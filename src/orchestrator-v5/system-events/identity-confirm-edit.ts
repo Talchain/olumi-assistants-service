@@ -5,6 +5,9 @@
  * writer stores exactly that on the quantity's own node, in the carrier every reader already reads:
  *   · `nonlinear_identity = {operation: 'product', factor_ids, stated_in_brief: true}` — the user's claim, so every
  *     reader says it as fact, never as "Olumi reads …" (`productIdentityClause`);
+ *   · a confirmed part the card read at TODAY's level through its one user cause, and that has no frame of its own,
+ *     takes that cause's RANGE as `scale_frame` (`todaysFrameFor`; R3 5907594976: without it the Run is blocked,
+ *     `IDENTITY_FRAME_MISSING`). A range only, never a level;
  *   · nothing else on the graph moves (the door's scope guard, `identityConfirmPostimageIsScoped`).
  * The carrier is an analysis input (`computeAnalysisAffectingGraphHash` hashes it as stored), so the write moves the
  * analysis revision: the prior Run reads stale and a new Run is required. No schemas release: the carrier is CEE's
@@ -25,6 +28,8 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { admitStoredProductDeclaration, type StoredProductDeclarationRefusal } from '../agent-lane/admit-model.js';
+import { todaysFrameFor } from '../agent-lane/identity-proposal.js';
+import { plotResolvesFrame } from '../../cee/graph-readiness/identity-frames.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { normaliseAbsenceOnly } from '../persisted-graph-projection.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
@@ -124,6 +129,12 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
 
   const carrier = { operation: 'product' as const, factor_ids: factorOrder, stated_in_brief: true };
   outcome.nonlinear_identity = carrier;
+  for (const id of factorOrder) {
+    const part = graph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
+    if (part === undefined || plotResolvesFrame(part)) continue;
+    const frame = todaysFrameFor(params.persistedGraph, id);
+    if (frame !== null) part.scale_frame = frame;
+  }
 
   const parsed = GraphV3.safeParse(graph);
   if (!parsed.success) return refuse('invalid_graph');
@@ -154,7 +165,8 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
 }
 
 /**
- * ⛔ ONLY THE ONE CARRIER MAY CHANGE: no other node, no other member of this node, no edge, no top-level field.
+ * ⛔ ONLY THE ONE CARRIER MAY CHANGE: no other node, no other member of this node, no edge, no top-level field — and,
+ * on a confirmed part that had no frame, exactly the `scale_frame` its one user cause gives it (`todaysFrameFor`).
  */
 export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: unknown, outcomeId: string): boolean {
   const before = normaliseAbsenceOnly(storedBefore);
@@ -167,5 +179,12 @@ export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: u
   const now = restored.nodes[at] as Rec;
   if (Object.hasOwn(was, 'nonlinear_identity')) now.nonlinear_identity = structuredClone(was.nonlinear_identity);
   else delete now.nonlinear_identity;
+  const confirmed = isRec(after.nodes.find((n) => isRec(n) && n.id === outcomeId)) ? (after.nodes.find((n) => isRec(n) && n.id === outcomeId) as Rec).nonlinear_identity : undefined;
+  for (const id of isRec(confirmed) && Array.isArray(confirmed.factor_ids) ? confirmed.factor_ids : []) {
+    const part = restored.nodes.find((n): n is Rec => isRec(n) && n.id === id);
+    const prior = (before.nodes as unknown[]).find((n): n is Rec => isRec(n) && n.id === id);
+    if (part === undefined || prior === undefined || Object.hasOwn(prior, 'scale_frame') || plotResolvesFrame(prior)) continue;
+    if (Object.hasOwn(part, 'scale_frame') && part.scale_frame === todaysFrameFor(before, String(id))) delete part.scale_frame;
+  }
   return isDeepStrictEqual(restored, before);
 }

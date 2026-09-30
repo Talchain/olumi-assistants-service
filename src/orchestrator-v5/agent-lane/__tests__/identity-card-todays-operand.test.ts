@@ -12,6 +12,10 @@ import { describe, it, expect } from 'vitest';
 import { proposeProductIdentity } from '../identity-proposal.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { identityConfirmPostimageIsScoped } from '../../system-events/identity-confirm-edit.js';
+import { todaysFrameFor } from '../identity-proposal.js';
+import { statedIdentityFrameGaps } from '../../../cee/graph-readiness/identity-frames.js';
+import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 type Json = Record<string, any>;
 type Graph = { nodes: Json[]; edges: Json[]; goal_constraints?: unknown };
@@ -89,3 +93,59 @@ describe('a product over an unlevelled operand gets the card, on the user’s TO
     expect(proposeProductIdentity(g((x) => { node(x, 'current_paying_subscribers').observed_state.raw_value = 3000; }))).toBeNull();
   });
 });
+
+/**
+ * ⛔ THE YES MUST LEAD TO A RUN (R3 5907594976 on served CEE `de6c642`: m1 → Yes → `IDENTITY_FRAME_MISSING`, a dead end; DL
+ * 5907621115; AIQ 5907618307 + R3 5907677185). The confirmed month-12 operand takes its one user cause's RANGE, never a
+ * level, and only a range that cannot clip the later count (≥ 2× today's level).
+ */
+describe('m1: after the Yes, the Run is not blocked for want of a frame (served de6c642)', () => {
+  const yes = (x: Graph) => {
+    const card = proposeProductIdentity(x)!;
+    const r = applyIdentityConfirmEdit({ persistedGraph: x, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
+      expected_graph_hash: computeAnalysisAffectingGraphHash(x as never) ?? '', reading_token: identityConfirmReadingToken(card) });
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    return { card, after: (r as { mutatedGraph: Graph }).mutatedGraph };
+  };
+  const codes = (x: Graph) => ((assessCanonicalAnalysisReadiness(x) as { issues?: { code: string }[] }).issues ?? []).map((i) => i.code);
+
+  it('RED: m1 → Yes → readiness clean; the operand takes its cause\'s range (10,000) and NO level', () => {
+    const { card, after } = yes(M1);
+    expect(card.factor_ids).toContain('paying_subscribers_at_12_months');
+    expect(codes(after)).not.toContain('IDENTITY_FRAME_MISSING');
+    expect(statedIdentityFrameGaps(after)).toEqual([]);
+    const op = node(after, 'paying_subscribers_at_12_months');
+    expect(op.scale_frame).toBe(10000);
+    expect(op.observed_state).toEqual(node(M1, 'paying_subscribers_at_12_months').observed_state);
+    expect(identityConfirmPostimageIsScoped(M1, after, card.outcome_id)).toBe(true);
+  });
+
+  it('R3 5907677185 GUARD: a cause range under 2× today\'s level (cap 1,600) could clip the later count → no range, today\'s ask stays', () => {
+    const x = g((y) => { node(y, 'current_paying_subscribers').observed_state.cap = 1600; });
+    expect(todaysFrameFor(x, 'paying_subscribers_at_12_months')).toBeNull();
+    const { after } = yes(x);
+    expect(node(after, 'paying_subscribers_at_12_months').scale_frame).toBeUndefined();
+    expect(codes(after)).toContain('IDENTITY_FRAME_MISSING');
+  });
+
+  it('CONTROL: m2 (every part already framed) — the Yes adds no range', () => {
+    const before = structuredClone(M2);
+    const { card, after } = yes(M2);
+    for (const id of card.factor_ids) expect(node(after, id).scale_frame).toEqual(node(before, id).scale_frame);
+  });
+
+  it('CONTROL: the scope guard still refuses any other change — a different range, or a range on a part that had its own', () => {
+    const { card, after } = yes(M1);
+    const wrong = structuredClone(after); node(wrong, 'paying_subscribers_at_12_months').scale_frame = 20000;
+    expect(identityConfirmPostimageIsScoped(M1, wrong, card.outcome_id)).toBe(false);
+    const other = structuredClone(after); node(other, 'pro_plan_price').scale_frame = 999;
+    expect(identityConfirmPostimageIsScoped(M1, other, card.outcome_id)).toBe(false);
+  });
+
+  it('CONTROL: two user-levelled causes (which is today\'s?) → no range', () => {
+    const x = g((y) => { Object.assign(node(y, 'monthly_new_subscriber_additions').observed_state, { source: 'brief_extraction' }); });
+    expect(todaysFrameFor(M1, 'paying_subscribers_at_12_months')).toBe(10000);
+    expect(todaysFrameFor(x, 'paying_subscribers_at_12_months')).toBeNull();
+  });
+});
+

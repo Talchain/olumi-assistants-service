@@ -135,6 +135,12 @@ function usersFactor(id: string, byId: Map<string, Rec2>): Level | null {
  * plain factor with no identity. Two such causes (which is today's?) or an Olumi level on the node: no card, as before.
  */
 function todaysOperand(id: string, byId: Map<string, Rec2>, edges: readonly Rec2[]): Level | null {
+  const t = todaysCause(id, byId, edges);
+  return t === null ? null : { id, label: text(t.n.label) ?? id, ...t.level, today: text(t.f.label) ?? String(t.f.id) };
+}
+
+/** The ONE user-levelled cause `todaysOperand` reads an operand through (the node, the cause, its level), or null. */
+function todaysCause(id: string, byId: Map<string, Rec2>, edges: readonly Rec2[]): { n: Rec2; f: Rec2; level: { value: number; unit: string } } | null {
   const n = byId.get(id);
   if (n === undefined || (n.kind !== 'outcome' && n.kind !== 'factor') || carriesIdentity(n)) return null;
   const os = isRec(n.observed_state) ? n.observed_state : undefined;
@@ -155,7 +161,33 @@ function todaysOperand(id: string, byId: Map<string, Rec2>, edges: readonly Rec2
   // user's 1,500 "subscribers" may count another population (free or non-Pro), so the value match proves nothing: no card.
   if (typeof os?.raw_value === 'number' && (classifyValueSource(os.source) === 'user_stated' || os.raw_value !== level.value
     || !sameUnit(os.unit, level.unit))) return null;
-  return { id, label: text(n.label) ?? id, ...level, today: text(f.label) ?? String(f.id) };
+  return { n, f, level };
+}
+
+/**
+ * ⛔ THE FRAME OF AN OPERAND READ AT TODAY'S LEVEL (R3 5907594976, served CEE `de6c642`; DL 5907621115; AIQ 5907618307).
+ * m1: after the Yes on "MRR = ‘Pro plan price’ × ‘Paying subscribers at 12 months’", the Run was BLOCKED
+ * (`IDENTITY_FRAME_MISSING`): the month-12 count is an OUTCOME with no cap, `scale_frame` or value/raw pair, and ISL
+ * refuses an identity part with no `execution_frame`. The card read it through its ONE user cause ("Current paying
+ * subscribers", 1,500 of 10,000); that cause's RANGE is the operand's, the same quantity at another time. A range only,
+ * never a level: 1,500 stays today's figure and the month-12 count is the Run's. Null unless `todaysOperand` would read
+ * the node (exactly one user-levelled cause) and that cause carries a frame (cap → `scale_frame` → the value/raw pair).
+ */
+export function todaysFrameFor(graph: unknown, id: string): number | null {
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  const byId = new Map(nodes.flatMap((n) => (typeof n.id === 'string' ? [[n.id, n] as const] : [])));
+  const t = todaysCause(id, byId, edges);
+  if (t === null) return null;
+  const os = isRec(t.f.observed_state) ? t.f.observed_state : undefined;
+  const pos = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  // ⛔ R3 5907677185: a copied frame is a RANGE the engine normalises by, so it must not CLIP the later count (MRR would be
+  // silently UNDER-stated). Only a frame at least TWICE today's level, never one derived as headroom over a target; else
+  // no frame, and today's ask stays.
+  if ([os?.cap_origin, os?.frame_origin, t.f.frame_origin].includes('target_derived_headroom')) return null;
+  const [value, raw] = [os?.value, os?.raw_value];
+  const frame = pos(os?.cap) ? os.cap : pos(t.f.scale_frame) ? t.f.scale_frame : pos(value) && pos(raw) && raw > value ? raw / value : null;
+  return frame !== null && frame >= 2 * Math.abs(t.level.value) ? frame : null;
 }
 
 /** The card's reading of `p` × `q` as the goal's money per period, or null when the parts do not reconcile or compose. */
