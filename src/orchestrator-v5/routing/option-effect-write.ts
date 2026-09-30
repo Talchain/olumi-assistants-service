@@ -217,6 +217,7 @@ import {
   type PhraseOccurrence,
 } from './option-intervention-guard.js';
 import { readMissingValueAnswer } from './missing-value-answer.js';
+import { sayFigureRead } from '../agent-lane/say-figure.js';
 import {
   extractProtectedEntities,
   PRESERVATION_CUE,
@@ -1488,7 +1489,16 @@ export function formatOptionEffectWriteAck(params: {
   readonly optionLabel: string;
   readonly factorLabel: string;
   readonly committedValue: number;
+  /**
+   * ⛔ THE USER'S FIGURE, WHEN THE COMMITTED CELL HOLDS ONE (DL #75 5902916137 (3)): the canvas edit's "£57" was said as
+   * "an effect value of 0.285". Read back from the committed cell by the caller, never from the request.
+   */
+  readonly committedFigure?: { readonly raw_value: number; readonly unit: string };
 }): string {
+  const f = params.committedFigure;
+  if (f !== undefined && Number.isFinite(f.raw_value) && f.unit.trim() !== '') {
+    return `"${params.optionLabel}" now sets "${params.factorLabel}" to ${sayFigureRead(f.raw_value, f.unit.trim())}.`;
+  }
   return (
     `"${params.optionLabel}" now has an effect value of ${renderCommittedValue(params.committedValue)} `
     + `on "${params.factorLabel}".`

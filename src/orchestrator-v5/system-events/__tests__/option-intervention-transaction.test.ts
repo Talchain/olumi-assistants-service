@@ -349,7 +349,14 @@ describe('option-intervention transaction — real commit, serialized store boun
     expect(persistence.durableRows()).toHaveLength(1);
   });
 
-  it('does not render a model-scale intervention as a percentage or an unlicensed raw currency amount', async () => {
+  /**
+   * ⛔ SUPERSEDED BOUNDARY (#1279 banked this writer INTERNAL-ONLY: "input is already model-scale; no raw-unit conversion").
+   * The canvas card now commits through it and shows the user the level on the factor's own range; served W4 run2
+   * (`f074916`, DL #75 5902916137 (3)) stored the card's £57 as a bare 0.285 and said "an effect value of 0.285". The
+   * level and the factor's own value share ONE frame in the engine (here 0.5 ↔ £50,000 on 100,000), so 0.3 IS £30,000:
+   * it is kept on the cell and said so. With no declared range the old sentence stands (`canvas-level-edit-keeps-the-figure`).
+   */
+  it('says a model-scale level in the factor\'s own units when the factor declares its range (and keeps it on the cell)', async () => {
     const initial = canonicalGraph();
     const factor = initial.nodes.find(node => node.id === 'factor')!;
     factor.observed_state = {
@@ -362,15 +369,13 @@ describe('option-intervention transaction — real commit, serialized store boun
     expect(result.kind).toBe('committed');
     if (result.kind !== 'committed') throw new Error('Expected model-scale intervention commit');
     expect(persistence.durableGraph().nodes.find(node => node.id === 'option')?.interventions?.factor)
-      .toMatchObject({ value: 0.3, source: 'user_specified' });
+      .toMatchObject({ value: 0.3, source: 'user_specified', raw_value: 30_000, cap: 100_000, unit: 'GBP' });
     expect(persistence.durableGraph().nodes.find(node => node.id === 'factor')?.observed_state)
       .toEqual(factor.observed_state);
     expect(result.response.assistant_text).toContain('Pilot');
     expect(result.response.assistant_text).toContain('Coverage');
-    // The explicit model-scale value remains licensed. It must not be
-    // converted into percent or raw currency via this factor's amount/cap.
-    expect(result.response.assistant_text).toContain('0.3');
-    expect(result.response.assistant_text).not.toMatch(/[%£$€]|\bGBP\b|\b(?:30[ ,]?000|50[ ,]?000|100[ ,]?000)\b/);
+    expect(result.response.assistant_text).toContain('£30,000');
+    expect(result.response.assistant_text).not.toMatch(/effect value|0\.3\b|30%/);
   });
 
   it('leaves an unchanged AI estimate and its provenance untouched without appending', async () => {
@@ -469,9 +474,9 @@ describe('option-intervention transaction — real commit, serialized store boun
 
     // The retirement is DISCLOSED, not silent: the ack keeps its own sentence
     // and the lapse notice is appended to it, never in place of it.
-    expect(result.response.assistant_text).toContain('now has an effect value of 0.3');
+    expect(result.response.assistant_text).toContain('now sets "Coverage" to 30%');
     expect(result.response.assistant_text.length)
-      .toBeGreaterThan('"Option A" now has an effect value of 0.3 on "Factor".'.length);
+      .toBeGreaterThan('"Pilot" now sets "Coverage" to 30%.'.length);
   });
 
   /**
