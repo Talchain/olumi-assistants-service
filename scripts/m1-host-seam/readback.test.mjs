@@ -131,3 +131,34 @@ test('readback names the construction version and whether it is still current; r
   assert.equal(b.construction.is_current, false);
   assert.equal(b.model_version.version_id, 'v-2');
 });
+
+test('accountTokenSource signs in once, reuses the token, and signs in again under 5 minutes left', async () => {
+  const { accountTokenSource, parseAccountFile } = await import('./readback.mjs');
+  const account = parseAccountFile('LAB_SUPABASE_URL=https://p.supabase.co/\nLAB_SUPABASE_ANON_KEY=anon\nLAB_EMAIL=e@x.test\nLAB_PASSWORD=pw\n');
+  let calls = 0, t = 0;
+  const fetchImpl = async (url, init) => {
+    calls += 1;
+    assert.equal(url, 'https://p.supabase.co/auth/v1/token?grant_type=password');
+    assert.equal(init.headers.apikey, 'anon');
+    return { status: 200, json: async () => ({ access_token: `tok-${calls}`, expires_in: 3600 }) };
+  };
+  const token = accountTokenSource(account, { fetchImpl, now: () => t });
+  assert.equal(await token(), 'tok-1');
+  t = 50 * 60_000; assert.equal(await token(), 'tok-1');
+  t = 56 * 60_000; assert.equal(await token(), 'tok-2');
+  assert.equal(calls, 2);
+  const refused = accountTokenSource(account, { fetchImpl: async () => ({ status: 400, json: async () => ({}) }) });
+  await assert.rejects(refused(), /sign-in failed \(HTTP 400\)/);
+  assert.throws(() => parseAccountFile('LAB_EMAIL=e'), /missing LAB_SUPABASE_URL/);
+});
+
+test('an async token source is resolved per call and sent as the bearer', async () => {
+  const sid = '33333333-3333-4333-8333-333333333333';
+  const seen = [];
+  let n = 0;
+  const rb = await readback({ base: 'https://c', assistKey: 'k', bearer: async () => `t${++n}`, scenarioId: sid,
+    fetchImpl: fakeFetch({ '/healthz': { http: 200, json: {} }, [`/assist/v1/scenarios/${sid}/graph`]: graphRead(),
+      [`/assist/v1/scenarios/${sid}/versions`]: versionsRead([V1]) }, seen) });
+  assert.equal(rb.version_binding, 'bound');
+  assert.deepEqual(seen.filter((s) => s.headers.authorization).map((s) => s.headers.authorization), ['Bearer t1', 'Bearer t2']);
+});

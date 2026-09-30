@@ -1,7 +1,11 @@
 /**
- * Opt-in disposable manual preview for #2290. Reuses Runtime's real-role replay
- * seam: real Agent/tools, fixture-seeded in-memory session store, OpenAI only.
- * No production storage, model registry, PLoT call or serving claim.
+ * Opt-in disposable manual preview for #2290. Two kinds of session:
+ * - FRESH (`{mode:'fresh', brief}`): the AUTHENTIC M1 host. The brief goes to the served CEE's Agent
+ *   (`build_model_from_brief` → `/graph/register`), and every read comes back through the served graph read +
+ *   versions routes (`scripts/m1-host-seam/readback.mjs`). There is no store, constructor or route of this file's own.
+ *   A card is shown only on `version_binding: 'bound'` (J1); anything else says why.
+ * - FROZEN (`{arm}`): Runtime's real-role replay seam over the C3 fixture, in an in-memory store. It is labelled FROZEN.
+ * OpenAI only. Only the fresh-session seam reaches the CEE host; every other outbound call is refused.
  */
 import { it, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -9,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 type Row = Record<string, unknown> & { scenario_id: string; turn_id: string; pending_actions: unknown[] };
 const rows = new Map<string, Row>();
@@ -82,6 +87,37 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   } as const;
   const sessions = new Map<string, keyof typeof arms>();
   const network = globalThis.fetch;
+  // ── FRESH (authentic M1) — the served CEE is the host. Credentials: the assist key is read from the CEE env file
+  // (never copied); the Lab account file (600-mode, outside every repo) signs in and refreshes its own token.
+  type Readback = Record<string, unknown> & { version_binding: string; brief_text: string | null; graph: unknown;
+    graph_identity_hash: { value?: string } | null; model_version: { version_id?: string } | null; raw?: unknown };
+  const seam = await import(pathToFileURL(resolve('scripts/m1-host-seam/readback.mjs')).href) as {
+    readback(o: Record<string, unknown>): Promise<Readback>;
+    buildFromBrief(o: Record<string, unknown>): Promise<Record<string, unknown> & { scenario_id: string; response?: unknown }>;
+    sendTurn(o: Record<string, unknown>): Promise<Record<string, unknown> & { http: number; response?: unknown }>;
+    cardsAllowed(rb: Readback): boolean; withheldReason(rb: Readback): string | null; sameModel(a: Readback, b: Readback): boolean;
+    parseAccountFile(text: string): Record<string, string>;
+    accountTokenSource(account: Record<string, string>, o: { fetchImpl: typeof fetch }): () => Promise<string>;
+  };
+  const { parse: parseEnv } = await import('dotenv');
+  const ceeBase = process.env.LAB_CEE_BASE ?? 'https://cee-staging.onrender.com';
+  const assistKey = process.env.LAB_ASSIST_ENV_FILE
+    ? parseEnv(readFileSync(process.env.LAB_ASSIST_ENV_FILE, 'utf8')).ASSIST_API_KEY : undefined;
+  const bearer = process.env.LAB_ACCOUNT_FILE
+    ? seam.accountTokenSource(seam.parseAccountFile(readFileSync(process.env.LAB_ACCOUNT_FILE, 'utf8')), { fetchImpl: network })
+    : undefined;
+  const host = { base: ceeBase, assistKey, bearer, fetchImpl: network };
+  const fresh = new Set<string>();
+  const view = (rb: Readback) => {
+    const { raw: _raw, ...rest } = rb;
+    return { ...rest, model_version_id: rb.model_version?.version_id ?? null, withheld_reason: seam.withheldReason(rb) };
+  };
+  const readFresh = async (sid: string) => {
+    const rb = await seam.readback({ ...host, scenarioId: sid });
+    if (evidence) appendFileSync(evidence, JSON.stringify({ timestamp: new Date().toISOString(), head, source_hash,
+      session_id: sid, mode: 'fresh', readback: rb }) + '\n');
+    return rb;
+  };
   vi.stubGlobal('fetch', async (input: string | URL | Request, init?: Parameters<typeof fetch>[1]) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     if (url.origin !== 'https://api.openai.com') throw new Error('This lab permits only OpenAI provider traffic; external services are unavailable.');
@@ -112,13 +148,33 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     app.get(`/lab/${name}`, async (_req, reply) => reply.type('text/javascript').send(readFileSync(resolve('scripts/ai-experience-lab', name), 'utf8')));
   }
   app.get('/lab/status', async () => ({ status: 'ISOLATED_MANUAL_PREVIEW', head, source_hash, arms, fixture: fixture.run,
-    persistence: 'disposable_in_memory', external_analysis: 'unavailable', m2_available: m2Enabled }));
+    persistence: 'disposable_in_memory', external_analysis: 'unavailable', m2_available: m2Enabled,
+    fresh: { host: ceeBase, available: typeof assistKey === 'string' && assistKey.length > 0, signed_in: bearer !== undefined } }));
   app.get('/lab/session/:id', async (req, reply) => {
     const sid = (req.params as { id: string }).id;
+    if (fresh.has(sid)) return { session_id: sid, mode: 'fresh', ...view(await readFresh(sid)) };
     if (!sessions.has(sid)) return reply.code(404).send({ error: 'Lab session not found; reset to start again.' });
     return { session_id: sid, arm: sessions.get(sid), graph: graphs.get(sid) };
   });
   app.post('/lab/session', async (req, reply) => {
+    const body = req.body as { mode?: unknown; brief?: unknown } | null;
+    if (body?.mode === 'fresh') {
+      if (!assistKey) return reply.code(503).send({ error: 'The CEE host is not configured (LAB_ASSIST_ENV_FILE).' });
+      if (typeof body.brief !== 'string' || !body.brief.trim() || body.brief.length > 12000) {
+        return reply.code(400).send({ error: 'Enter a brief (maximum 12,000 characters).' });
+      }
+      if (busy) return reply.code(409).send({ error: 'Another Lab call is still running.' });
+      busy = true;
+      try {
+        const turn = await seam.buildFromBrief({ ...host, brief: body.brief.trim() });
+        fresh.add(turn.scenario_id);
+        const rb = await readFresh(turn.scenario_id);
+        const { response: _response, ...turnView } = turn;
+        return { session_id: turn.scenario_id, mode: 'fresh', ...view(rb), turn: turnView };
+      } catch (error) {
+        return reply.code(502).send({ error: `The CEE host could not build the model: ${error instanceof Error ? error.message : String(error)}` });
+      } finally { busy = false; }
+    }
     const arm = (req.body as { arm?: keyof typeof arms })?.arm;
     if (!arm || !Object.hasOwn(arms, arm)) return reply.code(400).send({ error: 'Choose a supported arm.' });
     const sid = randomUUID(); sessions.set(sid, arm);
@@ -129,7 +185,8 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
         user_message: h.user, assistant_message: h.assistant, pending_actions: [], handler_facts: [],
         llm_calls_used: 0, turn_class: 'direct_answer', handler_id: null, created_at: new Date(Date.UTC(2026, 8, 27, 0, 0, i)).toISOString() });
     }
-    return { session_id: sid, arm, ...arms[arm], brief: fixture.history[0]!.user, history: fixture.history, graph: graphs.get(sid) };
+    return { session_id: sid, arm, ...arms[arm], frozen: true, label: 'FROZEN C3 fixture',
+      brief: fixture.history[0]!.user, history: fixture.history, graph: graphs.get(sid) };
   });
   let busy = false;
   // The opt-in M2 child reads only this session's current brief/model and the existing pinned MM-1 contract.
@@ -159,6 +216,33 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   app.post('/lab/widen', async (req, reply) => {
     if (!m2Enabled) return reply.code(404).send({ error: 'Live M2 is not enabled in this preview.' });
     const sid = (req.body as { session_id?: unknown })?.session_id;
+    if (typeof sid === 'string' && fresh.has(sid)) {
+      if (busy) return reply.code(409).send({ error: 'Another Lab call is still running.' });
+      busy = true;
+      try {
+        // J1: read before, withhold unless bound, read after, withhold unless it is the SAME model.
+        const before = await readFresh(sid);
+        if (!seam.cardsAllowed(before)) return reply.code(409).send({ error: seam.withheldReason(before), withheld_reason: seam.withheldReason(before), readback: view(before) });
+        const result = await callReadOnlyM2({ session_id: sid, brief: before.brief_text!, graph: clone(before.graph) });
+        const after = await readFresh(sid);
+        const stale = !seam.sameModel(before, after);
+        if (m2Evidence && result.receipt) appendFileSync(m2Evidence, JSON.stringify({
+          timestamp: new Date().toISOString(), head, source_hash, mode: 'fresh', stale,
+          graph_identity_hash: before.graph_identity_hash?.value, model_version_id: before.model_version?.version_id, ...result.receipt as object,
+        }) + '\n');
+        if (stale) return reply.code(409).send({ error: 'The model changed during M2; its proposals were withheld.', withheld_reason: 'model_changed_during_m2', readback: view(after) });
+        if (!result.receipt) return reply.code(502).send({ error: 'M2 could not finish; nothing was shown.' });
+        return { accepted: result.accepted === true, proposals: result.accepted === true ? result.proposals : [],
+          withheld_reason: result.accepted === true ? null : 'proposal_validation_or_provider_incomplete',
+          graph_identity_hash: before.graph_identity_hash?.value ?? null, model_version_id: before.model_version?.version_id ?? null,
+          version_binding: before.version_binding,
+          model: (result.receipt as { model?: string }).model,
+          graph_hash: (result.receipt as { graph_hash?: string }).graph_hash,
+          latency_ms: (result.receipt as { latency_ms?: number }).latency_ms };
+      } catch {
+        return reply.code(502).send({ error: 'M2 could not finish; nothing was shown.' });
+      } finally { busy = false; }
+    }
     if (typeof sid !== 'string' || !sessions.has(sid)) return reply.code(404).send({ error: 'Start a Lab session first.' });
     if (busy) return reply.code(409).send({ error: 'Another Lab call is still running.' });
     const graph = graphs.get(sid), brief = briefs.get(sid);
@@ -185,7 +269,25 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   });
   app.post('/lab/turn', async (req, reply) => {
     const body = req.body as { session_id?: string; message?: string };
-    const sid = body?.session_id; const arm = sid ? sessions.get(sid) : undefined;
+    const sid = body?.session_id;
+    if (sid && fresh.has(sid)) {
+      if (typeof body.message !== 'string' || !body.message.trim() || body.message.length > 12000) {
+        return reply.code(400).send({ error: 'Enter a message (maximum 12,000 characters).' });
+      }
+      if (busy) return reply.code(409).send({ error: 'One lab turn is already running. Please wait.' });
+      busy = true; const start = Date.now();
+      try {
+        const turn = await seam.sendTurn({ ...host, scenarioId: sid, message: body.message });
+        const rb = await readFresh(sid);
+        const receipt = { timestamp: new Date().toISOString(), head, source_hash, session_id: sid, mode: 'fresh',
+          status: turn.http, latency_ms: Date.now() - start, message: body.message, response: turn.response };
+        appendFileSync(evidence, JSON.stringify({ ...receipt, readback: rb }) + '\n');
+        return reply.code(turn.http === 200 ? 200 : 502).send({ ...receipt, readback: view(rb) });
+      } catch (error) {
+        return reply.code(502).send({ error: error instanceof Error ? error.message : String(error) });
+      } finally { busy = false; }
+    }
+    const arm = sid ? sessions.get(sid) : undefined;
     if (!sid || !arm || typeof body.message !== 'string' || !body.message.trim() || body.message.length > 12000) {
       return reply.code(400).send({ error: 'Start a lab session and enter a message (maximum 12,000 characters).' });
     }

@@ -46,8 +46,10 @@ function headers({ assistKey, bearer }) {
 }
 
 async function post(ctx, path, body, ms) {
+  // `bearer` may be a token or an async token source (accountTokenSource), resolved per call so a long session refreshes.
+  const bearer = typeof ctx.bearer === 'function' ? await ctx.bearer() : ctx.bearer;
   const r = await ctx.fetchImpl(`${ctx.base}${path}`, {
-    method: 'POST', headers: headers(ctx), body: JSON.stringify(body), signal: AbortSignal.timeout(ms),
+    method: 'POST', headers: headers({ assistKey: ctx.assistKey, bearer }), body: JSON.stringify(body), signal: AbortSignal.timeout(ms),
   });
   let json = null;
   try { json = JSON.parse(await r.text()); } catch { json = null; }
@@ -59,21 +61,27 @@ function context({ base, assistKey, bearer, fetchImpl = fetch }) {
   return { base: base.replace(/\/+$/, ''), assistKey, bearer, fetchImpl };
 }
 
-/** Build a model from a fresh brief through the served Agent. Returns what was called, never the credentials. */
-export async function buildFromBrief(opts) {
+/** One served Agent turn on a scenario. Returns what was called, never the credentials. */
+export async function sendTurn(opts) {
   const ctx = context(opts);
-  const scenario_id = opts.scenarioId ?? randomUUID();
+  const first = opts.first === true;
   const t = await post(ctx, '/agent/v1/turn', {
-    scenario_id, turn_id: randomUUID(), stage: 'frame', turn_class: 'frame', source: 'composer', kind: 'message',
-    message: opts.brief,
+    scenario_id: opts.scenarioId, turn_id: randomUUID(), kind: 'message', message: opts.message,
+    ...(first ? { stage: 'frame', turn_class: 'frame', source: 'composer' } : {}),
   }, opts.timeoutMs ?? 300000);
   return {
-    scenario_id,
+    scenario_id: opts.scenarioId,
     http: t.http,
     tools: (t.json?._agent?.tool_calls ?? []).map((c) => ({ name: c.name, ok: c.ok !== false })),
     providers: [...new Set((t.json?._provider_calls ?? []).map((p) => p.provider))],
     assistant_message: typeof t.json?.assistant_message === 'string' ? t.json.assistant_message : null,
+    response: t.json,
   };
+}
+
+/** Build a model from a fresh brief through the served Agent, on a new scenario. */
+export async function buildFromBrief(opts) {
+  return sendTurn({ ...opts, scenarioId: opts.scenarioId ?? randomUUID(), message: opts.brief, first: true });
 }
 
 /** Decide the binding from the two reads. Pure, so the Lab and its tests share one rule. */
@@ -164,4 +172,37 @@ export function withheldReason(rb) {
     default:
       return 'Not shown: this model is not tied to a saved version.';
   }
+}
+
+/** Read a KEY=VALUE account file (600-mode, outside every repo). Values are returned, never logged. */
+export function parseAccountFile(text) {
+  const out = {};
+  for (const line of String(text).split('\n')) {
+    const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+    if (m) out[m[1]] = m[2];
+  }
+  for (const k of ['LAB_SUPABASE_URL', 'LAB_SUPABASE_ANON_KEY', 'LAB_EMAIL', 'LAB_PASSWORD']) {
+    if (!out[k]) throw new Error(`account file is missing ${k}`);
+  }
+  return out;
+}
+
+/**
+ * A signed-in user's access token, refreshed by signing in again when under 5 minutes remain (Supabase tokens last
+ * an hour; a Lab session can outlast one). The token is never returned in a readback.
+ */
+export function accountTokenSource(account, { fetchImpl = fetch, now = () => Date.now() } = {}) {
+  let token = null, expiresAt = 0;
+  return async () => {
+    if (token !== null && expiresAt - now() > 5 * 60_000) return token;
+    const r = await fetchImpl(`${account.LAB_SUPABASE_URL.replace(/\/+$/, '')}/auth/v1/token?grant_type=password`, {
+      method: 'POST', headers: { apikey: account.LAB_SUPABASE_ANON_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify({ email: account.LAB_EMAIL, password: account.LAB_PASSWORD }), signal: AbortSignal.timeout(20000),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.status !== 200 || typeof j.access_token !== 'string') throw new Error(`Lab account sign-in failed (HTTP ${r.status})`);
+    token = j.access_token;
+    expiresAt = now() + (Number(j.expires_in) > 0 ? Number(j.expires_in) : 3600) * 1000;
+    return token;
+  };
 }
