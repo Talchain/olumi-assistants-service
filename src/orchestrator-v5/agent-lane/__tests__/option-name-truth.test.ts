@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { optionNameAliases } from '../option-name-truth.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { repairedOptionNameRead } from './fixtures/repaired-option-name.js';
 
 const graph = (label = 'Raise to £59', raw = 60, unit = '£ per subscriber per month') => ({
   nodes: [
@@ -61,6 +62,37 @@ describe('Agent result option names are bound to the current stored level', () =
       option_label: 'Raise to £59', display_label: 'Raise to £59 (set to £60/month)', outcome: { mean: 100 },
     });
     expect(result.enrichment.option_comparison[0]!.option_label).toBe('Raise to £59');
+  });
+
+  it('keeps the current Run display name when repaired-shape raw CAS and canonical Run hashes differ', async () => {
+    const read = repairedOptionNameRead();
+    const dispatch: InternalDispatch = async () => ({ status: 200, json: {
+      graph: read.graph, graph_hash: read.graphHash, analysis_result: read.result, analysis_state: read.state,
+    } });
+    const state = await createAgentCapabilities(dispatch, new ProposalStore()).getCanonicalState({
+      scenario_id: '7d18dd9a-5929-4b6e-8ca4-462a11489257', authenticated_user_id: null, request_id: 'name-truth-repaired',
+    }) as Record<string, any>;
+    expect(read.graphHash).not.toBe(read.runHash); // existing CS-AN-2 repaired-shape premise
+    expect(state.entities.find((e: { id: string }) => e.id === 'opt_hybrid')).toMatchObject({
+      label: 'Spend £110,000', display_label: 'Spend £110,000 (set to £120,000)',
+    });
+    expect(state.analysis.saved_run_options[0]).toMatchObject({
+      option_label: 'Spend £110,000', display_label: 'Spend £110,000 (set to £120,000)',
+    });
+    expect(read.result.enrichment.option_comparison[0]!.option_label).toBe('Spend £110,000');
+  });
+
+  it.each(['complete_stale', 'unknown_degraded'])('%s repaired-shape read never gives an old Run a new display name', async (kind) => {
+    const read = repairedOptionNameRead();
+    const dispatch: InternalDispatch = async () => ({ status: 200, json: {
+      graph: read.graph, graph_hash: read.graphHash, analysis_result: read.result,
+      analysis_state: { run_state: { kind, graph_hash_at_run: read.runHash } },
+    } });
+    const state = await createAgentCapabilities(dispatch, new ProposalStore()).getCanonicalState({
+      scenario_id: '7d18dd9a-5929-4b6e-8ca4-462a11489257', authenticated_user_id: null, request_id: `name-truth-${kind}`,
+    }) as Record<string, any>;
+    expect(state.entities.find((e: { id: string }) => e.id === 'opt_hybrid')).not.toHaveProperty('display_label');
+    expect(state.analysis).not.toHaveProperty('saved_run_options');
   });
 
   it('does not attach the new £60 name to an earlier £59 Run after the edit makes it stale', async () => {
