@@ -1,4 +1,4 @@
-import { initialRehearsal, transition, evidenceFor, readFrozenRegions } from './rehearsal.mjs';
+import { initialRehearsal, transition, evidenceFor, readFrozenRegions, readFrozenContrastive, contrastiveCurrentness, CONTRASTIVE_SOURCE } from './rehearsal.mjs';
 
 /** Reuses the preview's article renderer and styles. All transitions are recorded-state playback. */
 export function mountRehearsal({ add, call }) {
@@ -81,7 +81,7 @@ export function mountRehearsal({ add, call }) {
   };
 }
 
-/** Displays two pinned ISL results in the same article UI; never runs a science calculation. */
+/** Displays pinned ISL research in the same article UI; never runs a science calculation. */
 export function mountFrozenRegions({ add, call }) {
   const root = document.getElementById('regions');
   const live = document.getElementById('live');
@@ -89,6 +89,7 @@ export function mountFrozenRegions({ add, call }) {
   const toggle = document.getElementById('regions-toggle');
   const rehearsalToggle = document.getElementById('rehearsal-toggle');
   let data;
+  let frozenGraphSha256 = CONTRASTIVE_SOURCE.graph_sha256;
   function detail(parent, title, value) {
     const d = document.createElement('details'), s = document.createElement('summary'), p = document.createElement('pre');
     s.textContent = title; p.textContent = JSON.stringify(value, null, 2);
@@ -96,19 +97,37 @@ export function mountFrozenRegions({ add, call }) {
   }
   function render() {
     root.replaceChildren();
-    const [threshold, unavailable] = data.cases;
+    if (contrastiveCurrentness(data.contrastive, frozenGraphSha256) === 'stale') {
+      add('assistant', 'FROZEN R3-B SCIENCE · STALE LAB SIMULATION\nThe frozen model identity changed in this local simulation. Its earlier threshold and goal-vulnerability claims are withheld; nothing was written or recalculated.', root);
+      const restore = document.createElement('button');
+      restore.type = 'button'; restore.textContent = 'Restore frozen research snapshot';
+      restore.onclick = () => { frozenGraphSha256 = CONTRASTIVE_SOURCE.graph_sha256; render(); };
+      root.append(restore);
+      return;
+    }
+    const [threshold, unavailable] = data.regions.cases;
     add('assistant', 'FROZEN R3-B SCIENCE CASES · RESEARCH REFERENCE\nThis is a different graph from the live £100k pricing example and the recorded £20k walkthrough. These are pinned outputs, not fresh analysis or a recommendation.', root);
     const first = add('assistant', `HARD CONSTRAINT BOUNDARY · ${threshold.subject.label}\nFrozen reference: ${threshold.current_value} ${threshold.current_unit}. Frozen threshold: ${threshold.flip_threshold} ${threshold.threshold_unit}.\n${threshold.flip_meaning}\n${threshold.provenance.assumption_qualifier}`, root);
-    detail(first, 'Pinned source, graph and fixed assumptions', { source: data.source, provenance: threshold.provenance, fixed_assumptions: threshold.fixed_assumptions });
+    detail(first, 'Pinned source, graph and fixed assumptions', { source: data.regions.source, provenance: threshold.provenance, fixed_assumptions: threshold.fixed_assumptions });
     const second = add('assistant', `THRESHOLD UNAVAILABLE · ${unavailable.subject.label}\n${unavailable.reason.detail}\nNo numerical threshold or no-effect claim is available for this option.`, root);
     detail(second, 'Pinned source and unavailable reason', { provenance: unavailable.provenance, reason: unavailable.reason, fixed_assumptions: unavailable.fixed_assumptions });
     add('assistant', 'The threshold concerns hard-constraint feasibility in a frozen exploratory slice. It does not establish which option is best, whether any effect is plausible, or how all options compare.', root);
+    const study = data.contrastive.study;
+    const [holding, churnOnly, competitionOnly, both] = study.contrast.points;
+    const tradeoff = add('assistant', `EXPERIMENTAL GOAL VULNERABILITY · ${study.scope.option_label}\nIn this frozen tested grid, churn response ${holding.churn_response_pp_per_10gbp} → ${churnOnly.churn_response_pp_per_10gbp} percentage points per +£10 alone still reaches the £100k goal. Competitive response £0 → £${Math.abs(competitionOnly.competitive_response_gbp_per_month).toLocaleString('en-GB')}/month headwind alone does too. Together they miss it (about £${Math.round(both.month_12_mrr_gbp).toLocaleString('en-GB')} MRR at month 12), while churn stays ${both.monthly_churn_percent}% under its 4% hard limit.\nAn additive trade-off in evaluated model scenarios; not an interaction, likelihood, exact boundary or recommendation.`, root);
+    detail(tradeoff, 'Pinned coaching copy, assumptions and Science rulings', { coaching: data.contrastive.coaching, source: data.contrastive.source, frozen_source: study.source, scope: study.scope, claim_limits: study.claim_limits });
+    const edit = document.createElement('button');
+    edit.type = 'button'; edit.textContent = 'Simulate edit to this frozen model (Lab only)';
+    edit.onclick = () => { frozenGraphSha256 = 'lab-simulated-edited-graph'; render(); };
+    root.append(edit);
   }
   toggle.onclick = async () => {
     if (!root.hidden) { root.hidden = true; live.hidden = false; toggle.textContent = 'Open frozen R3-B science cases'; return; }
     toggle.disabled = true;
     try {
-      data = await readFrozenRegions((await call('/lab/rehearsal')).frozen_regions_raw);
+      const payload = await call('/lab/rehearsal');
+      data = { regions: await readFrozenRegions(payload.frozen_regions_raw),
+        contrastive: await readFrozenContrastive(payload.frozen_contrastive_raw, payload.frozen_contrastive_copy) };
       root.hidden = false; live.hidden = true; rehearsal.hidden = true;
       rehearsalToggle.textContent = 'Open recorded reasoning walkthrough';
       render(); toggle.textContent = 'Return to live AI comparison';

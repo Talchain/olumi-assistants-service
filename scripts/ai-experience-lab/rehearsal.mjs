@@ -70,3 +70,58 @@ export async function readFrozenRegions(raw, binding = REGIONS_SOURCE) {
   }
   return { status: 'FROZEN_R3B_RESEARCH', source: binding, cases };
 }
+
+// This is a separate, Science-reviewed research result on the same frozen graph.
+// The source still says pending review; the linked rulings approve only experimental display.
+export const CONTRASTIVE_SOURCE = Object.freeze({
+  repository: 'Talchain/Inference-Service-Layer',
+  commit: '68e8c8874eed528422db186852d3a5a1da9a27da',
+  path: 'experiments/sci_regions_v1/contrastive-vulnerability.json',
+  sha256: 'd40c815ac20beb69786f22750bf63e4191f255371c48d43e3afb42851825bfc2',
+  coaching_path: 'experiments/sci_regions_v1/contrastive-coaching.md',
+  coaching_sha256: '944e3ff993e6db5ecc95a22f9b7f0d47a5c4e2e611d1f44b59a90af93a5bcf89',
+  graph_id: REGIONS_SOURCE.graph_id,
+  graph_sha256: REGIONS_SOURCE.graph_sha256,
+  mapping_sha256: REGIONS_SOURCE.mapping_sha256,
+  evaluator_sha256: REGIONS_SOURCE.evaluator_sha256,
+  science_ruling: 'https://github.com/Talchain/olumi-programme-docs/issues/75#issuecomment-5911687681',
+  r3_ruling: 'https://github.com/Talchain/olumi-programme-docs/issues/75#issuecomment-5911872298',
+});
+
+async function sha256Of(raw) {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function readFrozenContrastive(raw, coaching, binding = CONTRASTIVE_SOURCE) {
+  if (typeof raw !== 'string' || typeof coaching !== 'string' ||
+      await sha256Of(raw) !== binding.sha256 || await sha256Of(coaching) !== binding.coaching_sha256) {
+    throw new Error('Pinned contrastive source or coaching changed; claim withheld.');
+  }
+  const study = JSON.parse(raw);
+  const source = study.source;
+  const frozen = source?.frozen_source;
+  const points = study.contrast?.points;
+  if (study.schema !== 'SCI_REGIONS_CONTRASTIVE_EXPERIMENT_V1' || study.verdict !== 'KEEP' ||
+      study.release_state !== 'RESEARCH_ONLY_PENDING_SCIENCE_REVIEW' ||
+      study.contrast?.boundary_kind !== 'ADDITIVE_TRADE_OFF_ON_EVALUATED_GRID' ||
+      source?.frozen_graph_id !== binding.graph_id || frozen?.graph_sha256 !== binding.graph_sha256 ||
+      frozen?.mapping_sha256 !== binding.mapping_sha256 || frozen?.evaluator_sha256 !== binding.evaluator_sha256 ||
+      frozen?.commit !== 'fdb51e84a673993de7cddb85d5b963741941b80a' ||
+      frozen?.model_id !== 'X_net_reading' || frozen?.tier !== 'X' ||
+      !Array.isArray(source.fixed_assumptions) || source.fixed_assumptions.length === 0 ||
+      study.scope?.option_id !== '59_with_feature_release' ||
+      study.scope?.overall_comparison !== 'INCOMPLETE_COMPARISON; three of six declared options lack intervention values' ||
+      !Array.isArray(points) || points.length !== 4 ||
+      points.map(point => point.label).join('|') !== 'holding_grid_point|churn_only|competition_only|both' ||
+      points.some((point, index) => point.goal_state !== (index === 3 ? 'MISSED' : 'ATTAINED') ||
+        point.hard_constraint_state !== 'SATISFIED')) {
+    throw new Error('Pinned contrastive graph, assumptions or four-point meaning changed; claim withheld.');
+  }
+  return { status: 'FROZEN_R3B_EXPERIMENTAL', source: binding, study, coaching };
+}
+
+export function contrastiveCurrentness(data, graphSha256) {
+  return data?.status === 'FROZEN_R3B_EXPERIMENTAL' &&
+    graphSha256 === data.source.graph_sha256 ? 'frozen_snapshot' : 'stale';
+}

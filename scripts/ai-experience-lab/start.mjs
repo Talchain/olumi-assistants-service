@@ -26,6 +26,7 @@ const files = ['src/orchestrator-v5/agent-lane/__tests__/ai-experience-lab.manua
   'scripts/ai-experience-lab/index.html', 'scripts/ai-experience-lab/pricing-fixture.json', 'scripts/ai-experience-lab/start.mjs',
   'scripts/ai-experience-lab/rehearsal.json', 'scripts/ai-experience-lab/rehearsal.mjs', 'scripts/ai-experience-lab/rehearsal-ui.mjs',
   'scripts/ai-experience-lab/regions-cases.json',
+  'scripts/ai-experience-lab/contrastive-vulnerability.json', 'scripts/ai-experience-lab/contrastive-coaching.md',
   'scripts/ai-experience-lab/canonical-m1-guard.mjs',
   'scripts/ai-experience-lab/m2-runner.mjs',
   'scripts/m1-host-seam/readback.mjs',
