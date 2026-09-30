@@ -49,6 +49,17 @@ describe('the run’s own withheld goal explanation at the Agent wire', () => {
     expect(out.response.assistant_text).not.toContain(say);
   });
 
+  it.each([
+    ['inline', `The run finished. ${say}`],
+    ['restyled', say.replace('‘MRR’', '**MRR**')],
+  ])('restores the typed say once after an %s Agent copy was filtered', (_, modelText) => {
+    const out = enforceAgentLaneLeaderClaimsAtWire(response(`${modelText}\n\nRaise to £59 does best.`), opts);
+    expect(out.response.assistant_text.split(say)).toHaveLength(2);
+    expect(out.response.assistant_text).not.toContain('Raise to £59 does best');
+    const again = enforceAgentLaneLeaderClaimsAtWire(out.response, opts);
+    expect(again.response.assistant_text).toBe(out.response.assistant_text);
+  });
+
   it('does not protect an old Run’s say after the read says the result is stale', () => {
     const out = enforceAgentLaneLeaderClaimsAtWire(response(`Raise to £59 does best.\n\n${say}`, 'complete_stale'), opts);
     expect(out.response.assistant_text).not.toContain(say);
@@ -78,6 +89,12 @@ describe('the run’s own withheld goal explanation at the Agent wire', () => {
     expect(out.response.assistant_text.split(typed)).toHaveLength(2);
     expect(out.response.assistant_text).not.toContain('71%');
     expect(out.response.assistant_text).not.toContain('29%');
+    const inline = enforceAgentLaneLeaderClaimsAtWire(
+      { ...response(`The run finished. ${typed}`), blocks: [placeholder] } as unknown as OlumiResponse,
+      { ...opts, protectedGoalChanceSay: typed },
+    );
+    expect(inline.response.assistant_text.split(typed)).toHaveLength(2);
+    expect(inline.response.assistant_text.match(/Give a figure for that link/g)).toHaveLength(1);
   });
 
   it('does not replay a prior Run’s sentence on a cold follow-up or after a later Run without that warning', () => {

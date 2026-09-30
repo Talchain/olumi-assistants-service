@@ -71,7 +71,7 @@
  */
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { log } from '../../utils/telemetry.js';
-import { goalChanceWithheldForAgent } from './goal-chance-withheld.js';
+import { goalChanceWithheldForAgent, sameWordsIn } from './goal-chance-withheld.js';
 import { analysisReadyPermitsLeaderNaming, permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
 import {
   leaderClaimReasonKind,
@@ -1661,7 +1661,19 @@ export function enforceAgentLaneLeaderClaimsAtWire(
          * speaks about a run, so the ranking is dropped and nothing is added, as on the build turn (AX2). A reply the
          * drop would leave empty gets the one sentence that claims no run.
          */
-        const body = projected.text.trimEnd();
+        // The Agent can put the typed reason inline or restyle its quotes. The route then owes no
+        // second line, but the ranking filter can remove that copy. Restore only a reason that was
+        // actually in the input and is now absent; an unrelated warning must not appear by magic.
+        const lostTypedSay = typedSay !== null && sameWordsIn(projectionInput, typedSay)
+          && !sameWordsIn(projected.text, typedSay);
+        // A multi-sentence warning can lose its ranking-sounding first sentence while its exact
+        // ask survives. Remove those surviving typed fragments before restoring the full line once.
+        const withoutTypedFragments = lostTypedSay
+          ? finerSentences(typedSay).reduce((body, fragment) => body.replace(fragment.trim(), ''), projected.text)
+          : projected.text;
+        const body = lostTypedSay
+          ? [withoutTypedFragments.trimEnd(), typedSay].filter((part) => part !== '').join('\n\n')
+          : withoutTypedFragments.trimEnd();
         const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
         next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
         log.info(

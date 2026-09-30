@@ -139,7 +139,7 @@ export function goalChanceSayFromThisTurn(toolResults: readonly unknown[]): stri
  * every quote mark and markdown emphasis mark removed and whitespace collapsed; any other change (a word, a figure, the
  * operator) is not the sentence, so it is still owed.
  */
-function sameWordsIn(text: string, sentence: string): boolean {
+export function sameWordsIn(text: string, sentence: string): boolean {
   const plain = (t: string): string => t.replace(/[\u0027\u0022\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2032\u2033`]|\*\*|__|(?<![\w])[*_]|[*_](?![\w])/g, '')
     .replace(/\s+/g, ' ').trim();
   return plain(text).includes(plain(sentence));
