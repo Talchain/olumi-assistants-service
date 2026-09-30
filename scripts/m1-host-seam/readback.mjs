@@ -77,9 +77,12 @@ function context({ base, assistKey, bearer, fetchImpl = fetch }) {
 export async function sendTurn(opts) {
   const ctx = context(opts);
   const first = opts.first === true;
+  // A chip press travels as the served UI sends it: `{ chip: { id, … } }` beside the message (the typed approval is
+  // recognised from `agent-approve-proposal:<id>`, `approval-chips.ts`). The caller decides WHICH chip; this only carries it.
   const t = await post(ctx, '/agent/v1/turn', {
     scenario_id: opts.scenarioId, turn_id: randomUUID(), kind: 'message', message: opts.message,
     ...(first ? { stage: 'frame', turn_class: 'frame', source: 'composer' } : {}),
+    ...(opts.chip ? { chip: opts.chip } : {}),
   }, opts.timeoutMs ?? 300000);
   return {
     scenario_id: opts.scenarioId,
@@ -87,6 +90,7 @@ export async function sendTurn(opts) {
     tools: (t.json?._agent?.tool_calls ?? []).map((c) => ({ name: c.name, ok: c.ok !== false })),
     providers: [...new Set((t.json?._provider_calls ?? []).map((p) => p.provider))],
     assistant_message: typeof t.json?.assistant_message === 'string' ? t.json.assistant_message : null,
+    suggested_actions: Array.isArray(t.json?.suggested_actions) ? t.json.suggested_actions : [],
     response: t.json,
   };
 }

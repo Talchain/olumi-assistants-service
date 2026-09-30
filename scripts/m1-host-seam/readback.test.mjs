@@ -195,3 +195,21 @@ test('editedSinceConstruction reads the served history: later current version â‡
   assert.equal(editedSinceConstruction(rb({ version_id: 'v1', sequence: 1 }, null)), false);
   assert.equal(editedSinceConstruction(null), false);
 });
+
+test('sendTurn carries a chip press as the served UI does ({ chip } beside the message) and returns the offered chips', async () => {
+  const { sendTurn } = await import('./readback.mjs');
+  const bodies = [];
+  const offeredChips = [{ id: 'agent-approve-proposal:prop_abc123', label: 'Set Paying subscribers to 1600' }];
+  const fetchImpl = async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    const json = { assistant_message: 'ok', suggested_actions: offeredChips };
+    return { status: 200, text: async () => JSON.stringify(json), json: async () => json };
+  };
+  const pressed = await sendTurn({ base: 'https://c', assistKey: 'k', scenarioId: 's', message: 'Set Paying subscribers to 1600',
+    chip: { id: 'agent-approve-proposal:prop_abc123' }, fetchImpl });
+  assert.deepEqual(bodies[0].chip, { id: 'agent-approve-proposal:prop_abc123' });
+  assert.equal(bodies[0].kind, 'message');
+  assert.deepEqual(pressed.suggested_actions, offeredChips);
+  await sendTurn({ base: 'https://c', assistKey: 'k', scenarioId: 's', message: 'hi', fetchImpl });
+  assert.equal('chip' in bodies[1], false);
+});
