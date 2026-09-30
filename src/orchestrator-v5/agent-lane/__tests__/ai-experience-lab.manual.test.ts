@@ -99,6 +99,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     cardsAllowed(rb: Readback): boolean; withheldReason(rb: Readback): string | null; sameModel(a: Readback, b: Readback): boolean;
     parseAccountFile(text: string): Record<string, string>;
     accountTokenSource(account: Record<string, string>, o: { fetchImpl: typeof fetch }): () => Promise<string>;
+    editedSinceConstruction(rb: Readback): boolean;
   };
   const { parse: parseEnv } = await import('dotenv');
   const ceeBase = process.env.LAB_CEE_BASE ?? 'https://cee-staging.onrender.com';
@@ -109,13 +110,11 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     : undefined;
   const host = { base: ceeBase, assistKey, bearer, fetchImpl: network };
   const fresh = new Set<string>();
-  // Build's guard (scripts/ai-experience-lab/canonical-m1-guard.mjs) is the ONE binding rule for M2 (Build 5908596263):
-  // the first M2 on a fresh model binds only the brief's construction; after a turn moved the version, the new current one.
+  // Build's guard (scripts/ai-experience-lab/canonical-m1-guard.mjs) is the ONE binding rule for M2 (Build 5908596263).
   const guard = await import(pathToFileURL(resolve('scripts/ai-experience-lab/canonical-m1-guard.mjs')).href) as {
     bindCanonicalM1(o: Record<string, unknown>): { accepted: boolean; withheld_reason?: string; binding?: Record<string, unknown> };
     settleCanonicalM2(o: Record<string, unknown>): { accepted: boolean; proposals: unknown[]; withheld_reason: string | null; receipt?: unknown };
   };
-  const lastVersion = new Map<string, string | null>();
   // The served CEE is the authority, not this process: after a host restart a fresh scenario re-attaches by reading it
   // back (its owner's token decides whether it can be read at all).
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -125,10 +124,10 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     if (!assistKey || !UUID.test(sid) || sessions.has(sid)) return false;
     const rb = await seam.readback({ ...host, scenarioId: sid });
     if (rb.http?.graph !== 200 || rb.graph === null) return false;
-    fresh.add(sid); lastVersion.set(sid, rb.model_version?.version_id ?? null);
+    fresh.add(sid);
     return true;
   };
-  const edited = new Set<string>();
+
   const view = (rb: Readback) => {
     const { raw: _raw, ...rest } = rb;
     // A fresh session's id IS its scenario id; every readback carries it (Build 5908635393: the UI rejects a readback
@@ -196,7 +195,6 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
         const turn = await seam.buildFromBrief({ ...host, brief: body.brief.trim() });
         fresh.add(turn.scenario_id);
         const rb = await readFresh(turn.scenario_id);
-        lastVersion.set(turn.scenario_id, rb.model_version?.version_id ?? null);
         const { response: _response, ...turnView } = turn;
         return { mode: 'fresh', ...view(rb), turn: turnView };
       } catch (error) {
@@ -253,8 +251,10 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
         if (!seam.cardsAllowed(before)) {
           return reply.code(409).send({ error: seam.withheldReason(before), withheld_reason: before.version_binding, readback: view(before) });
         }
+        // The first M2 binds only the brief's construction; once the served history shows a later current version (an
+        // edit), that version binds — read from the history, so a host restart changes nothing.
         const bound = guard.bindCanonicalM1({ session_id: sid, scenario_id: sid, readback: before,
-          require_construction_current: !edited.has(sid) });
+          require_construction_current: !seam.editedSinceConstruction(before) });
         if (!bound.accepted || !bound.binding) {
           return reply.code(409).send({ error: 'Not shown: this model could not be tied to its saved version.',
             withheld_reason: bound.withheld_reason, readback: view(before) });
@@ -319,10 +319,6 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
       try {
         const turn = await seam.sendTurn({ ...host, scenarioId: sid, message: body.message });
         const rb = await readFresh(sid);
-        // A turn that moved the current version is an approved edit: the next M2 binds the new current version.
-        const now = rb.model_version?.version_id ?? null;
-        if (lastVersion.has(sid) && now !== lastVersion.get(sid)) edited.add(sid);
-        lastVersion.set(sid, now);
         const receipt = { timestamp: new Date().toISOString(), head, source_hash, session_id: sid, mode: 'fresh',
           status: turn.http, latency_ms: Date.now() - start, message: body.message, response: turn.response };
         appendFileSync(evidence, JSON.stringify({ ...receipt, readback: rb }) + '\n');

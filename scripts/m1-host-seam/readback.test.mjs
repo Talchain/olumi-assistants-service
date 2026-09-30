@@ -184,3 +184,14 @@ test('a read retries once on a network error; an HTTP refusal is never retried; 
   await assert.rejects(sendTurn({ base: 'https://c', assistKey: 'k', scenarioId: sid, message: 'm', fetchImpl }), /fetch failed/);
   assert.equal(counts['/agent/v1/turn'], 1);
 });
+
+test('editedSinceConstruction reads the served history: later current version ⇒ edited; else not', async () => {
+  const { editedSinceConstruction } = await import('./readback.mjs');
+  const rb = (cons, cur) => ({ construction: cons, model_version: cur });
+  assert.equal(editedSinceConstruction(rb({ version_id: 'v1', sequence: 1, is_current: true }, { version_id: 'v1', sequence: 1 })), false);
+  assert.equal(editedSinceConstruction(rb({ version_id: 'v1', sequence: 1, is_current: false }, { version_id: 'v2', sequence: 2 })), true);
+  // construction not found in history (a brief the Agent did not build): never "edited" — the first M2 must bind the construction
+  assert.equal(editedSinceConstruction(rb({ version_id: null, sequence: null, is_current: false }, { version_id: 'v2', sequence: 2 })), false);
+  assert.equal(editedSinceConstruction(rb({ version_id: 'v1', sequence: 1 }, null)), false);
+  assert.equal(editedSinceConstruction(null), false);
+});

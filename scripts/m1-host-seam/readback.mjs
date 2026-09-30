@@ -218,3 +218,15 @@ export function accountTokenSource(account, { fetchImpl = fetch, now = () => Dat
     return token;
   };
 }
+
+/**
+ * Has the model moved on from the brief's construction? Read from the served history, never from host memory (Build
+ * 5908915762: an in-memory "edited" marker is lost on a host restart). True only when the construction's version is found
+ * in this scenario's history AND the current version comes after it: that is an edit, so the current version may bind.
+ * Otherwise the first M2 may bind only the construction itself.
+ */
+export function editedSinceConstruction(rb) {
+  const c = rb?.construction, mv = rb?.model_version;
+  return typeof c?.version_id === 'string' && Number.isInteger(c?.sequence)
+    && Number.isInteger(mv?.sequence) && mv.sequence > c.sequence;
+}
