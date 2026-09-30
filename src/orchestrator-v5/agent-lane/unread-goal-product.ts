@@ -16,6 +16,7 @@
  * code. A DECLARED product is read either way: evaluated, or PLoT withheld the run itself (#416, `identity on the goal's
  * path not evaluated`) and this never runs. A level of ±1 is no reading (anything × 1 is itself). Pure.
  */
+import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { sayFigure } from './say-figure.js';
 
@@ -29,7 +30,7 @@ const userOwns = (source: unknown): boolean =>
 
 /** The reconciling product this run did not read: the goal and its two parts, each with the user's level and unit. */
 export interface UnreadGoalProduct {
-  /** `typed`: the user WROTE the goal's level (brief, chat); a level they only ratified is Olumi's (#2333 class). */
+  /** `typed`: the user WROTE the goal's level (`classifyValueSource` = `user_stated`); a ratified level is Olumi's (#2333). */
   readonly goal: { readonly id: string; readonly label: string; readonly level: number; readonly unit: string; readonly typed: boolean };
   readonly rate: { readonly id: string; readonly label: string; readonly level: number; readonly unit: string };
   readonly count: { readonly id: string; readonly label: string; readonly level: number; readonly unit: string };
@@ -99,7 +100,7 @@ export function unreadGoalProduct(graph: unknown): UnreadGoalProduct | null {
       const c = unitsCompose(goalUnit, goalLabel, a, b);
       if (c.kind === 'no' || read(a.id, b.id)) continue;
       const [rate, count] = c.rate === a.label ? [a, b] : [b, a];
-      const typed = os?.source === 'brief_extraction' || os?.source === 'user_override' || os?.source === 'user_stated';
+      const typed = classifyValueSource(os?.source) === 'user_stated';
       const product = { goal: { id: goal.id, label: goalLabel, level: o, unit: goalUnit, typed }, rate, count };
       if (c.kind === 'proof') return product;
       found ??= product;
