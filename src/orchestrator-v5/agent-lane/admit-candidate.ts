@@ -159,6 +159,9 @@ function provenanceSourceFor(candidateProvenance: string): string {
   return candidateProvenance === 'explicit' ? 'brief_extraction' : 'cee_hypothesis';
 }
 
+/** How a size Olumi stated but the model does not use is labelled wherever the Agent reads it (AIQ 5914222384). */
+export const SET_ASIDE_ESTIMATE_LABEL = "Olumi's guess, set aside: NOT in the model";
+
 /**
  * What the ledger says beside a sized link, whatever the edge carries: the question the user is asked
  * (`.magnitude_question`, routed to `open_questions` by `build-model.ts`), or — when a stated size could not be used
@@ -189,6 +192,20 @@ function magnitudeNotes(fieldPath: string, link: CandidateLink, sized: LinkSizin
           ? 'could not be read on the ranges the two are measured on'
           : "runs the other way from the link's own direction") +
         ', so the standard placeholder strength is used instead. It is not a measurement.',
+      severity: 'warn',
+    });
+  }
+  // ⛔ OLUMI'S SIZE THE EDGE DOES NOT CARRY is typed as set aside (`build-model.ts` → `set_aside_estimates`), so the Agent
+  // never lists it among the model's inputs: its only other trace is the question above, which quotes it.
+  if (sized.set_aside === true && sized.statement !== undefined) {
+    notes.push({
+      code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE,
+      layer: 'cee',
+      field_path: `${fieldPath}.set_aside_estimate`,
+      before: { effect_amount: link.effect_amount ?? null, effect_per_source_change: link.effect_per_source_change ?? null },
+      after: { from: link.from, to: link.to, estimate: sized.statement },
+      reason: `${SET_ASIDE_ESTIMATE_LABEL}: ${sized.statement}. The link carries a placeholder strength instead, so no result `
+        + 'rests on this figure; never say the model is built on it.',
       severity: 'warn',
     });
   }
