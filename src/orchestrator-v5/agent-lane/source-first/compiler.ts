@@ -279,13 +279,18 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
         }
       }
       // A wide option quote can include a separate constraint sentence. The
-      // target noun appearing there proves source binding, not that the option
-      // changes it. Without an independently typed action quantity, keep the
-      // relationship unresolved instead of making the limit controllable.
-      if (intervention.quantity_ref === null && claimsFor(intervention.entity_ref).some(({ claim }) =>
+      // constraint may be typed on a different ref for the same named concept;
+      // its source role still cannot authorise an option action.
+      if (intervention.quantity_ref === null && [...accepted.values()].some(({ claim }) =>
         claim.role === 'limit' && spansOverlap(source_bindings[claim.ref], source.source))) {
         issue(intervention.entity_ref, 'intervention_source_is_limit',
           `Does "${node.label}" change "${target.label}", or is this only its stated limit?`); continue;
+      }
+      // Qualitative interventions need an affirmative action in their own
+      // bound clause; a shared noun in a broad option quote is not enough.
+      if (intervention.quantity_ref === null && !/\b(?:add|adopt|build|change|cut|decrease|deploy|hire|increase|introduce|launch|lower|move|raise|reduce|remove|replace|shift|start|stop|switch|use)\b/i.test(source.source.quote)) {
+        issue(intervention.entity_ref, 'intervention_action_unbound',
+          `What action does "${node.label}" take on "${target.label}"?`); continue;
       }
       // An option quote cannot authorise a link to an unrelated factor. Its
       // action must overlap the target's independent source and name it there.

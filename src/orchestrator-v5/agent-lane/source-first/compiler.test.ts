@@ -380,6 +380,22 @@ describe('saved source-first graph reaches product lineage and option readers', 
     expect(result.graph.nodes.find((node) => node.id === churn)?.category).toBe('external');
     expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'f3', code: 'intervention_source_is_limit' }));
   });
+  it('rejects a limit clause even when the limit belongs to another typed ref', () => {
+    const captured = structuredClone(captures.find((item) => item.case === 'paul-mrr')!);
+    const limit = 'Monthly churn must stay below 5%';
+    captured.meaning.entities.push({ ref: 'f3', kind: 'factor', label: 'Monthly churn', source: source(limit) });
+    captured.meaning.entities.find((entity) => entity.ref === 'o1')!.source =
+      source(captured.brief.slice(0, captured.brief.indexOf(', and we want')));
+    captured.meaning.options[0].interventions[0] = { entity_ref: 'f3', quantity_ref: null, source: source(limit) };
+
+    const result = compileSourceMeaning(captured.brief, captured.meaning);
+    const churn = sourceEntityId('f3');
+    const option = result.graph.nodes.find((node) => node.id === sourceEntityId('o1'))!;
+    expect(result.graph.edges.some((edge) => edge.from === option.id && edge.to === churn)).toBe(false);
+    expect(option.interventions).toEqual({});
+    expect(result.graph.nodes.find((node) => node.id === churn)?.category).toBe('external');
+    expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'f3', code: 'intervention_source_is_limit' }));
+  });
   it('refuses a qualitative action attached to the wrong factor', () => {
     const captured = structuredClone(captures.find((item) => item.case === 'support')!);
     const optionId = sourceEntityId('o1');
