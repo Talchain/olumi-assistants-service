@@ -1140,10 +1140,11 @@ function proposalNoteFor(usersCount: number, total: number): string {
   }
   if (usersCount === total) {
     return 'Nothing has changed. Show the user each value as the figure the user gave: it will be saved as the ' +
-      `user's own figure, so never call it an assumption or say it is not a measurement, ${ask}`;
+      "user's own figure, so never call it Olumi's estimate or an assumption, or say it is not a measurement (an " +
+      `"about" in their words does not make it Olumi's), ${ask}`;
   }
   return 'Nothing has changed. Show the user each value and what it rests on. A value marked your_figure is the ' +
-    "user's own figure and will be saved as theirs: never call it an assumption. Say plainly that the other values " +
+    "user's own figure and will be saved as theirs: never call it Olumi's estimate or an assumption. Say plainly that the other values " +
     `are assumptions to adopt or correct and NOT measurements, ${ask}`;
 }
 

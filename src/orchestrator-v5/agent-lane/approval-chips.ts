@@ -185,7 +185,28 @@ export function approvalChipsFor(
     return effectReading === undefined ? []
       : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: linkEffectApproveMessage(effectReading), detail: effectReading }, AMEND_CHIP];
   }
-  return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message }, AMEND_CHIP];
+  const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId));
+  return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
+}
+
+/** Every op sets a factor value the USER wrote (`authored_by: 'user_stated'`, the write's own predicate). */
+const allUsersOwnValues = (proposal: StructuredProposal): boolean =>
+  proposal.operations.length > 0
+  && proposal.operations.every((o) => o.op === 'set_factor_value' && (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated');
+
+/**
+ * ⛔ THE USER'S OWN FIGURE IS SHOWN AS THEIRS AT THE APPROVAL (AIQ 5909998288, R3 candidate-2 witness R2): the card
+ * ("GCP unit-cost saving: 20% → 25% (your figure, in your words: …)") was built and stored, but the chip carried only
+ * "Use as starting assumptions", so the user approved their own figure under words that called it a starting estimate
+ * while the Agent said "Olumi's estimate". The STORED proposal's own card rides in `detail`, only when the proposer's
+ * result for that same id returned the same words — never the Agent's prose.
+ */
+function usersOwnCardFor(tool: string, source: ApprovalLabelSource | undefined): string | undefined {
+  const proposal = source?.proposal;
+  const result = source?.result;
+  if (tool !== 'propose_assumptions' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
+  if (!allUsersOwnValues(proposal) || typeof proposal.public_label !== 'string' || proposal.public_label.trim() === '' || result.public_label !== proposal.public_label) return undefined;
+  return proposal.public_label;
 }
 
 /**
@@ -346,10 +367,13 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
     return `Record ${levelOps.length} levels (${olumi} Olumi estimate${olumi === 1 ? '' : 's'})`;
   }
   if (ops.length === 0 || ops.some((o) => !FIGURE_OPS.has(o.op))) return fallback;
+  // ⛔ The user's own figures are RECORDED, never "starting assumptions" (AIQ 5909998288; the card rides in `detail`).
+  const usersOwn = tool === 'propose_assumptions' && allUsersOwnValues(proposal);
+  const ownFallback = usersOwn ? (ops.length === 1 ? 'Record your figure' : `Record your ${ops.length} figures`) : fallback;
   if (ops.length > 1) {
     // A revision the user asked for replaces figures already there: it is not a set of starting figures.
     const revises = ops.some((o) => o.op === 'set_factor_value' && (o.value as { authored_by?: unknown } | undefined)?.authored_by === 'user_stated');
-    return revises ? fallback : `Use these ${ops.length} starting figures`;
+    return revises ? ownFallback : `Use these ${ops.length} starting figures`;
   }
   const op = ops[0]!;
   const stored = (op.value ?? {}) as { raw?: unknown; value?: unknown; unit?: unknown };
@@ -362,9 +386,9 @@ export function approvalLabelFor(tool: string, source: ApprovalLabelSource | und
     return (figure !== null ? fitted(`Save ${figure} for `, shown.option, '') : null) ?? fallback;
   }
   const shown = values.length === 1 && levels.length === 0 ? values[0]! : undefined;
-  if (shown === undefined || typeof stored.value !== 'number' || shown.value !== stored.value || shown.unit !== stored.unit) return fallback;
+  if (shown === undefined || typeof stored.value !== 'number' || shown.value !== stored.value || shown.unit !== stored.unit) return ownFallback;
   const figure = figureInUserUnits(stored.value, stored.unit);
-  return (figure !== null ? fitted('Set ', shown.factor, ` to ${figure}`) : null) ?? fallback;
+  return (figure !== null ? fitted('Set ', shown.factor, ` to ${figure}`) : null) ?? ownFallback;
 }
 
 const APPROVE_PREFIX = 'agent-approve-proposal:';

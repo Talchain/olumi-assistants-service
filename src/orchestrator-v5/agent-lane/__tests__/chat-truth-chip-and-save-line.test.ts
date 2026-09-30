@@ -212,7 +212,11 @@ describe('the approve chip is labelled from the stored proposal it approves', ()
       { factor_label: 'Annual PA salary', value: 45000, unit: 'GBP', basis: 'the user’s figure', revise: true },
     ] });
     expect(revise.ok, JSON.stringify(revise)).toBe(true);
-    expect(chipsFor(s3.store, [{ name: 'propose_assumptions', result: revise }])[0]!.label).toBe('Use as starting assumptions');
+    // Re-recorded (AIQ 5909998288, R2): both values are ones the USER wrote (`user_stated`), so the button records them as
+    // theirs and never calls them "starting assumptions"; the stored card rides in `detail`.
+    const chip = chipsFor(s3.store, [{ name: 'propose_assumptions', result: revise }])[0]!;
+    expect(chip.label).toBe('Record your 2 figures');
+    expect(chip.detail).toBe(revise.public_label);
   });
 
   it('FALLBACK: a result that does not agree with the stored proposal figure for figure keeps today’s label', async () => {

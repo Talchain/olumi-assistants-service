@@ -83,8 +83,38 @@ export type FactorValueOperator = 'set' | 'increase' | 'decrease' | 'multiply';
  * (`agent-lane/relative-figure.ts`, a percent read in a share factor's frame) uses this rule, never a copy.
  */
 export const PROPORTION_UNIT_TOKENS: ReadonlySet<string> = new Set(['scale', 'unit_interval', 'ratio', 'proportion']);
+/**
+ * ⛔ A UNIT THAT STATES A SHARE OR A 0–1 RANGE (MG SUCCESSOR #75 5910272624; R3 candidate-2 witness, served CEE 2cd7823).
+ * The served drafter writes 0–1 quantities as `share (0-1)`, `fraction of workloads`, `adoption fraction (0-1)`, `0-1`, …:
+ * 16 of 18 uncapped 0–1 factors in 75 served drafts, none of them in the closed tokens above, so the user's "25%" on
+ * "GCP unit-cost saving" (`share (0-1)`, 0.2) was carded "0.2% → 25%" and the write refused it. Still CLOSED: a head word
+ * `share` / `fraction` / `proportion` (never `shares`, a count), or a written `0-1` range; never a `0/1` switch, and never
+ * a unit carrying `%` / `percent` ("market share %" holds 23, not 0.23). And a value outside [0, 1] contradicts it.
+ */
+function statesShareOrUnitRange(unit: string, value: number | undefined): boolean {
+  if (value !== undefined && (value < 0 || value > 1)) return false;
+  if (/%|percent/.test(unit)) return false;
+  // A switch beats a range: `binary (0-1)`, `on/off (0–1)`, `0/1`, `yes/no (0 or 1)` are 0 OR 1, never a share.
+  if (/\b0\s*\/\s*1\b|\bbinary\b|\binactive\b|\bon\s*\/\s*off\b|\byes\s*\/\s*no\b/.test(unit)) return false;
+  // A written 0–1 range: `0-1`, `0–1`, `0 to 1`, `[0, 1]` — never `0-10`, `0-100` or `0–1,000`.
+  if (/(?:^|[^\d.,])0\s*(?:[-\u2013]|to)\s*1(?![\d.]|,\d)/.test(unit) || /\[\s*0\s*,\s*1\s*\]/.test(unit)) return true;
+  // Any other bracket states another scale, a currency or a count (`(0-100)`, `(1-5)`, `(£)`, `(pct)`, `(pp)`, `(people)`,
+  // P0 PARTNER CR 5910740141): the unit is not a share, whatever its words, even with no stored value to contradict it.
+  if (/[([]/.test(unit)) return false;
+  // Or a HEAD noun share / fraction / proportion: after a comparative tail ("versus AWS", "vs today", "relative to …") is
+  // cut, the word before "of", else the last word; or `proportion` / `fraction` FIRST (served cut-costs: "proportion
+  // reduction versus AWS"). Never `share` first ("share price"), never with "per" (`£ per share`), never `shares` (a count)
+  // or `fractional FTE`.
+  const core = unit.replace(/\b(?:versus|vs\.?|relative to|compared (?:to|with)|against)\b.*$/, '').trim();
+  if (/\bper\b/.test(core)) return false;
+  const words = core.split(/[^a-z]+/).filter((w) => w !== '');
+  const of = words.indexOf('of');
+  const head = of > 0 ? words[of - 1] : words[words.length - 1];
+  return head === 'share' || head === 'fraction' || head === 'proportion' || words[0] === 'proportion' || words[0] === 'fraction';
+}
 export function isProportionScaledFactor(f: { unit: unknown; cap: number | undefined; value: number | undefined; raw_value: number | undefined }): boolean {
-  const isProportionUnit = typeof f.unit === 'string' && PROPORTION_UNIT_TOKENS.has(f.unit.trim().toLowerCase());
+  const unit = typeof f.unit === 'string' ? f.unit.trim().toLowerCase() : '';
+  const isProportionUnit = PROPORTION_UNIT_TOKENS.has(unit) || (unit !== '' && statesShareOrUnitRange(unit, f.value));
   return f.cap === 1 || (isProportionUnit && f.cap === undefined && recoverScaleFrame({ value: f.value, raw_value: f.raw_value }) === undefined);
 }
 
