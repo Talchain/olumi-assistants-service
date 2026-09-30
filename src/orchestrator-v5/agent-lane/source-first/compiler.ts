@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { DEFAULT_EXISTS_PROBABILITY } from '@talchain/schemas';
 import { GraphV3, type GraphV3T, type NodeV3T, type EdgeV3T } from '../../../schemas/cee-v3.js';
-import { sizeLink, type MagnitudeNode } from '../../../cee/magnitude/link-effect.js';
+import { naturalAmountUnitOf, sizeLink, type MagnitudeNode } from '../../../cee/magnitude/link-effect.js';
 import type { GoalConstraintT } from '../../../schemas/assist.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
@@ -457,18 +457,6 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
       issue(claim.ref, 'causal_unit_frame_unverified',
         `What measured source and target units should the stated effect from "${from.label}" to "${to.label}" use?`); continue;
     }
-    if (!boundAmount || !boundPer || !namesBoth || !unitWordsGrounded || !directionGrounded
-      || !compatibleUnits(sourceUnit, natural.per_source_change_unit)
-      || !compatibleUnits(targetUnit, natural.amount_unit) || !per || per.value <= 0
-      || !amount || amount.value === 0 || hasPath(to.id, from.id)) {
-      issue(claim.ref, 'causal_natural_effect_unverified',
-        `Which exact source and target changes, units and direction did the stated effect from "${from.label}" to "${to.label}" mean?`); continue;
-    }
-    if (claim.existence_probability !== null && (!probability || !spanWithin(probability.source, source.source)
-      || !/\b(?:probability|likelihood|chance)\b/i.test(probability.source.quote)
-      || probability.value < 0 || probability.value > 1)) {
-      issue(claim.ref, 'causal_probability_unverified', `What likelihood was stated for "${from.label}" affecting "${to.label}"?`); continue;
-    }
     const optionLevels = (node: NodeV3T) => [...nodes.values()].filter((candidate) => candidate.kind === 'option')
       .flatMap((candidate) => {
         const level = candidate.interventions?.[node.id]?.value;
@@ -479,12 +467,35 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
       observed_state: node.observed_state, goal_threshold_cap: node.goal_threshold_cap,
       goal_threshold_unit: node.goal_threshold_unit, unit, option_levels: optionLevels(node),
     });
+    const sourceMagnitude = magnitudeNode(from, unitText(sourceUnit));
+    const targetMagnitude = magnitudeNode(to, unitText(targetUnit));
+    const naturalAmountUnit = naturalAmountUnitOf(targetMagnitude);
+    // The existing magnitude contract reads a percentage LEVEL's change in
+    // points. A relative percent is not interchangeable with those points.
+    const amountUnitCompatible = naturalAmountUnit === unitText(targetUnit)
+      ? compatibleUnits(targetUnit, natural.amount_unit)
+      : targetUnit.kind === 'percent' && natural.amount_unit.kind === 'percentage_points'
+        && natural.amount_unit.currency === null && natural.amount_unit.counted_object === null
+        && (natural.amount_unit.period === null || natural.amount_unit.period === targetUnit.period)
+        && unitText({ ...natural.amount_unit, period: null }) === naturalAmountUnit;
+    if (!boundAmount || !boundPer || !namesBoth || !unitWordsGrounded || !directionGrounded
+      || !compatibleUnits(sourceUnit, natural.per_source_change_unit)
+      || !amountUnitCompatible || !per || per.value <= 0
+      || !amount || amount.value === 0 || hasPath(to.id, from.id)) {
+      issue(claim.ref, 'causal_natural_effect_unverified',
+        `Which exact source and target changes, units and direction did the stated effect from "${from.label}" to "${to.label}" mean?`); continue;
+    }
+    if (claim.existence_probability !== null && (!probability || !spanWithin(probability.source, source.source)
+      || !/\b(?:probability|likelihood|chance)\b/i.test(probability.source.quote)
+      || probability.value < 0 || probability.value > 1)) {
+      issue(claim.ref, 'causal_probability_unverified', `What likelihood was stated for "${from.label}" affecting "${to.label}"?`); continue;
+    }
     const sized = sizeLink({
       direction: claim.direction,
       effect_amount: claim.direction === 'negative' ? -Math.abs(amount.value) : Math.abs(amount.value),
       effect_per_source_change: per.value,
       user_stated: true,
-    }, magnitudeNode(from, unitText(sourceUnit)), magnitudeNode(to, unitText(targetUnit)));
+    }, sourceMagnitude, targetMagnitude);
     if (sized.outcome !== 'user_stated' || sized.problem || !sized.natural_effect) {
       issue(claim.ref, sized.problem ?? 'causal_unit_frame_unverified', sized.question
         ?? `How should the stated natural effect from "${from.label}" to "${to.label}" be measured?`); continue;
@@ -496,9 +507,10 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
       effect_direction: claim.direction,
       provenance: { source: 'brief_extraction', reasoning: source.source.quote,
         magnitude: sized.magnitude, natural_effect: sized.natural_effect },
-      // The spread and (unless supplied) existence probability are Olumi's,
-      // not additional claims by the user who stated the natural mean.
-      defaulted: true,
+      // The user stated the mean; `defaulted` would erase that authorship in
+      // readiness. CEE marks only the two numbers it supplies itself.
+      std_defaulted: true,
+      ...(probability ? {} : { exists_defaulted: true }),
     });
   }
   for (const unknown of meaning.unknowns) issue(unknown.ref, 'stated_unknown', unknown.question);

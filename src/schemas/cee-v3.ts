@@ -652,11 +652,12 @@ export const EdgeV3 = z.object({
    * Olumi's. Before this field that fact was simply lost: the edge read as entirely the user's. This is the
    * per-field half that survives.
    *
-   * CEE-MINTED, ONE WRITER: `adjust-edge-strength.ts` sets it to `true` exactly when a user write removes
-   * `defaulted: true` from an edge. The confirmation guard (`isProvenanceOnlyEdgeConfirmation`) admits that pair and
-   * nothing else. A producer cannot write it: the root is in `field-safety.ts` `CEE_ANALYSIS_OWNED_ROOTS`, so a model
-   * update naming it is refused PIPELINE_OWNED_FIELD at any depth, and an `add_node` value carrying it is stripped;
-   * the draft transform builds edges field-by-field and does not copy it.
+   * CEE-MINTED: `adjust-edge-strength.ts` and `link-effect-edit.ts` retain this marker when a user-authored mean
+   * replaces a defaulted one; `structural-add-edge.ts` marks a user-drawn causal link's default probability;
+   * the source-first compiler marks its default probability after `sizeLink` establishes a user-stated mean.
+   * The confirmation guard (`isProvenanceOnlyEdgeConfirmation`) admits its own narrow transition. An untrusted model
+   * update cannot write it: `field-safety.ts` owns the root in `CEE_ANALYSIS_OWNED_ROOTS`, so a proposed update is
+   * refused and an `add_node` value carrying it is stripped; the draft transform does not copy it.
    *
    * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the warning `goal_threshold_frame` carries. `EdgeV3` is
    * a plain `z.object`, so an undeclared `exists_defaulted` is SILENTLY DELETED by the handler's own post-mutation
@@ -677,12 +678,12 @@ export const EdgeV3 = z.object({
    * absolute value (`adjust-edge-strength.ts` `olumiSpreadForMean`) — while the edge is stamped `user_specified`.
    * Without this flag that std read as the user's.
    *
-   * CEE-MINTED, TWO WRITERS: `adjust-edge-strength.ts` sets it to `true` on every user write whose std the user did
-   * not state, and REMOVES it when the write states the spread itself (a named band, or an explicit `std`);
-   * `structural-add-edge.ts` sets it on a causal link the user draws, whose `DEFAULT_STD` is Olumi's. The
-   * confirmation guard (`isProvenanceOnlyEdgeConfirmation`) admits absent → `true` on a figure confirm and present →
-   * absent on a band confirm, and nothing else. A producer cannot write it: the root is in `field-safety.ts`
-   * `CEE_ANALYSIS_OWNED_ROOTS` (update refused PIPELINE_OWNED_FIELD at any depth; an `add_node` value is stripped).
+   * CEE-MINTED: `adjust-edge-strength.ts` marks a user write without a stated spread and removes the marker for an
+   * explicit band or `std`; `structural-add-edge.ts` marks a user-drawn causal link's default spread;
+   * `link-effect-edit.ts` and the source-first compiler mark the `sizeLink` spread beside a user-stated natural mean.
+   * The confirmation guard (`isProvenanceOnlyEdgeConfirmation`) admits its own narrow transitions. An untrusted model
+   * update cannot write it: `field-safety.ts` owns the root in `CEE_ANALYSIS_OWNED_ROOTS` (proposed update refused;
+   * an `add_node` value carrying it is stripped).
    *
    * ⚠ LOAD-BEARING, as `exists_defaulted` above: undeclared, the handler's own post-mutation `GraphV3` parse would
    * silently delete it. Absence means not marked. Malformed → dropped (`.catch`). OUT of

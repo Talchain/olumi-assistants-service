@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { edgeStrengthProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
 import type { CallStructuredModel } from '../runtime/build-model.js';
 import { compileSourceMeaning, sourceEntityId } from './compiler.js';
 import { bindSource, readNumber } from './source-binding.js';
@@ -169,9 +170,51 @@ describe('source-first compiler', () => {
     expect(edge?.provenance).toMatchObject({ source: 'brief_extraction', magnitude: 'user_stated',
       natural_effect: { amount: -Number(amount), amount_unit: 'subscribers', per_source_change: 1,
         per_source_change_unit: 'GBP per subscriber per month', strength_mean: beta, strength_mean_frame: 'edge_strength' } });
-    expect(edge?.defaulted).toBe(true);
+    expect(edge?.defaulted).toBeUndefined();
+    expect(edge?.std_defaulted).toBe(true);
+    expect(edge?.exists_defaulted).toBe(true);
+    expect(edgeStrengthProvenance(edge)).toBe('user_stated');
     expect(result.unresolved).toEqual([]);
     expect(GraphV3.safeParse(result.graph).success).toBe(true);
+  });
+
+  it('reads monthly churn effects in percentage points, never as a relative percent', () => {
+    const price = 'Current Pro plan price is £49 per subscriber a month.';
+    const churn = 'Current Monthly churn is 6% per month.';
+    const points = 'A £1 increase in Pro plan price reduces Monthly churn by 1 percentage point.';
+    const percent = 'A £1 increase in Pro plan price reduces Monthly churn by 1%.';
+    const model = (quote: string, literal: string, amountUnit: SourceUnit): SourceMeaning => {
+      const meaning = empty();
+      meaning.entities = [
+        { ref: 'price', kind: 'factor', label: 'Pro plan price', source: source(price) },
+        { ref: 'churn', kind: 'factor', label: 'Monthly churn', source: source(churn) },
+      ];
+      meaning.quantities = [
+        quantity('price_today', 'price', 'current', '£49', '49', price, money('subscriber')),
+        quantity('churn_today', 'churn', 'current', '6%', '6', churn,
+          { kind: 'percent', currency: null, period: 'month', counted_object: null, as_stated: '%' }),
+      ];
+      meaning.causal_claims = [{ ref: 'effect', from_ref: 'price', to_ref: 'churn', direction: 'negative',
+        source: source(quote), coefficient: null,
+        natural_effect: { amount: { literal, value: '1', source: source(literal === '1' ? 'by 1 percentage point' : 'by 1%') },
+          amount_unit: amountUnit,
+          per_source_change: { literal: '£1', value: '1', source: source('£1 increase in Pro plan price') },
+          per_source_change_unit: { ...money('subscriber'), as_stated: '£' } },
+        standard_deviation: null, existence_probability: null }];
+      return meaning;
+    };
+    const pointsResult = compileSourceMeaning(`${price} ${churn} ${points}`, model(points, '1',
+      { kind: 'percentage_points', currency: null, period: 'month', counted_object: null, as_stated: 'percentage point' }));
+    const edge = pointsResult.graph.edges.find((item) => item.from === sourceEntityId('price') && item.to === sourceEntityId('churn'));
+    expect(edge?.strength.mean).toBe(-1);
+    expect(edge?.provenance?.natural_effect?.amount_unit).toBe('percentage points');
+    expect(edgeStrengthProvenance(edge)).toBe('user_stated');
+    expect(pointsResult.unresolved).toEqual([]);
+
+    const percentResult = compileSourceMeaning(`${price} ${churn} ${percent}`, model(percent, '1%',
+      { kind: 'percent', currency: null, period: 'month', counted_object: null, as_stated: '%' }));
+    expect(percentResult.graph.edges).toEqual([]);
+    expect(percentResult.unresolved).toContainEqual(expect.objectContaining({ ref: 'effect', code: 'causal_natural_effect_unverified' }));
   });
 
   it('withholds a natural effect with mismatched units, absent frame or unframed stated uncertainty', () => {
