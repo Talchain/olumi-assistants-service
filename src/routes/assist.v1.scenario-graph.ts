@@ -224,6 +224,7 @@ import { log } from "../utils/telemetry.js";
 // helper; this route contributes the security ladder and the graph it read.
 import { readScenarioAnalysis } from "./scenario-graph-analysis-read.js";
 import { projectAnalysisAdmission } from './analysis-admission-projection.js';
+import { isAgentAnswerRow } from "../orchestrator-v5/session/conversation-as-seen.js";
 
 /** Wire schema discriminator. Frozen — the UI lane builds against this. */
 export const SCENARIO_GRAPH_SCHEMA = "scenario_graph.v1" as const;
@@ -312,7 +313,7 @@ function wantsConversationTurns(body: unknown): boolean {
  * out as well: its narration was shown when it happened, and a restore omits it rather than risk text the user never
  * saw.
  */
-export const AGENT_ANSWER_REQUEST_HASH_PREFIX = "agent_turn:";
+export { AGENT_ANSWER_REQUEST_HASH_PREFIX } from "../orchestrator-v5/session/conversation-as-seen.js";
 
 /**
  * The scenario's turns, OLDEST first, from the last {@link CONVERSATION_TURNS_CAP} rows, each reduced to its id, time
@@ -328,7 +329,7 @@ async function readConversationTurns(
   try {
     const rows = await store.readRecent(scenarioId, CONVERSATION_TURNS_CAP);
     return [...rows].reverse()
-      .filter((r) => typeof r.request_hash === "string" && r.request_hash.startsWith(AGENT_ANSWER_REQUEST_HASH_PREFIX))
+      .filter(isAgentAnswerRow)
       .map((r) => ({
         turn_id: r.turn_id,
         created_at: r.created_at,

@@ -17,6 +17,7 @@
  * orphan a `function_call_output`, which the API rejects. So the trim only ever
  * cuts at the start of a user message — a point where nothing is half-finished.
  */
+import { isAgentAnswerRow } from '../session/conversation-as-seen.js';
 
 const DEFAULT_MAX_SESSIONS = 200;
 /**
@@ -309,11 +310,13 @@ export function dropDanglingCalls(items: readonly unknown[]): unknown[] {
  * `get_canonical_state` truthfully shows nothing awaiting approval).
  */
 export function historyFromDurableTurns(
-  turns: readonly { user_message?: string | null; assistant_message?: string | null }[],
+  turns: readonly { request_hash?: string | null; user_message?: string | null; assistant_message?: string | null }[],
 ): unknown[] {
   const items: unknown[] = [];
-  // `readRecent` returns newest first.
-  for (const t of [...turns].reverse()) {
+  // `readRecent` returns newest first. ⛔ Only the Agent's OWN answer rows: an internal sub-turn's row carries the
+  // model's tool reason as `user_message` and a handler's text the user never read (served MRR `3b6369b0`), so seeding
+  // from every row told the Agent the user said words they never said (#75 5910983526, 5911326118).
+  for (const t of [...turns].reverse().filter(isAgentAnswerRow)) {
     if (typeof t.user_message === 'string' && t.user_message.trim().length > 0) {
       items.push({ role: 'user', content: [{ type: 'input_text', text: t.user_message }] });
     }
