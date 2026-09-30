@@ -1,0 +1,170 @@
+{
+  "brief": "Should we raise our Pro plan price from \u00a349 to \u00a359 a month? We have 1,500 paying subscribers and \u00a375k MRR. Monthly churn must stay below 5%, and we want MRR above \u00a385k within a year.",
+  "candidate": {
+    "goal": {
+      "metric": "MRR",
+      "operator": ">",
+      "target_stated": true,
+      "value": 85000,
+      "unit": "\u00a3/month",
+      "horizon_months": 12,
+      "provenance": "explicit",
+      "frame": "level",
+      "baseline_known": true,
+      "baseline_value": 75000,
+      "baseline_provenance": "explicit",
+      "scope": {
+        "modelled": "all plans together",
+        "alternative": "the Pro plan only",
+        "stated_in_brief": false
+      }
+    },
+    "constraints": [
+      {
+        "metric": "Monthly churn",
+        "operator": "<",
+        "value": 5,
+        "unit": "%",
+        "provenance": "explicit",
+        "frame": "level"
+      }
+    ],
+    "options": [
+      {
+        "label": "Raise Pro price to \u00a359",
+        "provenance": "explicit",
+        "changes": [],
+        "interventions": [
+          {
+            "factor_label": "Pro plan price",
+            "value": 59,
+            "value_kind": "absolute",
+            "unit": "\u00a3 per subscriber per month",
+            "provenance": "explicit"
+          }
+        ],
+        "is_status_quo": null,
+        "brief_words": "raise our Pro plan price from \u00a349 to \u00a359 a month"
+      },
+      {
+        "label": "Keep current Pro price",
+        "provenance": "ai_proposed",
+        "changes": [],
+        "interventions": [],
+        "is_status_quo": true,
+        "brief_words": null
+      },
+      {
+        "label": "Raise Pro price to \u00a354",
+        "provenance": "ai_proposed",
+        "changes": [],
+        "interventions": [
+          {
+            "factor_label": "Pro plan price",
+            "value": 54,
+            "value_kind": "absolute",
+            "unit": "\u00a3 per subscriber per month",
+            "provenance": "ai_proposed"
+          }
+        ],
+        "is_status_quo": null,
+        "brief_words": null
+      }
+    ],
+    "factors": [
+      {
+        "label": "Pro plan price",
+        "role": "controllable",
+        "baseline_known": true,
+        "baseline_value": 49,
+        "unit": "\u00a3 per subscriber per month",
+        "provenance": "explicit",
+        "plausible_max": 200
+      },
+      {
+        "label": "Monthly churn",
+        "role": "observable",
+        "baseline_known": false,
+        "baseline_value": 3,
+        "unit": "%",
+        "provenance": "ai_proposed",
+        "plausible_max": 100
+      },
+      {
+        "label": "Pro plan paying subscribers",
+        "role": "observable",
+        "baseline_known": true,
+        "baseline_value": 1500,
+        "unit": "subscribers",
+        "provenance": "explicit",
+        "plausible_max": 10000
+      },
+      {
+        "label": "Other-plan MRR",
+        "role": "external",
+        "baseline_known": true,
+        "baseline_value": 1500,
+        "unit": "\u00a3/month",
+        "provenance": "inferred",
+        "plausible_max": 20000
+      }
+    ],
+    "risks": [],
+    "outcomes": [],
+    "links": [
+      {
+        "from": "Pro plan price",
+        "to": "MRR",
+        "direction": "positive",
+        "provenance": "ai_proposed",
+        "effect_amount": 1500,
+        "effect_per_source_change": 1,
+        "effect_provenance": "ai_proposed"
+      },
+      {
+        "from": "Pro plan price",
+        "to": "Monthly churn",
+        "direction": "positive",
+        "provenance": "ai_proposed",
+        "effect_amount": 0.15,
+        "effect_per_source_change": 1,
+        "effect_provenance": "ai_proposed"
+      },
+      {
+        "from": "Monthly churn",
+        "to": "Pro plan paying subscribers",
+        "direction": "negative",
+        "provenance": "ai_proposed",
+        "effect_amount": -15,
+        "effect_per_source_change": 1,
+        "effect_provenance": "ai_proposed"
+      },
+      {
+        "from": "Pro plan paying subscribers",
+        "to": "MRR",
+        "direction": "positive",
+        "provenance": "ai_proposed",
+        "effect_amount": 49,
+        "effect_per_source_change": 1,
+        "effect_provenance": "ai_proposed"
+      },
+      {
+        "from": "Other-plan MRR",
+        "to": "MRR",
+        "direction": "positive",
+        "provenance": "ai_proposed",
+        "effect_amount": 1,
+        "effect_per_source_change": 1,
+        "effect_provenance": "ai_proposed"
+      }
+    ],
+    "identities": [],
+    "unknowns": [
+      "Does \u201cMRR\u201d mean all plans together or the Pro plan only? The model provisionally uses all-plan MRR because the stated \u00a375k exceeds 1,500 subscribers \u00d7 \u00a349 (\u00a373.5k).",
+      "The current monthly churn rate is not stated. The provisional 3% baseline is an assumption and must be replaced before relying on the 5% constraint check.",
+      "The model provisionally assumes each \u00a31 monthly Pro price increase raises monthly churn by 0.15 percentage points, and that each additional churn point reduces the Pro subscriber base by about 15 subscribers per month. Validate this price elasticity and the 12-month retention dynamics.",
+      "Other-plan MRR is inferred as \u00a31.5k/month: \u00a375k stated MRR less \u00a373.5k/month from 1,500 Pro subscribers at \u00a349. Confirm whether this difference is other-plan revenue, discounts, taxes, or a timing difference."
+    ],
+    "decision_question": "Should we raise our Pro plan price from \u00a349 to \u00a359 a month?"
+  }
+}

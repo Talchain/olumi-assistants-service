@@ -9,7 +9,8 @@
  *
  * ⛔ THE TAG IS A HEURISTIC, NOT PROOF (AI Quality 5887015488 (a)), so this is the backstop the DL asked MG for: an option
  * is marked only when the BRIEF names neither its label nor a level it sets (`figureTheUserWroteFor`, the door #2284 and
- * #2275 trust). The status quo is never marked (declared, read from its name, stamped `is_baseline`, or setting no level).
+ * #2275 trust; inside a listed item writing two or more figures of the level's kind, the quote's own binder
+ * `multiFigureItemBinds`, AIQ 5895604637). The status quo is never marked (declared, read from its name, stamped `is_baseline`, or setting no level).
  * Anything unclear, such as two
  * options that share a name, is left unmarked, so it stays compared: a wrongly marked user option would be dropped from
  * the comparison, a wrongly unmarked Olumi one is only compared as today.
@@ -18,7 +19,9 @@
  * array), so its analysis hash cannot move. Pure.
  */
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
+import { admittedOptionKeys } from './admitted-option-identity.js';
 import { figureTheUserWroteFor } from './stated-by-user.js';
+import { listedSpans, multiFigureItemBinds } from './option-lineage.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 
 export const PROPOSED_BY_OLUMI = 'olumi' as const;
@@ -26,12 +29,21 @@ export const PROPOSED_BY_OLUMI = 'olumi' as const;
 type CandidateOption = CandidateModel['options'][number];
 
 /** The canonical labels of the drafter's options that Olumi added, by the four conditions above. */
-export function olumiAddedOptionLabels(candidate: CandidateModel, brief: string): ReadonlySet<string> {
+export function olumiAddedOptionLabels(candidate: CandidateModel, brief: string, sourceAware = false): ReadonlySet<string> {
   const factorLabels = (candidate.factors ?? []).map((f) => f.label);
   const briefKey = canonicalLabel(brief);
+  const items = sourceAware ? listedSpans(brief) : [];
   const levelTheUserWrote = (o: CandidateOption): boolean => (o.interventions ?? []).some((i) => {
     const value = Number(i.value);
-    return Number.isFinite(value) && figureTheUserWroteFor(value, i.unit, brief, {
+    if (!Number.isFinite(value)) return false;
+    // ⛔ AIQ 5895604637 (the #2295 residual): a listed item writing two or more figures of this kind speaks ONLY through
+    // the quote's own binder (`multiFigureItemBinds`): "raise Pro price to £59 with a £54 setup credit" is not the user's
+    // £54 Pro price, so an Olumi "Raise to £54" keeps its mark. Such items are blanked for the left-context reading, which
+    // still reads the rest of the brief as before.
+    const multi = items.filter((s) => multiFigureItemBinds(i, s.text) !== null);
+    if (multi.some((s) => multiFigureItemBinds(i, s.text) === true)) return true;
+    const rest = multi.reduce((b, s) => b.slice(0, s.from) + ' '.repeat(s.to - s.from) + b.slice(s.to), brief);
+    return figureTheUserWroteFor(value, i.unit, rest, {
       target: [i.factor_label],
       others: factorLabels.filter((l) => canonicalLabel(l) !== canonicalLabel(i.factor_label)),
     });
@@ -54,19 +66,23 @@ export function olumiAddedOptionLabels(candidate: CandidateModel, brief: string)
 
 /**
  * The admitted graph's nodes with `proposed_by: 'olumi'` on each option node Olumi added. A node is marked only when
- * exactly one option node carries that name, and never on a node stamped `is_baseline`; otherwise nothing is marked for it.
+ * exactly one option node carries that name, and never on a node stamped `is_baseline` or carrying a brief quote;
+ * otherwise nothing is marked for it.
  */
-export function markOlumiOptions<N extends { readonly kind?: unknown; readonly label?: unknown; readonly is_baseline?: unknown }>(
-  nodes: readonly N[], candidate: CandidateModel, brief: string,
+export function markOlumiOptions<N extends { readonly kind?: unknown; readonly label?: unknown; readonly is_baseline?: unknown; readonly source_quote?: unknown }>(
+  nodes: readonly N[], candidate: CandidateModel, brief: string, sourceAware = false,
 ): readonly N[] {
-  const olumi = olumiAddedOptionLabels(candidate, brief);
+  const olumi = olumiAddedOptionLabels(candidate, brief, sourceAware);
   if (olumi.size === 0) return nodes;
+  const keys = sourceAware ? admittedOptionKeys(nodes, candidate.options) : new Map<N, string>();
   const optionNodes = new Map<string, number>();
-  for (const n of nodes) {
+  if (!sourceAware) for (const n of nodes) {
     if (n.kind === 'option' && typeof n.label === 'string') optionNodes.set(canonicalLabel(n.label), (optionNodes.get(canonicalLabel(n.label)) ?? 0) + 1);
   }
-  const marks = (n: N): boolean => n.kind === 'option' && typeof n.label === 'string' && n.is_baseline !== true
-    && olumi.has(canonicalLabel(n.label)) && optionNodes.get(canonicalLabel(n.label)) === 1;
+  const marks = (n: N): boolean => sourceAware
+    ? n.is_baseline !== true && n.source_quote === undefined && olumi.has(keys.get(n) ?? '')
+    : n.kind === 'option' && typeof n.label === 'string' && n.is_baseline !== true
+      && olumi.has(canonicalLabel(n.label)) && optionNodes.get(canonicalLabel(n.label)) === 1;
   if (!nodes.some(marks)) return nodes;
   return nodes.map((n) => (marks(n) ? { ...n, proposed_by: PROPOSED_BY_OLUMI } : n));
 }

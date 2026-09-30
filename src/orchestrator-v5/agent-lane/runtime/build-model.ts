@@ -36,8 +36,12 @@
 import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
+import { bindM1ClaimSources } from '../m1-claim-lineage.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
+import { quoteListedOptions } from '../option-lineage.js';
 import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
+import { admittedOptionKeys } from '../admitted-option-identity.js';
+import { partitionM1Candidate, type M1Proposal } from '../m1-candidate-partition.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
@@ -63,7 +67,7 @@ import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 
 /** The construction contract: the banked schema plus typed interventions. */
-export function buildCandidateSchema(): Record<string, unknown> {
+export function buildCandidateSchema(includeOptionLineage = false): Record<string, unknown> {
   const provenance = { type: 'string', enum: ['explicit', 'inferred', 'ai_proposed'] };
   const obj = (properties: Record<string, unknown>, required: string[]) => ({
     type: 'object', additionalProperties: false, properties, required,
@@ -156,7 +160,9 @@ export function buildCandidateSchema(): Record<string, unknown> {
       // requires every key, so "optional" is `null`.
       is_status_quo: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
         'true ONLY for the one option that keeps things as they are now (the current state or status quo), whatever it is called. null for every other option. Never true on more than one option.' },
-    }, ['label', 'provenance', 'changes', 'interventions', 'is_status_quo']) },
+      ...(includeOptionLineage ? { brief_words: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+        'The words in the brief that name this option, copied exactly as the brief writes them (from a list of options, the whole item). null when the brief does not name it: the status quo you added, or an option you suggest.' } } : {}),
+    }, ['label', 'provenance', 'changes', 'interventions', 'is_status_quo', ...(includeOptionLineage ? ['brief_words'] : [])]) },
     factors: { type: 'array', items: obj({
       label: { type: 'string' }, role: { type: 'string', enum: ['controllable', 'observable', 'external'] },
       // ⭐ A CHANGE FROM TODAY is 0 today BY DEFINITION, not by estimate (served AI Quality B3, CEE 1f8327c: "cut our list
@@ -417,8 +423,9 @@ export function retrySchemaPinningGoal(
    * before the key) pins to "no question" (null).
    */
   decisionQuestion?: string | null,
+  includeOptionLineage = false,
 ): Record<string, unknown> {
-  const schema = buildCandidateSchema();
+  const schema = buildCandidateSchema(includeOptionLineage);
   const properties = schema['properties'] as Record<string, Record<string, unknown>>;
   properties['decision_question'] = typeof decisionQuestion === 'string'
     ? { type: 'string', enum: [decisionQuestion] }
@@ -598,7 +605,7 @@ export function carryFindingsAcrossRetry<P extends ReturnType<typeof prepareProv
   };
 }
 
-export function prepareProvisionalCandidate(drafted: CandidateModel): {
+export function prepareProvisionalCandidate(drafted: CandidateModel, preserveAbsoluteAuthorship = false): {
   candidate: CandidateModel;
   /** Olumi option levels on a limited node the same option's levers move, dropped (`option-level-over-own-levers.ts`). */
   levels_over_own_levers: OptionLevelOverOwnLevers[];
@@ -625,7 +632,7 @@ export function prepareProvisionalCandidate(drafted: CandidateModel): {
       if (kind === undefined) { interventions.push(intervention); continue; } // Stored before the field: as on staging.
       if (kind === 'absolute') {
         const unknownBaseline = factors.length === 1 && factors[0]!.baseline_known !== true;
-        if (intervention.provenance === 'explicit' && unknownBaseline) {
+        if (intervention.provenance === 'explicit' && unknownBaseline && !preserveAbsoluteAuthorship) {
           provenance_demoted.push({ option: option.label, factor: intervention.factor_label, value: intervention.value });
           interventions.push({ ...intervention, provenance: 'ai_proposed' });
         } else {
@@ -1193,7 +1200,9 @@ export async function buildModelFromBrief(
   dispatch: InternalDispatch,
   callStructured: CallStructuredModel,
   observeConstruction?: (t: ConstructionTrace) => void,
+  constructionPolicy: 'current' | 'm1' = 'current',
 ): Promise<ToolResult> {
+  const faithfulM1 = constructionPolicy === 'm1';
   const budget = budgetFor('gpt-5.6-terra', 'whole');
   let candidate: CandidateModel;
   // ⛔ A CUT-OFF ANSWER IS SAID AS ONE, NEVER AS THE PARSE ERROR IT CAUSES (served 770a477: 2/14 first briefs stopped
@@ -1206,7 +1215,7 @@ export async function buildModelFromBrief(
       input: brief,
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
-      schema: buildCandidateSchema(),
+      schema: buildCandidateSchema(faithfulM1),
     });
     if (out.status === 'incomplete') cutOff = out.incomplete_reason ?? 'unspecified';
     if (out.text.length === 0) {
@@ -1226,6 +1235,16 @@ export async function buildModelFromBrief(
     return { ok: false, mutated: false, refusal: 'construction_failed', detail: String(err).slice(0, 200) };
   }
 
+  // M1 has no source-bound proof that a part and the goal share scope. Numeric
+  // reconciliation alone cannot supply that meaning, so M1 leaves inferred
+  // definitions outside admission. The default keeps current-best's rule.
+  const firstProof = { model: candidate, folded: null, dropped: [] as DroppedGoalProduct[] };
+  const firstPartition = faithfulM1 ? partitionM1Candidate(firstProof.model, brief) : null;
+  let m1Proposals: readonly M1Proposal[] = firstPartition?.proposals ?? [];
+  let m1Placeholders = firstPartition?.placeholders ?? [];
+  let m1OptionQuotes = firstPartition?.option_quotes ?? new Map<string, string>();
+  candidate = firstPartition?.candidate ?? candidate;
+
   // The drafter's own words, kept for a repair retry: re-preparing a PREPARED
   // candidate finds nothing (review 5822933692, B3), so the retry sees the original.
   // ⛔ AN OPTION AND A QUANTITY NEVER SHARE A NAME (`keepOptionsAndQuantitiesApart`, Canvas #72 5884644099): admission
@@ -1236,7 +1255,7 @@ export async function buildModelFromBrief(
   let keptApart = apart.renamed;
   let notToldApart = apart.ambiguous;
   const firstCandidate = candidate;
-  let preparation = prepareProvisionalCandidate(candidate);
+  let preparation = prepareProvisionalCandidate(candidate, faithfulM1);
   candidate = preparation.candidate;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
@@ -1244,6 +1263,7 @@ export async function buildModelFromBrief(
   // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
   // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).
   const mintOrFold = (c0: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null; dropped: DroppedGoalProduct[]; residual: GapResidual | null } => {
+    if (faithfulM1) return { model: c0, folded: null, dropped: [], residual: null };
     // FORK (iii) + AIQ 5892219245: a drafter-declared goal product is the drafter's reading, so it is demoted to Olumi's
     // first and waits for the user's Yes like the mint's, or dropped (and said) when its units don't compose.
     const { model: c1, dropped } = unconfirmGoalProducts(c0, brief);
@@ -1255,8 +1275,8 @@ export async function buildModelFromBrief(
     return minted !== c ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(c, brief), dropped, residual };
   };
   const firstIdentity = mintOrFold(candidate);
-  let foldedCarrier = firstIdentity.folded;
-  let droppedProducts = firstIdentity.dropped;
+  let foldedCarrier = firstIdentity.folded ?? firstProof.folded;
+  let droppedProducts = [...firstProof.dropped, ...firstIdentity.dropped];
   let gapResidual = firstIdentity.residual;
   let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief));
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
@@ -1293,7 +1313,8 @@ export async function buildModelFromBrief(
   // A missing risk mechanism, and an option × factor (or acted-on baseline) with no
   // level (c22, `findCoverageGaps`), ask the retry to repair. An addition with no total
   // DEGRADES instead (see `prepareProvisionalCandidate`): the figure is the user's to give.
-  const repairIssues = (p: typeof preparation): string[] => [...p.mechanism_issues, ...sayCoverageGaps(p)];
+  // Missing user inputs need clarification, not a second request for the estimates M1 just excluded.
+  const repairIssues = (p: typeof preparation): string[] => [...p.mechanism_issues, ...(faithfulM1 ? [] : sayCoverageGaps(p))];
   // ⚠ Counted WITHOUT the first pass's own degraded additions (#1841 B1): a retry that
   // echoes the prepared candidate carries each such pair in `changes`, and that figure
   // is the user's to give — it is never a new gap, so it can never refuse the retry.
@@ -1366,15 +1387,18 @@ export async function buildModelFromBrief(
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
-        schema: retrySchemaPinningGoal(candidate.goal, candidate.decision_question),
+        schema: retrySchemaPinningGoal(candidate.goal, candidate.decision_question, faithfulM1),
       });
       if (retry.text.length > 0) {
-        const retryApart = keepOptionsAndQuantitiesApart(JSON.parse(retry.text) as CandidateModel);
+        const retryParsed = JSON.parse(retry.text) as CandidateModel;
+        const retryProof = faithfulM1 ? mintOrFold(retryParsed) : { model: retryParsed, folded: null, dropped: [] };
+        const retryPartition = faithfulM1 ? partitionM1Candidate(retryProof.model, brief) : null;
+        const retryApart = keepOptionsAndQuantitiesApart(retryPartition?.candidate ?? retryParsed);
         const retryRaw = keepLimitedQuantityAuthor(
           neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryApart.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
         );
-        const retryPrepared = prepareProvisionalCandidate(retryRaw);
+        const retryPrepared = prepareProvisionalCandidate(retryRaw, faithfulM1);
         const retryCandidate = retryPrepared.candidate;
         const retryIdentity = mintOrFold(retryCandidate);
         const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief));
@@ -1427,9 +1451,14 @@ export async function buildModelFromBrief(
             .map((n) => ({ kind: String(n.kind), label: String((n as { description?: unknown }).description ?? n.label) }));
           candidate = retryCandidate;
           admitted = retryAdmitted;
-          foldedCarrier = retryIdentity.folded;
-          droppedProducts = retryIdentity.dropped;
+          foldedCarrier = retryIdentity.folded ?? retryProof.folded;
+          droppedProducts = [...retryProof.dropped, ...retryIdentity.dropped];
           gapResidual = retryIdentity.residual;
+          if (retryPartition !== null) {
+            m1Proposals = [...new Map([...m1Proposals, ...retryPartition.proposals].map((p) => [p.id, p])).values()];
+            m1Placeholders = retryPartition.placeholders;
+            m1OptionQuotes = retryPartition.option_quotes;
+          }
           keptApart = retryApart.renamed;
           notToldApart = retryApart.ambiguous;
           size = retrySize;
@@ -1618,7 +1647,12 @@ export async function buildModelFromBrief(
   const withheldOptions = [...(admitted.options_withheld ?? []), ...carriedWithheld];
   openQuestions.unshift(
     ...withheldOptions.map((w) => w.sentence),
-    ...(admitted.indistinct_stated_options ?? []).map((g) => g.question),
+    ...(admitted.indistinct_stated_options ?? []).flatMap((g) => {
+      const pending = preparation.additions_without_total.filter((a) => a.reason === 'baseline_unknown' && g.options.some((o) => canonicalLabel(o) === canonicalLabel(a.option)));
+      if (!faithfulM1 || !g.options.every((o) => pending.some((a) => canonicalLabel(a.option) === canonicalLabel(o)))) return [g.question];
+      // The user already told these actions apart. Ask for the missing starting levels, not their difference again.
+      return pending.map((a) => `What is "${a.factor}" today? Your addition of ${a.value}${a.unit ? ` ${a.unit}` : ''} for "${a.option}" is kept pending until its starting level is known.`);
+    }),
   );
   /**
    * ⛔ A DEADLINE NO RESULT ANSWERS IS ASKED WHERE THE USER ALWAYS SEES IT. Unattested, the goal holds no deadline and
@@ -1650,24 +1684,36 @@ export async function buildModelFromBrief(
   // analysis; asked here, in the channel the Agent already reads, never only in prose. Ahead of the
   // deadline question (merge of staging #1939): both lead the parked questions, so neither is cut by
   // the five-question cap.
-  openQuestions.unshift(...admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason));
+  const scope = candidate.goal.scope;
+  openQuestions.unshift(...(faithfulM1 && scope?.stated_in_brief === false
+    ? [`Does your "${candidate.goal.metric}" goal cover ${scope.modelled} or ${scope.alternative}?`]
+    : admitted.loss.filter((l) => /\.goal_scope$/.test(l.field_path)).map((l) => l.reason)));
 
   // ⭐ A USER-STATED SIZE FITS THE FRAMES BY WIDENING ITS TARGET, every natural size held (AIQ 5895140735; DL 5897504696):
   // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
   // effect and withheld the chance. Refused (and left to the Run's honest clamp withhold) when a level is set on the
   // target, a spread would move, a new link would be cut, or the target is a bounded scale.
+  const markedNodes = markOlumiOptions(faithfulM1 ? quoteListedOptions(goalNodes, candidate, brief) : goalNodes, candidate, brief, faithfulM1);
+  const optionKeys = faithfulM1 ? admittedOptionKeys(markedNodes, candidate.options) : new Map();
   const graph = refitFramesForStatedEffects({
     // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
     // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
-    nodes: markOlumiOptions(goalNodes, candidate, brief),
+    // A source-bound option carries the brief's exact words. Suggestions remain proposals in M1.
+    nodes: faithfulM1 ? markedNodes.map((n) => {
+      const key = optionKeys.get(n);
+      const quote = key === undefined ? undefined : m1OptionQuotes.get(key);
+      return quote === undefined ? n : { ...n, source_quote: quote };
+    }) : markedNodes,
     edges: admitted.edges,
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }
       : {}),
   } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
 
+  const claimLineage = faithfulM1 ? bindM1ClaimSources(graph, brief) : null;
+  const graphToRegister = claimLineage?.graph ?? graph;
   // Never persist a graph the product cannot then read.
-  const parsed = GraphV3.safeParse(graph);
+  const parsed = GraphV3.safeParse(graphToRegister);
   if (!parsed.success) {
     return {
       ok: false, mutated: false, refusal: 'admitted_graph_invalid',
@@ -1729,7 +1775,7 @@ export async function buildModelFromBrief(
    * `OPERATION_ID_REUSED` loser is: the versions read finds this construction's own version, or it is not ours.
    */
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
-    graph,
+    graph: graphToRegister,
     brief_text: brief,
     operation_id: constructionOperationId(scenarioId, brief),
     expected_graph_identity_hash: null,
@@ -1786,6 +1832,7 @@ export async function buildModelFromBrief(
     within_compact_limits: size.within,
     size_retried: sizeRetried,
     construction_retried: constructionRetried,
+    ...(faithfulM1 ? { construction_policy: 'm1', constructor_proposals: m1Proposals, constructor_placeholders: m1Placeholders, constructor_source_bindings: claimLineage?.bindings ?? [], constructor_unbound_claims: claimLineage?.unbound ?? [], deferred_suggestions: m1Proposals.length } : {}),
     ...(size.user_material_exceeds_limit
       ? { admitted_over_limit_because: 'your own stated options and facts exceed the compact limit' }
       : {}),
@@ -1834,7 +1881,9 @@ export async function buildModelFromBrief(
       // d2362e9d, item e). Its question is asked first in `open_questions`, above.
       ...admitted.loss
         .filter((l) => /\.goal_scope$/.test(l.field_path))
-        .map((l) => l.after)
+        .map((l) => faithfulM1 && scope?.stated_in_brief === false
+          ? `The scope of your "${candidate.goal.metric}" goal is unresolved and needs your confirmation.`
+          : l.after)
         .filter((a): a is string => typeof a === 'string'),
       // A goal read as a two-part product: an extra direct parent re-pointed or taken out (`product-goal-extra-parent.ts`).
       ...admitted.loss.filter((l) => /\.rate_operand\./.test(l.field_path)).map((l) => l.reason),
