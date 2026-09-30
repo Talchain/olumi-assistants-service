@@ -68,12 +68,14 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
   const links: Link[] = [];
   for (const l of model.links) {
     if (key(l.to) !== goal || operands.has(key(l.from))) { links.push(l); continue; }
+    // A link the user stated (or sized) is theirs: never dropped or re-pointed here (AIQ 5902792262).
+    if (l.provenance === 'explicit' || l.effect_provenance === 'explicit') { links.push(l); continue; }
     const through = reaches(l.from, l);
     if (through !== undefined) {
       found.push({ kind: 'double_route', from: l.from, goal: model.goal.metric, through });
       continue;
     }
-    const sized = l.effect_provenance != null && l.effect_provenance !== 'explicit' && finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0;
+    const sized = l.effect_provenance != null && finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0;
     if (!sized || rate === undefined || volume === undefined || isMoney(volume.unit) || !rate.baseline_known || !finite(rate.baseline_value) || rate.baseline_value <= 0) {
       links.push(l);
       continue;

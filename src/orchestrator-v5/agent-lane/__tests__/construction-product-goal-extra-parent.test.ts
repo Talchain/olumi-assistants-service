@@ -106,6 +106,21 @@ describe('a goal read as price × subscribers gets no third direct parent', () =
     expect(((out.not_represented ?? []) as string[]).some((l) => l.includes('count it twice'))).toBe(true);
   });
 
+  it('ROW (AIQ 5902792262): the USER stated churn → MRR and only Olumi routes churn through subscribers — the user\'s direct link is kept, nothing said', async () => {
+    const { graph, out } = await build(draft((c) => {
+      c.links[3].effect_provenance = 'explicit';
+      c.links.push(link('Monthly churn', 'Paying subscribers', 'negative', -15, 1, 'ai_proposed'));
+    }));
+    expect(edge(graph, 'Monthly churn', 'GOAL')).toBeDefined();
+    expect(((out.not_represented ?? []) as string[]).some((l) => l.includes('count it twice'))).toBe(false);
+  });
+
+  it('ROW (AIQ 5902792262): a direct link the user named (link provenance explicit, Olumi size) is neither dropped nor re-pointed', async () => {
+    const { graph } = await build(draft((c) => { (c.links[3] as { provenance?: string }).provenance = 'explicit'; }));
+    expect(edge(graph, 'Monthly churn', 'GOAL')).toBeDefined();
+    expect(edge(graph, 'Monthly churn', 'Paying subscribers')).toBeUndefined();
+  });
+
   it('CONTROL (the user stated the churn → MRR size): nothing is re-pointed', async () => {
     const { graph } = await build(draft((c) => { c.links[3].effect_provenance = 'explicit'; }));
     expect(edge(graph, 'Monthly churn', 'Paying subscribers')).toBeUndefined();
