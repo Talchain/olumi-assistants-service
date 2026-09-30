@@ -256,15 +256,18 @@ describe('CONTROLS — refused with a plain reason, nothing proposed, nothing wr
     expect(r.refusal).toBe('no_target');
   });
 
-  it('R1 S4-core: a goal stated as a CHANGE from today is refused with the TRUE reason — it has a target — never "no stated target"', async () => {
+  it('R1 S4-core, the change slice (DL #75 5902318219): a goal stated as a CHANGE from today takes the user\'s level — prepared with the change as its target, never "no stated target"', async () => {
     const g = clone(paulGraph);
     const goal = goalOf(g);
     goal.goal_threshold_frame = 'change_rel';
     goal.goal_threshold_raw = -0.15;
-    const r = await refusedAndInert(T2, g);
-    expect(r.refusal).toBe('goal_is_a_change');
-    expect(String(r.detail)).toContain('a goal to change by a stated amount from today');
-    expect(String(r.detail)).not.toMatch(/no stated target/);
+    const s = setup(g);
+    const r = await s.call(TOOL, T2) as ToolResult & { public_label?: string };
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.refusal).toBeUndefined();
+    expect(String(r.public_label)).toContain('down 15% from today');
+    expect(JSON.stringify(r)).not.toMatch(/no stated target/);
+    expect(s.registers, 'held for approval: nothing written').toEqual([]);
   });
 
   it('a goal with no stated target on the level frame has nothing to measure against', async () => {
