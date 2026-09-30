@@ -5585,12 +5585,19 @@ export function createAgentCapabilities(
           const levelWords = Object.entries(expectedInterventions).map(([factorId, raw]) => {
             const factor = g.nodes.find((n) => n.id === factorId);
             const level = raw !== null && typeof raw === 'object' ? raw as Record<string, unknown> : { value: raw };
-            const figure = typeof level.raw_value === 'number' ? level.raw_value : level.value;
-            const unit = typeof level.unit === 'string' && level.unit.trim() !== '' ? ` ${level.unit.trim()}` : '';
+            const frame = levelFrameOf(factor);
+            const storedRaw = typeof level.raw_value === 'number' && Number.isFinite(level.raw_value) ? level.raw_value : null;
+            const normalized = typeof level.value === 'number' && Number.isFinite(level.value) ? level.value : null;
+            const figure = storedRaw ?? (normalized !== null && frame !== null ? Number((normalized * frame).toPrecision(12)) : normalized);
+            const unitValue = typeof level.unit === 'string' && level.unit.trim() !== ''
+              ? level.unit.trim() : factor?.observed_state?.unit;
+            const unit = (storedRaw !== null || frame !== null) && typeof unitValue === 'string' && unitValue !== ''
+              ? ` ${unitValue}` : '';
+            const scaleNote = storedRaw === null && frame === null && normalized !== null ? ' (normalized scale; no user-facing unit verified)' : '';
             const source = level.source === 'cee_hypothesis' ? "Olumi's suggested estimate"
               : level.source === 'user_specified' ? 'set by you'
                 : level.source === 'brief_extraction' ? 'from your original brief' : 'source not recorded';
-            return `${String(factor?.label ?? factorId)}: ${typeof figure === 'number' ? `${figure}${unit}` : 'no level set'} (${source})`;
+            return `${String(factor?.label ?? factorId)}: ${typeof figure === 'number' ? `${figure}${unit}${scaleNote}` : 'no level set'} (${source})`;
           });
           const reading = `Add Olumi's suggestion "${suggested.label}" to your comparison with its existing levels: ${levelWords.length > 0 ? levelWords.join('; ') : 'none set'}.`;
           const approvalMessage = `Yes, add Olumi's suggestion "${suggested.label}" to my comparison with the levels shown.`;

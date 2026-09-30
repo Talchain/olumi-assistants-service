@@ -165,9 +165,10 @@ export function approvalChipsFor(
   const adoption = stored?.operations.length === 1 && stored.operations[0]?.op === 'adopt_olumi_option'
     ? stored.operations[0].value as { approval_message?: unknown } | undefined : undefined;
   if (adoption !== undefined && typeof adoption.approval_message === 'string' && adoption.approval_message !== '') {
-    // DGAI currently renders `label` but drops `detail`. Keep the exact stored
-    // level/source reading on the visible button until the UI has a detail row.
-    return [{ id: approvalChipIdFor(proposalId), label: stored!.public_label,
+    // DGAI discloses `detail` above consent chips with this exact id prefix.
+    // Keep the short button label separate so decimal levels do not trigger
+    // the egress rule for unvalidated figures in chip labels.
+    return [{ id: approvalChipIdFor(proposalId), label: 'Add this suggestion to my comparison',
       message: adoption.approval_message, detail: stored!.public_label }, AMEND_CHIP];
   }
   const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
