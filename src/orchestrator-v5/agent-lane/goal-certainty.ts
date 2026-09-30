@@ -371,6 +371,12 @@ export function placeholderGoalPaths(
   if (goal === undefined || typeof goal.id !== 'string') return [];
   const evaluated = new Set((identityEvaluations ?? []).filter(isRec)
     .filter((e) => e.evaluated === true && typeof e.node_id === 'string').map((e) => e.node_id as string));
+  // ⛔ THE CARD IS THE ONE ROUTE (AIQ 5902606752): a goal that declares an INFERRED product this run did not evaluate is
+  // Olumi's unconfirmed reading of how the goal is made. PLoT never forwards it (variant (d), `translator-v3.ts`) and
+  // withholds every goal figure itself (#416, which (S) defers to), and C46 names the leader's cause. (S) stands down, so
+  // the one reason said is the product's, and the confirm card is the one way forward.
+  const goalIdentity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
+  if (goalIdentity !== undefined && goalIdentity.stated_in_brief === false && goalIdentity.operation === 'product' && !evaluated.has(goal.id)) return [];
   const placeholder = (e: Rec): boolean => {
     const p = isRec(e.provenance) ? e.provenance : undefined;
     if (p?.magnitude !== PLACEHOLDER_MAGNITUDE || p.source === 'user_specified') return false;

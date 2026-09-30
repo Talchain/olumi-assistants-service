@@ -217,6 +217,15 @@ describe('the one exact link: an operand INTO an identity this run evaluated', (
   it('evaluated → exact: nothing withheld', () => {
     expect(placeholderGoalPaths(g0(), [SWITCH, PHASE], [{ node_id: 'monthly_cloud_spend', evaluated: true }])).toEqual([]);
   });
+  it('CARD ROUTE (AIQ 5902606752): an INFERRED product on the goal this run did not evaluate → (S) stands down (#416 / C46 speak)', () => {
+    const g = g0();
+    (g.nodes as Json[]).find((n) => n.kind === 'goal')!.nonlinear_identity = { operation: 'product', factor_ids: ['monthly_gcp_cost_saving', 'migration_downtime'], stated_in_brief: false };
+    expect(placeholderGoalPaths(g, [SWITCH, PHASE], [])).toEqual([]);
+    // Once the user's Yes makes it theirs and the run evaluates it, operand links are exact and the rest is read as usual.
+    (g.nodes as Json[]).find((n) => n.kind === 'goal')!.nonlinear_identity.stated_in_brief = true;
+    expect(placeholderGoalPaths(g, [SWITCH, PHASE], []).map((p) => p.option_id).sort()).toEqual([PHASE, SWITCH]);
+  });
+
   it('declared but NOT evaluated → still a placeholder: withheld', () => {
     expect(placeholderGoalPaths(g0(), [SWITCH, PHASE], [{ node_id: 'monthly_cloud_spend', evaluated: false }]).map((p) => p.option_id).sort()).toEqual([PHASE, SWITCH]);
   });
