@@ -46,6 +46,14 @@ describe('W3: a saved current Run that may name its leader gives each option its
       .toEqual(expect.arrayContaining([['keep_49_price', 0, true], ['raise_to_54', 0, true]]));
   });
 
+  it('an unchecked 0/1 sidecar leaves the interior chance standing (PR Review 5903031170)', async () => {
+    const read = copy();
+    delete read.analysis_goal_certainty; // the stored 0/1 decisions are missing: the sidecar reads unchecked
+    const state = await canonicalState(read);
+    expect(state.analysis.goal_certainty?.unchecked).toBe(true);
+    expect(chanceOf(state, 'raise_to_59')).toBe(0.2469);
+  });
+
   it('a withheld leader keeps the standing drop of per-option chances', async () => {
     const read = copy();
     read.analysis_state.leader_claim = { permitted: false, withheld_reason: 'constraint_verdict_withheld' };
@@ -99,5 +107,9 @@ describe('W3: the route says an interior chance is a recorded model chance (AIQ 
     expect(lines[0]).not.toMatch(/\\u00a3\d|£\d|\b\d{2,3}(,\d{3})+\b|\b\d+% of model runs/);
     expect(lines[0]).toContain('For an exact 0 or 1, use only its projected goal_certainty');
     expect(lines[0]).not.toContain('For goal certainty, use only its projected goal_certainty');
+    // PR Review 5903031170: "unchecked" is about exact 0/1 only; stale blocks every chance.
+    expect(lines[0]).toContain('If goal_certainty is unchecked, say only that an exact 0 or 1 cannot be confirmed');
+    expect(lines[0]).toContain('If the Run is stale, say no chance can be confirmed');
+    expect(lines[0]).not.toContain('If goal_certainty is unchecked or the Run is stale, say the chance cannot be confirmed');
   });
 });
