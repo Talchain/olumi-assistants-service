@@ -62,6 +62,10 @@ export function quantityProblem(quantity: SourceQuantity, context: string): stri
   const at = quote.indexOf(quantity.number.literal);
   const before = quote.slice(0, at).toLowerCase();
   if (quantity.role === 'current') {
+    // "target for current MRR" names the metric being targeted; it does not
+    // state today's MRR. The later word "current" must not outrank "target".
+    if (/\b(?:target|goal|aim|limit|ceiling|budget)\s+for\s+(?:(?:our|the|my)\s+)?current\b/.test(before))
+      return 'current_value_is_target_or_limit';
     const statedCurrent = [...before.matchAll(/\b(current(?:ly)?|today|now|have|has|from)\b/g)].at(-1)?.index ?? -1;
     const prospective = [...before.matchAll(/\b(target|want|goal|aim|must|under|below|above|limit|ceiling|budget|to)\b/g)].at(-1)?.index ?? -1;
     if (prospective > statedCurrent) return 'current_value_is_target_or_limit';

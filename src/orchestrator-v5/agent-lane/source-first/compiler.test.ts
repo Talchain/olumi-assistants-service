@@ -98,6 +98,36 @@ describe('source-first compiler', () => {
     expect(result.unresolved[0].code).toBe('current_value_is_target_or_limit');
   });
 
+  it('does not promote a target for the current metric into its goal baseline', () => {
+    const targetForMetric = 'The target for current MRR is £75k per month.';
+    const target = 'Our target MRR is above £85k per month.';
+    const meaning = empty();
+    meaning.entities = [{ ref: 'mrr', kind: 'goal', label: 'MRR', source: source(targetForMetric) }];
+    meaning.quantities = [
+      quantity('wrong_current', 'mrr', 'current', '£75k', '75000', targetForMetric, money()),
+      { ...quantity('target', 'mrr', 'target', '£85k', '85000', target, money()), comparator: '>' },
+    ];
+    const result = compileSourceMeaning(`${targetForMetric} ${target}`, meaning);
+    expect(result.graph.nodes[0].goal_threshold_raw).toBe(85000);
+    expect(result.graph.nodes[0].observed_state).toBeUndefined();
+    expect(result.source_bindings.wrong_current).toBeUndefined();
+    expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'wrong_current', code: 'current_value_is_target_or_limit' }));
+  });
+
+  it('keeps a genuine current level when the same passage mentions the target first', () => {
+    const brief = 'Our target is above £85k per month, and current MRR is £75k per month.';
+    const meaning = empty();
+    meaning.entities = [{ ref: 'mrr', kind: 'goal', label: 'MRR', source: source(brief) }];
+    meaning.quantities = [
+      quantity('current', 'mrr', 'current', '£75k', '75000', brief, money()),
+      { ...quantity('target', 'mrr', 'target', '£85k', '85000', brief, money()), comparator: '>' },
+    ];
+    const result = compileSourceMeaning(brief, meaning);
+    const goal = result.graph.nodes[0];
+    expect(goal.observed_state).toMatchObject({ raw_value: 75000, baseline: 75000 / goal.goal_threshold_cap!, source_quote: brief });
+    expect(result.unresolved).toEqual([]);
+  });
+
   it('does not mint a goal-fit baseline from a target-only brief', () => {
     const brief = 'Our target MRR is above £85k a month.';
     const meaning = empty();
