@@ -19,7 +19,7 @@ import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import { GOAL_FIGURES_PRODUCT_NOT_READ } from '../../../../orchestrator/context/option-result-source.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import { goalChanceWithheldForAgent, PRODUCT_NOT_READ_NOTE } from '../../../agent-lane/goal-chance-withheld.js';
-import { unreadGoalProduct } from '../../../agent-lane/unread-goal-product.js';
+import { unreadGoalProduct, unreadGoalProductWarning } from '../../../agent-lane/unread-goal-product.js';
 import { buildAnalysisResultBlock } from '../../../compose.js';
 import { composeAnalysisStateV1, readRawRobustnessFromResponseBody } from '../../../compose/analysis-state-v1.js';
 import { mayPresentLeaderClaimForFact } from '../../../compose/unrequested-analysis-confinement.js';
@@ -178,6 +178,15 @@ describe('CONTROLS — figures kept where the user\'s figures make no unread pro
     const g = clone(M0.graph);
     (g.nodes as Json[]).find((n) => n.id === 'mrr')!.observed_state.raw_value = 81000;
     expect(unreadGoalProduct(g)).toBeNull();
+  });
+
+  it('AIQ 5904501948: a goal level the user only RATIFIED (user_confirmed) is never called "your"', () => {
+    const g = clone(M0.graph);
+    (g.nodes as Json[]).find((n) => n.id === 'mrr')!.observed_state.source = 'user_confirmed';
+    const p = unreadGoalProduct(g)!;
+    const w = unreadGoalProductWarning(p, M0_OPTIONS, GOAL_FIGURES_PRODUCT_NOT_READ);
+    expect(w.message).toContain('close to the goal’s current £75,000');
+    expect(w.message).not.toContain('your');
   });
 
   it('CONTROL (m0, the price a YEARLY rate): the levels reconcile but the units do not compose, so no withhold', () => {

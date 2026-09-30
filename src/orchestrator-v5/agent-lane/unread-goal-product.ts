@@ -29,7 +29,8 @@ const userOwns = (source: unknown): boolean =>
 
 /** The reconciling product this run did not read: the goal and its two parts, each with the user's level and unit. */
 export interface UnreadGoalProduct {
-  readonly goal: { readonly id: string; readonly label: string; readonly level: number; readonly unit: string };
+  /** `typed`: the user WROTE the goal's level (brief, chat); a level they only ratified is Olumi's (#2333 class). */
+  readonly goal: { readonly id: string; readonly label: string; readonly level: number; readonly unit: string; readonly typed: boolean };
   readonly rate: { readonly id: string; readonly label: string; readonly level: number; readonly unit: string };
   readonly count: { readonly id: string; readonly label: string; readonly level: number; readonly unit: string };
 }
@@ -98,7 +99,8 @@ export function unreadGoalProduct(graph: unknown): UnreadGoalProduct | null {
       const c = unitsCompose(goalUnit, goalLabel, a, b);
       if (c.kind === 'no' || read(a.id, b.id)) continue;
       const [rate, count] = c.rate === a.label ? [a, b] : [b, a];
-      const product = { goal: { id: goal.id, label: goalLabel, level: o, unit: goalUnit }, rate, count };
+      const typed = os?.source === 'brief_extraction' || os?.source === 'user_override' || os?.source === 'user_stated';
+      const product = { goal: { id: goal.id, label: goalLabel, level: o, unit: goalUnit, typed }, rate, count };
       if (c.kind === 'proof') return product;
       found ??= product;
     }
@@ -119,7 +121,7 @@ export function unreadGoalProductWarning(
   const same = Math.abs(product - p.goal.level) < 1e-9 * Math.abs(p.goal.level);
   const sum = `${sayFigure(p.rate.level, p.rate.unit)} × ${sayFigure(p.count.level, p.count.unit)} = ${sayFigure(product, p.goal.unit)}`;
   const message = `Not shown. Olumi has not read ‘${p.goal.label}’ as ‘${p.rate.label}’ × ‘${p.count.label}’ (${sum}, `
-    + `${same ? 'your' : 'close to your'} ${sayFigure(p.goal.level, p.goal.unit)}), so this run can’t say how likely any option is `
+    + `${same ? '' : 'close to '}${p.goal.typed ? 'your' : 'the goal’s current'} ${sayFigure(p.goal.level, p.goal.unit)}), so this run can’t say how likely any option is `
     + 'to reach the goal, what it would reach, or which option does best.';
   return {
     code,
