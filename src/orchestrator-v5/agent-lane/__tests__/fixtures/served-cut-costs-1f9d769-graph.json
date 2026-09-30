@@ -1,0 +1,478 @@
+{
+  "_source": "DL 27fbe09b cut-costs journey r0 (scenario 52ebd5af) on served CEE 1f9d769: /graph read after the brief (02-read-after-brief.json), graph only.",
+  "graph": {
+    "edges": [
+      {
+        "to": "stay_on_aws",
+        "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "switch_to_gcp",
+        "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "phased_gcp_migration",
+        "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "gcp_workload_share",
+        "from": "switch_to_gcp",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "migration_duration",
+        "from": "switch_to_gcp",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "parallel_run_overlap",
+        "from": "switch_to_gcp",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "gcp_workload_share",
+        "from": "phased_gcp_migration",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "migration_duration",
+        "from": "phased_gcp_migration",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "parallel_run_overlap",
+        "from": "phased_gcp_migration",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "gcp_workload_share",
+        "from": "stay_on_aws",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "migration_duration",
+        "from": "stay_on_aws",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "parallel_run_overlap",
+        "from": "stay_on_aws",
+        "origin": "repair",
+        "strength": {
+          "std": 0.01,
+          "mean": 1
+        },
+        "provenance": {
+          "source": "cee_hypothesis",
+          "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 1
+      },
+      {
+        "to": "costs",
+        "from": "gcp_workload_share",
+        "strength": {
+          "std": 0.096,
+          "mean": -0.192
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_estimate",
+          "natural_effect": {
+            "amount": -108,
+            "amount_unit": "£/month",
+            "strength_mean": -0.192,
+            "per_source_change": 1,
+            "strength_mean_frame": "edge_strength",
+            "per_source_change_unit": "%"
+          }
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "migration_downtime",
+        "from": "migration_duration",
+        "strength": {
+          "std": 0.125,
+          "mean": 0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "migration_downtime",
+        "from": "parallel_run_overlap",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "costs",
+        "from": "parallel_run_overlap",
+        "strength": {
+          "std": 0.044444444444444446,
+          "mean": 0.08888888888888889
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_estimate",
+          "natural_effect": {
+            "amount": 50,
+            "amount_unit": "£/month",
+            "strength_mean": 0.08888888888888889,
+            "per_source_change": 1,
+            "strength_mean_frame": "edge_strength",
+            "per_source_change_unit": "%"
+          }
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "migration_downtime",
+        "from": "migration_execution_quality",
+        "strength": {
+          "std": 0.125,
+          "mean": -0.5
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis"
+        },
+        "effect_direction": "negative",
+        "exists_probability": 0.8
+      },
+      {
+        "to": "costs",
+        "from": "migration_downtime",
+        "strength": {
+          "std": 0.1,
+          "mean": 0.2
+        },
+        "defaulted": true,
+        "provenance": {
+          "source": "cee_hypothesis",
+          "magnitude": "olumi_placeholder"
+        },
+        "effect_direction": "positive",
+        "exists_probability": 0.8
+      }
+    ],
+    "nodes": [
+      {
+        "id": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+        "kind": "decision",
+        "label": "Should we switch our cloud…",
+        "provenance": "from_brief",
+        "description": "Should we switch our cloud provider from AWS to GCP?"
+      },
+      {
+        "id": "costs",
+        "kind": "goal",
+        "label": "costs",
+        "provenance": "from_brief",
+        "goal_direction": "<=",
+        "goal_threshold": -0.2,
+        "observed_state": {
+          "cap": 56250,
+          "unit": "£/month",
+          "value": 0.8,
+          "source": "cee_inference",
+          "baseline": 0.8,
+          "raw_value": 45000
+        },
+        "threshold_source": "brief_extraction",
+        "goal_level_reading": {
+          "lead": "Olumi reads your ‘£45k’ (‘Monthly spend is £45k’) as today's level of ‘costs’",
+          "bound": "<=",
+          "level": 45000,
+          "quote": "Monthly spend is £45k",
+          "level_unit": "£/month"
+        },
+        "goal_threshold_cap": 56250,
+        "goal_threshold_raw": -0.2,
+        "goal_threshold_unit": "£/month",
+        "goal_threshold_frame": "change_rel",
+        "goal_threshold_cap_provenance": "target_derived_headroom"
+      },
+      {
+        "id": "stay_on_aws",
+        "kind": "option",
+        "label": "Stay on AWS",
+        "provenance": "ai_inferred",
+        "is_baseline": true
+      },
+      {
+        "id": "switch_to_gcp",
+        "kind": "option",
+        "label": "Switch to GCP",
+        "provenance": "from_brief",
+        "interventions": {
+          "gcp_workload_share": {
+            "unit": "%",
+            "value": 1,
+            "source": "cee_hypothesis",
+            "raw_value": 100,
+            "target_match": {
+              "node_id": "gcp_workload_share",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "migration_duration": {
+            "unit": "weeks",
+            "value": 0.15384615384615385,
+            "source": "cee_hypothesis",
+            "raw_value": 8,
+            "target_match": {
+              "node_id": "migration_duration",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "parallel_run_overlap": {
+            "unit": "%",
+            "value": 0.25,
+            "source": "cee_hypothesis",
+            "raw_value": 25,
+            "target_match": {
+              "node_id": "parallel_run_overlap",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "phased_gcp_migration",
+        "kind": "option",
+        "label": "Phased GCP migration",
+        "provenance": "ai_inferred",
+        "proposed_by": "olumi",
+        "interventions": {
+          "gcp_workload_share": {
+            "unit": "%",
+            "value": 0.5,
+            "source": "cee_hypothesis",
+            "raw_value": 50,
+            "target_match": {
+              "node_id": "gcp_workload_share",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "migration_duration": {
+            "unit": "weeks",
+            "value": 0.07692307692307693,
+            "source": "cee_hypothesis",
+            "raw_value": 4,
+            "target_match": {
+              "node_id": "migration_duration",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          },
+          "parallel_run_overlap": {
+            "unit": "%",
+            "value": 0.15,
+            "source": "cee_hypothesis",
+            "raw_value": 15,
+            "target_match": {
+              "node_id": "parallel_run_overlap",
+              "confidence": "high",
+              "match_type": "exact_id"
+            }
+          }
+        }
+      },
+      {
+        "id": "gcp_workload_share",
+        "kind": "factor",
+        "label": "GCP workload share",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "%",
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "migration_duration",
+        "kind": "factor",
+        "label": "Migration duration",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 52,
+        "observed_state": {
+          "unit": "weeks",
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "parallel_run_overlap",
+        "kind": "factor",
+        "label": "Parallel-run overlap",
+        "category": "controllable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "%",
+          "value": 0,
+          "source": "cee_inference",
+          "raw_value": 0,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "migration_execution_quality",
+        "kind": "factor",
+        "label": "Migration execution quality",
+        "category": "observable",
+        "provenance": "ai_inferred",
+        "scale_frame": 100,
+        "observed_state": {
+          "unit": "score out of 100",
+          "value": 0.7,
+          "source": "cee_inference",
+          "raw_value": 70,
+          "extractionType": "inferred"
+        }
+      },
+      {
+        "id": "migration_downtime",
+        "kind": "outcome",
+        "label": "Migration downtime",
+        "provenance": "from_brief"
+      }
+    ],
+    "goal_constraints": [
+      {
+        "unit": "weeks",
+        "label": "Migration downtime",
+        "value": 2,
+        "node_id": "migration_downtime",
+        "operator": "<=",
+        "provenance": "explicit",
+        "value_frame": "level",
+        "constraint_id": "agent-lane:migration_downtime:<="
+      }
+    ]
+  }
+}
