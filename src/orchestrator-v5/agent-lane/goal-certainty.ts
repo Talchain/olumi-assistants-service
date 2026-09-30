@@ -458,8 +458,11 @@ export function placeholderGoalWarning(
   // as the guess it is, and not asked; nothing is offered that no writer delivers (no tool removes a link).
   const limitIds = new Set((isRec(graph) && Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
     .filter(isRec).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'));
-  const guessed = named.filter((l) => limitIds.has(l.from));
-  const asked = named.filter((l) => !limitIds.has(l.from) && levelOf(byId.get(l.from)).value !== undefined);
+  // Only a link INTO the goal (AIQ 5903874730; P0 PARTNER 5903857287): a placeholder out of limit-watched churn into
+  // subscribers is a real mechanism whose size is unknown, so it is asked for as before; downtime → spend is the guess.
+  const guessedLink = (l: { from: string; to: string }): boolean => limitIds.has(l.from) && byId.get(l.to)?.kind === 'goal';
+  const guessed = named.filter(guessedLink);
+  const asked = named.filter((l) => !guessedLink(l) && levelOf(byId.get(l.from)).value !== undefined);
   const byTarget = new Map<string, string[]>();
   for (const l of named) byTarget.set(l.to, [...(byTarget.get(l.to) ?? []), l.from]);
   const phrases = [...byTarget].slice(0, 2).map(([to, froms]) =>
