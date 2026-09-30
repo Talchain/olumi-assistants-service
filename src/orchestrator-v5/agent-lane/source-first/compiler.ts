@@ -158,6 +158,9 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
           if (claim.frame === 'level') node.scale_frame = cap.cap;
         }
       }
+      // The target's validated numeric claim, not the node's general quote,
+      // authorises the field-level source marker read by the product.
+      if (node.goal_threshold_raw !== undefined && source_bindings[claim.ref]) node.threshold_source = 'brief_extraction';
     } else if (targets.length > 1) issue(ref, 'multiple_targets', `Which target applies to "${node.label}"?`);
     if (currents.length === 1) {
       const { claim, value } = currents[0];
@@ -174,6 +177,19 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     edges.push({ from: from.id, to: to.id, ...STRUCTURAL_EDGE_DEFAULTS,
       provenance: { source, reasoning: reason }, origin: 'structural' });
   };
+  const decisions = meaning.entities.filter((entity) => entity.kind === 'decision');
+  const explicitOptionRefs = [...new Set(meaning.options.map((option) => option.entity_ref))]
+    .filter((ref) => nodes.get(ref)?.kind === 'option');
+  if (decisions.length === 1) {
+    const decision = nodes.get(decisions[0].ref);
+    if (decision) for (const ref of explicitOptionRefs) {
+      const option = nodes.get(ref)!;
+      structuralEdge(decision, option, option.source_quote!);
+    }
+  } else if (decisions.length > 1) {
+    for (const ref of explicitOptionRefs) issue(ref, 'decision_option_scope_ambiguous',
+      `Which stated decision does "${nodes.get(ref)!.label}" answer?`);
+  }
   const usedQuantityRefs = new Set<string>();
   for (const option of meaning.options) {
     const node = nodes.get(option.entity_ref);

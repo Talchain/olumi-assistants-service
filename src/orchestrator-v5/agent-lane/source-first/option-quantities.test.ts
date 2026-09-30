@@ -24,8 +24,9 @@ describe('source-first projection of option-owned quantities', () => {
         source_quote: index === 0 ? 'hire two senior engineers' : 'four junior engineers' });
       expect(result.graph.edges).toContainEqual(expect.objectContaining({ from: option.id, to: factor.id, origin: 'structural' }));
     }
-    expect(result.graph.edges).toHaveLength(2);
-    expect(result.graph.edges.every((edge) => options.some((option) => option.id === edge.from))).toBe(true);
+    expect(result.graph.edges).toHaveLength(4);
+    expect(result.graph.edges.filter((edge) => options.some((option) => option.id === edge.from))).toHaveLength(2);
+    expect(result.graph.edges.filter((edge) => edge.from === sourceEntityId('d1'))).toHaveLength(2);
     expect(result.graph.nodes.filter((node) => node.kind === 'goal')).toHaveLength(2);
     expect(result.graph.goal_constraints?.[0]).toMatchObject({ value: 400000, operator_as_stated: '<' });
     expect(result.trace.projected_option_quantities).toBe(2);

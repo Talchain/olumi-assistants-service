@@ -312,6 +312,39 @@ describe('first live source-meaning regression captures', () => {
   });
 });
 
+describe('saved source-first graph reaches product lineage and option readers', () => {
+  const captures = JSON.parse(readFileSync(new URL('./fixtures/repaired-live-source-meaning.json', import.meta.url), 'utf8')) as Array<{ case: string; brief: string; meaning: SourceMeaning }>;
+  it('marks the exact validated Paul target on the goal, but never an ungrounded target', () => {
+    const captured = structuredClone(captures.find((item) => item.case === 'paul-mrr')!);
+    const graph = GraphV3.parse(JSON.parse(JSON.stringify(compileSourceMeaning(captured.brief, captured.meaning).graph)));
+    expect(graph.nodes.find((node) => node.id === sourceEntityId('g1'))).toMatchObject({
+      goal_threshold_raw: 85000, threshold_source: 'brief_extraction', source_quote: 'we want MRR above £85k within a year',
+    });
+    captured.meaning.quantities.find((claim) => claim.ref === 'q6')!.number.source = source('£75k MRR');
+    const ungrounded = compileSourceMeaning(captured.brief, captured.meaning);
+    expect(ungrounded.graph.nodes.find((node) => node.id === sourceEntityId('g1'))?.threshold_source).toBeUndefined();
+    expect(ungrounded.graph.nodes.find((node) => node.id === sourceEntityId('g1'))?.goal_threshold_raw).toBeUndefined();
+  });
+  it.each([['paul-mrr', ['o1']], ['E', ['o1', 'o2']]] as const)(
+    'links the single stated decision to the explicit %s options', (caseId, refs) => {
+      const captured = captures.find((item) => item.case === caseId)!;
+      const result = compileSourceMeaning(captured.brief, captured.meaning);
+      const graph = GraphV3.parse(JSON.parse(JSON.stringify(result.graph)));
+      const links = graph.edges.filter((edge) => edge.from === sourceEntityId('d1') && refs.some((ref) => edge.to === sourceEntityId(ref)));
+      expect(links.map((edge) => edge.to).sort()).toEqual(refs.map(sourceEntityId).sort());
+      expect(links.every((edge) => edge.origin === 'structural' && edge.provenance?.source === 'brief_extraction')).toBe(true);
+    },
+  );
+  it('leaves option ownership unresolved when two decisions were extracted', () => {
+    const captured = structuredClone(captures.find((item) => item.case === 'paul-mrr')!);
+    captured.meaning.entities.push({ ...captured.meaning.entities.find((entity) => entity.ref === 'd1')!, ref: 'd2' });
+    const result = compileSourceMeaning(captured.brief, captured.meaning);
+    expect(result.graph.edges.some((edge) => edge.to === sourceEntityId('o1')
+      && [sourceEntityId('d1'), sourceEntityId('d2')].includes(edge.from))).toBe(false);
+    expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'o1', code: 'decision_option_scope_ambiguous' }));
+  });
+});
+
 describe('source-first provider seam', () => {
   it('uses existing architecture-comparison settings and performs one call with no registration', async () => {
     const { brief, meaning } = pricing();

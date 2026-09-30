@@ -19,11 +19,12 @@ describe('relative goals use typed metric references', () => {
     expect(goal.goal_threshold_unit).toBeUndefined();
     expect(goal.goal_threshold).toBeUndefined();
     expect(goal.goal_threshold_cap).toBeUndefined();
+    expect(goal.threshold_source).toBeUndefined();
     expect(goal.observed_state).toBeUndefined();
     expect(graph.nodes.find((node) => node.id === sourceEntityId('f1'))?.observed_state).toMatchObject({ raw_value: 45000, unit: 'GBP per month' });
     expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'q2', code: 'relative_goal_metric_unbound' }));
     expect(result.unresolved.some((finding) => finding.ref === 'q2' && finding.code === 'unassigned_change')).toBe(false);
-    expect(graph.edges).toEqual([]);
+    expect(graph.edges).toEqual([expect.objectContaining({ from: sourceEntityId('d1'), to: sourceEntityId('o1'), origin: 'structural' })]);
   });
 
   it('compiles the full canonical target only when current and change already share one metric reference', () => {
@@ -36,6 +37,7 @@ describe('relative goals use typed metric references', () => {
     const goal = graph.nodes.find((node) => node.id === sourceEntityId('g1'))!;
     expect(goal).toMatchObject({ goal_threshold_raw: -0.2, goal_threshold: -0.2,
       goal_threshold_frame: 'change_rel', goal_threshold_unit: 'GBP per month',
+      threshold_source: 'brief_extraction',
       observed_state: { raw_value: 45000, unit: 'GBP per month', source_quote: 'Monthly spend is £45k' } });
     expect(goal.goal_threshold_cap).toBeGreaterThanOrEqual(45000);
     expect(goal.observed_state!.value * goal.goal_threshold_cap!).toBe(45000);
