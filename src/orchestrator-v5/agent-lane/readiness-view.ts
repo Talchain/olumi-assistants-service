@@ -18,6 +18,7 @@
  * PLAIN-ENGLISH explanation in user prose").
  */
 import { assessRouteAdmission } from '../../cee/graph-readiness/canonical-readiness.js';
+import { targetTestabilityOf, notTargetTestableSentence } from '../admission/target-testability.js';
 
 export interface ReadinessItem {
   readonly message: string;
@@ -42,6 +43,12 @@ export interface ReadinessView {
    * admitted without them (AI Conversation #70 5849012990 U3), so they are named on their own.
    */
   readonly levels_not_set: readonly { readonly option: string; readonly factor: string }[];
+  /**
+   * ⭐ DECISION-REPRESENTATION row 4 (AIQ #75 5913873948 row 3): the goal's stated target can't be tested by a Run yet,
+   * in AIQ's words, with the one question when there is one (`notTargetTestableSentence`). Present only then: a Run may
+   * still compare the options, but no Run answers the target until this is resolved.
+   */
+  readonly target_not_testable?: string;
   /** Why a run is refused when no demand explains it: the refusal's own words. Present only then. */
   readonly reason?: string;
 }
@@ -102,6 +109,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
     if (typeof n?.id === 'string') labelOf.set(n.id, typeof n.label === 'string' && n.label !== '' ? n.label : n.id);
   }
   const excluded = (verdict.scaffold_plan.excluded_option_ids ?? []).map((id) => labelOf.get(id) ?? id);
+  const target = notTargetTestableSentence(rawGraph, targetTestabilityOf(rawGraph));
   return {
     checked: true,
     may_run: verdict.may_run,
@@ -110,6 +118,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
     will_run_without: excluded,
     levels_not_set: levelsNotSet,
     ...(reason !== undefined ? { reason } : {}),
+    ...(target !== null ? { target_not_testable: target } : {}),
   };
 }
 
@@ -150,9 +159,13 @@ export function withoutCantRunOpening(reason: string): string {
 export function readinessSentence(view: ReadinessView): string {
   if (!view.checked) return 'I could not check whether the analysis can run yet.';
   if (view.may_run === true) {
-    if (view.will_run_without.length === 0) return 'The analysis can run now.';
     const one = view.will_run_without.length === 1;
-    return `The analysis can run now; it will leave out ${one ? `"${view.will_run_without[0]}"` : listOf(view.will_run_without)} until ${one ? 'its levels are' : 'their levels are'} set.`;
+    const leaveOut = view.will_run_without.length === 0 ? ''
+      : `leave out ${one ? `"${view.will_run_without[0]}"` : listOf(view.will_run_without)} until ${one ? 'its levels are' : 'their levels are'} set.`;
+    // ⛔ A run that proceeds over a target it can't test never reads "can run" and then shows nothing (AIQ 5914209776):
+    // the lead is DR row 4's own sentence.
+    if (view.target_not_testable !== undefined) return leaveOut === '' ? view.target_not_testable : `${view.target_not_testable} The run will ${leaveOut}`;
+    return leaveOut === '' ? 'The analysis can run now.' : `The analysis can run now; it will ${leaveOut}`;
   }
   const why = view.needs_from_user.slice(0, 2).map((i) => i.message.replace(/\s+$/, '')).join(' ');
   if (why !== '') return `The analysis can't run yet. ${why}`;

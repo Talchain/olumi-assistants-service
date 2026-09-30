@@ -1099,6 +1099,8 @@ const BY_ADMISSION_REASON: Readonly<Record<string, string>> = {
   NOTHING_TO_COMPARE:
     'because there is nothing to compare yet; name at least two different options you are weighing',
   MODEL_HAS_BLOCKERS: 'because this model cannot be analysed yet; ask me what it still needs',
+  // DECISION-REPRESENTATION row 4 (AIQ #77 5912882031): the target is stated but cannot be tested yet.
+  TARGET_NOT_TESTABLE: 'because Olumi can’t yet test the options against your target; ask me what it needs to test it',
 };
 
 const REASON_NOT_RECORDED =

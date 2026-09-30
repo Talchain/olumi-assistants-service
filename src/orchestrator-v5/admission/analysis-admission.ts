@@ -172,6 +172,7 @@ import {
   type ObligationClass,
   type StructureProvenance,
 } from '../../cee/graph-readiness/obligation-provenance.js';
+import { targetTestabilityOf, notTargetTestableSentence, targetVerdictCapsOrdering } from './target-testability.js';
 
 // ============================================================================
 // Vocabulary
@@ -471,7 +472,8 @@ export type AdmissionReasonCode =
   | 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED'
   | 'USER_STATED_PARAMETERS_NOT_MATERIAL'
   | 'CONFIDENCE_PARAMETERS_PARTLY_USER_STATED'
-  | 'READY_TO_COMPARE';
+  | 'READY_TO_COMPARE'
+  | 'TARGET_NOT_TESTABLE';
 
 /**
  * ONE input the model is missing, with WHY IT MATTERS rather than only what it is.
@@ -1185,6 +1187,9 @@ const MODE_REASON: Readonly<
   comparative_leader: SEMANTIC_REASON.material_user_stated,
 };
 
+/** Said only if the verdict's own sentence cannot be built (a goal with no readable target words). */
+const TARGET_NOT_TESTABLE_FALLBACK = "Olumi can compare your options, but can't yet test them against your target.";
+
 /** The reason for a mode, routed through the semantic cause where the mode needs it. */
 function modeReason(
   mode: PermittedAnalysisMode,
@@ -1256,7 +1261,13 @@ export function analysisAdmissionFrom(
   const signals = censusConfidenceParameters(graph);
   const semanticSufficient = semanticQualitySufficient(signals);
   const cause = semanticVerdictCause(signals);
-  const mode = deriveMode(admission, semanticSufficient);
+  // ⭐ DECISION-REPRESENTATION row 4 (PTL A; AIQ #77 5912882031, R3 5912916965): a run that will proceed over a target
+  // it cannot test licenses no chance, share or leader. Capped at `exploratory` on the one lattice, so every rail that
+  // reads the mode withholds them, and the reason says why before any Run. Only ever LOWERS the mode.
+  const target = targetTestabilityOf(graph);
+  const derived = deriveMode(admission, semanticSufficient);
+  const targetCapped = admission.willProceed && targetVerdictCapsOrdering(target) && modePermitsAtLeast(derived, 'quantified_provisional');
+  const mode: PermittedAnalysisMode = targetCapped ? 'exploratory' : derived;
 
   // ⚠ `assessment.blockingIssues`, NOT `strict.issues`. `strict.issues` is the
   // EXHAUSTIVE record (carrier + blocking); this field is what is MISSING. And
@@ -1324,7 +1335,9 @@ export function analysisAdmissionFrom(
   // ── permitted_analysis_mode ────────────────────────────────────────────────
   reasons.push({
     field: 'permitted_analysis_mode',
-    ...modeReason(mode, cause),
+    ...(targetCapped
+      ? { code: 'TARGET_NOT_TESTABLE' as const, message: notTargetTestableSentence(graph, target) ?? TARGET_NOT_TESTABLE_FALLBACK }
+      : modeReason(mode, cause)),
   });
 
   return {

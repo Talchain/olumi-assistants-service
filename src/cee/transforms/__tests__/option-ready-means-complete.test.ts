@@ -311,7 +311,15 @@ describe("A1b — the model-level Run verdict does not move", () => {
     expect(optionRow(r, GRANDFATHER_OPTION).status).toBe("needs_encoding");
     expect(r.may_run).toBe(true);
     expect(JSON.stringify(r.may_run)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.may_run));
-    expect(JSON.stringify(r.analysis_admission)).toBe(JSON.stringify(recordedPatched));
+    // ⭐ DR row 4 (#2371; PTL #77 5914383843) owns TWO fields of this record, and only them: this graph states a target
+    // it can't test yet, so the mode is capped at `exploratory` with `TARGET_NOT_TESTABLE` on the mode's field. The
+    // record is not edited; every other byte of the admission must still match it (the A1b claim).
+    const modeReason = (a: { reasons: readonly { field: string }[] }) => a.reasons.find((x) => x.field === 'permitted_analysis_mode') as { code?: string } | undefined;
+    const { permitted_analysis_mode: liveMode, reasons: liveReasons, ...liveRest } = r.analysis_admission as unknown as { permitted_analysis_mode: string; reasons: { field: string }[] };
+    const { permitted_analysis_mode: _recordedMode, reasons: recordedReasons, ...recordedRest } = recordedPatched as unknown as { permitted_analysis_mode: string; reasons: { field: string }[] };
+    expect(JSON.stringify(liveRest)).toBe(JSON.stringify(recordedRest));
+    expect(JSON.stringify(liveReasons.filter((x) => x.field !== 'permitted_analysis_mode'))).toBe(JSON.stringify(recordedReasons.filter((x) => x.field !== 'permitted_analysis_mode')));
+    expect([liveMode, modeReason({ reasons: liveReasons })?.code]).toEqual(['exploratory', 'TARGET_NOT_TESTABLE']);
     expect(JSON.stringify(r.readiness_issues)).toBe(JSON.stringify(RECORDED_WITH_STATUS_QUO_LEVEL.readiness_issues));
     expect(r.status).toBe(RECORDED_WITH_STATUS_QUO_LEVEL.status);
   });

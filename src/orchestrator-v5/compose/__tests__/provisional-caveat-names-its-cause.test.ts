@@ -21,10 +21,24 @@ import { resolveAnalysisAdmission } from '../../admission/analysis-admission.js'
 import { dropRankingSentences } from '../../agent-lane/withheld-leader-fail-closed.js';
 import { enforceLeadingOptionClaimsAtWire } from '../leading-option-wire-enforcement.js';
 
+/**
+ * The same graph with NO stated target, so DECISION-REPRESENTATION row 4's verdict has no subject (#2371): these rows
+ * keep testing their own axis. Only the goal's raw target and its own limit row go; nothing else about the capture moves.
+ */
+function withoutTarget<G>(graph: G): G {
+  const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
+  const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
+  for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
+  return c as unknown as G;
+}
+
 /** Paul's own served MRR draft (`cbd15f83`, CEE `bdd43f4`): his £49 is the level two options change. */
 const PAUL_DRAFT = 'src/orchestrator-v5/coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.draft-graph.json';
+// Held off DR row 4 (#2371): his draft states a target no Run can test yet, which caps the mode at `exploratory`
+// (tested in `target-testability.test.ts`); this spec is about the provisional caveat's cause, so the target goes.
 const paulDraft = (): Record<string, unknown> =>
-  JSON.parse(JSON.stringify((JSON.parse(readFileSync(PAUL_DRAFT, 'utf8')) as { graph: unknown }).graph)) as Record<string, unknown>;
+  withoutTarget(JSON.parse(JSON.stringify((JSON.parse(readFileSync(PAUL_DRAFT, 'utf8')) as { graph: unknown }).graph)) as Record<string, unknown>);
 const nodeOf = (graph: Record<string, unknown>, id: string): Record<string, any> => {
   const found = (graph.nodes as Record<string, unknown>[]).find((n) => n.id === id);
   if (!found) throw new Error(`fixture drift: ${id} is absent from ${PAUL_DRAFT}`);

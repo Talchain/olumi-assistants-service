@@ -15,6 +15,18 @@ import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 
+/**
+ * The same graph with NO stated target, so DECISION-REPRESENTATION row 4's verdict has no subject (#2371): these rows
+ * keep testing their own axis. Only the goal's raw target and its own limit row go; nothing else about the capture moves.
+ */
+function withoutTarget<G>(graph: G): G {
+  const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
+  const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
+  for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
+  return c as unknown as G;
+}
+
 const paulGraph = JSON.parse(readFileSync(new URL('./fixtures/paul-cbd15f83-stored-graph.json', import.meta.url), 'utf8')) as unknown;
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554400b1';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r' };
@@ -128,7 +140,7 @@ describe('(B) the post-write line never contradicts the Run control on the same 
     const { postWriteReadinessLine } = await import('../../../routes/agent-v1-turn.js');
     expect(postWriteReadinessLine(paulGraph, { may_run: false, status: 'blocked' })).toMatch(/^The analysis can't run yet\. .*not connected from the decision/i);
     expect(postWriteReadinessLine(paulGraph, { may_run: true, status: 'ready' }), 'disagrees with the button → silent').toBeNull();
-    expect(postWriteReadinessLine(linked(), { may_run: true, status: 'ready' })).toBe('The analysis can run now.');
+    expect(postWriteReadinessLine(withoutTarget(linked()), { may_run: true, status: 'ready' })).toBe('The analysis can run now.');
     expect(postWriteReadinessLine(linked(), { may_run: false, status: 'blocked' }), 'runnable verdict, blocked button → silent').toBeNull();
     expect(postWriteReadinessLine(paulGraph, undefined), 'unknown button state → silent, never a refusal').toBeNull();
     expect(postWriteReadinessLine(undefined, { may_run: false }), 'no graph read → silent, never "nothing is blocking"').toBeNull();

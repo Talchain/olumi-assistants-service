@@ -81,12 +81,20 @@ export const GOAL_FIGURES_PLACEHOLDER_PATH = 'GOAL_FIGURES_PLACEHOLDER_PATH';
  */
 export const GOAL_FIGURES_PRODUCT_NOT_READ = 'GOAL_FIGURES_PRODUCT_NOT_READ';
 
+/**
+ * CEE's code for a run whose goal figures it withheld because the goal's target can't be tested yet (DECISION-
+ * REPRESENTATION row 4, `targetTestabilityOf`; AIQ #2371 5914730220). Written by `run_analysis` for EVERY option, the
+ * leader and shares too; `node_ids` names the goal. The message is the DR sentence, with its one question.
+ */
+export const GOAL_FIGURES_TARGET_NOT_TESTABLE = 'GOAL_FIGURES_TARGET_NOT_TESTABLE';
+
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PRODUCT_NOT_READ,
+  GOAL_FIGURES_TARGET_NOT_TESTABLE,
 ]);
 
 function readRecord(value: unknown): Record<string, unknown> | null {
