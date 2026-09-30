@@ -94,7 +94,9 @@ describe('W3: the route says an interior chance is a recorded model chance (AIQ 
     const lines = src.split('\n').filter((l) => l.includes('For a CURRENT saved Run'));
     expect(lines, 'control: exactly one saved-Run instruction line').toHaveLength(1);
     expect(lines[0]).toContain('recorded model chance, not a guarantee');
-    expect(lines[0]).toContain('in model runs');
+    expect(lines[0]).toContain('reaches the target in about N% of model runs');
+    // AIQ 5903007662: the prompt is read by every journey, so its example carries no journey's figure.
+    expect(lines[0]).not.toMatch(/\\u00a3\d|£\d|\b\d{2,3}(,\d{3})+\b|\b\d+% of model runs/);
     expect(lines[0]).toContain('For an exact 0 or 1, use only its projected goal_certainty');
     expect(lines[0]).not.toContain('For goal certainty, use only its projected goal_certainty');
   });
