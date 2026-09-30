@@ -3165,7 +3165,7 @@ export function createAgentCapabilities(
       const occupied: { label: string; current_value: number }[] = [];
       const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string }[] = [];
 
       for (const a of input) {
         const requested = String(a?.factor_label ?? '');
@@ -3223,14 +3223,24 @@ export function createAgentCapabilities(
         if (!Number.isFinite(Number(a?.value))) { unresolved.push(node.label); continue; }
         if (seen.has(node.id)) continue;
         seen.add(node.id);
+        // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's. Its owner is
+        // read the add-factor door's way (`newFactorScopeIn`: rivals + strict): under the plain reading, served journey E's
+        // "Senior engineers cost £120k a year each and juniors £65k a year each" was Olumi's for both salaries (5d73351, 2/2).
+        const writtenAbout = figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, newFactorScopeIn(g, node.label, String(a?.unit ?? nodeUnit ?? ''), []));
+        // ⛔ HUMAN CONTROL IS THE PROVENANCE GATE, here too (the DL's ruling on #2235 for the add-factor door; AIQ #75
+        // 5902528686). Served cut-costs (DL alt-B r0/r1, CEE 1f9d769): "Our team's quote shows GCP would be about 25% cheaper
+        // than AWS for our workload." revised the discount factor to 0.25, the user's exact figure, and stored it as
+        // `user_assumption` ("Olumi's suggestion the user accepted"), replied "recorded as Olumi's assumption": word proximity
+        // read "AWS … workload" after the comparative as another quantity's. A revision the user asked for, whose figure IS
+        // written in this message, is theirs when the approval shows the pairing with their own sentence, verbatim: their Yes
+        // makes it theirs. A figure Olumi worked out from it (£112.50 per point) is not written, so it stays Olumi's.
+        const quote = !writtenAbout && typeof existing === 'number' ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text) : null;
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
-          // ⛔ A revision is the user's only when they WROTE the figure (`stated-by-user.ts`); else it is Olumi's. Its owner is
-          // read the add-factor door's way (`newFactorScopeIn`: rivals + strict): under the plain reading, served journey E's
-          // "Senior engineers cost £120k a year each and juniors £65k a year each" was Olumi's for both salaries (5d73351, 2/2).
-          userWrote: figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, newFactorScopeIn(g, node.label, String(a?.unit ?? nodeUnit ?? ''), [])),
+          userWrote: writtenAbout || quote !== null,
+          ...(quote !== null ? { quote } : {}),
         });
       }
 
@@ -3271,10 +3281,11 @@ export function createAgentCapabilities(
       const notWritten = revisions.filter((a) => !a.userWrote);
       const said = (value: number, unit: string) => sayFigureExactly(value, unit) ?? `${value}${unit !== '' ? ' ' + unit : ''}`;
       const withUnit = (a: { value: number; unit: string }) => said(a.value, a.unit);
-      const describe = (a: { label: string; value: number; unit: string; replaces?: number }) =>
+      const describe = (a: { label: string; value: number; unit: string; replaces?: number; quote?: string }) =>
         typeof a.replaces === 'number'
-          // The replaced figure is not written: an inexact one is said "about", rounded (DL #2227 follow-up A).
-          ? `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
+          // The replaced figure is not written: an inexact one is said "about", rounded (DL #2227 follow-up A). A pairing the
+          // approval confirms is shown with the user's own sentence (above).
+          ? `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}${a.quote !== undefined ? ` (your figure, in your words: "${a.quote}")` : ''}`
           : `${a.label} = ${withUnit(a)}`;
       const heading =
         revisions.length === 0
