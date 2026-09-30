@@ -17,7 +17,7 @@ mkdirSync(evidence, { recursive: true });
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 const files = ['src/orchestrator-v5/agent-lane/__tests__/ai-experience-lab.manual.test.ts',
   'src/routes/agent-v1-turn.ts',
-  'src/orchestrator-v5/agent-lane/runtime/model-budgets.ts',
+  'src/orchestrator-v5/agent-lane/model-budgets.ts',
   'src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts',
   'src/orchestrator-v5/agent-lane/runtime/build-model.ts',
   'src/routes/assist.v1.scenario-graph-register.ts',
