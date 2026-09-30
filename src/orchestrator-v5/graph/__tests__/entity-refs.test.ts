@@ -194,7 +194,7 @@ describe('refs and counters are bounded to safe integers (PR Review CR 2)', () =
   });
 
   it('RED: an unsafe counter in the base cannot push the next ref past the bound', () => {
-    const base = { ...(assignEntityRefs(FIRST, null).graph as Json), ref_high_water: { O: 1e300 } };
+    const base: Json = { ...(assignEntityRefs(FIRST, null).graph as Json), ref_high_water: { O: 1e300 } };
     const out = assignEntityRefs({ ...base, nodes: [...(base.nodes as Json[]), node('opt_new', 'option')] }, base).graph as Json;
     expect(refs(out).opt_new).toMatch(/^O[1-9][0-9]{0,8}$/);
     expect(parseEntityRef(`O${'1'.repeat(10)}`)).toBeNull();
