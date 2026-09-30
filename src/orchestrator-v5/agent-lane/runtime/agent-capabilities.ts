@@ -224,6 +224,39 @@ export { newFactorScopeIn };
  * figure measures, so its label ("Budget overrun risk") makes no claim on the figure. Every other quantity still does:
  * "300 Pro paying subscribers" is never a £300 limit on the price.
  */
+/**
+ * ⛔ A CARD THAT SIZES A LINK SAYS WHAT ITS SOURCE MEANS IN THE MODEL (AIQ 5914532431; R3 5914500931). Paul sized
+ * "Fundraising overhead" → funding as "strong", meaning EFFORT ("more effort equates to more potential funding
+ * opportunities"). In the model the same node cut outreach and raised runway exhaustion, so his approval recorded his size
+ * on a meaning he was never shown. The card now says the source's unit and what else it drives, so the approval carries
+ * that reading. Empty when the source drives nothing else (the options that set it are not "driven").
+ */
+export function sourceMeaningInModel(
+  g: { readonly nodes: readonly { id: string; kind: string; label: string; observed_state?: Record<string, unknown> }[];
+       readonly edges: readonly { from: string; to: string; strength?: unknown; effect_direction?: unknown }[] },
+  fromId: string, toId: string,
+): string {
+  const from = g.nodes.find((n) => n.id === fromId);
+  if (from === undefined) return '';
+  const drives = g.edges
+    .filter((e) => e.from === fromId && e.to !== toId)
+    .flatMap((e) => {
+      const n = g.nodes.find((x) => x.id === e.to);
+      if (n === undefined || n.kind === 'option' || n.kind === 'decision') return [];
+      const mean = e.strength !== null && typeof e.strength === 'object' ? (e.strength as { mean?: unknown }).mean : undefined;
+      const lowers = e.effect_direction === 'negative' || (e.effect_direction !== 'positive' && typeof mean === 'number' && mean < 0);
+      return [`${lowers ? 'lowers' : 'raises'} "${n.label}"`];
+    });
+  if (drives.length === 0) return '';
+  const shown = drives.length > 3 ? [...drives.slice(0, 3), `${drives.length - 3} more`] : drives;
+  const list = shown.length === 1 ? shown[0]! : `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
+  const unit = typeof from.observed_state?.unit === 'string' && from.observed_state.unit.trim() !== '' ? ` (${from.observed_state.unit.trim()})` : '';
+  return ` In the model, "${from.label}"${unit} also ${list}.`;
+}
+
+/** A card label that gains a trailing sentence ends its own first (" …estimate. In the model, …"). */
+const asSentence = (tail: string): string => (tail === '' ? '' : `.${tail}`);
+
 export function limitScopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, limitLabel: string): EntityScope {
   const risks = new Set(g.nodes.filter((n) => n.kind === 'risk').map((n) => (typeof n.label === 'string' ? n.label : '')));
   const { target, others } = scopeIn(g, limitLabel);
@@ -2715,9 +2748,10 @@ export function createAgentCapabilities(
         operations: [{ op: 'update_edge', path: `${from.id}::${to.id}`, value }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: confirm
+        public_label: (confirm
           ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate (strength kept at ${quotable(Math.abs(mean))} on Olumi's 0\u20131 scale)`
-          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`,
+          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`)
+          + asSentence(sourceMeaningInModel(g, from.id, to.id)),
         ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
@@ -2818,7 +2852,7 @@ export function createAgentCapabilities(
           value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken } }],
         provenance: { authored_by: 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record your figure for how "${from.label}" moves "${to.label}": "${said}"`,
+        public_label: `Record your figure for how "${from.label}" moves "${to.label}": "${said}"` + asSentence(sourceMeaningInModel(g, from.id, to.id)),
       });
       proposals.put(proposal);
       return {
@@ -2900,7 +2934,7 @@ export function createAgentCapabilities(
       const namedByTheUser = (band: InfluenceBand, words: unknown, fromLabel: string, toLabel: string): boolean =>
         typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
         && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
-      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; wasStrength: number };
+      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; wasStrength: number; meaning?: string };
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
       const already: string[] = [];
@@ -2968,7 +3002,7 @@ export function createAgentCapabilities(
           const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
           ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
             expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, wasStrength: Math.abs(mean) });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, wasStrength: Math.abs(mean), meaning: sourceMeaningInModel(g, from.id, to.id) });
           continue;
         }
         // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
@@ -3003,7 +3037,9 @@ export function createAgentCapabilities(
         provenance: { authored_by: shown.every((x) => x.yours) ? 'user_stated' : 'model_proposed', basis: String(args?.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}, on Olumi\u2019s 0\u20131 scale: `
-          + shown.map((x) => `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
+          + shown.map((x) => `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; ')
+          // The user's own sizes carry their source's meaning in the model (AIQ 5914532431), after the list.
+          + asSentence([...new Set(shown.filter((x) => x.yours).map((x) => x.meaning ?? '').filter((m) => m !== ''))].join('')),
       });
       proposals.put(proposal);
       const olumis = shown.filter((x) => !x.yours).length;
