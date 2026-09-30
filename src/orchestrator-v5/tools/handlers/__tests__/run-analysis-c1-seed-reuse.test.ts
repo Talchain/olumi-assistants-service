@@ -9,6 +9,7 @@
  *   H2 (R-d, identity) the same graph rerun → the same seed reaches PLoT (the result would be identical).
  *   H3 (R-c) a pinning change (an option newly sets a factor) → no seed sent → C2_unpaired, as today.
  *   H4 (control) no turn binding (a script / test double) → no seed, exactly today's behaviour.
+ *   H5 (CR 5921519604) a prior added to a factor with no observed value → C2; H5c the same prior on both Runs → C1.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -68,7 +69,24 @@ function harness() {
       // PLoT `resolveSeed`: a caller seed wins, echoed as a string; else a digest of the graph's values.
       const derived = String(parseInt(createHash('sha256').update(JSON.stringify(body.graph)).digest('hex').slice(0, 7), 16));
       response.meta = { ...(response.meta as Rec), seed_used: body.seed !== undefined ? String(body.seed) : derived };
-      response._meta = { builds: { plot: 'p1', isl: 'i1' } };
+      // PLoT's canonical meta also records the ISL request it sent (`_meta.payloads.isl_request`). This double mirrors
+      // only the draw-bearing shape: an observed factor → normal; a prior-only factor → uniform (PLoT's second pass).
+      const g = body.graph as Rec;
+      const uncertainties = (g.nodes as Rec[]).flatMap((n) => {
+        if (n.kind !== 'factor') return [];
+        if (typeof n.observed_state?.value === 'number') return [{ node_id: n.id, distribution: 'normal', std: 0.05 }];
+        if (n.prior && typeof n.prior.range_min === 'number') return [{ node_id: n.id, distribution: 'uniform', range_min: n.prior.range_min, range_max: n.prior.range_max }];
+        return [];
+      });
+      response._meta = {
+        builds: { plot: 'p1', isl: 'i1' },
+        payloads: { isl_request: {
+          seed: body.seed ?? 'derived', n_samples: 1000, analysis_types: ['comparison'],
+          graph: { nodes: (g.nodes as Rec[]).map((n) => ({ id: n.id, kind: n.kind, epsilon_std: 0 })), edges: g.edges },
+          options: (body.options as Rec[]).map((o) => ({ id: o.option_id ?? o.id, interventions: o.interventions ?? {} })),
+          parameter_uncertainties: uncertainties,
+        } },
+      };
       return response as V2RunResponseEnvelope;
     }),
   } as unknown as PLoTClient;
@@ -131,6 +149,30 @@ describe('C1 at the handler — the prior Run lends its seed to a same-structure
     await h.run('turn-b', true);
     expect(h.sentSeeds[1], 'a draw-structure change lends no seed').toBeUndefined();
     expect(h.caseOf().attribution_case).toBe('C2_unpaired');
+  });
+
+  it('H5 (CR 5921519604): a prior added to a factor with no observed value → PLoT samples it → C2, never C1', async () => {
+    const h = harness();
+    const churn = h.graph.nodes.find((n: Rec) => n.id === 'monthly_churn')!;
+    delete churn.observed_state;
+    delete churn.prior;
+    await h.run('turn-a', true);
+    await new Promise((r) => setTimeout(r, 5));
+    churn.prior = { distribution: 'uniform', range_min: 0.02, range_max: 0.04 };
+    await h.run('turn-b', true);
+    expect(h.caseOf().attribution_case, 'the recorded ISL requests differ by one uniform draw').toBe('C2_unpaired');
+  });
+
+  it('H5c (control): the same prior on both Runs and a £59 → £60 edit → C1', async () => {
+    const h = harness();
+    const churn = h.graph.nodes.find((n: Rec) => n.id === 'monthly_churn')!;
+    delete churn.observed_state;
+    churn.prior = { distribution: 'uniform', range_min: 0.02, range_max: 0.04 };
+    await h.run('turn-a', true);
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(60);
+    await h.run('turn-b', true);
+    expect(h.caseOf().attribution_case).toBe('C1_attributable');
   });
 
   it('H4 (control): outside a bound turn nothing is lent — today\'s behaviour, and C2 on a value edit', async () => {

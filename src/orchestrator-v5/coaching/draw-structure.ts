@@ -76,3 +76,61 @@ export function drawStructureKeyOfFact(fact: HandlerFact): string | null {
   const result = (fact as { result?: unknown }).result;
   return isRec(result) && isRec(result.input_snapshot) ? drawStructureKey(result.input_snapshot) : null;
 }
+
+/**
+ * The DRAW STRUCTURE PLoT actually sent to ISL for one Run, from PLoT's own recorded request (`enrichment._meta.payloads
+ * .isl_request`, stored byte for byte on the Run fact — the owner's record, not a CEE reading of the graph). It is the
+ * ONLY carrier that holds every draw: a factor with a prior but no observed value has no `input_snapshot` row, yet
+ * PLoT samples it (`buildParameterUncertaintiesV3`'s prior-only pass → `uniform`) — AI EXPERIENCE BUILD CR 5921519604.
+ *
+ * In LIST ORDER (ISL draws per sample in list order): nodes (epsilon noise on or off; a nonlinear identity fixes its
+ * definitional edges), edges (`exists_probability`; a mean at 0), the parameter uncertainties with their distribution
+ * type, the options' intervention sets and stated ranges, and the request's analysis switches. Values that do not
+ * change the draw count (a mean or std off 0, a prior's bounds, an intervention level) are NOT in the key.
+ * `null` when the Run recorded no ISL request (PLoT's canonical meta off, or no ISL call): the draws cannot be shown to
+ * line up, so C1 is not earned (`build-run-delta.ts`).
+ */
+export function islDrawStructureKey(islRequest: unknown): string | null {
+  if (!isRec(islRequest) || !isRec(islRequest.graph)) return null;
+  const g = islRequest.graph;
+  if (!Array.isArray(g.nodes) || !Array.isArray(g.edges) || !Array.isArray(islRequest.parameter_uncertainties)) return null;
+  const nodes = g.nodes.filter(isRec).map((n) => {
+    const nli = isRec(n.nonlinear_identity)
+      ? JSON.stringify([n.nonlinear_identity.operation ?? null, n.nonlinear_identity.factor_ids ?? null, n.nonlinear_identity.addends ?? null])
+      : '';
+    const eps = typeof n.epsilon_std === 'number' && n.epsilon_std > 0 ? 'eps' : '';
+    return `${String(n.id)}|${String(n.kind)}|${eps}|${nli}`;
+  });
+  const edges = g.edges.filter(isRec).map((e) => {
+    const mean = isRec(e.strength) ? e.strength.mean : undefined;
+    return `${String(e.from)}->${String(e.to)}@${String(e.exists_probability ?? 'default')}${isZero(mean) ? '|mean0' : ''}`;
+  });
+  const uncertainties = islRequest.parameter_uncertainties.filter(isRec).map((u) => `${String(u.node_id)}:${String(u.distribution)}`);
+  const options = (Array.isArray(islRequest.options) ? islRequest.options.filter(isRec) : []).map((o) => {
+    const levers = isRec(o.interventions) ? Object.keys(o.interventions).sort().join(',') : '';
+    const ranges = isRec(o.intervention_ranges)
+      ? Object.keys(o.intervention_ranges).sort().map((k) => {
+        const r = (o.intervention_ranges as Record<string, unknown>)[k];
+        return isRec(r) ? `${k}~${String(r.meaning)}:${String(r.low)}:${String(r.high)}` : k;
+      }).join(',')
+      : '';
+    return `${String(o.id)}|${levers}|${ranges}`;
+  });
+  return JSON.stringify({
+    nodes,
+    edges,
+    uncertainties,
+    options,
+    correlations: islRequest.factor_correlations ?? null,
+    switches: [islRequest.analysis_types ?? null, islRequest.include_voi ?? null, islRequest.include_e_values ?? null, islRequest.include_factor_flips ?? null],
+  });
+}
+
+/** {@link islDrawStructureKey} of a Run fact's recorded PLoT→ISL request, or null when it recorded none. */
+export function islDrawStructureKeyOfFact(fact: HandlerFact): string | null {
+  const result = (fact as { result?: unknown }).result;
+  if (!isRec(result) || !isRec(result.enrichment)) return null;
+  const meta = result.enrichment._meta;
+  if (!isRec(meta) || !isRec(meta.payloads)) return null;
+  return islDrawStructureKey(meta.payloads.isl_request);
+}
