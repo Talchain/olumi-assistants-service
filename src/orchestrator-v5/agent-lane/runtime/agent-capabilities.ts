@@ -4226,7 +4226,12 @@ export function createAgentCapabilities(
         const levelProposal = prepared.ok && typeof prepared.proposal_id === 'string' ? proposals.get(prepared.proposal_id) : undefined;
         if (levelProposal === undefined) return notRecorded(prepared.refusal);
         const written = await applyGoalCurrentLevel({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, levelProposal, after!);
-        if (written.ok !== true || written.applied !== true) return notRecorded(written.refusal);
+        if (written.ok !== true || written.applied !== true) {
+          // ⛔ P0 PARTNER CR on #2373 (5914335527): the level proposal this branch made internally was never shown as a
+          // card, so it must not stay outstanding — the next "yes" would record what this reply says was not recorded.
+          proposals.discard(levelProposal.proposal_id);
+          return notRecorded(written.refusal);
+        }
         return {
           ...applied,
           receipts: [...receipts, ...((written.receipts as ReceiptSummary[] | undefined) ?? [])],

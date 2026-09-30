@@ -365,6 +365,15 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     expect(t2.assistant_text, t2.assistant_text).toContain('The goal "MRR" now has the target at least £60,000, as you stated it.');
     expect(t2.assistant_text, t2.assistant_text).toContain('Its level today (£0) was not recorded');
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(/level today is recorded/);
+    // ⛔ P0 PARTNER CR (5914335527): the NEXT turn has no pending level approval — one "yes" would record what was refused.
+    let seen = '';
+    script = [
+      () => fnCall('get_canonical_state', {}),
+      (body) => { seen = JSON.stringify(body); return say('Here is the model.'); },
+    ];
+    await turn({ message: 'What does the model hold now?' });
+    expect(seen, 'the control: the state read reached the model').toContain('awaiting_your_approval');
+    expect(seen).not.toContain('Record the current level');
   }, 180_000);
 
   // ⛔ AIQ CHANGES_REQUIRED on #2373: the level must be bound to the GOAL, in the target's own statement. Paul's exact
