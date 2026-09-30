@@ -1,10 +1,3 @@
-import { isDeepStrictEqual } from 'node:util';
-import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
-import { analysisResultForAgent } from './decision-sensitivity.js';
-import { claimPermissionsFrom } from './first-analysis.js';
-import { goalCertaintyForAgent } from './goal-certainty-for-agent.js';
-import { withNonlinearIdentity } from './runtime/agent-capabilities.js';
-
 /**
  * Conversation history, bounded in both directions.
  *
@@ -172,323 +165,34 @@ const parsedOutput = (item: unknown): unknown => {
 type Rec = Record<string, unknown>;
 const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
 
-/**
- * The route's final readback of the turn (`readBackState`, agent-v1-turn.ts): the scenario's canonical verdict and the
- * result that verdict selected. `undefined` — or a readback that failed — vouches for nothing.
- */
-export interface KeptRunReadback {
-  readonly scenarioId?: string;
-  readonly analysisState?: unknown;
-  readonly analysisResult?: unknown;
-  readonly analysisReady?: unknown;
-  /** The same final graph read as the selected result, for the product-identity explanation. */
-  readonly graph?: unknown;
-  readonly identityEvaluated?: ReadonlySet<string>;
-  /** The selected fact's stored decisions; absence is unrecorded, never permission to repeat an old certainty. */
-  readonly goalCertainty?: readonly unknown[];
-}
+/** A retained Run output is a pointer only. The fresh canonical read supplies every analysis fact. */
+export const EARLIER_RUN_NOTE = 'Earlier analysis ran; see the current Run in CURRENT MODEL STATE.';
+export const EARLIER_RUN_ATTEMPT_NOTE = 'Earlier analysis attempt; see the current Run in CURRENT MODEL STATE.';
 
-/** A kept run the model has moved past. */
-export const STALE_RUN_NOTE = 'The model has changed since this run, so these are not the current model’s figures: do not quote them as current. Offer to run the analysis again.';
-/** A newer Run can replace the kept one even when the analysis-affecting graph did not change. */
-export const SUPERSEDED_RUN_NOTE = 'A different analysis run is selected now, so figures from this earlier run are not the current run’s figures. Use the latest saved run.';
-/** A kept run no readback could vouch for (the read failed): fail closed, never presented as current. */
-export const UNCONFIRMED_RUN_NOTE = 'Olumi could not confirm this run is of the current model, so do not quote its figures as the current model’s.';
-/** The fact identity matched, but the selected saved payload did not confirm this older tool copy. */
-export const SELECTED_RUN_CONFLICT_NOTE = 'The selected saved run does not confirm this earlier tool copy, so use the current model state instead of its old claims.';
-
-/** AIQ's permitted drops: what a follow-up question does not need from a run that may name its leader. */
-const HEAVY_WHEN_PERMITTED: ReadonlySet<string> = new Set(['robustness', 'p_win_sensitivity', 'factor_evppi', 'edge_e_values']);
-/** R&C's pinned KEY set, verbatim, matched on keys never labels; `decision_sensitivity` is the one key AIQ keeps. */
-const RE_RANKING_KEY = /confidence|near_tie|goal_fit|separation|alternative_winner|win_probabilit|sensitivity|evpi|enrichment/i;
-/** AIQ's named withheld drops the pinned set does not match. */
-const RE_RANKING_NAMED: ReadonlySet<string> = new Set(['probability_of_goal', 'probability_of_joint_goal', 'all_limits_hold_probability', 'conditional_winners', 'flip_thresholds', 'leading_option_id', 'run_delta']);
-/** Until B5 `per_limit` lands, no key naming constraint probabilities is kept, whatever the permission. */
-const namesConstraintProbability = (key: string): boolean => /constraint/i.test(key) && /probabilit/i.test(key);
-/** What a withheld run keeps at its top level, in this order (a fixed order is what makes a re-prune byte-identical). */
-const KEPT_WHEN_WITHHELD = ['ok', 'mutated', 'ran', 'status', 'what_is_missing', 'blockers', 'options', 'result', 'claim_permissions', 'goal_chance', 'run_identity'] as const;
-/** A compared option's identity — its id and its label, however the producer named them; nothing it scored. */
-const optionLabelOf = (o: unknown): Rec => {
-  const r = recordOf(o) ?? {};
-  const id = r.option_id ?? r.id;
-  const label = r.label ?? r.option_label;
-  return { ...(id !== undefined ? { option_id: id } : {}), ...(label !== undefined ? { label } : {}) };
-};
-
-const withoutKeys = (value: unknown, drop: (key: string) => boolean): unknown => {
-  if (Array.isArray(value)) return value.map((v) => withoutKeys(v, drop));
-  const r = recordOf(value);
-  if (r === undefined) return value;
-  const out: Rec = {};
-  for (const [k, v] of Object.entries(r)) {
-    // The selected Run's outcome range is kept exactly as recorded, but only on its own whitelisted option rows.
-    if (k === 'decision_sensitivity' || k === 'outcome') out[k] = v;
-    else if (!drop(k)) out[k] = withoutKeys(v, drop);
-  }
-  return out;
-};
-const pick = (r: Rec, keys: readonly string[]): Rec => {
-  const out: Rec = {};
-  for (const k of keys) if (r[k] !== undefined) out[k] = r[k];
-  return out;
-};
-
-/** An unearned 0/1 is a diagnostic input, never a figure for the Agent to repeat. */
-function keptGoalCertainty(value: unknown): unknown {
-  const certainty = recordOf(value);
-  if (certainty === undefined || !Array.isArray(certainty.options)) return value;
-  return {
-    ...pick(certainty, ['unchecked', 'note']),
-    options: certainty.options.map((raw) => {
-      const row = recordOf(raw) ?? {};
-      return {
-        ...pick(row, ['option', 'option_id', 'earned', 'say']),
-        ...(row.earned === true && (row.probability_of_goal === 0 || row.probability_of_goal === 1)
-          ? { probability_of_goal: row.probability_of_goal } : {}),
-      };
-    }),
-  };
-}
-
-/** A withheld run's result: words, stamp, decision sensitivity, and only recorded per-option outcomes when current. */
-function withheldResult(result: Rec, selected: unknown, goalCertainty: unknown, current: boolean): Rec {
-  // A result already projected carries these at its top level: re-projecting reads them back from there.
-  const source = recordOf(result.enrichment) ?? result;
-  const compared = Array.isArray(source.option_comparison) ? source.option_comparison : undefined;
-  const selectedBlock = recordOf(selected);
-  const selectedSource = recordOf(selectedBlock?.enrichment) ?? selectedBlock;
-  const selectedCompared = selectedSource?.option_comparison;
-  // A prior stale projection has only the Run stamp. Re-selecting that Run must not refill its ranges without the
-  // per-option certainty caveats the projection deliberately discarded; the current canonical state supplies them.
-  const hadOutcomeOrCertainty = compared?.some((raw) => recordOf(raw)?.outcome !== undefined) === true || goalCertainty !== undefined;
-  // A matching Run tuple is necessary for currency, but it does not prove payload equality. For a current Run,
-  // the canonical selected result owns both option order and outcomes; an old tool copy cannot refill an omission.
-  const displayed = current ? (Array.isArray(selectedCompared) ? selectedCompared : undefined) : compared;
-  const byId = new Map<string, Rec>();
-  if (current && Array.isArray(selectedCompared)) {
-    for (const raw of selectedCompared) {
-      const row = recordOf(raw);
-      const id = row?.option_id ?? row?.id;
-      if (typeof id === 'string' && !byId.has(id)) byId.set(id, row!);
-    }
-  }
-  const certaintyRows = recordOf(goalCertainty)?.options;
-  const certaintyById = new Map<string, Rec>();
-  if (Array.isArray(certaintyRows)) {
-    for (const raw of certaintyRows) {
-      const row = recordOf(raw);
-      if (typeof row?.option_id === 'string') certaintyById.set(row.option_id, row);
-    }
-  }
-  return {
-    ...pick(result, ['type', 'summary', 'computed_against_hash', 'decision_sensitivity']),
-    ...(displayed !== undefined ? { option_comparison: displayed.map((raw) => {
-      const labels = optionLabelOf(raw);
-      const id = labels.option_id;
-      const outcome = current && hadOutcomeOrCertainty && typeof id === 'string' ? byId.get(id)?.outcome : undefined;
-      const certainty = typeof id === 'string' ? certaintyById.get(id) : undefined;
-      // If this option has an unearned certainty, its range cannot travel without its own caveat.
-      const say = certainty?.earned === false ? certainty.say : undefined;
-      const mayKeepOutcome = outcome !== undefined && (certainty?.earned !== false || (typeof say === 'string' && say.trim() !== ''));
-      return {
-        ...labels,
-        ...(mayKeepOutcome ? { outcome } : {}),
-        ...(mayKeepOutcome && typeof say === 'string' ? { say } : {}),
-      };
-    }) } : {}),
-    ...(source.inference_warnings !== undefined ? { inference_warnings: source.inference_warnings } : {}),
-  };
-}
-
-/**
- * The stale marking, re-derived from THIS readback every time (never sticky): current only when the canonical verdict
- * is `complete_current` AND the selected result has this run's complete fact identity. Graph hash alone is not Run
- * identity: two analyses of the unchanged graph have the same hash and different `computed_at` values.
- *
- * ⛔ NOT THE READBACK'S WIRE `graph_hash`. That is the RAW hash of the persisted bytes, the writers' compare-and-set
- * base (assist.v1.scenario-graph.ts); `computed_against_hash` is the run's `graph_hash_at_run` over the CANONICAL
- * projection (`deriveDecisionContextGraphHash`). Same function, same width, and equal on a graph already in canonical
- * shape — so the mistake would pass every unchanged-graph test — but they differ on a repaired-shape graph that has
- * not moved (scenario-graph-analysis-read.ts, CS-AN-2), where comparing them would call a current run stale. The read
- * route's own words: "`analysis_state.run_state` is the currency verdict". Its `analysis_result` is present only on a
- * fresh verdict for the current graph and carries the SAME canonical stamp, so the two stamps compare in one space.
- */
-function staleNoteFor(run: Rec, result: Rec, readback: KeptRunReadback | undefined): string | undefined {
-  const selectedState = recordOf(recordOf(readback?.analysisState)?.run_state);
-  const kind = selectedState?.kind;
-  const ownIdentity = recordOf(run.run_identity);
-  const selectedIdentity = {
-    scenario_id: readback?.scenarioId,
-    graph_hash_at_run: recordOf(readback?.analysisResult)?.computed_against_hash,
-    computed_at: selectedState?.computed_at,
-  };
-  const binding = compareAnalysisRunFactIdentity(ownIdentity, selectedIdentity);
-  const ownHashMatches = ownIdentity?.graph_hash_at_run === result.computed_against_hash;
-  if (kind === 'complete_current' && ownHashMatches && binding.status === 'match') return undefined;
-  if (kind === 'complete_current' && binding.status === 'mismatch' && binding.reason === 'computed_at_conflict') return SUPERSEDED_RUN_NOTE;
-  // MOVED: the verdict says so, or the current run is of another model. A run with no stamp, or a verdict that is
-  // neither (unknown, blocked, running…), is only unconfirmed — the note says no more than is known.
-  const moved = kind === 'complete_stale' || (kind === 'complete_current' && binding.status === 'mismatch');
-  return moved ? STALE_RUN_NOTE : UNCONFIRMED_RUN_NOTE;
-}
-
-/** A saved-result conflict is not a stale graph: retain the Run identity, never its old claims. */
-function identityOnlyRun(run: Rec, result: Rec, note: string): Rec {
-  return {
-    ...pick(run, ['ok', 'mutated', 'ran', 'status']),
-    result: pick(result, ['type', 'computed_against_hash']),
-    ...pick(run, ['run_identity']),
-    stale: true,
-    stale_note: note,
-  };
-}
-
-/** Exact 0/1 goal chances travel only when this selected Run's stored decision earned that option's figure. */
-function withoutUnearnedGoalCertainties(value: unknown, selectedCertainty: unknown): unknown {
-  const earned = new Map<string, number>();
-  const options = recordOf(selectedCertainty)?.options;
-  if (Array.isArray(options)) for (const raw of options) {
-    const row = recordOf(raw);
-    if (row?.earned === true && typeof row.option_id === 'string'
-      && (row.probability_of_goal === 0 || row.probability_of_goal === 1)) {
-      earned.set(row.option_id, row.probability_of_goal);
-    }
-  }
-  const visit = (part: unknown): unknown => {
-    if (Array.isArray(part)) return part.map(visit);
-    const row = recordOf(part);
-    if (row === undefined) return part;
-    const id = typeof row.option_id === 'string' ? row.option_id : typeof row.id === 'string' ? row.id : undefined;
-    const out: Rec = {};
-    for (const [key, member] of Object.entries(row)) {
-      if (key === 'probability_of_goal' && (member === 0 || member === 1) && (id === undefined || earned.get(id) !== member)) continue;
-      out[key] = visit(member);
-    }
-    return out;
-  };
-  return visit(value);
-}
-
-/** Normalize both the old tool copy and selected result under the same compact, certainty-aware history policy. */
-function permittedResult(value: Rec, selectedCertainty: unknown): Rec {
-  const enrichment = recordOf(value.enrichment);
-  const light = enrichment === undefined ? value
-    : { ...value, enrichment: Object.fromEntries(Object.entries(enrichment).filter(([k]) => !HEAVY_WHEN_PERMITTED.has(k))) };
-  return withoutUnearnedGoalCertainties(withoutKeys(light, namesConstraintProbability), selectedCertainty) as Rec;
-}
-
-/**
- * ⭐ THE KEPT RUN IS A PROJECTION OF THE RUN, BY ITS OWN PERMISSION (AI Quality ruling, #70 5859279825 + 5859288025;
- * R&C's pinned key set). The latest run's output is the one C1 keeps, and on the served A02 run its `result` is ~11.9 KB
- * (≈3k tokens), 94% of it `enrichment` — carried in every request for 24 turns after the Run. Only this KEPT copy is
- * projected: the prune runs when the turn is STORED, so the Run turn's own model input is unchanged.
- *   - STALE or unconfirmed, regardless of the original permission: only Run identity and status stay. Even the old
- *     summary can name a leader, so neither it nor any old figure or permission travels as current context.
- *   - PERMITTED and current (`claim_permissions.leader_may_be_named === true`): robustness, p_win_sensitivity,
- *     factor_evppi and edge_e_values leave `result.enrichment`; the comparison itself stays.
- *   - WITHHELD and current (anything else — fail closed): NOTHING that re-ranks. A whitelist (KEPT_WHEN_WITHHELD; the result keeps
- *     its summary, stamp, decision_sensitivity, inference_warnings, each option's label and, ONLY while this selected
- *     Run is current, its recorded outcome range; `options` keeps labels and levels. Ranking keys still drop.
- *   - No constraint probabilities (until B5 per_limit). A stale Run gets `stale: true` and a one-line note unless the
- *     turn's readback vouches for THIS run (`staleNoteFor`).
- * ⛔ THE RUN CHIP'S `canonical_state` IS NOT KEPT, except a permitted run's `run_delta`. It is the post-run readback the
- * fast path hands its one interpreting call (agent-v1-turn.ts, FAST PATH 3): a model snapshot, superseded by the state
- * given with every turn exactly as `get_canonical_state` is (C1), and its `run_state: complete_current` would contradict
- * the stale marking the moment the model moves. A withheld run's `run_delta` carries win-probability and leader deltas.
- * Idempotent: a projected run projects to itself, byte for byte, under the same readback.
- */
-function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec | undefined {
+function runHistoryMarker(output: unknown): Rec {
   const run = recordOf(output);
-  const result = recordOf(run?.result);
-  if (run === undefined || result === undefined) return undefined;
-  const note = staleNoteFor(run, result, readback);
-  if (note !== undefined) return identityOnlyRun(run, result, note);
-  const selectedResult = recordOf(analysisResultForAgent(readback?.analysisResult));
-  if (selectedResult === undefined || readback?.scenarioId === undefined) {
-    return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
+  if (run?.note === EARLIER_RUN_NOTE || run?.note === EARLIER_RUN_ATTEMPT_NOTE) return { note: run.note };
+  if (typeof run?.note === 'string'
+    && /^Earlier analysis ran at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z; see the current Run in CURRENT MODEL STATE\.$/.test(run.note)) {
+    return { note: run.note };
   }
-  const selectedCertainty = goalCertaintyForAgent(selectedResult,
-    { scenario_id: readback.scenarioId, analysis_state: readback.analysisState },
-    { raw: null, analysis_state: readback.analysisState, analysis_result: readback.analysisResult,
-      goal_certainty: readback.goalCertainty });
-  // A tuple match does not prove that an old earned 0/1 or withholding sentence is still the saved decision.
-  if (run.goal_certainty !== undefined
-    && !isDeepStrictEqual(keptGoalCertainty(run.goal_certainty), keptGoalCertainty(selectedCertainty))) {
-    return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
-  }
-  const ownPermission = recordOf(run.claim_permissions);
-  const basePermission = claimPermissionsFrom(readback.analysisState, readback.analysisReady, { requested: true });
-  const selectedPermission = recordOf(basePermission.leader_may_be_named || readback.graph === undefined
-    ? basePermission : withNonlinearIdentity(basePermission, readback.graph, readback.identityEvaluated)) ?? basePermission;
-  // The selected verdict also owns the withheld reason; an old reason is not a current explanation.
-  if (ownPermission !== undefined && !isDeepStrictEqual(ownPermission, selectedPermission)) {
-    return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
-  }
-  // A prior stale projection has no claims left to compare. If this read selects the same fact again, restore only
-  // from the selected persisted result and permission, never from an old tool payload.
-  const identityOnly = run.stale === true && ownPermission === undefined
-    && Object.keys(result).every((key) => key === 'type' || key === 'computed_against_hash');
-  const permitted = selectedPermission.leader_may_be_named === true;
-  let kept: Rec;
-  if (permitted) {
-    const selectedKeptResult = permittedResult(selectedResult, selectedCertainty);
-    if (!identityOnly && !isDeepStrictEqual(permittedResult(result, selectedCertainty), selectedKeptResult)) {
-      return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
-    }
-    const { stale: _s, stale_note: _n, canonical_state: canonical, goal_certainty: _c, ...rest } = run;
-    const canon = recordOf(canonical);
-    const delta = canon === undefined ? {} : pick(canon, ['run_delta', 'run_delta_absence_reason']);
-    kept = {
-      ...rest,
-      result: selectedKeptResult,
-      claim_permissions: selectedPermission,
-      ...(Object.keys(delta).length > 0 ? { canonical_state: delta } : {}),
-    };
-    kept = withoutKeys(kept, namesConstraintProbability) as Rec;
-  } else {
-    const { claim_permissions: _old, run_identity: _identity, ...body } = pick(run, KEPT_WHEN_WITHHELD);
-    kept = withoutKeys({ ...body, result: withheldResult(selectedResult, readback?.analysisResult, selectedCertainty, true),
-      claim_permissions: selectedPermission, ...pick(run, ['run_identity']) },
-      (k) => (RE_RANKING_KEY.test(k) || RE_RANKING_NAMED.has(k) || namesConstraintProbability(k))) as Rec;
-  }
-  if (selectedCertainty !== undefined) kept.goal_certainty = keptGoalCertainty(selectedCertainty);
-  else delete kept.goal_certainty;
-  return kept;
+  if (run?.ran !== true) return { note: EARLIER_RUN_ATTEMPT_NOTE };
+  const recordedAt = recordOf(run.run_identity)?.computed_at;
+  const time = typeof recordedAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(recordedAt)
+    && !Number.isNaN(Date.parse(recordedAt)) ? recordedAt : undefined;
+  return { note: time === undefined ? EARLIER_RUN_NOTE
+    : `Earlier analysis ran at ${time}; see the current Run in CURRENT MODEL STATE.` };
 }
 
 /**
- * ⭐ A SUPERSEDED SNAPSHOT IS NOT KEPT (slice C1; P3A replay of Paul's transcript, 27 Sep). Each state read added
- * 2.5–3k tokens and each run 3.1–3.6k, all carried for 24 turns — 55k of a 62.7k request was old copies of the model.
- * Every state read and build result is replaced by a stub, and every run result but the LATEST (the one a follow-up
- * question is about). The call and its output stay paired — only the output's text changes — so the next request
- * stays valid input (see `dropDanglingCalls`).
- *
- * ⭐ NOR IS AN APPLIED PROPOSAL, OR AN EARLIER APPROVAL (DL scoreboard PJ-C1, token half). Served run
- * `pj-20260927T181846Z` (CEE 523e18d, journey A): the first model call of each turn read 15.4k → 18.3k → 20.3k →
- * 21.3k → 22.8k input tokens over ten turns of propose → approve, against a 15,000 cap. Each proposal's output —
- * 230–990 tokens by the served per-call deltas, 1.9–2.7k for journey A's four — rode in every request for 24 turns
- * after the change it described was applied and was already in the state given with each turn (`agent-loop.ts`,
- * CURRENT MODEL STATE). So:
- *   - a `propose_*` output is stubbed once a LATER approval applied that proposal in full (`proposalAppliedBy`);
- *     a proposal still awaiting a yes — never approved, refused, or part-applied — is kept byte for byte;
- *   - every `authorise_change` output but the LATEST is stubbed (the latest is what "what did that change?" is about).
- * Messages, calls and their arguments are never touched. MEASURED on a journey-A-shaped history (the served A02 run,
- * then 3 proposals and 3 approvals; `__tests__/fixtures/a-journey-history.ts`): 30,899 → 22,893 bytes (−25.9%, ≈2.0k
- * tokens) with typed approvals, 28,432 → 23,160 (−18.5%, ≈1.3k) with chip approvals. ⚠ NOT ENOUGH ON ITS OWN for the
- * 15,000 cap: by the served deltas it takes journey A's last request from 22,752 to ≈20.0–20.9k. The latest run (≈3.9k
- * tokens, kept by the rule above though every approval since has changed the model) is the next largest item.
- * ⭐ So it is now kept as its PROJECTION, marked stale once the model moves (`keptRunOf`, above; AIQ #70 5859279825):
- * the same history measures 30,899 → 11,832 characters (−61.7%) typed, 28,432 → 12,099 (−57.4%) chip.
- *
- * ⛔ THE APPROVE CHIP LEAVES NO RECORD IN THE HISTORY. Its fast path (agent-v1-turn.ts, FAST PATH 2) appends only the
- * chip's words and Olumi's status — no call, no proposal id — and every approval in that served run was a chip. So the
- * route also passes the turn's own approval results (`approvalsThisTurn`); being this turn's, they are later than
- * every output already in the history.
+ * Snapshot outputs and all retained Run outputs yield to the fresh canonical state on the next turn.
+ * Keep the latest Run call/output pair for conversational continuity, but only as a neutral time marker.
+ * Applied proposal and earlier approval outputs are separately stubbed below.
  */
 export function pruneSupersededToolOutputs(
   items: readonly unknown[],
   approvalsThisTurn: readonly unknown[] = [],
-  readback?: KeptRunReadback,
+  _readback?: unknown,
 ): unknown[] {
   const nameOf = new Map<string, string>();
   for (const i of items) {
@@ -520,9 +224,7 @@ export function pruneSupersededToolOutputs(
     if (name === undefined) return i;
     if (SNAPSHOT_TOOLS.has(name) || (name === 'run_analysis' && k !== lastRun)) return { ...(i as object), output: SUPERSEDED_OUTPUT };
     if (name === 'run_analysis') {
-      // The latest run: its projection, by its own permission, marked stale unless this readback vouches for it.
-      const kept = keptRunOf(parsedOutput(i), readback);
-      return kept === undefined ? i : { ...(i as object), output: JSON.stringify(kept) };
+      return { ...(i as object), output: JSON.stringify(runHistoryMarker(parsedOutput(i))) };
     }
     if (name === 'authorise_change' && k !== lastApproval) return { ...(i as object), output: EARLIER_APPROVAL_OUTPUT };
     if (name.startsWith('propose_')) {
@@ -542,8 +244,8 @@ export function pruneSupersededToolOutputs(
  *
  * After the prune: a `function_call` whose output is one of its stubs is dropped WITH that output, and a reasoning item
  * is dropped only when EVERY call it produced is dropped (a reasoning item that also produced a kept call keeps all of
- * them). Messages are never touched; the latest run, the latest approval and a proposal awaiting a yes are not stubs, so
- * they stay byte for byte. PURE and idempotent; the result is valid input.
+ * them). Messages are never touched; the latest Run pair carries only a neutral marker. The latest approval and a
+ * proposal awaiting a yes are not stubs. PURE and idempotent; the result is valid input.
  */
 const PRUNE_STUBS: ReadonlySet<string> = new Set([SUPERSEDED_OUTPUT, APPLIED_PROPOSAL_OUTPUT, EARLIER_APPROVAL_OUTPUT]);
 

@@ -3,7 +3,7 @@
  *
  * PLoT's `probability_of_joint_goal` is how often ALL the user's limits hold — never the goal's target. The Run persists
  * PLoT's bytes (handler ownership), so the Agent-facing projection is where it is renamed: the LIVE `run_analysis` result
- * (`analysisResultForAgent`) and, because history keeps THAT output, every later turn's kept copy.
+ * (`analysisResultForAgent`). Later turns read the selected result afresh; history carries only a pointer.
  *
  * AIQ's served row 3 (Paul's MRR brief on 741eb64): "76% chance of BOTH £85k and churn < 5%" while the goal alone is 57% —
  * the joint (0.7591) is the churn limit only. Plus a real zero (P(goal) 0 present) and a withheld U (#416).
@@ -17,7 +17,7 @@ import { ALL_LIMITS_HOLD_NOTE } from '../decision-sensitivity.js';
 type Json = Record<string, any>;
 const ctx = { scenario_id: '550e8400-e29b-41d4-a716-4466554400e1', authenticated_user_id: null, request_id: 'r' };
 const GRAPH = { nodes: [{ id: 'goal_mrr', kind: 'goal', label: 'MRR' }], edges: [] };
-// The leader is permitted: the kept copy then keeps `result.enrichment` (the path the DL named).
+// The leader is permitted, exercising the full live Agent result.
 const STATE = { run_state: { kind: 'complete_current', computed_at: '2026-09-29T10:20:00.000Z' }, leader_claim: { permitted: true } };
 const READY_NAMED = { status: 'ready', analysis_admission: { admitted: true, permitted_analysis_mode: 'comparative_leader' } };
 
@@ -29,7 +29,6 @@ const ROW3 = [
 const BRIEF = { analysis_summary: { goal_fit: 0.7591, headline: 'x' } };
 const rawResult = (enrichment: Json) => ({ type: 'analysis_result', summary: 's',
   computed_against_hash: 'a'.repeat(16), enrichment });
-const selectedRawByRun = new WeakMap<Json, Json>();
 
 function world(enrichment: Json, state: Json = STATE) {
   const d: InternalDispatch = async (path) => {
@@ -42,30 +41,21 @@ function world(enrichment: Json, state: Json = STATE) {
   };
   return createAgentCapabilities(d, new ProposalStore());
 }
-const runOf = async (enrichment: Json, state?: Json): Promise<Json> => {
-  const output = await world(enrichment, state).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
-  selectedRawByRun.set(output, rawResult(enrichment));
-  return output;
-};
-const keptOf = (output: Json, selectedOverride?: Json): Json => {
-  const selected = selectedOverride ?? selectedRawByRun.get(output);
-  expect(selected, 'the graph read selects the independent raw result, not the Agent projection').toBeDefined();
+const runOf = async (enrichment: Json, state?: Json): Promise<Json> =>
+  await world(enrichment, state).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+const keptOf = (output: Json): Json => {
   const kept = pruneSupersededToolOutputs([
     { type: 'function_call', call_id: 'c1', name: 'run_analysis', arguments: '{}' },
     { type: 'function_call_output', call_id: 'c1', output: JSON.stringify(output) },
-  ], [], {
-    // These assertions concern the current kept Run. Without a selected readback the
-    // history projection must treat its figures as unconfirmed and omit them.
-    scenarioId: ctx.scenario_id,
-    analysisState: STATE,
-    analysisReady: READY_NAMED,
-    analysisResult: selected,
-    graph: GRAPH,
-  }) as Array<{ type: string; output?: string }>;
+  ]) as Array<{ type: string; output?: string }>;
   return JSON.parse(kept.find((x) => x.type === 'function_call_output')!.output!) as Json;
 };
+const expectNeutral = (kept: Json) => {
+  expect(Object.keys(kept)).toEqual(['note']);
+  expect(kept.note).toMatch(/^Earlier analysis ran(?: at .*?)?; see the current Run in CURRENT MODEL STATE\.$/);
+};
 
-describe('served row 3 (joint 0.7591 > P(goal) 0.57): the live result and the kept copy', () => {
+describe('served row 3 (joint 0.7591 > P(goal) 0.57): the live result and later history', () => {
   it('FIRST REPLY: P(goal) 0.57 stays the goal figure; the joint only as `all_limits_hold_probability`, with its note; no `goal_fit`', async () => {
     const r = await runOf({ option_comparison: ROW3, decision_brief: BRIEF });
     expect(r.claim_permissions.leader_may_be_named, 'precondition: a permitted Run').toBe(true);
@@ -75,18 +65,11 @@ describe('served row 3 (joint 0.7591 > P(goal) 0.57): the live result and the ke
     expect(r.result.limits_note).toBe(ALL_LIMITS_HOLD_NOTE);
   });
 
-  it('LATER TURNS: the kept copy of that permitted Run keeps the rename and the note — never the raw joint', async () => {
+  it('LATER TURNS: the kept Run contains no old goal or limits figures', async () => {
     const live = await runOf({ option_comparison: ROW3, decision_brief: BRIEF });
-    expect(selectedRawByRun.get(live)?.enrichment.option_comparison[0].probability_of_joint_goal).toBe(0.7591);
     const kept = keptOf(live);
-    const rows = kept.result.enrichment.option_comparison as Json[];
-    expect(rows[0].all_limits_hold_probability).toBe(0.7591);
-    expect(JSON.stringify(kept)).not.toMatch(/probability_of_joint_goal|"goal_fit"/);
-    expect(kept.result.limits_note).toBe(ALL_LIMITS_HOLD_NOTE);
-    const conflicted = keptOf(live, { ...selectedRawByRun.get(live), summary: 'A different saved result.' });
-    expect(conflicted.stale).toBe(true);
-    expect(conflicted.result).toEqual({ type: 'analysis_result', computed_against_hash: 'a'.repeat(16) });
-    expect(conflicted.claim_permissions).toBeUndefined();
+    expectNeutral(kept);
+    expect(JSON.stringify(kept)).not.toMatch(/0\.7591|0\.57|0\.81|probability|goal_fit|limits_note/);
   });
 
   it('a REAL ZERO: P(goal) 0 is present and stays the goal figure (0), beside its limits figure', async () => {
@@ -101,7 +84,7 @@ describe('served row 3 (joint 0.7591 > P(goal) 0.57): the live result and the ke
     expect(JSON.stringify(r.result)).not.toMatch(/probability_of_goal|probability_of_joint_goal/);
     expect((r.result.enrichment.option_comparison as Json[])[0].all_limits_hold_probability).toBe(0.7591);
     expect(r.goal_chance?.withheld).toBe(true);
-    expect(JSON.stringify(keptOf(r))).not.toMatch(/probability_of_joint_goal/);
+    expectNeutral(keptOf(r));
   });
 });
 
@@ -129,21 +112,19 @@ describe('a withheld run (#416) with an EMPTY current carrier and a stale numeri
     it(`${shape}: no withheld P(goal), no raw joint — live and kept`, async () => {
       const [live, kept] = await bothInputs({ option_comparison: [], inference_warnings: [WITHHOLD], ...legacy });
       expect(live.claim_permissions.leader_may_be_named, 'precondition: the permitted (kept-in-full) path').toBe(true);
-      for (const [name, input] of [['live', live], ['kept', kept]] as const) {
-        const text = JSON.stringify(input.result);
-        expect(text, name).not.toMatch(/probability_of_goal|probability_of_joint_goal|0\.8317/);
-        expect(text, `${name}: the stale copy itself is removed, not only its goal figures`).not.toMatch(/0\.6123/);
-        expect(text, `${name}: the typed withhold itself survives`).toMatch(/GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED/);
-      }
+      const text = JSON.stringify(live.result);
+      expect(text).not.toMatch(/probability_of_goal|probability_of_joint_goal|0\.8317/);
+      expect(text, 'the stale copy itself is removed, not only its goal figures').not.toMatch(/0\.6123/);
+      expect(text, 'the typed withhold itself survives in the live result').toMatch(/GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED/);
+      expectNeutral(kept);
     });
   }
 
   it('a current row that still carried a P(goal) under the withhold loses it (fail closed); its limits figure is renamed', async () => {
     const [live, kept] = await bothInputs({ option_comparison: STALE, inference_warnings: [WITHHOLD] });
-    for (const input of [live, kept]) {
-      const rows = input.result.enrichment.option_comparison as Json[];
-      expect(rows[0]).toEqual({ option_id: 'raise_59', label: 'Raise to £59', win_probability: 0.6123, all_limits_hold_probability: 0.7591 });
-    }
+    const rows = live.result.enrichment.option_comparison as Json[];
+    expect(rows[0]).toEqual({ option_id: 'raise_59', label: 'Raise to £59', win_probability: 0.6123, all_limits_hold_probability: 0.7591 });
+    expectNeutral(kept);
   });
 });
 
@@ -151,14 +132,13 @@ describe('CONTROL — no withhold: every legacy carrier is KEPT, its P(goal) int
   for (const [shape, legacy] of LEGACY_SHAPES) {
     it(`${shape}: P(goal) 0.8317 present; the joint only as all_limits_hold_probability`, async () => {
       const [live, kept] = await bothInputs({ option_comparison: ROW3, ...legacy });
-      for (const input of [live, kept]) {
-        const text = JSON.stringify(input.result);
-        expect(text).toMatch(/"probability_of_goal":0\.8317/);
-        expect(text, 'present control for the removal discriminator').toMatch(/0\.6123/);
-        expect(text).not.toMatch(/probability_of_joint_goal/);
-        expect(text).toMatch(/"all_limits_hold_probability":0\.7591/);
-        expect(input.result.limits_note).toBe(ALL_LIMITS_HOLD_NOTE);
-      }
+      const text = JSON.stringify(live.result);
+      expect(text).toMatch(/"probability_of_goal":0\.8317/);
+      expect(text, 'present control for the removal discriminator').toMatch(/0\.6123/);
+      expect(text).not.toMatch(/probability_of_joint_goal/);
+      expect(text).toMatch(/"all_limits_hold_probability":0\.7591/);
+      expect(live.result.limits_note).toBe(ALL_LIMITS_HOLD_NOTE);
+      expectNeutral(kept);
     });
   }
 });

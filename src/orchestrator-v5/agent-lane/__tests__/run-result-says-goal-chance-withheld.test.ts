@@ -64,33 +64,23 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
     expect(goalChanceWithheldForAgent({ summary: 's', inference_warnings: [WITHHELD_WARNING] })?.node_ids).toEqual(['mrr']);
   });
 
-  it('LATER TURNS keep the rule only while the selected Run is confirmed current', async () => {
+  it('LATER TURNS read the selected Run afresh; retained history never repeats the old warning or chance', async () => {
     const r = await world({ option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] }).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
-    expect(r.claim_permissions?.leader_may_be_named).not.toBe(true); // precondition: the WITHHELD projection is the one used
-    const stamp = 'aaaaaaaaaaaaaaaa';
     const computed_at = '2026-09-29T13:07:48.159Z';
-    const run = { ...r, result: { ...r.result, computed_against_hash: stamp },
-      run_identity: { scenario_id: ctx.scenario_id, graph_hash_at_run: stamp, computed_at } };
-    const selectedRaw = { type: 'analysis_result', summary: 's', computed_against_hash: stamp,
-      enrichment: { option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] } };
+    const run = { ...r, run_identity: { scenario_id: ctx.scenario_id, graph_hash_at_run: 'aaaaaaaaaaaaaaaa', computed_at } };
     const history = [
       { type: 'function_call', call_id: 'c1', name: 'run_analysis', arguments: '{}' },
       { type: 'function_call_output', call_id: 'c1', output: JSON.stringify(run) },
     ];
-    const output = (items: readonly unknown[]) => JSON.parse((items[1] as { output: string }).output) as Json;
-    const selected = { scenarioId: ctx.scenario_id,
-      analysisState: { run_state: { kind: 'complete_current', computed_at },
-        leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
-      analysisReady: { status: 'ready' }, analysisResult: selectedRaw, graph: GRAPH };
-    const current = pruneSupersededToolOutputs(history, [], selected);
-    expect(output(current).goal_chance).toEqual(r.goal_chance);
-    const changedVerdict = pruneSupersededToolOutputs(history, [], { ...selected,
-      analysisState: { ...selected.analysisState,
-        leader_claim: { permitted: false, withheld_reason: 'olumi_option_provisional' } } });
-    expect(output(changedVerdict).stale).toBe(true);
-    expect(output(changedVerdict).goal_chance).toBeUndefined();
+    const current = pruneSupersededToolOutputs(history, [], { scenarioId: ctx.scenario_id,
+      analysisState: { run_state: { kind: 'complete_current', computed_at } }, analysisResult: r.result });
     const unconfirmed = pruneSupersededToolOutputs(history);
-    expect(output(unconfirmed).stale).toBe(true);
-    expect(output(unconfirmed).goal_chance).toBeUndefined();
+    const marker = { note: `Earlier analysis ran at ${computed_at}; see the current Run in CURRENT MODEL STATE.` };
+    for (const items of [current, unconfirmed]) {
+      const output = JSON.parse((items[1] as { output: string }).output) as Json;
+      expect(output).toEqual(marker);
+      expect(JSON.stringify(output)).not.toMatch(/goal_chance|inference_warnings|MRR|probability|withheld/);
+    }
   });
+
 });

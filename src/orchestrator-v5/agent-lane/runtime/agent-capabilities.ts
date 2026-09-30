@@ -1188,6 +1188,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   const rec = (value: unknown): Record<string, unknown> | undefined =>
     value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
   const current = rec(rec(g.analysis_state)?.run_state)?.kind === 'complete_current';
+  const goalChance = current ? withGoalChance(g.analysis_result).goal_chance : undefined;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
   const byId = new Map(decisions.flatMap((value) => {
@@ -1202,12 +1203,13 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     const decision = byId.get(id);
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
-      ...(rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
+      ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
       ...(decision !== undefined ? { goal_certainty: decision } : {}),
     }];
   }) : [];
   return { ...context, analysis: { ...analysis,
     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
+    ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
   } };
 }

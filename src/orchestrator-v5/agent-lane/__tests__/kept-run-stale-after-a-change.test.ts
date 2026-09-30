@@ -1,17 +1,4 @@
-/**
- * ⭐ THE KEPT RUN SAYS WHEN THE MODEL HAS MOVED PAST IT (AI Quality ruling, #70 5859279825 + 5859288025, part (a)).
- *
- * C1 keeps the latest run's output in the Agent's history for 24 turns, and every approval since changes the model it
- * describes. The route stores each turn's history AFTER its final readback (`readBackState`) and hands that readback's
- * canonical verdict to the prune, so a run the model has moved past is stored `stale: true` with a one-line note —
- * before the NEXT request is built. Hash spaces: the verdict and the readback's own `analysis_result` stamp decide;
- * the readback's wire `graph_hash` is the RAW compare-and-set base, not the stamp's canonical projection.
- *
- * Driven through the REAL route with the served A02 run (`served-pj-a02-run.json`, a WITHHELD run): Run chip → propose
- * (one model call) → approve chip (zero) → a typed question, whose request is captured at the provider boundary.
- * CONTROL: Run chip → a typed question with no edit carries the run unmarked — which also proves the route hands the
- * prune a readback at all (with none, it fails closed and marks the run unconfirmed).
- */
+/** A real route keeps only a neutral Run marker after an edit or an unchanged follow-up. */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync } from 'node:fs';
@@ -32,16 +19,11 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 const served = JSON.parse(readFileSync(new URL('./fixtures/served-pj-a02-run.json', import.meta.url), 'utf8')) as {
   analysis_result: { computed_against_hash: string }; analysis_ready: unknown; analysis_state: Record<string, unknown>;
 };
-const STAMP = served.analysis_result.computed_against_hash;
 // A link is proposed only with the band the user typed THIS turn (#70 5845493088).
 const TYPED_BAND = 'Team size strongly drives velocity, so connect them.';
-const RE_RANKING = /confidence|near_tie|goal_fit|separation|alternative_winner|win_probabilit|sensitivity|evpi|enrichment/i;
-
 type Item = { type?: string; name?: string; call_id?: string; output?: string };
-const keysOf = (v: unknown): string[] => Array.isArray(v) ? v.flatMap(keysOf)
-  : v !== null && typeof v === 'object' ? Object.entries(v).flatMap(([k, x]) => [k, ...keysOf(x)]) : [];
 
-describe('the kept run is marked stale in the request after a change, and not without one', () => {
+describe('the retained Run output is a neutral pointer after a change and without one', () => {
   let app: FastifyInstance;
   /** What the provider was sent, request by request. */
   const requests: { input: Item[] }[] = [];
@@ -102,10 +84,10 @@ describe('the kept run is marked stale in the request after a change, and not wi
     expect(runCall, 'the run call is in the request').toBeDefined();
     const output = input.find((i) => i.type === 'function_call_output' && i.call_id === runCall!.call_id)?.output;
     expect(output, 'the run output is beside its call (valid input)').toBeTypeOf('string');
-    return JSON.parse(String(output)) as { stale?: unknown; stale_note?: unknown; result?: { computed_against_hash?: unknown } };
+    return JSON.parse(String(output)) as { note?: unknown };
   };
 
-  it('RED: Run → propose → approve chip → the next request carries the run marked stale, still paired and still withheld-safe', async () => {
+  it('Run → propose → approve chip → next request keeps only the marker, still paired', async () => {
     await runChip(EDITED_SCENARIO);
     script.push([{
       type: 'function_call', name: 'propose_model_change', call_id: 'c_link',
@@ -114,8 +96,8 @@ describe('the kept run is marked stale in the request after a change, and not wi
     const proposed = (await turn({ scenario_id: EDITED_SCENARIO, message: TYPED_BAND })).json() as { suggested_actions: { id: string; message: string }[]; _agent: { tool_calls: { name: string; proposal_id?: string }[] } };
     const proposalId = proposed._agent.tool_calls.find((c) => c.name === 'propose_model_change')?.proposal_id;
     expect(proposalId, 'control: a real proposal was made').toMatch(/^prop_/);
-    // The run is still current in the propose turn's own request: nothing has changed yet.
-    expect(carriedRun().stale, 'control: before the edit the run is unmarked').toBeUndefined();
+    const marker = carriedRun();
+    expect(marker).toEqual({ note: expect.stringMatching(/^Earlier analysis ran at .*; see the current Run in CURRENT MODEL STATE\.$/) });
     const approve = proposed.suggested_actions.find((a) => a.id === `agent-approve-proposal:${proposalId}`)!;
     expect(approve, 'the approve chip was offered').toBeDefined();
     const clicked = (await turn({ scenario_id: EDITED_SCENARIO, message: approve.message, source: 'chip', chip: { id: approve.id } })).json() as { _diagnostic_trace: { fast_path?: string } };
@@ -123,19 +105,12 @@ describe('the kept run is marked stale in the request after a change, and not wi
     expect(edges.get(EDITED_SCENARIO), 'control: the approval changed the model').toHaveLength(1);
 
     await turn({ scenario_id: EDITED_SCENARIO, message: 'What does the run say now?' });
-    const kept = carriedRun();
-    expect(kept.stale, 'the model moved after the run').toBe(true);
-    expect(String(kept.stale_note)).toMatch(/changed since this run/);
-    expect(kept.result?.computed_against_hash, 'still stamped with the hash it was computed against').toBe(STAMP);
-    expect(keysOf(kept).filter((k) => RE_RANKING.test(k) && k !== 'decision_sensitivity'), 'a withheld run keeps nothing that re-ranks').toEqual([]);
+    expect(carriedRun()).toEqual(marker);
   });
 
-  it('CONTROL: Run → a typed question with no edit carries the run unmarked', async () => {
+  it('CONTROL: Run → a typed question with no edit also carries only the marker', async () => {
     await runChip(UNEDITED_SCENARIO);
     await turn({ scenario_id: UNEDITED_SCENARIO, message: 'What does the run say?' });
-    const kept = carriedRun();
-    expect(kept.stale, 'the readback selected this very run').toBeUndefined();
-    expect(kept.stale_note).toBeUndefined();
-    expect(kept.result?.computed_against_hash).toBe(STAMP);
+    expect(carriedRun()).toEqual({ note: expect.stringMatching(/^Earlier analysis ran at .*; see the current Run in CURRENT MODEL STATE\.$/) });
   });
 });
