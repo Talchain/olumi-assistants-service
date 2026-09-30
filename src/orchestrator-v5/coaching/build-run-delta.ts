@@ -578,8 +578,12 @@ export function buildRunDelta(input: {
   const priorWins = identityBoundWinProbabilities(priorEchoes.enrichment);
   const currentWins = identityBoundWinProbabilities(currentEchoes.enrichment);
 
+  // ⛔ A share names its Run's leader by arithmetic ("opt-a 62% → 45%, opt-b 38% → 55%"), so a pair travels its
+  // shares only when BOTH Runs are entitled by the same per-Run authority that decides the leader ids above
+  // (CURRENT-READ-v1 row 9: leader_claim.permitted === false → no shares; AIQ F1 on #2378). Else `[]`: this block
+  // then carries no win-share reading at all, on the turn and on the cold read alike.
   const winProbabilities: RunDeltaWinProbabilityDelta[] = [];
-  for (const [optionId, priorValue] of priorWins) {
+  for (const [optionId, priorValue] of priorEntitled && currentEntitled ? priorWins : new Map<string, number>()) {
     const currentValue = currentWins.get(optionId);
     if (currentValue === undefined) continue;
     winProbabilities.push({
