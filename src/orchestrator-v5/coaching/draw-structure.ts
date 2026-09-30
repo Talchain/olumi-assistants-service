@@ -18,8 +18,8 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 
 const isZero = (v: unknown): boolean => v === 0;
 
 /**
- * The DRAW STRUCTURE of one recorded Run input (see the header). Sorted, so key order never matters. Values other
- * than 0 are NOT in the key: a value edit is exactly what C1 attributes.
+ * The DRAW STRUCTURE of one recorded Run input (see the header), in the order the Run recorded it. Values other than
+ * 0 are NOT in the key: a value edit is exactly what C1 attributes.
  */
 export function drawStructureKey(snapshot: RunInputSnapshot | Readonly<Record<string, unknown>>): string {
   const s: Readonly<Record<string, unknown>> = snapshot;
@@ -57,13 +57,16 @@ export function drawStructureKey(snapshot: RunInputSnapshot | Readonly<Record<st
     linkKeys.push(`${from}->${to}@${typeof l.exists_probability === 'number' ? l.exists_probability : 'default'}`);
     if (isZero(l.mean)) zeroKeys.push(`l:${from}->${to}`);
   }
+  // ⚠ ORDER IS STRUCTURE. ISL draws per sample in LIST order (edges, then factor uncertainties), so the same set in a
+  // different order misaligns every later draw. The lists keep the order the snapshot recorded (the wire order); only
+  // the zero flags, a pure set, are sorted. A reordered list reads C2: an under-claim, never a false C1.
   const sorted = (a: string[]) => [...a].sort();
   return JSON.stringify({
     v: s.snapshot_version ?? null,
-    options: sorted(optionIds),
-    settings: sorted(settingKeys),
-    factors: sorted(factorIds),
-    links: sorted(linkKeys),
+    options: optionIds,
+    settings: settingKeys,
+    factors: factorIds,
+    links: linkKeys,
     zero: sorted(zeroKeys),
   });
 }
