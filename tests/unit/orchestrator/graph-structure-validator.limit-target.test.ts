@@ -57,12 +57,14 @@ describe("a limit-only decision tally is a valid terminal (AIQ 5858730290 (a))",
     expect(noPath(g as unknown as GraphV3T)).toHaveLength(1);
   });
 
-  it('CONTRAST: a limited dead end fed by a NON-lever (an observable factor) is still refused — a missing link, not a tally', () => {
+  // ⛔ SUPERSEDED (#2129's parents-only rule; AIQ 5903604206, DL lease 5903604509): an exogenous cause of a limited
+  // quantity is part of its branch, not a missing link. A live arm on served cut-costs drew downtime's own uncertain
+  // causes as roots ("Migration complexity", observable, no parent); refusing them blocked 3 of 4 Runs.
+  it('an exogenous cause (an observable root) feeding a limited dead end is part of its branch — accepted', () => {
     const g = budgetGraph(true) as unknown as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
     g.nodes.push({ id: 'market_rate', kind: 'factor', category: 'observable', label: 'Market ad rate' });
     g.edges.push(e('market_rate', 'incremental_6_month_spend'));
-    // market_rate is itself a dead end too; the point is that the limited total is NOT exempt.
-    expect(noPath(g as unknown as GraphV3T).some((d) => d.includes('"incremental_6_month_spend"'))).toBe(true);
+    expect(noPath(g as unknown as GraphV3T)).toEqual([]);
   });
 
   it('CONTRAST: a limited node WITH an outgoing edge that still misses the goal is refused (not a terminal)', () => {
@@ -80,8 +82,8 @@ describe("a limit-only decision tally is a valid terminal (AIQ 5858730290 (a))",
  * limit it exists for ("≤ 2 weeks"): planning quality (a lever) and migration duration (observable, set by the GCP share
  * lever) → expected migration downtime, with no downtime → spend link (downtime is not a cause of the bill). Loop 2 refused
  * all three (`NO_PATH_TO_GOAL`), so Run 1, Run 2 and the cold state were all blocked, and the Agent advised adding the
- * false cause. The exemption now reads the limit's ROOT ancestors, not only its parents: every one a lever, an option or
- * the decision. An exogenous root feeding the limit is still a missing link (the contrast above).
+ * false cause. The exemption now reads the limit's ancestors, not only its parents: the limited terminal and every
+ * ancestor are exempt when a lever (an option or a controllable factor) is among them — the decision moves it.
  */
 describe('a limit branch driven only by the decision\'s levers is a valid sink (served cut-costs, 15f48f0b)', () => {
   /** The served stored graph after the brief (ids, kinds, categories, edges and the limit row, verbatim). */
@@ -125,13 +127,40 @@ describe('a limit branch driven only by the decision\'s levers is a valid sink (
     }
   });
 
-  it('CONTRAST: an exogenous root (no lever above it) feeding the limited branch is still a missing link — refused', () => {
+  it('live-arm shape: an uncertain cause of downtime drawn as a root ("Migration complexity", observable) is accepted', () => {
     const g = cutCosts() as unknown as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
-    g.nodes.push({ id: 'legacy_complexity', kind: 'factor', category: 'observable', label: 'Legacy system complexity' });
-    g.edges.push(e('legacy_complexity', 'migration_duration'));
+    g.nodes.push({ id: 'migration_complexity', kind: 'factor', category: 'observable', label: 'Migration complexity' });
+    g.edges.push(e('migration_complexity', 'expected_migration_downtime'));
+    expect(noPath(g as unknown as GraphV3T)).toEqual([]);
+  });
+
+  it('a two-step uncertain cause (team experience → migration complexity → downtime) is accepted, root and all', () => {
+    const g = cutCosts() as unknown as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
+    g.nodes.push({ id: 'migration_complexity', kind: 'factor', category: 'observable', label: 'Migration complexity' });
+    g.nodes.push({ id: 'team_experience', kind: 'factor', category: 'observable', label: 'Team migration experience' });
+    g.edges.push(e('team_experience', 'migration_complexity'), e('migration_complexity', 'expected_migration_downtime'));
+    expect(noPath(g as unknown as GraphV3T)).toEqual([]);
+  });
+
+  it('a lever that reaches the limit only through an observable (planning quality → duration → downtime) still makes it a sink', () => {
+    const g = cutCosts() as unknown as { nodes: Array<Record<string, unknown>>; edges: Array<{ from: string; to: string }> };
+    // Planning quality now acts on downtime only THROUGH duration, and GCP share no longer feeds duration.
+    g.edges = g.edges.filter((x) => !(x.from === 'migration_planning_quality' && x.to === 'expected_migration_downtime')
+      && !(x.from === 'gcp_workload_share' && x.to === 'migration_duration'));
+    g.edges.push(e('migration_planning_quality', 'migration_duration') as never);
+    expect(noPath(g as unknown as GraphV3T)).toEqual([]);
+  });
+
+  it('CONTRAST: a limited island no lever reaches (the decision cannot move it) is still refused', () => {
+    const g = cutCosts() as unknown as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
+    g.nodes.push({ id: 'vendor_sla', kind: 'factor', category: 'observable', label: 'Vendor SLA' });
+    g.nodes.push({ id: 'support_backlog', kind: 'outcome', label: 'Support backlog' });
+    g.edges.push(e('vendor_sla', 'support_backlog'));
+    (g as unknown as { goal_constraints: unknown[] }).goal_constraints.push({ constraint_id: 'c2', node_id: 'support_backlog', operator: '<=', value: 50, unit: 'tickets', provenance: 'explicit' });
     const found = noPath(g as unknown as GraphV3T);
-    expect(found.some((d) => d.includes('"expected_migration_downtime"'))).toBe(true);
-    expect(found.some((d) => d.includes('"legacy_complexity"'))).toBe(true);
+    expect(found.some((d) => d.includes('"support_backlog"'))).toBe(true);
+    expect(found.some((d) => d.includes('"vendor_sla"'))).toBe(true);
+    expect(found.some((d) => d.includes('"expected_migration_downtime"'))).toBe(false);
   });
 
   it('CONTRAST: a dead end that reaches neither the goal nor a limit is still refused beside the accepted branch', () => {

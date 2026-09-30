@@ -640,23 +640,24 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   // spends, and has no outgoing edge, so this loop refused the whole model on the node the limit watches. A tally bound
   // by a limit is a cost constraint scored against its limit, never a cause of the goal; drafting a tally → goal link to
   // pass this check would invent the false cause A4b removed.
-  // ⭐ …AND SO IS A LIMIT'S WHOLE BRANCH WHEN ONLY THE DECISION'S LEVERS DRIVE IT (R3 pre-flight #75 5903589565; AIQ
-  // 5903604206; DL lease 5903604509). Served cut-costs (`9f75612`, guest `15f48f0b`): planning quality (a lever) and
-  // migration duration (observable, set by the GCP-share lever) → expected migration downtime "≤ 2 weeks", with no
-  // downtime → spend link — downtime is not a cause of the bill. Every Run was blocked, and 2 of 4 drafts invented that
-  // link to pass here. Exempt ONLY when all hold: a `goal_constraints` row names the node; it has no outgoing directed
-  // edge (a terminal) and at least one parent; and walking up from it through every node that is not a lever, each
-  // branch ends at a lever (an option, a controllable factor, or the decision) — never at an exogenous root. Exempt are
-  // the limited node and the nodes that walk visits. Any other dead end — including a limited node an exogenous root
-  // feeds (a missing link, not a lever-driven quantity) — is still refused. Every parent a lever (journey C) is the
-  // one-step case of this walk.
+  // ⭐ …AND SO IS A LIMIT'S WHOLE BRANCH WHEN THE DECISION MOVES IT (R3 pre-flight #75 5903589565; AIQ 5903604206; DL
+  // lease 5903604509). Served cut-costs (`9f75612`, guest `15f48f0b`): planning quality (a lever) and migration duration
+  // (observable, set by the GCP-share lever) → expected migration downtime "≤ 2 weeks", with no downtime → spend link —
+  // downtime is not a cause of the bill. Every Run was blocked, and 3 of 4 first drafts invented that link to pass here.
+  // A live arm on the corrected prompt then drew downtime's own uncertain causes as roots ("Migration complexity",
+  // observable, no parent) — sound science, and refused by a parents-only rule. Exempt ONLY when all hold: a
+  // `goal_constraints` row names the node; it has no outgoing directed edge (a terminal) and at least one parent; and a
+  // lever (an option or a controllable factor) is among its ancestors — the decision moves it. Exempt are the limited node
+  // and every ancestor of it. Any other dead end — one reaching no limit, a limited node with an onward edge that misses
+  // the goal, or a limited island no lever reaches — is still refused. Journey C's all-lever parents is a case of this;
+  // an exogenous cause of a limited quantity is part of its branch (this supersedes #2129's parents-only contrast).
   const limitTargetIds = new Set(
     (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
   );
   const kindById = new Map(graph.nodes.map((n) => [n.id, n] as const));
   const isLever = (id: string): boolean => {
     const n = kindById.get(id);
-    return n !== undefined && (n.kind === 'option' || n.kind === 'decision'
+    return n !== undefined && (n.kind === 'option'
       || (n.kind === 'factor' && (n as { category?: unknown }).category === 'controllable'));
   };
   const directedParents = new Map<string, string[]>();
@@ -671,19 +672,17 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
     if (!kindById.has(id)) continue;
     if (graph.edges.some((edge) => isDirected(edge) && edge.from === id)) continue;
     if ((directedParents.get(id) ?? []).length === 0) continue;
-    const visited = new Set<string>([id]);
+    const ancestors = new Set<string>([id]);
     const walk: string[] = [...(directedParents.get(id) ?? [])];
-    let leverDriven = true;
-    while (walk.length > 0 && leverDriven) {
+    while (walk.length > 0) {
       const at = walk.pop()!;
-      if (visited.has(at)) continue;
-      visited.add(at);
-      if (isLever(at)) continue; // A lever is the decision's own: the walk stops there.
-      const parents = directedParents.get(at) ?? [];
-      if (parents.length === 0) leverDriven = false; // An exogenous root: a missing link, not a lever-driven quantity.
-      walk.push(...parents);
+      if (ancestors.has(at)) continue;
+      ancestors.add(at);
+      walk.push(...(directedParents.get(at) ?? []));
     }
-    if (leverDriven) for (const v of visited) limitSinkBranch.add(v);
+    // The decision moves it: a lever among its ancestors. A limited island nothing the options change reaches is refused.
+    if (![...ancestors].some((a) => a !== id && isLever(a))) continue;
+    for (const a of ancestors) limitSinkBranch.add(a);
   }
 
   for (const node of graph.nodes) {
