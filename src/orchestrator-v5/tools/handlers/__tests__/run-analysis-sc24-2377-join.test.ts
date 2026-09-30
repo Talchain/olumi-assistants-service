@@ -32,7 +32,6 @@ vi.mock('../../../../utils/telemetry.js', () => ({
 }));
 
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
-import { buildRunDelta } from '../../../coaching/build-run-delta.js';
 import { readScenarioAnalysis } from '../../../../routes/scenario-graph-analysis-read.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 
@@ -53,8 +52,6 @@ function invocation(turnId: string): HandlerInvocation {
     requestId: turnId, signal: new AbortController().signal, orientationText: '',
   } as unknown as HandlerInvocation;
 }
-
-type Rec2 = Record<string, any>;
 
 type Rec2 = Record<string, any>;
 

@@ -640,7 +640,8 @@ describe('AX2 binding: an explicit Run on the product brief keeps its run-turn c
     const { deriveAnalysisFreshness } = await import('../../context/freshness.js');
     const { canonicalStateFromFreshness } = await import('../../context/canonical-analysis-state.js');
     const { readMayNameLeadingOptionVerdict } = await import('../../context/claim-safety-read.js');
-    const freshness = deriveAnalysisFreshness([fact], deriveDecisionContextGraphHash(graph), undefined, { priorFactsReadOk: true });
+    // As production (#2377): the graph is the goal-unit proof for a Run that carries a goal snapshot.
+    const freshness = deriveAnalysisFreshness([fact], deriveDecisionContextGraphHash(graph), undefined, { priorFactsReadOk: true, currentGraph: graph });
     const response = composeDirectAnswerResponse({
       assistant_text: 'ran', stage: 'analyse', answerKind: 'substantive', blocks: [buildAnalysisResultBlock(fact, READY as never)],
     });
