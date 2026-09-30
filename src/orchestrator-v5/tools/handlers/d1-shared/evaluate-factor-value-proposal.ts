@@ -98,14 +98,19 @@ function statesShareOrUnitRange(unit: string, value: number | undefined): boolea
   if (/\b0\s*\/\s*1\b|\bbinary\b|\binactive\b|\bon\s*\/\s*off\b|\byes\s*\/\s*no\b/.test(unit)) return false;
   // A written 0–1 range: `0-1`, `0–1`, `0 to 1`, `[0, 1]` — never `0-10`, `0-100` or `0–1,000`.
   if (/(?:^|[^\d.,])0\s*(?:[-\u2013]|to)\s*1(?![\d.]|,\d)/.test(unit) || /\[\s*0\s*,\s*1\s*\]/.test(unit)) return true;
-  // Or a HEAD noun share / fraction / proportion: the word before "of", else the last word, once any bracket is
-  // dropped. `£ per share` (a rate per share), `share price (£)`, `shares outstanding` and `fractional FTE` are not.
-  const core = unit.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').trim();
+  // Any other bracket states another scale, a currency or a count (`(0-100)`, `(1-5)`, `(£)`, `(pct)`, `(pp)`, `(people)`,
+  // P0 PARTNER CR 5910740141): the unit is not a share, whatever its words, even with no stored value to contradict it.
+  if (/[([]/.test(unit)) return false;
+  // Or a HEAD noun share / fraction / proportion: after a comparative tail ("versus AWS", "vs today", "relative to …") is
+  // cut, the word before "of", else the last word; or `proportion` / `fraction` FIRST (served cut-costs: "proportion
+  // reduction versus AWS"). Never `share` first ("share price"), never with "per" (`£ per share`), never `shares` (a count)
+  // or `fractional FTE`.
+  const core = unit.replace(/\b(?:versus|vs\.?|relative to|compared (?:to|with)|against)\b.*$/, '').trim();
   if (/\bper\b/.test(core)) return false;
   const words = core.split(/[^a-z]+/).filter((w) => w !== '');
   const of = words.indexOf('of');
   const head = of > 0 ? words[of - 1] : words[words.length - 1];
-  return head === 'share' || head === 'fraction' || head === 'proportion';
+  return head === 'share' || head === 'fraction' || head === 'proportion' || words[0] === 'proportion' || words[0] === 'fraction';
 }
 export function isProportionScaledFactor(f: { unit: unknown; cap: number | undefined; value: number | undefined; raw_value: number | undefined }): boolean {
   const unit = typeof f.unit === 'string' ? f.unit.trim().toLowerCase() : '';

@@ -51,6 +51,18 @@ describe('served R2: the user\'s "about 25% cheaper" on a `share (0-1)` factor',
     expect(r.public_label).not.toContain('0.2%');
   });
 
+  it('RED (P0 PARTNER CR 5910740141): the served cut-costs unit "proportion reduction versus AWS" reads 25% as 0.25 too', async () => {
+    const swapped = { ...R2.graph, nodes: R2.graph.nodes.map((n: Json) => (n.label === LABEL ? { ...n, observed_state: { ...n.observed_state, unit: 'proportion reduction versus AWS' } } : n)) };
+    const d: InternalDispatch = async (path) => { if (path.endsWith('/graph')) return { status: 200, json: { graph: swapped, graph_hash: 'h0' } }; throw new Error(path); };
+    const store = new ProposalStore();
+    const r = await createAgentCapabilities(d, store).proposeAssumptions(
+      { scenario_id: '550e8400-e29b-41d4-a716-446655440c03', authenticated_user_id: null, request_id: 'r', user_text: R2.sentence } as never,
+      { assumptions: [{ factor_label: LABEL, value: 25, unit: '%', basis: "the team's quote", revise: true }] } as never) as Json;
+    expect((store.get(r.proposal_id)!.operations[0] as Json).value).toMatchObject({ value: 0.25, authored_by: 'user_stated' });
+    expect(r.public_label).toContain('20% \u2192 25%');
+    expect(r.public_label).not.toContain('0.2%');
+  });
+
   it('CONTROL: {0.25, "share (0-1)"} (the served call that saved) is unchanged', async () => {
     const { op } = await propose(0.25, 'share (0-1)');
     expect(op).toEqual({ value: 0.25, unit: 'share (0-1)', basis: "the team's quote", authored_by: 'user_stated' });
@@ -61,13 +73,23 @@ describe('the ONE proportion rule, on the units the served drafts use', () => {
   const uncapped = (unit: string, value = 0.2) => isProportionScaledFactor({ unit, cap: undefined, value, raw_value: undefined });
   it.each(['share (0-1)', 'fraction of workloads', 'fraction', 'proportion of workload', 'adoption fraction (0-1)', '0-1', '0-1 deployment', '0–1 adoption', 'share of revenue',
     // P0 PARTNER rows 5910371788 (convert): the range variants, and a head with no range.
-    '0–1', '0 to 1', '[0, 1]', 'share of spend'])(
+    '0–1', '0 to 1', '[0, 1]', 'share of spend',
+    // P0 PARTNER CR 5910740141: the served cut-costs unit (a qualifier after the head), and a constructed "… vs" tail.
+    'proportion reduction versus AWS', 'reduction share vs AWS'])(
     'RED: %s (a stated share or 0–1 range) is proportion-scaled', (unit) => { expect(uncapped(unit)).toBe(true); });
   it.each(['proportion', 'ratio', 'scale', 'unit_interval'])('CONTROL: the existing token %s still is', (unit) => { expect(uncapped(unit)).toBe(true); });
+  it.each(['share of voice (0-100)', 'share (1-5)', 'adoption share (0–10 scale)', 'proportion of revenue (£)', 'share of wallet (£k)',
+    'share (pct)', 'share (pp)', 'fraction (bps)', 'share of customers (people)'])(
+    'CONTROL: %s with NO stored value is never a share (P0 PARTNER CR 5910740141)', (unit) => {
+      expect(isProportionScaledFactor({ unit, cap: undefined, value: undefined, raw_value: undefined })).toBe(false);
+    });
   it.each(['0/1', 'active (0/1)', 'binary', 'active/inactive', 'deployed (0/1)', 'shares', '£/month', 'weeks', '%', 'subscribers', 'market share %', 'share (percent)',
     // P0 PARTNER rows 5910371788 (never): N1 range lookalikes, N2 share/fraction as a word not a head, N3 switches.
     '% (0-100)', 'score (0-10)', '0–1,000 subscribers', '£ per share', 'share price (£)', 'shares outstanding', 'shareholders',
-    'fractional FTE', 'binary (0-1)', 'yes/no (0 or 1)', 'on/off (0–1)'])(
+    'fractional FTE', 'binary (0-1)', 'yes/no (0 or 1)', 'on/off (0–1)',
+    // P0 PARTNER CR 5910740141 (latent, value undefined): a bracket stating another scale, a currency or a count.
+    'share of voice (0-100)', 'share (1-5)', 'adoption share (0–10 scale)', 'proportion of revenue (£)', 'share of wallet (£k)',
+    'share (pct)', 'share (pp)', 'fraction (bps)', 'share of customers (people)'])(
     'CONTROL: %s (a switch, a count, an amount, a percent) never is', (unit) => { expect(uncapped(unit)).toBe(false); });
   it('CONTROL: a value outside [0, 1] contradicts a share unit ("market share" holding 23)', () => {
     expect(uncapped('market share', 23)).toBe(false);
