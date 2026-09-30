@@ -719,6 +719,28 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(approveChipOf(t1)).toBeUndefined();
   }, 120_000);
 
+  it('a marked Olumi twin cannot be described as the user\'s existing comparison or silently added', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, proposed_by: 'olumi' }
+      : node) });
+    let toolOutput: { ok?: boolean; detail?: string } = {};
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }], rationale: 'Please add your suggestion.' }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
+        return say("That's Olumi's suggestion, not compared as yours; adopting it isn't available yet.");
+      },
+    ];
+    const turnResult = await turn({ message: 'Add your £59 suggestion as mine.' });
+    expect(toolOutput.ok).toBe(false);
+    expect(toolOutput.detail).toContain("Olumi's suggestion, not compared as yours");
+    expect(toolOutput.detail).toContain("Adopting one into your comparison isn't available yet");
+    expect(inner, 'no write or held proposal').toEqual([]);
+    expect(approveChipOf(turnResult)).toBeUndefined();
+  }, 120_000);
+
   it('[q5] RED (DL #70 5846812818, served F4/F4e): TWO options in one request, one a twin of "Raise to £59" → the valid one is still proposed as ONE change with ONE chip, the twin is named as not added, and approving adds only the valid one', async () => {
     graphOf.set(SCENARIO, seedGraph());
     let toolOutput: { ok?: boolean; refusal?: string; not_added?: { option: string; same_levels_as: string }[]; not_added_note?: string; options?: unknown; option?: { label?: string } } = {};

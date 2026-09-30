@@ -41,6 +41,17 @@ describe('planning a new option', () => {
     expect(p.detail).toContain('Hire One Developer');
   });
 
+  it('a marked Olumi suggestion is not described as a user option or silently adopted', () => {
+    const marked = [...NODES, { id: 'olumi_mid', kind: 'option', label: 'Try a contractor', proposed_by: 'olumi' }];
+    const p = planNewOption(marked, { label: 'Try a contractor', acts_on: [{ factor_label: 'Lead time', direction: 'negative' }], rationale: 'The user asked to add it.' });
+    expect(p.ok).toBe(false);
+    if (p.ok) return;
+    expect(p.refusal).toBe('label_already_exists');
+    expect(p.detail).toContain("Olumi's suggestion, not compared as yours");
+    expect(p.detail).toContain("Adopting one into your comparison isn't available yet");
+    expect(p.detail).not.toContain('The model already has an option');
+  });
+
   it('⛔ refuses an option linked to nothing — it would block EVERY option', () => {
     const p = planNewOption(NODES, { label: 'Do something vague', acts_on: [], rationale: 'r' });
     expect(p.ok).toBe(false);

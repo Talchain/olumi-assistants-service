@@ -103,7 +103,9 @@ export interface NewOptionPlan {
   readonly publicLabel: string;
 }
 
-interface GraphNodeLike { readonly id: string; readonly kind?: string; readonly label?: string; readonly description?: string }
+interface GraphNodeLike { readonly id: string; readonly kind?: string; readonly label?: string; readonly description?: string; readonly proposed_by?: unknown }
+
+export const OLUMI_SUGGESTION_NOT_ADOPTABLE = "Olumi's suggestion, not compared as yours. Adopting one into your comparison isn't available yet.";
 
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
 
@@ -142,7 +144,9 @@ export function planNewOption(
     return {
       ok: false,
       refusal: 'label_already_exists',
-      detail: `The model already has an option called "${clash.label}". Say what would differ, or set what that one does instead.`,
+      detail: clash.proposed_by === 'olumi'
+        ? `"${clash.label}" is ${OLUMI_SUGGESTION_NOT_ADOPTABLE} Nothing was prepared.`
+        : `The model already has an option called "${clash.label}". Say what would differ, or set what that one does instead.`,
     };
   }
 
