@@ -59,6 +59,7 @@ import { refitFramesForStatedEffects } from '../refit-frames.js';
 import { creditStatedFactorLevels, figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
+import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
@@ -1587,7 +1588,11 @@ export async function buildModelFromBrief(
     : statedGoal.nodes;
 
   const parked = (candidate as { unknowns?: unknown }).unknowns;
-  const openQuestions = userFacingDrafterQuestions(parked);
+  // ⛔ OLUMI'S SIZE SET ASIDE (`admit-candidate.ts` `.set_aside_estimate`) is asked ONCE, by the magnitude contract's own
+  // words ("… the model doesn't hold it yet"). The drafter's question quoting the same amount ("The provisional estimate
+  // of £75,000 per conversation …", Paul's funding turn 1) reads as a figure in use, so it is not shown beside it.
+  const setAside = setAsideEstimatesOf(admitted.loss);
+  const openQuestions = withoutSetAsideAmounts(userFacingDrafterQuestions(parked), setAside);
   // ⭐ THE MAGNITUDE CONTRACT (D5–D8): a size Olumi set aside, a user's size that cannot hold, or a placeholder sized to
   // the target's range is ASKED where the user always sees it — ahead of the drafter's own questions, and behind
   // every question placed below. Admission writes each as a `.magnitude_question` ledger entry (`admit-candidate.ts`).
@@ -1833,6 +1838,8 @@ export async function buildModelFromBrief(
     ...(admitted.pure_limit_asks !== undefined ? { pure_limit_asks: admitted.pure_limit_asks } : {}),
     // R3-2: limited spend tallies held as the sum of their levers, beside the sentence in `open_questions`.
     ...(admitted.sum_identities !== undefined ? { sum_identities: admitted.sum_identities } : {}),
+    // ⛔ Olumi's sizes NO edge carries, typed (AIQ 5914222384): never among the model's inputs, and said as set aside.
+    ...(setAside.length > 0 ? { set_aside_estimates: setAside.map(({ from, to, estimate }) => ({ from, to, estimate, status: 'set_aside_not_in_model' as const })) } : {}),
     not_represented: [
       // ⛔ C46: the goal's unstated scope, as Olumi's assumption (the `goal_scope` entry's `after`), FIRST.
       // Said here and never written on the goal node: `get_canonical_state` shows a node's description as
@@ -1883,10 +1890,11 @@ export async function buildModelFromBrief(
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
         // `magnitude_unconvertible`: a stated size that could not be read on the two ends' frames, so the standard
         // placeholder stands in (magnitude contract, D2/D6) — never dropped unseen.
+        // `set_aside_estimate`: Olumi's own stated size that no edge carries, said as "Olumi's guess, set aside: NOT in the model".
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
@@ -1906,6 +1914,28 @@ const UI_NODE_ID_RE = /\b(?:fac|opt|goal|outcome|edge|node|constraint)_[a-z0-9_]
 const UI_SNAKE_ID_RE = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+){2,}\b/;
 const carriesFieldPath = (q: string): boolean => UI_NODE_ID_RE.test(q) || UI_SNAKE_ID_RE.test(q)
   || (q.match(/\b[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\b/g) ?? []).some((t) => t.includes('_'));
+
+interface SetAsideEstimate { readonly from: string; readonly to: string; readonly estimate: string; readonly amount: number | null }
+
+/** Olumi's stated sizes the model does not use, from their ledger entries (`admit-candidate.ts` `magnitudeNotes`). */
+function setAsideEstimatesOf(loss: readonly unknown[]): SetAsideEstimate[] {
+  return loss.flatMap((l) => {
+    const e = l as { field_path?: unknown; before?: { effect_amount?: unknown } | null; after?: { from?: unknown; to?: unknown; estimate?: unknown } | null };
+    if (typeof e.field_path !== 'string' || !e.field_path.endsWith('.set_aside_estimate')) return [];
+    const a = e.after ?? {};
+    if (typeof a.from !== 'string' || typeof a.to !== 'string' || typeof a.estimate !== 'string') return [];
+    const amount = typeof e.before?.effect_amount === 'number' && Number.isFinite(e.before.effect_amount) ? e.before.effect_amount : null;
+    return [{ from: a.from, to: a.to, estimate: a.estimate, amount }];
+  });
+}
+
+/** The drafter's questions, less any that writes the amount of a size Olumi set aside (it is asked in the contract's words). */
+function withoutSetAsideAmounts(questions: string[], setAside: readonly SetAsideEstimate[]): string[] {
+  const amounts = setAside.map((s) => s.amount).filter((a): a is number => a !== null && a !== 0).map(Math.abs);
+  if (amounts.length === 0) return questions;
+  const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-9 * Math.max(1, a, b);
+  return questions.filter((q) => !findStatedAmounts(q).some((w) => amounts.some((a) => same(Math.abs(w.magnitude), a))));
+}
 
 export function userFacingDrafterQuestions(parked: unknown): string[] {
   return Array.isArray(parked)

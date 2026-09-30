@@ -14,7 +14,7 @@
  *     produced by THIS FILE running in a pristine worktree at the PR base
  *     (`e58a31c1`) under `LANE_CAPTURE_BASE=1`, with byte-identical store
  *     doubles because it is the same file. Every pre-existing key must be
- *     deep-equal, and the new key set must be EXACTLY the two declared ones. A
+ *     deep-equal, and the new key set must be EXACTLY the declared ones. A
  *     lane-authored expectation could not have caught a reordered or
  *     re-derived pre-existing value; a capture can.
  *
@@ -126,6 +126,21 @@ const PRE_EDIT_GRAPH_HASH = computeAnalysisAffectingGraphHash({
     ? { ...node, observed_state: { value: 0.3, cap: 1 } }
     : node),
 })!;
+const FIGURE_GRAPH = {
+  ...GRAPH,
+  goal_node_id: "goal_growth",
+  nodes: GRAPH.nodes.map((node) => node.id === "goal_growth"
+    ? { ...node, goal_threshold_frame: "level", goal_threshold_unit: "£/month",
+      observed_state: { unit: "£/month" } }
+    : node),
+};
+const FIGURE_GRAPH_HASH = computeAnalysisAffectingGraphHash(FIGURE_GRAPH as never)!;
+const PRE_EDIT_FIGURE_GRAPH_HASH = computeAnalysisAffectingGraphHash({
+  ...FIGURE_GRAPH,
+  nodes: FIGURE_GRAPH.nodes.map((node) => node.id === "fac_market"
+    ? { ...node, observed_state: { value: 0.3, cap: 1 } }
+    : node),
+} as never)!;
 
 /**
  * A committed provisional run. `mayName` drives the PERSISTED claim-safety
@@ -215,7 +230,7 @@ const BASE_CAPTURE_PATH = join(
  * identity — the link writer's own input (`identityRunUseFromFacts`), carried so the Agent's door cannot disagree with
  * the writer. It rides every answered read, `null` when no Run succeeded, so the base fixture's no-fact read shows it.
  */
-const NEW_KEYS = ["analysis_state", "analysis_result", "graph_hash", "analysis_admission", "analysis_identity_run_use"] as const;
+const NEW_KEYS = ["analysis_state", "analysis_result", "current_read", "graph_hash", "analysis_admission", "analysis_identity_run_use"] as const;
 
 /**
  * Additions made INSIDE a pre-existing key since the base capture — declared
@@ -374,6 +389,73 @@ describe("2.1271 — the committed provisional analysis reaches the wire (pin 2)
   });
 });
 
+describe("CURRENT-READ-v1 — the selected Run reaches a cold graph read", () => {
+  beforeEach(() => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: FIGURE_GRAPH, briefText: BRIEF });
+  });
+  const withFigures = (graphHash: string) => {
+    const fact = runAnalysisFact({ graphHash, mayName: true });
+    const result = fact.result as Record<string, unknown>;
+    const enrichment = result.enrichment as Record<string, unknown>;
+    const compared = enrichment.option_comparison as Array<Record<string, unknown>>;
+    compared[0] = { ...compared[0], status: "computed", outcome: { mean: 90 }, probability_of_goal: 1 };
+    result.goal_certainty = [{
+      option_id: "opt_hire", probability_of_goal: 1, earned: false,
+      unsized_path: { from: "fac_market", enters_goal_through: "fac_market" },
+      break_even: {
+        kind: "product", projected_if_held: 92, threshold: 85,
+        operand_id: "fac_market", fraction: 0.1, operand_count: 1,
+      },
+      say: "The conditional projection is 92 if market demand holds; its chance is not known.",
+    }];
+    return fact;
+  };
+
+  it("serves the selected block and attested conditional figure after a cold read, withholding the untyped mean", async () => {
+    readFactsFor.mockResolvedValue([withFigures(FIGURE_GRAPH_HASH)]);
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    const current = body.current_read as Record<string, unknown>;
+    expect(current.run_state).toMatchObject({ kind: "complete_current" });
+    expect(body.analysis_result).not.toBeNull();
+    expect(current).not.toHaveProperty("result");
+    expect(current.computed_against_hash).toBe(FIGURE_GRAPH_HASH);
+    expect(current.current_analysis_hash).toBe(FIGURE_GRAPH_HASH);
+    expect(current.figures).toMatchObject([
+      { option_id: "opt_hire", value: 92, measure: "projected_if_held", run_hash: FIGURE_GRAPH_HASH,
+        computed_at: "2026-08-17T09:15:50.000Z", condition: { kind: "if_held", operand_id: "fac_market" } },
+    ]);
+    expect(current.figures).toHaveLength(1);
+    expect((current.figures as Array<{ measure: string }>).every((figure) => figure.measure === "projected_if_held")).toBe(true);
+  });
+
+  it("withdraws the conditional figure on an edited graph, then serves only the rerun on the next cold read", async () => {
+    const app = await buildApp();
+    readFactsFor.mockResolvedValue([withFigures(PRE_EDIT_FIGURE_GRAPH_HASH)]);
+    const stale = (await read(app)).json() as Record<string, unknown>;
+    expect(stale.current_read).toMatchObject({ run_state: { kind: "complete_stale" }, figures: [] });
+    expect(stale.current_read).not.toHaveProperty("result");
+    expect(stale.current_read).toMatchObject({
+      computed_against_hash: PRE_EDIT_FIGURE_GRAPH_HASH,
+      current_analysis_hash: FIGURE_GRAPH_HASH,
+    });
+    expect(stale.analysis_result).toBeNull();
+
+    readFactsFor.mockResolvedValue([withFigures(FIGURE_GRAPH_HASH)]);
+    const rerun = (await read(app)).json() as Record<string, unknown>;
+    expect(rerun.current_read).toMatchObject({ run_state: { kind: "complete_current" } });
+    expect((rerun.current_read as { figures: unknown[] }).figures).toHaveLength(1);
+    expect(rerun.current_read).not.toHaveProperty("result");
+  });
+
+  it("distinguishes an unreadable analysis from no saved Run while preserving the graph", async () => {
+    readFactsFor.mockRejectedValue(new Error("fact store unavailable"));
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    expect(body.graph_present).toBe(true);
+    expect(body.current_read).toMatchObject({ run_state: { kind: "unknown_degraded" }, figures: [] });
+    expect(body.current_read).not.toHaveProperty("result");
+  });
+});
+
 // ─── 3. A failed read is not "never analysed" ─────────────────────────────
 
 describe("2.1271 — an unreadable fact store never claims the scenario was never analysed (pin 3)", () => {
@@ -452,6 +534,8 @@ describe("2.1271 — the analysis leg is strictly additive to the graph read (pi
     expect(body.graph_present).toBe(false);
     expect(body.analysis_state).toBeNull();
     expect(body.analysis_result).toBeNull();
+    expect(body.current_read).toMatchObject({ run_state: null, figures: [] });
+    expect(body.current_read).not.toHaveProperty("result");
     expect(readRecent).not.toHaveBeenCalled();
   });
 

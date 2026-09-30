@@ -1,0 +1,55 @@
+{
+  "source": "R3 served r8r9/03-run2.json (2026-09-30)",
+  "scenario_id": "r8r9-served-fixture",
+  "run_state": {
+    "kind": "complete_current",
+    "computed_at": "2026-09-30T11:02:22.019Z"
+  },
+  "selected_goal": {
+    "nodes": [{
+      "id": "mrr", "kind": "goal", "goal_threshold_frame": "level",
+      "goal_threshold_unit": "£/month", "observed_state": { "unit": "£/month" }
+    }]
+  },
+  "current_result": {
+    "type": "analysis_result",
+    "computed_against_hash": "e7d843f951477155",
+    "leading_option_id": "raise_pro_price_to_59",
+    "enrichment": {
+      "option_comparison": [
+        {
+          "option_id": "raise_pro_price_to_59",
+          "status": "computed",
+          "outcome": {
+            "mean": 90993.23628890762
+          },
+          "probability_of_goal": 1
+        }
+      ]
+    }
+  },
+  "selected_fact": {
+    "graph_hash_at_run": "e7d843f951477155",
+    "computed_at": "2026-09-30T11:02:22.019Z",
+    "goal_certainty": [
+      {
+        "option_id": "raise_pro_price_to_59",
+        "probability_of_goal": 1,
+        "earned": false,
+        "unsized_path": {
+          "from": "pro_plan_price",
+          "enters_goal_through": "paying_subscribers"
+        },
+        "break_even": {
+          "kind": "product",
+          "projected_if_held": 91836.73469387756,
+          "threshold": 85000,
+          "operand_id": "paying_subscribers",
+          "fraction": 0.07444444444444454,
+          "operand_count": 112
+        },
+        "say": "‘Raise Pro price to £59’ gives about £91,800 / month if ‘Paying subscribers’ holds. It misses £85,000 / month if raising ‘Pro plan price’ loses more than about 7.4% of ‘Paying subscribers’ (about 112 of your 1,500 subscribers). Olumi hasn’t sized how ‘Pro plan price’ moves ‘Paying subscribers’, so it can’t yet say how likely that is."
+      }
+    ]
+  }
+}
