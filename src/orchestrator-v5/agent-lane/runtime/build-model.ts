@@ -232,6 +232,12 @@ export function buildCandidateSchema(): Record<string, unknown> {
         'The change in the SOURCE\u2019s own unit that causes `effect_amount`: 1 for switching a yes/no on, 10 for a GBP 10 price rise. null when `effect_amount` is null.' },
       effect_provenance: { anyOf: [provenance, { type: 'null' }], description:
         '"explicit" only when the user stated this size; null when `effect_amount` is null.' },
+      // ⭐ DL #75 5916504679: the drafter's word that a link holds by definition. Optional in the contract (a recorded
+      // candidate validates unchanged), required in what is sent (`strictForTheDrafter`); checked before any edge has it.
+      definitional: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
+        'true ONLY when this link holds BY DEFINITION, not by estimate: the source is part of the target\u2019s own quantity, in the SAME unit, '
+        + 'so one unit of the source moves the target by exactly one unit (money lost to a risk is money the goal does not get: '
+        + 'effect_amount -1, effect_per_source_change 1). null for every other link.' },
     }, ['from', 'to', 'direction', 'provenance', 'effect_amount', 'effect_per_source_change', 'effect_provenance']) },
     /**
      * ⛔ C46: a product the analysis can only ADD UP must be DECLARED, never read off a label.

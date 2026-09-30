@@ -654,6 +654,11 @@ export const EdgeProvenanceV3 = z.object({
     strength_mean: z.number().finite(),
     strength_mean_frame: z.literal("edge_strength"),
   }).optional().catch(undefined),
+  /**
+   * The link holds BY DEFINITION, checked at construction (`definitionalLink`: ±1 in one unit, on the drafter's word; DL
+   * #75 5916504679), so its size is not Olumi's guess. Only `true` or absent; anything else is dropped.
+   */
+  definitional: z.literal(true).optional().catch(undefined),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
 
