@@ -27,8 +27,22 @@ const SERVED = JSON.parse(
 
 const DENIAL = 'no option can be called the leader';
 
+// The provisional-copy axis, with DR row 4 held off (#2371): the served draft states a target no Run can test yet, which
+// caps the real draft at `exploratory` (`target-testability.test.ts`). The served hash check below reads the fixture.
+/**
+ * The same graph with NO stated target, so DECISION-REPRESENTATION row 4's verdict has no subject (#2371): these rows
+ * keep testing their own axis. Only the goal's raw target and its own limit row go; nothing else about the capture moves.
+ */
+function withoutTarget<G>(graph: G): G {
+  const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
+  const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
+  for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
+  return c as unknown as G;
+}
+
 function admissionOf(mutate: (g: Json) => void = () => {}) {
-  const graph = structuredClone(SERVED.draft_graph);
+  const graph = withoutTarget(structuredClone(SERVED.draft_graph));
   mutate(graph);
   return resolveAnalysisAdmission(graph);
 }

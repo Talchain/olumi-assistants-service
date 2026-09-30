@@ -55,9 +55,14 @@ export type TargetTestability =
  * A confirmed identity's ISL rules are checked by the Run, so that pass stays listed as unchecked.
  */
 const OLUMI_SIZED = /^olumi_/;
+/**
+ * A link sized only by Olumi (R3 #2371 5914745577): an `olumi_*` magnitude, OR a plain `defaulted: true` size (~58% of
+ * Olumi's served defaults carry no marker; m1's churn → subscribers-at-12-months is one, the link that turns a monthly
+ * rate into a year's loss). The user's own size never is.
+ */
 function olumiGuess(e: Rec): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
-  return p?.source !== 'user_specified' && typeof p?.magnitude === 'string' && OLUMI_SIZED.test(p.magnitude);
+  return p?.source !== 'user_specified' && ((typeof p?.magnitude === 'string' && OLUMI_SIZED.test(p.magnitude)) || e.defaulted === true);
 }
 function sizedInGoalUnit(e: Rec, goalUnit: string | undefined): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
@@ -139,8 +144,10 @@ export function targetTestabilityOf(graph: unknown): TargetTestability {
       }
     }
     const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
-    // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links).
-    const guess = edges.find((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && olumiGuess(e));
+    // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
+    // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
+    const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.stated_in_brief !== false).map((n) => n.id));
+    const guess = edges.find((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to) && olumiGuess(e));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     const unconverted = identityForwarded ? undefined : into.find((e) => !sizedInGoalUnit(e, goalUnit));
@@ -194,4 +201,18 @@ export function notTargetTestableSentence(graph: unknown, verdict: TargetTestabi
   const question = cases.map((c) => said(c)[1]).find((q): q is string => q !== null);
   const because = reasons.length === 1 ? reasons[0] : `${reasons.slice(0, -1).join(', ')} and ${reasons[reasons.length - 1]}`;
   return `Olumi can compare your options, but can't yet test them against your target (${target}), because ${because}.${question !== undefined ? ` ${question}` : ''}`;
+}
+
+/**
+ * The `run_analysis` warning for a run whose goal figures are withheld because the target can't be tested yet (AIQ #2371
+ * 5914730220): the goal chance goes with the leader and the shares. "Not shown." opens it, as every goal-figure withhold
+ * does (its readers key on that opener); the rest is the DR sentence. `null` for a verdict that doesn't cap.
+ */
+export function targetNotTestableWarning(
+  graph: unknown, verdict: TargetTestability, optionIds: readonly string[], code: string,
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[] } | null {
+  if (!targetVerdictCapsOrdering(verdict) || verdict.kind !== 'not_testable') return null;
+  const said = notTargetTestableSentence(graph, verdict);
+  const message = said !== null && said.length <= 388 ? `Not shown. ${said}` : "Not shown. Olumi can compare your options, but can't yet test them against your target.";
+  return { code, message, severity: 'warning', node_ids: [verdict.goal_id], option_ids: [...optionIds] };
 }

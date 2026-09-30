@@ -23,8 +23,11 @@ const RAW = JSON.parse(readFileSync(new URL('./fixtures/target-testability-20260
 const confirmed = (g: Json): Json => { const c = structuredClone(g); for (const n of c.nodes) if (n.kind === 'goal' && n.nonlinear_identity) n.nonlinear_identity.stated_in_brief = true; return c; };
 /** Paul's graph after MODEL GENERATION's G6: his stated "£0 secured so far" is today's level (5913925033). */
 const withToday = (g: Json): Json => { const c = structuredClone(g); for (const n of c.nodes) if (n.kind === 'goal') n.observed_state = { value: 0, baseline: 0, raw_value: 0, unit: '£', cap: n.goal_threshold_cap, source: 'user_stated' }; return c; };
-/** Every Olumi-sized link made the user's own size (as the user's answer to the one question would). */
-const userSized = (g: Json): Json => { const c = structuredClone(g); for (const e of c.edges) if (typeof e.provenance?.magnitude === 'string' && e.provenance.magnitude.startsWith('olumi_')) e.provenance = { ...e.provenance, source: 'user_specified' }; return c; };
+/** An Olumi-sized link (an `olumi_*` magnitude or a plain `defaulted` size, R3 5914745577), made the user's own. */
+const olumiSized = (e: Json): boolean => e.provenance?.source !== 'user_specified' && ((typeof e.provenance?.magnitude === 'string' && e.provenance.magnitude.startsWith('olumi_')) || e.defaulted === true);
+const userSizedWhere = (g: Json, which: (e: Json) => boolean): Json => { const c = structuredClone(g); for (const e of c.edges) if (olumiSized(e) && which(e)) e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' }; return c; };
+/** Every Olumi-sized link made the user's own size (as the user's answers to the one question would). */
+const userSized = (g: Json): Json => userSizedWhere(g, () => true);
 /** …and every link into the goal given a £ size per unit of its source (R3 5914500931's £-sized form). */
 const poundsInto = (g: Json): Json => { const c = userSized(g); const goal = c.nodes.find((n: Json) => n.kind === 'goal'); for (const e of c.edges) if (e.to === goal.id) e.provenance = { ...(e.provenance ?? {}), source: 'user_specified', natural_effect: { amount: 50000, amount_unit: goal.goal_threshold_unit, per_source_change: 1, per_source_change_unit: 'unit' } }; return c; };
 /** R3's control: the user's qualitative "strong" on every link into the goal — theirs, but unitless. */
@@ -104,8 +107,14 @@ describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn gue
     expect(resolveAnalysisAdmission(M1).permitted_analysis_mode).toBe('exploratory');
   });
 
-  it('GREEN: the same graph once the user sizes price → churn themselves → not refused; the admission keeps its own mode', () => {
-    const sized = userSized(M1);
+  it('RED (R3 5914745577): price → churn user-sized ALONE still counts churn once — churn → subscribers-at-12-months is Olumi\'s default', () => {
+    const v = targetTestabilityOf(userSizedWhere(M1, (e) => e.from === 'pro_plan_price' && e.to === 'monthly_churn_rate'));
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.lever)).toEqual([expect.stringMatching(/churn/i)]);
+  });
+
+  it('GREEN: the user answers AIQ\'s one question ("how many of your 1,500 would you lose over a year at £59?"), sizing the route → kept', () => {
+    // The identity's own operand edges (price → mrr, subscribers → mrr) are exact, never "Olumi-sized" (R3 5914745577).
+    const sized = userSizedWhere(M1, (e) => e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months');
     expect(targetTestabilityOf(sized).kind).toBe('unchecked');
     const a = resolveAnalysisAdmission(sized);
     expect(a.permitted_analysis_mode).not.toBe('exploratory');

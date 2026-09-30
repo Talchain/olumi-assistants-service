@@ -45,7 +45,8 @@ import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
-import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { targetTestabilityOf, targetNotTestableWarning } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import type {
   RunAnalysisArgs,
@@ -1828,6 +1829,24 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             goal_id: unread.goal.id, part_ids: [unread.rate.id, unread.count.id], option_ids: scoredIds,
           },
           'run_analysis: goal figures withheld: the user\'s own figures make the goal a product this run did not evaluate',
+        );
+      }
+      // ⛔ DR ROW 4 (AIQ #2371 5914730220): a target this run can't test (the verdict that capped the admission's mode at
+      // `exploratory`) has no goal chance for ANY option, as it has no leader or share. Once, and only when no earlier
+      // withhold already said its own reason.
+      const untestable = runWithheldGoalFigures(response as Record<string, unknown>) || scoredIds.length === 0 ? null
+        : targetNotTestableWarning(graphForAnalysis, targetTestabilityOf(graphForAnalysis), scoredIds, GOAL_FIGURES_TARGET_NOT_TESTABLE);
+      if (untestable !== null) {
+        response = withholdOptionGoalFigures(response, new Set(scoredIds), untestable);
+        log.info(
+          {
+            event: 'run_analysis.goal_figures_withheld_target_not_testable',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            // Redacted: ids only.
+            goal_id: untestable.node_ids[0], option_ids: scoredIds,
+          },
+          'run_analysis: goal figures withheld: the goal\'s target can\'t be tested yet',
         );
       }
     }
