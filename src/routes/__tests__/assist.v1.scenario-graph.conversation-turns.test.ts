@@ -99,15 +99,6 @@ const GRAPH_NO_LAYOUT = {
   options: [{ id: "n1", label: "Take the job" }],
 };
 
-/** The same graph with canvas positions bled in — the drift case pin (5) must SEE. */
-const GRAPH_WITH_LAYOUT = {
-  nodes: [
-    { id: "n1", label: "Take the job", category: "option", position: { x: 12, y: 40 } },
-    { id: "n2", label: "Commute time", category: "factor" },
-  ],
-  edges: [{ from: "n1", to: "n2", weight: 0.4 }],
-  options: [{ id: "n1", label: "Take the job" }],
-};
 
 async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify();
