@@ -42,6 +42,19 @@ describe('first construction — every entity gets a ref, in array order within 
   });
 });
 
+describe('no backfill: a pre-refs graph is not rewritten by an unchanged write', () => {
+  it('an unchanged write to a graph with NO refs returns the SAME object (no spurious version, identity unchanged)', () => {
+    expect(assignEntityRefs(FIRST, FIRST).graph).toBe(FIRST);
+  });
+
+  it('a NEW entity on a pre-refs graph gets a ref; the entities the base held stay ref-less', () => {
+    const out = assignEntityRefs({ ...FIRST, nodes: [...(FIRST.nodes as Json[]), node('opt_pilot', 'option')] }, FIRST).graph as Json;
+    expect(refs(out).opt_pilot).toBe('O1');
+    expect(refs(out).opt_raise).toBeUndefined();
+    expect(out.ref_high_water).toEqual({ O: 1 });
+  });
+});
+
 describe('never renumbered, never reused (AIQ condition 1)', () => {
   const v1 = assignEntityRefs(FIRST).graph as Json;
 

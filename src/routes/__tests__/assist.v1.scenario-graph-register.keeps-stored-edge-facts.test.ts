@@ -122,6 +122,17 @@ function edgeOf(graph: Graph, pair: { from: string; to: string }): Edge {
   return hits[0]!;
 }
 
+
+// ⚠ THE SERVED CAPTURES PREDATE STABLE ENTITY REFS (`graph/entity-refs.ts`). This spec replays served bytes and pins
+// served hashes to prove the edge-facts carry; a ref on a fresh registration would move every pinned identity for a
+// reason the carry has nothing to do with. So refs are OFF for this replay only. They are covered on the same route in
+// `assist.v1.scenario-graph-register.entity-refs.test.ts`.
+vi.mock('../../orchestrator-v5/graph/entity-refs.js', async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  assignEntityRefs: <G,>(graph: G) => ({ graph, assigned: [], carried: [] }),
+  raiseRefHighWaterForRestore: <G,>(graph: G) => graph,
+}));
+
 const identityOf = (g: unknown) => computeGraphIdentityHash(g as never)?.value;
 const analysisHashOf = (g: unknown) => computeAnalysisAffectingGraphHash(g as never);
 

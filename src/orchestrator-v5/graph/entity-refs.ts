@@ -22,6 +22,9 @@
  * 3. A new number is 1 + the max of: both high-waters and every valid ref in base and incoming. So a deleted O2 stays
  *    retired (the next option is O3), and a lowered counter on the incoming graph cannot pull numbers back.
  * 4. A ref whose prefix does not match the node's kind (an option holding `F1`), or that is malformed, is replaced.
+ * 5. NO BACKFILL: a node the base already held WITHOUT a ref stays ref-less. Only new entities (and every entity of
+ *    a first construction) are issued refs, so an unchanged write to a pre-refs graph is byte-identical: no spurious
+ *    version, no identity change. Backfilling older scenarios is a separate, explicit step.
  *
  * Pure. Returns the ORIGINAL object when nothing changes, so an unchanged graph is not a spurious write.
  */
@@ -116,7 +119,9 @@ export function assignEntityRefs<G>(graph: G, base?: unknown): EntityRefAssignme
   if (nodes === null) return { graph, assigned: [], carried: [] };
 
   const baseRefById = new Map<string, string>();
+  const baseIds = new Set<string>();
   for (const b of nodesOf(base) ?? []) {
+    if (typeof b.id === 'string') baseIds.add(b.id);
     const ref = typeof b.id === 'string' ? refFor(b, b.ref) : null;
     if (ref !== null && !baseRefById.has(b.id as string)) baseRefById.set(b.id as string, ref);
   }
@@ -146,6 +151,7 @@ export function assignEntityRefs<G>(graph: G, base?: unknown): EntityRefAssignme
   const assigned: { id: string; ref: string }[] = [];
   nodes.forEach((n, i) => {
     if (chosen[i] !== null) return;
+    if (typeof n.id === 'string' && baseIds.has(n.id)) return; // rule 5: never backfill an entity the base held ref-less
     const prefix = prefixOf(n.kind);
     if (prefix === null) return; // an unknown kind gets no ref (never guess one)
     const next = (hw[prefix] ?? 0) + 1;
