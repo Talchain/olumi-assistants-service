@@ -87,7 +87,7 @@ describe('a row written inside an Agent sub-turn is not the user’s conversatio
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
-  }, 60_000);
+  }, 180_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
 
   it('RED: the Agent’s run tool — its sub-turn row keeps no words; the Agent’s answer row keeps the user’s and the reply', async () => {

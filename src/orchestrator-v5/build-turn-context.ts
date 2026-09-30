@@ -92,6 +92,7 @@ import { SessionReadError, GraphStaleWriteError, type SessionStore } from './ses
 export { GraphStaleWriteError };
 import { getSessionStore } from './session/index.js';
 import type { PendingAction } from './session/pending-action.js';
+import { withTextAsSeen } from './session/conversation-as-seen.js';
 import {
   AnalysisSnapshotDivergedError,
   NO_CLAIM,
@@ -1991,7 +1992,9 @@ async function fetchPriorTurns(
 ): Promise<PriorTurnsRead> {
   if (!store) return { turns: [], readOk: true };
   try {
-    return { turns: await store.readRecent(scenarioId), readOk: true };
+    // The conversation as the user SAW it (CURRENT-READ-v1 row 5): an Agent sub-turn row keeps its id and facts but not
+    // the model's tool reason / handler text, which reached no one (#75 5910983526).
+    return { turns: withTextAsSeen(await store.readRecent(scenarioId)), readOk: true };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);

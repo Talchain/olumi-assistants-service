@@ -88,7 +88,7 @@ vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
   return { ...actual, resolveUserIdentity };
 });
 
-import scenarioGraphRoute, { AGENT_ANSWER_REQUEST_HASH_PREFIX, CONVERSATION_TURNS_CAP } from "../assist.v1.scenario-graph.js";
+import scenarioGraphRoute, { AGENT_ANSWER_REQUEST_HASH_PREFIX, CONVERSATION_ROWS_READ, CONVERSATION_TURNS_CAP } from "../assist.v1.scenario-graph.js";
 
 /** A graph with no positional keys anywhere — the shape `scenarios.graph` holds today. */
 const GRAPH_NO_LAYOUT = {
@@ -162,7 +162,7 @@ describe("the conversation, when asked", () => {
     const res = await read(app, SCENARIO, { include_conversation_turns: true });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(readRecent).toHaveBeenCalledWith(SCENARIO, CONVERSATION_TURNS_CAP);
+    expect(readRecent).toHaveBeenCalledWith(SCENARIO, CONVERSATION_ROWS_READ);
     expect(CONVERSATION_TURNS_CAP).toBe(50);
     expect(body.conversation_turns).toEqual([
       { turn_id: "turn-1", created_at: "2026-09-30T08:01:00.000Z", user_message: "Should we switch to GCP?", assistant_message: "I've mapped the decision." },
@@ -187,7 +187,7 @@ describe("the conversation, when asked", () => {
 
   // The analysis leg already reads the hot window through `readRecent` (default 20) on every graph read; the conversation
   // is ONE further read, at its own cap, and only when asked.
-  const conversationReads = () => readRecent.mock.calls.filter((c) => c[1] === CONVERSATION_TURNS_CAP).length;
+  const conversationReads = () => readRecent.mock.calls.filter((c) => c[1] === CONVERSATION_ROWS_READ).length;
 
   it("CONTROL (unasked): no conversation_turns key and no conversation read — every existing caller is unchanged", async () => {
     const app = await buildApp();
@@ -279,6 +279,26 @@ describe("the restore returns only the Agent's answer rows — what the user saw
     readRecent.mockResolvedValue([noHash, { ...row(2, "typed", "reply"), request_hash: "sha256:abc" }]);
     const app = await buildApp();
     expect((await read(app, SCENARIO, { include_conversation_turns: true })).json().conversation_turns).toEqual([]);
+    await app.close();
+  });
+
+  it("the cap counts AFTER the drop: 60 Agent turns (claim + sub-turn + answer each) restore the newest 50 answers", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => {
+      const n = String(i).padStart(2, "0");
+      return [
+        served(`02:${n}:00`, `t${n}:claim`, "direct_answer", null, A("c"), null, null),
+        served(`02:${n}:01`, `sub${n}`, "handler", "run_analysis", S("d"), "the user pressed Run", "sub text"),
+        served(`02:${n}:02`, `t${n}`, "direct_answer", null, A("c"), `user ${n}`, `reply ${n}`),
+      ];
+    }).flat();
+    expect(CONVERSATION_ROWS_READ).toBeGreaterThanOrEqual(many.length);
+    readRecent.mockResolvedValue([...many].reverse());
+    const app = await buildApp();
+    const turns = (await read(app, SCENARIO, { include_conversation_turns: true })).json().conversation_turns;
+    expect(turns).toHaveLength(CONVERSATION_TURNS_CAP);
+    expect(turns[0].turn_id).toBe("t10");
+    expect(turns[49].turn_id).toBe("t59");
+    expect(JSON.stringify(turns)).not.toContain("the user pressed Run");
     await app.close();
   });
 

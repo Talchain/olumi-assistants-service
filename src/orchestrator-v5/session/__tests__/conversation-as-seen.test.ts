@@ -5,10 +5,12 @@
  * Agent turn is a claim row, then the Agent's internal sub-turns (the turn executor's `sha256:` rows), then the Agent's
  * answer row (`agent_turn:`). `readRecent` answers newest first, so the fixture is reversed for the readers.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
-import { conversationAsSeen, isAgentAnswerRow, AGENT_ANSWER_REQUEST_HASH_PREFIX } from '../conversation-as-seen.js';
-import { historyFromDurableTurns } from '../../agent-lane/history-store.js';
+import { conversationAsSeen, isAgentAnswerRow, withTextAsSeen, AGENT_ANSWER_REQUEST_HASH_PREFIX } from '../conversation-as-seen.js';
+import { historyFromDurableTurns, DURABLE_SEED_TURNS, DURABLE_SEED_ROWS_READ } from '../../agent-lane/history-store.js';
+import { maintainRollingSummaryForCommit } from '../../rolling-summary/capture.js';
+import { MonotonicRollingSummaryStoreFake } from '../../../../tests/utils/rolling-summary-store-fake.js';
 import { assembleExplicitGenerateBrief } from '../../routing/assemble-explicit-generate-brief.js';
 import type { SessionTurnWithContent } from '../conversation-content.js';
 
@@ -81,5 +83,77 @@ describe('the predicate', () => {
     expect(conversationAsSeen(OLDEST_FIRST).map((r) => r.turn_id)).toEqual(['a096:claim', 'a096', 'e3d5:claim', 'e3d5', '745a:claim', '745a']);
     const direct = [row('t1', S('1'), 'x', 'y'), row('t2', S('2'), 'z', 'w')];
     expect(conversationAsSeen(direct)).toEqual(direct);
+  });
+});
+
+/**
+ * P0 PARTNER's served replay (CURRENT-READ-v1 row 5): R3's MRR `9fc32bf8` on `e9fba88`, 12:19:05–12:20:27Z, as stored.
+ * The real `historyFromDurableTurns` at `c782026a` reseeded 4 "user" items from these rows; the 4th was "the user pressed
+ * Run", a sub-turn the user never typed.
+ */
+const SERVED_9FC32BF8_NEWEST_FIRST = [
+  row('r10', A('d'), 'Run analysis.', '**On this model, raising the Pro price to £59 does best.'),
+  row('r9', S('e'), 'the user pressed Run', 'Raise price to £59 scored highest against your goal in 100% of runs. This was a re-run.'),
+  row('r8:claim', A('d'), null, null),
+  row('r7', A('c'), 'Yes — Is “MRR” your “Pro plan monthly price” × “Paying subscribers”?', 'Recorded, as you confirmed: "MRR" is calculated as…'),
+  row('r6', S('f'), null, 'Recorded as yours: "MRR" is "Pro plan monthly price"… The held change has lapsed because the model changed.'),
+  row('r5:claim', A('c'), null, null),
+  row('r4', A('b'), 'Should we raise our Pro plan price from £49 to £59 a month?', 'I’ve drafted a comparison, but its first pass…'),
+  row('r3', S('a'), null, 'I ran a first analysis on the model I have just drafted.'),
+  row('graph_registration:x', 'graph_registration:fe', null, null),
+  row('r1:claim', A('b'), null, null),
+];
+
+describe('P0 PARTNER’s served 9fc32bf8 replay — the reseeded Agent memory', () => {
+  it('RED: "the user pressed Run" is gone; the 3 real sends stay, with the 3 replies the user read', () => {
+    const items = historyFromDurableTurns(SERVED_9FC32BF8_NEWEST_FIRST);
+    expect(said(items, 'user')).toEqual(['Should we raise our Pro plan price from £49 to £59 a month?',
+      'Yes — Is “MRR” your “Pro plan monthly price” × “Paying subscribers”?', 'Run analysis.']);
+    expect(said(items, 'assistant')).toHaveLength(3);
+    const all = JSON.stringify(items);
+    for (const unseen of ['the user pressed Run', '100% of runs', 'This was a re-run', 'has lapsed', 'I ran a first analysis', 'Recorded as yours']) {
+      expect(all).not.toContain(unseen);
+    }
+  });
+
+  it('the reseed cap counts AFTER the drop: 30 Agent turns (claim + sub-turn + answer) reseed the newest 20', () => {
+    const rows = Array.from({ length: 30 }, (_, i) => [
+      row(`t${i}:claim`, A('1'), null, null), row(`s${i}`, S('2'), 'the user pressed Run', 'sub'), row(`t${i}`, A('1'), `user ${i}`, `reply ${i}`),
+    ]).flat().reverse();
+    expect(DURABLE_SEED_ROWS_READ).toBeGreaterThanOrEqual(rows.length);
+    const users = said(historyFromDurableTurns(rows), 'user');
+    expect(users).toHaveLength(DURABLE_SEED_TURNS);
+    expect(users[0]).toBe('user 10');
+    expect(users[19]).toBe('user 29');
+  });
+});
+
+describe('withTextAsSeen — every row kept (ids, facts, watermarks), only unseen text blanked', () => {
+  it('RED: turn context / rolling summary rows keep their ids and order; sub-turn texts become null', () => {
+    const out = withTextAsSeen(SERVED_9FC32BF8_NEWEST_FIRST);
+    expect(out.map((r) => r.turn_id)).toEqual(SERVED_9FC32BF8_NEWEST_FIRST.map((r) => r.turn_id));
+    const sub = out.find((r) => r.turn_id === 'r9')!;
+    expect([sub.user_message, sub.assistant_message]).toEqual([null, null]);
+    expect(out.find((r) => r.turn_id === 'r10')!.user_message).toBe('Run analysis.');
+    expect(JSON.stringify(out)).not.toContain('the user pressed Run');
+  });
+
+  it('CONTROL: an orchestrator-only conversation keeps every text', () => {
+    const direct = [row('t1', S('1'), 'x', 'y')];
+    expect(withTextAsSeen(direct)).toEqual(direct);
+  });
+
+  it('RED: the rolling summary never hands the summariser a sub-turn’s text', async () => {
+    const summarise = vi.fn(async () => ({ text: 'DECISION FRAME: Pro price.' }));
+    await maintainRollingSummaryForCommit({
+      scenarioId: 'scenario-seen', turnId: 'r10', persistedRowId: 'row-10',
+      historyReader: { readRecent: vi.fn(async () => SERVED_9FC32BF8_NEWEST_FIRST.map((r) => ({ ...r, created_at: '2026-09-30T12:20:00.000Z' }))) } as never,
+      summaryStore: new MonotonicRollingSummaryStoreFake(),
+      model: { summarise },
+    });
+    expect(summarise, 'the control: the summariser really ran').toHaveBeenCalled();
+    const input = JSON.stringify(summarise.mock.calls);
+    expect(input).toContain('Run analysis.');
+    for (const unseen of ['the user pressed Run', '100% of runs', 'I ran a first analysis']) expect(input).not.toContain(unseen);
   });
 });

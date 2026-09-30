@@ -282,6 +282,9 @@ function detectLayout(graph: unknown): boolean {
 
 /** Most turns a reload restores; the oldest beyond it are left out (the Agent's own window is 20). */
 export const CONVERSATION_TURNS_CAP = 50;
+/** The raw rows read so that {@link CONVERSATION_TURNS_CAP} answer rows survive the drop (each Agent turn also writes a
+ *  claim row and its sub-turns). */
+export const CONVERSATION_ROWS_READ = CONVERSATION_TURNS_CAP * 4;
 
 /** One restored turn: text only, as stored. */
 export interface ConversationTurnRead {
@@ -327,7 +330,7 @@ async function readConversationTurns(
   requestId: string,
 ): Promise<ConversationTurnRead[] | null> {
   try {
-    const rows = await store.readRecent(scenarioId, CONVERSATION_TURNS_CAP);
+    const rows = await store.readRecent(scenarioId, CONVERSATION_ROWS_READ);
     return [...rows].reverse()
       .filter(isAgentAnswerRow)
       .map((r) => ({
@@ -336,7 +339,8 @@ async function readConversationTurns(
         user_message: typeof r.user_message === "string" ? r.user_message : null,
         assistant_message: typeof r.assistant_message === "string" ? r.assistant_message : null,
       }))
-      .filter((t) => t.user_message !== null || t.assistant_message !== null);
+      .filter((t) => t.user_message !== null || t.assistant_message !== null)
+      .slice(-CONVERSATION_TURNS_CAP); // the cap counts AFTER the drop (CURRENT-READ-v1 row 5)
   } catch (err) {
     log.warn(
       {
