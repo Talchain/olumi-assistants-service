@@ -79,6 +79,7 @@
  * and acyclicity.
  */
 
+import { limitSinkBranch } from '../graph/limit-sink-branch.js';
 import type { GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
@@ -654,42 +655,13 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   const limitTargetIds = new Set(
     (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
   );
-  const kindById = new Map(graph.nodes.map((n) => [n.id, n] as const));
-  const isLever = (id: string): boolean => {
-    const n = kindById.get(id);
-    return n !== undefined && (n.kind === 'option'
-      || (n.kind === 'factor' && (n as { category?: unknown }).category === 'controllable'));
-  };
-  const directedParents = new Map<string, string[]>();
-  for (const edge of graph.edges) {
-    if (!isDirected(edge)) continue;
-    const list = directedParents.get(edge.to) ?? [];
-    list.push(edge.from);
-    directedParents.set(edge.to, list);
-  }
-  const limitSinkBranch = new Set<string>();
-  for (const id of limitTargetIds) {
-    if (!kindById.has(id)) continue;
-    if (graph.edges.some((edge) => isDirected(edge) && edge.from === id)) continue;
-    if ((directedParents.get(id) ?? []).length === 0) continue;
-    const ancestors = new Set<string>([id]);
-    const walk: string[] = [...(directedParents.get(id) ?? [])];
-    while (walk.length > 0) {
-      const at = walk.pop()!;
-      if (ancestors.has(at)) continue;
-      ancestors.add(at);
-      walk.push(...(directedParents.get(at) ?? []));
-    }
-    // The decision moves it: a lever among its ancestors. A limited island nothing the options change reaches is refused.
-    if (![...ancestors].some((a) => a !== id && isLever(a))) continue;
-    for (const a of ancestors) limitSinkBranch.add(a);
-  }
+  const limitSinkBranchIds = limitSinkBranch(graph.nodes, graph.edges.filter(isDirected), limitTargetIds);
 
   for (const node of graph.nodes) {
     if (node.kind === 'goal') continue; // Trivially reaches itself; loop 1 owns the goal.
     if (node.kind === 'decision') continue; // Loop 1 owns the decision→goal relationship.
     if (canReachGoal.has(node.id)) continue;
-    if (limitSinkBranch.has(node.id)) continue;
+    if (limitSinkBranchIds.has(node.id)) continue;
     if (node.kind === 'option' && optionsMissingFactorEdge.has(node.id)) continue;
     // Already caught by orphan check if it has no edges at all —
     // but an edged node can still be a dead-end with no path to the goal.
