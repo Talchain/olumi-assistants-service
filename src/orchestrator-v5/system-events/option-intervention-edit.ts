@@ -71,6 +71,7 @@ import { interventionKeysFollowInterventions } from '../reindex-intervention-key
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../agent-lane/stated-link-band-context.js';
+import { factorUnitOf } from '../agent-lane/unit-conflict.js';
 import type { IdentityRunUse } from '../compose/definitional-links.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
@@ -876,7 +877,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   const resizedLine = groupResizedLinks(linksResized, [...values.map(v => v.factorId), ...frames.map(f => f.factorId)], labelOf)
     .map(resizedLinksSentence);
   const acknowledgment = [...valueConfirmations, ...resizedLine, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
-    factorLabel: labelOf(t.factorId), committedValue: t.modelValue })
+    factorLabel: labelOf(t.factorId), committedValue: t.modelValue,
+    ...((f) => (f !== undefined ? { committedFigure: f } : {}))(committedFigureOf(plan.graph, t.optionId, t.factorId, t.modelValue)) })
     + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))]
     .join(' ');
   const response: OlumiResponse = { response_version: 2,
@@ -944,6 +946,41 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   } catch {
     return { kind: 'unverified', reason: 'canonical_readback_failed', commitAttempted: true };
   }
+}
+
+/**
+ * The level read on the range the factor DECLARES (`observed_state.cap`, else `scale_frame`): the frame every level on it
+ * was normalised by, and the one the canvas card reads to show it. Nothing when the factor declares no range, when its
+ * own value is not read on that range, or when a figure already on the cell was read on a different one — a figure is
+ * never invented.
+ */
+function figureOnFactorRange(
+  graph: unknown,
+  factor: { readonly id?: unknown; readonly observed_state?: unknown; readonly scale_frame?: unknown },
+  existing: unknown,
+  modelValue: number,
+): { raw_value: number; unit?: string; cap: number } | undefined {
+  const os = (factor.observed_state ?? {}) as { cap?: unknown; value?: unknown; raw_value?: unknown };
+  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  const cap = positive(os.cap) ? os.cap : positive(factor.scale_frame) ? factor.scale_frame : undefined;
+  if (cap === undefined) return undefined;
+  const readOn = (raw: unknown, value: unknown): boolean =>
+    typeof raw !== 'number' || typeof value !== 'number' || Math.abs(raw / cap - value) <= 1e-9;
+  const cell = (existing ?? {}) as { value?: unknown; raw_value?: unknown; unit?: unknown };
+  if (!readOn(os.raw_value, os.value) || !readOn(cell.raw_value, cell.value)) return undefined;
+  const raw = Number((modelValue * cap).toPrecision(12));
+  if (!Number.isFinite(raw) || Math.abs(raw / cap - modelValue) > 1e-9) return undefined;
+  const unit = typeof cell.unit === 'string' && cell.unit.trim() !== '' ? cell.unit.trim() : factorUnitOf(graph, factor)?.trim();
+  return { raw_value: raw, cap, ...(unit !== undefined && unit !== '' ? { unit } : {}) };
+}
+
+/** The user's figure on a committed cell, read back from the committed graph (never from the request). */
+function committedFigureOf(graph: unknown, optionId: string, factorId: string, modelValue: number): { raw_value: number; unit: string } | undefined {
+  const option = ((graph as { nodes?: unknown } | null)?.nodes as Record<string, unknown>[] | undefined)?.find((n) => n?.id === optionId);
+  const c = option === undefined ? undefined : mergeInterventionSourceObjects(option)[factorId] as
+    { value?: unknown; raw_value?: unknown; unit?: unknown } | undefined;
+  return c !== undefined && c.value === modelValue && typeof c.raw_value === 'number' && Number.isFinite(c.raw_value)
+    && typeof c.unit === 'string' && c.unit.trim() !== '' ? { raw_value: c.raw_value, unit: c.unit } : undefined;
 }
 
 export function prepareOptionInterventionEdit(input: OptionInterventionEditInput):
@@ -1074,10 +1111,14 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     optionId: option.id, optionLabel: option.label,
     factorId: factor.id, factorLabel: factor.label, value: input.modelValue,
   });
+  // ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (DL #75 5902916137 (3); P0 partner 5902892060; served W4 run2 on `f074916`):
+  // the card sends the level on the model scale and shows it on the factor's own range ("£57" = 0.285 of 200). Written
+  // bare, the £57 left the model and the reply said "an effect value of 0.285". That same reading is kept on the cell.
+  const levelFigure = figure ?? figureOnFactorRange(graph, factor, existing, input.modelValue);
   // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell
   // (`cap` only when it reproduces the level, which the check above has already required).
-  const operation = figure === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
-    raw_value: figure.raw_value, cap: figure.cap, ...(figure.unit !== undefined ? { unit: figure.unit.trim() } : {}) } };
+  const operation = levelFigure === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
+    raw_value: levelFigure.raw_value, cap: levelFigure.cap, ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } };
   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
   // instead of defaulting the cell to `user_specified`, and the rationale says whose it is.
