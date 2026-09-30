@@ -174,6 +174,19 @@ function todaysCause(id: string, byId: Map<string, Rec2>, edges: readonly Rec2[]
  * the node (exactly one user-levelled cause) and that cause carries a frame (cap → `scale_frame` → the value/raw pair).
  */
 export function todaysFrameFor(graph: unknown, id: string): number | null {
+  return todaysLevelFor(graph, id)?.frame ?? null;
+}
+
+/**
+ * ⛔ AND ITS TODAY LEVEL: the figure the pressed card showed (R3 CR 5908327529: ISL's structural rule 2 needs every identity
+ * part to have a status-quo level, so a range alone still left the Run blocked, `identity_operand_missing`; AIQ ruling
+ * 5908364515 revises "never a level" for exactly this case). The card said "Today that is £49 × 1,500 (your ‘Current
+ * paying subscribers’)", so writing that 1,500 as the part's TODAY level makes the consent text the value consumed. Exactly
+ * the ONE user cause's level and unit, stamped with the cause's OWN user source (never `user_confirmed`, never Olumi's);
+ * null when the cause is not the user's, or no safe range exists (the no-clip guard below). The month-12 count stays the
+ * Run's.
+ */
+export function todaysLevelFor(graph: unknown, id: string): { raw: number; unit: string; source: string; frame: number } | null {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
   const byId = new Map(nodes.flatMap((n) => (typeof n.id === 'string' ? [[n.id, n] as const] : [])));
@@ -187,7 +200,9 @@ export function todaysFrameFor(graph: unknown, id: string): number | null {
   if ([os?.cap_origin, os?.frame_origin, t.f.frame_origin].includes('target_derived_headroom')) return null;
   const [value, raw] = [os?.value, os?.raw_value];
   const frame = pos(os?.cap) ? os.cap : pos(t.f.scale_frame) ? t.f.scale_frame : pos(value) && pos(raw) && raw > value ? raw / value : null;
-  return frame !== null && frame >= 2 * Math.abs(t.level.value) ? frame : null;
+  const source = text(os?.source);
+  if (frame === null || frame < 2 * Math.abs(t.level.value) || source === undefined) return null;
+  return { raw: t.level.value, unit: t.level.unit, source, frame };
 }
 
 /** The card's reading of `p` × `q` as the goal's money per period, or null when the parts do not reconcile or compose. */

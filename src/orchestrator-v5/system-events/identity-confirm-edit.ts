@@ -5,9 +5,10 @@
  * writer stores exactly that on the quantity's own node, in the carrier every reader already reads:
  *   · `nonlinear_identity = {operation: 'product', factor_ids, stated_in_brief: true}` — the user's claim, so every
  *     reader says it as fact, never as "Olumi reads …" (`productIdentityClause`);
- *   · a confirmed part the card read at TODAY's level through its one user cause, and that has no frame of its own,
- *     takes that cause's RANGE as `scale_frame` (`todaysFrameFor`; R3 5907594976: without it the Run is blocked,
- *     `IDENTITY_FRAME_MISSING`). A range only, never a level;
+ *   · a confirmed part the card read at TODAY's level through its one user cause takes, where it has none of its own,
+ *     that cause's RANGE as `scale_frame` and the card's own figure as its TODAY level, stamped with the cause's user
+ *     source (`todaysLevelFor`; R3 5907594976 + CR 5908327529: without both the Run is blocked, `IDENTITY_FRAME_MISSING`
+ *     then ISL's `identity_operand_missing`; AIQ 5908364515). The later count stays the Run's;
  *   · nothing else on the graph moves (the door's scope guard, `identityConfirmPostimageIsScoped`).
  * The carrier is an analysis input (`computeAnalysisAffectingGraphHash` hashes it as stored), so the write moves the
  * analysis revision: the prior Run reads stale and a new Run is required. No schemas release: the carrier is CEE's
@@ -28,7 +29,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { EditGraphHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { admitStoredProductDeclaration, type StoredProductDeclarationRefusal } from '../agent-lane/admit-model.js';
-import { todaysFrameFor } from '../agent-lane/identity-proposal.js';
+import { todaysLevelFor } from '../agent-lane/identity-proposal.js';
 import { plotResolvesFrame } from '../../cee/graph-readiness/identity-frames.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { normaliseAbsenceOnly } from '../persisted-graph-projection.js';
@@ -89,6 +90,19 @@ export function identityConfirmReadingToken(reading: IdentityConfirmReading): st
   return `identity:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
 }
 
+/** What the Yes writes on a confirmed part read at today's level: only what it lacks (a range, a level). One rule for the
+ * writer and its scope guard. */
+function todaysWrite(part: Rec, today: { raw: number; unit: string; source: string; frame: number }): { scale_frame?: number; observed_state?: Rec } {
+  const out: { scale_frame?: number; observed_state?: Rec } = {};
+  if (!plotResolvesFrame(part)) out.scale_frame = today.frame;
+  const os = isRec(part.observed_state) ? part.observed_state : undefined;
+  if (typeof os?.value !== 'number') {
+    const cap = typeof os?.cap === 'number' && os.cap > 0 ? os.cap : typeof part.scale_frame === 'number' && part.scale_frame > 0 ? part.scale_frame : today.frame;
+    out.observed_state = { value: today.raw / cap, raw_value: today.raw, unit: today.unit, source: today.source };
+  }
+  return out;
+}
+
 const refuse = (reason: IdentityConfirmRefusal, detail?: string): IdentityConfirmEditResult =>
   ({ kind: 'refused', reason, ...(detail !== undefined ? { detail } : {}) });
 
@@ -131,9 +145,11 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   outcome.nonlinear_identity = carrier;
   for (const id of factorOrder) {
     const part = graph.nodes.find((n): n is Rec => isRec(n) && n.id === id);
-    if (part === undefined || plotResolvesFrame(part)) continue;
-    const frame = todaysFrameFor(params.persistedGraph, id);
-    if (frame !== null) part.scale_frame = frame;
+    const today = part === undefined ? null : todaysLevelFor(params.persistedGraph, id);
+    if (part === undefined || today === null) continue;
+    const expected = todaysWrite(part, today);
+    if (expected.scale_frame !== undefined) part.scale_frame = expected.scale_frame;
+    if (expected.observed_state !== undefined) part.observed_state = expected.observed_state;
   }
 
   const parsed = GraphV3.safeParse(graph);
@@ -166,7 +182,7 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
 
 /**
  * ⛔ ONLY THE ONE CARRIER MAY CHANGE: no other node, no other member of this node, no edge, no top-level field — and,
- * on a confirmed part that had no frame, exactly the `scale_frame` its one user cause gives it (`todaysFrameFor`).
+ * on a confirmed part read at today's level, exactly the range and today level it lacked (`todaysWrite`).
  */
 export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: unknown, outcomeId: string): boolean {
   const before = normaliseAbsenceOnly(storedBefore);
@@ -183,8 +199,15 @@ export function identityConfirmPostimageIsScoped(storedBefore: unknown, after: u
   for (const id of isRec(confirmed) && Array.isArray(confirmed.factor_ids) ? confirmed.factor_ids : []) {
     const part = restored.nodes.find((n): n is Rec => isRec(n) && n.id === id);
     const prior = (before.nodes as unknown[]).find((n): n is Rec => isRec(n) && n.id === id);
-    if (part === undefined || prior === undefined || Object.hasOwn(prior, 'scale_frame') || plotResolvesFrame(prior)) continue;
-    if (Object.hasOwn(part, 'scale_frame') && part.scale_frame === todaysFrameFor(before, String(id))) delete part.scale_frame;
+    const today = part === undefined || prior === undefined ? null : todaysLevelFor(before, String(id));
+    if (part === undefined || prior === undefined || today === null) continue;
+    const expected = todaysWrite(prior, today);
+    if (expected.scale_frame !== undefined && part.scale_frame === expected.scale_frame) {
+      if (Object.hasOwn(prior, 'scale_frame')) part.scale_frame = structuredClone(prior.scale_frame); else delete part.scale_frame;
+    }
+    if (expected.observed_state !== undefined && isDeepStrictEqual(part.observed_state, expected.observed_state)) {
+      if (Object.hasOwn(prior, 'observed_state')) part.observed_state = structuredClone(prior.observed_state); else delete part.observed_state;
+    }
   }
   return isDeepStrictEqual(restored, before);
 }

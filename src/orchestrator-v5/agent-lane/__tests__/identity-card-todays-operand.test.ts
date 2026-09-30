@@ -13,7 +13,7 @@ import { proposeProductIdentity } from '../identity-proposal.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { identityConfirmPostimageIsScoped } from '../../system-events/identity-confirm-edit.js';
-import { todaysFrameFor } from '../identity-proposal.js';
+import { todaysFrameFor, todaysLevelFor } from '../identity-proposal.js';
 import { statedIdentityFrameGaps } from '../../../cee/graph-readiness/identity-frames.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
@@ -109,15 +109,32 @@ describe('m1: after the Yes, the Run is not blocked for want of a frame (served 
   };
   const codes = (x: Graph) => ((assessCanonicalAnalysisReadiness(x) as { issues?: { code: string }[] }).issues ?? []).map((i) => i.code);
 
-  it('RED: m1 → Yes → readiness clean; the operand takes its cause\'s range (10,000) and NO level', () => {
+  it('RED (v2, R3 CR 5908327529 + AIQ 5908364515): m1 → Yes → the operand takes its cause\'s range AND the card\'s TODAY level, the user\'s own stamp', () => {
     const { card, after } = yes(M1);
     expect(card.factor_ids).toContain('paying_subscribers_at_12_months');
+    expect(card.words).toContain('Today that is £49 × 1,500 (your “Current paying subscribers”)');
     expect(codes(after)).not.toContain('IDENTITY_FRAME_MISSING');
     expect(statedIdentityFrameGaps(after)).toEqual([]);
     const op = node(after, 'paying_subscribers_at_12_months');
+    const cause = node(M1, 'current_paying_subscribers').observed_state;
     expect(op.scale_frame).toBe(10000);
-    expect(op.observed_state).toEqual(node(M1, 'paying_subscribers_at_12_months').observed_state);
+    // ISL rule 2: every part has a status-quo level. Exactly the pressed card's 1,500, in its unit, with the CAUSE's stamp.
+    expect(op.observed_state).toEqual({ value: 0.15, raw_value: 1500, unit: cause.unit, source: cause.source });
+    expect(node(M1, 'paying_subscribers_at_12_months').observed_state).toBeUndefined();
     expect(identityConfirmPostimageIsScoped(M1, after, card.outcome_id)).toBe(true);
+  });
+
+  it('AIQ 5908364515 (2): a cause that is not the user\'s → no level and no range written (the ask stays)', () => {
+    const x = g((y) => { node(y, 'current_paying_subscribers').observed_state.source = 'cee_inference'; });
+    expect(todaysLevelFor(x, 'paying_subscribers_at_12_months')).toBeNull();
+  });
+
+  it('CONTROL: the scope guard refuses any other level — Olumi\'s 1,450, or the 1,500 stamped user_confirmed', () => {
+    const { card, after } = yes(M1);
+    const other = structuredClone(after); Object.assign(node(other, 'paying_subscribers_at_12_months').observed_state, { raw_value: 1450, value: 0.145 });
+    expect(identityConfirmPostimageIsScoped(M1, other, card.outcome_id)).toBe(false);
+    const stamp = structuredClone(after); node(stamp, 'paying_subscribers_at_12_months').observed_state.source = 'user_confirmed';
+    expect(identityConfirmPostimageIsScoped(M1, stamp, card.outcome_id)).toBe(false);
   });
 
   it('R3 5907677185 GUARD: a cause range under 2× today\'s level (cap 1,600) could clip the later count → no range, today\'s ask stays', () => {
@@ -125,13 +142,17 @@ describe('m1: after the Yes, the Run is not blocked for want of a frame (served 
     expect(todaysFrameFor(x, 'paying_subscribers_at_12_months')).toBeNull();
     const { after } = yes(x);
     expect(node(after, 'paying_subscribers_at_12_months').scale_frame).toBeUndefined();
+    expect(node(after, 'paying_subscribers_at_12_months').observed_state).toBeUndefined();
     expect(codes(after)).toContain('IDENTITY_FRAME_MISSING');
   });
 
   it('CONTROL: m2 (every part already framed) — the Yes adds no range', () => {
     const before = structuredClone(M2);
     const { card, after } = yes(M2);
-    for (const id of card.factor_ids) expect(node(after, id).scale_frame).toEqual(node(before, id).scale_frame);
+    for (const id of card.factor_ids) {
+      expect(node(after, id).scale_frame).toEqual(node(before, id).scale_frame);
+      expect(node(after, id).observed_state).toEqual(node(before, id).observed_state);
+    }
   });
 
   it('CONTROL: the scope guard still refuses any other change — a different range, or a range on a part that had its own', () => {
