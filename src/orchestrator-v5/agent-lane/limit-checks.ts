@@ -13,6 +13,7 @@
  */
 import { readRatifiedConstraints, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 import {
+  OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
   PLACEHOLDER_PARTS_REASON,
   optionIdOf,
@@ -62,6 +63,8 @@ export const OFF_SCALE_LIMIT_REASONS: ReadonlySet<string> = new Set(['threshold_
 const PARTS_LIMIT_SENTENCES: ReadonlyMap<string, string> = new Map([
   [PLACEHOLDER_PARTS_REASON, 'Olumi’s links from its parts to it are placeholders, not estimates.'],
   [PARTS_IDENTITY_UNMODELLED_REASON, 'the model cannot yet combine its parts the way they really combine.'],
+  // B6 (DL #75 5915507578; AIQ 5915438520): every option's figure for it is Olumi's guess, so a chance would be false certainty.
+  [OLUMI_GUESS_LIMIT_REASON, 'every option’s figure for it rests on Olumi’s guesses, not figures you gave.'],
 ]);
 
 const andList = (xs: readonly string[]): string =>
@@ -97,8 +100,11 @@ function withheldOptionsFor(
     if (finding === null || label === null) continue;
     labels.push(label);
     byReason.set(finding.reason, [...(byReason.get(finding.reason) ?? []), label]);
-    const part = finding.reason === PLACEHOLDER_PARTS_REASON ? labelOf(finding.partId) : null;
-    const ask = part !== null && target !== null ? `How much does ${q(part)} change ${q(target)}?` : null;
+    const part = finding.reason === PLACEHOLDER_PARTS_REASON || finding.reason === OLUMI_GUESS_LIMIT_REASON ? labelOf(finding.partId) : null;
+    // B6, an option setting it to Olumi's one point: AIQ 5915438520's one question, a range. (Olumi's LEVEL alone is the
+    // row's own level ask, never a second question here.)
+    const ask = part !== null && target !== null ? `How much does ${q(part)} change ${q(target)}?`
+      : finding.setsPoint === true && target !== null ? `What’s each option’s likely range for ${q(target)}?` : null;
     if (ask !== null && !asks.includes(ask)) asks.push(ask);
   }
   return { labels, byReason, asks };
@@ -120,6 +126,8 @@ const PER_OPTION_WHY: ReadonlyMap<string, readonly [one: string, many: string]> 
     'those options move it through a link Olumi has not sized (a placeholder, not an estimate).']],
   [PARTS_IDENTITY_UNMODELLED_REASON, ['that option moves it through parts the model cannot yet combine the way they really combine.',
     'those options move it through parts the model cannot yet combine the way they really combine.']],
+  [OLUMI_GUESS_LIMIT_REASON, ['that option’s figure for it rests on Olumi’s guesses, not figures you gave.',
+    'those options’ figures for it rest on Olumi’s guesses, not figures you gave.']],
 ]);
 
 /** One sentence per state (and, for `estimate_only`, per whose figure it was checked against). */

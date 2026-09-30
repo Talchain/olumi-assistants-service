@@ -16,6 +16,7 @@
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
+import { olumiSizedLink } from '../../orchestrator/context/placeholder-parts.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -54,16 +55,12 @@ export type TargetTestability =
  *   it). A structural link nobody sized carries no guess and is not a failure here.
  * A confirmed identity's ISL rules are checked by the Run, so that pass stays listed as unchecked.
  */
-const OLUMI_SIZED = /^olumi_/;
 /**
  * A link sized only by Olumi (R3 #2371 5914745577): an `olumi_*` magnitude, OR a plain `defaulted: true` size (~58% of
  * Olumi's served defaults carry no marker; m1's churn → subscribers-at-12-months is one, the link that turns a monthly
- * rate into a year's loss). The user's own size never is.
+ * rate into a year's loss). The user's own size never is. ONE definition with B6's limit rule (`olumiSizedLink`).
  */
-function olumiGuess(e: Rec): boolean {
-  const p = isRec(e.provenance) ? e.provenance : undefined;
-  return p?.source !== 'user_specified' && ((typeof p?.magnitude === 'string' && OLUMI_SIZED.test(p.magnitude)) || e.defaulted === true);
-}
+const olumiGuess = olumiSizedLink;
 function sizedInGoalUnit(e: Rec, goalUnit: string | undefined): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
   const ne = isRec(p?.natural_effect) ? p!.natural_effect as Rec : undefined;

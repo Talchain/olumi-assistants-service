@@ -24,6 +24,7 @@
  */
 
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
+import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 
 type Rec = Record<string, unknown>;
 
@@ -32,7 +33,27 @@ const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !
 /** Why a target's limit is withheld. Each is a per-limit `reason` code on the contract (a string: hazard 1). */
 export const PLACEHOLDER_PARTS_REASON = 'parts_links_placeholder';
 export const PARTS_IDENTITY_UNMODELLED_REASON = 'parts_identity_unmodelled';
-export type PlaceholderPartsReason = typeof PLACEHOLDER_PARTS_REASON | typeof PARTS_IDENTITY_UNMODELLED_REASON;
+export const OLUMI_GUESS_LIMIT_REASON = 'limit_rests_on_olumi_guess';
+export type PlaceholderPartsReason =
+  | typeof PLACEHOLDER_PARTS_REASON
+  | typeof PARTS_IDENTITY_UNMODELLED_REASON
+  | typeof OLUMI_GUESS_LIMIT_REASON;
+
+/**
+ * A link sized only by Olumi: an `olumi_*` magnitude, OR a plain `defaulted: true` size, and never a link the user sized
+ * (`user_specified`). The ONE test DECISION-REPRESENTATION row 4's check (2) reads for the goal (`target-testability.ts`,
+ * R3 #2371 5914745577) and B6 reads for a limit (R3 #75 5915571955), so the two cannot disagree on "Olumi's guess".
+ */
+export function olumiSizedLink(e: Rec): boolean {
+  const p = isRec(e.provenance) ? e.provenance : undefined;
+  return p?.source !== 'user_specified'
+    && ((typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) || e.defaulted === true);
+}
+
+/** A value stamp the user authored (`user_stated`) or admitted as their own assumption: the user's, not Olumi's guess. */
+function usersOwn(stamp: unknown): boolean {
+  return earnsAuthorshipCredit(classifyValueSource(stamp)) || stamp === 'user_assumption';
+}
 
 const SIZED_MAGNITUDES: ReadonlySet<unknown> = new Set(['olumi_estimate', 'user_stated']);
 
@@ -136,7 +157,7 @@ export function placeholderPartsFinding(
   nodes: readonly Rec[],
   edges: readonly Rec[],
   options: ReadonlyArray<Record<string, unknown>>,
-): { readonly reason: PlaceholderPartsReason; readonly partId?: string } | null {
+): { readonly reason: PlaceholderPartsReason; readonly partId?: string; readonly setsPoint?: true } | null {
   const kindById = new Map(nodes.map((n) => [n.id, n.kind] as const));
   // The target's parts: every node upstream of it that is not an option or the decision (T4's walk).
   const parts = new Set<unknown>();
@@ -151,32 +172,64 @@ export function placeholderPartsFinding(
       queue.push(e.from);
     }
   }
-  if (parts.size === 0) return null;
-  const movers = options
+  const target = nodes.find((n) => n.id === targetId);
+  const movers = parts.size === 0 ? [] : options
     .map((o) => (isRec(o.interventions) ? o.interventions : {}))
     .filter((iv) => !setsLevel(iv[targetId]) && Object.keys(iv).some((k) => parts.has(k)));
-  if (movers.length === 0) return null;
-  const target = nodes.find((n) => n.id === targetId);
-  if (target !== undefined && isRec(target.nonlinear_identity)) return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
-  const unitById = sizerUnitsOf(nodes);
-  const onPath = new Set<unknown>([...parts, targetId]);
-  for (const iv of movers) {
-    // Forward from each part this option sets, through parts only: every link walked lies on a path to the target.
-    for (const partId of Object.keys(iv).filter((k) => parts.has(k))) {
-      const reached = new Set<unknown>([partId]);
-      const walk: unknown[] = [partId];
-      while (walk.length > 0) {
-        const at = walk.shift();
-        for (const e of edges) {
-          if (e.from !== at || !onPath.has(e.to)) continue;
-          if (!linkIsSized(e, unitById) && !userStatedStrength(e)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
-          if (e.to !== targetId && !reached.has(e.to)) {
-            reached.add(e.to);
-            walk.push(e.to);
+  let guessedPart: string | undefined;
+  if (movers.length > 0) {
+    if (target !== undefined && isRec(target.nonlinear_identity)) return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
+    const unitById = sizerUnitsOf(nodes);
+    const onPath = new Set<unknown>([...parts, targetId]);
+    for (const iv of movers) {
+      // Forward from each part this option sets, through parts only: every link walked lies on a path to the target.
+      for (const partId of Object.keys(iv).filter((k) => parts.has(k))) {
+        const reached = new Set<unknown>([partId]);
+        const walk: unknown[] = [partId];
+        while (walk.length > 0) {
+          const at = walk.shift();
+          for (const e of edges) {
+            if (e.from !== at || !onPath.has(e.to)) continue;
+            if (!linkIsSized(e, unitById) && !userStatedStrength(e)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
+            if (guessedPart === undefined && olumiSizedLink(e)) guessedPart = partId;
+            if (e.to !== targetId && !reached.has(e.to)) {
+              reached.add(e.to);
+              walk.push(e.to);
+            }
           }
         }
       }
     }
+    // ⛔ B6 (DL #75 5915507578 item 1; AIQ 5915438520; R3 5915571955): no placeholder on the way, but the option's value
+    // of the target rests on Olumi's guess — a link on its path Olumi sized, or the target's own level is not the user's
+    // — so its P restates the guess (served cloud r1: "downtime ≤ 2 weeks" 0.9339 / 0.9995 on Olumi's weeks).
+    if (guessedPart !== undefined) return { reason: OLUMI_GUESS_LIMIT_REASON, partId: guessedPart };
+    if (!usersOwn(isRec(target?.observed_state) ? target.observed_state.source : undefined)) return { reason: OLUMI_GUESS_LIMIT_REASON };
+  }
+  // ⛔ B6, an option that SETS the target to one point (AIQ 5915438520: a guessed single-point duration scores 100%/0%):
+  // withheld unless the point is the user's, or the option states a range for it. Holding today's level is no guess.
+  for (const o of options) {
+    const iv = isRec(o.interventions) ? o.interventions : {};
+    if (!setsLevel(iv[targetId])) continue;
+    // The stored option carries the setting's owner and raw figure; the wire copy may carry a bare projected number.
+    const node = nodes.find((n) => n.kind === 'option' && n.id === optionIdOf(o));
+    const stored = [node?.interventions, isRec(node?.data) ? node.data.interventions : undefined]
+      .map((x) => (isRec(x) ? x[targetId] : undefined)).find(isRec);
+    const setting = stored ?? iv[targetId];
+    if (holdsTodaysLevel(setting, target)) continue;
+    const ranges = [o.intervention_ranges, node?.intervention_ranges].map((x) => (isRec(x) ? x[targetId] : undefined));
+    const theirs = (isRec(setting) && (usersOwn(setting.source) || isRec(setting.range))) || ranges.some(isRec);
+    if (!theirs) return { reason: OLUMI_GUESS_LIMIT_REASON, setsPoint: true };
   }
   return null;
+}
+
+/** The option holds the target at today's level (the status quo's zero change): its P is arithmetic, not a guess. */
+function holdsTodaysLevel(v: unknown, target: Rec | undefined): boolean {
+  const today = isRec(target?.observed_state) ? target.observed_state : undefined;
+  if (today === undefined) return false;
+  const raw = isRec(v) ? v.raw_value : undefined;
+  if (typeof raw === 'number' && typeof today.raw_value === 'number') return raw === today.raw_value;
+  const value = typeof v === 'number' ? v : isRec(v) ? v.value : undefined;
+  return typeof value === 'number' && typeof today.value === 'number' && value === today.value;
 }
