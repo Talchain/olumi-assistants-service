@@ -112,10 +112,11 @@ describe('the finaliser binds a withheld leader\'s cause to the refusal, never t
 
   it('a selected no-limit Run is withheld without claiming a limit, while a different older fact cannot supply its cause', () => {
     const B = runFact({ at: '2026-09-25T02:00:00.000Z', mayName: false, auto: false, status: 'completed', state: 'not_applicable' });
-    const out = finalise([A, B], false);
+    const out = finalise([A, B], false, { claimConstraintVerdictState: 'not_applicable' });
     expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'analysis_leader_withheld' });
-    const unbound = finalise([A], false);
-    expect(unbound.analysis_state?.leader_claim.withheld_reason).not.toBe('analysis_leader_withheld');
+    const olderNoLimit = runFact({ at: '2026-09-25T01:00:00.000Z', mayName: false, auto: false, status: 'completed', state: 'not_applicable' });
+    const newerLimitVerdict = finalise([olderNoLimit], false, { claimConstraintVerdictState: 'evaluated_infeasible' });
+    expect(newerLimitVerdict.analysis_state?.leader_claim.withheld_reason).toBe('constraint_verdict_withheld');
   });
 
   it('RED B — this turn\'s own run refused, but the finaliser was handed the pre-handler window [A]', () => {

@@ -658,6 +658,8 @@ export interface TurnExecutorRunResult {
    * dispatch `ok` outcome already carry.
    */
   mayNameLeadingOption: boolean;
+  /** Read from the same selected claim fact as mayNameLeadingOption. */
+  mayNameLeadingOptionConstraintVerdictState: ConstraintVerdictState | null;
   /**
    * WHERE `mayNameLeadingOption` came from. Additive, diagnostic, REQUIRED —
    * same doctrine as the field above: an optional here is a latent forgetting
@@ -16653,6 +16655,7 @@ export async function runTurnExecutor(
       // default on every non-execute exit, which made the Layer-3 egress
       // alarm a licensed no-op there. See the declaration above.
       mayNameLeadingOption: mayNameLeadingOptionForRun,
+      mayNameLeadingOptionConstraintVerdictState: mayNameLeadingOptionVerdictForRun.constraint_verdict_state,
       // …and WHERE that boolean came from. Taken off the SAME verdict object the
       // boolean above is taken off, so the value and its evidence cannot
       // describe different reads — the identical single-derivation rule the
