@@ -7,8 +7,8 @@
  * stream in list order (ISL `robustness_analyzer_v2.py:1027-1037`): a Bernoulli per edge, then a Normal ONLY when the
  * edge exists — so a changed `exists_probability` changes which samples draw, and every later draw shifts. PLoT turns
  * a value of 0 into `point_mass` (no draw) and switches type on pinning (`translator-v3.ts:1560/1579`). So the key
- * holds: the option×factor settings (pinning), the factor/link id sets, each link's `exists_probability`, and which
- * values sit at 0. A mean or std that stays off 0 draws the same count and is NOT in the key — that is the edit C1
+ * holds: the option×factor settings (pinning) with any stated range, the factor/link id sets, each link's
+ * `exists_probability`, and which values sit at 0. A mean or std that stays off 0 draws the same count and is NOT in the key — that is the edit C1
  * attributes. The SAME key gates the classifier (`build-run-delta.ts`), so reuse and C1 cannot disagree.
  */
 import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrator';
@@ -34,7 +34,10 @@ export function drawStructureKey(snapshot: RunInputSnapshot): string {
     for (const st of Array.isArray(o.settings) ? o.settings.filter(isRec) : []) {
       const fid = str(st.factor_id);
       if (fid === null) continue;
-      settingKeys.push(`${oid}|${fid}`);
+      // A stated range (TEMPORAL 0.66, sent once #2382 lands) is sampled by the engine; how many draws it takes is not
+      // verified here, so the WHOLE range is structure — a range edit reads C2, an under-claim, never a false C1.
+      const range = isRec(st.range) ? `~${String(st.range.meaning)}:${String(st.range.low)}:${String(st.range.high)}` : '';
+      settingKeys.push(`${oid}|${fid}${range}`);
       if (isZero(st.encoded) || isZero(st.raw)) zeroKeys.push(`s:${oid}|${fid}`);
     }
   }
