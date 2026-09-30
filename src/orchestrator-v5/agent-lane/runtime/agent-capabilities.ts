@@ -800,6 +800,8 @@ interface GraphRead {
     defaulted?: unknown;
   }[];
   readonly analysis_state: unknown;
+  /** The result block the read route returns ONLY when it is current for this graph (`readScenarioAnalysis`); else absent. */
+  readonly analysis_result?: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
   /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
@@ -986,7 +988,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
  * constant 0.8 on every headroom-derived cap), limits from `goal_constraints` as stored, link strength and
  * provenance as stored. Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
  */
-function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state'>): Record<string, unknown> {
+function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_result'>): Record<string, unknown> {
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
   const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label] as const));
@@ -1080,7 +1082,7 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
     ...(limits.length > 0 ? { limits } : {}),
     links,
     readiness: readinessViewOf(g.raw),
-    ...(earlierAnalysisOf(g.analysis_state) ?? {}),
+    ...(earlierAnalysisOf(g.analysis_state, g.analysis_result) ?? {}),
   };
 }
 
@@ -1170,11 +1172,31 @@ const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<s
  * so it is dropped here: whether a run may happen now is `readiness`, only. What the stored RESULT is — an
  * earlier run, current or stale — stays, named `earlier_analysis` so it is never read as admission.
  */
-function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> } | undefined {
+function earlierAnalysisOf(state: unknown, result?: unknown): { analysis: Record<string, unknown> } | undefined {
   if (state === null || typeof state !== 'object') return undefined;
   const { readiness: _placeholder, ...rest } = state as Record<string, unknown>;
   const kind = (rest.run_state as { kind?: unknown } | undefined)?.kind;
-  return { analysis: { ...(typeof kind === 'string' ? { earlier_analysis: kind } : {}), ...rest } };
+  const zeroFilled = zeroFilledByRun(result);
+  return { analysis: {
+    ...(typeof kind === 'string' ? { earlier_analysis: kind } : {}), ...rest,
+    ...(zeroFilled.length > 0 ? { run_used_default_zero_for: zeroFilled } : {}),
+  } };
+}
+
+/**
+ * ⛔ WHAT THE RUN ON SCREEN FILLED WITH 0 (served `263dbd5`, final witness `053159Z/12`): the Agent said two add-on
+ * factors were "unknown—not zero" while that run had used 0.0 for both. The read route returns the result only when it
+ * is current for the graph it returns; its own `ROOT_NODE_DEFAULT_VALUE` warnings name each factor it filled, by the
+ * producer's `node_label` — passed through, never re-derived.
+ */
+function zeroFilledByRun(result: unknown): string[] {
+  const warnings = (result as { enrichment?: { inference_warnings?: unknown } } | null | undefined)?.enrichment?.inference_warnings;
+  if (!Array.isArray(warnings)) return [];
+  return [...new Set(warnings
+    .filter((w): w is { code: string; node_label: string } => w !== null && typeof w === 'object'
+      && (w as { code?: unknown }).code === 'ROOT_NODE_DEFAULT_VALUE' && typeof (w as { node_label?: unknown }).node_label === 'string'
+      && (w as { node_label: string }).node_label !== '')
+    .map((w) => w.node_label))];
 }
 
 /**
@@ -1514,6 +1536,7 @@ export function createAgentCapabilities(
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
+      ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
