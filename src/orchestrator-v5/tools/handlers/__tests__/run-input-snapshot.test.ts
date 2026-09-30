@@ -105,4 +105,20 @@ describe('runIdFor — one id per turn that ran, the same on a replay', () => {
     expect(runIdFor({ scenarioId: 's', turnId: 't2', graphHashAtRun: 'h' })).not.toBe(a);
     expect(a).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  // Prompt Strike on the lease (#75 5915277428): two rows the offer did not pin, each RED on the offer head.
+  it('a factor with no authored raw_value records NO raw — the normalised value is never presented as the user\'s figure', () => {
+    const g = { ...graph, nodes: [...graph.nodes.filter((n) => n.id !== 'fac_churn'),
+      { id: 'fac_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.037, source: 'cee_inference' } }] };
+    const snap = buildRunInputSnapshot(input({ wireGraph: g, plotPayload: payload({ graph: g }) }))!;
+    const churn = snap.factors.find((f) => f.factor_id === 'fac_churn')!;
+    expect(churn).not.toHaveProperty('raw');
+    expect(churn.encoded).toBe(0.037);
+  });
+
+  it('an option the Run was sent with no id records NO snapshot — never an invented option id', () => {
+    const snap = buildRunInputSnapshot(input({ submittedOptions: [{ label: 'Unnamed' }, { option_id: 'opt_hold', label: 'Hold', is_baseline: true }] }));
+    expect(snap).toBeNull();
+  });
 });
+
