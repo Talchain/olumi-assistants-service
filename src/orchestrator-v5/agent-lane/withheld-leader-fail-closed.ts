@@ -1064,7 +1064,7 @@ function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold |
   const codes = warnings.filter((w): w is { code: string; node_ids?: unknown; message?: unknown } =>
     typeof (w as { code?: unknown } | null)?.code === 'string');
   if (codes.some((w) => w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')) {
-    return { why: 'Olumi has not read the goal as a product of its recorded factors, so its figures cannot yet support a comparison' };
+    return { why: 'Olumi has not read your goal as the product of your own figures, so its figures cannot yet support a comparison' };
   }
   const warning = codes.find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
   if (warning === undefined) return undefined;
@@ -1212,6 +1212,9 @@ function singleCauseClause(
     return `${why}, and ${goalFigureCoHold.why}${goalFigureCoHold.action === undefined ? '' : `; ${goalFigureCoHold.action}`}`;
   }
   if (admission !== undefined) return admission;
+  if (goalFigureCoHold !== undefined) {
+    return `because ${goalFigureCoHold.why}${goalFigureCoHold.action === undefined ? '' : `; ${goalFigureCoHold.action}`}`;
+  }
   if (withheldReason === WITHHELD_CONSTRAINT_VERDICT) {
     const cause = limitCauseCodes.find((c) => BY_CONSTRAINT_CODE[c] !== undefined);
     if (cause !== undefined) return BY_CONSTRAINT_CODE[cause]!;

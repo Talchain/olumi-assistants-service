@@ -71,7 +71,7 @@ describe('the no-leader sentence never asks for a rerun that cannot help', () =>
   });
 
   it('CO-HELD: unread goal product does not prescribe a value-and-rerun loop', () => {
-    const analysisReady = { analysis_admission: { permitted_analysis_mode: 'quantified_provisional', reasons: [{ field: 'permitted_analysis_mode', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }] } };
+    const analysisReady = { analysis_admission: { permitted_analysis_mode: 'comparative_leader', reasons: [{ field: 'permitted_analysis_mode', code: 'READY_TO_COMPARE' }] } };
     const blocks = [{ type: 'analysis_result', enrichment: { inference_warnings: [{ code: 'GOAL_FIGURES_PRODUCT_NOT_READ' }] } }];
     const out = enforceAgentLaneLeaderClaimsAtWire(
       {
@@ -80,8 +80,10 @@ describe('the no-leader sentence never asks for a rerun that cannot help', () =>
       } as unknown as OlumiResponse,
       { requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false, leaderClaimWithheldReason: 'separation_unavailable', graph: { nodes: [], edges: [] }, analysisReady } as never,
     );
-    expect(out.response.assistant_text).toContain('Olumi has not read the goal as a product of its recorded factors');
+    expect(out.response.assistant_text).toContain('Olumi has not read your goal as the product of your own figures');
     expect(out.response.assistant_text).not.toContain('set one of them yourself, then run the analysis again');
+    expect(out.response.assistant_text).not.toContain('ask me to run the analysis');
+    expect(agentNoLeaderSentence('separation_unavailable', analysisReady)).toContain('ask me to run the analysis');
   });
 
   it('keeps one complete closing across a second wire pass when a factor label contains ranking punctuation', () => {
