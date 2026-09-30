@@ -740,6 +740,24 @@ describe("0.63.0 — `analysis_goal_certainty` is the selected Run's stored arra
     expect(body.analysis_goal_certainty).toEqual(STORED);
   });
 
+  it("COLD WIRE — carries an earned exact chance, but strips an unearned exact chance from the option block", async () => {
+    const fact = withCertainty(GRAPH_HASH, STORED);
+    const enrichment = (fact.result as Record<string, unknown>).enrichment as Record<string, unknown>;
+    const options = enrichment.option_comparison as Array<Record<string, unknown>>;
+    options[0]!.probability_of_goal = 1;
+    options[1]!.probability_of_goal = 0;
+    readFactsFor.mockResolvedValue([fact]);
+
+    const body = (await read(await buildApp())).json() as Record<string, unknown>;
+    const block = body.analysis_result as { enrichment: { option_comparison: Array<Record<string, unknown>> } };
+    const publicOptions = block.enrichment.option_comparison;
+    expect(publicOptions.find((row) => row.option_id === "opt_hire")?.probability_of_goal).toBe(1);
+    expect(publicOptions.find((row) => row.option_id === "opt_hold")).not.toHaveProperty("probability_of_goal");
+    expect(publicOptions.find((row) => row.option_id === "opt_hold")?.outcome_mean).toBe(0.41);
+    expect(body.analysis_goal_certainty).toEqual(STORED);
+    expect(options[1]!.probability_of_goal).toBe(0); // persisted truth was not rewritten
+  });
+
   it("RECORDED EMPTY — `[]` (no option claims a certainty) is carried as `[]`, never dropped to absent", async () => {
     readFactsFor.mockResolvedValue([withCertainty(GRAPH_HASH, [])]);
     const body = (await read(await buildApp())).json() as Record<string, unknown>;
