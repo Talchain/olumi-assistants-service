@@ -1695,6 +1695,7 @@ function deriveContextPackAnalysisState(
   const canonical = selectCanonicalAnalysisState({
     priorFacts: input.priorFacts,
     currentGraphHash,
+    currentGraph: rawGraph,
     // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): keep the
     // diagnostic / coaching-pack canonical state consistent with the wire
     // verdict. Same raw graph the hash is derived from. undefined when off.

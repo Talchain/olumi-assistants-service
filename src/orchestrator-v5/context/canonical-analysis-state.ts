@@ -319,6 +319,8 @@ export interface SelectCanonicalAnalysisStateInput {
   readonly readiness?: ReadinessLike;
   /** Hash of this turn's analysis-affecting graph fields, or null. */
   readonly currentGraphHash: string | null;
+  /** Same current graph as the hash, for the selected Run's goal-unit snapshot. */
+  readonly currentGraph?: unknown;
   /**
    * Current graph's option IDs for the option-identity freshness guard. Only
    * threaded by callers when `cee.optionIdentityFreshnessGuard` is on; left
@@ -386,11 +388,12 @@ export function selectCanonicalAnalysisState(
     // Defect 4: distinguishes "the store says no analysis" from "the store
     // could not be read". Absent => pre-fix behaviour, by construction.
     // The restore marker rides the same options object; absent => unchanged.
-    input.priorFactsReadOk === undefined && input.analysisInvalidatedAt === undefined
+    input.priorFactsReadOk === undefined && input.analysisInvalidatedAt === undefined && input.currentGraph === undefined
       ? undefined
       : {
           ...(input.priorFactsReadOk === undefined ? {} : { priorFactsReadOk: input.priorFactsReadOk }),
           ...(input.analysisInvalidatedAt === undefined ? {} : { analysisInvalidatedAt: input.analysisInvalidatedAt }),
+          ...(input.currentGraph === undefined ? {} : { currentGraph: input.currentGraph }),
         },
   );
   const selected = selectRunAnalysisFact(unifiedFacts);

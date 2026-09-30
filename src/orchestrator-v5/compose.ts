@@ -15,7 +15,7 @@ import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
 
-import { selectRunAnalysisFact, type FreshnessDerivation } from './context/freshness.js';
+import { goalSnapshotStaleMessage, selectRunAnalysisFact, type FreshnessDerivation } from './context/freshness.js';
 import { selectCanonicalAnalysisState } from './context/canonical-analysis-state.js';
 import { TelemetryEvents, emit } from '../utils/telemetry.js';
 import type { SuggestedAction } from './compose/types.js';
@@ -522,6 +522,18 @@ function buildBlocksFromFacts(
   for (const fact of facts) {
     if (fact.fact_type === 'run_analysis') {
       currentTurnRunAnalysisHandled = true;
+      // Hash equality cannot make an incompatible Run unit current. Reuse the
+      // central verdict before any result, Phase 3 card or focus is rebuilt.
+      const unitStaleMessage = lifecycle?.freshness.freshness === 'stale'
+        ? goalSnapshotStaleMessage(lifecycle.freshness.reason) : undefined;
+      if (unitStaleMessage !== undefined) {
+        const staleBlock = buildStaleRerunCoachingBlock({
+          created_at: new Date().toISOString(),
+          graph_hash_at_generation: lifecycle!.freshness.graph_hash_at_run ?? '',
+        }, unitStaleMessage);
+        if (staleBlock !== null) blocks.push(staleBlock);
+        continue;
+      }
       blocks.push(buildAnalysisResultBlock(fact, analysisReady));
 
       // PR 3 lifecycle branch 1 — fresh blocks from current-turn fact.
@@ -1791,7 +1803,7 @@ function buildLifecycleBlocksFromPrior(
     const staleBlock = buildStaleRerunCoachingBlock({
       created_at: new Date().toISOString(),
       graph_hash_at_generation: sourceGraphHash,
-    });
+    }, goalSnapshotStaleMessage(freshness.reason));
     const blocks: OlumiResponse['blocks'] = staleBlock ? [staleBlock] : [];
     emitLifecycle(lifecycle, {
       lifecycle_state: 'emitted_stale',

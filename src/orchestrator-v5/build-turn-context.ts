@@ -1021,7 +1021,7 @@ export async function buildTurnContext(
     // have it replayed indefinitely — long after the store recovered.
     // Threading the read state makes the degraded case `'unknown' /
     // derivation_failed`, which maps to an `unavailable` signal instead.
-    { priorFactsReadOk: scenarioAnalysisFactsReadOk },
+    { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph },
   );
   // AUTHORITATIVE STAGE — CEE decides the reasoning stage from the model it
   // holds, rather than echoing the client's guess back at it. See

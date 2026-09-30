@@ -674,7 +674,7 @@ function attachAnalysisState(
   if (analysisState === undefined) return response;
   return {
     ...response,
-    blocks: projectAnalysisBlocksForRunBinding(response.blocks, analysisState),
+    blocks: projectAnalysisBlocksForRunBinding(response.blocks, analysisState, canonical.freshness_reason),
     analysis_state: analysisState,
   };
 }

@@ -318,6 +318,7 @@ export function projectTurnContext(
   const { facts, readOk, complete } = analysisFactsFrom(context);
   const freshness = deriveAnalysisFreshness(facts, currentGraphHash, extractGraphOptionIds(graph), {
     priorFactsReadOk: readOk,
+    currentGraph: graph,
   });
 
   if (!readOk) {

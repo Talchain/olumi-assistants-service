@@ -2284,6 +2284,7 @@ export async function runTurnExecutor(
                 analysisReadyForTurn,
               ),
               currentGraphHash: currentAnalysisGraphHashForTurn,
+              currentGraph: canonicalReadinessGraphForRun,
               // Option-identity guard: read the SAME active graph authority
               // as readiness + the routing-freshness hash. This matters after
               // an atomic repair commit: `context.persistedGraph` is the
@@ -2325,6 +2326,7 @@ export async function runTurnExecutor(
                 analysisReadyForTurn,
               ),
               currentGraphHash: currentAnalysisGraphHashForTurn,
+              currentGraph: canonicalReadinessGraphForRun,
               currentGraphOptionIds: config.cee.optionIdentityFreshnessGuard
                 ? extractGraphOptionIds(canonicalReadinessGraphForRun)
                 : undefined,
@@ -2953,6 +2955,7 @@ export async function runTurnExecutor(
       // turn-path derivation — measured: 1 of 20 call sites threaded it.
       // `null`/absent ⇒ byte-identical to before.
       {
+        currentGraph: canonicalReadinessGraphForRun,
         ...(context.prior_facts_read_ok === undefined
           ? {}
           : { priorFactsReadOk: context.prior_facts_read_ok }),
@@ -2966,6 +2969,7 @@ export async function runTurnExecutor(
       currentAnalysisGraphHashForTurn,
       currentGraphOptionIdsForTurn,
       {
+        currentGraph: canonicalReadinessGraphForRun,
         priorFactsReadOk: scenarioAnalysisFactsReadOk,
         // Same marker, same turn, same read — see the routing derivation above.
         ...(context.analysis_invalidated_at === undefined
@@ -4746,9 +4750,12 @@ export async function runTurnExecutor(
               : undefined,
           
             // PR #981 review P1b: same flag, same question (see routingFreshness).
-            context.prior_facts_read_ok === undefined
-              ? undefined
-              : { priorFactsReadOk: context.prior_facts_read_ok },
+            {
+              currentGraph: outcome.mutatedGraph,
+              ...(context.prior_facts_read_ok === undefined
+                ? {}
+                : { priorFactsReadOk: context.prior_facts_read_ok }),
+            },
           );
           emit(TelemetryEvents.PendingActionConsumed, {
             request_id: requestId,
@@ -5021,9 +5028,12 @@ export async function runTurnExecutor(
               : undefined,
           
             // PR #981 review P1b: same flag, same question (see routingFreshness).
-            context.prior_facts_read_ok === undefined
-              ? undefined
-              : { priorFactsReadOk: context.prior_facts_read_ok },
+            {
+              currentGraph: lastExecuted.mutatedGraph,
+              ...(context.prior_facts_read_ok === undefined
+                ? {}
+                : { priorFactsReadOk: context.prior_facts_read_ok }),
+            },
           );
           for (const ref of consumedRefs) {
             const consumedHold = holds.find((h) => h.chip_id === ref)!;
@@ -13088,6 +13098,7 @@ export async function runTurnExecutor(
       // than mutation reasons. Stamp the mutation's structural fields
       // onto the ingress shape so the comparison is apples-to-apples
       // with how `graph_hash_at_run` was originally computed.
+      let currentGraphForPostHandlerFreshness = canonicalReadinessGraphForRun;
       const hashForPostHandlerFreshness = ((): string | null => {
         if (handlerOutcome.mutated_graph === undefined) {
           return currentAnalysisGraphHashForTurn;
@@ -13102,6 +13113,7 @@ export async function runTurnExecutor(
             ? { goal_constraints: mutated.goal_constraints }
             : {}),
         };
+        currentGraphForPostHandlerFreshness = merged;
         // M5 readiness authority: on a mutation the freshness hash reflects the
         // post-mutation graph, so canonical readiness must too. Use the handler's
         // GraphV3 `mutated` projection (the canonical adapter derives option
@@ -13141,9 +13153,12 @@ export async function runTurnExecutor(
         // here (this turn's own facts are first in the unified chain) — it
         // matters only when the handler produced no usable fact AND the prior
         // read degraded, where 'none' would again be an unsupported claim.
-        context.prior_facts_read_ok === undefined
-          ? undefined
-          : { priorFactsReadOk: context.prior_facts_read_ok },
+        {
+          currentGraph: currentGraphForPostHandlerFreshness,
+          ...(context.prior_facts_read_ok === undefined
+            ? {}
+            : { priorFactsReadOk: context.prior_facts_read_ok }),
+        },
       );
       // T1 claim safety — REFINE the turn-entry read (ROADMAP 1.233, see the
       // declaration) over the SAME fact array and via the SAME canonical
@@ -13244,6 +13259,7 @@ export async function runTurnExecutor(
         priorFacts: context.prior_facts,
         readiness: canonicalReadinessForRun,
         currentGraphHash: hashForPostHandlerFreshness,
+        currentGraph: currentGraphForPostHandlerFreshness,
         currentGraphOptionIds: currentGraphOptionIdsForPostHandler,
         // Defect 4. Threaded here too for consistency, though it is nearly
         // always inert on this path: the execute branch carries this turn's

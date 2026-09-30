@@ -3401,9 +3401,12 @@ export async function dispatchEditGraph(
       // CONTEXT/MEMORY V5 defect 4 — a degraded prior-fact read reaches here as
       // `[]`. Untreated, this is the derivation that seeds the `'none'` verdict
       // the recovery re-derivations below then repeat.
-      turnContext.prior_facts_read_ok === undefined
-        ? undefined
-        : { priorFactsReadOk: turnContext.prior_facts_read_ok },
+      {
+        currentGraph: persistedPostEditGraph,
+        ...(turnContext.prior_facts_read_ok === undefined
+          ? {}
+          : { priorFactsReadOk: turnContext.prior_facts_read_ok }),
+      },
     );
     emitFreshnessTelemetry(
       freshness,
@@ -3646,9 +3649,12 @@ export async function dispatchEditGraph(
             // Defect 4 — the `derivation_failed` short-circuit above does NOT
             // cover a degraded read (that path returns `readOk: false` without
             // throwing, so `freshness.reason` is `no_successful_run_analysis_fact`).
-            priorFactsReadOkForRecovery === undefined
-              ? undefined
-              : { priorFactsReadOk: priorFactsReadOkForRecovery },
+            {
+              currentGraph: gmFrameBase,
+              ...(priorFactsReadOkForRecovery === undefined
+                ? {}
+                : { priorFactsReadOk: priorFactsReadOkForRecovery }),
+            },
           ).freshness;
     // ROADMAP 2.474 / A3 — DOES THIS SCENARIO ALREADY CARRY AN ANALYSIS?
     //
@@ -4033,9 +4039,12 @@ export async function dispatchEditGraph(
         config.cee.optionIdentityFreshnessGuard
           ? extractGraphOptionIds(gmFrameBase)
           : undefined,
-        priorFactsReadOkForRecovery === undefined
-          ? undefined
-          : { priorFactsReadOk: priorFactsReadOkForRecovery },
+        {
+          currentGraph: gmFrameBase,
+          ...(priorFactsReadOkForRecovery === undefined
+            ? {}
+            : { priorFactsReadOk: priorFactsReadOkForRecovery }),
+        },
       );
     }
     if (invalidBaseRefusalOwnsReply) {
@@ -4082,9 +4091,12 @@ export async function dispatchEditGraph(
           : undefined,
         // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above screens
         // `derivation_failed`, which a degraded read does NOT produce.
-        priorFactsReadOkForRecovery === undefined
-          ? undefined
-          : { priorFactsReadOk: priorFactsReadOkForRecovery },
+        {
+          currentGraph: gmFrameBase,
+          ...(priorFactsReadOkForRecovery === undefined
+            ? {}
+            : { priorFactsReadOk: priorFactsReadOkForRecovery }),
+        },
       );
     }
     ev.branch = 'part_accounting_substitution_blocked';
@@ -4173,9 +4185,12 @@ export async function dispatchEditGraph(
           : undefined,
         // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above screens
         // `derivation_failed`, which a degraded read does NOT produce.
-        priorFactsReadOkForRecovery === undefined
-          ? undefined
-          : { priorFactsReadOk: priorFactsReadOkForRecovery },
+        {
+          currentGraph: gmFrameBase,
+          ...(priorFactsReadOkForRecovery === undefined
+            ? {}
+            : { priorFactsReadOk: priorFactsReadOkForRecovery }),
+        },
       );
     }
     // R7 per-turn event honesty: the mutation did not apply.
@@ -5566,9 +5581,12 @@ export async function dispatchEditGraph(
               : undefined,
             // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above
             // screens `derivation_failed`, which a degraded read does NOT produce.
-            priorFactsReadOkForRecovery === undefined
-              ? undefined
-              : { priorFactsReadOk: priorFactsReadOkForRecovery },
+            {
+              currentGraph: gmFrameBase,
+              ...(priorFactsReadOkForRecovery === undefined
+                ? {}
+                : { priorFactsReadOk: priorFactsReadOkForRecovery }),
+            },
           );
         }
       }

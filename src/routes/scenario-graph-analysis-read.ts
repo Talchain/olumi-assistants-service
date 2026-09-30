@@ -101,6 +101,7 @@ import {
   loadScenarioAnalysisFactsForRead,
 } from '../orchestrator-v5/build-turn-context.js';
 import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
+import { attachComputedAt, type AnalysisReadyPayload } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 import {
   composeAnalysisStateV1,
   readRawRobustnessFromResponseBody,
@@ -142,6 +143,8 @@ export interface ScenarioAnalysisRead {
    * already believed standing.
    */
   readonly analysis_state: AnalysisStateV1 | null;
+  /** Existing freshness text carrier, present for the goal-snapshot stale boundary. */
+  readonly analysis_ready?: AnalysisReadyPayload;
   /**
    * The `analysis_result` block for the fact the verdict selected, present ONLY
    * on a fresh graph-hash verdict with no conflicting run identity. Legacy
@@ -327,6 +330,7 @@ export async function readScenarioAnalysis(
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
       analysisInvalidatedAt,
+      currentGraph: params.graph,
     });
 
     // The result block first, so the verdict's `leader_claim` can be composed
@@ -386,6 +390,7 @@ export async function readScenarioAnalysis(
         canonical: selectCanonicalAnalysisState({
           priorFacts: facts,
           currentGraphHash,
+          currentGraph: params.graph,
           ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
           priorFactsReadOk: factsReadOk,
           analysisInvalidatedAt,
@@ -458,10 +463,13 @@ export async function readScenarioAnalysis(
       }) ?? null;
 
     const boundResult = analysisResult !== null && analysisState !== null
-      ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState)[0] ?? null
+      ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState, derivation.reason)[0] ?? null
       : analysisResult;
     return {
       analysis_state: analysisState,
+      ...(analysisReady !== undefined && (derivation.reason === 'goal_unit_changed'
+        || derivation.reason === 'goal_snapshot_unverified')
+        ? { analysis_ready: attachComputedAt(analysisReady, derivation) } : {}),
       analysis_result: boundResult,
       // R3-9: every answered read carries it, from the same facts as the writer; never gated on freshness.
       analysis_identity_run_use: identityRunUseWire(facts),
