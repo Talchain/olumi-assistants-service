@@ -191,9 +191,12 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     expect(sent.length).toBeGreaterThanOrEqual(1);
     const items = (s: Record<string, unknown>, k: string) => ((s.properties as Record<string, { items: { required: string[] } }>)[k]!.items);
     for (const s of sent) for (const k of ['risks', 'outcomes']) expect(items(s, k).required).toEqual(['label', 'provenance', 'unit', 'plausible_max']);
+    // The link's `definitional` (DL 5916504679) is the other key optional in the contract and required when sent.
+    for (const s of sent) expect(items(s, 'links').required.at(-1)).toBe('definitional');
     const contract = buildCandidateSchema();
     const back = structuredClone(sent[0]!);
     for (const k of ['risks', 'outcomes']) items(back, k).required = ['label', 'provenance'];
+    items(back, 'links').required = items(back, 'links').required.filter((k) => k !== 'definitional');
     expect(JSON.stringify(back)).toBe(JSON.stringify(contract));
   });
 
