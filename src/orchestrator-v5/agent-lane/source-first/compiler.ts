@@ -30,6 +30,13 @@ export function sourceEntityId(ref: string): string {
   return `sf_${createHash('sha256').update(ref).digest('hex').slice(0, 20)}`;
 }
 
+/** Keep a quarter deadline verbatim when the goal's own bound source states one. */
+function statedQuarterDeadline(quote: string): string | undefined {
+  const matches = [...quote.matchAll(/\b(?:by|before)\s+(?:the\s+end\s+of\s+)?Q[1-4]\b/gi)]
+    .filter((match) => !/\b(?:not|never|cannot|can't)\s*$/i.test(quote.slice(0, match.index)));
+  return matches.length === 1 ? matches[0][0] : undefined;
+}
+
 /** Compile validated meaning once. Never repair meaning by label or invent values. */
 export function compileSourceMeaning(brief: string, input: unknown): SourceFirstCompilation {
   const meaning = SourceMeaningSchema.parse(input);
@@ -53,11 +60,13 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     const source = bindSource(brief, entity.source);
     if (!source.ok) { issue(entity.ref, source.reason, `Which passage identifies "${entity.label}"?`); continue; }
     const id = sourceEntityId(entity.ref);
+    const deadline = entity.kind === 'goal' ? statedQuarterDeadline(source.source.quote) : undefined;
     reference_ids[entity.ref] = id;
     source_bindings[entity.ref] = source.source;
     nodes.set(entity.ref, {
       id, kind: entity.kind, label: entity.label,
       source_quote: source.source.quote, provenance: 'from_brief',
+      ...(deadline ? { goal_deadline_as_stated: deadline } : {}),
       ...(entity.label !== source.source.quote ? { label_authored: true } : {}),
       ...(entity.kind === 'factor' ? { category: 'external' as const } : {}),
     });

@@ -20,8 +20,27 @@ describe('captured numeric spellings', () => {
     const result = compileSourceMeaning(captured.brief, captured.meaning);
     expect(result.graph.goal_constraints?.[0]).toMatchObject({ value: 400000, unit: 'GBP per year', operator_as_stated: '<' });
     expect(result.graph.nodes.every((node) => node.goal_horizon_months === undefined)).toBe(true);
+    expect(result.graph.nodes.find((node) => node.id === sourceEntityId('g1'))?.goal_deadline_as_stated).toBe('by Q3');
     expect(result.graph.nodes.filter((node) => node.kind === 'factor')).toHaveLength(2);
     expect(result.graph.nodes.filter((node) => node.kind === 'factor').every((node) => node.observed_state === undefined)).toBe(true);
+  });
+  it('binds a quarter deadline only from an unambiguous, affirmative goal source', () => {
+    const captured = captures.find((item) => item.case === 'E')!;
+    const goal = captured.meaning.entities.find((entity) => entity.ref === 'g1')!;
+    for (const [brief, quote, expected] of [
+      ['Ship the new platform by Q3.', 'Ship the new platform by Q3', 'by Q3'],
+      ['Ship the new platform, not by Q3.', 'Ship the new platform, not by Q3', undefined],
+      ['Ship the new platform by Q3 or by Q4.', 'Ship the new platform by Q3 or by Q4', undefined],
+      ['Ship the new platform. Hiring starts by Q3.', 'Ship the new platform', undefined],
+    ] as const) {
+      captured.brief = brief;
+      goal.source = { quote, start: null, end: null };
+      captured.meaning.quantities = [];
+      captured.meaning.options = [];
+      captured.meaning.unknowns = [];
+      const result = compileSourceMeaning(captured.brief, captured.meaning);
+      expect(result.graph.nodes.find((node) => node.id === sourceEntityId('g1'))?.goal_deadline_as_stated).toBe(expected);
+    }
   });
   it('retains approximate support volume and its exact qualifying quote', () => {
     const captured = captures.find((item) => item.case === 'support')!;
