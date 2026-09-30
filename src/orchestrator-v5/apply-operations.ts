@@ -108,6 +108,7 @@ import { applyPatchOperations } from '../orchestrator/patch-applier.js';
 import { validatePatchOperations } from '../orchestrator/patch-validation.js';
 import { buildAppliedChanges, parseEditGraphResponse } from '../orchestrator/tools/edit-graph.js';
 import {
+  clearInheritedInterventionSourceQuotes,
   encodeOptionInterventionsForEdit,
   optionIdsAddedWithInterventionIntent,
   optionIdsTouchedByOperations,
@@ -604,7 +605,7 @@ export function createApplyOperations(
 
     const graph = projectGraphForPersistence(
       mergeAppliedGraphForPersistence({
-        appliedGraph: encoded.graph,
+        appliedGraph: clearInheritedInterventionSourceQuotes(before, encoded.graph),
         persistedBase: before,
         ingressBase: before,
         scenarioId,
