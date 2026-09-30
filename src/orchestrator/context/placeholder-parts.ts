@@ -28,10 +28,12 @@
 
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
+import { sameUnit } from '../../orchestrator-v5/agent-lane/same-unit.js';
 
 type Rec = Record<string, unknown>;
 
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** Why a target's limit is withheld. Each is a per-limit `reason` code on the contract (a string: hazard 1). */
 export const PLACEHOLDER_PARTS_REASON = 'parts_links_placeholder';
@@ -44,13 +46,72 @@ export type PlaceholderPartsReason =
 
 /**
  * A link sized only by Olumi: an `olumi_*` magnitude, OR a plain `defaulted: true` size, and never a link the user sized
- * (`user_specified`). The ONE test DECISION-REPRESENTATION row 4's check (2) reads for the goal (`target-testability.ts`,
- * R3 #2371 5914745577) and B6 reads for a limit (R3 #75 5915571955), so the two cannot disagree on "Olumi's guess".
+ * (`user_specified`). Read through {@link olumiGuessedLink}. A `magnitude: 'user_stated'` size with `defaulted` from a
+ * projected spread (MODEL GENERATION 5918011036) stays a guess here until construction's brief check is scoped to the
+ * link (#2389; AIQ 5918035214, P0 PARTNER 5918144110): that change lands with it.
  */
 export function olumiSizedLink(e: Rec): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
   return p?.source !== 'user_specified'
     && ((typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) || e.defaulted === true);
+}
+
+/**
+ * ⭐ A link that holds BY DEFINITION is no Olumi guess (DL #75 5916504679; R3 5916525389): money lost to a risk is money
+ * the goal does not get, one for one. CHECKED on the stored edge every read, never claimed: construction's type
+ * (`provenance.definitional`, #2386, written only when its own size proves it) AND that size still describes the edge
+ * (`natural_effect.strength_mean` is the β the Run uses: the sizer's staleness key, `link-effect.ts` `natural()`; P0
+ * PARTNER CR 5917993638) AND it is exactly ±1 per unit in ONE unit AND the target's unit is that unit (the source's
+ * too, where its node carries one). Anything else stays a guess.
+ */
+export function holdsByDefinition(e: Rec, unitOf: (id: unknown) => string | undefined): boolean {
+  const p = isRec(e.provenance) ? e.provenance : undefined;
+  const ne = isRec(p?.natural_effect) ? p!.natural_effect as Rec : undefined;
+  if (p?.definitional !== true || ne === undefined) return false;
+  if (!finite(ne.strength_mean) || ne.strength_mean !== (isRec(e.strength) ? e.strength.mean : undefined)) return false;
+  if (!finite(ne.amount) || !finite(ne.per_source_change) || ne.per_source_change === 0 || Math.abs(ne.amount / ne.per_source_change) !== 1) return false;
+  const [amountUnit, sourceUnit] = [ne.amount_unit, ne.per_source_change_unit];
+  if (typeof amountUnit !== 'string' || typeof sourceUnit !== 'string' || amountUnit.trim() === '' || !sameUnit(amountUnit, sourceUnit)) return false;
+  const [from, to] = [unitOf(e.from), unitOf(e.to)];
+  return to !== undefined && sameUnit(to, amountUnit) && (from === undefined || sameUnit(from, amountUnit));
+}
+
+/** Per node id, the unit its level is read in: its own `unit`, else its level's, else (the goal) its target's. */
+export function nodeUnitOf(nodes: readonly unknown[]): (id: unknown) => string | undefined {
+  const byId = new Map(nodes.filter(isRec).map((n) => [n.id, n] as const));
+  return (id) => {
+    const n = byId.get(id);
+    return n === undefined ? undefined
+      : [n.unit, isRec(n.observed_state) ? n.observed_state.unit : undefined, n.kind === 'goal' ? n.goal_threshold_unit : undefined]
+        .find((x): x is string => typeof x === 'string' && x.trim() !== '');
+  };
+}
+
+/**
+ * ⭐ THE ONE "rests on Olumi's guess" test on a link, read by DECISION-REPRESENTATION row 4 for the goal
+ * (`target-testability.ts`, R3 #2371 5914745577) and by B6 for a limit (R3 #75 5915571955): sized only by Olumi, and not
+ * a link that holds by definition. One test, so the two gates cannot disagree on the same link (AIQ 5917939324; P0
+ * PARTNER 5918016361). Read it over {@link asAnalysed}'s graph: a link out of the calculation is on no path.
+ */
+export function olumiGuessedLink(e: Rec, unitOf: (id: unknown) => string | undefined): boolean {
+  return olumiSizedLink(e) && !holdsByDefinition(e, unitOf);
+}
+
+/**
+ * The graph the Run computes on (P0 PARTNER #75 5916838445): a node the user kept out of the calculation
+ * (`analysis_participation: 'retained_excluded'`, the exact literal `run-analysis-participation-guard.ts` acts on) and
+ * every edge touching it are handed to PLoT absent, so they are on no path here either. The goal is never dropped (the
+ * guard refuses that run instead), nor `keep` (B6's limited node, whose own limit is being read).
+ */
+export function asAnalysed<G extends { nodes: readonly unknown[]; edges?: unknown }>(graph: G, keep?: unknown): G {
+  const out = new Set(graph.nodes.filter((n) => isRec(n) && n.analysis_participation === 'retained_excluded' && n.kind !== 'goal' && n.id !== keep)
+    .map((n) => (n as Rec).id));
+  if (out.size === 0) return graph;
+  return {
+    ...graph,
+    nodes: graph.nodes.filter((n) => !(isRec(n) && out.has(n.id))),
+    edges: Array.isArray(graph.edges) ? graph.edges.filter((e) => !(isRec(e) && (out.has(e.from) || out.has(e.to)))) : graph.edges,
+  };
 }
 
 /**
@@ -169,10 +230,11 @@ export function placeholderMovedOptions(
  */
 export function placeholderPartsFinding(
   targetId: string,
-  nodes: readonly Rec[],
-  edges: readonly Rec[],
+  allNodes: readonly Rec[],
+  allEdges: readonly Rec[],
   options: ReadonlyArray<Record<string, unknown>>,
 ): PlaceholderPartsFinding | null {
+  const { nodes, edges } = asAnalysed({ nodes: allNodes, edges: allEdges }, targetId);
   const kindById = new Map(nodes.map((n) => [n.id, n.kind] as const));
   // The target's parts: every node upstream of it that is not an option or the decision (T4's walk).
   const parts = new Set<unknown>();
@@ -202,6 +264,7 @@ export function placeholderPartsFinding(
   if (movers.length > 0) {
     if (target !== undefined && isRec(target.nonlinear_identity)) return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
     const unitById = sizerUnitsOf(nodes);
+    const unitOf = nodeUnitOf(nodes);
     const onPath = new Set<unknown>([...parts, targetId]);
     for (const iv of movers) {
       // Forward from each part this option sets, through parts only: every link walked lies on a path to the target.
@@ -213,7 +276,7 @@ export function placeholderPartsFinding(
           for (const e of edges) {
             if (e.from !== at || !onPath.has(e.to)) continue;
             if (!linkIsSized(e, unitById) && !userStatedStrength(e)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
-            if (guessed === undefined && olumiSizedLink(e)) guessed = { partId, from: String(e.from), to: String(e.to) };
+            if (guessed === undefined && olumiGuessedLink(e, unitOf)) guessed = { partId, from: String(e.from), to: String(e.to) };
             if (e.to !== targetId && !reached.has(e.to)) {
               reached.add(e.to);
               walk.push(e.to);
@@ -253,8 +316,10 @@ export function placeholderPartsFinding(
       if (levelIsOlumis) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' };
       continue;
     }
-    const ranges = [o.intervention_ranges, node?.intervention_ranges].map((x) => (isRec(x) ? x[targetId] : undefined));
-    const theirs = (isRec(setting) && (usersOwn(setting.source) || isRec(setting.range))) || ranges.some(isRec);
+    // A range lifts it only as the user stated it: the stored `interventions[T].range` with the user's `source` (TEMPORAL
+    // #2382's writer; AIQ 5914222384: a range with no author is refused). The wire's `intervention_ranges` carries no
+    // author, so it never does on its own.
+    const theirs = isRec(setting) && (usersOwn(setting.source) || (isRec(setting.range) && usersOwn(setting.range.source)));
     if (!theirs) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'point' };
   }
   return null;

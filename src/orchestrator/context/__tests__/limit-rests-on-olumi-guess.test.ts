@@ -149,9 +149,30 @@ describe('B6: an option that SETS the limited quantity to one point (AIQ 5915438
     expect(moved(setting('user')).has('switch_to_gcp')).toBe(false);
   });
 
-  it('CONTROL: Olumi\'s point with a STATED range for it → kept', () => {
+  /** The range as TEMPORAL #2382 stores the user's answer: on the setting it qualifies, with its author. */
+  const ranged = (range: Json): Json => {
+    const g = setting('cee_hypothesis');
+    g.nodes.find((n: Json) => n.id === 'switch_to_gcp').interventions[TARGET].range = range;
+    return g;
+  };
+  const USERS_RANGE = { low: 2, high: 5, meaning: 'likely_range', source: 'user_specified', source_quote: 'somewhere between 2 and 5 weeks' };
+
+  it('CONTROL: Olumi\'s point with the USER\'s stated range for it (#2382\'s stored shape) → kept', () => {
+    expect(moved(ranged(USERS_RANGE)).has('switch_to_gcp')).toBe(false);
+  });
+
+  it('RED (AIQ 5914222384, "no author"): the same range with no `source` → withheld', () => {
+    const { source: _s, ...authorless } = USERS_RANGE;
+    expect(moved(ranged(authorless)).get('switch_to_gcp')).toBe(OLUMI_GUESS_LIMIT_REASON);
+  });
+
+  it('RED: a range Olumi wrote (`cee_hypothesis`) → withheld (a guessed range is still a guess)', () => {
+    expect(moved(ranged({ ...USERS_RANGE, source: 'cee_hypothesis' })).get('switch_to_gcp')).toBe(OLUMI_GUESS_LIMIT_REASON);
+  });
+
+  it('RED: a range only on the wire copy (`intervention_ranges`, no author) → withheld', () => {
     const g = setting('cee_hypothesis', { intervention_ranges: { [TARGET]: { low: 2, high: 5, meaning: 'likely_range' } } });
-    expect(moved(g).has('switch_to_gcp')).toBe(false);
+    expect(moved(g).get('switch_to_gcp')).toBe(OLUMI_GUESS_LIMIT_REASON);
   });
 
   it('CONTROL: setting today\'s level when that level is definitional (0) → kept; when it is Olumi\'s 1 week → (ii) withholds it', () => {
