@@ -103,7 +103,7 @@ import { projectEvidenceAssessment } from './compose/project-evidence-assessment
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.js';
 import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
-import { deriveEveryOptionLimitVerdict, readRatifiedConstraints } from '../orchestrator/context/constraint-feasibility.js';
+import { deriveEveryOptionLimitVerdict, readRatifiedConstraints, type ConstraintVerdictState } from '../orchestrator/context/constraint-feasibility.js';
 import { nodesUnderANonlinearIdentity } from './agent-lane/admit-model.js';
 
 /**
@@ -113,7 +113,7 @@ import { nodesUnderANonlinearIdentity } from './agent-lane/admit-model.js';
  * {@link RunDeltaRefusal} members are the PRODUCER's and arrive by passthrough —
  * re-spelling them here would be a second list free to drift from the one
  * `buildRunDelta` actually returns (this estate's dominant defect: the
- * hand-maintained mirror). The three below are the CALLER's, and the producer
+ * hand-maintained mirror). The four below are the CALLER's, and the producer
  * cannot see them: it is never invoked on these paths, so it has no reason to
  * offer.
  *
@@ -129,7 +129,9 @@ export type RunDeltaDisclosureReason =
   /** The composer could not confirm the two runs are the same subject. */
   | 'run_identity_unconfirmed'
   /** The composer found the two runs are demonstrably different subjects. */
-  | 'run_identity_conflict';
+  | 'run_identity_conflict'
+  /** A newer degraded Run supersedes the older successful pair. */
+  | 'newer_run_degraded';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
 
@@ -288,6 +290,8 @@ export interface FinaliserContext {
    * which is the fail-closed direction.
    */
   readonly mayNameLeadingOption?: boolean;
+  /** The state read beside the permission from the same scenario-selected claim fact. */
+  readonly claimConstraintVerdictState?: ConstraintVerdictState | null;
   /**
    * The CALLER that decided `mayNameLeadingOption === false` states that its
    * refusal was the unrequested-analysis confinement (a permitting verdict,
@@ -634,6 +638,11 @@ function attachAnalysisState(
     withheldBecauseUnrequested: ctx.leaderWithheldBecauseUnrequested === true,
     // C46 (H2): stated by the same caller, on the same terms — never derived here.
     withheldBecauseNonlinearIdentity: ctx.leaderWithheldBecauseNonlinearIdentity === true,
+    // The caller supplies this beside its permission from ONE selected
+    // scenario fact. The hot window can hold a different, older run.
+    withheldWithoutConstraintCause: ctx.mayNameLeadingOption === false
+      && (ctx.claimConstraintVerdictState === 'not_applicable'
+        || ctx.claimConstraintVerdictState === 'evaluated_feasible'),
     // F-LIMIT: every option breaks the same limit on the run fact this claim BINDS — and only when that is ALSO the
     // fact the entitlement is read from (`selectClaimBearingRunAnalysisFact`, which counts a partial run). When the two
     // differ (#1876: a newer partial run carries the refusal), this finaliser cannot know the cause, so today's stands.
@@ -857,6 +866,13 @@ function attachRunDelta(
         : 'run_identity_conflict',
       withoutDelta as OlumiResponse,
     );
+  }
+  // C2: the delta builder selects successful Runs. A newer partial Run can
+  // supersede both without appearing in that pair, so their old comparison
+  // must not be presented as the current turn's change.
+  if (response.analysis_state?.contradictions.includes('fact_status_success_but_degraded_newer')) {
+    const { run_delta: _shadowedDelta, ...withoutDelta } = response;
+    return disclose('skipped', 'newer_run_degraded', withoutDelta as OlumiResponse);
   }
   if (ctx.priorFacts === undefined) return disclose('skipped', 'prior_facts_absent', response);
   const built = buildRunDelta({

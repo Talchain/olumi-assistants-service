@@ -558,12 +558,11 @@ describe('F1 — the DIVERGENCE state at the boundary', () => {
 
   // ── OVER-SUPPRESSION CONTROL ──────────────────────────────────────────────
 
-  describe('CONTROL: the SAME fixture with A PERMITTED must be untouched', () => {
+  describe('CONTROL: A PERMITTED with no newer partial Run remains untouched', () => {
     beforeEach(() => {
-      // ONE member flipped — A's `may_name_leading_option`. Every behavioural
-      // difference from the arm above is therefore attributable to the
-      // displayed fact's verdict and to nothing else in the fixture.
-      priorFacts = [FACT_B_PARTIAL_PERMITTED, FACT_A_SUCCESSFUL_WITHHELD(true)];
+      // A newer partial Run supersedes A's current claim even when B's own
+      // verdict permits a leader. Remove B to isolate the earned A-only path.
+      priorFacts = [FACT_A_SUCCESSFUL_WITHHELD(true)];
     });
 
     it('the model-facing analysis keeps EVERY leader field', async () => {

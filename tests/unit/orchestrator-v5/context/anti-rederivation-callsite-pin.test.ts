@@ -365,6 +365,11 @@ const EXPECTED: Record<string, Record<string, number>> = {
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)
     'src/orchestrator-v5/context/context-pack-assembler.ts': 2, // approved seam
+    // C2 Phase-3 lifecycle: freshness deliberately selects the older successful
+    // Run for historical cards, while this one card-builder seam needs the
+    // canonical contradiction from the same prior-fact set to suppress those
+    // cards after a newer degraded Run. No new selector or policy is defined.
+    'src/orchestrator-v5/compose.ts': 2,
     // System B durable analysis authority: +1 call (import + three calls).
     // The new call remains inside the already-approved TurnExecutor assembly
     // seam and selects from the complete scenario-scoped fact snapshot solely

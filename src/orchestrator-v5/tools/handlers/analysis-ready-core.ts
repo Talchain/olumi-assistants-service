@@ -540,12 +540,9 @@ function isWaivableByComputeDiscard(
  * interventions as `number | { value: number }`. Closing it on an unproven
  * reachability would be guessing. Settle the reachability first, then close it.
  */
-function comparisonSurvivesDedup(
-  wireOptions: ReadonlyArray<{ interventions?: Record<string, unknown> }>,
-  rawGraph: unknown,
-): boolean {
-  const fingerprint = (o: { interventions?: Record<string, unknown> }): string =>
-    Object.entries(o.interventions ?? {})
+/** PLoT's intervention identity, shared with the post-gate Olumi option filter. */
+export function interventionFingerprint(interventions: Record<string, unknown>): string {
+  return Object.entries(interventions)
       .map(([key, raw]) => {
         const v =
           raw !== null && typeof raw === 'object' && 'value' in (raw as Record<string, unknown>)
@@ -555,6 +552,12 @@ function comparisonSurvivesDedup(
       })
       .sort()
       .join('|');
+}
+
+function comparisonSurvivesDedup(
+  wireOptions: ReadonlyArray<{ interventions?: Record<string, unknown> }>,
+  rawGraph: unknown,
+): boolean {
   /**
    * ⭐ THE SET THE RUN WILL SUBMIT, NOT THE OPTIONS AS STORED (Delivery Lead 5842717741; MG 5842710702).
    * A held status quo keeps no copy of its starting values (#1902), so its stored map is empty BY CONTRACT
@@ -574,7 +577,7 @@ function comparisonSurvivesDedup(
   const distinctValuedMaps = new Set<string>(
     submitted
       .filter((o) => Object.keys(o.interventions ?? {}).length > 0)
-      .map((o) => fingerprint(o)),
+      .map((o) => interventionFingerprint(o.interventions ?? {})),
   );
   return distinctValuedMaps.size >= PLOT_MIN_COMPARISON_OPTIONS;
 }

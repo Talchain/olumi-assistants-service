@@ -75,8 +75,12 @@ describe('2.579 wiring — the handler actually consumes the intake axis', () =>
     // the same HTTP response.
     expect(source).toContain('applyIntakeToLeaderPermission(');
     expect(source).toContain('projectClaimSafety(constraintVerdict)');
+    const permission = source.slice(source.indexOf('const leaderPermission ='), source.indexOf('const factCandidate:'));
+    expect(permission).toContain('applyIntakeToLeaderPermission(');
+    expect(permission).toContain('projectClaimSafety(constraintVerdict)');
     const stamp = source.slice(source.indexOf('constraint_verdict:'));
-    expect(stamp.slice(0, 200)).toContain('applyIntakeToLeaderPermission');
+    expect(stamp.slice(0, 200)).toContain('keptOlumiProvisional');
+    expect(stamp.slice(0, 200)).toContain('leaderPermission');
   });
 
   it('POSITIVE CONTROL — these checks can see a change', () => {

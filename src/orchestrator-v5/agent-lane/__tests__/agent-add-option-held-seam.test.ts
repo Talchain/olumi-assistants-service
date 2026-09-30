@@ -719,6 +719,28 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(approveChipOf(t1)).toBeUndefined();
   }, 120_000);
 
+  it('a marked Olumi twin cannot be described as the user\'s existing comparison or silently added', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, proposed_by: 'olumi' }
+      : node) });
+    let toolOutput: { ok?: boolean; detail?: string } = {};
+    script = [
+      () => fnCall('propose_new_option', { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }], rationale: 'Please add your suggestion.' }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
+        return say("That's Olumi's suggestion, not compared as yours; adopting it isn't available yet.");
+      },
+    ];
+    const turnResult = await turn({ message: 'Add your £59 suggestion as mine.' });
+    expect(toolOutput.ok).toBe(false);
+    expect(toolOutput.detail).toContain("Olumi's suggestion, not compared as yours");
+    expect(toolOutput.detail).toContain("Adopting one into your comparison isn't available yet");
+    expect(inner, 'no write or held proposal').toEqual([]);
+    expect(approveChipOf(turnResult)).toBeUndefined();
+  }, 120_000);
+
   it('[q5] RED (DL #70 5846812818, served F4/F4e): TWO options in one request, one a twin of "Raise to £59" → the valid one is still proposed as ONE change with ONE chip, the twin is named as not added, and approving adds only the valid one', async () => {
     graphOf.set(SCENARIO, seedGraph());
     let toolOutput: { ok?: boolean; refusal?: string; not_added?: { option: string; same_levels_as: string }[]; not_added_note?: string; options?: unknown; option?: { label?: string } } = {};
@@ -745,6 +767,32 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(labels).toContain('Test £54 at release');
     expect(labels).not.toContain('Test £59 at release');
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id), 'linked from the decision').toBe(true);
+  }, 120_000);
+
+  it('a batch can prepare the distinct option without promising adoption of a marked Olumi twin', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, proposed_by: 'olumi' }
+      : node) });
+    let toolOutput: { ok?: boolean; not_added_note?: string; option?: { label?: string } } = {};
+    script = [
+      () => fnCall('propose_new_option', { options: [
+        { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }] },
+        { label: 'Test £54 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 54, unit: 'GBP' } }] },
+      ], rationale: 'The user asked for both.' }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
+        return say("The £59 one is Olumi's suggestion and cannot be adopted yet. I can prepare the distinct £54 option for approval.");
+      },
+    ];
+    const turnResult = await turn({ message: 'Add both the £59 suggestion and a new £54 option.' });
+    expect(toolOutput.ok).toBe(true);
+    expect(toolOutput.option?.label).toBe('Test £54 at release');
+    expect(toolOutput.not_added_note).toContain("Olumi's suggestion, not compared as yours");
+    expect(toolOutput.not_added_note).toContain('adoption is unavailable');
+    expect(toolOutput.not_added_note).not.toContain('it is added only by a new proposal');
+    expect(approveChipOf(turnResult)).toBeDefined();
   }, 120_000);
 
   it('[q6] RED (DL #70 5846924842, served BF5): the user gives a level for an option NOT linked to Price → ONE proposal carries the link and the level → one click → the REAL product adds the link and records the level (never "once approved, I can record…")', async () => {
