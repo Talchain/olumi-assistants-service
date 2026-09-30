@@ -147,6 +147,34 @@ export type Composition =
   | { readonly kind: 'no' };
 const NO: Composition = { kind: 'no' };
 
+/** The two parents that are the user's own levels, when every OTHER parent is a link #2328 re-points; else null. */
+function twoUserPartsBesideRepointable(candidate: CandidateModel, metric: string, sources: readonly string[]): string[] | null {
+  const factor = (label: string) => candidate.factors.find((f) => f.label === label);
+  const users = sources.filter((s) => { const f = factor(s); return f !== undefined && f.baseline_known === true && f.provenance === 'explicit' && stated(f.baseline_value); });
+  if (users.length !== 2) return null;
+  const reaches = (from: string, skip: unknown): boolean => {
+    const seen = new Set([from]); const queue = [from];
+    while (queue.length > 0) {
+      const at = queue.shift()!;
+      for (const l of candidate.links) {
+        if (l === skip || l.from !== at || l.to === metric) continue;
+        if (users.includes(l.to)) return true;
+        if (!seen.has(l.to)) { seen.add(l.to); queue.push(l.to); }
+      }
+    }
+    return false;
+  };
+  for (const s of sources.filter((x) => !users.includes(x))) {
+    const f = factor(s);
+    const links = candidate.links.filter((l) => l.from === s && l.to === metric);
+    if (f === undefined || links.length !== 1 || readCurrencyUnitWithQualifiers(f.unit).kind === 'currency') return null;
+    const l = links[0]!;
+    if (l.provenance === 'explicit' || l.effect_provenance == null || l.effect_provenance === 'explicit') return null;
+    if (!stated(l.effect_amount ?? null) || !stated(l.effect_per_source_change ?? null) || reaches(s, l)) return null;
+  }
+  return users;
+}
+
 /**
  * Everything but the units: the goal's stated level o and its EXACTLY TWO drafted non-option parents, both the user's
  * figures, reconciling within 5%. Shared by the silent mint and the confirmation, so the two can never disagree on it.
@@ -159,8 +187,14 @@ function reconcilingParts(candidate: CandidateModel, brief: string) {
   if (!figureTheUserWrote(o, goal.unit, brief) || !levelWrittenApartFromTarget(o, goal.unit, goal.value, brief)) return null;
   if ((candidate.identities ?? []).some((i) => i.outcome === metric)) return null;
   const options = new Set(candidate.options.map((opt) => opt.label));
-  const sources = [...new Set(candidate.links.filter((l) => l.to === metric).map((l) => l.from))].filter((s) => !options.has(s));
-  if (sources.length !== 2) return null;
+  const all = [...new Set(candidate.links.filter((l) => l.to === metric).map((l) => l.from))].filter((s) => !options.has(s));
+  // ⛔ A THIRD PARENT THE PRODUCT WILL RE-POINT DOES NOT HIDE THE READING (R3 5903882132, guest `73192fdf`; DL 5903903027):
+  // 1 in 5 constructor drafts declare no product and link churn straight into MRR beside price and subscribers — no card,
+  // and Run 1 stated an additive "£59 → ~£76.8k, 0%". The extra parent must be exactly what `product-goal-extra-parent.ts`
+  // re-points once the product is read (a non-money factor, Olumi-sized, with no route to either part); anything else —
+  // an addend, a money parent, a risk, a user-stated link — keeps today's refusal.
+  const sources = all.length === 2 ? all : twoUserPartsBesideRepointable(candidate, metric, all);
+  if (sources === null || sources.length !== 2) return null;
   const parts = sources.map((s) => candidate.factors.find((f) => f.label === s));
   const levels: number[] = [];
   for (const f of parts) {
