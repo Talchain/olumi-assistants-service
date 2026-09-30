@@ -473,7 +473,10 @@ export async function readScenarioAnalysis(
             figures: projectSelectedRunFigures({
               scenarioId: params.scenarioId,
               runState: analysisState.run_state,
-              selectedGoal: readSelectedGoalFigureContext(params.graph, analysisReady?.goal_node_id),
+              selectedGoal: readSelectedGoalFigureContext(
+                params.graph,
+                (params.graph as { goal_node_id?: unknown }).goal_node_id,
+              ),
               leaderClaimPermitted: analysisState.leader_claim.permitted,
               currentResult: boundResult,
               selectedFact: fact?.result ?? null,

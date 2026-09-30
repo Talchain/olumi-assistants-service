@@ -6,8 +6,9 @@ type ResultBlock = OlumiResponse['blocks'][number];
 type RunHashes = Pick<FreshnessDerivation, 'graph_hash_at_run' | 'current_graph_hash'>;
 
 /**
- * Internal producer projection for the selected saved Run. The graph route does
- * not publish this shape yet; its consumer contract is being reconciled.
+ * Producer projection for the selected saved Run. The graph route publishes
+ * its identity and typed figures; the selected raw `result` stays internal
+ * because `analysis_result` is the one existing public block carrier.
  *
  * `run_state` is the existing selector's verdict. Null means the read failed;
  * `{ kind: 'never_run' }` means a successful read found no Run. The two must
