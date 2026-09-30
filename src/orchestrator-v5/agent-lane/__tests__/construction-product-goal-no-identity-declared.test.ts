@@ -55,7 +55,7 @@ function draft(edit: (c: Json) => void = () => {}): CandidateModel {
   return c as unknown as CandidateModel;
 }
 
-async function build(model: CandidateModel): Promise<{ graph: { nodes: Json[]; edges: Json[] }; out: Json }> {
+async function build(model: CandidateModel, brief: string = BRIEF): Promise<{ graph: { nodes: Json[]; edges: Json[] }; out: Json }> {
   expect(strict(model), JSON.stringify(strict.errors)).toBe(true);
   let graph: unknown = null;
   const call = (async () => ({ text: JSON.stringify(model) })) as unknown as CallStructuredModel;
@@ -63,7 +63,7 @@ async function build(model: CandidateModel): Promise<{ graph: { nodes: Json[]; e
     if (path.endsWith('/graph/register')) { graph = structuredClone((body as { graph: unknown }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('ec51a31b-0000-4000-8000-000000000001', BRIEF, d, call) as Json;
+  const out = await buildModelFromBrief('ec51a31b-0000-4000-8000-000000000001', brief, d, call) as Json;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
   return { graph: graph as { nodes: Json[]; edges: Json[] }, out };
 }
@@ -92,6 +92,18 @@ describe('a goal the brief reconciles as price × subscribers is read as one whe
     const card = proposeProductIdentity(graph as never);
     expect(card?.words).toContain('£49');
     expect(card?.words).toContain('1,500');
+  });
+
+  it('RED (P0 PARTNER 5904117525): the brief ALSO states churn ("3.5%") — three of the user\'s figures among the parents; the one reconciling pair is the product', async () => {
+    const withChurn = `${BRIEF} Our monthly churn is 3.5%.`;
+    const { graph } = await build(draft((c) => {
+      noIdentity(c);
+      Object.assign(c.factors.find((f: Json) => f.label === 'Monthly churn'), { baseline_known: true, baseline_value: 3.5, provenance: 'explicit' });
+    }), withChurn);
+    expect(goalIdentity(graph)).toBeDefined();
+    expect(parentsOf(graph)).toEqual([idOf(graph, 'Paying subscribers'), idOf(graph, 'Pro plan price')].sort());
+    expect(edge(graph, 'Monthly churn', 'Paying subscribers')?.provenance?.natural_effect?.amount).toBeCloseTo(-15, 6);
+    expect(proposeProductIdentity(graph as never)?.words).toContain('£49');
   });
 
   it('CONTROL (the identity-declared drafts, 4/4 served): unchanged — one product on the goal, the card offered', async () => {
