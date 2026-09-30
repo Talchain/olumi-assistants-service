@@ -75,6 +75,7 @@ import { analysisReadyPermitsLeaderNaming, permittedAnalysisModeFromAnalysisRead
 import {
   leaderClaimReasonKind,
   WITHHELD_CONSTRAINT_VERDICT,
+  WITHHELD_LEADER_CAUSE_UNRECORDED,
   WITHHELD_NEAR_TIE,
   WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN,
   WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT,
@@ -957,6 +958,8 @@ const BY_WITHHELD_REASON: Readonly<Record<string, string>> = {
    */
   [WITHHELD_CONSTRAINT_VERDICT]:
     'because a limit on your model was not shown to be met on this run, and running the analysis again as it stands will not change that; ask me what the limit needs before it can be checked',
+  [WITHHELD_LEADER_CAUSE_UNRECORDED]:
+    'because this comparison does not yet support putting forward one option, and the reason was not recorded; ask me what needs checking before changing or rerunning the model',
   [WITHHELD_NEAR_TIE]:
     'because the options came out too close together on this run to tell apart; tell me what matters most to you between them',
   [WITHHELD_SEPARATION_UNAVAILABLE]:

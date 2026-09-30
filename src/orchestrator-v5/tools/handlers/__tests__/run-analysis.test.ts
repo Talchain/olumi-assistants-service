@@ -43,6 +43,8 @@ import happyFixture from '../../../../../tests/fixtures/plot/v2-run-golden-happy
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json' with { type: 'json' };
 import largerFixture from '../../../../../tests/fixtures/plot/v2-run-golden-larger.json' with { type: 'json' };
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { composeAnalysisStateV1 } from '../../../compose/analysis-state-v1.js';
+import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -982,6 +984,144 @@ describe('run_analysis handler — AbortSignal + budget propagation', () => {
 // ---------------------------------------------------------------------------
 
 describe('run_analysis handler — PLoT payload construction', () => {
+  const optionParticipationSnapshot = (includeSecondUser: boolean, olumiMarked = true, identicalUsers = false, heldBaseline = false) => {
+    const options = [
+      { id: 'opt_a', option_id: 'opt_a', kind: 'option', label: 'Option A', interventions: { fac_price: 0.4 } },
+      ...(includeSecondUser
+        ? [{ id: 'opt_b', option_id: 'opt_b', kind: 'option', label: 'Option B',
+          ...(heldBaseline ? { is_baseline: true, interventions: {} } : { interventions: { fac_price: identicalUsers ? 0.4 : 0.8 } }),
+        }]
+        : []),
+      {
+        id: 'opt_olumi', option_id: 'opt_olumi', kind: 'option', label: 'Olumi suggestion',
+        interventions: { fac_price: 0.6 },
+        ...(olumiMarked ? { proposed_by: 'olumi' } : {}),
+      },
+    ];
+    const graph = {
+      version: '1',
+      nodes: [
+        { id: 'g', kind: 'goal', label: 'Goal' },
+        { id: 'fac_price', kind: 'factor', label: 'Price', category: 'controllable',
+          observed_state: heldBaseline
+            ? { value: 0.5, cap: 1, raw_value: 0.5, declared_scale: 'unit_interval' }
+            : { value: 0.5, cap: 1 },
+        },
+        ...options,
+      ],
+      edges: [{ id: 'e_price_goal', from: 'fac_price', to: 'g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' }],
+    };
+    return makeScenarioSnapshot({ graph, rawPersistedGraph: graph, options });
+  };
+
+  it('excludes an unadopted Olumi suggestion from PLoT when two user options remain', async () => {
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(optionParticipationSnapshot(true)),
+    });
+    await handler(makeInvocation());
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect((payload.options as Array<{ option_id: string }>).map((option) => option.option_id)).toEqual(['opt_a', 'opt_b']);
+  });
+
+  it('counts a held user baseline alongside a changed user option without losing leader permission', async () => {
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(optionParticipationSnapshot(true, true, false, true)),
+    });
+    const outcome = await handler(makeInvocation());
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect((payload.options as Array<{ option_id: string }>).map((option) => option.option_id)).toEqual(['opt_a', 'opt_b']);
+    const baseline = (payload.options as Array<{ option_id: string; interventions: Record<string, unknown> }>)[1]!;
+    expect(Object.keys(baseline.interventions).length).toBeGreaterThan(0);
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(true);
+  });
+
+  it.each([
+    ['served W3', '../../../agent-lane/__tests__/fixtures/served-w3-520aab46-cold-read-f074916.json', ['raise_to_59', 'keep_49_price']],
+    ['served cut-costs', './fixtures/served-cut-costs-15f48f0b-graph.json', ['keep_aws', 'switch_to_gcp']],
+  ])('submits only the two user options from the %s graph to PLoT', async (_name, path, expectedIds) => {
+    const source = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as { graph?: unknown; nodes?: unknown[]; edges?: unknown[] };
+    const graph = (source.graph ?? source) as { nodes: Array<Record<string, unknown>>; edges: unknown[] };
+    const options = graph.nodes.filter((node) => node.kind === 'option');
+    const goal = graph.nodes.find((node) => node.kind === 'goal');
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(makeScenarioSnapshot({
+        graph, rawPersistedGraph: graph, options, goal_node_id: goal?.id as string,
+      })),
+    });
+    await handler(makeInvocation());
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect((payload.options as Array<{ option_id?: string; id?: string }>).map((option) => option.option_id ?? option.id)).toEqual(expectedIds);
+  });
+
+  it('keeps an Olumi suggestion provisional when fewer than two user options remain, without a permitted leader', async () => {
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(optionParticipationSnapshot(false)),
+    });
+    const outcome = await handler(makeInvocation());
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect((payload.options as Array<{ option_id: string }>).map((option) => option.option_id)).toEqual(['opt_a', 'opt_olumi']);
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(false);
+    expect(fact.result.constraint_verdict?.constraint_verdict_state).toBe('not_applicable');
+    const canonical = {
+      status: 'complete', freshness: 'fresh', computed_at: fact.result.computed_at,
+      selected_fact_index: 0, usableForProse: true, usableForChips: true,
+      usableForFollowupContext: true, requiresRerun: false, blockedUnusable: false,
+      contradictions: [],
+    } as never;
+    const compose = (mayNameLeadingOption: boolean) => composeAnalysisStateV1({
+      canonical,
+      mayNameLeadingOption,
+      rawRobustness: { level: 'high', near_tie: { is_tie: false } },
+    } as never);
+    // A separable, current run WOULD permit a leader without the producer's
+    // remove-only provisional verdict. The same run must withhold on both the
+    // UI claim and the Agent's permission after that verdict is applied.
+    expect(compose(true)?.leader_claim.permitted).toBe(true);
+    const state = compose(readMayNameLeadingOptionFromResult(fact.result));
+    expect(state?.leader_claim.permitted).toBe(false);
+    expect(claimPermissionsFrom(state, {
+      analysis_admission: { permitted_analysis_mode: 'comparative_leader' },
+    }, { requested: true }).leader_may_be_named).toBe(false);
+  });
+
+  it('keeps distinct Olumi C when user A/B have identical interventions and would collapse to one at PLoT', async () => {
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(optionParticipationSnapshot(true, true, true)),
+    });
+    const outcome = await handler(makeInvocation());
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect((payload.options as Array<{ option_id: string }>).map((option) => option.option_id))
+      .toEqual(['opt_a', 'opt_b', 'opt_olumi']);
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(false);
+  });
+
+  it('continues to submit an unmarked third option as an ordinary user option', async () => {
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(optionParticipationSnapshot(true, false)),
+    });
+    await handler(makeInvocation());
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect((payload.options as Array<{ option_id: string }>).map((option) => option.option_id)).toEqual(['opt_a', 'opt_b', 'opt_olumi']);
+  });
+
   it('includes graph, options, goal_node_id, request_id — the PLoT-required fields', async () => {
     const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
     const handler = createRunAnalysisHandler({

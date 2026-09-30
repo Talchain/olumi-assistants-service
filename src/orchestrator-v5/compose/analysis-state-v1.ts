@@ -200,6 +200,8 @@ export const REFUSAL_REASON_UNSPECIFIED = 'analysis_refused_unspecified';
 
 /** `withheld_reason` codes. Producer-owned; a consumer maps them to its copy. */
 export const WITHHELD_CONSTRAINT_VERDICT = 'constraint_verdict_withheld';
+/** A selected Run withheld its leader while its constraint verdict was not applicable. No cause is asserted. */
+export const WITHHELD_LEADER_CAUSE_UNRECORDED = 'analysis_leader_withheld';
 export const WITHHELD_NEAR_TIE = 'options_do_not_separate';
 export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
 export const WITHHELD_RUN_IDENTITY_UNCONFIRMED = 'analysis_run_identity_unconfirmed';
@@ -320,6 +322,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   Record<string, Exclude<LeaderClaimReasonKind, 'unknown'>>
 > = {
   [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
+  [WITHHELD_LEADER_CAUSE_UNRECORDED]: 'withheld',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
   [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'withheld',
   [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'withheld',
@@ -537,6 +540,8 @@ export interface AnalysisStateComposeInput {
    * changes; `withheldBecauseUnrequested` outranks it (see WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN).
    */
   readonly withheldBecauseNonlinearIdentity?: boolean;
+  /** The selected Run withheld its leader with no applicable constraint verdict; the cause remains unrecorded. */
+  readonly withheldWithoutConstraintCause?: boolean;
   /**
    * OPTIONAL CAUSE (F-LIMIT): what EVERY option does against one limit on the BOUND run fact
    * (`deriveEveryOptionLimitVerdict`, constraint-feasibility.ts), decided by the caller that holds that fact — this
@@ -935,7 +940,17 @@ export function separationWithholdFromRobustness(
   return raw !== null ? WITHHELD_NEAR_TIE : WITHHELD_SEPARATION_UNAVAILABLE;
 }
 
-function composeLeaderClaim(input: AnalysisStateComposeInput, runState: AnalysisRunState): AnalysisLeaderClaim {
+function composeLeaderClaim(
+  input: AnalysisStateComposeInput,
+  runState: AnalysisRunState,
+  newerDegradedRun: boolean,
+): AnalysisLeaderClaim {
+  // A newer partial/refused Run supersedes the older success's claim, but
+  // supplies no usable robustness verdict for the displayed older figures.
+  // This is a known withhold, not an unperformed separation check.
+  if (newerDegradedRun) {
+    return { permitted: false, withheld_reason: WITHHELD_LEADER_CAUSE_UNRECORDED };
+  }
   /**
    * ⛔ F-LIMIT × BF9 (DL #72 5863859943; owner Canonical 5863888216) — AN F-LIMIT TIER REFUSES THE CLAIM, not only names
    * the reason. The persisted leader verdict entitles any leader above rule 4's infeasibility floor (P ≤ 0.05), so on
@@ -989,6 +1004,8 @@ function composeLeaderClaim(input: AnalysisStateComposeInput, runState: Analysis
           // P1-d: an out-of-date run is not "withheld for a limit" (see WITHHELD_RUN_OUT_OF_DATE).
           : runState.kind === 'complete_stale'
             ? WITHHELD_RUN_OUT_OF_DATE
+            : input.withheldWithoutConstraintCause === true
+              ? WITHHELD_LEADER_CAUSE_UNRECORDED
             : WITHHELD_CONSTRAINT_VERDICT
       : separationWithholdFromRobustness(raw)!;
   }
@@ -1057,6 +1074,14 @@ export function composeAnalysisStateV1(
   }
 
   const runState = composeRunState(input);
+  // A newer degraded Run can withdraw the older completed Run's claim while
+  // the freshness selector still holds that older Run for historical prose.
+  // Its robustness belongs to the suppressed result block, not to the
+  // current claim on this turn or cold read.
+  const newerDegradedRun = canonical.contradictions.includes('fact_status_success_but_degraded_newer');
+  const claimInput = newerDegradedRun
+    ? { ...input, rawRobustness: null }
+    : input;
   return {
     run_state: runState,
     readiness: {
@@ -1065,8 +1090,8 @@ export function composeAnalysisStateV1(
       // nothing is blocking. It is distinct from `analysis_state` being absent.
       blockers: wireBlockers(input.readiness, readinessStatus),
     },
-    leader_claim: composeLeaderClaim(input, runState),
-    robustness: composeRobustness(input),
+    leader_claim: composeLeaderClaim(claimInput, runState, newerDegradedRun),
+    robustness: composeRobustness(claimInput),
     // The five predicates are COPIED from the canonical verdict, never
     // recomputed: a consumer that re-derives them re-opens the divergence this
     // contract closes, and so would a second derivation here.
@@ -1082,22 +1107,31 @@ export function composeAnalysisStateV1(
 }
 
 /**
- * The analysis block follows the composed binding verdict. Conflicting facts
- * cannot supply a result for this run. Unconfirmed legacy binding retains its
- * available figures but cannot supply a leader designation. The fact remains
- * intact in both cases. This does not police other response prose or coaching.
+ * The analysis block follows the composed binding and claim verdicts. A
+ * conflicting fact cannot supply a result. A newer degraded Run that withholds
+ * the claim makes an older completed result historical, so it cannot supply current figures.
+ * Ordinary withheld claims retain computed facts without a leader designation.
+ * The persisted facts remain intact. This does not police other response prose.
  */
 export function projectAnalysisBlocksForRunBinding(
   blocks: OlumiResponse['blocks'],
   state: AnalysisStateV1,
 ): OlumiResponse['blocks'] {
   const reason = state.leader_claim.withheld_reason;
-  if (reason === WITHHELD_RUN_IDENTITY_CONFLICT) {
+  if (reason === WITHHELD_RUN_IDENTITY_CONFLICT
+    || state.contradictions.includes('fact_status_success_but_degraded_newer')) {
     return blocks.filter((block) => block.type !== 'analysis_result');
   }
+  // Keep ordinary result blocks intact: the verdict may withhold a current
+  // recommendation while the computed analysis and its disclosure are still
+  // valid (for example a filtered constraint). The identity-unconfirmed case
+  // alone needs the designation scrubbed from a block whose binding is unproven.
   if (reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;
   return blocks.map((block) => {
     if (block.type !== 'analysis_result') return block;
+    // A transport block carrying only enrichment has no leader claim to
+    // project. Keep its independent evidence and diagnostics intact.
+    if (block.leading_option_id === undefined && block.summary === undefined) return block;
     return {
       ...block,
       leading_option_id: null,

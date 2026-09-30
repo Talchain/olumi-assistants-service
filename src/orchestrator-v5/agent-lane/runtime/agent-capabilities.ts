@@ -125,7 +125,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
   }
 }
 
-import { planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
+import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
@@ -1242,6 +1242,14 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
 function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> } | undefined {
   if (state === null || typeof state !== 'object') return undefined;
   const { readiness: _placeholder, ...rest } = state as Record<string, unknown>;
+  // The read retains the older successful Run's lifecycle when a newer
+  // degraded Run supersedes it. Do not echo `complete_current` to the Agent:
+  // the old result is absent and the canonical verdict requires a rerun.
+  if (Array.isArray(rest.contradictions)
+    && rest.contradictions.includes('fact_status_success_but_degraded_newer')) {
+    const { run_state: _olderRun, ...withoutOlderRun } = rest;
+    return { analysis: { earlier_analysis: 'superseded_by_newer_degraded_run', ...withoutOlderRun } };
+  }
   const kind = (rest.run_state as { kind?: unknown } | undefined)?.kind;
   return { analysis: { ...(typeof kind === 'string' ? { earlier_analysis: kind } : {}), ...rest } };
 }
@@ -5889,14 +5897,16 @@ export function createAgentCapabilities(
        * change. A lone option that is a twin is refused as before.
        */
       let kept = entries;
-      const notAdded: { option: string; same_levels_as: string }[] = [];
+      const notAdded: { option: string; same_levels_as: string; olumi_suggestion?: true }[] = [];
+      const markedTwin = (id: string): boolean => g.nodes.some((n) => n.kind === 'option' && n.id === id && n.proposed_by === 'olumi');
       let parameters = parametersOf(kept);
       // The product's own transaction, run here purely: a spec it would not build is never sent.
       let built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
       while (!built.matched && built.reason === 'same_levels_as_existing_option' && built.sameAs !== undefined
         && kept.length > 1 && typeof built.index === 'number' && built.index >= 0 && built.index < kept.length) {
         const twinIndex = built.index;
-        notAdded.push({ option: kept[twinIndex]!.plan.label, same_levels_as: built.sameAs.label });
+        notAdded.push({ option: kept[twinIndex]!.plan.label, same_levels_as: built.sameAs.label,
+          ...(markedTwin(built.sameAs.id) ? { olumi_suggestion: true as const } : {}) });
         kept = kept.filter((_, i) => i !== twinIndex);
         parameters = parametersOf(kept);
         built = buildAddOptionsTransaction(parameters, { nodes: g.nodes as never, edges: g.edges as never });
@@ -5910,13 +5920,16 @@ export function createAgentCapabilities(
          * The Agent says WHICH option it would repeat, so the user can change a level, never a bare "could not".
          */
         const twin = !built.matched && built.sameAs !== undefined ? built.sameAs.label : undefined;
+        const twinMarked = !built.matched && built.sameAs !== undefined && markedTwin(built.sameAs.id);
         const why = reason === 'new_factor_unreachable'
           ? ' Nothing the new factor changes leads to the goal, so it could not affect the comparison: ask the user what it changes.'
           : reason === 'new_factor_exists'
             ? ' The model already has a factor by that name: name it in acts_on instead of adding it.'
             : reason === 'same_levels_as_existing_option'
-              ? ` It would set exactly the same levels as "${twin ?? 'an option already in the model'}", so the analysis could not tell the two apart: `
-                + 'say so, and ask the user which level this option should change.'
+              ? twinMarked
+                ? ` "${twin}" is ${OLUMI_SUGGESTION_NOT_ADOPTABLE} Do not say it was added.`
+                : ` It would set exactly the same levels as "${twin ?? 'an option already in the model'}", so the analysis could not tell the two apart: `
+                  + 'say so, and ask the user which level this option should change.'
               : '';
         return { ok: false, mutated: false, refusal: 'not_prepared', ...(!built.matched ? { reason: built.reason } : {}),
           ...(twin !== undefined ? { same_levels_as: twin } : {}),
@@ -6049,9 +6062,11 @@ export function createAgentCapabilities(
         } : {}),
         ...(notAdded.length > 0 ? {
           not_added: notAdded,
-          not_added_note: `${notAdded.map((n) => `"${n.option}" is NOT in this change: it would set exactly the same levels as "${n.same_levels_as}", so the analysis could not tell the two apart`).join('; ')}. `
-            + 'Say that in one line, and ask the user what makes it different (for example, a factor it changes that the other does not). '
-            + 'Never promise to add it later: it is added only by a new proposal the user approves.',
+          not_added_note: `${notAdded.map((n) => n.olumi_suggestion
+            ? `"${n.option}" is NOT in this change: "${n.same_levels_as}" is ${OLUMI_SUGGESTION_NOT_ADOPTABLE}`
+            : `"${n.option}" is NOT in this change: it would set exactly the same levels as "${n.same_levels_as}", so the analysis could not tell the two apart`).join('; ')}. `
+            + 'For an ordinary twin, ask what makes it different; a distinct option requires a new proposal and approval. '
+            + 'For Olumi\'s marked suggestion, adoption is unavailable. Never promise to add it later.',
         } : {}),
         ...(keptFactors.length > 0 ? {
           new_factors: keptFactors.map((f) => ({

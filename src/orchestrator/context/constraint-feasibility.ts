@@ -2396,6 +2396,18 @@ export function readConstraintVerdictStateFromResult(
   return asVerdictState((stamp as Record<string, unknown>).constraint_verdict_state);
 }
 
+/**
+ * The selected Run itself withheld a leader while recording that no limit
+ * caused the withhold: either no limit applied or the evaluated limit passed.
+ * Its actual reason is not thereby known, but a consumer must not turn that
+ * pair into a claim that a limit failed.
+ */
+export function leaderWithheldWithoutConstraintCause(result: unknown): boolean {
+  const state = readConstraintVerdictStateFromResult(result);
+  return !readMayNameLeadingOptionFromResult(result)
+    && (state === 'not_applicable' || state === 'evaluated_feasible');
+}
+
 /** Narrow an unknown to a contract state, or `null`. Derived from the enum. */
 export function asVerdictState(value: unknown): ConstraintVerdictState | null {
   if (typeof value !== 'string') return null;

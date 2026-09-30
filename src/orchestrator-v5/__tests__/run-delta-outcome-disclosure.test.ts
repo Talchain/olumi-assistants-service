@@ -319,8 +319,9 @@ describe('run_delta outcome disclosure', () => {
  * survives intact. Same mechanic as `may_run` and `blocked_reason`, whose
  * precedent is written up in `routing/readiness-intake.ts`.
  *
- * ⚠ SCOPE, EXACTLY: the FIVE producer refusals only. The caller's own three
- * (`prior_facts_absent`, `run_identity_unconfirmed`, `run_identity_conflict`)
+ * ⚠ SCOPE, EXACTLY: the FIVE producer refusals only. The caller's own four
+ * (`prior_facts_absent`, `run_identity_unconfirmed`, `run_identity_conflict`,
+ * `newer_run_degraded`)
  * stay telemetry-only, and NOT for tidiness — `prior_facts_absent` fires on
  * every turn that ran no analysis at all, which is most of them, and the two
  * identity members already reach the client as

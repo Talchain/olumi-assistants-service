@@ -276,14 +276,15 @@ describe('SERVED 2-loop (factor <-> risk, both Olumi’s): withheld, said, and t
     expect((out.not_represented as string[]).some((s) => s.includes('nobody has stated which way they run'))).toBe(false);
   });
 
-  it('RED (OUTCOME): readiness is no longer blocked — may_run, and PLoT is called once for every option', async () => {
+  it('RED (OUTCOME): readiness is no longer blocked — may_run, and PLoT compares the two user options', async () => {
     const { graph } = await build(servedCandidate());
     expect(blockers(graph)).toEqual([]);
     expect(resolveRunAdmission(graph).willProceed).toBe(true);
     const { plotCalls, error } = await runAnalysis(graph);
     expect(error).toBeNull();
     expect(plotCalls).toHaveLength(1);
-    expect(plotCalls[0]!.options.map((o) => o.option_id ?? o.id).sort()).toEqual(['keep_49_price', 'phased_54_price', 'raise_to_59']);
+    // The marked Phased £54 suggestion is not silently treated as the user's third option.
+    expect(plotCalls[0]!.options.map((o) => o.option_id ?? o.id).sort()).toEqual(['keep_49_price', 'raise_to_59']);
   });
 
   it('RED (a): the loop is a construction issue for the ONE repair retry, naming the loop exactly', async () => {

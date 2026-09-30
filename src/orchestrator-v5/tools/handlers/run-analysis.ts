@@ -122,6 +122,7 @@ import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
+import { filterOlumiProposedOptions } from './olumi-option-filter.js';
 import {
   carryLevelLimitBaselines,
   carryLimitTargetCaps,
@@ -646,6 +647,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // Keep an unadopted Olumi suggestion out of an ordinary comparison when
+    // two user options remain. If fewer remain, the comparison is provisional
+    // and cannot license a leading-option claim.
+    const olumiFilter = filterOlumiProposedOptions({
+      submitted: gate.options as ReadonlyArray<Record<string, unknown>>,
+      graph: snapshot.rawPersistedGraph ?? snapshot.graph,
+    });
+    const keptOlumiProvisional = olumiFilter.keptOlumiProvisional;
+
     // --- 2.6. Load-time intercept guard (Track S 0.13c-1) -----------------
     // Legacy persisted graphs (drafted before #263 / Track S 0.13a) can carry
     // the duplicate observed-root pattern `intercept === observed_state.value`.
@@ -670,7 +680,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // because PLoT's preflight raises `INVALID_EDGE_ENDPOINT` as a BLOCKER for
     // a dangling endpoint, so leaving them would refuse the whole run.
     // See `run-analysis-participation-guard.ts` for the full doctrine.
-    const optionsForParticipation = gate.options as ReadonlyArray<Record<string, unknown>>;
+    const optionsForParticipation = olumiFilter.options;
     const optionInterventionTargetIds = new Set<string>();
     const submittedOptionIds = new Set<string>();
     for (const opt of optionsForParticipation) {
@@ -749,7 +759,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // OBJECTS; the wire numbers exist only from here on.
     const graphNodesForScale = (graphForAnalysis as { nodes?: unknown })?.nodes;
     const factorScaleById = buildFactorScaleMap(graphNodesForScale);
-    const submittedOptions = gate.options as ReadonlyArray<Record<string, unknown>>;
+    const submittedOptions = olumiFilter.options;
     const rawObjectsPerOption = submittedOptions.map((opt) =>
       opt.interventions !== null && typeof opt.interventions === 'object'
         ? (opt.interventions as Record<string, unknown>)
@@ -2214,7 +2224,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis: leader withheld — its sign on a multiplied goal is not proven',
       );
     }
-    const headline = nonlinearIdentityWithhold !== null ? null : buildAnalysisResultHeadline(headlineInput);
+    const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional
+      ? null : buildAnalysisResultHeadline(headlineInput);
     // ⛔ THE GOAL FRAME THE HEADLINE WAS COMPOSED UNDER (R&C round 1, F1). The
     // objective-contradiction tail below must not say "against your goal" where
     // this headline has withdrawn it, nor assert attainment while the frame is
@@ -2549,6 +2560,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    const leaderPermission = applyNonlinearIdentityToLeaderPermission(
+      applyIntakeToLeaderPermission(
+        projectClaimSafety(constraintVerdict),
+        intakeReconciliation,
+      ),
+      nonlinearIdentityWithhold,
+    );
     const factCandidate: RunAnalysisHandlerFact = {
       fact_type: 'run_analysis',
       fact_version: 1,
@@ -2615,13 +2633,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // ⛔ C46 stage 1 (b): a THIRD remove-only conjunct, the intake precedent's shape — it can only
         // take the permission away, and leaves `constraint_verdict_state` untouched (its REASON is chosen
         // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
-        constraint_verdict: applyNonlinearIdentityToLeaderPermission(
-          applyIntakeToLeaderPermission(
-            projectClaimSafety(constraintVerdict),
-            intakeReconciliation,
-          ),
-          nonlinearIdentityWithhold,
-        ),
+        constraint_verdict: keptOlumiProvisional
+          ? { ...leaderPermission, may_name_leading_option: false }
+          : leaderPermission,
       },
     };
 

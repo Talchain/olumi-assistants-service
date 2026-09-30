@@ -7,10 +7,11 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import { finaliseV5Response } from '../response-finaliser.js';
 import { buildAnalysisResultBlock } from '../compose.js';
 import { deriveAnalysisFreshness } from '../context/freshness.js';
-import { canonicalStateFromFreshness } from '../context/canonical-analysis-state.js';
+import { canonicalStateFromFreshness, selectCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { runAnalysisFact } from '../context/__tests__/run-delta-fixtures.js';
+import { buildRunDelta } from '../coaching/build-run-delta.js';
 import {
   WITHHELD_RUN_IDENTITY_CONFLICT,
   WITHHELD_RUN_IDENTITY_UNCONFIRMED,
@@ -77,6 +78,7 @@ describe('C2 binding at the reached finaliser/composer seam', () => {
     const out = finalise([fact()]);
     expect(out.analysis_state?.run_state).toEqual({ kind: 'complete_current', computed_at: FIRST_TIME });
     expect(out.analysis_state?.leader_claim.permitted).toBe(true);
+    expect(out.analysis_state?.leader_claim.withheld_reason).toBeUndefined();
     expect(out.blocks[0]).toMatchObject({ leading_option_id: 'option-a', win_probabilities: { 'option-a': 0.65 } });
   });
 
@@ -175,6 +177,81 @@ describe('C2 binding at the reached finaliser/composer seam', () => {
     expect(out.analysis_state?.leader_claim.permitted).toBe(false);
     expect(out.analysis_state?.leader_claim.separation).toBe('near_tie');
     expect(out.blocks[0]).toMatchObject({ leading_option_id: null, win_probabilities: { 'option-a': 0.65 } });
+  });
+
+  it('C2 turn wire: a newer partial withholding Run does not let an older permitted Run name a leader', () => {
+    const older = fact();
+    const newer = fact({
+      computed_at: NEXT_TIME,
+      constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'not_applicable' },
+      enrichment: { analysis_status: 'partial', robustness: { level: 'strong', near_tie: { is_tie: false } } },
+    });
+    const out = finaliseV5Response(response(older), {
+      scenarioId: SCENARIO,
+      priorFacts: [newer, older],
+      freshness: deriveAnalysisFreshness([older], HASH),
+      canonicalState: selectCanonicalAnalysisState({ priorFacts: [newer, older], currentGraphHash: HASH }),
+      mayNameLeadingOption: false,
+      claimConstraintVerdictState: 'not_applicable',
+    });
+    expect(OlumiResponseSchema.safeParse(out).success).toBe(true);
+    expect(out.analysis_state?.leader_claim.permitted).toBe(false);
+    expect(out.analysis_state?.leader_claim.withheld_reason).toBe('analysis_leader_withheld');
+    expect(out.analysis_state?.requires_rerun).toBe(true);
+    expect(out.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(out.analysis_state?.robustness).toEqual({});
+    expect(out.analysis_state?.leader_claim.separation).toBeUndefined();
+    expect(out.blocks).toEqual([]);
+  });
+
+  it('C2 turn wire: a newer partial Run supersedes old figures even when its constraint verdict permits', () => {
+    const older = fact();
+    const newer = fact({ computed_at: NEXT_TIME, enrichment: { analysis_status: 'partial' } });
+    const out = finaliseV5Response(response(older), {
+      scenarioId: SCENARIO,
+      priorFacts: [newer, older],
+      freshness: deriveAnalysisFreshness([older], HASH),
+      canonicalState: selectCanonicalAnalysisState({ priorFacts: [newer, older], currentGraphHash: HASH }),
+      mayNameLeadingOption: true,
+      claimConstraintVerdictState: 'evaluated_feasible',
+    });
+    expect(out.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'analysis_leader_withheld' });
+    expect(out.analysis_state?.robustness).toEqual({});
+    expect(out.blocks).toEqual([]);
+    expect(out.run_delta).toBeUndefined();
+  });
+
+  it('C2 turn wire: a newer partial Run suppresses a numeric delta from two older successes', () => {
+    const firstEcho = runAnalysisFact(
+      [{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', CHANGED_HASH, FIRST_TIME,
+    );
+    const secondEcho = runAnalysisFact(
+      [{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', HASH, NEXT_TIME,
+    );
+    if (firstEcho.fact_type !== 'run_analysis' || secondEcho.fact_type !== 'run_analysis') {
+      throw new Error('The fixture must supply run_analysis facts');
+    }
+    const first = fact({ ...firstEcho.result });
+    const second = fact({ ...secondEcho.result });
+    const partial = fact({
+      computed_at: '2026-09-06T17:50:20.000Z',
+      constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'not_applicable' },
+      enrichment: { analysis_status: 'partial' },
+    });
+    expect(buildRunDelta({ priorFacts: [second, first], mayNameLeadingOption: false }).kind)
+      .toBe('ok');
+    const out = finaliseV5Response(response(second), {
+      scenarioId: SCENARIO,
+      priorFacts: [partial, second, first],
+      freshness: deriveAnalysisFreshness([second], HASH),
+      canonicalState: selectCanonicalAnalysisState({ priorFacts: [partial, second, first], currentGraphHash: HASH }),
+      mayNameLeadingOption: false,
+      claimConstraintVerdictState: 'not_applicable',
+    });
+    expect(out.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(out.blocks).toEqual([]);
+    expect(out.run_delta).toBeUndefined();
   });
 
   it('keeps true no-run and no-fact-context compatibility paths distinct', () => {
