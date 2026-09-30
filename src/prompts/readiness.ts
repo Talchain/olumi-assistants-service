@@ -3,8 +3,9 @@
  *
  * Single boolean exposed on /healthz: `prompts_ready`. True iff each of the
  * five PMS-tracked prompt keys resolves from any source (store or registered
- * default). The result is cached briefly so /healthz hits don't hammer the
- * loader.
+ * default). The health result is a process-local snapshot refreshed at boot
+ * and explicit prompt reload. Actual runtime failures overlay that snapshot
+ * in memory, never by a recurring load-balancer probe.
  *
  * Telemetry from these probe calls passes `trigger: 'healthz'` / `'status'`
  * so dashboards can filter probe noise out of real-traffic
@@ -27,19 +28,16 @@ import { dispositionOf, gateActiveOf, gateOf, type PromptDisposition } from './e
 import { log } from '../utils/telemetry.js';
 import { getRoutingLiveStatus } from './routing-live-status.js';
 import type { CeeTaskId } from './schema.js';
+import { clearRuntimePromptResolutions, getRuntimePromptResolution } from './runtime-health.js';
 
-const READINESS_CACHE_TTL_MS = 30_000;
+interface ReadinessSnapshot {
+  ready: boolean;
+  coverage: CriticalPromptCoverage;
+}
 
-let cached: { value: boolean; expiresAt: number } | null = null;
-// Single-flight: coalesce concurrent probe calls so /healthz under burst
-// doesn't issue N parallel 5-key probes. Once the first probe resolves it
-// populates `cached`; subsequent callers within the TTL hit the cache.
-let inflightProbe: Promise<boolean> | null = null;
-
-// Separate cache for the PMS-coverage view. Kept independent of `cached`
-// above so the existing arePromptsReady() path stays byte-for-byte unchanged.
-let coverageCached: { value: CriticalPromptCoverage; expiresAt: number } | null = null;
-let inflightCoverage: Promise<CriticalPromptCoverage> | null = null;
+let snapshot: ReadinessSnapshot | null = null;
+let inflightSnapshot: Promise<ReadinessSnapshot> | null = null;
+let snapshotGeneration = 0;
 
 export interface PromptKeyStatus {
   key: StatusKey;
@@ -109,9 +107,7 @@ export const CRITICAL_PROMPT_FETCH_ERROR_REASON = 'critical_prompt_fetch_error';
  * wiring can be tested separately — the alternative is a rule that only exists
  * inline in `server.ts` and can be severed without any test going red.
  */
-export function promptStoreDegradationReasons(
-  coverage: CriticalPromptCoverage,
-): string[] {
+export function promptStoreDegradationReasons(coverage: CriticalPromptCoverage): string[] {
   return coverage.fetch_error.length > 0 ? [CRITICAL_PROMPT_FETCH_ERROR_REASON] : [];
 }
 
@@ -126,10 +122,7 @@ function shortSha256(content: string): string {
  *   - `probeTrackedPrompts()` → the CRITICAL five, for health GATING.
  *   - `probeStatusPrompts()`  → the derived REPORTED set, for observability.
  */
-async function probePromptKeys(
-  keys: readonly StatusKey[],
-  trigger: PromptResolveTrigger,
-): Promise<PromptKeyStatus[]> {
+async function probePromptKeys(keys: readonly StatusKey[], trigger: PromptResolveTrigger): Promise<PromptKeyStatus[]> {
   const results = await Promise.all(
     keys.map(async (key): Promise<PromptKeyStatus> => {
       const gate = gateOf(key);
@@ -205,9 +198,7 @@ export async function probeTrackedPrompts(
   // Narrowing cast, not a widening one: the rows come back keyed by exactly
   // the TRACKED_KEYS passed in, so the critical-coverage callers keep their
   // `TrackedKey` typing even though the shared prober is set-agnostic.
-  return (await probePromptKeys(TRACKED_KEYS, trigger)) as Array<
-    PromptKeyStatus & { key: TrackedKey }
-  >;
+  return (await probePromptKeys(TRACKED_KEYS, trigger)) as Array<PromptKeyStatus & { key: TrackedKey }>;
 }
 
 /**
@@ -219,36 +210,13 @@ export async function probeTrackedPrompts(
  * drift-guarded exception lists, so a newly wired prompt shows up here with
  * nobody remembering to add it.
  */
-export async function probeStatusPrompts(
-  trigger: PromptResolveTrigger,
-): Promise<PromptKeyStatus[]> {
+export async function probeStatusPrompts(trigger: PromptResolveTrigger): Promise<PromptKeyStatus[]> {
   return probePromptKeys(STATUS_KEYS, trigger);
 }
 
-/**
- * Cheap boolean for /healthz. Cached for 30s; concurrent callers share a
- * single in-flight probe.
- */
+/** Cheap boolean backed by the same snapshot as critical coverage. */
 export async function arePromptsReady(): Promise<boolean> {
-  const now = Date.now();
-  if (cached && cached.expiresAt > now) return cached.value;
-  if (inflightProbe) return inflightProbe;
-
-  inflightProbe = (async (): Promise<boolean> => {
-    try {
-      const statuses = await probeTrackedPrompts('healthz');
-      const ready = statuses.every((s) => s.source !== 'error');
-      cached = { value: ready, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
-      return ready;
-    } catch (err) {
-      log.warn({ err }, 'prompts_ready probe failed');
-      cached = { value: false, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
-      return false;
-    } finally {
-      inflightProbe = null;
-    }
-  })();
-  return inflightProbe;
+  return (await getReadinessSnapshot('healthz')).ready;
 }
 
 /**
@@ -293,76 +261,105 @@ export interface CriticalPromptCoverage {
   fetch_error: TrackedKey[];
 }
 
-/**
- * Cheap critical-prompt coverage for `/healthz` + startup logging. Cached for
- * 30s with single-flight, mirroring `arePromptsReady()`. Never throws — on
- * probe failure every key is reported `error` (→ `all_pms:false`).
- */
+function coverageFromStatuses(statuses: Array<Pick<PromptKeyStatus, 'source' | 'version' | 'pms_task' | 'snapshot_error' | 'fallback_reason'> & { key: TrackedKey }>): CriticalPromptCoverage {
+  const keys = statuses.map((s) => ({
+    key: s.key,
+    source: s.source,
+    version: s.version,
+    ...(s.pms_task ? { pms_task: s.pms_task } : {}),
+    ...(s.snapshot_error ? { snapshot_error: s.snapshot_error } : {}),
+    ...(s.fallback_reason ? { fallback_reason: s.fallback_reason } : {}),
+  }));
+  const default_or_error = statuses.filter((s) => s.source !== 'pms').map((s) => s.key);
+  // A STALE snapshot (PMS-resolved, but a later rebuild was rejected and the
+  // prior snapshot restored) must also fail coverage: `all_pms` is the
+  // "latest PMS prompt is live" gate, not "some PMS prompt is served".
+  const snapshot_errors = statuses.filter((s) => s.snapshot_error != null).map((s) => s.key);
+  // The store THREW for these — distinct from "no PMS row for this key".
+  const fetch_error = statuses.filter((s) => s.fallback_reason === 'fetch_error').map((s) => s.key);
+  return {
+    all_pms: default_or_error.length === 0 && snapshot_errors.length === 0,
+    keys,
+    default_or_error,
+    snapshot_errors,
+    fetch_error,
+  };
+}
+
+function failedCoverage(): CriticalPromptCoverage {
+  return {
+    all_pms: false,
+    keys: TRACKED_KEYS.map((key) => ({
+      key,
+      source: 'error' as const,
+      version: null,
+      fallback_reason: 'fetch_error' as const,
+    })),
+    default_or_error: [...TRACKED_KEYS],
+    snapshot_errors: [],
+    // The PROBE itself threw — a harder failure than a per-key fallback,
+    // and unambiguously broken. It must raise the alarm, and it cannot
+    // fire in the healthy `not_found` shape (the per-key prober catches
+    // there and never reaches this branch), so the alarm stays scoped.
+    fetch_error: [...TRACKED_KEYS],
+  };
+}
+
+async function getReadinessSnapshot(trigger: PromptResolveTrigger): Promise<ReadinessSnapshot> {
+  if (snapshot) return snapshot;
+  if (inflightSnapshot) return inflightSnapshot;
+
+  const generation = snapshotGeneration;
+  const probe = (async (): Promise<ReadinessSnapshot> => {
+    try {
+      const statuses = await probeTrackedPrompts(trigger);
+      const result = {
+        ready: statuses.every((s) => s.source !== 'error'),
+        coverage: coverageFromStatuses(statuses),
+      };
+      if (generation === snapshotGeneration) snapshot = result;
+      return result;
+    } catch (err) {
+      log.warn({ err }, 'prompt readiness snapshot failed');
+      const result = { ready: false, coverage: failedCoverage() };
+      if (generation === snapshotGeneration) snapshot = result;
+      return result;
+    }
+  })();
+  inflightSnapshot = probe;
+  const clearInflight = () => {
+    if (inflightSnapshot === probe) inflightSnapshot = null;
+  };
+  void probe.then(clearInflight, clearInflight);
+  return probe;
+}
+
+/** Explicit boot/promotion refresh. Health probes only read the resulting snapshot. */
+export async function warmPromptReadinessSnapshot(trigger: PromptResolveTrigger): Promise<void> {
+  await getReadinessSnapshot(trigger);
+}
+
+/** The load-balancer path must never start a prompt-store read. */
+export function getPromptHealthSnapshot(): ReadinessSnapshot {
+  const base = snapshot ?? { ready: false, coverage: failedCoverage() };
+  // Runtime lookups are the only fresh evidence between explicit reloads.
+  // Overlay them on the boot snapshot so a later 402 cannot leave health
+  // falsely green, while this load-balancer path remains entirely local.
+  const keys = base.coverage.keys.map((key) => {
+    const latest = getRuntimePromptResolution(key.key);
+    if (!latest) return key;
+    return { ...key, ...latest, fallback_reason: latest.fallback_reason };
+  });
+  const coverage = coverageFromStatuses(keys);
+  return { ready: base.ready, coverage };
+}
+
+/** Repeated calls have no TTL or database work; promotion explicitly resets it. */
 export async function getCriticalPromptCoverage(
   trigger: PromptResolveTrigger = 'healthz',
 ): Promise<CriticalPromptCoverage> {
-  const now = Date.now();
-  if (coverageCached && coverageCached.expiresAt > now) return coverageCached.value;
-  if (inflightCoverage) return inflightCoverage;
-
-  inflightCoverage = (async (): Promise<CriticalPromptCoverage> => {
-    try {
-      const statuses = await probeTrackedPrompts(trigger);
-      const keys = statuses.map((s) => ({
-        key: s.key,
-        source: s.source,
-        version: s.version,
-        ...(s.pms_task ? { pms_task: s.pms_task } : {}),
-        ...(s.snapshot_error ? { snapshot_error: s.snapshot_error } : {}),
-        ...(s.fallback_reason ? { fallback_reason: s.fallback_reason } : {}),
-      }));
-      const default_or_error = statuses
-        .filter((s) => s.source !== 'pms')
-        .map((s) => s.key);
-      // A STALE snapshot (PMS-resolved, but a later rebuild was rejected and the
-      // prior snapshot restored) must also fail coverage: `all_pms` is the
-      // "latest PMS prompt is live" gate, not "some PMS prompt is served".
-      const snapshot_errors = statuses
-        .filter((s) => s.snapshot_error != null)
-        .map((s) => s.key);
-      // The store THREW for these — distinct from "no PMS row for this key".
-      const fetch_error = statuses
-        .filter((s) => s.fallback_reason === 'fetch_error')
-        .map((s) => s.key);
-      const coverage: CriticalPromptCoverage = {
-        all_pms: default_or_error.length === 0 && snapshot_errors.length === 0,
-        keys,
-        default_or_error,
-        snapshot_errors,
-        fetch_error,
-      };
-      coverageCached = { value: coverage, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
-      return coverage;
-    } catch (err) {
-      log.warn({ err }, 'critical_prompt_coverage probe failed');
-      const coverage: CriticalPromptCoverage = {
-        all_pms: false,
-        keys: TRACKED_KEYS.map((key) => ({
-          key,
-          source: 'error' as const,
-          version: null,
-          fallback_reason: 'fetch_error' as const,
-        })),
-        default_or_error: [...TRACKED_KEYS],
-        snapshot_errors: [],
-        // The PROBE itself threw — a harder failure than a per-key fallback,
-        // and unambiguously broken. It must raise the alarm, and it cannot
-        // fire in the healthy `not_found` shape (the per-key prober catches
-        // there and never reaches this branch), so the alarm stays scoped.
-        fetch_error: [...TRACKED_KEYS],
-      };
-      coverageCached = { value: coverage, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
-      return coverage;
-    } finally {
-      inflightCoverage = null;
-    }
-  })();
-  return inflightCoverage;
+  await getReadinessSnapshot(trigger);
+  return getPromptHealthSnapshot().coverage;
 }
 
 /**
@@ -371,8 +368,10 @@ export async function getCriticalPromptCoverage(
  * by tests that need a clean slate.
  */
 export function resetPromptsReadyCache(): void {
-  cached = null;
-  coverageCached = null;
+  snapshotGeneration += 1;
+  snapshot = null;
+  inflightSnapshot = null;
+  clearRuntimePromptResolutions();
 }
 
 /** @deprecated use resetPromptsReadyCache() — kept for back-compat. */

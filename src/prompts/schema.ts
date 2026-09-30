@@ -301,6 +301,8 @@ export const CompiledPromptSchema = z.object({
   content: z.string(),
   compiledAt: isoTimestamp(),
   variables: z.record(z.union([z.string(), z.number()])).optional(),
+  /** Whether the selected version is the staging pointer. */
+  isStaging: z.boolean().optional(),
   /** Environment-specific model configuration (if set in prompt definition) */
   modelConfig: ModelConfigSchema,
 });

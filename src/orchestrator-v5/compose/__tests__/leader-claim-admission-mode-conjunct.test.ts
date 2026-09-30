@@ -589,3 +589,96 @@ describe('permittedAnalysisModeFromAnalysisReady — the field reader', () => {
     expect(analysisReadyPermitsLeaderNaming({ analysis_admission: null })).toBe(true);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⛔ THE ALARM MIRRORS THE ENFORCER'S PERMIT-WITH-CAVEAT ARM TOO (DL #77 5913488508 item 2).
+// Paul's funding test, runs 2 and 3 (`chip_click`, 12:46 and 13:07Z): ERROR
+// `leading_option_claim_withheld_at_egress`, hit_count 12, `enforced: false`, and no enforcer edit. Those
+// are the entitled, SEPARATED, `quantified_provisional` Runs Paul ruled "caveat, not withhold": the
+// enforcer kept the leader and appended the caveat, while the alarm, mirroring only "entitled AND the
+// admission licenses a leader", reported a withheld leader on the leader the enforcer had kept.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('the alarm mirrors the permit-with-caveat arm — no false ERROR on a leader the enforcer kept', () => {
+  const EVENT = 'v5.egress.leading_option_claim_withheld_violated';
+
+  it('RED: entitled + separated + quantified_provisional → kept with the caveat, and the alarm is silent on what ships', () => {
+    const cell = { mayNameLeadingOption: true, separationEstablished: true, analysisReady: analysisReady('quantified_provisional') };
+    const enforced = enforceLeadingOptionClaimsAtWire(envelope(ANSWER), { ...WIRE_OPTS, ...cell });
+    expect(enforced.response.assistant_text, 'the control: the leader is kept').toContain(FOUNDER_CLAIM);
+    expect(enforced.response.assistant_text, 'the control: with the caveat').toContain('These figures are provisional');
+    events.length = 0;
+    expect(guardLeadingOptionClaimsAtEgress(enforced.response, { ...ALARM_OPTS, ...cell })).toBe(enforced.response);
+    expect(events.map((e) => e.name)).not.toContain(EVENT);
+  });
+
+  it('CONTROL: the same cell WITHOUT separation still reports (the founder’s cell)', () => {
+    guardLeadingOptionClaimsAtEgress(envelope(ANSWER), {
+      ...ALARM_OPTS, mayNameLeadingOption: true, separationEstablished: false, analysisReady: analysisReady('quantified_provisional'),
+    });
+    expect(events.map((e) => e.name)).toContain(EVENT);
+  });
+
+  it('CONTROL: separated but NOT entitled still reports', () => {
+    guardLeadingOptionClaimsAtEgress(envelope(ANSWER), {
+      ...ALARM_OPTS, mayNameLeadingOption: false, separationEstablished: true, analysisReady: analysisReady('quantified_provisional'),
+    });
+    expect(events.map((e) => e.name)).toContain(EVENT);
+  });
+
+  it('CONTROL: separated + entitled below the provisional mode (exploratory) still reports', () => {
+    guardLeadingOptionClaimsAtEgress(envelope(ANSWER), {
+      ...ALARM_OPTS, mayNameLeadingOption: true, separationEstablished: true, analysisReady: analysisReady('exploratory'),
+    });
+    expect(events.map((e) => e.name)).toContain(EVENT);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⭐ AIQ's ACCEPTANCE (#75 5913751874) on Paul's served run 3 (`3b047ee4`, 13:07:45Z). The Run sub-turn's
+// stored text, first sentence verbatim; the alarm fired on its `chip_click` egress (hit_count 12). The Agent
+// reply the user read (13:07:55Z) named the same leader with the caveat LAST (char 792 of 1003).
+// Leader KEPT: entitled + separated + quantified_provisional, the provisional sentence FIRST, 0 ERROR.
+// Leader WITHHELD: unseparated / not entitled / exploratory → 0 leader words, and the alarm still fires.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('Paul’s run 3, replayed: the leader kept with the provisional sentence first, and no false ERROR', () => {
+  const EVENT = 'v5.egress.leading_option_claim_withheld_violated';
+  const LEADER = 'Convertible bridge from existing supporters';
+  const SERVED = `${LEADER} scored highest in 83% of runs of this model.`;
+  const paulReady = (mode: string) => ({
+    status: 'ready',
+    goal_node_id: 'securing_funding',
+    options: [
+      { option_id: '10979ab0', label: LEADER, status: 'ready', interventions: {} },
+      { option_id: 'angel_bridge', label: 'Angel bridge', status: 'ready', interventions: {} },
+      { option_id: 'current_outreach', label: 'Current outreach', status: 'ready', interventions: {} },
+    ],
+    analysis_admission: { structurally_analysable: true, missing_important_inputs: [], semantic_quality_sufficient: false, permitted_analysis_mode: mode, reasons: [] },
+  });
+  const ship = (o: { mayNameLeadingOption: boolean; separationEstablished: boolean; mode: string }) => {
+    const opts = { mayNameLeadingOption: o.mayNameLeadingOption, separationEstablished: o.separationEstablished, analysisReady: paulReady(o.mode) };
+    const out = enforceLeadingOptionClaimsAtWire(envelope(SERVED), { ...WIRE_OPTS, ...opts }).response;
+    events.length = 0;
+    guardLeadingOptionClaimsAtEgress(out, { ...ALARM_OPTS, ...opts });
+    return { text: String(out.assistant_text), alarmed: events.some((e) => e.name === EVENT) };
+  };
+
+  it('RED: KEPT — the leader is named, the provisional sentence comes FIRST, and the alarm is silent', () => {
+    const { text, alarmed } = ship({ mayNameLeadingOption: true, separationEstablished: true, mode: 'quantified_provisional' });
+    expect(text).toContain(SERVED);
+    expect(text.startsWith('These figures are provisional'), text).toBe(true);
+    expect(alarmed).toBe(false);
+  });
+
+  for (const [name, cell] of [
+    ['unseparated', { mayNameLeadingOption: true, separationEstablished: false, mode: 'quantified_provisional' }],
+    ['not entitled', { mayNameLeadingOption: false, separationEstablished: true, mode: 'quantified_provisional' }],
+    ['exploratory', { mayNameLeadingOption: true, separationEstablished: true, mode: 'exploratory' }],
+  ] as const) {
+    it(`CONTROL (${name}): WITHHELD — 0 leader words ship, and the alarm fires on the unenforced body`, () => {
+      expect(ship(cell).text).not.toContain(LEADER);
+      events.length = 0;
+      guardLeadingOptionClaimsAtEgress(envelope(SERVED), { ...ALARM_OPTS, mayNameLeadingOption: cell.mayNameLeadingOption, separationEstablished: cell.separationEstablished, analysisReady: paulReady(cell.mode) });
+      expect(events.map((e) => e.name)).toContain(EVENT);
+    });
+  }
+});

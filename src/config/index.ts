@@ -620,16 +620,11 @@ const ConfigSchema = z.object({
     // field was never env-mapped in rawConfig and had zero source consumers.
     shareReview: booleanString.default(false),
     enableLegacySSE: booleanString.default(false),
-    orchestratorV2: booleanString.default(false), // ENABLE_ORCHESTRATOR_V2 — V2 five-phase pipeline
     // CEE_ORCHESTRATOR_CONTEXT_ENABLED — Context Fabric: 3-zone cache-aware context assembly pipeline
     // IMPORTANT: V2 prompt path must have parity with V1 before enabling on staging. See A.4 audit.
     contextFabric: booleanString.default(false),
     dskV0: booleanString.default(false), // ENABLE_DSK_V0 — load DSK v0 bundle from data/dsk/v1.json at startup
     dskEnabled: booleanString.default(false), // DSK_ENABLED — alias for dskV0, gates typed accessors
-    bilEnabled: booleanString.default(false), // BIL_ENABLED — Brief Intelligence Layer extraction + injection
-    briefDetectionEnabled: booleanString.default(false), // CEE_BRIEF_DETECTION_ENABLED — deterministic NL brief → draft_graph routing
-    dskCoachingEnabled: booleanString.default(false), // DSK_COACHING_ENABLED — deterministic DSK coaching items on envelope
-    zone2Registry: booleanString.default(false), // CEE_ZONE2_REGISTRY_ENABLED — Zone 2 block registry prompt assembly
     moeSpikeEnabled: booleanString.default(false), // MOE_SPIKE_ENABLED — shadow-mode brief quality specialist (never surfaces to users)
     orchestratorStreaming: booleanString.default(false), // ENABLE_ORCHESTRATOR_STREAMING — SSE streaming for orchestrator turns
     strictPromptValidation: booleanString.default(false), // CEE_STRICT_PROMPT_VALIDATION — throw on error-severity prompt-zone violations
@@ -1587,14 +1582,9 @@ function parseConfig(): Config {
       clarifier: env.CLARIFIER_ENABLED,
       shareReview: env.SHARE_REVIEW_ENABLED,
       enableLegacySSE: env.ENABLE_LEGACY_SSE,
-      orchestratorV2: env.ENABLE_ORCHESTRATOR_V2,
       contextFabric: env.CEE_ORCHESTRATOR_CONTEXT_ENABLED,
       dskV0: env.ENABLE_DSK_V0,
       dskEnabled: env.DSK_ENABLED,
-      bilEnabled: env.BIL_ENABLED,
-      briefDetectionEnabled: env.CEE_BRIEF_DETECTION_ENABLED,
-      dskCoachingEnabled: env.DSK_COACHING_ENABLED,
-      zone2Registry: env.CEE_ZONE2_REGISTRY_ENABLED,
       moeSpikeEnabled: env.MOE_SPIKE_ENABLED,
       orchestratorStreaming: env.ENABLE_ORCHESTRATOR_STREAMING,
       strictPromptValidation: env.CEE_STRICT_PROMPT_VALIDATION,
@@ -2355,6 +2345,15 @@ const DEAD_ENV_VARS: string[] = [
   'RESEARCH_CACHE_TTL_MS',
   'RESEARCH_CACHE_MAX_SIZE',
   'RESEARCH_TIMEOUT_MS',
+  // Five enabled features that did not run, retired 2026-09-30 (DL gap 4, ARCHITECTURE-FINDINGS). Their producers were
+  // deleted 2026-07-22 (`f957d6d8`, #615): Brief Intelligence Layer, DSK (bias) coaching, prompt-zones Zone 2 blocks,
+  // the V2 five-phase pipeline and intent-gate brief detection. Every boot logged all five unhealthy. Remove them from
+  // the Render dashboard. (DSK_ENABLED / ENABLE_DSK_V0 stay LIVE: they gate the DSK bundle, which still loads.)
+  'BIL_ENABLED',
+  'DSK_COACHING_ENABLED',
+  'CEE_ZONE2_REGISTRY_ENABLED',
+  'ENABLE_ORCHESTRATOR_V2',
+  'CEE_BRIEF_DETECTION_ENABLED',
 ];
 
 /**

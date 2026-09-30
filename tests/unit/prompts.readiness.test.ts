@@ -2,12 +2,15 @@
  * Readiness probe — `prompts_ready` boolean and per-key status.
  */
 
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { registerAllDefaultPrompts } from '../../src/prompts/defaults.js';
+import * as loader from '../../src/prompts/loader.js';
 import {
   arePromptsReady,
   probeTrackedPrompts,
   getCriticalPromptCoverage,
+  getPromptHealthSnapshot,
+  warmPromptReadinessSnapshot,
   __resetPromptsReadyCacheForTests,
   TRACKED_KEYS,
 } from '../../src/prompts/readiness.js';
@@ -32,6 +35,33 @@ describe('prompts readiness', () => {
       expect(r.source).not.toBe('error');
       expect(r.content_hash).toMatch(/^[0-9a-f]{16}$/);
       expect(r.content_chars).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps repeated health checks free of prompt reads, even after the old 30-second TTL', async () => {
+    const loadSpy = vi.spyOn(loader, 'loadPrompt');
+    const start = Date.now();
+    try {
+      // A pre-boot health check is fail-closed and does not open the store.
+      expect(getPromptHealthSnapshot().ready).toBe(false);
+      expect(loadSpy).not.toHaveBeenCalled();
+
+      await warmPromptReadinessSnapshot('startup');
+      const warmReads = loadSpy.mock.calls.length;
+      expect(warmReads).toBeGreaterThan(0);
+      expect(getPromptHealthSnapshot().ready).toBe(true);
+
+      vi.spyOn(Date, 'now').mockReturnValue(start + 60_000);
+      for (let i = 0; i < 20; i++) {
+        const health = getPromptHealthSnapshot();
+        expect(health.ready).toBe(true);
+        expect(health.coverage.all_pms).toBe(false);
+        expect(await arePromptsReady()).toBe(true);
+        expect((await getCriticalPromptCoverage()).all_pms).toBe(false);
+      }
+      expect(loadSpy).toHaveBeenCalledTimes(warmReads);
+    } finally {
+      vi.restoreAllMocks();
     }
   });
 });

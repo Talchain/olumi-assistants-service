@@ -51,8 +51,10 @@
  *     `__tests__/feature-health.test.ts`, which REDs the moment anyone wires
  *     the producer up. Fail-loud, never assume-good.
  *
- * Retiring the flags that now gate nothing is a separate decision (ROADMAP) —
- * this module's job is to stop lying about them, not to remove them.
+ * Retiring the flags that now gate nothing was a separate decision; it was taken on 2026-09-30 (DL gap 4,
+ * ARCHITECTURE-FINDINGS): BIL, DSK_coaching, zone2_registry, orchestrator_v2, brief_detection and entity_memory are no
+ * longer declared, their env vars are `DEAD_ENV_VARS` (`config/index.ts`), and the uncalled entity tracker is deleted.
+ * The evidence kinds stay, for the next feature that needs them.
  */
 
 import { config } from "../config/index.js";
@@ -121,39 +123,17 @@ interface FeatureDeclaration {
  *  - Whether each `producer_module` verdict agrees with an independent
  *    `fs.existsSync` of the same specifier (so a module that is present but
  *    fails to LOAD is caught — the two mechanisms disagree).
- *  - Whether every specifier naming an ABSENT path is a path that genuinely
- *    was deleted, cross-checked against the mechanically-derived deletion
- *    record `__tests__/deleted-src-f957d6d8.txt`. **This is what makes a typo'd
- *    or stale specifier fail loud.** Without it, a typo passes: a path that
- *    never existed is "absent" to both mechanisms, so they agree and the check
- *    reports the right verdict for the wrong reason — and a restored producer
- *    would then report unhealthy forever. (Exactly this was demonstrated
- *    against PR #756 by adversarial review: typo'd specifier, 17/17 green.)
  *  - Whether a live specifier's named export is present and callable.
  *
+ * (Until 2026-09-30 five declarations named DELETED producers, and the test cross-checked each absent specifier
+ * against the `f957d6d8` deletion record so a typo could not pass as "deleted". Those features were retired, so no
+ * declared specifier is absent and that record went with them. A new `producer_module` row must name a live module.)
+ *
  * WHAT IT CANNOT SEE:
- *  - Whether `producesExport` is the RIGHT name for an absent producer. While
- *    the module is gone there is nothing in the working tree to check it
- *    against; the names below were read out of the deleted files themselves at
- *    `f957d6d8^` and are cited per declaration. A wrong one is latent — it
- *    would surface as a `producer_export_missing` verdict on the day the
- *    producer is restored, not as a false green today.
  *  - Whether a resolvable, exported producer is actually CALLED on a live path.
  *    That is the `no_producer` kind's job, and it is pinned separately.
  */
 export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
-  {
-    // Brief Intelligence Layer. Producer deleted 2026-07-22 (f957d6d8, #615).
-    name: 'BIL',
-    flag: 'BIL_ENABLED',
-    enabled: () => !!config.features?.bilEnabled,
-    evidence: {
-      kind: 'producer_module',
-      specifier: '../orchestrator/brief-intelligence/extract.js',
-      // `extract.ts:440` at f957d6d8^ — the module's only producing function.
-      producesExport: 'extractBriefIntelligence',
-    },
-  },
   {
     // Real liveness: the bundle is loaded AND its hash verified, or it isn't.
     // loadDskBundle() returns silently on ENOENT / bad JSON / bad shape /
@@ -165,35 +145,6 @@ export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
       kind: 'runtime_state',
       describes: 'DSK bundle loaded and hash-verified (dsk_version_hash present)',
       observe: () => getDskVersionHash() !== null,
-    },
-  },
-  {
-    // Producer deleted 2026-07-22 (f957d6d8, #615). Nothing in src/ assigns
-    // `dskCoaching`, so the envelope field can never be emitted.
-    name: 'DSK_coaching',
-    flag: 'DSK_COACHING_ENABLED',
-    enabled: () => !!config.features?.dskCoachingEnabled,
-    evidence: {
-      kind: 'producer_module',
-      specifier: '../orchestrator/dsk-coaching/index.js',
-      // `index.ts:1` at f957d6d8^ — the barrel's first re-export, and the
-      // function that assembled the `dsk_coaching` envelope payload.
-      producesExport: 'assembleDskCoachingItems',
-    },
-  },
-  {
-    // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_ENTITY_MEMORY_ENABLED was deleted, so
-    // this used to report a hardcoded enabled/healthy true. The tracker module
-    // still exists — which is exactly why a module probe would be a false
-    // green — but `trackEntityStates()` has no production caller.
-    name: 'entity_memory',
-    flag: 'unconditional',
-    enabled: () => true,
-    evidence: {
-      kind: 'no_producer',
-      describes:
-        'trackEntityStates() (src/orchestrator/context/entity-state-tracker.ts) has no ' +
-        'production caller — nothing populates entity_state_map on any live path',
     },
   },
   {
@@ -217,48 +168,6 @@ export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
       // (`grounding/process-attachments.ts:11-15`) — a real consumed producer,
       // not a file that merely exists.
       producesExport: 'extractTextFromPdf',
-    },
-  },
-  {
-    // Zone 2 block registry prompt assembly. Producer deleted 2026-07-22
-    // (f957d6d8, #615: src/orchestrator/prompt-zones/**).
-    name: 'zone2_registry',
-    flag: 'CEE_ZONE2_REGISTRY_ENABLED',
-    enabled: () => !!config.features?.zone2Registry,
-    evidence: {
-      kind: 'producer_module',
-      specifier: '../orchestrator/prompt-zones/zone2-blocks.js',
-      // `zone2-blocks.ts:490` at f957d6d8^ — resolved the active Zone 2 blocks.
-      producesExport: 'getActiveBlocks',
-    },
-  },
-  {
-    // The V2 five-phase pipeline entry point, deleted 2026-07-22 (f957d6d8,
-    // #615). NB /orchestrate/v2/turn is the V5 endpoint (orchestrator/
-    // route-v2.ts:2) — the route name outlived the pipeline this flag named.
-    name: 'orchestrator_v2',
-    flag: 'ENABLE_ORCHESTRATOR_V2',
-    enabled: () => !!config.features?.orchestratorV2,
-    evidence: {
-      kind: 'producer_module',
-      specifier: '../orchestrator/pipeline/pipeline.js',
-      // `pipeline.ts:55` at f957d6d8^ — the five-phase pipeline's entry point.
-      producesExport: 'executePipeline',
-    },
-  },
-  {
-    // Deterministic NL brief → draft_graph routing. Its subject
-    // (looksLikeDecisionBrief / classifyIntentWithContext in
-    // src/orchestrator/intent-gate.ts) was deleted 2026-07-22 (f957d6d8, #615).
-    name: 'brief_detection',
-    flag: 'CEE_BRIEF_DETECTION_ENABLED',
-    enabled: () => !!config.features?.briefDetectionEnabled,
-    evidence: {
-      kind: 'producer_module',
-      specifier: '../orchestrator/intent-gate.js',
-      // `intent-gate.ts:723` at f957d6d8^ — the brief-detection heuristic
-      // itself. Zero hits repo-wide at this tip.
-      producesExport: 'looksLikeDecisionBrief',
     },
   },
 ] as const;
@@ -307,7 +216,8 @@ async function probeProducerModule(
   return { ok: true };
 }
 
-async function evaluate(
+/** Exported for the mechanism rows in `__tests__/feature-health.test.ts` (no declared feature is dead any more). */
+export async function evaluateFeatureEvidence(
   evidence: FeatureEvidence,
 ): Promise<{ ok: boolean; reason?: string }> {
   switch (evidence.kind) {
@@ -352,7 +262,7 @@ export async function checkFeatureHealth(): Promise<FeatureHealthReport> {
       continue;
     }
 
-    const verdict = await evaluate(declaration.evidence);
+    const verdict = await evaluateFeatureEvidence(declaration.evidence);
     checks.push({
       name: declaration.name,
       flag: declaration.flag,

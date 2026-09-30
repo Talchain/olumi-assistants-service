@@ -1,0 +1,650 @@
+{
+ "_source": "served constructor f7c8c86a, 0-LLM replay of the captured drafter answer local-147c0ce7/cc/d1 (gpt-5.6-terra); MG SUCCESSOR, 30 Sep. `graph` is as registered; `olumi_levels_unset` is the same graph with every option level Olumi set removed (the user-stamped levels kept): may_run false with 4 offered gaps, P-CORE PC01's shape.",
+ "graph": {
+  "nodes": [
+   {
+    "id": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "kind": "decision",
+    "label": "Should we switch our cloud\u2026",
+    "description": "Should we switch our cloud provider from AWS to GCP?",
+    "provenance": "from_brief"
+   },
+   {
+    "id": "costs",
+    "kind": "goal",
+    "label": "costs",
+    "provenance": "from_brief",
+    "goal_threshold_unit": "\u00a3/month",
+    "goal_threshold_frame": "change_rel",
+    "goal_threshold_raw": -0.2,
+    "goal_threshold_cap": 56250,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "goal_threshold": -0.2,
+    "observed_state": {
+     "value": 0.8,
+     "baseline": 0.8,
+     "unit": "\u00a3/month",
+     "source": "cee_inference",
+     "raw_value": 45000,
+     "cap": 56250
+    },
+    "goal_level_reading": {
+     "level": 45000,
+     "level_unit": "\u00a3/month",
+     "quote": "Monthly spend is \u00a345k",
+     "lead": "Olumi reads your \u2018\u00a345k\u2019 (\u2018Monthly spend is \u00a345k\u2019) as today's level of \u2018costs\u2019",
+     "bound": "<="
+    },
+    "threshold_source": "brief_extraction",
+    "goal_direction": "<="
+   },
+   {
+    "id": "continue_with_aws",
+    "kind": "option",
+    "label": "Continue with AWS",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "switch_to_gcp",
+    "kind": "option",
+    "label": "Switch to GCP",
+    "provenance": "from_brief",
+    "interventions": {
+     "gcp_workload_share": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "gcp_workload_share",
+       "match_type": "exact_id",
+       "confidence": "high"
+      }
+     },
+     "migration_downtime": {
+      "value": 0.16666666666666666,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "migration_downtime",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 2,
+      "unit": "weeks"
+     }
+    }
+   },
+   {
+    "id": "phased_gcp_migration",
+    "kind": "option",
+    "label": "Phased GCP migration",
+    "provenance": "ai_inferred",
+    "interventions": {
+     "gcp_workload_share": {
+      "value": 0.5,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "gcp_workload_share",
+       "match_type": "exact_id",
+       "confidence": "high"
+      }
+     },
+     "migration_downtime": {
+      "value": 0.08333333333333333,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "migration_downtime",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "raw_value": 1,
+      "unit": "weeks"
+     }
+    },
+    "proposed_by": "olumi"
+   },
+   {
+    "id": "gcp_workload_share",
+    "kind": "factor",
+    "label": "GCP workload share",
+    "provenance": "from_brief",
+    "category": "controllable",
+    "observed_state": {
+     "value": 0,
+     "unit": "fraction of workloads",
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "gcp_full_workload_spend",
+    "kind": "factor",
+    "label": "GCP full-workload spend",
+    "provenance": "ai_inferred",
+    "category": "observable",
+    "observed_state": {
+     "value": 0.34,
+     "raw_value": 34000,
+     "unit": "\u00a3/month",
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    },
+    "scale_frame": 100000
+   },
+   {
+    "id": "migration_downtime",
+    "kind": "factor",
+    "label": "Migration downtime",
+    "provenance": "from_brief",
+    "category": "controllable",
+    "observed_state": {
+     "value": 0,
+     "raw_value": 0,
+     "cap": 12,
+     "declared_scale": "unit_interval",
+     "unit": "weeks",
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "estimated_monthly_cloud_spend",
+    "kind": "outcome",
+    "label": "Estimated monthly cloud spend",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "edges": [
+   {
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "to": "continue_with_aws",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "to": "switch_to_gcp",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "to": "phased_gcp_migration",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "switch_to_gcp",
+    "to": "gcp_workload_share",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "switch_to_gcp",
+    "to": "migration_downtime",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "phased_gcp_migration",
+    "to": "gcp_workload_share",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "phased_gcp_migration",
+    "to": "migration_downtime",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "continue_with_aws",
+    "to": "gcp_workload_share",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "origin": "repair"
+   },
+   {
+    "from": "continue_with_aws",
+    "to": "migration_downtime",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "origin": "repair"
+   },
+   {
+    "from": "gcp_workload_share",
+    "to": "estimated_monthly_cloud_spend",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.125
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "defaulted": true
+   },
+   {
+    "from": "gcp_full_workload_spend",
+    "to": "estimated_monthly_cloud_spend",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "defaulted": true
+   },
+   {
+    "from": "migration_downtime",
+    "to": "estimated_monthly_cloud_spend",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "defaulted": true
+   },
+   {
+    "from": "estimated_monthly_cloud_spend",
+    "to": "costs",
+    "strength": {
+     "mean": 0.2,
+     "std": 0.1
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "defaulted": true
+   }
+  ],
+  "goal_constraints": [
+   {
+    "constraint_id": "agent-lane:migration_downtime:<=",
+    "node_id": "migration_downtime",
+    "operator": "<=",
+    "value": 2,
+    "label": "Migration downtime",
+    "unit": "weeks",
+    "provenance": "explicit",
+    "value_frame": "level"
+   }
+  ]
+ },
+ "olumi_levels_unset": {
+  "nodes": [
+   {
+    "id": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "kind": "decision",
+    "label": "Should we switch our cloud\u2026",
+    "description": "Should we switch our cloud provider from AWS to GCP?",
+    "provenance": "from_brief"
+   },
+   {
+    "id": "costs",
+    "kind": "goal",
+    "label": "costs",
+    "provenance": "from_brief",
+    "goal_threshold_unit": "\u00a3/month",
+    "goal_threshold_frame": "change_rel",
+    "goal_threshold_raw": -0.2,
+    "goal_threshold_cap": 56250,
+    "goal_threshold_cap_provenance": "target_derived_headroom",
+    "goal_threshold": -0.2,
+    "observed_state": {
+     "value": 0.8,
+     "baseline": 0.8,
+     "unit": "\u00a3/month",
+     "source": "cee_inference",
+     "raw_value": 45000,
+     "cap": 56250
+    },
+    "goal_level_reading": {
+     "level": 45000,
+     "level_unit": "\u00a3/month",
+     "quote": "Monthly spend is \u00a345k",
+     "lead": "Olumi reads your \u2018\u00a345k\u2019 (\u2018Monthly spend is \u00a345k\u2019) as today's level of \u2018costs\u2019",
+     "bound": "<="
+    },
+    "threshold_source": "brief_extraction",
+    "goal_direction": "<="
+   },
+   {
+    "id": "continue_with_aws",
+    "kind": "option",
+    "label": "Continue with AWS",
+    "provenance": "ai_inferred",
+    "is_baseline": true,
+    "interventions": {}
+   },
+   {
+    "id": "switch_to_gcp",
+    "kind": "option",
+    "label": "Switch to GCP",
+    "provenance": "from_brief",
+    "interventions": {}
+   },
+   {
+    "id": "phased_gcp_migration",
+    "kind": "option",
+    "label": "Phased GCP migration",
+    "provenance": "ai_inferred",
+    "interventions": {},
+    "proposed_by": "olumi"
+   },
+   {
+    "id": "gcp_workload_share",
+    "kind": "factor",
+    "label": "GCP workload share",
+    "provenance": "from_brief",
+    "category": "controllable",
+    "observed_state": {
+     "value": 0,
+     "unit": "fraction of workloads",
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "gcp_full_workload_spend",
+    "kind": "factor",
+    "label": "GCP full-workload spend",
+    "provenance": "ai_inferred",
+    "category": "observable",
+    "observed_state": {
+     "value": 0.34,
+     "raw_value": 34000,
+     "unit": "\u00a3/month",
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    },
+    "scale_frame": 100000
+   },
+   {
+    "id": "migration_downtime",
+    "kind": "factor",
+    "label": "Migration downtime",
+    "provenance": "from_brief",
+    "category": "controllable",
+    "observed_state": {
+     "value": 0,
+     "raw_value": 0,
+     "cap": 12,
+     "declared_scale": "unit_interval",
+     "unit": "weeks",
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "estimated_monthly_cloud_spend",
+    "kind": "outcome",
+    "label": "Estimated monthly cloud spend",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "edges": [
+   {
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "to": "continue_with_aws",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "to": "switch_to_gcp",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "should_we_switch_our_cloud_provider_from_aws_to_gcp",
+    "to": "phased_gcp_migration",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "switch_to_gcp",
+    "to": "gcp_workload_share",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "switch_to_gcp",
+    "to": "migration_downtime",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "phased_gcp_migration",
+    "to": "gcp_workload_share",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "phased_gcp_migration",
+    "to": "migration_downtime",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    }
+   },
+   {
+    "from": "continue_with_aws",
+    "to": "gcp_workload_share",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "origin": "repair"
+   },
+   {
+    "from": "continue_with_aws",
+    "to": "migration_downtime",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "origin": "repair"
+   },
+   {
+    "from": "gcp_workload_share",
+    "to": "estimated_monthly_cloud_spend",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.125
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "defaulted": true
+   },
+   {
+    "from": "gcp_full_workload_spend",
+    "to": "estimated_monthly_cloud_spend",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "defaulted": true
+   },
+   {
+    "from": "migration_downtime",
+    "to": "estimated_monthly_cloud_spend",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "defaulted": true
+   },
+   {
+    "from": "estimated_monthly_cloud_spend",
+    "to": "costs",
+    "strength": {
+     "mean": 0.2,
+     "std": 0.1
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "defaulted": true
+   }
+  ],
+  "goal_constraints": [
+   {
+    "constraint_id": "agent-lane:migration_downtime:<=",
+    "node_id": "migration_downtime",
+    "operator": "<=",
+    "value": 2,
+    "label": "Migration downtime",
+    "unit": "weeks",
+    "provenance": "explicit",
+    "value_frame": "level"
+   }
+  ]
+ }
+}

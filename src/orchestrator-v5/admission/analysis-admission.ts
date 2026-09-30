@@ -289,6 +289,31 @@ export function permittedAnalysisModeFromAnalysisReady(
 }
 
 /**
+ * The admission's own SEMANTIC CAUSE — its `semantic_quality_sufficient` reason — read from a shipped
+ * `analysis_ready` payload, never re-derived (Canvas #13, MG #75 5912728111).
+ *
+ * Returns this module's OWN entry for that code, so a caller quotes a finite set of sentences this file wrote, never
+ * text lifted from a payload. `null` when the payload carries no recognised cause: a caller must then name no author.
+ */
+export function semanticReasonFromAnalysisReady(
+  analysisReady: unknown,
+): { readonly code: AdmissionReasonCode; readonly message: string } | null {
+  const reasons = (
+    (analysisReady as { readonly analysis_admission?: { readonly reasons?: unknown } } | null | undefined)
+      ?.analysis_admission
+  )?.reasons;
+  if (!Array.isArray(reasons)) return null;
+  const code = (reasons as { readonly field?: unknown; readonly code?: unknown }[])
+    .find((r) => r !== null && typeof r === 'object' && r.field === 'semantic_quality_sufficient')?.code;
+  return Object.values(SEMANTIC_REASON).find((r) => r.code === code) ?? null;
+}
+
+/** Every semantic cause this module can put on a payload, for callers that must probe each sentence they derive from one. */
+export function semanticReasons(): readonly { readonly code: AdmissionReasonCode; readonly message: string }[] {
+  return Object.values(SEMANTIC_REASON);
+}
+
+/**
  * ⭐ THE ONE ANSWER TO "DOES THE MODEL LICENSE NAMING A LEADER?", shared by every
  * claim-safety rail so they cannot drift into two authorities on one question.
  *

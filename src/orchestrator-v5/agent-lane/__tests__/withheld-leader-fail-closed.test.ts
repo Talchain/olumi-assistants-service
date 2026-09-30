@@ -302,7 +302,9 @@ describe('review of #1871 — the classifier in both directions', () => {
 });
 
 describe('review of #1871 — withheld is exactly the shared gate’s withhold arm', () => {
-  const ready = (mode: string) => ({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode, reasons: [] } });
+  // The real producer always ships its semantic cause; the caveat's first sentence is read from it (Canvas #13).
+  const ALL_MACHINE = [{ field: 'semantic_quality_sufficient', code: 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED' }];
+  const ready = (mode: string) => ({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode, reasons: mode === 'quantified_provisional' ? ALL_MACHINE : [] } });
   const reply = 'Raise Pro to £59 at release is ahead on MRR. Monthly churn is assumed at 3%.';
   const gate = (o: { permitted: boolean; separated: boolean; mode: string; reason?: string }) => enforceAgentLaneLeaderClaimsAtWire(
     { assistant_text: reply, blocks: [], suggested_actions: [], analysis_state: { leader_claim: { permitted: o.permitted, ...(o.separated ? { separation: 'separated' } : {}), ...(o.reason ? { withheld_reason: o.reason } : {}) } } } as unknown as OlumiResponse,
@@ -311,8 +313,9 @@ describe('review of #1871 — withheld is exactly the shared gate’s withhold a
 
   it('SEPARABLE PROVISIONAL (entitled, separated, quantified_provisional): caveat, not withhold — nothing is removed', () => {
     const out = gate({ permitted: true, separated: true, mode: 'quantified_provisional' });
-    expect(out.startsWith(reply)).toBe(true);
-    expect(out).toContain(PROVISIONAL_FIGURES_CAVEAT.trim().slice(0, 40));
+    // The caveat leads, the reply follows untouched (AIQ #75 5913751874: the provisional sentence comes first).
+    expect(out.startsWith(PROVISIONAL_FIGURES_CAVEAT)).toBe(true);
+    expect(out.endsWith(reply)).toBe(true);
   });
   it('the AUTOMATIC first run (not entitled) is withheld: the ranking sentence goes', () => {
     const out = gate({ permitted: false, separated: true, mode: 'quantified_provisional', reason: 'auto_initiated' });
@@ -1487,6 +1490,6 @@ describe('a sentence naming ONE option as separated ranks the options', () => {
   });
 
   it('CONTROL: on the permit-with-caveat turn (entitled, separated, quantified_provisional) the served headline is kept', () => {
-    expect(gate({ permitted: true }).startsWith(reply)).toBe(true);
+    expect(gate({ permitted: true }).endsWith(reply)).toBe(true); // after the leading caveat (AIQ 5913751874)
   });
 });

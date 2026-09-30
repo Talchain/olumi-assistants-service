@@ -459,7 +459,6 @@ export async function build() {
   log.info({
     event: 'config.startup_health',
     pipeline: 'unified_v2',
-    orchestrator_version: config.features.orchestratorV2 ? 'V2' : 'V1',
     diagnostic_trace: diagnosticTraceEnabled,
     streaming: config.features.orchestratorStreaming,
     models: startupTaskModels,
@@ -849,10 +848,9 @@ app.get("/healthz", async (_request, reply) => {
     });
   }
 
-  const { arePromptsReady, getCriticalPromptCoverage, promptStoreDegradationReasons } =
+  const { getPromptHealthSnapshot, promptStoreDegradationReasons } =
     await import("./prompts/readiness.js");
-  const prompts_ready = await arePromptsReady();
-  const criticalPromptCoverage = await getCriticalPromptCoverage();
+  const { ready: prompts_ready, coverage: criticalPromptCoverage } = getPromptHealthSnapshot();
   // Additive honest signal: true iff every critical (tracked) prompt resolves
   // from PMS. Unlike `prompts_ready`, a bundled default makes this false.
   // Deliberately does NOT affect `degraded` (avoids load-balancer side effects).
@@ -1579,9 +1577,10 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   // any is on the bundled default. This is the gate signal for arming
   // fail-closed (PR2). Non-fatal — never blocks boot.
   try {
-    const { getCriticalPromptCoverage } = await import(
+    const { getCriticalPromptCoverage, warmPromptReadinessSnapshot } = await import(
       './prompts/readiness.js'
     );
+    await warmPromptReadinessSnapshot('startup');
     const coverage = await getCriticalPromptCoverage('startup');
     if (coverage.all_pms) {
       app.log.info(

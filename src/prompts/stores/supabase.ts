@@ -912,6 +912,75 @@ export class SupabasePromptStore
     };
   }
 
+  /** Select only the elected prompt pointer and its one served version. */
+  async getRuntimeCompiled(
+    taskId: string,
+    variables: Record<string, string | number>,
+    options?: GetCompiledOptions,
+  ): Promise<CompiledPrompt | null> {
+    const client = this.ensureInitialized();
+
+    // Include archived rows in election: an archived canonical authority means
+    // fallback, not promotion of a rival row with a newer updated_at value.
+    const { data: prompts, error: promptError } = await client
+      .from('cee_prompts')
+      .select('id,task_id,status,active_version,staging_version,model_config')
+      .eq('task_id', taskId);
+
+    if (promptError) {
+      throw new Error(`Failed to resolve prompt for '${taskId}': ${promptError.message}`);
+    }
+    type RuntimePromptRow = Pick<
+      PromptRow,
+      'id' | 'task_id' | 'status' | 'active_version' | 'staging_version' | 'model_config'
+    >;
+    const candidates = (prompts ?? []) as RuntimePromptRow[];
+    const prompt =
+      candidates.find((row) => row.id === `${taskId}_default`) ??
+      [...candidates].sort((a, b) => a.id.localeCompare(b.id))[0];
+    if (!prompt || prompt.status === 'archived') return null;
+
+    const targetVersion =
+      options?.version ??
+      (options?.useStaging ? prompt.staging_version : null) ??
+      prompt.active_version;
+
+    const { data: selectedVersion, error: versionError } = await client
+      .from('cee_prompt_versions')
+      .select('version,content,variables')
+      .eq('prompt_id', prompt.id)
+      .eq('version', targetVersion)
+      .single();
+
+    if (versionError || !selectedVersion) {
+      throw new Error(
+        `Version ${targetVersion} not found for prompt '${prompt.id}'` +
+          (versionError ? `: ${versionError.message}` : ''),
+      );
+    }
+
+    const version = selectedVersion as Pick<VersionRow, 'version' | 'content' | 'variables'>;
+    const versionVariables = parseJsonColumn<PromptVariable>(version.variables, {
+      column: 'variables',
+      promptId: prompt.id,
+      version: version.version,
+    });
+    const content = interpolatePrompt(version.content, variables, versionVariables);
+
+    return {
+      promptId: prompt.id,
+      version: version.version,
+      content,
+      compiledAt: new Date().toISOString(),
+      isStaging: Boolean(
+        options?.useStaging &&
+          prompt.staging_version &&
+          targetVersion === prompt.staging_version,
+      ),
+      modelConfig: prompt.model_config ?? undefined,
+    };
+  }
+
   /**
    * Get active prompt for a task
    */

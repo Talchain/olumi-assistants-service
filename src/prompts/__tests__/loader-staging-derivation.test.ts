@@ -85,6 +85,7 @@ beforeEach(() => {
       version: options?.useStaging ? STAGING_VERSION : ACTIVE_VERSION,
       content: options?.useStaging ? 'STAGING BODY' : 'ACTIVE BODY',
       compiledAt: new Date().toISOString(),
+      isStaging: Boolean(options?.useStaging),
     }),
   );
   getMock.mockResolvedValue({
@@ -104,6 +105,8 @@ describe('loadPrompt() derives useStaging from the deployment (no silent product
     expect(optionsOfCall().useStaging).toBe(true);
     expect(loaded.version).toBe(STAGING_VERSION);
     expect(loaded.content).toBe('STAGING BODY');
+    expect(loaded.isStaging).toBe(true);
+    expect(getMock).not.toHaveBeenCalled();
   });
 
   it('a caller that OMITS useStaging gets the ACTIVE pin when shouldUseStagingPrompts() is false', async () => {

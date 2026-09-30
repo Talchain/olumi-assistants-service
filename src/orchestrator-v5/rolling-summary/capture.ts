@@ -52,6 +52,7 @@ import type { RollingSummaryStorePort } from './store-adapter.js';
 
 import { SUMMARY_FULL_HISTORY_READ_LIMIT } from './summary-types.js';
 import type { SummarySpeaker } from './summary-types.js';
+import { withTextAsSeen } from '../session/conversation-as-seen.js';
 
 /** Read the full persisted history off the hot-path window. readRecent is
  *  unclamped (verified); a large limit is effectively "full history" for any
@@ -69,6 +70,7 @@ export { SUMMARY_FULL_HISTORY_READ_LIMIT };
 export interface MaintainerTurn {
   readonly turn_id: string;
   readonly created_at: string;
+  readonly request_hash?: string | null;
   readonly user_message?: string | null;
   readonly assistant_message?: string | null;
 }
@@ -249,7 +251,8 @@ async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> 
     // have truncated older history — the stored summary must say so (marker
     // + in-text disclosure), never claim silent completeness.
     const historyCapped = newestFirst.length >= SUMMARY_FULL_HISTORY_READ_LIMIT;
-    const chronologicalTurns: SummariserTurn[] = [...newestFirst].reverse().map(toSummariserTurn);
+    // As the user SAW it (CURRENT-READ-v1 row 5): a sub-turn keeps its place (watermarks are turn ids) but not its text.
+    const chronologicalTurns: SummariserTurn[] = [...withTextAsSeen(newestFirst)].reverse().map(toSummariserTurn);
     if (chronologicalTurns.length === 0) {
       emitUpdated(args, { status: 'no_turns', duration_ms: Date.now() - startedAt });
       return;
