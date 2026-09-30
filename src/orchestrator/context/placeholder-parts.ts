@@ -267,5 +267,6 @@ function holdsTodaysLevel(v: unknown, target: Rec | undefined): boolean {
   const raw = isRec(v) ? v.raw_value : undefined;
   if (typeof raw === 'number' && typeof today.raw_value === 'number') return raw === today.raw_value;
   const value = typeof v === 'number' ? v : isRec(v) ? v.value : undefined;
-  return typeof value === 'number' && typeof today.value === 'number' && value === today.value;
+  // A bare wire number may be on either scale (projected or raw).
+  return typeof value === 'number' && (value === today.value || value === today.raw_value);
 }
