@@ -949,8 +949,6 @@ function evaluateFactorValueProposalImpl(
    *   0.8 months genuinely could mean 0.8 or 80%. On a proportion unit there is
    *   no second reading to be ambiguous between — pinned by controls.
    */
-  const isProportionUnit =
-    typeof factorUnit === 'string' && PROPORTION_UNIT_TOKENS.has(factorUnit.trim().toLowerCase());
   /**
    * ⛔ THE UNIT TOKEN IS NOT ENOUGH ON ITS OWN, AND THE ESTATE SAYS SO.
    *
