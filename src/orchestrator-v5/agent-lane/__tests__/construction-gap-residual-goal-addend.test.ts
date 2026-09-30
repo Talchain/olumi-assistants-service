@@ -14,6 +14,8 @@ import type { CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
+import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 
 type Json = Record<string, any>;
 const BRIEF = 'Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. '
@@ -75,6 +77,19 @@ describe('Olumi’s gap residual beside the user’s price × subscribers is tak
     const { out } = await build(m0());
     expect(said(out)).toContain('I had added ‘Other MRR’ of £1,500 a month so that ‘MRR’ matched your £75,000; that was my guess');
     expect(said(out)).toContain('Your £49 × 1,500 = £73,500 is on the card for you to confirm.');
+  });
+
+  it('POST-YES (DL 5904403673): the Yes makes the goal the user\u2019s price × subscribers; the residual is not added back', async () => {
+    const { graph } = await build(m0());
+    const card = proposeProductIdentity(graph)!;
+    const r = applyIdentityConfirmEdit({ persistedGraph: graph, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
+      expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never), reading_token: identityConfirmReadingToken(card) });
+    expect(r.kind).toBe('mutated');
+    const after = (r as { mutatedGraph: { nodes: Json[]; edges: Json[] } }).mutatedGraph;
+    expect(goalOf(after).nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: true });
+    expect([...goalOf(after).nonlinear_identity.factor_ids].sort()).toEqual([...card.factor_ids].sort());
+    expect(labelsInto(after)).toEqual(['Paying subscribers', 'Pro plan monthly price']);
+    expect(residualNode(after)).toBeUndefined();
   });
 
   it('CONTROL: an Olumi addend NOT equal to the gap stays, and there is no card', async () => {
