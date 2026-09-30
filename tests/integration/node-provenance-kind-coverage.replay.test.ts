@@ -673,6 +673,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "success_threshold",
       "threshold_source",
       "uncertainty_drivers",
+      // MG 0.67.0, 30 Sep (PTL A; P0 SHARED DATA 5914707462, AIQ 5914471584) — THE VALUE-BEARING DECISION: `unit_reading`
+      // is NOT value-bearing and must NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). It says WHICH unit a quantity
+      // is read in and WHO read it ({unit, source, source_quote}, closed), never HOW MUCH: the sibling of
+      // `quantity_frame`. A node carrying only a unit reading carries no value; joining would let a unit read as a figure.
+      "unit_reading",
     ]);
   });
 });
