@@ -25,6 +25,7 @@ import { computeAnalysisAffectingGraphHash } from '../../../context/graph-hash.j
 import type { HandlerInvocation } from '../../registry.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE } from '../../../../orchestrator/context/option-result-source.js';
 import { log } from '../../../../utils/telemetry.js';
 
 const producer = vi.hoisted(() => ({ mode: 'real' as 'real' | 'throw' | 'invalid' }));
@@ -44,6 +45,7 @@ vi.mock('../../../agent-lane/goal-certainty.js', async (importOriginal) => {
 type Json = Record<string, any>;
 const DIR = 'tests/fixtures/cross-service/b5-per-limit';
 const input = JSON.parse(readFileSync(`${DIR}/17d1cd3a.graph.json`, 'utf8')) as { graph: Json; brief_text: string };
+const clone0 = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 /**
  * …with NO stated target, so DECISION-REPRESENTATION row 4 (#2371) has no subject: Paul's 17d1 MRR target can't be tested
  * yet (placeholders on the goal's path), and row 4 then withholds EVERY option's chance, the status quo's earned 0 too
@@ -57,6 +59,7 @@ function withoutTarget<G>(graph: G): G {
   if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
   return c as unknown as G;
 }
+const SERVED_GRAPH = clone0(input.graph);
 input.graph = withoutTarget(input.graph);
 const plotResponse = JSON.parse(readFileSync(`${DIR}/17d1cd3a.plot-response.json`, 'utf8')) as Json;
 
@@ -64,10 +67,10 @@ const SCENARIO = 'a295e4a1-97b5-46c8-987a-513232e5dba4';
 const OPTIONS = ['keep_current_49_price', 'increase_price_to_59', 'increase_price_to_54'];
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-async function storedRun(body: Json): Promise<Json> {
+async function storedRun(body: Json, graph: Json = input.graph): Promise<Json> {
   const store = {
-    loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(input.graph), briefText: input.brief_text })),
-    loadGraph: vi.fn(async () => clone(input.graph)),
+    loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(graph), briefText: input.brief_text })),
+    loadGraph: vi.fn(async () => clone(graph)),
   };
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-gc-load', store as never);
   const run = vi.fn(async () => clone(body) as unknown as V2RunResponseEnvelope);
@@ -96,6 +99,28 @@ async function storedRun(body: Json): Promise<Json> {
 beforeEach(() => {
   producer.mode = 'real';
   vi.restoreAllMocks();
+});
+
+describe('DR row 4 on the SERVED graph (target stated, not testable): the earned 0 is withheld too', () => {
+  it('⛔ exploratory (DR row 4) withholds every option\'s goal chance, including an earned 0 (PTL P2; AIQ 5914730220, 5916664644)', async () => {
+    const result = await storedRun(plotResponse, SERVED_GRAPH);
+    expect(result.goal_certainty ?? []).toEqual([]);
+    // The words (AIQ 5916664644): the status quo is withheld under the run's own TARGET_NOT_TESTABLE reason, never a
+    // placeholder-path reason it does not have; the price options keep (S)'s own reason.
+    const warnings: Json[] = [];
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) { v.forEach(walk); return; }
+      if (v === null || typeof v !== 'object') return;
+      const r = v as Json;
+      if (typeof r.code === 'string' && Array.isArray(r.option_ids)) warnings.push(r);
+      Object.values(r).forEach(walk);
+    };
+    walk(result);
+    const byCode = (code: string) => new Set(warnings.filter((w) => w.code === code).flatMap((w) => w.option_ids as string[]));
+    expect(byCode(GOAL_FIGURES_TARGET_NOT_TESTABLE).has(OPTIONS[0])).toBe(true);
+    expect(byCode(GOAL_FIGURES_PLACEHOLDER_PATH).has(OPTIONS[0])).toBe(false);
+    expect([...byCode(GOAL_FIGURES_PLACEHOLDER_PATH)].sort()).toEqual([OPTIONS[2], OPTIONS[1]].sort());
+  });
 });
 
 describe('0.63.0 at the call site: the Run stores its own goal certainty', () => {
