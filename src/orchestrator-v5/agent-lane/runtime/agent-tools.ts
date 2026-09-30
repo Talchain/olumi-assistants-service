@@ -409,12 +409,18 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'authorise_change: show the user what it sets, never the id, before they approve. Give the figure exactly as the user '
       + 'wrote it, in their units (60000, with the unit £, for £60k), and whether they said at least or at most. Never use this '
       + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
-      + 'a figure or direction they did not state is refused.',
+      + 'a figure or direction they did not state is refused. If the user ALSO stated the goal’s level today (for example "we have secured '
+      + '£0 so far and need at least £1 million"), pass it as current_level: both go on ONE card and are written on ONE approval. '
+      + 'Never promise to record today’s level later: without current_level nothing records it.',
     parameters: obj({
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
       unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      current_level: obj({
+        value: { type: 'number', description: 'The goal’s level TODAY, exactly as the user stated it in their units (0 for "we have secured £0 so far").' },
+        unit: { type: 'string', description: 'The unit the user gave it in (for example £).' },
+      }, ['value', 'unit']),
     }, ['constraint_type', 'value', 'unit', 'rationale']),
   },
   {
@@ -735,6 +741,8 @@ export interface AgentCapabilities {
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). */
   proposeGoalTarget?(ctx: AgentToolContext, args: {
     constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
+    /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
+    current_level?: { value: number; unit: string };
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {

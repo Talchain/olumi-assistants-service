@@ -182,7 +182,7 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
-import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
+import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
@@ -3087,14 +3087,41 @@ export function createAgentCapabilities(
       }
       // ⛔ …and written ABOUT this goal (DL #72 5862394804): "300 Pro paying subscribers" is never a £300 MRR target.
       if (!figureTheUserWroteFor(value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
+      /**
+       * ⭐ THE GOAL'S LEVEL TODAY, WHEN THE USER STATED IT BESIDE THE TARGET — on THIS card, written on THIS approval
+       * (AIQ #75 5913873948 row G6, 5913897396, 5913952911; DL 5913935708). R3's run: "We have secured £0 so far and need
+       * at least £1 million" gave a card for the target only and the reply "I'll then record the current £0 level", which
+       * nothing ever recorded. A stated level (0 included) is the user's figure: the level door's own words rule
+       * (`statedGoalLevelInUsersWords`), against the unit the target is written in. It is framed against the target
+       * only once the target is written (the apply branch), by the level door itself. The sentence it was written in
+       * travels with it: the approval arrives on a later turn, whose own text does not hold it.
+       */
+      const levelArg = (args as { current_level?: unknown }).current_level;
+      let currentLevel: { value: number; unit: string; quote: string } | undefined;
+      if (levelArg !== undefined && levelArg !== null) {
+        const lv = (levelArg as { value?: unknown }).value;
+        const lu = (levelArg as { unit?: unknown }).unit;
+        if (typeof lv !== 'number' || !Number.isFinite(lv) || typeof lu !== 'string' || lu.trim() === '') {
+          return { ok: false, mutated: false, refusal: 'unreadable_current_level',
+            detail: 'Today’s level needs the figure and its unit, as the user wrote them. Nothing was prepared; ask the user for whichever is missing.' };
+        }
+        const inWords = statedGoalLevelInUsersWords(lv, lu, { label: goal.label, unit }, ctx.user_text);
+        if (!inWords.ok) return { ok: false, mutated: false, refusal: inWords.refusal, detail: inWords.detail };
+        if (inWords.quote === null) return targetNotStated;
+        currentLevel = { value: inWords.raw, unit, quote: inWords.quote };
+      }
+      const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
-        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit } }],
+        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit, ...(currentLevel !== undefined ? { current_level: currentLevel } : {}) } }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}`,
+        // AIQ's words for the one card (5913952911): both figures, the user's own.
+        public_label: today === undefined
+          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}`
+          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`,
       });
       proposals.put(proposal);
       return {
@@ -3106,8 +3133,11 @@ export function createAgentCapabilities(
           label: goal.label,
           current_target: trio.goal_threshold_raw === undefined ? null : targetFigure(trio.goal_threshold_raw, trio.goal_threshold_unit ?? ''),
           becomes: `${DIRECTION_WORDS[type]} ${figure}`,
+          ...(today !== undefined ? { today } : {}),
         },
-        note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target — never the id — and call authorise_change with this proposal_id once they agree.`,
+        note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
+          + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
+          + ' — never the id — and call authorise_change with this proposal_id once they agree.',
       };
     },
 
@@ -4154,10 +4184,39 @@ export function createAgentCapabilities(
         const receipts = receipt.summary !== null ? [receipt.summary] : [];
         proposals.markApplied(decision.proposal.proposal_id, receipts);
         const goalLabel = String(after!.nodes.find((x) => x.id === op.path)?.label ?? 'the goal');
-        return {
+        const targetSaid = `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, as you stated it.`;
+        const applied = {
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-          follow_up: `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, as you stated it.`,
+          follow_up: targetSaid,
+        };
+        /**
+         * ⭐ TODAY'S LEVEL, ON THE SAME APPROVAL (AIQ #75 5913952911): prepared by the level door against the target just
+         * written — the door's own words rule, unit rule and `admitStatedGoalLevel` — then written by its own CAS-gated
+         * writer, on the revision read back above. The goal's cap and its provenance are left exactly as the target
+         * writer set them. Either write failing is said by name: the target stays set, the level is not recorded.
+         */
+        const level = (op.value as { current_level?: { value: number; unit: string; quote: string } }).current_level;
+        if (level === undefined) return applied;
+        const todaySaid = targetFigure(level.value, level.unit);
+        const notRecorded = (why: unknown): ToolResult => ({
+          ...applied,
+          follow_up: `${targetSaid} Its level today (${todaySaid}) was not recorded, so nothing about today’s level changed.`,
+          level_not_recorded: true,
+          note: `The target is set. Today's level was NOT recorded (${String(why ?? 'refused')}). Say both plainly, and never say today's level was saved.`,
+        });
+        const levelCtx = { ...ctx, user_text: level.quote, user_turn_text: level.quote };
+        const prepared = await proposeGoalCurrentLevel({ readGraph: async () => after, proposals }, levelCtx, {
+          goal_label: goalLabel, value: level.value, unit: level.unit, goal_is: v.constraint_type, user_stated: true,
+        });
+        const levelProposal = prepared.ok && typeof prepared.proposal_id === 'string' ? proposals.get(prepared.proposal_id) : undefined;
+        if (levelProposal === undefined) return notRecorded(prepared.refusal);
+        const written = await applyGoalCurrentLevel({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, levelProposal, after!);
+        if (written.ok !== true || written.applied !== true) return notRecorded(written.refusal);
+        return {
+          ...applied,
+          receipts: [...receipts, ...((written.receipts as ReceiptSummary[] | undefined) ?? [])],
+          follow_up: `${targetSaid} Its level today is recorded as ${todaySaid}, your figure.`,
         };
       }
 
