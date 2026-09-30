@@ -103,6 +103,16 @@ describe('get_canonical_state — the Agent can see WHO said it', () => {
   });
 });
 
+describe('get_canonical_state — approved participation survives a cold read', () => {
+  it('keeps Olumi origin and approved comparison participation as separate stored facts', async () => {
+    const [suggested] = await entitiesFor([{
+      id: 'suggested', kind: 'option', label: 'Raise to £54', proposed_by: 'olumi',
+      analysis_participation: 'included', interventions: { price: { value: 0.54, source: 'cee_hypothesis' } },
+    }]);
+    expect(suggested).toMatchObject({ id: 'suggested', proposed_by: 'olumi', analysis_participation: 'included' });
+  });
+});
+
 describe('get_canonical_state — absence stays absence', () => {
   it('CONTROL: an entity with no magnitude carries no invented carriers', async () => {
     const [bare] = await entitiesFor([BARE]);
@@ -171,4 +181,3 @@ describe('build_model_from_brief returns the SAME entity semantics as get_canoni
     expect(r.entities).toEqual(await entitiesFor([PRICE, BARE]));
   });
 });
-

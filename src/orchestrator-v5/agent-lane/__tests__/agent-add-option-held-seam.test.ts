@@ -746,6 +746,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(inner, 'no write or held proposal').toEqual([]);
     const approve = approveChipOf(turnResult);
     expect(approve?.message).toContain('Olumi\'s suggestion');
+    expect(approve?.label).toContain("Price: 54 GBP (Olumi's suggested estimate)");
     expect(graphNow().nodes.find((node) => node.id === 'opt_b')).toMatchObject({ proposed_by: 'olumi' });
 
     const before = structuredClone(graphNow());
@@ -774,11 +775,45 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(filterOlumiProposedOptions({ graph: after, submitted }).options.map((node) => node.id)).toEqual(['opt_a', 'opt_b', 'opt_c']);
     const graphWrites = () => store.append.mock.calls.filter(([write]) => write.scenario_id === SCENARIO && write.graph !== undefined).length;
     expect(graphWrites()).toBe(1);
+    const coldBodies: Record<string, unknown>[] = [];
+    script = [(body) => { coldBodies.push(body); return say('The £54 suggestion now participates; its earlier Run is stale.'); }];
+    await turn({ message: 'Is the £54 suggestion in my comparison now?' });
+    const coldState = JSON.stringify(coldBodies[0]?.input ?? []);
+    expect(coldState).toMatch(/opt_b.{0,500}proposed_by.{0,30}olumi.{0,100}analysis_participation.{0,30}included/);
     script = [() => fnCall('authorise_change', { proposal_id: toolOutput.proposal_id }), () => say('No second write.')];
     const retried = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     expect(retried._agent.tool_calls.find((call) => call.name === 'authorise_change'))
       .toMatchObject({ ok: true, mutated: false });
     expect(graphWrites(), 'the same card cannot create a second graph version').toBe(1);
+  }, 120_000);
+
+  it('does not claim a failed adoption when the atomic write landed but its readback failed', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, label: 'Raise to £54', proposed_by: 'olumi',
+        interventions: { fac_price: { value: 0.27, raw_value: 54, unit: 'GBP', source: 'cee_hypothesis' } } }
+      : node) });
+    script = [
+      () => fnCall('propose_new_option', { label: 'Raise to £54', acts_on: [], rationale: 'Please add your suggestion.' }),
+      () => say('I can offer this suggestion for your comparison.'),
+    ];
+    const offered = await turn({ message: 'Please add "Raise to £54" as one of my options.' });
+    const approve = approveChipOf(offered)!;
+    store.loadGraph.mockImplementation(async (sid: string) => {
+      const current = graphOf.get(sid) as { nodes?: { analysis_participation?: string }[] } | undefined;
+      if (current?.nodes?.some((node) => node.analysis_participation === 'included')) throw new Error('readback unavailable');
+      return current ?? null;
+    });
+    try {
+      const pressed = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+      expect(graphNow().nodes.find((node) => node.id === 'opt_b')?.analysis_participation).toBe('included');
+      expect(pressed._agent.tool_calls.find((call) => call.name === 'authorise_change'))
+        .toMatchObject({ ok: false, mutated: true, refusal: 'not_confirmed' });
+      expect(pressed.assistant_text).toMatch(/could not be confirmed/i);
+      expect(pressed.assistant_text).not.toMatch(/not saved|nothing was changed|not added/i);
+    } finally {
+      store.loadGraph.mockImplementation(async (sid: string) => graphOf.get(sid) ?? null);
+    }
   }, 120_000);
 
   it('a unique marked £54 suggestion can be offered when the user refers to its figure without repeating its exact label', async () => {
@@ -837,9 +872,11 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     ];
     const result = await turn({ message: 'Please add "Raise to £59" as one of my options.' });
     const detail = approveChipOf(result)?.detail;
+    const visibleLabel = approveChipOf(result)?.label;
     expect(detail).toContain("Price: 59 GBP (Olumi's suggested estimate)");
     expect(detail).toContain('Factor 1: 4 units (from your original brief)');
     expect(detail).toContain('Factor 2: 5 units (set by you)');
+    expect(visibleLabel).toBe(detail);
   }, 120_000);
 
   it('[q5] RED (DL #70 5846812818, served F4/F4e): TWO options in one request, one a twin of "Raise to £59" → the valid one is still proposed as ONE change with ONE chip, the twin is named as not added, and approving adds only the valid one', async () => {

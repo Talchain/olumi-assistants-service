@@ -994,6 +994,8 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
               : { value_provenance: valueProvenance }),
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
             ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
+            ...(n.kind === 'option' && (n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded')
+              ? { analysis_participation: n.analysis_participation } : {}),
           };
         }
 
@@ -3921,12 +3923,16 @@ export function createAgentCapabilities(
           expected_label: v.label,
           expected_interventions: expected as Record<string, unknown>,
         });
+        if (res.status === 'unconfirmed') {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
+            detail: 'The adoption may have been saved, but I could not confirm the current model. Read the comparison before trying again or saying what it includes.' };
+        }
         if (res.status !== 'committed') {
           return { ok: false, mutated: false, applied: false, refusal: res.status === 'stale' ? 'superseded' : 'not_applied',
             proposal_id: decision.proposal.proposal_id,
             detail: res.status === 'stale'
               ? 'The model changed before this adoption was saved, so nothing changed. Read the suggestion again and offer a fresh card.'
-              : 'The suggestion was not added to your comparison. Nothing was confirmed; read the model before offering it again.' };
+              : 'The suggestion could not be adopted. Nothing was changed; read the model before offering it again.' };
         }
         const after = await readGraph(ctx.scenario_id);
         const adopted = after?.nodes.find((n) => n.id === op.path);

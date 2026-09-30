@@ -165,7 +165,9 @@ export function approvalChipsFor(
   const adoption = stored?.operations.length === 1 && stored.operations[0]?.op === 'adopt_olumi_option'
     ? stored.operations[0].value as { approval_message?: unknown } | undefined : undefined;
   if (adoption !== undefined && typeof adoption.approval_message === 'string' && adoption.approval_message !== '') {
-    return [{ id: approvalChipIdFor(proposalId), label: 'Add this suggestion to my comparison',
+    // DGAI currently renders `label` but drops `detail`. Keep the exact stored
+    // level/source reading on the visible button until the UI has a detail row.
+    return [{ id: approvalChipIdFor(proposalId), label: stored!.public_label,
       message: adoption.approval_message, detail: stored!.public_label }, AMEND_CHIP];
   }
   const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
