@@ -3,6 +3,9 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { deriveAnalysisFreshness } from '../freshness.js';
 import { composeToolCallResponse } from '../../compose.js';
 import { composeAnalysisStateV1, projectAnalysisBlocksForRunBinding } from '../../compose/analysis-state-v1.js';
+import { assembleContextPack } from '../context-pack-assembler.js';
+import { PRESENT_PAIR } from './run-delta-fixtures.js';
+import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { attachComputedAt } from '../../compose/analysis-ready-emit.js';
 import { selectCanonicalAnalysisState } from '../canonical-analysis-state.js';
 
@@ -101,11 +104,12 @@ describe('the selected Run goal unit is part of currentness', () => {
 
 
 describe('goal-unit stale current-turn and shared wire egress', () => {
-  const compose = (freshness: ReturnType<typeof derive>) => composeToolCallResponse({
+  const compose = (freshness: ReturnType<typeof derive>, withLifecycle = true) => composeToolCallResponse({
     orientation: 'Analysis received.', confirmation: 'Run saved.', coaching: null,
     stage: 'analyse', answerKind: 'functional', handlerFacts: [fact()],
     persistedGraph: graph('USD/month'), persistedGraphHash: HASH,
-    lifecycle: { freshness, priorFacts: [fact()], requestId: 'unit-test', scenarioId: 'scenario' },
+    ...(withLifecycle ? { lifecycle: { freshness, priorFacts: [fact()], requestId: 'unit-test', scenarioId: 'scenario' } }
+      : { freshness }),
   });
 
   it.each(['goal_unit_changed', 'goal_snapshot_unverified'] as const)(
@@ -113,6 +117,7 @@ describe('goal-unit stale current-turn and shared wire egress', () => {
       const freshness = { ...derive(graph('USD/month')), reason };
       const out = compose(freshness);
       expect(out.blocks.map((b) => b.type)).toEqual(['coaching']);
+      expect(compose(freshness, false).blocks.map((b) => b.type)).toEqual(['coaching']);
       expect(out.blocks[0]).toMatchObject({ freshness: 'stale', action_intent: 'rerun_analysis' });
       expect(JSON.stringify(out.blocks)).toContain(reason === 'goal_unit_changed'
         ? 'your goal’s unit changed' : 'the saved goal’s unit could not be confirmed');
@@ -127,6 +132,31 @@ describe('goal-unit stale current-turn and shared wire egress', () => {
         .toEqual(currentResult);
     });
 
+  it('does not rebuild populated Phase 3 cards on a chip path without lifecycle metadata', () => {
+    const populated = fact() as unknown as { result: Record<string, unknown> };
+    populated.result.constraint_verdict = { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' };
+    populated.result.leading_option_id = 'opt_a';
+    populated.result.enrichment = {
+      analysis_status: 'computed',
+      graph: { nodes: [{ id: 'fac_delivery_risk', label: 'Delivery risk', kind: 'factor' }] },
+      factor_sensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+      decision_review: {
+        narrative_summary: 'Plan A leads with a comfortable margin.', story_headlines: {},
+        robustness_explanation: { summary: 'Stable.', primary_risk: null }, readiness_rationale: 'Ready.',
+        evidence_enhancements: { fac_delivery_risk: { specific_action: 'check the last two releases',
+          rationale: 'delivery rate is the highest variance driver', evidence_type: 'internal_data', decision_hygiene: 'estimate first' } },
+        scenario_contexts: {}, flip_thresholds: [], bias_findings: [],
+        key_assumptions: ['Market conditions persist for the next two quarters.'], decision_quality_prompts: [],
+      },
+    };
+    const build = (freshness: ReturnType<typeof derive>) => composeToolCallResponse({
+      orientation: '', confirmation: 'Run saved.', coaching: null, stage: 'analyse', answerKind: 'functional',
+      handlerFacts: [populated as unknown as HandlerFact], freshness,
+    });
+    expect(build(derive(graph())).blocks.some((b) => b.type === 'review_card' || b.type === 'evidence')).toBe(true);
+    expect(build(derive(graph('USD/month'))).blocks.map((b) => b.type)).toEqual(['coaching']);
+  });
+
   it('maps the human unit reason onto the existing freshness text carrier without restamping the Run', () => {
     expect(attachComputedAt({ options: [], goal_node_id: 'mrr', status: 'ready' }, derive(graph('USD/month'))))
       .toMatchObject({ freshness: 'stale', freshness_reason: 'your goal’s unit changed', computed_at: AT,
@@ -136,5 +166,22 @@ describe('goal-unit stale current-turn and shared wire egress', () => {
   it('preserves ordinary graph-stale current-turn result behaviour', () => {
     expect(compose({ ...derive(graph('USD/month')), reason: 'graph_hash_diverged' })
       .blocks.some((b) => b.type === 'analysis_result')).toBe(true);
+  });
+});
+
+
+describe('goal-unit stale comparisons cannot return through AI prompt context', () => {
+  it('withholds the same comparison in the pack, with a legacy ordinary-stale control', () => {
+    const canonical = selectCanonicalAnalysisState({ priorFacts: [fact()], currentGraphHash: HASH,
+      currentGraph: graph('USD/month') });
+    const pack = (freshness_reason: typeof canonical.freshness_reason) => assembleContextPack({
+      payload: makeMessagePayload({ scenario_id: 'unit-stale-pack', message: 'What changed?' }),
+      priorTurns: [], priorFacts: PRESENT_PAIR, priorFactsReadOk: true,
+      graphContext: { status: 'canonical' }, mayNameLeadingOption: true,
+      canonicalState: { ...canonical, freshness_reason },
+    });
+    expect(pack('goal_unit_changed').run_delta).toBeUndefined();
+    expect(pack('goal_snapshot_unverified').run_delta).toBeUndefined();
+    expect(pack('graph_hash_diverged').run_delta).toBeDefined();
   });
 });

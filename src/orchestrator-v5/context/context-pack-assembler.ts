@@ -1849,7 +1849,8 @@ export function assembleContextPackWithSummary(
   // AND-gates that against each run's own persisted verdict, so this can only
   // ever withhold a leader id, never promote one.
   const runDeltaBuild =
-    input.priorFacts === undefined
+    input.priorFacts === undefined || analysisStateSummary?.freshness_reason === 'goal_unit_changed'
+      || analysisStateSummary?.freshness_reason === 'goal_snapshot_unverified'
       ? null
       : buildRunDelta({
           priorFacts: input.priorFacts,
