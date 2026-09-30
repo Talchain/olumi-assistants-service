@@ -183,38 +183,29 @@ describe('A — the model already states the mechanism: the shortcut is folded o
 });
 
 /**
- * ⛔ A SHORTCUT THE **USER** STATED IS NOT OLUMI'S TO FOLD (Panel review
- * 5793954535, B2). Folding it would move their claim onto a link they did not
- * draw and strip the `brief_extraction` stamp that `brief_stated_keys.edges` and
- * `keepsEveryUserStatedIdentity` read. So it is left exactly as stated, and the
- * ask the user already gets from readiness — which names the risk in their own
- * label — is the channel, not a rewrite behind their back.
+ * ⛔ A SHORTCUT THE **USER** STATED IS NOT OLUMI'S TO FOLD (Panel review 5793954535, B2). But the user states an option's
+ * link only in a brief ACTION clause for that option that names the target (AIQ 5909754019 (1)), and the drafter's
+ * `explicit` alone never licenses the user's name (AIQ 5909528911; CEE #2355). This brief, "Should I hire a Tech lead or
+ * two developers to increase velocity?", names no hiring delay. So a drafted `explicit` Hire a Tech Lead → Hiring delay
+ * is OLUMI's (AIQ 5909754019 (2), re-recorded): it is folded onto the stated mechanism exactly as in A, and the fold is
+ * recorded. Before #2355 it was kept as `brief_extraction` and asked about as the user's.
  */
-describe('the user\u2019s own option -> risk link is left exactly as stated', () => {
+describe('a drafted "explicit" option -> risk link the brief does not state is Olumi\u2019s, and folded like one', () => {
   const stated = {
     ...BANKED,
     links: [...links(BANKED), { ...SHORTCUT, provenance: 'explicit' }],
   } as unknown as CandidateModel;
   const a = admitCandidateModel(stated, {});
 
-  it('is kept with the user\u2019s authorship, and is NOT folded onto the mechanism', () => {
-    const e = edge(a, OPTION, RISK);
-    expect(e, 'the user\u2019s stated link must survive').toBeDefined();
-    expect(e!.provenance?.source).toBe('brief_extraction');
-    expect(lossAt(a, `edges[${OPTION}::${RISK}].mechanism`)).toBeUndefined();
-    // The mechanism it shortcuts is still there too — both, because neither was touched.
+  it('is folded onto the mechanism, not kept under the user\u2019s name', () => {
+    expect(edge(a, OPTION, RISK)).toBeUndefined();
+    expect(lossAt(a, `edges[${OPTION}::${RISK}].mechanism`)?.severity).toBe('info');
     expect(edge(a, MEDIATOR, RISK)?.effect_direction).toBe('positive');
+    expect(reaches(a, OPTION, RISK)).toBe(true);
   });
 
-  it('and readiness still asks the user about it, by identity', () => {
-    expect(mappingBlockers(a)).toEqual([
-      {
-        option_id: OPTION,
-        message:
-          'How does Hire a Tech Lead change Hiring delay? The proposed relationship is retained, '
-          + 'but its mechanism and value still need clarification.',
-      },
-    ]);
+  it('and readiness no longer blocks the option on it', () => {
+    expect(mappingBlockers(a)).toEqual([]);
   });
 });
 

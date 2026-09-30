@@ -33,6 +33,16 @@ const PRICE_59 = /59/;
 
 const plant = (edit: (m: Rec) => void): string => { const m = JSON.parse(FIXTURE.raw) as Rec; edit(m); return JSON.stringify(m); };
 const linkToChurn = (m: Rec) => { m.links.push({ from: 'Raise price to £59', to: 'Monthly churn', direction: 'positive', provenance: 'explicit' }); };
+// P0 PARTNER rows 2 and 3 (PR 5909806023): the clause belongs to ANOTHER option, or only a word is shared.
+const anotherOptionsClause = (m: Rec) => {
+  m.options.push({ label: 'Launch an AI add-on', provenance: 'explicit', interventions: [], changes: ['Monthly churn'] });
+  linkToChurn(m);
+};
+const sharedWordOnly = (m: Rec) => {
+  m.factors.push({ label: 'Price-driven churn', role: 'observable', baseline_known: false, baseline_value: null, unit: '%', provenance: 'ai_proposed' });
+  m.links.push({ from: 'Price-driven churn', to: 'MRR', direction: 'negative', provenance: 'ai_proposed' });
+  m.links.push({ from: 'Raise price to £59', to: 'Price-driven churn', direction: 'positive', provenance: 'explicit' });
+};
 const linkToPrice = (m: Rec) => { m.links.push({ from: 'Raise price to £59', to: 'Pro plan monthly price', direction: 'positive', provenance: 'explicit' }); };
 const limitAsAction = (m: Rec) => {
   for (const o of m.options) if (PRICE_59.test(o.label)) o.interventions.push({ factor_label: 'Monthly churn', value: 5, value_kind: 'absolute', unit: '%', provenance: 'explicit' });
@@ -81,6 +91,19 @@ describe('an option link or action the brief does not give is never the user\'s'
     const g = await register([plant(linkToChurn), plant((m) => { linkToChurn(m); limitAsAction(m); })]);
     expect(userLinksToChurn(g)).toEqual([]);
     expect(userActionsOnChurn(g)).toEqual([]);
+  });
+
+  it('the churn clause belongs to ANOTHER option ("…or launch an AI add-on to cut churn"): £59 → churn is still not the user\'s', async () => {
+    const g = await register([plant(anotherOptionsClause)]);
+    expect(nodes(g).some((n) => n.kind === 'option' && /add-on/i.test(String(n.label)))).toBe(true);
+    expect(userLinksToChurn(g)).toEqual([]);
+  });
+
+  it('only a word is shared ("Raise price" → "Price-driven churn"): the link is not the user\'s', async () => {
+    const g = await register([plant(sharedWordOnly)]);
+    const target = nodes(g).find((n) => /price-driven/i.test(String(n.label)));
+    expect(target).toBeDefined();
+    expect((g.edges ?? []).filter((e: Rec) => e.from === option59(g).id && e.to === target!.id && USER.has(String(e.provenance?.source)))).toEqual([]);
   });
 
   it('CONTROL — an "explicit" link from the £59 option to the price it sets stays the user\'s', async () => {

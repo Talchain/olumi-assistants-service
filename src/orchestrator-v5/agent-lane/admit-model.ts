@@ -3709,10 +3709,20 @@ function admitOnce(
    * (`admit-candidate.ts`), so the drafter's word alone made "Raise price to £59 → Monthly churn" the user's on Paul's
    * brief, whose only action is the price rise (P0's counterexample on the served control; the level-gap retry kept it
    * whether it repeated the link, failed, or answered with the churn LIMIT as the option's action). An option → X link
-   * is the user's only when the option's user-stamped level sets X; otherwise it is Olumi's.
+   * is the user's only when a brief ACTION clause for that option names X (AIQ 5909754019 (1)):
+   *   · the option's user-stamped level sets X ("Raise to £59" → the price), or
+   *   · the option is the USER's (`explicit`) and acts on X, whether the drafter wrote that action as a level or as a
+   *     change, and whoever sized it (served "£59 with AI release" → AI feature availability, whose level is Olumi's
+   *     because the brief gives none; a compact retry restating it as an Olumi level must not lose the user's link),
+   *   · …never on what a user's LIMIT holds: a limit clause attests a constraint, never an option's action
+   *     (AIQ 5909030106), so "Monthly churn must stay below 5%" never becomes the £59 option's link.
+   * Otherwise it is Olumi's.
    */
+  const userLimitIds = new Set(constraintResult.constraints.filter((c) => c.provenance === 'explicit').map((c) => c.node_id));
+  const userOptionIds = new Set(model.options.filter((o) => o.provenance === 'explicit').map((o) => ids.get(o.label)).filter((id): id is string => id !== undefined));
   const userActsOn = (optionId: string, factorId: string): boolean =>
-    USER_AUTHORED_EDGE_SOURCES.has(String(interventionsByOption.get(optionId)?.[factorId]?.source ?? ''));
+    USER_AUTHORED_EDGE_SOURCES.has(String(interventionsByOption.get(optionId)?.[factorId]?.source ?? ''))
+    || (userOptionIds.has(optionId) && actsOnByOption.get(optionId)?.has(factorId) === true && !userLimitIds.has(factorId));
   for (const t of topologyEdges) {
     if (!duplicatePairs.has(`${t.from}::${t.to}`) || !userActsOn(t.from, t.to)) continue;
     const userStated = linkResult.edges.find(
