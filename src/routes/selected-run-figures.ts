@@ -1,6 +1,7 @@
 import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
 import { compareAnalysisRunFactIdentity } from '../orchestrator-v5/context/analysis-interpretation-identity.js';
 import { readStoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
+import type { ClaimPermissions } from '../orchestrator-v5/agent-lane/first-analysis.js';
 
 type ResultBlock = OlumiResponse['blocks'][number];
 type Rec = Record<string, unknown>;
@@ -23,6 +24,7 @@ export interface SelectedRunFigure {
   readonly claim_permissions: {
     readonly may_present_value: true;
     readonly may_name_as_leader: boolean;
+    readonly provisional?: true;
     readonly may_present_without_if_held: false;
     readonly may_claim_goal_certainty: false;
   };
@@ -63,7 +65,8 @@ export interface SelectedRunFiguresInput {
   readonly runState: AnalysisStateV1['run_state'] | null;
   /** Read from the same current graph as `runState`, and only when its unit is hash-bound. */
   readonly selectedGoal: SelectedGoalFigureContext | null;
-  readonly leaderClaimPermitted: boolean;
+  /** The existing admission-mode AND leader authority, consumed unchanged. */
+  readonly claimPermissions: ClaimPermissions;
   /** The claim-gated block that `readScenarioAnalysis` actually delivered. */
   readonly currentResult: ResultBlock | null;
   /** The SAME selected fact's stored metadata and goal-certainty decision. */
@@ -119,7 +122,7 @@ export function projectSelectedRunFigures(input: SelectedRunFiguresInput): Selec
       option_id, goal_node_id: input.selectedGoal.goal_node_id, unit: input.selectedGoal.unit,
       goal_frame: input.selectedGoal.goal_frame, run_hash, computed_at,
     };
-    const may_name_as_leader = input.leaderClaimPermitted && block.leading_option_id === option_id;
+    const may_name_as_leader = input.claimPermissions.leader_may_be_named && block.leading_option_id === option_id;
     const certainty = certaintyByOption.get(option_id);
     const breakEven = rec(certainty?.break_even);
     const chances = [option.probability_of_goal, option.goal_probability, option.goalProbability]
@@ -137,7 +140,9 @@ export function projectSelectedRunFigures(input: SelectedRunFiguresInput): Selec
       ...common, value: breakEven.projected_if_held, measure: 'projected_if_held',
       condition: { kind: 'if_held', operand_id: breakEven.operand_id },
       claim_permissions: {
-        may_present_value: true, may_name_as_leader, may_present_without_if_held: false,
+        may_present_value: true, may_name_as_leader,
+        ...(may_name_as_leader && input.claimPermissions.provisional === true ? { provisional: true } : {}),
+        may_present_without_if_held: false,
         may_claim_goal_certainty: false,
       },
       attested_copy: certainty.say,

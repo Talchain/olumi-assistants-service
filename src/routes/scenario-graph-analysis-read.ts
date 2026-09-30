@@ -132,6 +132,7 @@ import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
+import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
 import { projectSelectedRunFigures, readSelectedGoalFigureContext } from './selected-run-figures.js';
@@ -477,7 +478,7 @@ export async function readScenarioAnalysis(
                 params.graph,
                 (params.graph as { goal_node_id?: unknown }).goal_node_id,
               ),
-              leaderClaimPermitted: analysisState.leader_claim.permitted,
+              claimPermissions: claimPermissionsFrom(analysisState, analysisReady, { requested: true }),
               currentResult: boundResult,
               selectedFact: fact?.result ?? null,
             }),

@@ -5,12 +5,17 @@ import limitsEstimate from '../../orchestrator-v5/agent-lane/__tests__/fixtures/
 import nextMove from '../../orchestrator-v5/coaching/__tests__/fixtures/paul-run-08bf9a1f-next-move.json';
 import provisionalLeader from '../../orchestrator-v5/admission/__tests__/fixtures/served-provisional-leader.bc09bb1.json';
 import { projectSelectedRunFigures, readSelectedGoalFigureContext, type SelectedRunFiguresInput } from '../selected-run-figures.js';
+import { claimPermissionsFrom } from '../../orchestrator-v5/agent-lane/first-analysis.js';
+import type { PermittedAnalysisMode } from '../../orchestrator-v5/admission/analysis-admission.js';
+
+const permissions = (mode: PermittedAnalysisMode, leaderClaim = { permitted: true, separation: 'separated' }) =>
+  claimPermissionsFrom({ leader_claim: leaderClaim }, { analysis_admission: { permitted_analysis_mode: mode } }, { requested: true });
 
 const input = (): SelectedRunFiguresInput => ({
   scenarioId: served.scenario_id,
   runState: served.run_state as AnalysisStateV1['run_state'],
   selectedGoal: readSelectedGoalFigureContext(served.selected_goal, 'mrr'),
-  leaderClaimPermitted: true,
+  claimPermissions: permissions('comparative_leader'),
   currentResult: served.current_result as unknown as OlumiResponse['blocks'][number],
   selectedFact: served.selected_fact,
 });
@@ -31,7 +36,7 @@ describe('figures from one selected saved Run', () => {
         scenarioId: 'served-scale-regression',
         runState: state.run_state as AnalysisStateV1['run_state'],
         selectedGoal,
-        leaderClaimPermitted: state.leader_claim.permitted,
+        claimPermissions: claimPermissionsFrom(state, undefined, { requested: true }),
         currentResult: result as unknown as OlumiResponse['blocks'][number],
         selectedFact: {
           graph_hash_at_run: result.computed_against_hash,
@@ -96,9 +101,23 @@ describe('figures from one selected saved Run', () => {
     expect(readSelectedGoalFigureContext(graph, 'mrr')).toBeNull();
   });
 
-  it('leader permission never turns a non-leading option into a leader claim', () => {
-    const figures = projectSelectedRunFigures({ ...input(), leaderClaimPermitted: false });
+  it('a withheld common leader permission keeps the conditional figure without a leader claim', () => {
+    const figures = projectSelectedRunFigures({ ...input(), claimPermissions: permissions('comparative_leader', { permitted: false, separation: 'separated' }) });
+    expect(figures).toHaveLength(1);
     expect(figures.every((figure) => figure.claim_permissions.may_name_as_leader === false)).toBe(true);
+  });
+
+  it('an exploratory current Run keeps its conditional figure but cannot grant a leader claim from the leader stamp alone', () => {
+    const figures = projectSelectedRunFigures({ ...input(), claimPermissions: permissions('exploratory') });
+    expect(figures).toHaveLength(1);
+    expect(figures[0]!.claim_permissions.may_name_as_leader).toBe(false);
+    expect(figures[0]!.claim_permissions).not.toHaveProperty('provisional');
+  });
+
+  it('a permitted separable provisional Run carries the existing authority\'s provisional mark on its leader figure', () => {
+    const figures = projectSelectedRunFigures({ ...input(), claimPermissions: permissions('quantified_provisional') });
+    expect(figures).toHaveLength(1);
+    expect(figures[0]!.claim_permissions).toMatchObject({ may_name_as_leader: true, provisional: true });
   });
 
   it('does not present a non-computed option as a selected Run figure', () => {
