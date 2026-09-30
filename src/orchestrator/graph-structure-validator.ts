@@ -639,30 +639,58 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   // Served: Paul's budget brief (journey C) never ran — its spend total carries "≤ £30,000", is a sum of the levers'
   // spends, and has no outgoing edge, so this loop refused the whole model on the node the limit watches. A tally bound
   // by a limit is a cost constraint scored against its limit, never a cause of the goal; drafting a tally → goal link to
-  // pass this check would invent the false cause A4b removed. Exempt ONLY when all three hold: a `goal_constraints` row
-  // names the node; it has no outgoing directed edge (a terminal); and every parent is a lever (an option, or a
-  // controllable factor). Any other dead end — including a limited node fed by a non-lever — is still refused.
+  // pass this check would invent the false cause A4b removed.
+  // ⭐ …AND SO IS A LIMIT'S WHOLE BRANCH WHEN ONLY THE DECISION'S LEVERS DRIVE IT (R3 pre-flight #75 5903589565; AIQ
+  // 5903604206; DL lease 5903604509). Served cut-costs (`9f75612`, guest `15f48f0b`): planning quality (a lever) and
+  // migration duration (observable, set by the GCP-share lever) → expected migration downtime "≤ 2 weeks", with no
+  // downtime → spend link — downtime is not a cause of the bill. Every Run was blocked, and 2 of 4 drafts invented that
+  // link to pass here. Exempt ONLY when all hold: a `goal_constraints` row names the node; it has no outgoing directed
+  // edge (a terminal) and at least one parent; and walking up from it through every node that is not a lever, each
+  // branch ends at a lever (an option, a controllable factor, or the decision) — never at an exogenous root. Exempt are
+  // the limited node and the nodes that walk visits. Any other dead end — including a limited node an exogenous root
+  // feeds (a missing link, not a lever-driven quantity) — is still refused. Every parent a lever (journey C) is the
+  // one-step case of this walk.
   const limitTargetIds = new Set(
     (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
   );
   const kindById = new Map(graph.nodes.map((n) => [n.id, n] as const));
   const isLever = (id: string): boolean => {
     const n = kindById.get(id);
-    return n !== undefined && (n.kind === 'option'
+    return n !== undefined && (n.kind === 'option' || n.kind === 'decision'
       || (n.kind === 'factor' && (n as { category?: unknown }).category === 'controllable'));
   };
-  const isLimitOnlyTally = (id: string): boolean => {
-    if (!limitTargetIds.has(id)) return false;
-    if (graph.edges.some((edge) => isDirected(edge) && edge.from === id)) return false;
-    const parents = graph.edges.filter((edge) => isDirected(edge) && edge.to === id).map((edge) => edge.from);
-    return parents.length > 0 && parents.every(isLever);
-  };
+  const directedParents = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    if (!isDirected(edge)) continue;
+    const list = directedParents.get(edge.to) ?? [];
+    list.push(edge.from);
+    directedParents.set(edge.to, list);
+  }
+  const limitSinkBranch = new Set<string>();
+  for (const id of limitTargetIds) {
+    if (!kindById.has(id)) continue;
+    if (graph.edges.some((edge) => isDirected(edge) && edge.from === id)) continue;
+    if ((directedParents.get(id) ?? []).length === 0) continue;
+    const visited = new Set<string>([id]);
+    const walk: string[] = [...(directedParents.get(id) ?? [])];
+    let leverDriven = true;
+    while (walk.length > 0 && leverDriven) {
+      const at = walk.pop()!;
+      if (visited.has(at)) continue;
+      visited.add(at);
+      if (isLever(at)) continue; // A lever is the decision's own: the walk stops there.
+      const parents = directedParents.get(at) ?? [];
+      if (parents.length === 0) leverDriven = false; // An exogenous root: a missing link, not a lever-driven quantity.
+      walk.push(...parents);
+    }
+    if (leverDriven) for (const v of visited) limitSinkBranch.add(v);
+  }
 
   for (const node of graph.nodes) {
     if (node.kind === 'goal') continue; // Trivially reaches itself; loop 1 owns the goal.
     if (node.kind === 'decision') continue; // Loop 1 owns the decision→goal relationship.
     if (canReachGoal.has(node.id)) continue;
-    if (isLimitOnlyTally(node.id)) continue;
+    if (limitSinkBranch.has(node.id)) continue;
     if (node.kind === 'option' && optionsMissingFactorEdge.has(node.id)) continue;
     // Already caught by orphan check if it has no edges at all —
     // but an edged node can still be a dead-end with no path to the goal.
