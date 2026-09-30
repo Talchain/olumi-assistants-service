@@ -209,6 +209,9 @@ import { replaceAssertingUnits, splitIntoRedactableUnits } from './redactable-un
 import {
   analysisReadyPermitsLeaderNaming,
   permittedAnalysisModeFromAnalysisReady,
+  semanticReasonFromAnalysisReady,
+  semanticReasons,
+  type AdmissionReasonCode,
 } from '../admission/analysis-admission.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from './withheld-explanation-answer.js';
 // The producer's own classification of a withheld reason — 'we looked and
@@ -919,17 +922,65 @@ function projectField(
  *    that target in 46% of simulated runs"), so the caveat denied a real goal chance. It must never redefine a figure on
  *    the page: it now states the distinction in general, in AIQ's words.
  */
-export const PROVISIONAL_FIGURES_CAVEAT =
-  'These figures are provisional: every estimate behind them is machine-authored and unconfirmed. ' +
+const PROVISIONAL_SHARE_IS_NOT_GOAL_CHANCE =
   'A share of runs in which an option fitted your goal better than the others is not the chance of reaching your target.';
 
+/**
+ * ⛔ THE FIRST SENTENCE IS THE ADMISSION'S OWN CAUSE, READ EVERY TURN (Canvas #13, MG #75 5912728111; words AIQ
+ *    5912754596). It was one constant, "…every estimate behind them is machine-authored…", appended whenever the mode
+ *    was `quantified_provisional`. That mode has more than one cause (`semanticVerdictCause`): on Paul's run, after
+ *    his own 0.55 and 0.3 were in the model, the cause was `user_stated_not_material`, and six consecutive replies
+ *    still told him every estimate was machine-authored. A cause with no sentence here, or no cause on the payload,
+ *    gets the neutral sentence, which names no author.
+ */
+const PROVISIONAL_NEUTRAL = 'These figures are provisional.';
+const PROVISIONAL_FIRST_SENTENCE: Readonly<Partial<Record<AdmissionReasonCode, string>>> = {
+  CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED:
+    'These figures are provisional: every estimate behind them is machine-authored and unconfirmed.',
+  USER_STATED_PARAMETERS_NOT_MATERIAL:
+    'Your own estimates are in the model, but none of them sits on the path that decides this comparison, so these figures are still provisional.',
+};
+const caveatWith = (first: string): string => `${first} ${PROVISIONAL_SHARE_IS_NOT_GOAL_CHANCE}`;
+
+/** The caveat for an all-machine-authored model — today's words, for that cause only. */
+export const PROVISIONAL_FIGURES_CAVEAT = caveatWith(
+  PROVISIONAL_FIRST_SENTENCE.CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED!,
+);
+
+/**
+ * Causes with no sentence of their own whose admission reason the neutral fallback quotes. Only a cause that CAN make
+ * the mode provisional (`deriveMode`) is quoted: `CONFIDENCE_PARAMETERS_PARTLY_USER_STATED` makes it
+ * `comparative_leader`, so on a provisional payload it is inconsistent, and its reason ("…a leading option can be
+ * named") trips the enforcement reader (the load probe below caught it).
+ */
+const PROVISIONAL_CAUSES_QUOTED: ReadonlySet<AdmissionReasonCode> = new Set(['NO_COMPARISON_SUBSTRATE']);
+
+/**
+ * The caveat for THIS payload. The first sentence is keyed on the admission's own cause code; the neutral fallback
+ * adds the admission's own reason when it has one (never an author it cannot name).
+ */
+export function provisionalFiguresCaveatFor(analysisReady: unknown): string {
+  const reason = semanticReasonFromAnalysisReady(analysisReady);
+  if (reason === null) return caveatWith(PROVISIONAL_NEUTRAL);
+  const own = PROVISIONAL_FIRST_SENTENCE[reason.code];
+  if (own !== undefined) return caveatWith(own);
+  return caveatWith(PROVISIONAL_CAUSES_QUOTED.has(reason.code) ? `${PROVISIONAL_NEUTRAL} ${reason.message}` : PROVISIONAL_NEUTRAL);
+}
+
+/** Every caveat this module can append — a finite set, so each is probed at load and protected by identity downstream. */
+export const PROVISIONAL_FIGURES_CAVEATS: readonly string[] = [
+  ...new Set([
+    provisionalFiguresCaveatFor(null),
+    ...semanticReasons().map((r) =>
+      provisionalFiguresCaveatFor({ analysis_admission: { reasons: [{ field: 'semantic_quality_sufficient', code: r.code }] } })),
+  ]),
+];
+
 /** Append the caveat once. Identity on the constant, never a language test. */
-function withProvisionalCaveat(text: string): string {
-  if (text.includes(PROVISIONAL_FIGURES_CAVEAT)) return text;
+function withProvisionalCaveat(text: string, caveat: string): string {
+  if (text.includes(caveat)) return text;
   const trimmed = text.trimEnd();
-  return trimmed.length === 0
-    ? PROVISIONAL_FIGURES_CAVEAT
-    : `${trimmed}\n\n${PROVISIONAL_FIGURES_CAVEAT}`;
+  return trimmed.length === 0 ? caveat : `${trimmed}\n\n${caveat}`;
 }
 
 /**
@@ -945,14 +996,14 @@ function withProvisionalCaveat(text: string): string {
  * construction rather than by hope — the same contract
  * {@link projectBlocksForWithheldClaim} follows.
  */
-function qualifyAnalysisResultSummaries(blocks: unknown): unknown[] | null {
+function qualifyAnalysisResultSummaries(blocks: unknown, caveat: string): unknown[] | null {
   if (!Array.isArray(blocks) || blocks.length === 0) return null;
   let changed = false;
   const projected = blocks.map((block) => {
     if (block === null || typeof block !== 'object') return block;
     const source = block as { readonly type?: unknown; readonly summary?: unknown };
     if (source.type !== 'analysis_result' || typeof source.summary !== 'string') return block;
-    const next = withProvisionalCaveat(source.summary);
+    const next = withProvisionalCaveat(source.summary, caveat);
     if (next === source.summary) return block;
     changed = true;
     return { ...(block as Record<string, unknown>), summary: next };
@@ -1033,11 +1084,12 @@ export function enforceLeadingOptionClaimsAtWire(
     // the review's second finding was that returning the response untouched
     // here admits an unqualified assertion, and it does. Both surfaces that
     // disagreed on the captured turn are qualified from this one decision.
+    const caveat = provisionalFiguresCaveatFor(opts.analysisReady);
     const answer =
       typeof response.assistant_text === 'string'
-        ? withProvisionalCaveat(response.assistant_text)
+        ? withProvisionalCaveat(response.assistant_text, caveat)
         : response.assistant_text;
-    const qualifiedBlocks = qualifyAnalysisResultSummaries(response.blocks);
+    const qualifiedBlocks = qualifyAnalysisResultSummaries(response.blocks, caveat);
     const answerChanged = answer !== response.assistant_text;
     if (!answerChanged && qualifiedBlocks === null) return unchanged(response);
     return {
@@ -1254,25 +1306,28 @@ function assertReplacementIsInertAndNonVacuous(): void {
   //   tripped either reader would be a claim the gate injects on every qualified
   //   turn — the exact defect the two probes above exist to prevent, one arm
   //   over. Checked at module load so it fails the process, not a review.
-  if (textAssertsLeadingOption(PROVISIONAL_FIGURES_CAVEAT)) {
-    throw new Error(
-      'leading-option-wire-enforcement: PROVISIONAL_FIGURES_CAVEAT trips the ENFORCEMENT reader, ' +
-        'so the qualified arm would attach a sentence a later pass reads as a leader claim.',
-    );
-  }
-  if (textNamesLeadingOption(PROVISIONAL_FIGURES_CAVEAT)) {
-    throw new Error(
-      'leading-option-wire-enforcement: PROVISIONAL_FIGURES_CAVEAT trips the ALARM vocabulary, so ' +
-        'the qualified arm would inject the residue the alarm measures.',
-    );
-  }
-  // IDEMPOTENCE, exercised rather than argued: attaching twice attaches once.
-  const caveated = withProvisionalCaveat('Some answer.');
-  if (withProvisionalCaveat(caveated) !== caveated) {
-    throw new Error(
-      'leading-option-wire-enforcement: the provisional caveat is not idempotent, so a re-run of ' +
-        'the qualified arm would repeat it in the answer the person reads.',
-    );
+  // Every caveat this gate can attach — one per admission cause, plus the neutral one — is probed.
+  for (const caveat of PROVISIONAL_FIGURES_CAVEATS) {
+    if (textAssertsLeadingOption(caveat)) {
+      throw new Error(
+        `leading-option-wire-enforcement: the provisional caveat "${caveat}" trips the ENFORCEMENT reader, ` +
+          'so the qualified arm would attach a sentence a later pass reads as a leader claim.',
+      );
+    }
+    if (textNamesLeadingOption(caveat)) {
+      throw new Error(
+        `leading-option-wire-enforcement: the provisional caveat "${caveat}" trips the ALARM vocabulary, so ` +
+          'the qualified arm would inject the residue the alarm measures.',
+      );
+    }
+    // IDEMPOTENCE, exercised rather than argued: attaching twice attaches once.
+    const caveated = withProvisionalCaveat('Some answer.', caveat);
+    if (withProvisionalCaveat(caveated, caveat) !== caveated) {
+      throw new Error(
+        'leading-option-wire-enforcement: the provisional caveat is not idempotent, so a re-run of ' +
+          'the qualified arm would repeat it in the answer the person reads.',
+      );
+    }
   }
   // POSITIVE CONTROL — the probe above is vacuous if the readers see nothing.
   if (!textAssertsLeadingOption('Hire Marketing Manager leads at 72%.')) {
