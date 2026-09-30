@@ -42,6 +42,12 @@ const stripped = (g: Json, rows: Json[]): Json[] => {
 };
 const pOf = (rows: Json[], id: string): unknown => rows.find((o) => o.option_id === id)?.constraint_probabilities?.[LIMIT];
 const edgeTo = (g: Json, from: string, to: string): Json => g.edges.find((e: Json) => e.from === from && e.to === to);
+/** R3's synthetic with today's downtime at Olumi's 1 week (not 0): the level is an estimate, not a definition. */
+const olumiLevel = (): Json => {
+  const g = clone(FIX.user_limit.graph);
+  Object.assign(g.nodes.find((n: Json) => n.id === TARGET).observed_state, { source: 'cee_inference', raw_value: 1, value: 1 / 12 });
+  return g;
+};
 
 describe('B6 on the served cloud Run (R3 r1)', () => {
   it('PRECONDITION: the served Run scored both GCP options on Olumi\'s guess, and the status quo at 1', () => {
@@ -66,11 +72,13 @@ describe('B6 on the served cloud Run (R3 r1)', () => {
     expect(pOf(rows, 'remain_on_aws')).toBe(1);
   });
 
-  it('RED (the Agent\'s words, the same predicate): names both options, says why, and asks the one link question', () => {
+  it('RED (the Agent\'s words, AIQ 5916187873 (a)+(b)): arm (i)\'s words for both options, no "checked against", ONE question', () => {
     const [row] = limitChecksForAgent(FIX.served.graph, FIX.served.analysis_limit_verdicts as never) ?? [];
     expect(row?.withheld_for).toEqual(['Switch to GCP', 'Phased GCP migration']);
-    expect(row?.say).toContain('those options’ figures for it rest on Olumi’s guesses, not figures you gave.');
-    expect(row?.ask).toContain('How much does ‘GCP migration share’ change ‘Migration downtime’?');
+    expect(row?.say).toBe('For ‘Switch to GCP’ and ‘Phased GCP migration’ it isn’t shown: it depends on how strongly ‘GCP migration share’ '
+      + 'moves ‘Migration duration’, which Olumi estimated.');
+    expect(row?.say).not.toMatch(/checked against|was checked/);
+    expect(row?.ask).toBe('How much does ‘GCP migration share’ change ‘Migration duration’?');
   });
 
   it('CONTROL (R3\'s synthetic): the user\'s own level + user-sized links → every P stands', () => {
@@ -80,13 +88,24 @@ describe('B6 on the served cloud Run (R3 r1)', () => {
     expect(pOf(rows, 'phased_gcp_migration')).toBe(0.9995);
   });
 
-  it('RED (each arm alone): user-sized links but Olumi\'s level → still withheld; the row\'s own level question is the ask', () => {
+  it('RED (arm (ii) alone): user-sized links but Olumi\'s level → every option withheld, the status quo too ((c): its P is that level)', () => {
+    const g = olumiLevel();
+    expect([...moved(g).keys()].sort()).toEqual(['phased_gcp_migration', 'remain_on_aws', 'switch_to_gcp']);
+    expect([...new Set(moved(g).values())]).toEqual([OLUMI_GUESS_LIMIT_REASON]);
+  });
+
+  it('RED (arm (ii), every option withheld): the row says the level arm and asks for today\'s level, once', () => {
+    const [row] = limitChecksForAgent(olumiLevel(), { per_limit: [{ constraint_id: LIMIT, state: 'unscored', reason: OLUMI_GUESS_LIMIT_REASON }], joint: { state: 'unscored' } } as never) ?? [];
+    expect(row?.say).toBe('‘Migration downtime’ isn’t shown for any option. For ‘Remain on AWS’, ‘Switch to GCP’ and ‘Phased GCP migration’ it '
+      + 'isn’t shown: it starts from Olumi’s estimate of today’s ‘Migration downtime’.');
+    expect(row?.ask).toBe('What is ‘Migration downtime’ today?');
+  });
+
+  it('CONTROL ((c), definitional): Olumi\'s level of exactly 0 (nothing migrating today) is no estimate → kept', () => {
     const g = clone(FIX.user_limit.graph);
     g.nodes.find((n: Json) => n.id === TARGET).observed_state.source = 'cee_inference';
-    expect([...moved(g).keys()].sort()).toEqual(['phased_gcp_migration', 'switch_to_gcp']);
-    const [row] = limitChecksForAgent(g, FIX.served.analysis_limit_verdicts as never) ?? [];
-    expect(row?.ask).toMatch(/^What is "Migration downtime" today\?/);
-    expect(row?.ask).not.toContain('likely range');
+    expect(g.nodes.find((n: Json) => n.id === TARGET).observed_state.raw_value).toBe(0);
+    expect(moved(g).size).toBe(0);
   });
 
   it('RED (each arm alone): the user\'s level, ONE link on the way Olumi\'s → still withheld', () => {
@@ -118,6 +137,7 @@ describe('B6: an option that SETS the limited quantity to one point (AIQ 5915438
     expect(moved(g).get('switch_to_gcp')).toBe(OLUMI_GUESS_LIMIT_REASON);
     const [row] = limitChecksForAgent(g, { per_limit: [{ constraint_id: LIMIT, state: 'scored' }], joint: { state: 'scored' } } as never) ?? [];
     expect(row?.withheld_for).toEqual(['Switch to GCP']);
+    expect(row?.say).toContain('For ‘Switch to GCP’ it isn’t shown: it uses a single Olumi figure for ‘Migration downtime’.');
     expect(row?.ask).toBe('What’s each option’s likely range for ‘Migration downtime’?');
   });
 
@@ -134,11 +154,14 @@ describe('B6: an option that SETS the limited quantity to one point (AIQ 5915438
     expect(moved(g).has('switch_to_gcp')).toBe(false);
   });
 
-  it('CONTROL: holding today\'s level (the status quo\'s zero change) → kept', () => {
+  it('CONTROL: setting today\'s level when that level is definitional (0) → kept; when it is Olumi\'s 1 week → (ii) withholds it', () => {
     const g = clone(FIX.user_limit.graph);
     g.nodes.find((n: Json) => n.id === TARGET).observed_state.source = 'cee_inference';
     const o = g.nodes.find((n: Json) => n.id === 'remain_on_aws');
     o.interventions = { [TARGET]: { value: 0, raw_value: 0, unit: 'weeks', source: 'cee_hypothesis' } };
     expect(moved(g).has('remain_on_aws')).toBe(false);
+    const h = olumiLevel();
+    h.nodes.find((n: Json) => n.id === 'remain_on_aws').interventions = { [TARGET]: { value: 1 / 12, raw_value: 1, unit: 'weeks', source: 'cee_hypothesis' } };
+    expect(moved(h).get('remain_on_aws')).toBe(OLUMI_GUESS_LIMIT_REASON);
   });
 });

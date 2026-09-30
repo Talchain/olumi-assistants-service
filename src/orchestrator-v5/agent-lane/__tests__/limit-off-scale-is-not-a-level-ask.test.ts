@@ -39,10 +39,10 @@ describe('⛔ a limit the engine could not place on the model’s scale is said 
       expect(churn.say).toMatch(/couldn’t be checked: the limit doesn’t sit on the scale the model holds for it\.$/);
       expect(churn).not.toHaveProperty('ask');
       expect(churn.say).not.toMatch(/today|estimate/i);
-      // The other limit is untouched: still checked against Olumi's estimates, with its ask.
+      // The other limit is untouched: its own row and its own question (B6's, AIQ 5916187873: two options set it at Olumi's figure).
       const other = rows.find((r) => r.constraint_id === LIMIT)!;
       expect(other.state).toBe('estimate_only');
-      expect(other.ask).toMatch(/^What is "Total investment" today/);
+      expect(other.ask).toBe('What’s each option’s likely range for ‘Total investment’?');
     });
   }
 
@@ -52,10 +52,11 @@ describe('⛔ a limit the engine could not place on the model’s scale is said 
     expect(churn.ask).toBeDefined();
   });
 
-  it('CONTRAST: the served estimate_only rows are unchanged', () => {
+  it('CONTRAST: the served estimate_only rows keep their per-option words and a question (B6, AIQ 5916187873), never the off-scale sentence', () => {
     const rows = limitChecksForAgent(FX.graph, FX.limit_verdicts)!;
     for (const r of rows) {
-      expect(r.say).toMatch(/was checked, but only against Olumi’s estimates/);
+      expect(r.say).toMatch(/it isn’t shown: /);
+      expect(r.say).not.toMatch(/scale the model holds/);
       expect(r.ask).toBeDefined();
     }
   });

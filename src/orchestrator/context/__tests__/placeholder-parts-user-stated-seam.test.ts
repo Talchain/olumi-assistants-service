@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeAnalysisAffectingGraphHash } from '../../../orchestrator-v5/context/graph-hash.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken } from '../../../orchestrator-v5/system-events/link-effect-edit.js';
-import { PLACEHOLDER_PARTS_REASON, placeholderPartsFinding } from '../placeholder-parts.js';
+import { OLUMI_GUESS_LIMIT_REASON, PLACEHOLDER_PARTS_REASON, placeholderPartsFinding } from '../placeholder-parts.js';
 
 type Rec = Record<string, any>;
 function graph(target: Rec): Rec {
@@ -49,7 +49,10 @@ describe('a link the USER sized ends the R-c withhold on the limit it moves', ()
     if (r.kind !== 'mutated') return;
     const g = r.mutatedGraph as Rec;
     expect(edgesOf(g).find((e) => e.from === 'price' && e.to === 'subs')?.provenance?.magnitude).toBe('user_stated');
-    expect(placeholderPartsFinding('subs', nodesOf(g), edgesOf(g), OPTIONS)).toBeNull();
+    // The placeholder is gone; what remains is Olumi's 5,000 today, which B6 (ii) withholds on (AIQ 5916187873).
+    expect(placeholderPartsFinding('subs', nodesOf(g), edgesOf(g), OPTIONS)).toEqual({ reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' });
+    const theirs = { ...g, nodes: nodesOf(g).map((n) => (n.id === 'subs' ? { ...n, observed_state: { ...(n.observed_state as Rec), source: 'user' } } : n)) };
+    expect(placeholderPartsFinding('subs', nodesOf(theirs), edgesOf(theirs), OPTIONS)).toBeNull();
   });
   it('SEAM (a percentage LEVEL): "every £1 adds 0.1 percentage points of churn", written by #2274, is sized for R-c', () => {
     const CHURN = { id: 'churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, cap: 100, unit: '%', source: 'user_override' } };
@@ -67,9 +70,11 @@ describe('a strength the USER stated (no natural size) is theirs for R-c, not a 
   const CHURN = { id: 'churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, cap: 100, unit: '%', source: 'cee_inference' } };
   const userStrength = (g: Rec): Rec => ({ ...g, edges: edgesOf(g).map((e) => (e.from === 'price' && e.to === 'churn'
     ? { ...e, strength: { mean: 0.85, std: 0.0866 }, defaulted: false, provenance: { source: 'user_specified' } } : e)) });
-  it('ROW: Paul\'s "very high" price → churn (`user_specified` 0.85) — no withhold', () => {
+  it('ROW: Paul\'s "very high" price → churn (`user_specified` 0.85) — no placeholder withhold; B6 (ii) on Olumi\'s 3%, none on his own', () => {
     const g = userStrength(graph(CHURN));
-    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)).toBeNull();
+    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)).toEqual({ reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' });
+    const his = userStrength(graph({ ...CHURN, observed_state: { ...CHURN.observed_state, source: 'user' } }));
+    expect(placeholderPartsFinding('churn', nodesOf(his), edgesOf(his), OPTIONS)).toBeNull();
   });
   it('CONTROL: the same link as Olumi\'s placeholder still withholds', () => {
     const g = graph(CHURN);

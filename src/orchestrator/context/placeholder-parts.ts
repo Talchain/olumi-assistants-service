@@ -19,8 +19,11 @@
  *          `defaulted` is NOT the discriminator: Olumi's sized links carry it too (AIQ 5881541947, 5882087383);
  *   · (ii) the target declares a `nonlinear_identity`: the engine does not combine parts by it yet ("product treated
  *          as additive", served journey-cloud).
- * Otherwise every link on the path is Olumi's model (served cloud: share % → downtime and readiness → downtime,
- * `olumi_estimate` in weeks), and the normal fold applies. Pure.
+ * ⛔ B6 (AIQ #75 5916187873, superseding R-e's "Olumi-sized links fold normally"): otherwise an option's P is still
+ * withheld when it rests on Olumi's guess — (i) a link on its path Olumi sized (served cloud: share % → duration →
+ * downtime, `olumi_estimate` in weeks), (ii) the target's own level Olumi's and not definitional (not 0), or (iii) the
+ * option setting the target to Olumi's single point with no stated range. A placeholder still reports as a
+ * placeholder. Otherwise the normal fold applies. Pure.
  */
 
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
@@ -48,6 +51,18 @@ export function olumiSizedLink(e: Rec): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
   return p?.source !== 'user_specified'
     && ((typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) || e.defaulted === true);
+}
+
+/**
+ * One limit finding. B6's (`OLUMI_GUESS_LIMIT_REASON`) says WHICH input is Olumi's (AIQ #75 5916187873 (a)): a link it
+ * sized on the option's path (`link`, the first such link), today's level of the limited quantity (`level`), or the one
+ * point an option sets it to (`point`). The words and the one question follow the arm.
+ */
+export interface PlaceholderPartsFinding {
+  readonly reason: PlaceholderPartsReason;
+  readonly partId?: string;
+  readonly arm?: 'link' | 'level' | 'point';
+  readonly link?: { readonly from: string; readonly to: string };
 }
 
 /** A value stamp the user authored (`user_stated`) or admitted as their own assumption: the user's, not Olumi's guess. */
@@ -157,7 +172,7 @@ export function placeholderPartsFinding(
   nodes: readonly Rec[],
   edges: readonly Rec[],
   options: ReadonlyArray<Record<string, unknown>>,
-): { readonly reason: PlaceholderPartsReason; readonly partId?: string; readonly setsPoint?: true } | null {
+): PlaceholderPartsFinding | null {
   const kindById = new Map(nodes.map((n) => [n.id, n.kind] as const));
   // The target's parts: every node upstream of it that is not an option or the decision (T4's walk).
   const parts = new Set<unknown>();
@@ -173,10 +188,17 @@ export function placeholderPartsFinding(
     }
   }
   const target = nodes.find((n) => n.id === targetId);
+  const today = isRec(target?.observed_state) ? target.observed_state : undefined;
+  // (ii) fires only on a level Olumi SUPPLIED ("Olumi's estimate of today's X", AIQ 5916187873 (a)) that is not
+  // definitional: today's 0 of a quantity nothing produces yet (no migration, no downtime) is the quantity's
+  // definition, not an estimate ((c); R3 5916179718). A target with no level at all is not this arm's trigger: B5's
+  // own fold already says whose base an unlevelled limit has.
+  const level = today?.raw_value ?? today?.value;
+  const levelIsOlumis = today !== undefined && typeof level === 'number' && level !== 0 && !usersOwn(today.source);
   const movers = parts.size === 0 ? [] : options
     .map((o) => (isRec(o.interventions) ? o.interventions : {}))
     .filter((iv) => !setsLevel(iv[targetId]) && Object.keys(iv).some((k) => parts.has(k)));
-  let guessedPart: string | undefined;
+  let guessed: { partId: string; from: string; to: string } | undefined;
   if (movers.length > 0) {
     if (target !== undefined && isRec(target.nonlinear_identity)) return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
     const unitById = sizerUnitsOf(nodes);
@@ -191,7 +213,7 @@ export function placeholderPartsFinding(
           for (const e of edges) {
             if (e.from !== at || !onPath.has(e.to)) continue;
             if (!linkIsSized(e, unitById) && !userStatedStrength(e)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
-            if (guessedPart === undefined && olumiSizedLink(e)) guessedPart = partId;
+            if (guessed === undefined && olumiSizedLink(e)) guessed = { partId, from: String(e.from), to: String(e.to) };
             if (e.to !== targetId && !reached.has(e.to)) {
               reached.add(e.to);
               walk.push(e.to);
@@ -200,31 +222,45 @@ export function placeholderPartsFinding(
         }
       }
     }
-    // ⛔ B6 (DL #75 5915507578 item 1; AIQ 5915438520; R3 5915571955): no placeholder on the way, but the option's value
-    // of the target rests on Olumi's guess — a link on its path Olumi sized, or the target's own level is not the user's
-    // — so its P restates the guess (served cloud r1: "downtime ≤ 2 weeks" 0.9339 / 0.9995 on Olumi's weeks).
-    if (guessedPart !== undefined) return { reason: OLUMI_GUESS_LIMIT_REASON, partId: guessedPart };
-    if (!usersOwn(isRec(target?.observed_state) ? target.observed_state.source : undefined)) return { reason: OLUMI_GUESS_LIMIT_REASON };
+    // ⛔ B6 (DL #75 5915507578 item 1; AIQ 5915438520 + ruling 5916187873; R3 5915571955): no placeholder on the way,
+    // but the option's value of the target rests on Olumi's guess — (i) a link on its path Olumi sized, or (ii) the
+    // target's own level is Olumi's — so its P restates the guess (served cloud r1: "downtime ≤ 2 weeks" 0.9339 /
+    // 0.9995 on Olumi's weeks), and a disclosure does not make it a check.
+    if (guessed !== undefined) {
+      return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'link', partId: guessed.partId, link: { from: guessed.from, to: guessed.to } };
+    }
+    if (levelIsOlumis) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' };
   }
-  // ⛔ B6, an option that SETS the target to one point (AIQ 5915438520: a guessed single-point duration scores 100%/0%):
-  // withheld unless the point is the user's, or the option states a range for it. Holding today's level is no guess.
+  // ⛔ B6 (iii), an option that SETS the target to one point (AIQ 5915438520: a guessed single-point duration scores
+  // 100%/0%): withheld unless the point is the user's, or the option states a range for it. (ii) An option that leaves
+  // the target where it is today — sets nothing on its way, or sets today's level — has a P that is today's level
+  // against the limit: withheld when that level is Olumi's (AIQ 5916187873 (c): "3% churn" vs "< 4%" is an exact 100%
+  // resting on Olumi's 3%).
   for (const o of options) {
     const iv = isRec(o.interventions) ? o.interventions : {};
+    const holds = !setsLevel(iv[targetId]) && !Object.keys(iv).some((k) => parts.has(k));
+    if (holds) {
+      if (levelIsOlumis) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' };
+      continue;
+    }
     if (!setsLevel(iv[targetId])) continue;
     // The stored option carries the setting's owner and raw figure; the wire copy may carry a bare projected number.
     const node = nodes.find((n) => n.kind === 'option' && n.id === optionIdOf(o));
     const stored = [node?.interventions, isRec(node?.data) ? node.data.interventions : undefined]
       .map((x) => (isRec(x) ? x[targetId] : undefined)).find(isRec);
     const setting = stored ?? iv[targetId];
-    if (holdsTodaysLevel(setting, target)) continue;
+    if (holdsTodaysLevel(setting, target)) {
+      if (levelIsOlumis) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'level' };
+      continue;
+    }
     const ranges = [o.intervention_ranges, node?.intervention_ranges].map((x) => (isRec(x) ? x[targetId] : undefined));
     const theirs = (isRec(setting) && (usersOwn(setting.source) || isRec(setting.range))) || ranges.some(isRec);
-    if (!theirs) return { reason: OLUMI_GUESS_LIMIT_REASON, setsPoint: true };
+    if (!theirs) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'point' };
   }
   return null;
 }
 
-/** The option holds the target at today's level (the status quo's zero change): its P is arithmetic, not a guess. */
+/** The option sets the target at exactly today's level (the status quo's zero change). */
 function holdsTodaysLevel(v: unknown, target: Rec | undefined): boolean {
   const today = isRec(target?.observed_state) ? target.observed_state : undefined;
   if (today === undefined) return false;

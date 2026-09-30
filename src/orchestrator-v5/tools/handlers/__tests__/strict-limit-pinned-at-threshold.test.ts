@@ -57,8 +57,9 @@ function graphWith(row: Rec, pin: Pin | undefined): Rec {
     ],
     edges: [
       { from: 'fac_price', to: 'goal', strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
-      // Sized by Olumi in churn's unit, so R-c's parts predicate (AI Quality 5882087383) leaves this row's subject alone.
-      { from: 'fac_price', to: 'fac_churn', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive', provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 1, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } },
+      // Sized in churn's unit BY THE USER, so neither R-c (AI Quality 5882087383) nor B6 (AIQ 5916187873: an Olumi size is
+      // its guess) touches this row's subject, the strict pin.
+      { from: 'fac_price', to: 'fac_churn', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive', provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 1, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } },
       { from: 'fac_churn', to: 'goal', strength: { mean: -0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative' },
     ],
     goal_constraints: [row],

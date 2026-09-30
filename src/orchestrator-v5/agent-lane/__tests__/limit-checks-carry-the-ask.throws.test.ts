@@ -18,11 +18,12 @@ describe('a throwing ask producer never costs the run its limit rows', () => {
     const rows = limitChecksForAgent(FX.graph, FX.limit_verdicts)!;
     expect(rows.map((r) => r.constraint_id)).toEqual(FX.limit_verdicts.per_limit.map((r) => r.constraint_id));
     for (const r of rows) {
-      expect(r.say).toMatch(/was checked, but only against Olumi’s estimates/);
-      // Only the throwing producer's asks are lost. R-c per option (AIQ 5900908629): churn's link-size question comes from
-      // the per-option withhold, which did not throw, so it alone remains; no level question survives.
-      if (r.constraint_id === 'agent-lane:monthly_churn:<=') expect(r.ask).toBe('How much does ‘Pro plan price’ change ‘Monthly churn’?');
-      else expect(r).not.toHaveProperty('ask');
+      // B6 (AIQ 5916187873): the served options resting on Olumi's figures are named, never "checked against" them.
+      expect(r.say).toMatch(/it isn’t shown: /);
+      // Only the throwing producer's asks are lost. The per-option questions (R-c's link size, B6's arm) come from the
+      // per-option withhold, which did not throw, so they alone remain.
+      if (r.constraint_id === 'agent-lane:monthly_churn:<=') expect(r.ask).toBe('What is ‘Monthly churn’ today? How much does ‘Pro plan price’ change ‘Monthly churn’?');
+      else expect(r.ask).toBe('What’s each option’s likely range for ‘Total investment’?');
     }
   });
 });
