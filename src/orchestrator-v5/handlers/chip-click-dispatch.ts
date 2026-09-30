@@ -1787,7 +1787,25 @@ export async function dispatchChipClickRunAnalysis(
       typeof composedRunFact.result.graph_hash_at_run === 'string'
         ? composedRunFact.result.graph_hash_at_run
         : null;
+    // V5 state-trust: derive freshness POST-dispatch using the just-
+    // produced run_analysis fact + prior chain, against the snapshot
+    // graph. The chip-click rerun path is the user's escape hatch from
+    // a stale verdict — its wire response MUST report fresh.
+    const postDispatchFacts: readonly HandlerFact[] = [
+      ...enrichedFacts,
+      ...context.prior_facts,
+    ];
+    // Defect 4 — nearly always inert here (this turn's `enrichedFacts` are
+    // selected first), but it matters for a rerun that produced no usable
+    // run_analysis fact AND could not read the prior chain.
+    const freshness = deriveChipClickFreshness(
+      cachedSnapshot,
+      postDispatchFacts,
+      context.prior_facts_read_ok,
+    );
+
     let response = composeToolCallResponse({
+      freshness,
       answerKind: 'functional',
       orientation: '',  // no Sonnet orientation on chip clicks.
       confirmation: confirmationText,
@@ -2269,22 +2287,6 @@ export async function dispatchChipClickRunAnalysis(
         // entity-id labels in the stored assistant answer so stored == wire.
         contentGraph: snapshotGraph,
       });
-      // V5 state-trust: derive freshness POST-dispatch using the just-
-      // produced run_analysis fact + prior chain, against the snapshot
-      // graph. The chip-click rerun path is the user's escape hatch from
-      // a stale verdict — its wire response MUST report fresh.
-      const postDispatchFacts: readonly HandlerFact[] = [
-        ...enrichedFacts,
-        ...context.prior_facts,
-      ];
-      // Defect 4 — nearly always inert here (this turn's `enrichedFacts` are
-      // selected first), but it matters for a rerun that produced no usable
-      // run_analysis fact AND could not read the prior chain.
-      const freshness = deriveChipClickFreshness(
-        cachedSnapshot,
-        postDispatchFacts,
-        context.prior_facts_read_ok,
-      );
       emitFreshnessTelemetry(
         freshness,
         {

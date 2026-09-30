@@ -131,7 +131,10 @@ export type RunDeltaDisclosureReason =
   /** The composer found the two runs are demonstrably different subjects. */
   | 'run_identity_conflict'
   /** A newer degraded Run supersedes the older successful pair. */
-  | 'newer_run_degraded';
+  | 'newer_run_degraded'
+  /** Selected goal-unit snapshot cannot attest the comparison as current. */
+  | 'goal_unit_changed'
+  | 'goal_snapshot_unverified';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
 
@@ -853,6 +856,13 @@ function attachRunDelta(
     }
     return out;
   };
+
+  const freshnessReason = (ctx.analysisStateCanonical ?? ctx.canonicalState)?.freshness_reason
+    ?? (ctx.analysisStateFreshness ?? ctx.freshness)?.reason ?? exitDerivationFor(ctx)?.reason;
+  if (freshnessReason === 'goal_unit_changed' || freshnessReason === 'goal_snapshot_unverified') {
+    const { run_delta: _unitUnboundDelta, ...withoutDelta } = response;
+    return disclose('skipped', freshnessReason, withoutDelta as OlumiResponse);
+  }
 
   // Read the composer's identity verdict. An unbound pair must not add a new
   // comparative delta after the analysis block has been confined.
