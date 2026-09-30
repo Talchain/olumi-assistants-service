@@ -1,0 +1,90 @@
+/**
+ * ⛔ AN OPTION SETS WHAT THE USER CHOSE, NOT A LIMITED TOTAL ITS OWN LEVERS ALREADY MOVE (AIQ #75 5902306402; MG
+ * successor #75 5902260283 / 5902277663; DL 5902321589 (b)).
+ *
+ * Served, two journeys, one shape:
+ *   · E (lock `f95ea20` rep1/rep3): every hiring option set `annual_salary_spend` at an Olumi total AND set the
+ *     headcount linked into it, so the user's "£120k a year each" had no place and was never held (PJ-E-FIG).
+ *   · A (`1f9d769` reps 1–2, R3 5902268039): the retention option pinned churn at Olumi's 2.5% while its own lever →
+ *     churn link was a placeholder, so the churn limit scored it P = 1 on Olumi's own level (AIQ: NOT earned).
+ * In both, the node carries a USER LIMIT, and the limit's verdict rested on a level Olumi pinned instead of on the
+ * option's own levers. The level is dropped; the node then follows from those levers (sized links are Olumi's disclosed
+ * estimate; a placeholder falls to R-c's per-option withhold and its ask).
+ *
+ * NARROW ON PURPOSE (0-LLM corpus, R3 `wires-spike-97`): the unrestricted rule hit 54 non-E option levels, e.g. an option
+ * that funds a release AND sets "New feature rollout" = 1. Only a node a user limit names is touched; a level the user
+ * stated (`explicit`) is never dropped; a lever must be an intervention with a level on the SAME option.
+ *
+ * ⛔ SAME-UNIT LEVERS ARE LEFT ALONE (DL parity-lock rows, `construction-sum-carrier-goal-edge.test.ts` R3-2b): when every
+ * lever feeding the node is in the node's OWN unit (£ spends into a £ total), the node is R3-2's sum tally, and R3-2b
+ * deliberately does not mint while an option also sets it. Changing that is a journey-C budget-meaning change, routed
+ * separately. Only cross-unit levers are this guard's (headcount → £ salary spend; a retention switch → churn %). Pure.
+ */
+
+import { sayFigureRead } from './say-figure.js';
+
+export interface OptionLevelOverOwnLevers {
+  readonly option: string;
+  readonly factor: string;
+  readonly value: number;
+  /** The dropped level's unit (the intervention's, else the factor's), so it is said as the user writes it. */
+  readonly unit: string | undefined;
+  /** The option's own levers whose links reach `factor`. */
+  readonly via: readonly string[];
+}
+
+interface Intervention { readonly factor_label: string; readonly value: number; readonly unit?: string; readonly provenance: string }
+interface ModelShape {
+  readonly options: readonly { readonly label: string; readonly interventions?: readonly Intervention[] }[];
+  readonly factors?: readonly { readonly label: string; readonly unit: string | null }[];
+  readonly links?: readonly { readonly from: string; readonly to: string }[];
+  readonly constraints?: readonly { readonly metric: string }[];
+}
+
+const key = (s: string): string => s.trim().toLowerCase();
+
+export function dropOptionLevelsOverOwnLevers<M extends ModelShape>(model: M): { model: M; dropped: OptionLevelOverOwnLevers[] } {
+  const limited = new Set((model.constraints ?? []).map((c) => key(c.metric)));
+  if (limited.size === 0) return { model, dropped: [] };
+  const parents = new Map<string, Set<string>>();
+  for (const l of model.links ?? []) parents.set(key(l.to), (parents.get(key(l.to)) ?? new Set()).add(key(l.from)));
+  const upstreamOf = (t: string): Set<string> => {
+    const out = new Set<string>();
+    const queue = [t];
+    while (queue.length > 0) {
+      for (const p of parents.get(queue.shift()!) ?? []) if (!out.has(p) && p !== t) { out.add(p); queue.push(p); }
+    }
+    return out;
+  };
+  const unitRaw = new Map((model.factors ?? []).map((f) => [key(f.label), typeof f.unit === 'string' && f.unit.trim() !== '' ? f.unit : undefined]));
+  const unitOf = new Map((model.factors ?? []).map((f) => [key(f.label), typeof f.unit === 'string' && f.unit.trim() !== '' ? key(f.unit) : undefined]));
+  const sameUnit = (a: string, b: string): boolean => unitOf.get(key(a)) !== undefined && unitOf.get(key(a)) === unitOf.get(key(b));
+  const dropped: OptionLevelOverOwnLevers[] = [];
+  const options = model.options.map((o) => {
+    const ivs = o.interventions ?? [];
+    const drop = new Set<Intervention>();
+    for (const iv of ivs) {
+      if (iv.provenance === 'explicit' || !limited.has(key(iv.factor_label))) continue;
+      const up = upstreamOf(key(iv.factor_label));
+      const via = ivs.filter((p) => p !== iv && up.has(key(p.factor_label))).map((p) => p.factor_label);
+      if (via.length === 0 || via.every((v) => sameUnit(v, iv.factor_label))) continue;
+      drop.add(iv);
+      const unit = typeof iv.unit === 'string' && iv.unit.trim() !== '' ? iv.unit : unitRaw.get(key(iv.factor_label));
+      dropped.push({ option: o.label, factor: iv.factor_label, value: iv.value, unit, via });
+    }
+    return drop.size === 0 ? o : { ...o, interventions: ivs.filter((iv) => !drop.has(iv)) };
+  });
+  return dropped.length === 0 ? { model, dropped } : { model: { ...model, options } as M, dropped };
+}
+
+/**
+ * The one sentence a drop is said with (AIQ #75 5902622248): the figure in its unit ("2.5%", "£300,000 / year"), and
+ * words true whether the lever links are sized (the limit is checked through them) or placeholders (R-c withholds the
+ * option's verdict): the limit now FOLLOWS FROM what the option does, not from Olumi's figure.
+ */
+export function sayOptionLevelOverOwnLevers(d: OptionLevelOverOwnLevers): string {
+  const figure = sayFigureRead(d.value, d.unit ?? '');
+  const via = d.via.map((v) => `"${v}"`).join(' and ');
+  return `"${d.option}" had "${d.factor}" at ${figure}, a figure I proposed. Your limit on "${d.factor}" now follows from `
+    + `what this option does through ${via}, not from my figure.`;
+}
