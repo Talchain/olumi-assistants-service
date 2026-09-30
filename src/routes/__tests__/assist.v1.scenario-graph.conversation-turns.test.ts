@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
+import { readFileSync } from "node:fs";
 
 const SCENARIO = "a6ccf5cf-aab0-4f01-b889-e0d6c072067c";
 const ABSENT_SCENARIO = "11111111-2222-3333-4444-555555555555";
@@ -87,7 +88,7 @@ vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
   return { ...actual, resolveUserIdentity };
 });
 
-import scenarioGraphRoute, { CONVERSATION_TURNS_CAP } from "../assist.v1.scenario-graph.js";
+import scenarioGraphRoute, { AGENT_ANSWER_REQUEST_HASH_PREFIX, CONVERSATION_TURNS_CAP } from "../assist.v1.scenario-graph.js";
 
 /** A graph with no positional keys anywhere — the shape `scenarios.graph` holds today. */
 const GRAPH_NO_LAYOUT = {
@@ -139,9 +140,11 @@ beforeEach(() => {
 });
 
 
+// Each row here is one of the Agent route's answer rows, so it carries that route's request hash (`agent_turn:`).
 const row = (n: number, user: string | null, assistant: string | null) => ({
   id: `00000000-0000-4000-8000-0000000000${String(n).padStart(2, "0")}`, scenario_id: SCENARIO, user_id: null,
   turn_id: `turn-${n}`, handler_id: null, created_at: `2026-09-30T08:0${n}:00.000Z`,
+  request_hash: `agent_turn:${String(n).repeat(64).slice(0, 64)}`,
   user_message: user, assistant_message: assistant,
 });
 // `readRecent` answers NEWEST first (supabase-store.ts `order('created_at', { ascending: false })`).
@@ -229,5 +232,58 @@ describe("the conversation, when asked", () => {
     expect(body.conversation_turns).toBeNull();
     expect(body.graph).toEqual(GRAPH_NO_LAYOUT);
     await app.close();
+  });
+});
+
+/**
+ * ⛔ ONLY WHAT THE USER SAW (Canvas #75 5910906799; MG 5910983526; DL 5911089211; AIQ 5911161828). The served rows of MRR
+ * `3b6369b0`, 01:42:37–01:44:29Z, exactly as stored except for shortened texts: every Agent turn is a claim row, the
+ * Agent's internal sub-turns (the turn executor's `sha256:` rows) and the Agent's answer row (`agent_turn:`).
+ */
+describe("the restore returns only the Agent's answer rows — what the user saw", () => {
+  const served = (t: string, turnId: string, cls: string, handler: string | null, hash: string, um: string | null, am: string | null) => ({
+    id: `row-${turnId}`, scenario_id: SCENARIO, user_id: null, turn_id: turnId, turn_class: cls, handler_id: handler,
+    request_hash: hash, created_at: `2026-09-30T${t}.000Z`, user_message: um, assistant_message: am,
+  });
+  const A = (x: string) => `agent_turn:${x.repeat(64).slice(0, 64)}`;
+  const S = (x: string) => `sha256:${x.repeat(32).slice(0, 32)}`;
+  const OLDEST_FIRST = [
+    served("01:42:37", "a096:claim", "direct_answer", null, A("7"), null, null),
+    served("01:43:05", "graph_registration:4072", "direct_answer", null, "graph_registration:fefa3", null, null),
+    served("01:43:14", "8f22e3d6", "handler", "run_analysis", S("9"), null, "I ran a first analysis on the model I have just drafted."),
+    served("01:43:24", "a096", "direct_answer", null, A("7"), "Should we raise our Pro plan price from £49 to £59 a month?", "I’ve drafted a provisional model, but it cannot yet be analysed."),
+    served("01:43:40", "e3d5:claim", "direct_answer", null, A("5"), null, null),
+    served("01:43:41", "085f9d61", "direct_answer", null, S("2"), null, "Recorded as yours: “MRR” is “Pro plan monthly price” × “Paying subscribers”."),
+    served("01:43:43", "e3d5", "direct_answer", null, A("5"), "Yes — Is “MRR” your “Pro plan monthly price” × “Paying subscribers”?", "Recorded, as you confirmed."),
+    served("01:43:53", "745a:claim", "direct_answer", null, A("b"), null, null),
+    served("01:44:03", "0899b727", "handler", "run_analysis", S("4"), "The user asked to run the analysis after confirming how MRR is calculated.", "Raise price to £59 scored highest in 100% of runs."),
+    served("01:44:10", "745a", "direct_answer", null, A("b"), "Run the analysis", "On the current model, raising Pro price to £59 does best."),
+  ];
+
+  it("RED: the served MRR thread restores the user's three turns and the Agent's three answers — no sub-turn row, no unseen text", async () => {
+    readRecent.mockResolvedValue([...OLDEST_FIRST].reverse());
+    const app = await buildApp();
+    const body = (await read(app, SCENARIO, { include_conversation_turns: true })).json();
+    expect(body.conversation_turns.map((t: { turn_id: string }) => t.turn_id)).toEqual(["a096", "e3d5", "745a"]);
+    const restored = JSON.stringify(body.conversation_turns);
+    expect(restored).not.toContain("The user asked to run the analysis");
+    expect(restored).not.toContain("100% of runs");
+    expect(restored).not.toContain("I ran a first analysis");
+    expect(restored).not.toContain("Recorded as yours");
+    expect(body.conversation_turns[2]).toEqual({ turn_id: "745a", created_at: "2026-09-30T01:44:10.000Z", user_message: "Run the analysis", assistant_message: "On the current model, raising Pro price to £59 does best." });
+    await app.close();
+  });
+
+  it("a row with no request hash, or any other hash, is not restored (fails closed)", async () => {
+    const { request_hash: _h, ...noHash } = row(1, "Should we switch to GCP?", "I've mapped the decision.");
+    readRecent.mockResolvedValue([noHash, { ...row(2, "typed", "reply"), request_hash: "sha256:abc" }]);
+    const app = await buildApp();
+    expect((await read(app, SCENARIO, { include_conversation_turns: true })).json().conversation_turns).toEqual([]);
+    await app.close();
+  });
+
+  it("DRIFT PIN: the prefix is the one the Agent route writes on its answer rows", () => {
+    const src = readFileSync(new URL("../agent-v1-turn.ts", import.meta.url), "utf8");
+    expect(src).toContain(`return \`${AGENT_ANSWER_REQUEST_HASH_PREFIX}\${digest}\`;`);
   });
 });
