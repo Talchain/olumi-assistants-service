@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { dropOptionLevelsOverOwnLevers } from '../option-level-over-own-levers.js';
 
 const SCENARIO = '1f9d7698-0000-4000-8000-0000000e0f16';
 const BRIEF = 'Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?';
@@ -31,7 +32,7 @@ const RAW_74 = {"goal":{"metric":"ship the new platform","operator":">=","target
 /** The two keys today's strict schema added since 27 Sep: `decision_question`, and the goal's `frame` (a ship/not goal is a level). */
 const WIRE_74: Rec = { decision_question: null, ...RAW_74, goal: { ...RAW_74.goal, frame: 'level' } };
 
-async function build(wire: Rec): Promise<{ nodes: Rec[]; edges: Rec[] }> {
+async function buildWithOut(wire: Rec, brief = BRIEF): Promise<{ graph: { nodes: Rec[]; edges: Rec[] }; out: Rec }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let registered: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -42,10 +43,11 @@ async function build(wire: Rec): Promise<{ nodes: Rec[]; edges: Rec[] }> {
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, call) as Rec;
+  const out = await buildModelFromBrief(SCENARIO, brief, dispatch, call) as Rec;
   expect(out.ok, JSON.stringify(out).slice(0, 400)).toBe(true);
-  return registered as { nodes: Rec[]; edges: Rec[] };
+  return { graph: registered as { nodes: Rec[]; edges: Rec[] }, out };
 }
+const build = async (wire: Rec, brief = BRIEF) => (await buildWithOut(wire, brief)).graph;
 
 const variant = (edit: (w: any) => void): Rec => { const w = structuredClone(WIRE_74) as any; edit(w); return w; };
 const optionSets = (g: { nodes: Rec[] }, labelPrefix: string): Record<string, Rec> => {
@@ -69,7 +71,9 @@ describe('an option sets what the user chose, not a total its own levers compute
   });
 
   it('ROW 1 (E-FIG shape, served rep1/rep3): the options set their headcounts only; salary spend follows from them', async () => {
-    const g = await build(WIRE_74);
+    const { graph: g, out } = await buildWithOut(WIRE_74);
+    // Said, never silent: the sentence reaches the Agent's model (`not_represented`).
+    expect(((out.not_represented ?? []) as string[]).filter((l) => l.includes('your limit on "Annual salary spend" is checked through those'))).toHaveLength(2);
     const spend = spendId(g);
     for (const [prefix, word, n] of [['Hire two senior', 'senior', 2], ['Hire four junior', 'junior', 4]] as const) {
       const sets = optionSets(g, prefix);
@@ -82,13 +86,56 @@ describe('an option sets what the user chose, not a total its own levers compute
     expect(g.edges.some((e) => e.from === headcountId(g, 'junior') && e.to === spend)).toBe(true);
   });
 
-  it('CONTROL (the user stated the option\'s total): a spend level the user gave is kept', async () => {
-    const g = await build(variant((w) => { for (const o of w.options) for (const i of o.interventions) if (i.factor_label === 'Annual salary spend') i.provenance = 'explicit'; }));
+  it('CONTROL (the user stated the option\'s total): a spend level the user gave, in their brief, is kept', async () => {
+    // The brief must STATE the totals: an `explicit` figure the brief does not contain is demoted before admission.
+    const stated = `${BRIEF} Two seniors would cost £300,000 a year in salary and four juniors £280,000.`;
+    const g = await build(variant((w) => { for (const o of w.options) for (const i of o.interventions) if (i.factor_label === 'Annual salary spend') i.provenance = 'explicit'; }), stated);
     expect(Object.keys(optionSets(g, 'Hire two senior'))).toContain(spendId(g));
   });
 
   it('CONTROL (no lever of the option feeds it): an Olumi spend level with no headcount → spend link is kept', async () => {
     const g = await build(variant((w) => { w.links = w.links.filter((l: any) => l.to !== 'Annual salary spend'); }));
     expect(Object.keys(optionSets(g, 'Hire two senior'))).toContain(spendId(g));
+  });
+});
+
+describe('the guard itself: narrow on purpose (0-LLM corpus: 54 unrestricted non-E hits)', () => {
+  type Iv = { factor_label: string; value: number; provenance: string };
+  const model = (ivs: Iv[], opts: { limit?: string | null; links?: [string, string][] } = {}) => ({
+    options: [{ label: 'Opt', interventions: ivs }, { label: 'Other', interventions: [{ factor_label: 'Lever', value: 1, provenance: 'explicit' }] }],
+    links: (opts.links ?? [['Lever', 'Total']]).map(([from, to]) => ({ from, to })),
+    constraints: opts.limit === null ? [] : [{ metric: opts.limit ?? 'Total' }],
+  });
+  const lever: Iv = { factor_label: 'Lever', value: 2, provenance: 'explicit' };
+  const olumiTotal: Iv = { factor_label: 'Total', value: 300, provenance: 'ai_proposed' };
+
+  it('A-journey shape (R3 5902268039): the retention option pins limited churn at Olumi\'s 2.5% while its lever feeds churn → dropped', () => {
+    const r = dropOptionLevelsOverOwnLevers({
+      options: [{ label: 'Retention intervention for at-risk accounts', interventions: [
+        { factor_label: 'At-risk account retention intervention', value: 1, provenance: 'ai_proposed' },
+        { factor_label: 'Monthly churn', value: 2.5, provenance: 'ai_proposed' }] }],
+      links: [{ from: 'At-risk account retention intervention', to: 'Monthly churn' }],
+      constraints: [{ metric: 'Monthly churn' }],
+    });
+    expect(r.dropped.map((d) => [d.factor, d.via])).toEqual([['Monthly churn', ['At-risk account retention intervention']]]);
+    expect(r.model.options[0]!.interventions!.map((i) => i.factor_label)).toEqual(['At-risk account retention intervention']);
+  });
+  it('an Olumi total on a limited node its own lever feeds (also through a middle node) → dropped', () => {
+    expect(dropOptionLevelsOverOwnLevers(model([lever, olumiTotal])).dropped).toHaveLength(1);
+    expect(dropOptionLevelsOverOwnLevers(model([lever, olumiTotal], { links: [['Lever', 'Mid'], ['Mid', 'Total']] })).dropped).toHaveLength(1);
+  });
+  it('CONTROL: a node no user limit names is untouched (corpus: an option that funds a release AND sets "New feature rollout" = 1)', () => {
+    const r = dropOptionLevelsOverOwnLevers(model([lever, olumiTotal], { limit: 'Something else' }));
+    expect(r.dropped).toEqual([]);
+    expect(dropOptionLevelsOverOwnLevers(model([lever, olumiTotal], { limit: null })).dropped).toEqual([]);
+  });
+  it('CONTROL: a level the user stated is never dropped', () => {
+    expect(dropOptionLevelsOverOwnLevers(model([lever, { ...olumiTotal, provenance: 'explicit' }])).dropped).toEqual([]);
+  });
+  it('CONTROL: another option\'s lever does not count; nothing dropped returns the model itself', () => {
+    const m = model([olumiTotal]);
+    const r = dropOptionLevelsOverOwnLevers(m);
+    expect(r.dropped).toEqual([]);
+    expect(r.model).toBe(m);
   });
 });

@@ -37,6 +37,7 @@ import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
+import { dropOptionLevelsOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
@@ -593,14 +594,19 @@ export function carryFindingsAcrossRetry<P extends ReturnType<typeof prepareProv
   };
 }
 
-export function prepareProvisionalCandidate(model: CandidateModel): {
+export function prepareProvisionalCandidate(drafted: CandidateModel): {
   candidate: CandidateModel;
+  /** Olumi option levels on a limited node the same option's levers move, dropped (`option-level-over-own-levers.ts`). */
+  levels_over_own_levers: OptionLevelOverOwnLevers[];
   mechanism_issues: string[];
   additions_without_total: AdditionWithoutTotal[];
   provenance_demoted: DemotedProvenance[];
   level_gaps: LevelGap[];
   baseline_gaps: BaselineGap[];
 } {
+  // ⛔ BEFORE the demotion below: a level the user stated is still `explicit` here, so the guard never drops it (a
+  // demoted user total is rewritten to `ai_proposed` and would otherwise be read as Olumi's).
+  const { model, dropped: levels_over_own_levers } = dropOptionLevelsOverOwnLevers(drafted);
   const mechanism_issues: string[] = [];
   const additions_without_total: AdditionWithoutTotal[] = [];
   const provenance_demoted: DemotedProvenance[] = [];
@@ -674,7 +680,7 @@ export function prepareProvisionalCandidate(model: CandidateModel): {
     mechanism_issues.push(`${link.from} -> ${link.to}: retain this risk hypothesis through a causal factor or mediator, not a direct option-risk setting`);
   }
   const { level_gaps, baseline_gaps } = findCoverageGaps(model, additions_without_total);
-  return { candidate: { ...model, options }, mechanism_issues, additions_without_total, provenance_demoted, level_gaps, baseline_gaps };
+  return { candidate: { ...model, options }, levels_over_own_levers, mechanism_issues, additions_without_total, provenance_demoted, level_gaps, baseline_gaps };
 }
 
 /**
@@ -1815,6 +1821,9 @@ export async function buildModelFromBrief(
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
         `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`),
+      ...preparation.levels_over_own_levers.map((d) =>
+        `"${d.option}" had "${d.factor}" at ${d.value}, a figure I proposed, while the option already moves it through ` +
+        `${d.via.map((v) => `"${v}"`).join(' and ')}; your limit on "${d.factor}" is checked through those, not against my figure.`),
       directionless.length > 0
         ? `${directionless.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,
