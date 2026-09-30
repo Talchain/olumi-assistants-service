@@ -104,6 +104,17 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
       'tokens reasoning at the default; accepted only on a served journey-A run passing AIQ\'s truth rows (#72 5860911820).',
   },
   {
+    model: 'gpt-6.1-sol',
+    role: 'conversation',
+    max_output_tokens: 3400,
+    reasoning_effort: 'high',
+    evidence:
+      'Selected Sol-high coach v0.2 by AI Experience/DL (programme-docs #78 5915140232 / 5915156800). ' +
+      'Real-route paired gate at docs 50ce5eba, n=1/row: largest Sol-high hop across 20 gate turns ' +
+      'used 1140 output tokens; median 20.1 s versus Terra 8.5 s. Keep the measured 3400 cap; ' +
+      'no evidence supports a 16000 cap. Exact prompt/config handoff #78 5915316114.',
+  },
+  {
     model: 'gpt-5.6-sol',
     role: 'conversation',
     max_output_tokens: 3400,
