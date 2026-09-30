@@ -459,7 +459,6 @@ export async function build() {
   log.info({
     event: 'config.startup_health',
     pipeline: 'unified_v2',
-    orchestrator_version: config.features.orchestratorV2 ? 'V2' : 'V1',
     diagnostic_trace: diagnosticTraceEnabled,
     streaming: config.features.orchestratorStreaming,
     models: startupTaskModels,

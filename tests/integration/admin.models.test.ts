@@ -325,7 +325,7 @@ describe("GET /admin/dashboard/env", () => {
     expect(body).toHaveProperty("timestamp");
   });
 
-  it("feature_flags includes all three expected flags", async () => {
+  it("feature_flags includes both expected flags", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/admin/dashboard/env",
@@ -336,7 +336,8 @@ describe("GET /admin/dashboard/env", () => {
     // CEE_ORCHESTRATOR_ENABLED removed with the V1 orchestrator belt (2026-07-21).
     expect(flagNames).toContain("DSK_ENABLED");
     expect(flagNames).toContain("ANTHROPIC_PROMPT_CACHE_ENABLED");
-    expect(flagNames).toContain("CEE_ZONE2_REGISTRY_ENABLED");
+    // CEE_ZONE2_REGISTRY_ENABLED retired 2026-09-30: its producer (prompt-zones) was deleted in f957d6d8.
+    expect(flagNames).not.toContain("CEE_ZONE2_REGISTRY_ENABLED");
 
     // Each flag has name and enabled (boolean)
     for (const flag of body.feature_flags) {
