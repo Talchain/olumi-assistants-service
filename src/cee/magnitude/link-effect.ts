@@ -271,6 +271,13 @@ export interface LinkSizing {
   readonly problem?: LinkSizeProblem;
   /** Asked where the user always sees it (`open_questions`). */
   readonly question?: string;
+  /**
+   * ⛔ OLUMI'S STATED SIZE WAS NOT USED (D5 / D8 / target-sized / unconvertible / sign conflict): the edge carries a
+   * placeholder or today's default, never this size. Only Olumi's (a user's own size is never "set aside" here). The
+   * caller says it as "Olumi's guess, set aside: NOT in the model" (AIQ 5914222384; Paul's funding turn 1 said the
+   * first pass was "built on … £75,000 per qualified conversation" while that size was in no edge).
+   */
+  readonly set_aside?: true;
 }
 
 const fmt = (x: number): string => String(Number(x.toPrecision(6)));
@@ -500,6 +507,11 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
         + `gap to your target. A target is what you want, not evidence of what an option does, so it was not used: ${standIn} `
         + `stands in for it. ${HOW_MUCH(source, target)}`;
     }
+    // ⛔ Olumi's size that no frame can read is still ASKED, in words that never place it in the model (AIQ 5914222384):
+    // with no range to size a placeholder to, it was said only in `not_represented`, and the Agent listed it as an input.
+    if (problem === 'unconvertible' && !link.user_stated && sizeCheck === null) {
+      return `Olumi's starting guess is that ${statement}, but the model doesn't hold it yet. ${HOW_MUCH(source, target)}`;
+    }
     if (sizeCheck === null) return undefined;
     if (problem === 'unconvertible') {
       return `${who} ${statement}, but that could not be read on the ranges the two are measured on, so ${standIn} stands in for it. `
@@ -516,6 +528,7 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     ...(beta !== null ? { stated_strength: beta } : {}),
     ...(problem !== undefined ? { problem } : {}),
     ...(question !== undefined ? { question } : {}),
+    ...(stated && problem !== undefined && !link.user_stated ? { set_aside: true as const } : {}),
   };
 
   if (sized) {
