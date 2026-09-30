@@ -34,7 +34,7 @@ export function projectGoalProbabilitiesForTransport(
       const row = record(raw);
       if (row === null) return raw;
       let projected: RecordValue | null = null;
-      for (const key of ['probability_of_goal', 'goal_probability']) {
+      for (const key of ['probability_of_goal', 'goal_probability', 'goalProbability']) {
         const probability = row[key];
         if ((probability !== 0 && probability !== 1)
           || (typeof row.option_id === 'string' && earned.get(row.option_id) === probability)) continue;
@@ -45,11 +45,29 @@ export function projectGoalProbabilitiesForTransport(
     });
   };
 
-  // Both are public per-option carriers. A Run with `results` as well as
-  // `option_comparison` must not leak the withheld value through the alias.
+  const projectNestedRows = (value: unknown, keys: readonly string[]): unknown => {
+    const nested = record(value);
+    if (nested === null) return value;
+    const projected = { ...nested };
+    for (const key of keys) {
+      if (nested[key] !== undefined) projected[key] = projectRows(nested[key]);
+    }
+    return projected;
+  };
+
+  // Match the carriers read by readOptionResultSources, including UI-normalised
+  // aliases. Project every present copy, rather than only the preferred array,
+  // so a consumer fallback cannot revive an unearned exact goal probability.
   return {
     ...enrichment,
     ...(enrichment.option_comparison === undefined ? {} : { option_comparison: projectRows(enrichment.option_comparison) }),
-    ...(enrichment.results === undefined ? {} : { results: projectRows(enrichment.results) }),
+    ...(enrichment.results === undefined ? {} : {
+      results: Array.isArray(enrichment.results)
+        ? projectRows(enrichment.results)
+        : projectNestedRows(enrichment.results, ['option_comparison', 'options', 'option_results']),
+    }),
+    ...(enrichment.decision_brief === undefined ? {} : {
+      decision_brief: projectNestedRows(enrichment.decision_brief, ['options']),
+    }),
   };
 }

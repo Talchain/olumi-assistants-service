@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { goalCertaintyOfStoredResult } from '../goal-certainty.js';
+import { projectGoalProbabilitiesForTransport } from '../../compose/goal-probability-transport.js';
 
 type Json = Record<string, any>;
 const FX = JSON.parse(
@@ -83,6 +84,18 @@ describe('the EXECUTED Run\'s own stored decision (#2280), attributed by its run
     const earned = ((await run()).goal_certainty.options as Certainty[]).filter((x) => x.earned);
     expect(earned.map((x) => x.option_id).sort()).toEqual(['carry_on_as_now', 'raise_price_to_54']);
     for (const x of earned) expect(x).not.toHaveProperty('say');
+  });
+
+  it('an all-unearned transport-stripped immediate Run reads its stored sentence once and never restores its exact chance', async () => {
+    const rows = FX.paul.option_comparison.filter((o) => o.option_id === 'raise_price_to_59');
+    const stripped = projectGoalProbabilitiesForTransport({ option_comparison: rows }, STORED)!;
+    const projectedRows = stripped.option_comparison as Json[];
+    expect(projectedRows[0]).not.toHaveProperty('probability_of_goal');
+    const w = world({ rows: projectedRows });
+    const r = await w.caps.runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+    expect(p59(r)).toMatchObject({ earned: false, say: STORED.find((d) => d.option_id === 'raise_price_to_59')!.say });
+    expect(p59(r)).not.toHaveProperty('probability_of_goal');
+    expect(w.reads).toHaveLength(1);
   });
 
   it('CONTROL: no option at exactly 0 or 1 → nothing carried, and no graph read spent on it', async () => {
