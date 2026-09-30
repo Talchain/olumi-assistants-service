@@ -60,6 +60,7 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
   const entities = new Map(meaning.entities.map((entity) => [entity.ref, entity]));
   const edges: EdgeV3T[] = [];
   const constraints: GoalConstraintT[] = [];
+  const proposals = [...meaning.proposals];
   let projectedOptionQuantities = 0;
   const accepted = new Map<string, { claim: SourceQuantity; value: number }>();
   const issue = (ref: string, code: string, question: string): void => {
@@ -359,6 +360,73 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
       };
     }
   }
+  // A question about changing FROM today's stated position entails a baseline
+  // comparator. Keep its authorship separate from both an explicit user option
+  // and an Olumi proposal; a bare proposed action does not establish today.
+  const statedOptions = meaning.options.filter((option) => nodes.get(option.entity_ref)?.kind === 'option');
+  if (statedOptions.length === 1 && !meaning.options.some((option) => option.is_status_quo)) {
+    const alternative = statedOptions[0];
+    const action = source_bindings[alternative.entity_ref];
+    const beforeAction = action ? brief.slice(0, action.start).split(/[.!?;]/).at(-1) ?? '' : '';
+    const changeQuestion = action && /\b(?:raise|increase|move|switch|shift|change|replace|migrate)\b/i.test(action.quote)
+      && !/\b(?:not|never|avoid)\s+(?:raise|increase|move|switch|shift|change|replace|migrate)\b/i.test(action.quote)
+      && /\b(?:should|could)\s+we\b/i.test(beforeAction);
+    const fromTo = changeQuestion ? /\bfrom\s+([^.!?;,]{1,60}?)\s+to\s+([^.!?;,]{1,60}?)(?=$|[.!?;,])/i.exec(action.quote) : null;
+    const oldState = fromTo?.[1]?.trim();
+    const newState = fromTo?.[2]?.trim();
+    const intervention = alternative.interventions.length === 1 ? alternative.interventions[0] : undefined;
+    const current = intervention ? claimsFor(intervention.entity_ref).find(({ claim }) => claim.role === 'current') : undefined;
+    const proposed = intervention?.quantity_ref ? accepted.get(intervention.quantity_ref) : undefined;
+    const oldIsNumeric = oldState ? /[\d£$€%]/.test(oldState) : false;
+    const groundedNumeric = !!(oldIsNumeric && current && proposed
+      && oldState === current.claim.number.literal
+      && newState?.startsWith(proposed.claim.number.literal)
+      && !/[\d.]/.test(newState[proposed.claim.number.literal.length] ?? ''));
+    const groundedCategorical = !!(!oldIsNumeric && oldState
+      && (/^[A-Z][A-Za-z0-9-]{1,35}$/.test(oldState)
+        || !!intervention && nodes.get(intervention.entity_ref)?.kind === 'factor'
+          && /^[a-z][a-z0-9-]{1,35}$/.test(oldState)));
+    if (action && fromTo && newState && !/\b(?:from|and|or)\b/i.test(newState)
+      && (groundedNumeric || groundedCategorical)) {
+      const currentClause = /^from\s+.+?(?=\s+to\s+)/i.exec(fromTo[0])![0];
+      const start = action.start + fromTo.index;
+      const source = { quote: currentClause, start, end: start + currentClause.length };
+      const ref = `status_quo:${alternative.entity_ref}`;
+      if (!allRefs.includes(ref) && !nodes.has(ref)) {
+        const factor = intervention && nodes.get(intervention.entity_ref)?.kind === 'factor'
+          ? nodes.get(intervention.entity_ref) : undefined;
+        const label = groundedNumeric && factor
+          ? `Keep ${factor.label} at ${current!.claim.number.literal}`
+          : `Stay on ${oldState}`;
+        const baseline: NodeV3T = {
+          id: sourceEntityId(ref), kind: 'option', label,
+          description: `Today's state implied by the question: ${source.quote}`,
+          source_quote: source.quote, label_authored: true,
+          option_origin: 'status_quo_implied', is_baseline: true, interventions: {},
+        };
+        if (groundedNumeric && factor && current) {
+          baseline.interventions![factor.id] = {
+            value: current.value / frameOf(factor), raw_value: current.value,
+            unit: unitText(current.claim.unit), source: 'brief_extraction',
+            target_match: { node_id: factor.id, match_type: 'exact_id', confidence: 'high' },
+            source_quote: source.quote, reasoning: `Keeps the stated current level: ${source.quote}`,
+            value_type: 'numeric',
+          };
+        }
+        nodes.set(ref, baseline);
+        reference_ids[ref] = baseline.id;
+        source_bindings[ref] = source;
+        if (decisions.length === 1 && nodes.has(decisions[0].ref)) {
+          structuralEdge(nodes.get(decisions[0].ref)!, baseline, action.quote, 'domain_knowledge');
+        }
+        if (factor) structuralEdge(baseline, factor, source.quote, 'domain_knowledge');
+      }
+    } else if (changeQuestion && !meaning.proposals.some((proposal) => proposal.ref === `status_quo_proposal:${alternative.entity_ref}`)) {
+      proposals.push({ ref: `status_quo_proposal:${alternative.entity_ref}`, kind: 'option',
+        label: 'Keep the current approach',
+        reason: 'The question contrasts a change with today, but the current state is not sufficiently bound to add a baseline model option.' });
+    }
+  }
   for (const { claim, value } of accepted.values()) {
     const target = nodes.get(claim.entity_ref)!;
     if (claim.role === 'limit') {
@@ -535,7 +603,7 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
   const graph = GraphV3.parse({ nodes: [...nodes.values()], edges, ...(constraints.length ? { goal_constraints: constraints } : {}) });
   return {
     graph, open_questions: [...new Set(unresolved.map((item) => item.question))], unresolved,
-    proposals: meaning.proposals, source_bindings, reference_ids, loss: [...unresolved],
+    proposals, source_bindings, reference_ids, loss: [...unresolved],
     trace: { architecture: 'source_first', transforms: 1, repairs: 0, retries: 0,
       source_offset_corrections: Object.values(source_bindings).filter((source) => source.offset_corrected).length,
       level_direction_annotations_ignored: [...accepted.values()].filter(({ claim }) => claim.frame === 'level' && claim.direction !== 'none').length,
