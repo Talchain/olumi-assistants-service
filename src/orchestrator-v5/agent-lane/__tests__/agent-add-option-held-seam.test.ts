@@ -895,6 +895,25 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(graphNow().nodes.find((node) => node.id === 'opt_b')?.analysis_participation).toBeUndefined();
   }, 120_000);
 
+  it('refuses a multiplied consent figure when the Run has no proof that a raw-less level is normalized', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'fac_price'
+      ? { ...node, observed_state: { value: 0.5, cap: 200, unit: 'GBP' } }
+      : node.id === 'opt_b'
+        ? { ...node, label: 'Raise to £57', proposed_by: 'olumi',
+          interventions: { fac_price: { value: 0.285, source: 'cee_hypothesis' } } }
+        : node) });
+    script = [
+      () => fnCall('propose_new_option', { label: 'Raise to £57', acts_on: [], rationale: 'Please add your suggestion.' }),
+      () => say('That level needs checking before I can offer it.'),
+    ];
+    const result = await turn({ message: 'Please add "Raise to £57" as one of my options.' });
+    expect(result._agent.tool_calls.find((call) => call.name === 'propose_new_option'))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'unproven_display_level' });
+    expect(approveChipOf(result)).toBeUndefined();
+    expect(graphNow().nodes.find((node) => node.id === 'opt_b')?.analysis_participation).toBeUndefined();
+  }, 120_000);
+
   it('refuses a card whose displayed raw level disagrees with the level the Run would compare', async () => {
     const graph = seedGraph();
     graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
@@ -917,6 +936,22 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
       ? { ...node, label: 'UK launch', proposed_by: 'olumi',
         interventions: { fac_price: { value: 1, raw_value: 'UK', source: 'cee_hypothesis' } } }
+      : node) });
+    script = [
+      () => fnCall('propose_new_option', { label: 'UK launch', acts_on: [], rationale: 'Please add your suggestion.' }),
+      () => say('That categorical level needs a clear reading first.'),
+    ];
+    const result = await turn({ message: 'Please add "UK launch" as one of my options.' });
+    expect(result._agent.tool_calls.find((call) => call.name === 'propose_new_option'))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'non_numeric_stored_level' });
+    expect(approveChipOf(result)).toBeUndefined();
+  }, 120_000);
+
+  it('does not show a numeric consent reading for an encoded category with no raw label', async () => {
+    const graph = seedGraph(1, 1, 'none');
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, label: 'UK launch', proposed_by: 'olumi',
+        interventions: { fac_price: { value: 1, value_type: 'categorical', encoding_map: { UK: 1 }, source: 'cee_hypothesis' } } }
       : node) });
     script = [
       () => fnCall('propose_new_option', { label: 'UK launch', acts_on: [], rationale: 'Please add your suggestion.' }),

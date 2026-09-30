@@ -41,6 +41,7 @@ import { identityConfirmBaseIsWritable } from '../../system-events/editable-grap
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
 /**
@@ -5582,15 +5583,36 @@ export function createAgentCapabilities(
               detail: `"${suggested.label}" is already Olumi's suggestion. Adoption keeps its existing links and levels; nothing was prepared with additional edits. Propose its participation alone, then edit its effects separately.` };
           }
           const expectedInterventions = structuredClone(suggested.interventions ?? {});
+          const egressScaleByFactor = buildFactorScaleMap(g.nodes);
           // This narrow card speaks numeric levels. A category or switch is
           // stored in `raw_value` with a numeric encoding for analysis; showing
           // that encoding as the user's reading would approve a different idea.
-          if (Object.values(expectedInterventions).some((cell) => cell !== null && typeof cell === 'object'
-            && Object.hasOwn(cell, 'raw_value')
-            && (typeof (cell as { raw_value?: unknown }).raw_value !== 'number'
-              || !Number.isFinite((cell as { raw_value: number }).raw_value)))) {
+          if (Object.entries(expectedInterventions).some(([factorId, cell]) => cell !== null && typeof cell === 'object'
+            && ((Object.hasOwn(cell, 'raw_value')
+              && (typeof (cell as { raw_value?: unknown }).raw_value !== 'number'
+                || !Number.isFinite((cell as { raw_value: number }).raw_value)))
+              || resolveRawInterventionValue(cell, egressScaleByFactor.get(factorId)).codeNotMagnitude === true))) {
             return { ok: false, mutated: false, refusal: 'non_numeric_stored_level',
               detail: `"${suggested.label}" has a category or switch that this approval card cannot show accurately. Nothing was prepared; review that option before including it.` };
+          }
+          // A cap alone does not prove that a raw-less value is normalized.
+          // Use the Run's own egress classifier before showing a multiplied
+          // consent figure; it may correctly pass an ambiguous value through.
+          const unprovenDisplayLevel = Object.entries(expectedInterventions).some(([factorId, cell]) => {
+            if (cell === null || typeof cell !== 'object' || Object.hasOwn(cell, 'raw_value')) return false;
+            const level = cell as { value?: unknown };
+            if (typeof level.value !== 'number' || !Number.isFinite(level.value)) return false;
+            const factor = g.nodes.find((n) => n.id === factorId);
+            const frame = levelFrameOf(factor);
+            if (frame === null) return false;
+            const egress = resolveRawInterventionValue(cell, egressScaleByFactor.get(factorId));
+            const displayed = level.value * frame;
+            return egress.value === null || egress.codeNotMagnitude === true
+              || Math.abs(egress.value - displayed) > Math.max(1e-9, Math.abs(displayed) * 1e-6);
+          });
+          if (unprovenDisplayLevel) {
+            return { ok: false, mutated: false, refusal: 'unproven_display_level',
+              detail: `The level shown for "${suggested.label}" is not proven to be the level its comparison would use. Nothing was prepared; check that option's level before including it.` };
           }
           // The Run and canonical Agent reader use the normalized value in the
           // factor's frame. A stale raw display value cannot be the consent
