@@ -85,12 +85,15 @@ describe('B5-1 at the call site: the stored verdict on Paul\'s 17d1 run', () => 
     expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'unscored', reason: 'limit_rests_on_olumi_guess' }]);
     expect(v.joint).toMatchObject({ state: 'withheld' });
   });
-  it('DERIVED (churn\'s level marked as the user\'s assumption): the call site names it THEIRS, level_user_assumption', async () => {
+  // ⭐ DECLARED VERDICT MOVE (52f8cd #75 5921065216; AIQ ACK 5921073461; MG SUCCESSOR row 5921141702): `user_assumption`
+  // is Olumi's figure the user ACCEPTED — its one live writer is the approved adoption — so B6 reads a limit resting on it
+  // exactly as it reads Olumi's own 3 % above: accepting is not authoring. It used to be credited as the user's.
+  it('DERIVED (churn\'s level Olumi\'s, ACCEPTED by the user): still Olumi\'s for the limit — withheld, limit_rests_on_olumi_guess', async () => {
     const graph = withSizedChurnLink(input.graph);
     (graph.nodes as Json[]).find((n) => n.id === 'monthly_churn')!.observed_state.source = 'user_assumption';
     const v = await storedVerdict(graph);
-    expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'level_user_assumption' }]);
-    expect(v.joint).toEqual({ state: 'estimate_only' });
+    expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'unscored', reason: 'limit_rests_on_olumi_guess' }]);
+    expect(v.joint).toMatchObject({ state: 'withheld' });
   });
   it('CONTROL (DERIVED: churn\'s level stated by the user): the same run stores churn as scored', async () => {
     const graph = withSizedChurnLink(input.graph);

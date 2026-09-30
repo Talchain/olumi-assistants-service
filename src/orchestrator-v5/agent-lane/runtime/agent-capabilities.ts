@@ -989,9 +989,15 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
           // Value provenance is a DIFFERENT fact from entity provenance: who put
           // this NUMBER here, versus where the entity came from. Collapsing them
           // is how a system-read figure inherits a user's authority.
+          // The user's REVIEW of the figure (an accepted or confirmed Olumi estimate) is a third fact, apart from
+          // whose number it is: without it the Agent could only answer "where did this come from?" from chat
+          // history, which a cold session does not have (52f8cd, #75 5921124922; AIQ 5921018606).
+          const review = os.reviewed_by_user !== null && typeof os.reviewed_by_user === 'object'
+            ? (os.reviewed_by_user as { intent?: unknown }).intent : undefined;
           const valueProvenance = {
             ...(str(os.source) ? { source: os.source } : {}),
             ...(str(os.extractionType) ? { extraction_type: os.extractionType } : {}),
+            ...(str(review) ? { reviewed_by_user: review } : {}),
           };
           return {
             // ⭐ THE ID. Without it the only way to act on an entity was a fuzzy

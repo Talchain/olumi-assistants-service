@@ -10,7 +10,8 @@
  * survive `app.inject`, `stage-stream-context.ts:30`); nothing on the wire can claim it.
  */
 import { describe, it, expect } from 'vitest';
-import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { createAgentCapabilities, projectEntity, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { valueSourceAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { ProposalStore } from '../proposal.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { runWithApprovedAdoption } from '../approved-adoption-context.js';
@@ -130,6 +131,64 @@ describe('values-only approval of Olumi’s figures, through the real writer', (
     expect(again).toMatchObject({ already_applied: true });
     expect(p.writes()).toBe(before.writes);
     expect(p.byId().coordination_load.observed_state).toEqual(before.os);
+  });
+});
+
+/**
+ * ⭐ ORIGIN AND ACCEPTANCE ARE TWO FACTS (52f8cd; DL #75 5921002291; AIQ 5921018606 / ACK 5921073461; CODEX CEE BUDDY
+ * 5921162043). WIRE-WITNESSED before this fix on served `5479e15e` (guest `c708fca5`, #75 5921124922): an approved
+ * starting assumption was stored `user_assumption` + `node.provenance: 'user_set'` with no review, and the card read
+ * "Your assumption". The number is Olumi's; the approval is a review. Every carrier below must say the same.
+ */
+describe('an accepted Olumi figure keeps Olumi as its origin and records the acceptance apart', () => {
+  it('RED: stored as Olumi\'s number (user_assumption, node ai_inferred), accepted as a review — never user_set', async () => {
+    const { p } = await adoptValuesOnly();
+    const node = p.byId().coordination_load as Node & { provenance?: unknown };
+    const os = node.observed_state ?? {};
+    expect(os.source).toBe('user_assumption');
+    expect(node.provenance).toBe('ai_inferred');
+    expect(os.reviewed_by_user).toMatchObject({ intent: 'confirm' });
+    expect(Number.isNaN(Date.parse(String((os.reviewed_by_user as { at?: unknown }).at)))).toBe(false);
+  });
+
+  it('RED: every reader of whose number it is says Olumi\'s — the display map and what the Agent is given', async () => {
+    const { p } = await adoptValuesOnly();
+    const node = p.byId().coordination_load;
+    expect(valueSourceAuthorship(node.observed_state?.source)).toEqual({ source: 'assumption', provenance: 'ai_inferred' });
+    const seen = projectEntity(node as never);
+    expect(seen.provenance).toBe('ai_inferred');
+    expect(seen.value_provenance).toEqual({ source: 'user_assumption', reviewed_by_user: 'confirm' });
+  });
+
+  it('TWIN: a figure the user then TYPES is theirs — user_override, user_set, and the acceptance review is cleared', async () => {
+    const { p } = await adoptValuesOnly();
+    const ev = { kind: 'factor_value_edit' as const, target_id: 'coordination_load', value: 55 };
+    const res = await applyFactorValueEdit({
+      payload: { kind: 'system_event', turn_id: '5c4b3a2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d', scenario_id: SCENARIO, stage: 'frame', event: ev } as never,
+      event: ev as never, requestId: 'typed-after-adopt', persistedGraph: p.graph() as never, priorFacts: [],
+    });
+    expect(res.kind, JSON.stringify(res)).toBe('mutated');
+    const typed = ((res as unknown as { mutatedGraph: { nodes: (Node & { provenance?: unknown })[] } }).mutatedGraph.nodes).find((n) => n.id === 'coordination_load')!;
+    expect(typed.observed_state?.source).toBe('user_override');
+    expect(typed.provenance).toBe('user_set');
+    expect(typed.observed_state).not.toHaveProperty('reviewed_by_user');
+    expect(valueSourceAuthorship(typed.observed_state?.source)).toEqual({ source: 'user', provenance: 'user_set' });
+  });
+
+  it('CONTROL: a revision the USER named inside a proposal is theirs, with no acceptance review (the RED rows are not vacuous)', async () => {
+    const p = product();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const proposed = await caps.proposeAssumptions(ctx, {
+      assumptions: [{ factor_label: 'Team size', value: 6, unit: 'FTE', basis: 'the user said six', revise: true }],
+    } as never);
+    expect(store.get(String(proposed.proposal_id))!.provenance.authored_by, 'precondition: the user named it').toBe('user_stated');
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    const node = p.byId().team_size as Node & { provenance?: unknown };
+    expect(node.observed_state?.source).toBe('user_override');
+    expect(node.provenance).toBe('user_set');
+    expect(node.observed_state).not.toHaveProperty('reviewed_by_user');
   });
 });
 

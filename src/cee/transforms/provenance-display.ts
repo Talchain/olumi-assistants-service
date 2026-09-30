@@ -244,14 +244,21 @@ const SOURCE_AUTHORSHIP: Readonly<
   user_edited: { source: "user", provenance: "user_set" },
   user_calibration: { source: "user", provenance: "user_set" },
 
-  // ⚠ `user_assumption` ("mark as assumption") is `user_set` HERE and
-  // `inferred` for the SAMPLING-WIDTH authority, and the divergence is
-  // deliberate rather than an oversight. A declared guess should be sampled as
-  // widely as a model's guess — that is a claim about PRECISION. It is still
-  // the user's guess, not ours — that is a claim about AUTHORSHIP, and calling
-  // it `ai_inferred` would tell the user we invented a number they marked up
-  // themselves. Same literal, two questions, two answers.
-  user_assumption: { source: "user", provenance: "user_set" },
+  // ⭐ `user_assumption` IS OLUMI'S NUMBER, ADOPTED — the user accepted it, they did not author it
+  // (DL #75 5921002291; AIQ 5921018606: "accepting Olumi's estimate is NOT authoring it").
+  //
+  // Its one live writer is the approved adoption of an Olumi-authored proposal
+  // (`approved-adoption-context.ts`); the UI's "mark as assumption" handler has 0 callers
+  // (DGAI `AllImprovements.onAssumption`, 30 Sep). This row used to read the literal as the user's
+  // own declared guess and project `user_set`, and on served `5479e15e` (guest `c708fca5`,
+  // #75 5921124922) that told the user they set a figure Olumi proposed. The number is Olumi's,
+  // exactly as a repair's is (`cee_repair` above); the approval is a separate fact, carried by
+  // `observed_state.reviewed_by_user`. An old value a person really did type under this literal
+  // would now be UNDER-claimed, never falsely called theirs (AIQ 5921073461).
+  //
+  // The SAMPLING-WIDTH authority already reads it `inferred` (sampled as widely as a model's
+  // guess), so the two questions now agree on whose number it is.
+  user_assumption: { source: "assumption", provenance: "ai_inferred" },
 
   // ⚠ LOSSY, AND THE LOSS IS NAMED. `panel_elicited` is a named colleague's
   // answer, verified server-side by `collab/apply-verification.ts` before the
@@ -373,7 +380,8 @@ export const UNVERIFIED_USER_AUTHORSHIP_LITERALS: ReadonlySet<KnownObservedState
     "user_confirmed",
     "user_edited",
     "user_calibration",
-    "user_assumption",
+    // `user_assumption` LEFT this set when it stopped projecting `user_set` (it is Olumi's number,
+    // adopted — see its row above). The partition assertion keys on the projection, so it follows.
   ]);
 
 /**

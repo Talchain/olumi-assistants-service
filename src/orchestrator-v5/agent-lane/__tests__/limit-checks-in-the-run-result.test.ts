@@ -84,9 +84,15 @@ describe('⛔ run_analysis says how each of the user’s limits was checked', ()
     ]);
   });
 
-  it('CONTROL: a limit checked against a figure the user accepted as an assumption says so', () => {
+  // A Run stored BEFORE the provenance fix (its row says `level_user_assumption`), read now: the row's words stand, and
+  // the options that start from the accepted level are named as starting from Olumi's estimate — the figure is Olumi's,
+  // accepted, never the user's own (52f8cd #75 5921065216; AIQ 5921018606 / ACK 5921073461).
+  it('CONTROL: a limit checked against a figure the user accepted as an assumption says so, and the level stays Olumi\'s', () => {
     const rows = { per_limit: [{ constraint_id: 'agent-lane:monthly_churn:<=', state: 'estimate_only' as const, reason: 'level_user_assumption' }], joint: { state: 'estimate_only' as const } };
-    expect(limitChecksForAgent(withChurnLevel('user_assumption'), rows)![0]!.say).toBe(`‘Monthly churn’ was checked, against a figure you accepted as an assumption.${CHURN_WITHHELD}`);
+    expect(limitChecksForAgent(withChurnLevel('user_assumption'), rows)![0]!.say).toBe(
+      `‘Monthly churn’ was checked, against a figure you accepted as an assumption.${CHURN_WITHHELD}`
+      + ' For ‘Carry on as now’ and ‘Split £30,000 between feature development and advertising’ it isn’t shown: it starts from Olumi’s estimate of today’s ‘Monthly churn’.',
+    );
   });
 
   it('CONTROL: no per-limit rows on the read → no limit_checks (nothing invented); a row whose limit has no label is left out', async () => {

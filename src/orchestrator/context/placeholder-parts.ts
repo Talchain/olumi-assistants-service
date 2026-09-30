@@ -127,9 +127,16 @@ export interface PlaceholderPartsFinding {
   readonly link?: { readonly from: string; readonly to: string };
 }
 
-/** A value stamp the user authored (`user_stated`) or admitted as their own assumption: the user's, not Olumi's guess. */
+/**
+ * A value stamp the user AUTHORED (`user_stated`): the user's, not Olumi's guess.
+ *
+ * ⛔ `user_assumption` IS NOT THE USER'S. Its one live writer is the approved adoption of Olumi's proposed figure
+ * (`approved-adoption-context.ts`), so crediting it here let B6 call a limit resting on Olumi's number "the user's"
+ * after a bare Accept — served `5479e15e`, guest `c708fca5` (#75 5921124922; MG SUCCESSOR 5921141702). The declared
+ * verdict move (52f8cd 5921065216, AIQ ACK 5921073461): such a limit now reads as resting on Olumi's estimate.
+ */
 function usersOwn(stamp: unknown): boolean {
-  return earnsAuthorshipCredit(classifyValueSource(stamp)) || stamp === 'user_assumption';
+  return earnsAuthorshipCredit(classifyValueSource(stamp));
 }
 
 const SIZED_MAGNITUDES: ReadonlySet<unknown> = new Set(['olumi_estimate', 'user_stated']);
