@@ -24,6 +24,8 @@
  *      the pair is `partial`; the authored £59 → £60 row stays (control).
  *   L  a link's spread / existence probability that changed with no row kind → `partial`, never "complete, nothing
  *      changed"; an identical pair stays `complete` with [] (control).
+ *   M  (AIQ 5918134795) a link's β is the engine's number, never a row figure: a β-only change → no row, `partial`;
+ *      a link added / removed → a presence row with no figure; the £59 → £60 option row stays `complete` (controls).
  */
 import { describe, expect, it } from 'vitest';
 import { RunDeltaSchema } from '@talchain/schemas/boundary';
@@ -177,7 +179,8 @@ describe('SC-24 · diffRunInputSnapshots', () => {
     const next = snap({ links: [], options: [...snap().options, { option_id: 'opt-c', label: 'Annual plan', settings: [] }] });
     expect(diffRunInputSnapshots(snap(), next).map((r) => [r.entity_kind, r.field, r.change])).toEqual([
       ['option', 'presence', 'added'],
-      ['link', 'strength', 'removed'],
+      // A link carries no user figure (AIQ 5918134795): its leaving is a presence row, never its β as a "value".
+      ['link', 'presence', 'removed'],
     ]);
   });
 
@@ -185,7 +188,8 @@ describe('SC-24 · diffRunInputSnapshots', () => {
     const next = snap({
       goal: { node_id: 'goal_mrr', label: 'Pro MRR', target_raw: 60000, unit: 'GBP per month', operator: '>=' },
       factors: [{ factor_id: 'fac_churn', label: 'Monthly churn', raw: 4.1, unit: '%', encoded: 0.041, source: 'user_override' }],
-      links: [{ from: 'fac_price', to: 'fac_churn', mean: 0.6 }],
+      // The existing link keeps its β; a NEW link enters (a presence row — a β change alone would be no row, see M).
+      links: [{ from: 'fac_price', to: 'fac_churn', mean: 0.4 }, { from: 'fac_churn', to: 'goal_mrr', mean: 0.3 }],
     }, 60);
     expect(diffRunInputSnapshots(snap(), next).map((r) => r.entity_kind)).toEqual(['option_setting', 'factor_value', 'goal', 'link']);
   });
@@ -284,5 +288,30 @@ describe('SC-24 · diffRunInputSnapshots', () => {
     expect(coverage(withLink(0.1, 0.8), withLink(0.9, 0.8))).toEqual(['partial', []]);
     expect(coverage(withLink(0.1, 0.8), withLink(0.1, 0.2))).toEqual(['partial', []]);
     expect(coverage(withLink(0.1, 0.8), withLink(0.1, 0.8))).toEqual(['complete', []]);
+  });
+
+  it('M: a link\'s β is never a row figure — β-only change → no row + partial; presence rows carry no figure', () => {
+    const run = (a: RunInputSnapshot, b: RunInputSnapshot) => {
+      const out = buildRunDelta({ priorFacts: [
+        fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: b }),
+        fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: a }),
+      ], mayNameLeadingOption: true });
+      expect(out.kind).toBe('ok');
+      return out.kind === 'ok' ? out.delta : null;
+    };
+    const beta = run(snap(), snap({ links: [{ from: 'fac_price', to: 'fac_churn', mean: 0.5 }] }));
+    expect([beta?.input_coverage, beta?.input_changes]).toEqual(['partial', []]);
+    expect(JSON.stringify(beta)).not.toMatch(/"raw":0\.[45]\b/);
+    // Controls: a link added / removed is a presence row with no figure; the authored option row stays complete.
+    const added = run(snap({ links: [] }), snap());
+    expect(added?.input_changes).toEqual([{ entity_kind: 'link', entity_id: 'fac_price->fac_churn', link: { from: 'fac_price', to: 'fac_churn' },
+      field: 'presence', before: null, after: { raw: true }, change: 'added' }]);
+    expect(added?.input_coverage).toBe('complete');
+    const removed = run(snap(), snap({ links: [] }));
+    expect(removed?.input_changes?.map((r) => [r.field, r.change, r.before, r.after])).toEqual([['presence', 'removed', { raw: true }, null]]);
+    const option = run(snap({}, 59), snap({}, 60));
+    expect([option?.input_coverage, option?.input_changes?.map((r) => [r.entity_kind, r.before, r.after])])
+      .toEqual(['complete', [['option_setting', { raw: 59, unit: 'GBP' }, { raw: 60, unit: 'GBP' }]]]);
+    expect(RunDeltaSchema.safeParse(added).success && RunDeltaSchema.safeParse(beta).success).toBe(true);
   });
 });

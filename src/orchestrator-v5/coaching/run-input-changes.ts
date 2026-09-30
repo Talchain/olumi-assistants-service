@@ -11,8 +11,9 @@
  * RULES
  *   - A row carries AUTHORED figures only (`raw` + `unit`, the user's units). A consumer prints `raw` verbatim as the
  *     user's figure, so the number PLoT received (`encoded`) never enters a row (AIQ + P0 SHARED DATA on #2378).
- *   - A sent input that changed but cannot be stated that way (an end with no authored figure, a link's spread or
- *     existence probability, a goal/limit frame, a baseline flag, a limit's node) is NOT a row: it makes the diff
+ *   - A sent input that changed but cannot be stated that way (an end with no authored figure, any of a link's
+ *     engine numbers — mean, spread, existence probability — a goal/limit frame, a baseline flag, a limit's node) is
+ *     NOT a row: it makes the diff
  *     INCOMPLETE, and the delta says `input_coverage: 'partial'` — never "complete" over a change it could not show.
  *   - A label-only difference is never a row; a unit or kind difference is.
  *   - A status-quo setting CEE HELD at the factor's current value on BOTH Runs is not an option edit — the factor-value
@@ -177,13 +178,19 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     const pl = pL.get(id);
     const cl = cL.get(id);
     const ends = (pl ?? cl) as { from: string; to: string };
-    push(changeRow(
-      { entity_kind: 'link', entity_id: id, link: { from: ends.from, to: ends.to }, field: 'strength' },
-      pl ? { raw: pl.mean } : null,
-      cl ? { raw: cl.mean } : null,
-    ));
-    // A link's spread or existence probability has no row kind yet (AIQ owns that wording): the pair is partial.
-    if (pl !== undefined && cl !== undefined && (pl.std !== cl.std || pl.exists_probability !== cl.exists_probability)) complete = false;
+    if (pl === undefined || cl === undefined) {
+      // A link entered or left the model: a PRESENCE row, with no figure (the same marker an option's presence uses).
+      push(changeRow(
+        { entity_kind: 'link', entity_id: id, link: { from: ends.from, to: ends.to }, field: 'presence' },
+        pl ? { raw: true } : null,
+        cl ? { raw: true } : null,
+      ));
+      continue;
+    }
+    // A link's mean, spread and existence probability are the ENGINE's numbers on the model scale — the user never
+    // wrote them and they carry no unit. None is a row figure (AIQ 5918134795, the class rule already applied to
+    // `encoded`): any of them changing makes the pair partial.
+    if (pl.mean !== cl.mean || pl.std !== cl.std || pl.exists_probability !== cl.exists_probability) complete = false;
   }
 
   return { rows, complete };
