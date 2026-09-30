@@ -124,15 +124,23 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
     expect(node(g, 'pro_plan_mrr').nonlinear_identity).toStrictEqual({ operation: 'product', factor_ids: ['pro_plan_price', 'paying_subscribers'], stated_in_brief: false });
     expect([node(g, 'other_plan_mrr').observed_state.raw_value, node(g, 'other_plan_mrr').observed_state.source]).toStrictEqual([1500, 'cee_inference']);
   });
+  // ⛔ AIQ 5905919190 (rule 5904836575) SUPERSEDES 5892754930 (3) FOR A GAP PLUG: Olumi's £1,500 here is sized to close the
+  // gap (£75,000 − £49 × 1,500), so "that gives your £75,000" is circular and a Yes would build the plug into the goal.
+  // The served graph therefore gets NO card; new drafts drop the plug at construction (#2341 / #2343) and get it.
+  it('NO CARD (AIQ 5905919190): the served graph — Olumi\'s £1,500 beside the carrier is the gap plug', () => {
+    expect(proposeProductIdentity(beside())).toBeNull();
+  });
+  // The carrier card itself (5892754930 (3)), bound on the same bytes with the £1,500 as the USER's figure.
   it('RED: the card on the CARRIER, its own two factors, the user\'s arithmetic against the goal\'s £75,000', () => {
     const g = beside();
+    node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction';
     const label = (id: string): string => node(g, id).label;
     expect(proposeProductIdentity(g)).toStrictEqual({
       outcome_id: 'pro_plan_mrr',
       operation: 'product',
       factor_ids: ['pro_plan_price', 'paying_subscribers'],
       // AIQ 5892754930 (3): the Yes makes MRR the carrier PLUS its other parent, so the card names it and whose figure it is.
-      words: `Is “${label('pro_plan_mrr')}” your “${label('pro_plan_price')}” × “${label('paying_subscribers')}”? £49 × 1,500 = £73,500; with “${label('other_plan_mrr')}” (Olumi's estimate, £1,500) that gives your £75,000 “${label('mrr')}”. If yes, Olumi will calculate “${label('pro_plan_mrr')}” that way, and you can run the analysis again.`,
+      words: `Is “${label('pro_plan_mrr')}” your “${label('pro_plan_price')}” × “${label('paying_subscribers')}”? £49 × 1,500 = £73,500; with “${label('other_plan_mrr')}” (your figure, £1,500) that gives your £75,000 “${label('mrr')}”. If yes, Olumi will calculate “${label('pro_plan_mrr')}” that way, and you can run the analysis again.`,
     });
     expect(proposeProductIdentity(g)!.words.length).toBeLessThanOrEqual(CARD_WORDS_MAX);
   });
@@ -143,7 +151,8 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
     ['the other parent has no figure (and so no unit)', (g) => { delete node(g, 'other_plan_mrr').observed_state; }, ', close to your £75,000 “MRR”, which also depends on “Other-plan MRR” (no figure yet).'],
     ['the other parent has no figure yet, in the goal\'s own terms (£/month)', (g) => { node(g, 'other_plan_mrr').observed_state = { unit: '£/month' }; }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (no figure yet).'],
     ['the figures do not add up to the goal (£10,000 beside £73,500)', (g) => { node(g, 'other_plan_mrr').observed_state.raw_value = 10000; }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate, £10,000).'],
-    ['two other parents', (g) => { g.edges.push({ ...g.edges.find((e: Json) => e.from === 'other_plan_mrr' && e.to === 'mrr'), id: 'churn_to_mrr', from: 'monthly_churn_rate' }); }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (Olumi\'s estimate, £1,500) (and 1 more).'],
+    // The £1,500 made the USER's (not AIQ 5905919190's gap plug), so the row still binds the "(and 1 more)" wording.
+    ['two other parents', (g) => { node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction'; g.edges.push({ ...g.edges.find((e: Json) => e.from === 'other_plan_mrr' && e.to === 'mrr'), id: 'churn_to_mrr', from: 'monthly_churn_rate' }); }, ', close to your £75,000 “MRR”, which also adds “Other-plan MRR” (your figure, £1,500) (and 1 more).'],
   ])('WORDS: %s', (_why, change, clause) => {
     const g = beside();
     change(g);
@@ -184,8 +193,10 @@ describe('a card-domain carrier BESIDE another goal parent (the 1/19 served dead
     ['a period-less £ on a node NAMED for its period ("Other-plan MRR")', '£'],
   ])('CONTROL — the same period, so the sum is said: %s', (_why, unit) => {
     const g = beside();
+    // The USER's £1,500 (Olumi's would be AIQ 5905919190's gap plug: no card), so the row still binds the period reading.
+    node(g, 'other_plan_mrr').observed_state.source = 'brief_extraction';
     node(g, 'other_plan_mrr').observed_state.unit = unit;
-    expect(proposeProductIdentity(g)?.words).toContain('£49 × 1,500 = £73,500; with “Other-plan MRR” (Olumi\'s estimate, £1,500) that gives your £75,000 “MRR”. If yes,');
+    expect(proposeProductIdentity(g)?.words).toContain('£49 × 1,500 = £73,500; with “Other-plan MRR” (your figure, £1,500) that gives your £75,000 “MRR”. If yes,');
   });
   it('the card is not a write: the graph is byte-identical after it', () => {
     const g = beside();
