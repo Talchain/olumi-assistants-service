@@ -318,6 +318,12 @@ export interface HandlerInvocation {
    */
   readonly statedConstraintOperator?: import('../agent-lane/admit-constraint.js').CandidateOperator;
   /**
+   * ⭐ DR row 1 (DL #75 5918381864; AIQ 5918365996; R3 5918409192): set ONLY by the user's APPROVED goal target card
+   * (`goal-target-edit.ts`). The comparator of the goal's own target row is then held on the goal node too
+   * (`goal_direction`): one statement, one carrier. Absent (every other caller): the goal's direction is untouched.
+   */
+  readonly holdsGoalDirection?: true;
+  /**
    * Exact persisted edge identity for the strict `edge_strength_edit` adapter.
    *
    * The legacy natural-language lane addresses an edge with a composite
