@@ -10,6 +10,7 @@ import type { CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
+import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
 
 type Json = Record<string, any>;
 type Graph = { nodes: Json[]; edges: Json[] };
@@ -47,14 +48,25 @@ const edge = (g: Graph, from: string, to: string) => g.edges.some((e) => e.from 
 describe('Olumi’s risk straight into MRR = price × subscribers moves it through subscribers, said (b3d11a92)', () => {
   // R3 5906397501 / AIQ 5906413249 (a): D0 already carries the price's effect on subscribers through churn, which IS the
   // backlash mechanism, so re-pointing would count it a third time.
-  it('RED (a): the price already reaches subscribers (via churn) → the direct link is dropped with the risk, said, and the card', async () => {
+  // ⛔ SUPERSEDED "dropped with the risk" (DL 5916217417: a figure rule withholds FIGURES, it never removes STRUCTURE).
+  it('RED (a): the price already reaches subscribers (via churn) → the risk KEEPS its node and link, is kept out of the calculation, said, and the card', async () => {
     const { graph, out } = await build(m9());
-    expect(edge(graph, 'Customer backlash', 'GOAL')).toBe(false);
+    const risk = graph.nodes.find((n) => n.label === 'Customer backlash');
+    expect(risk, 'the risk stays on the model').toBeDefined();
+    expect(risk!.kind).toBe('risk');
+    expect(risk!.analysis_participation).toBe('retained_excluded');
+    expect(edge(graph, 'Customer backlash', 'GOAL'), 'its link is kept as drafted').toBe(true);
     expect(edge(graph, 'Customer backlash', 'Paying subscribers')).toBe(false);
-    // Left with no link out, admission would re-link it to MRR (risk repair); it goes, and the line names it.
-    expect(idOf(graph, 'Customer backlash')).toBeUndefined();
-    expect(JSON.stringify(out)).toContain('I had ‘Customer backlash’ moving ‘MRR’ directly; with ‘MRR’ read as ‘Pro plan monthly price’ × ‘Paying subscribers’, the effect of ‘Pro plan monthly price’ on ‘Paying subscribers’ is already in the model through ‘Monthly churn’, so I haven\'t added it again, and I\'ve taken ‘Customer backlash’ out of the model.');
+    expect(JSON.stringify(out)).toContain('I had ‘Customer backlash’ moving ‘MRR’ directly; with ‘MRR’ read as ‘Pro plan monthly price’ × ‘Paying subscribers’, the effect of ‘Pro plan monthly price’ on ‘Paying subscribers’ is already in the model through ‘Monthly churn’, so I\'ve kept ‘Customer backlash’ in the model but out of the calculation, so it isn\'t counted twice.');
+    expect(JSON.stringify(out)).not.toContain('out of the model');
     expect(proposeProductIdentity(graph)).not.toBeNull();
+    // What the analysis receives: the run guard takes the risk and its link out, so MRR has exactly its two parts.
+    const guarded = guardAnalysisParticipation(graph);
+    expect(guarded.excludedNodeIds).toEqual([risk!.id]);
+    const g = guarded.graph as Graph;
+    expect(g.nodes.some((n) => n.id === risk!.id)).toBe(false);
+    expect(g.edges.filter((e) => e.to === goalId(g)).map((e) => e.from).sort())
+      .toEqual([idOf(g, 'Paying subscribers'), idOf(g, 'Pro plan monthly price')].sort());
   });
 
   it('RED (b): with NO price → subscribers route, the unsized link is re-pointed to the count, said, and the card', async () => {

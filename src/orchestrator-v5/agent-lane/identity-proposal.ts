@@ -105,7 +105,9 @@ function goalAndParents(graph: unknown): { goal: Rec2; goalId: string; goalLabel
   if (goalId === undefined || goalLabel === undefined || o === null) return null;
   const byId = new Map(nodes.flatMap((n) => (typeof n.id === 'string' ? [[n.id, n] as const] : [])));
   const parentIds = [...new Set(edges.filter((e) => e.to === goalId && typeof e.from === 'string').map((e) => e.from as string))]
-    .filter((id) => { const k = byId.get(id)?.kind; return k !== 'option' && k !== 'decision'; });
+    // A node kept out of the calculation (`retained_excluded`) is not a parent the analysis sees: the run guard hands PLoT
+    // the model without it and its links (DL 5916217417), so the card reads the same parents the analysis does.
+    .filter((id) => { const n = byId.get(id); return n?.kind !== 'option' && n?.kind !== 'decision' && n?.analysis_participation !== 'retained_excluded'; });
   return { goal, goalId, goalLabel, o, byId, parentIds, edges };
 }
 
