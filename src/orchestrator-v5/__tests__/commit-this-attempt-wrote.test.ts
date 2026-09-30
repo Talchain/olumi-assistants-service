@@ -104,6 +104,9 @@ function composed() {
 }
 
 const meta = (graph?: unknown) => ({
+  // The graph this write replaces, as the executor passes it (`refBaseGraph`, #2357 B1): the stable-ref allocator
+  // needs no read of its own, so `loadGraph` below stays the authoritative REREAD this file is about.
+  refBaseGraph: graphAt(STORED),
   scenario_id: SCENARIO_ID,
   turn_id: TURN_ID,
   turn_class: 'direct_answer' as const,

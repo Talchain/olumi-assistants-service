@@ -168,8 +168,8 @@ answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
     expect(opt.interventions).toEqual(PROMOTED_OPT_HYBRID_INTERVENTIONS);
     expect(opt.data).toBeUndefined();
 
-    // (3) Draft-created option is byte-equivalent
-    expect(JSON.stringify(nodeById(persisted, 'opt_draft'))).toBe(JSON.stringify(draftOption()));
+    // (3) Draft-created option is byte-equivalent, but for the stable ref a first write gets (#2357 B1)
+    expect(JSON.stringify(nodeById(persisted, 'opt_draft'))).toBe(JSON.stringify({ ...draftOption(), ref: 'O1' }));
 
     // input graph not mutated (both repairs deep-clone)
     expect('intercept' in nodeById(g, 'fac_root_dup')).toBe(true);
@@ -215,8 +215,8 @@ answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
       const opt = readiness!.options.find((o) => o.option_id === 'opt_inhouse_capacity')!;
       expect(opt.status).toBe('needs_encoding');
     }
-    // (4) draft option byte-equivalent; input not mutated
-    expect(JSON.stringify(nodeById(persisted, 'opt_draft'))).toBe(JSON.stringify(draftOption()));
+    // (4) draft option byte-equivalent (but for its first-write stable ref, #2357 B1); input not mutated
+    expect(JSON.stringify(nodeById(persisted, 'opt_draft'))).toBe(JSON.stringify({ ...draftOption(), ref: 'O1' }));
     expect((g.nodes.find((n) => n.id === 'opt_inhouse_capacity') as AnyNode).interventions).toBeNull();
   });
 
