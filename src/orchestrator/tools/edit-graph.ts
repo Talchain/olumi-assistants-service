@@ -98,7 +98,7 @@ import {
 import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
 import { shouldHandOffProposeToLlmLane, resolveClauseLabel } from "./propose-handoff.js";
 import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
-import { encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
+import { clearInheritedInterventionSourceQuotes, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
@@ -3971,8 +3971,9 @@ export async function handleEditGraph(
           diagnostics(),
         );
       }
-      if (encoded.graph !== appliedGraph) {
-        appliedGraph = encoded.graph as GraphV3T;
+      const truthfullyQuoted = clearInheritedInterventionSourceQuotes(context.graph, encoded.graph);
+      if (truthfullyQuoted !== appliedGraph) {
+        appliedGraph = truthfullyQuoted as GraphV3T;
         appliedGraphHash = computeGraphHash(appliedGraph);
       }
     }

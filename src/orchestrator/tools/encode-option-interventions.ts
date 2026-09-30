@@ -30,6 +30,7 @@
  * (which still runs at commit as a safety net).
  */
 import { normaliseFactorValue } from '../../orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.js';
+import { isDeepStrictEqual } from 'node:util';
 import { OBSERVED_ROOT_SPELLINGS } from '../canonicalise-value-ops.js';
 import { log } from '../../utils/telemetry.js';
 
@@ -447,6 +448,51 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   if (rec.value_confidence !== undefined) iv.value_confidence = rec.value_confidence;
   if (rec.reasoning !== undefined) iv.reasoning = rec.reasoning;
   return iv;
+}
+
+/**
+ * A whole-map `update_node` can replace an already numeric intervention without
+ * entering `buildInterventionV3`. Clear only a quote copied from the persisted
+ * OLD cell when the figure changed; a newly supplied quote remains the user's
+ * evidence, and a same-value repeat leaves the original quote alone.
+ */
+export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after: T): T {
+  if (!isPlainObject(before) || !Array.isArray(before.nodes)
+    || !isPlainObject(after) || !Array.isArray(after.nodes)) return after;
+  const priorOptions = new Map<string, Dict>();
+  for (const node of before.nodes) {
+    if (isPlainObject(node) && node.kind === 'option' && typeof node.id === 'string') priorOptions.set(node.id, node);
+  }
+  let updatedNodes: Dict[] | undefined;
+  const afterNodes = after.nodes as Dict[];
+  for (let index = 0; index < afterNodes.length; index += 1) {
+    const node = afterNodes[index];
+    if (!isPlainObject(node) || node.kind !== 'option' || typeof node.id !== 'string'
+      || !isPlainObject(node.interventions)) continue;
+    const prior = priorOptions.get(node.id);
+    if (!prior || !isPlainObject(prior.interventions)) continue;
+    let updatedInterventions: Dict | undefined;
+    for (const [factorId, cell] of Object.entries(node.interventions)) {
+      const oldCell = prior.interventions[factorId];
+      if (!isPlainObject(cell) || !isPlainObject(oldCell)
+        || typeof cell.source_quote !== 'string' || cell.source_quote !== oldCell.source_quote) continue;
+      const figureChanged = cell.value !== oldCell.value
+        || (cell.raw_value !== undefined && oldCell.raw_value !== undefined && !isDeepStrictEqual(cell.raw_value, oldCell.raw_value))
+        || (cell.unit !== undefined && oldCell.unit !== undefined && cell.unit !== oldCell.unit)
+        || (cell.cap !== undefined && oldCell.cap !== undefined && cell.cap !== oldCell.cap)
+        || (cell.value_type !== undefined && oldCell.value_type !== undefined && cell.value_type !== oldCell.value_type)
+        || (cell.encoding_map !== undefined && oldCell.encoding_map !== undefined && !isDeepStrictEqual(cell.encoding_map, oldCell.encoding_map));
+      if (!figureChanged) continue;
+      const { source_quote: _staleQuote, ...withoutStaleQuote } = cell;
+      updatedInterventions ??= { ...node.interventions };
+      updatedInterventions[factorId] = withoutStaleQuote;
+    }
+    if (updatedInterventions !== undefined) {
+      updatedNodes ??= [...afterNodes];
+      updatedNodes[index] = { ...node, interventions: updatedInterventions };
+    }
+  }
+  return updatedNodes === undefined ? after : { ...after, nodes: updatedNodes } as T;
 }
 
 /**
