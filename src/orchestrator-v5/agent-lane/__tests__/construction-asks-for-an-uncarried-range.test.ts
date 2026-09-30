@@ -119,6 +119,38 @@ describe('A4 guarantee: a written money range no link carries is asked of the re
     expect(dealLink(graph)).toBeUndefined();
   });
 
+  // ⛔ CODEX CEE BUDDY 5921470248: a frame in another unit once "held" £1m (plausible_max 1000 on an hours factor).
+  it('RED (CODEX collision): an unrelated hours factor with plausible_max 1000 does not hide the range — still asked and adopted', async () => {
+    const collide = (d: Record<string, any>) => ({ ...d, factors: d.factors.map((f: { label: string }) => f.label === 'Hours per week on angel outreach' ? { ...f, plausible_max: 1000 } : f) });
+    const { graph, inputs } = await build([collide(servedFirstDraft()), collide(repairedDraft())]);
+    expect(inputs).toHaveLength(2);
+    expect(dealLink(graph)?.provenance?.natural_effect?.stated_range?.end).toBe('low');
+  });
+
+  it('RED (CODEX collision, both ends): frames of 1000 AND 2000 on hours factors never hold "£1-2 million" — still asked', async () => {
+    const collide = (d: Record<string, any>) => ({ ...d, factors: d.factors.map((f: { label: string }) =>
+      f.label === 'Hours per week on angel outreach' ? { ...f, plausible_max: 1000 } : { ...f, plausible_max: 2000 }) });
+    const { inputs } = await build([collide(servedFirstDraft()), collide(repairedDraft())]);
+    expect(inputs).toHaveLength(2);
+  });
+
+  it('RED (another quantity): a £1m GOAL target holds one end only — the range is still asked', async () => {
+    const at1m = (d: Record<string, any>) => ({ ...d, goal: { ...d.goal, value: 1000000 } });
+    const { inputs } = await build([at1m(servedFirstDraft()), at1m(repairedDraft())], BRIEF.replace('at least £1.2m', 'at least £1m'));
+    expect(inputs).toHaveLength(2);
+  });
+
+  it('CONTROL (price levels): a price range whose BOTH ends are the options\' £ levels is held → ONE call', async () => {
+    const priced = servedFirstDraft() as Record<string, any>;
+    priced.factors = [...priced.factors, { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: '£', provenance: 'explicit', plausible_max: 200 }];
+    priced.options = [...priced.options, { label: 'Raise the price to £59', provenance: 'explicit', changes: [], is_status_quo: null, interventions: [
+      { factor_label: 'Pro plan price', value: 59, value_kind: 'absolute', unit: '£', provenance: 'explicit' },
+    ] }];
+    priced.links = [...priced.links, link('Pro plan price', 'securing funding')];
+    const { inputs } = await build([priced], `${BRIEF.replace(' that do deals between £1-2 million', '')} We could price the Pro plan between £49 and £59.`);
+    expect(inputs).toHaveLength(1);
+  });
+
   it('CONTROL: a first draft that already carries the range → ONE call, no retry', async () => {
     const { inputs, graph } = await build([repairedDraft()]);
     expect(inputs).toHaveLength(1);
