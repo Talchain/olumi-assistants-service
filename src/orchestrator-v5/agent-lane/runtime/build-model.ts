@@ -51,7 +51,7 @@ import {
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { LIMIT_OPERATOR_WORDS, writtenLimitFrame } from '../admit-constraint.js';
 import { isChangeFrame, limitNeedsTodaysLevel, sayLimitInFrame } from '../limit-frame.js';
-import { droppedGoalProductLine, unconfirmGoalProducts, withReconcilingProductIdentity, type DroppedGoalProduct } from '../reconciling-product.js';
+import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, withoutGapResidual, withReconcilingProductIdentity, type DroppedGoalProduct, type GapResidual } from '../reconciling-product.js';
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
@@ -1243,16 +1243,21 @@ export async function buildModelFromBrief(
   // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
   // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
   // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).
-  const mintOrFold = (c0: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null; dropped: DroppedGoalProduct[] } => {
+  const mintOrFold = (c0: CandidateModel): { model: CandidateModel; folded: FoldedCarrier | null; dropped: DroppedGoalProduct[]; residual: GapResidual | null } => {
     // FORK (iii) + AIQ 5892219245: a drafter-declared goal product is the drafter's reading, so it is demoted to Olumi's
     // first and waits for the user's Yes like the mint's, or dropped (and said) when its units don't compose.
-    const { model: c, dropped } = unconfirmGoalProducts(c0, brief);
+    const { model: c1, dropped } = unconfirmGoalProducts(c0, brief);
+    // ⛔ Olumi's gap residual beside the user's two parts is taken out first (and said), so the reading and card apply.
+    const gap = withoutGapResidual(c1, brief);
+    const c = gap?.model ?? c1;
+    const residual = gap?.residual ?? null;
     const minted = withReconcilingProductIdentity(c, brief);
-    return minted !== c ? { model: minted, folded: null, dropped } : { ...foldProductCarrierIntoGoal(c, brief), dropped };
+    return minted !== c ? { model: minted, folded: null, dropped, residual } : { ...foldProductCarrierIntoGoal(c, brief), dropped, residual };
   };
   const firstIdentity = mintOrFold(candidate);
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
+  let gapResidual = firstIdentity.residual;
   let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief));
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
@@ -1424,6 +1429,7 @@ export async function buildModelFromBrief(
           admitted = retryAdmitted;
           foldedCarrier = retryIdentity.folded;
           droppedProducts = retryIdentity.dropped;
+          gapResidual = retryIdentity.residual;
           keptApart = retryApart.renamed;
           notToldApart = retryApart.ambiguous;
           size = retrySize;
@@ -1508,6 +1514,16 @@ export async function buildModelFromBrief(
     };
   }
   // AIQ 5892219245 (3): a goal product whose units don't compose is not a reading at all; the draft's proposal is said.
+  // AIQ 5904406904: the gap residual's drop is SAID, never silent.
+  if (gapResidual !== null) {
+    const g = gapResidual;
+    admitted = {
+      ...admitted,
+      loss: [...admitted.loss, {
+        field_path: `nodes[${slugId(g.label)}].gap_residual`, before: { label: g.label, value: g.value }, after: null, reason: gapResidualLine(g), severity: 'warn',
+      } as AdmittedModel['loss'][number]],
+    };
+  }
   if (droppedProducts.length > 0) {
     admitted = {
       ...admitted,
@@ -1864,7 +1880,7 @@ export async function buildModelFromBrief(
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|folded_into_goal)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };
