@@ -366,4 +366,38 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     expect(t2.assistant_text, t2.assistant_text).toContain('Its level today (£0) was not recorded');
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(/level today is recorded/);
   }, 180_000);
+
+  // ⛔ AIQ CHANGES_REQUIRED on #2373: the level must be bound to the GOAL, in the target's own statement. Paul's exact
+  // answer (R3 `accept-paul.mjs` ANSWER) holds three £ amounts; only the one written as the goal's level today may ride.
+  const PAUL = 'We have about £180k in the bank and spend roughly £45k a month, so about 4 months of runway. We have secured £0 so far and need at least £1 million.';
+  const fundingSeed = () => {
+    const g = seedGraph() as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[]; goal_node_id: string };
+    return {
+      ...g,
+      nodes: g.nodes.map((n) => (n.id === 'goal_mrr' ? { id: 'goal_mrr', kind: 'goal', label: 'securing funding', goal_threshold_unit: '£' } : n)),
+    };
+  };
+  const proposeFunding = (today: number) => {
+    script = [
+      () => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 1000000, unit: '£', rationale: 'Paul stated his target.', current_level: { value: today, unit: '£' } }),
+      () => say('Shall I record it?'),
+    ];
+    return turn({ message: PAUL });
+  };
+  for (const [today, name] of [[180000, 'cash in the bank (£180k)'], [45000, 'monthly spend (£45k)']] as const) {
+    it(`RED: Paul's answer — ${name} as today's level → refused, NOTHING prepared`, async () => {
+      graphOf.set(SCENARIO, fundingSeed());
+      const t1 = await proposeFunding(today);
+      const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+      expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'current_level_not_bound' }));
+      expect(approveChipOf(t1)).toEqual([]);
+    }, 180_000);
+  }
+  it('CONTROL: Paul\'s answer — his stated £0 secured rides the target card (the positive control)', async () => {
+    graphOf.set(SCENARIO, fundingSeed());
+    const t1 = await proposeFunding(0);
+    const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+    expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(approveChipOf(t1)).toHaveLength(1);
+  }, 180_000);
 });

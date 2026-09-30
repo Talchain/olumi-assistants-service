@@ -3107,8 +3107,22 @@ export function createAgentCapabilities(
         }
         const inWords = statedGoalLevelInUsersWords(lv, lu, { label: goal.label, unit }, ctx.user_text);
         if (!inWords.ok) return { ok: false, mutated: false, refusal: inWords.refusal, detail: inWords.detail };
-        if (inWords.quote === null) return targetNotStated;
-        currentLevel = { value: inWords.raw, unit, quote: inWords.quote };
+        /**
+         * ⛔ BOUND TO THE GOAL, IN THE TARGET'S OWN STATEMENT (AIQ CHANGES_REQUIRED on #2373; the #2275 authorship-door
+         * class). Paul's answer holds three £ amounts — "about £180k in the bank … roughly £45k a month … secured £0 so far
+         * and need at least £1 million" — and each passed the words rule, so only the model's choice kept cash in the bank
+         * from being stored as his funding secured. The level must be written (a) in the SAME sentence as the target
+         * figure, and (b) about this goal, strictly (`figureTheUserWroteFor`, the target's own scope). Every miss refuses
+         * the card: the Agent offers the target alone, with no promise.
+         */
+        const sameStatement = inWords.quote !== null && figureTheUserWrote(value, unit, inWords.quote);
+        const aboutTheGoal = figureTheUserWroteFor(inWords.raw, unit, ctx.user_text, { ...scopeIn(g, goal.label), strict: true });
+        if (!sameStatement || !aboutTheGoal) {
+          return { ok: false, mutated: false, refusal: 'current_level_not_bound',
+            detail: `${targetFigure(inWords.raw, unit)} is not written as today's level of "${goal.label}" in the same statement as its target, `
+              + 'so nothing was prepared. Offer the target on its own, and never say today’s level will be recorded.' };
+        }
+        currentLevel = { value: inWords.raw, unit, quote: inWords.quote! };
       }
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
       const proposal = createProposal({
