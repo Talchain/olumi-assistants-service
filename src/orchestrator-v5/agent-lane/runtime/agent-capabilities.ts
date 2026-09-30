@@ -853,6 +853,14 @@ interface GraphRead {
   readonly goal_certainty?: readonly unknown[];
 }
 
+// An edited graph can still carry an earlier Run. Its old result must not be
+// given a display name derived from the new intervention level.
+function optionNameAliasesForCurrentRun(g: GraphRead): ReturnType<typeof optionNameAliases> {
+  const kind = (g.analysis_state as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
+  const resultHash = (g.analysis_result as { computed_against_hash?: unknown } | undefined)?.computed_against_hash;
+  return kind === 'complete_current' && resultHash === g.graph_hash ? optionNameAliases(g.raw) : new Map();
+}
+
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/…$/, '').trim();
 
 /**
@@ -1232,7 +1240,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   const chancePermitted = current && goalChance === undefined
     && claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
-  const optionNames = optionNameAliases(g.raw);
+  const optionNames = optionNameAliasesForCurrentRun(g);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
   const byId = new Map(decisions.flatMap((value) => {
     const row = rec(value);
@@ -2557,7 +2565,7 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const optionNames = optionNameAliases(g.raw);
+      const optionNames = optionNameAliasesForCurrentRun(g);
       return {
         ok: true,
         mutated: false,

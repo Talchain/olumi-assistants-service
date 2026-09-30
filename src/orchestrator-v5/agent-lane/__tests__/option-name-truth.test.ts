@@ -77,4 +77,24 @@ describe('Agent result option names are bound to the current stored level', () =
     });
     expect(result.enrichment.option_comparison[0]!.option_label).toBe('Raise to £59');
   });
+
+  it('does not attach the new £60 name to an earlier £59 Run after the edit makes it stale', async () => {
+    const previousRun = { computed_against_hash: 'before-edit', enrichment: { option_comparison: [
+      { option_id: 'raise', option_label: 'Raise to £59', outcome: { mean: 99 } },
+    ] } };
+    const dispatch: InternalDispatch = async () => ({ status: 200, json: {
+      graph: graph(), graph_hash: 'after-edit', analysis_result: previousRun,
+      analysis_state: { run_state: { kind: 'complete_stale', cause: 'graph_changed', graph_hash_at_run: 'before-edit' }, requires_rerun: true },
+    } });
+    const state = await createAgentCapabilities(dispatch, new ProposalStore()).getCanonicalState({
+      scenario_id: '7d18dd9a-5929-4b6e-8ca4-462a11489257', authenticated_user_id: null, request_id: 'name-truth-stale',
+    }) as Record<string, any>;
+    const option = state.entities.find((e: { id: string }) => e.id === 'raise');
+    expect(option.label).toBe('Raise to £59');
+    expect(option.levels).toBeDefined();
+    expect(option).not.toHaveProperty('display_label');
+    expect(state.analysis.earlier_analysis).toBe('complete_stale');
+    expect(state.analysis).not.toHaveProperty('saved_run_options');
+    expect(previousRun.enrichment.option_comparison[0]!.option_label).toBe('Raise to £59');
+  });
 });

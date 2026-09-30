@@ -14,6 +14,7 @@ const state = { run_state: { kind: 'complete_current', computed_at: '2026-09-30T
   leader_claim: { permitted: true, separation: 'separated' } };
 const writes: string[] = [];
 const modelRequests: unknown[] = [];
+let modelText = 'Raise Pro plan price from £49 to £59: 99% in this model.';
 const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null }>();
 const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
@@ -35,7 +36,7 @@ describe('Agent Run result names a changed option level without renaming the gra
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: string }) => {
       modelRequests.push(JSON.parse(String(init?.body ?? '{}')));
       return new Response(JSON.stringify({ output: [
-        { type: 'message', content: [{ type: 'output_text', text: 'Raise Pro plan price from £49 to £59: 99% in this model.' }] },
+        { type: 'message', content: [{ type: 'output_text', text: modelText }] },
       ] }), { status: 200 });
     }));
     vi.resetModules();
@@ -64,5 +65,25 @@ describe('Agent Run result names a changed option level without renaming the gra
     expect(writes.at(-1)).toContain('Raise Pro plan price from £49 to £59 (set to £60/month): 99%');
     expect(body.blocks[0]?.enrichment?.option_comparison?.[0]?.option_label).toBe('Raise Pro plan price from £49 to £59');
     expect(graph.nodes[2]!.label).toBe('Raise Pro plan price from £49 to £59');
+  });
+
+  it('does not bind the edited level to the earlier Run on a stale follow-up', async () => {
+    state.run_state.kind = 'complete_stale';
+    modelText = 'In the earlier analysis, Raise Pro plan price from £49 to £59: 99%.';
+    const priorRequests = modelRequests.length;
+    try {
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, message: 'What did the last analysis say?',
+        turn_id: '4382b44d-7672-4c9d-9f2b-2b76a2662329',
+      } });
+      expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+      const body = r.json() as { assistant_text: string };
+      expect(body.assistant_text).not.toContain('(set to £60/month)');
+      expect(JSON.stringify(modelRequests.slice(priorRequests))).not.toContain('(set to £60/month)');
+      expect(writes.at(-1)).not.toContain('(set to £60/month)');
+    } finally {
+      state.run_state.kind = 'complete_current';
+      modelText = 'Raise Pro plan price from £49 to £59: 99% in this model.';
+    }
   });
 });
