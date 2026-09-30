@@ -43,6 +43,12 @@ The frozen comparison path uses the existing pricing model, which can be changed
 
 For a fresh Lab model, the last Agent reply may offer **Suggest starting assumptions**, an approval card or **Run analysis**. The Lab carries those exact host offers without deriving them from readiness; Run requires the exact `agent-run-analysis` id and `run_analysis` type. Pressing an offer sends only its id through the existing bound chip path. Earlier offers are disabled after a new reply, failed turn or model change. After the Run, the Lab displays the returned `run_delta` block only when the current model is bound; otherwise it shows `analysis_ready.run_delta_absence_reason`, or “No verified before/after delta returned.” The Lab calculates no comparison and launches no extra Run. Check the offer and absence guards with `pnpm exec vitest run scripts/ai-experience-lab/run-offer.test.mjs`.
 
+## Selected M2 request prepared offline
+
+`selected-m2-request.mjs` prepares the Astra-high candidate without a network call. Its byte-pinned reference is M2-Q1's Astra request at programme-docs `9b441fcf`; only the current validated input and explicitly superseding v0.2 instructions change. The prompt SHA-256 is `079cb1808160561e14085d691322470c6982927ddb728015d81f78ebfec62e13`. Transport parity includes the exact strict `mm1_widening` schema and no output cap, temperature, top-p or tools. The existing `providerSchema` transport fix already matches the benchmark's typed `const` nodes; the pinned validator is unchanged.
+
+This is **offline preparation**, not M2 execution or a quality result. The active `callM2` still uses its earlier MM-1 configuration. Runtime's real-route gate and AIQ clearance are required before wiring the selected request. Check the preparation with `pnpm exec vitest run scripts/ai-experience-lab/selected-m2-request.test.mjs`.
+
 ## Start
 
 Install the existing locked dependencies. Run from this checkout:
