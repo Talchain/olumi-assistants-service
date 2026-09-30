@@ -64,6 +64,22 @@ function olumiGuess(e: Rec): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
   return p?.source !== 'user_specified' && ((typeof p?.magnitude === 'string' && OLUMI_SIZED.test(p.magnitude)) || e.defaulted === true);
 }
+/**
+ * ⭐ A link that holds BY DEFINITION is no Olumi guess (DL #75 5916504679; R3 5916525389): money lost to a risk is money
+ * the goal does not get, one for one. CHECKED on the stored edge, never claimed: construction's type
+ * (`provenance.definitional`, #2386, written only when its own size proves it) AND that size is exactly ±1 per unit in
+ * ONE unit AND the target's unit is that unit (the source's too, where its node carries one). Anything else stays a guess.
+ */
+function holdsByDefinition(e: Rec, unitOf: (id: unknown) => string | undefined): boolean {
+  const p = isRec(e.provenance) ? e.provenance : undefined;
+  const ne = isRec(p?.natural_effect) ? p!.natural_effect as Rec : undefined;
+  if (p?.definitional !== true || ne === undefined) return false;
+  if (!finite(ne.amount) || !finite(ne.per_source_change) || ne.per_source_change === 0 || Math.abs(ne.amount / ne.per_source_change) !== 1) return false;
+  const [amountUnit, sourceUnit] = [ne.amount_unit, ne.per_source_change_unit];
+  if (typeof amountUnit !== 'string' || typeof sourceUnit !== 'string' || amountUnit.trim() === '' || !sameUnit(amountUnit, sourceUnit)) return false;
+  const [from, to] = [unitOf(e.from), unitOf(e.to)];
+  return to !== undefined && sameUnit(to, amountUnit) && (from === undefined || sameUnit(from, amountUnit));
+}
 function sizedInGoalUnit(e: Rec, goalUnit: string | undefined): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
   const ne = isRec(p?.natural_effect) ? p!.natural_effect as Rec : undefined;
@@ -170,7 +186,15 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
     const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.stated_in_brief !== false).map((n) => n.id));
-    const guess = edges.find((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to) && olumiGuess(e));
+    const unitOf = (id: unknown): string | undefined => {
+      const n = nodes.find((x) => x.id === id);
+      const u = n === undefined ? undefined
+        : [n.unit, isRec(n.observed_state) ? n.observed_state.unit : undefined, n.kind === 'goal' ? n.goal_threshold_unit : undefined]
+          .find((x): x is string => typeof x === 'string' && x.trim() !== '');
+      return u;
+    };
+    const guess = edges.find((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
+      && olumiGuess(e) && !holdsByDefinition(e, unitOf));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     const unconverted = identityForwarded ? undefined : into.find((e) => !sizedInGoalUnit(e, goalUnit));
