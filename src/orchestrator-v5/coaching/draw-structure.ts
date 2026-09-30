@@ -21,8 +21,8 @@ const isZero = (v: unknown): boolean => v === 0;
  * The DRAW STRUCTURE of one recorded Run input (see the header). Sorted, so key order never matters. Values other
  * than 0 are NOT in the key: a value edit is exactly what C1 attributes.
  */
-export function drawStructureKey(snapshot: RunInputSnapshot): string {
-  const s = snapshot as unknown as Record<string, unknown>;
+export function drawStructureKey(snapshot: RunInputSnapshot | Readonly<Record<string, unknown>>): string {
+  const s: Readonly<Record<string, unknown>> = snapshot;
   const options = Array.isArray(s.options) ? s.options.filter(isRec) : [];
   const optionIds: string[] = [];
   const settingKeys: string[] = [];
@@ -71,5 +71,5 @@ export function drawStructureKey(snapshot: RunInputSnapshot): string {
 /** The draw-structure key of a Run fact's recorded input, or null for a Run that recorded none (legacy). */
 export function drawStructureKeyOfFact(fact: HandlerFact): string | null {
   const result = (fact as { result?: unknown }).result;
-  return isRec(result) && isRec(result.input_snapshot) ? drawStructureKey(result.input_snapshot as unknown as RunInputSnapshot) : null;
+  return isRec(result) && isRec(result.input_snapshot) ? drawStructureKey(result.input_snapshot) : null;
 }
