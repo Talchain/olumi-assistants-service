@@ -35,7 +35,8 @@ export type ExtraParentOfProductGoal =
   | { readonly kind: 'rerouted'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string;
       readonly amount: number; readonly per: number; readonly converted: number; readonly rateLevel: number;
       readonly goalUnit: string; readonly fromUnit: string; readonly volumeUnit: string; readonly rateUnit: string }
-  | { readonly kind: 'rerouted_unsized'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string };
+  | { readonly kind: 'rerouted_unsized'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string }
+  | { readonly kind: 'dropped_already_carried'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string; readonly via: readonly string[] };
 
 const key = (s: string): string => s.trim().toLowerCase();
 const CODES = new Set(Object.values(CURRENCY_SYMBOL_TO_CODE).map((c) => c.toUpperCase()));
@@ -71,8 +72,25 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
     }
     return undefined;
   };
+  /** The price's own routes to the count that do not pass through `risk` or the goal: each first step's label. */
+  const rateRoutesToVolume = (risk: string): string[] => {
+    if (rate === undefined || volume === undefined) return [];
+    const to = (at: string) => model.links.filter((c) => key(c.from) === at && key(c.to) !== key(risk) && key(c.to) !== goal);
+    const reachesVolume = (start: string): boolean => {
+      const seen = new Set<string>([start]);
+      const queue = [start];
+      while (queue.length > 0) {
+        const at = queue.shift()!;
+        if (at === key(volume.label)) return true;
+        for (const c of to(at)) if (!seen.has(key(c.to))) { seen.add(key(c.to)); queue.push(key(c.to)); }
+      }
+      return false;
+    };
+    return [...new Set(to(key(rate.label)).filter((c) => reachesVolume(key(c.to))).map((c) => c.to))];
+  };
   const found: ExtraParentOfProductGoal[] = [];
   const links: Link[] = [];
+  const dropped = new Set<string>();
   for (const l of model.links) {
     if (key(l.to) !== goal || operands.has(key(l.from))) { links.push(l); continue; }
     // A link the user stated (or sized) is theirs: never dropped or re-pointed here (AIQ 5902792262).
@@ -82,17 +100,28 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
     // mechanisms, not one counted twice, so it is left exactly as drafted. So is a money parent (an addend in the goal's
     // own terms) and anything that is not a factor (a risk): only a non-money factor's link is re-pointed.
     const from = factor(l.from);
-    // ⛔ AIQ 5906371639 (R3 share-build `b3d11a92`): Olumi's RISK straight into a goal read as rate × count ("Customer
-    // backlash" → MRR, beside MRR = price × subscribers) contradicts the identity. The price is the user's lever, so a risk
-    // that is a REACTION to it (every cause of the risk is the rate operand) can only move MRR through the count: its UNSIZED
-    // link is re-pointed there, still Olumi's and unsized, and said. A risk with any other cause (served journey C's "Budget
-    // overrun risk" ← "Total initiative spend": no demand channel), a sized link, one that already reaches an operand, or
-    // one the user stated is left exactly as drafted.
+    // ⛔ AIQ 5906413249 (amending 5906371639 to R3's science 5906397501; share-build `b3d11a92`): Olumi's RISK straight into a
+    // goal read as rate × count ("Customer backlash" → MRR, beside MRR = price × subscribers) contradicts the identity. The
+    // price is the user's lever, so a risk that is a REACTION to it (every cause of the risk is the rate operand) can only
+    // move MRR through the count. (a) If the price ALREADY reaches the count by another route (churn, new subscribers), that
+    // route IS the risk's mechanism: its direct link is DROPPED and said; re-pointing would count it a third time. (b) Only
+    // with no such route is its UNSIZED link re-pointed to the count, still Olumi's and unsized, and said. A risk with any
+    // other cause (served journey C's "Budget overrun risk" ← "Total initiative spend": no demand channel), a sized link,
+    // one that already reaches an operand, or one the user stated is left exactly as drafted.
     const risk = from === undefined && (model.risks ?? []).some((r) => key(r.label) === key(l.from));
     const causes = model.links.filter((c) => key(c.to) === key(l.from)).map((c) => key(c.from));
     const reactsToRate = rate !== undefined && causes.length > 0 && causes.every((c) => c === key(rate.label));
     if (risk && reactsToRate && reaches(l.from, l) === undefined && l.effect_provenance == null && !finite(l.effect_amount)
       && rate !== undefined && volume !== undefined && !isMoney(volume.unit)) {
+      const via = rateRoutesToVolume(l.from);
+      if (via.length > 0) {
+        // ⛔ A RISK LEFT WITH NO LINK OUT IS NOT KEPT "INFORMATIONAL": admission's risk repair re-links it to the goal
+        // (a third parent again, no card), and readiness withholds anything with no path to the goal. So when this was
+        // its only link out, the risk goes with it, and its one cause (the price) links to nothing new.
+        if (!model.links.some((c) => c !== l && key(c.from) === key(l.from))) dropped.add(key(l.from));
+        found.push({ kind: 'dropped_already_carried', from: l.from, goal: model.goal.metric, rate: rate.label, volume: volume.label, via });
+        continue;
+      }
       links.push({ ...l, to: volume.label });
       found.push({ kind: 'rerouted_unsized', from: l.from, goal: model.goal.metric, rate: rate.label, volume: volume.label });
       continue;
@@ -121,12 +150,20 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
       goalUnit: wholeUnit(model.goal.unit ?? '', goalU.currencyDisplay), fromUnit: factor(l.from)?.unit ?? '', volumeUnit: volume.unit ?? '',
       rateUnit: wholeUnit(rate.unit ?? '', rateU.currencyDisplay) });
   }
-  return found.length === 0 ? { model, found } : { model: { ...model, links } as M, found };
+  if (found.length === 0) return { model, found };
+  if (dropped.size === 0) return { model: { ...model, links } as M, found };
+  return { model: { ...model, links: links.filter((c) => !dropped.has(key(c.to))),
+    risks: (model.risks ?? []).filter((r) => !dropped.has(key(r.label))) } as M, found };
 }
 
 /** The one sentence each finding is said with (`not_represented`). */
 export function sayExtraParentOfProductGoal(f: ExtraParentOfProductGoal): string {
   // AIQ 5906371639's words: the move is said; nothing is sized.
+  if (f.kind === 'dropped_already_carried') {
+    const list = f.via.map((v) => `‘${v}’`).join(' and ');
+    return `I had ‘${f.from}’ moving ‘${f.goal}’ directly; with ‘${f.goal}’ read as ‘${f.rate}’ × ‘${f.volume}’, the price's effect on `
+      + `‘${f.volume}’ is already in the model through ${list}, so I haven't added it again.`;
+  }
   if (f.kind === 'rerouted_unsized') {
     return `I had ‘${f.from}’ moving ‘${f.goal}’ directly; with ‘${f.goal}’ read as ‘${f.rate}’ × ‘${f.volume}’ it now moves ‘${f.volume}’.`;
   }

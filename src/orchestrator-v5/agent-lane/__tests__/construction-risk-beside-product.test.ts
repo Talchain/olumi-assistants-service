@@ -45,12 +45,30 @@ const goalId = (g: Graph) => g.nodes.find((n) => n.kind === 'goal')!.id;
 const edge = (g: Graph, from: string, to: string) => g.edges.some((e) => e.from === idOf(g, from) && e.to === (to === 'GOAL' ? goalId(g) : idOf(g, to)));
 
 describe('Olumi’s risk straight into MRR = price × subscribers moves it through subscribers, said (b3d11a92)', () => {
-  it('RED: the risk now moves the count, the line is said, and the card applies', async () => {
+  // R3 5906397501 / AIQ 5906413249 (a): D0 already carries the price's effect on subscribers through churn, which IS the
+  // backlash mechanism, so re-pointing would count it a third time.
+  it('RED (a): the price already reaches subscribers (via churn) → the direct link is dropped with the risk, said, and the card', async () => {
     const { graph, out } = await build(m9());
+    expect(edge(graph, 'Customer backlash', 'GOAL')).toBe(false);
+    expect(edge(graph, 'Customer backlash', 'Paying subscribers')).toBe(false);
+    // Left with no link out, admission would re-link it to MRR (risk repair); it goes, and the line names it.
+    expect(idOf(graph, 'Customer backlash')).toBeUndefined();
+    expect(JSON.stringify(out)).toContain('I had ‘Customer backlash’ moving ‘MRR’ directly; with ‘MRR’ read as ‘Pro plan monthly price’ × ‘Paying subscribers’, the price\'s effect on ‘Paying subscribers’ is already in the model through ‘Monthly churn’, so I haven\'t added it again.');
+    expect(proposeProductIdentity(graph)).not.toBeNull();
+  });
+
+  it('RED (b): with NO price → subscribers route, the unsized link is re-pointed to the count, said, and the card', async () => {
+    const { graph, out } = await build(m9((c) => { c.links = c.links.filter((l: Json) => !(l.from === 'Pro plan monthly price' && l.to === 'Monthly churn')); }));
     expect(edge(graph, 'Customer backlash', 'GOAL')).toBe(false);
     expect(edge(graph, 'Customer backlash', 'Paying subscribers')).toBe(true);
     expect(JSON.stringify(out)).toContain('I had ‘Customer backlash’ moving ‘MRR’ directly; with ‘MRR’ read as ‘Pro plan monthly price’ × ‘Paying subscribers’ it now moves ‘Paying subscribers’.');
     expect(proposeProductIdentity(graph)).not.toBeNull();
+  });
+
+  it('CONTROL: a link the USER sized is theirs — left as drafted, no card', async () => {
+    const { graph } = await build(m9((c) => { Object.assign(c.links.find((l: Json) => l.from === 'Customer backlash' && l.to === 'MRR'), { effect_amount: -500, effect_per_source_change: 1, effect_provenance: 'explicit' }); }));
+    expect(edge(graph, 'Customer backlash', 'GOAL')).toBe(true);
+    expect(proposeProductIdentity(graph)).toBeNull();
   });
 
   it('CONTROL: a risk with a cause other than the price (served journey C\u2019s "Budget overrun risk" ← spend) is left as drafted', async () => {
