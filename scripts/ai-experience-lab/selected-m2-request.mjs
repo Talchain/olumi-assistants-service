@@ -1,4 +1,4 @@
-/** Offline preparation only. The active M2 call does not import or execute this candidate. */
+/** Byte-pinned selected M2 request for the branch-only Lab call and offline checks. */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { assertPinnedSource, currentM2Input } from './m2-runner.mjs';
@@ -9,7 +9,7 @@ export const SELECTED_M2_SOURCE = Object.freeze({
   request_sha256: '39b202cc48274c283206dee1e5504d5886178348ea6a6d59b9cf2587b13065c3',
   prompt_path: 'openai/prompts/olumi-poc/21-m2-polymath.v0_2.candidate.md',
   prompt_sha256: '079cb1808160561e14085d691322470c6982927ddb728015d81f78ebfec62e13',
-  status: 'offline_candidate_pending_real_route_gate',
+  status: 'selected_for_branch_lab',
 });
 
 function pinnedText(path, expected) {

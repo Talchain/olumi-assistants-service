@@ -1,7 +1,9 @@
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { assertPinnedSource, callM2, currentM2Input } from './m2-runner.mjs';
+import { armM2ChildTimeout, assertPinnedSource, callM2, currentM2Input,
+  M2_CHILD_TIMEOUT_MS, M2_REQUEST_TIMEOUT_MS } from './m2-runner.mjs';
+import { prepareSelectedM2Request, SELECTED_M2_SOURCE } from './selected-m2-request.mjs';
 
 const snapshot = () => ({ session_id: 'lab-1', brief: 'We need to improve MRR while customers may leave.',
   graph: { nodes: [{ id: 'mrr', kind: 'goal', label: 'MRR' }, { id: 'customers', kind: 'factor', label: 'Customers' }],
@@ -23,15 +25,36 @@ const proposal = () => ({ proposal_id: 'p1', proposal_type: 'hidden_assumption',
   how_to_test_or_explore: 'Ask what happened after earlier price changes.', affected_model_refs: ['customers'] });
 const fake = output => async (_url, request) => {
   const body = JSON.parse(request.body);
-  assert.equal(body.model, 'gpt-6-luna');
-  assert.equal(body.reasoning.effort, 'low');
+  assert.equal(request.signal instanceof AbortSignal, true);
+  assert.equal(request.signal.aborted, false);
+  assert.equal(body.model, 'gpt-6-astra');
+  assert.equal(body.reasoning.effort, 'high');
+  assert.equal(Object.hasOwn(body, 'max_output_tokens'), false);
   assert.equal(body.tools, undefined);
+  assert.equal(body.text.format.name, 'mm1_widening');
   assert.equal(body.text.format.strict, true);
   assert.equal(body.text.format.schema.properties.proposals.items.properties.evidence_pointers.items.anyOf[0].properties.kind.type, 'string');
   return { ok: true, status: 200, json: async () => ({ status: 'completed', output: [
     { type: 'message', content: [{ type: 'output_text', text: JSON.stringify(output) }] }],
     usage: { input_tokens: 100, output_tokens: 50 } }) };
 };
+
+test('the Lab host allows the bounded M2 request to finish before killing its child', () => {
+  let scheduled, expire, killed;
+  const timer = {};
+  const result = armM2ChildTimeout({ kill: signal => { killed = signal; } }, (callback, milliseconds) => {
+    expire = callback;
+    scheduled = milliseconds;
+    return timer;
+  });
+  assert.equal(result, timer);
+  assert.equal(scheduled, 245_000);
+  assert.equal(scheduled, M2_CHILD_TIMEOUT_MS);
+  assert.ok(scheduled > M2_REQUEST_TIMEOUT_MS);
+  assert.equal(killed, undefined);
+  expire();
+  assert.equal(killed, 'SIGTERM');
+});
 
 test('uses the exact pinned MM-1 contract; full model text affects content identity', () => {
   assertPinnedSource();
@@ -42,17 +65,25 @@ test('uses the exact pinned MM-1 contract; full model text affects content ident
 
 test('shows only a locatable provisional proposal, while preserving the model', async () => {
   const current = snapshot(), before = structuredClone(current);
-  let sentInstructions;
+  let sentBody;
+  const timeout = vi.spyOn(AbortSignal, 'timeout');
   const send = fake({ proposals: [proposal()] });
-  const result = await callM2(current, (url, request) => {
-    sentInstructions = JSON.parse(request.body).instructions;
-    return send(url, request);
-  });
+  let result;
+  try {
+    result = await callM2(current, (url, request) => {
+      sentBody = JSON.parse(request.body);
+      return send(url, request);
+    });
+    assert.deepEqual(timeout.mock.calls, [[M2_REQUEST_TIMEOUT_MS]]);
+  } finally { timeout.mockRestore(); }
   assert.equal(result.accepted, true);
   assert.equal(result.proposals.length, 1);
-  assert.equal(result.receipt.model, 'gpt-6-luna');
-  assert.match(sentInstructions, /Every proposal must use origin "olumi_hypothesis"/);
-  assert.equal(result.receipt.instruction_hash, createHash('sha256').update(sentInstructions).digest('hex'));
+  assert.deepEqual(sentBody, prepareSelectedM2Request(current).request);
+  assert.equal(result.receipt.model, 'gpt-6-astra');
+  assert.equal(result.receipt.effort, 'high');
+  assert.equal(result.receipt.instruction_hash, SELECTED_M2_SOURCE.prompt_sha256);
+  assert.equal(result.receipt.instruction_hash, createHash('sha256').update(sentBody.instructions).digest('hex'));
+  assert.deepEqual(result.receipt.selected_source, SELECTED_M2_SOURCE);
   assert.equal(Object.hasOwn(result.receipt, 'model_version_id'), false);
   assert.deepEqual(current, before);
 });

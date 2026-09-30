@@ -5,9 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { contentHash } from './pinned-runtime/artefact-runtime/canonical.ts';
 import { MM1_PROPOSAL_JSON_SCHEMA, validateMM1Output } from './pinned-runtime/artefact-runtime/evals/mm-1/package.ts';
-import { MM1_WIDENING_PROMPT, MM1_DIFFERENT_MODEL, MM1_EFFORT } from './pinned-runtime/artefact-runtime/evals/mm-1/sealed-provider-pack.ts';
 
 const source = 'Talchain/olumi-programme-docs@03897e41624f3c261c061f06efbf4daf52e5be24';
+export const M2_REQUEST_TIMEOUT_MS = 240_000;
+export const M2_CHILD_TIMEOUT_MS = 245_000;
+
+export function armM2ChildTimeout(child, schedule = setTimeout) {
+  return schedule(() => child.kill('SIGTERM'), M2_CHILD_TIMEOUT_MS);
+}
+
 const pinned = {
   './pinned-runtime/artefact-runtime/canonical.ts': '8db892f56a0af42220dda13011f09431ff80922eb784114e2b12e54267d06066',
   './pinned-runtime/artefact-runtime/evals/mm-1/package.ts': '6d28de2fcfd5d76484d5cfeee215952a32c02c00ae0b5983f89ee260349b573a',
@@ -91,24 +97,15 @@ export function validateM2Output(binding, output) {
 }
 
 export async function callM2(snapshot, send = fetch) {
-  assertPinnedSource();
-  const current = currentM2Input(snapshot);
-  const instructions = current.binding.evidence_refs.length === 0
-    ? `${MM1_WIDENING_PROMPT}\n\nLive binding: evidence_refs is empty. Every proposal must use origin "olumi_hypothesis"; do not label an idea evidence-derived. Cite only an exact brief span, a current model reference, or a specific graph absence, and keep each idea provisional.`
-    : MM1_WIDENING_PROMPT;
-  const request = {
-    model: MM1_DIFFERENT_MODEL,
-    instructions,
-    input: JSON.stringify(current.providerInput),
-    reasoning: { effort: MM1_EFFORT },
-    max_output_tokens: 3200,
-    text: { format: { type: 'json_schema', name: 'mm1_widening_proposals', strict: true,
-      schema: providerSchema(MM1_PROPOSAL_JSON_SCHEMA) } },
-  };
+  // Load after this module has initialised: the selected builder reuses this module's
+  // pinned MM-1 input guard and schema transport without creating a second authority.
+  const { prepareSelectedM2Request } = await import('./selected-m2-request.mjs');
+  const { request, current, source: selected_source } = prepareSelectedM2Request(snapshot);
   const started = Date.now();
   const response = await send('https://api.openai.com/v1/responses', {
     method: 'POST', headers: { authorization: `Bearer ${process.env.OPENAI_API_KEY ?? ''}`, 'content-type': 'application/json' },
-    body: JSON.stringify(request), signal: AbortSignal.timeout(60_000),
+    // The five selected Astra-high M2-Q1 calls took 105–170 seconds; keep one bounded call.
+    body: JSON.stringify(request), signal: AbortSignal.timeout(M2_REQUEST_TIMEOUT_MS),
   });
   const raw = await response.json();
   const latency_ms = Date.now() - started;
@@ -122,10 +119,10 @@ export async function callM2(snapshot, send = fetch) {
     : { accepted: false, errors: [response.ok ? `provider_${raw.status ?? 'incomplete'}` : `provider_http_${response.status}`], proposals: [] };
   return {
     accepted: verdict.accepted, proposals: verdict.proposals, errors: verdict.errors,
-    receipt: { mode: 'live_m2_read_only', source, session_id: current.session_id, model: request.model,
-      effort: MM1_EFFORT, input_hash: current.input_hash, graph_hash: current.graph_hash,
+    receipt: { mode: 'live_m2_read_only', source, selected_source, session_id: current.session_id, model: request.model,
+      effort: request.reasoning.effort, input_hash: current.input_hash, graph_hash: current.graph_hash,
       ...(current.canonical_receipt ?? {}),
-      instruction_hash: createHash('sha256').update(instructions).digest('hex'),
+      instruction_hash: createHash('sha256').update(request.instructions).digest('hex'),
       schema_hash: contentHash(MM1_PROPOSAL_JSON_SCHEMA), provider_schema_hash: contentHash(request.text.format.schema),
       request_input: current.providerInput,
       provider_status: response.status, provider_state: raw.status ?? null, latency_ms, usage: raw.usage ?? null,

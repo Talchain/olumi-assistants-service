@@ -120,6 +120,9 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     bindCanonicalM1(o: Record<string, unknown>): { accepted: boolean; withheld_reason?: string; binding?: Record<string, unknown> };
     settleCanonicalM2(o: Record<string, unknown>): { accepted: boolean; proposals: unknown[]; withheld_reason: string | null; receipt?: unknown };
   };
+  const { armM2ChildTimeout } = await import(pathToFileURL(resolve('scripts/ai-experience-lab/m2-runner.mjs')).href) as {
+    armM2ChildTimeout(child: ReturnType<typeof spawn>): ReturnType<typeof setTimeout>;
+  };
   // The served CEE is the authority, not this process: after a host restart a fresh scenario re-attaches by reading it
   // back (its owner's token decides whether it can be read at all).
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -234,7 +237,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       let output = '', diagnostics = '';
-      const timer = setTimeout(() => child.kill('SIGTERM'), 65_000);
+      const timer = armM2ChildTimeout(child);
       child.stdout.on('data', (part: Buffer) => { output += part.toString(); if (output.length > 2_000_000) child.kill('SIGTERM'); });
       child.stderr.on('data', (part: Buffer) => { diagnostics += part.toString(); if (diagnostics.length > 4_000) child.kill('SIGTERM'); });
       child.on('error', fail);

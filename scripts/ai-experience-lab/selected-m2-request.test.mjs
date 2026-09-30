@@ -21,7 +21,7 @@ test('selected M2 preparation preserves benchmark transport with only current in
   assert.equal(request.text.format.strict, true);
   assert.deepEqual(request.text.format.schema, providerSchema(MM1_PROPOSAL_JSON_SCHEMA));
   assert.equal(current.binding.evidence_refs.length, 0);
-  assert.equal(source.status, 'offline_candidate_pending_real_route_gate');
+  assert.equal(source.status, 'selected_for_branch_lab');
   assert.equal(source.prompt_sha256, SELECTED_M2_SOURCE.prompt_sha256);
   assert.deepEqual(input, before);
 });
