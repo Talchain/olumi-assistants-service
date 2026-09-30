@@ -2293,7 +2293,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     // PJ-C1 tokens: a pair the prune stubbed carries nothing, so it leaves with its reasoning (`dropSupersededPairs`).
     histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals,
-      { scenarioId, analysisState, analysisResult, analysisReady, goalCertainty })));
+      { scenarioId, analysisState, analysisResult, analysisReady, goalCertainty, graph: readbackGraph, identityEvaluated })));
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');

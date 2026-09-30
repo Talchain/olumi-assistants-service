@@ -3,6 +3,7 @@ import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretati
 import { analysisResultForAgent } from './decision-sensitivity.js';
 import { claimPermissionsFrom } from './first-analysis.js';
 import { goalCertaintyForAgent } from './goal-certainty-for-agent.js';
+import { withNonlinearIdentity } from './runtime/agent-capabilities.js';
 
 /**
  * Conversation history, bounded in both directions.
@@ -180,6 +181,9 @@ export interface KeptRunReadback {
   readonly analysisState?: unknown;
   readonly analysisResult?: unknown;
   readonly analysisReady?: unknown;
+  /** The same final graph read as the selected result, for the product-identity explanation. */
+  readonly graph?: unknown;
+  readonly identityEvaluated?: ReadonlySet<string>;
   /** The selected fact's stored decisions; absence is unrecorded, never permission to repeat an old certainty. */
   readonly goalCertainty?: readonly unknown[];
 }
@@ -413,7 +417,9 @@ function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec 
     return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
   }
   const ownPermission = recordOf(run.claim_permissions);
-  const selectedPermission = claimPermissionsFrom(readback.analysisState, readback.analysisReady, { requested: true });
+  const basePermission = claimPermissionsFrom(readback.analysisState, readback.analysisReady, { requested: true });
+  const selectedPermission = recordOf(basePermission.leader_may_be_named || readback.graph === undefined
+    ? basePermission : withNonlinearIdentity(basePermission, readback.graph, readback.identityEvaluated)) ?? basePermission;
   // The selected verdict also owns the withheld reason; an old reason is not a current explanation.
   if (ownPermission !== undefined && !isDeepStrictEqual(ownPermission, selectedPermission)) {
     return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);

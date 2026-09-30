@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { pruneSupersededToolOutputs, type KeptRunReadback } from '../history-store.js';
 import { GOAL_CERTAINTY_NOTE } from '../goal-certainty-for-agent.js';
+import { withNonlinearIdentity } from '../runtime/agent-capabilities.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440079';
 const HASH = '7b53bf0ada890991';
@@ -33,6 +35,8 @@ const run = {
   goal_certainty,
   run_identity: { scenario_id: SCENARIO, graph_hash_at_run: HASH, computed_at: RUN_AT },
 };
+const productGraph = (JSON.parse(readFileSync(new URL('./fixtures/served-paul-mrr-ed49d44.json', import.meta.url), 'utf8')) as
+  { runs: { run: number; graph: unknown }[] }).runs.find((item) => item.run === 1)!.graph;
 const readback = (computed_at = RUN_AT, kind = 'complete_current' as 'complete_current' | 'complete_stale') => ({
   scenarioId: SCENARIO,
   analysisState: { run_state: { kind, computed_at }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
@@ -98,6 +102,24 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
     expect(current.claim_permissions.withheld_reason).toBe('constraint_verdict_withheld');
     expect(current.stale).toBeUndefined();
     expect(JSON.stringify(projected(current, readback()))).toBe(JSON.stringify(current));
+  });
+
+  it('a current producer product-identity sidecar survives only while the selected saved graph still warrants it', () => {
+    const produced = withNonlinearIdentity(run.claim_permissions, productGraph) as Record<string, any>;
+    expect(produced.nonlinear_identity?.reason).toBe('nonlinear_identity_sign_unproven');
+    const withProduct = { ...run, claim_permissions: produced };
+    const current = projected(withProduct, { ...readback(), graph: productGraph });
+    expect(current.stale).toBeUndefined();
+    expect(current.result.option_comparison).toHaveLength(3);
+    expect(current.claim_permissions.nonlinear_identity).toEqual(produced.nonlinear_identity);
+    expect(projected(current, { ...readback(), graph: productGraph })).toEqual(current);
+
+    const engineEvaluated = projected(withProduct, {
+      ...readback(), graph: productGraph, identityEvaluated: new Set(['mrr']),
+    });
+    expect(engineEvaluated.stale).toBe(true);
+    expect(engineEvaluated.result).toEqual({ computed_against_hash: HASH });
+    expect(engineEvaluated.claim_permissions).toBeUndefined();
   });
 
   it('R4 absent stays absent on an otherwise current Run', () => {
