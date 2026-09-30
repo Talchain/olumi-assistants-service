@@ -325,9 +325,11 @@ export function stillValidOffers(
   // like the approve chip: after a restart the replay carries the words only). A replay whose state read
   // failed is unknown, and an unknown state is never re-advertised as a refusal (#1885 pre-review 5827131835).
   const nextStep = offered.some((a) => a.id === NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id) && knownNotRunnable(now.analysisReady);
+  // Offered only on a refused run (`offersStartingAssumptions`): it stays while the run is KNOWN refused, as the next step does.
+  const startingAssumptions = offered.some((a) => a.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id) && knownNotRunnable(now.analysisReady);
   // A rebuild stays offered only while there is still no model to build over.
   const rebuild = offered.some((a) => a.id === REBUILD_AFTER_TOO_LARGE_CHIP.id) && !now.modelExists;
-  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : [])];
+  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : [])];
 }
 const sessions = new SessionBindingRegistry();
 
@@ -568,6 +570,45 @@ export const REBUILD_AFTER_TOO_LARGE_CHIP = {
   label: 'Build it again',
   message: 'Build the model again from my brief.',
 } as const;
+
+/**
+ * ⭐ "SUGGEST STARTING ASSUMPTIONS" — THE DETERMINISTIC AFFORDANCE (P-CORE #78 5911687135; DL 5912622789 item 5; Paul's
+ * test 13:06Z: "always make assumptions about the missing data… alert me"). The state already carried the gaps Olumi may
+ * fill (`olumi_can_offer`), and the prompt's rule fired 0–2 times in 4 (P0 2/4, P1a 0/2, P1b 0/2). So the HOST offers the
+ * chip when the run is refused and Olumi can offer (`offersStartingAssumptions`), and its press makes the Agent's first
+ * call `propose_starting_point` (`firstCallTool`): the user still sees every figure as Olumi's and approves it.
+ * Plain text (no `action_type`): the click is an ordinary Agent turn, as `agent-suggest-what-it-needs` is.
+ */
+export const SUGGEST_STARTING_ASSUMPTIONS_CHIP = {
+  id: 'agent-suggest-starting-assumptions',
+  label: 'Suggest starting assumptions',
+  message: 'Suggest starting assumptions for what this model is missing, so I can review and approve them.',
+} as const;
+
+/** The tool a press of {@link SUGGEST_STARTING_ASSUMPTIONS_CHIP} makes first. */
+export const STARTING_ASSUMPTIONS_TOOL = 'propose_starting_point';
+
+/** When the chip is offered: the run is KNOWN refused and Olumi can offer something (never on an unchecked verdict). */
+export function offersStartingAssumptions(view: { readonly checked: boolean; readonly may_run?: boolean; readonly olumi_can_offer: readonly unknown[] }): boolean {
+  return view.checked && view.may_run === false && view.olumi_can_offer.length > 0;
+}
+
+/**
+ * The chip on the state read back: offered only when it agrees with THIS turn's Run control over the same readback's
+ * `analysis_ready` (a KNOWN refusal, as `postWriteReadinessLine`), so it never sits beside a Run button.
+ */
+export function startingAssumptionsOffered(graph: unknown, analysisReady: unknown): boolean {
+  return knownNotRunnable(analysisReady) && offersStartingAssumptions(readinessViewOf(graph));
+}
+
+/** The first call's forced tool, only when the request declares a tool of that name. */
+export function forcedToolOf(req: unknown): string | undefined {
+  const choice = (req as { tool_choice?: unknown } | null | undefined)?.tool_choice as { type?: unknown; name?: unknown } | undefined;
+  if (choice === undefined || choice === null || typeof choice !== 'object' || choice.type !== 'function' || typeof choice.name !== 'string') return undefined;
+  const tools = (req as { tools?: unknown }).tools;
+  const declared = Array.isArray(tools) && tools.some((t) => (t as { name?: unknown } | null)?.name === choice.name);
+  return declared ? choice.name : undefined;
+}
 
 export const RUN_OFFER_CHIP = {
   id: 'agent-run-analysis',
@@ -1146,6 +1187,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       tools: req.tools,
       // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
       ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
+      // A pressed chip that names its tool (`firstCallTool`, the loop's first call only): sent only when that tool is
+      // among the tools this call declares, so a forced call can never name a tool the turn does not carry.
+      ...(forcedToolOf(req) !== undefined ? { tool_choice: { type: 'function', name: forcedToolOf(req) } } : {}),
       // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
       ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
       // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
@@ -2186,6 +2230,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
           composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
+          // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
+          ...((body['chip'] as { id?: unknown } | null | undefined)?.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
+            ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
         },
         capabilities,
         callModel,
@@ -2402,6 +2449,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         runOutcomeKind = loopOutcomes[loopOutcomes.length - 1]!.kind;
       }
     }
+    // ⭐ "Suggest starting assumptions" (P-CORE 5911687135; DL item 5): on the state read back THIS turn, never while an
+    // approval is waiting (that card is the next step) and never on an unchecked verdict.
+    const offerStartingAssumptions = approvals.length === 0 && carriedApproval.length === 0
+      && startingAssumptionsOffered(readbackGraph, analysisReady);
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
@@ -2411,7 +2462,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
       ...runOutcomeChips,
-      ...((runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
+      // The run is refused and Olumi can fill the gap: the one specific next step replaces the general one.
+      ...(offerStartingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP]
+        : (runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
       // The research control for each query the Agent offered THIS turn: the only way a query is ever sent.
       ...[...new Map(result.tool_results.flatMap((r) => {

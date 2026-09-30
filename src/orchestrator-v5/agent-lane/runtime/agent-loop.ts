@@ -32,6 +32,8 @@ export interface ModelCallRequest {
   readonly input: readonly unknown[];
   readonly tools: readonly unknown[];
   readonly max_output_tokens: number;
+  /** The ONE tool this call must make (`AgentTurnInput.firstCallTool`), sent only on the turn's first call. */
+  readonly tool_choice?: { readonly type: 'function'; readonly name: string };
 }
 
 export interface ModelCallResponse {
@@ -111,6 +113,14 @@ export interface AgentTurnInput {
   readonly composeReply?: (tool: string, args: unknown, result: ToolResult) => string | null;
   /** Injected for deterministic tests; defaults to the wall clock. */
   readonly now?: () => number;
+  /**
+   * ⭐ A CHIP THE USER PRESSED NAMES THE TOOL ITS FIRST CALL MAKES (P-CORE #78 5911687135; DL 5912622789 item 5): "Suggest
+   * starting assumptions" → `propose_starting_point`. The prompt stated the rule and neither prompt fired it reliably
+   * (P0 2/4, P1a 0/2, P1b 0/2); the press is the user's request, so the first call is required to make it. Applied only
+   * when that tool is offered on this turn (a withheld or ineligible tool is never forced); every later call is free.
+   * Absent ⇒ exactly as before.
+   */
+  readonly firstCallTool?: string;
 }
 
 /**
@@ -344,15 +354,19 @@ export async function runAgentTurn(
   for (let hop = 0; hop < maxHops; hop++) {
     const providerStartedAt = now();
     providerCalls += 1;
+    // Eligibility, not the raw catalogue. `eligibleTools` starts from
+    // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
+    // and a context packet can never widen the surface.
+    const offered = (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
+      .filter((t) => !withheld.has(t.name));
+    const forced = hop === 0 && input.firstCallTool !== undefined && offered.some((t) => t.name === input.firstCallTool)
+      ? input.firstCallTool : undefined;
     const resp = await callModel({
       instructions: input.instructions,
       input: items,
-      // Eligibility, not the raw catalogue. `eligibleTools` starts from
-      // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
-      // and a context packet can never widen the surface.
-      tools: (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
-        .filter((t) => !withheld.has(t.name)) as readonly unknown[],
+      tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
+      ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
     });
     providerMs += Math.max(0, now() - providerStartedAt);
     const out = resp.output ?? [];

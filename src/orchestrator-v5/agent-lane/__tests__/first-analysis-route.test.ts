@@ -16,7 +16,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { readFileSync } from 'node:fs';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
+
+const CC_SERVED = JSON.parse(readFileSync(new URL('./fixtures/cc-olumi-levels-unset-20260930.json', import.meta.url), 'utf8')) as { graph: unknown };
 
 type RunArgs = { payload: { turn_id: string; scenario_id: string; chip?: { id?: string; action_type?: string } }; requestId: string; autoRun?: { draftTurnId: string } };
 interface Scenario {
@@ -286,7 +289,23 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const { resolveRunAdmission } = await import('../../tools/handlers/analysis-ready-core.js');
     const missing = resolveRunAdmission(BLOCKED_GRAPH).blockedNextStep!;
     expect(b.assistant_text, 'server-authored, whatever the model said').toContain(missing);
-    expect(b.suggested_actions.map((c) => c.id)).toContain('agent-suggest-what-it-needs');
+    // The gap is Olumi's to fill (Option B's level: `olumi_can_offer`, nothing owed by the user), so the repair chip is
+    // the specific one, "Suggest starting assumptions" (DL item 5, #2367), in place of the general next step.
+    const ids = b.suggested_actions.map((c) => c.id);
+    expect(ids).toContain('agent-suggest-starting-assumptions');
+    expect(ids).not.toContain('agent-suggest-what-it-needs');
+  });
+
+  it('CONTRAST (test 3): blocked, but only the USER can fill it (factor levels; nothing Olumi can offer) → the general next step', async () => {
+    // The served cut-costs construction with every factor's level removed: `may_run: false`, `needs_from_user` only.
+    const g = structuredClone(CC_SERVED.graph) as { nodes: Record<string, unknown>[] };
+    for (const n of g.nodes) if (n.kind === 'factor') delete n.observed_state;
+    knobs.graph = g as never;
+    const b = await buildTurn(app);
+    expect(b._diagnostic_trace.first_analysis, 'the contrast reaches a refused first analysis').toMatchObject({ ran: false });
+    const ids = b.suggested_actions.map((c) => c.id);
+    expect(ids).toContain('agent-suggest-what-it-needs');
+    expect(ids).not.toContain('agent-suggest-starting-assumptions');
   });
 
   it('RED: a retry of the SAME turn_id replays — still exactly one run (test 1a)', async () => {
