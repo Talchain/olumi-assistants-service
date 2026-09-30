@@ -287,7 +287,45 @@ describe('M1 saved live target-scope regression', () => {
     expect(graph.edges.filter((e: Rec) => e.to === goal.id)).toHaveLength(0);
   });
 
-  it('continues to carry an explicit user definition through existing admission', async () => {
+  it('does not promote an explicit-tagged product or scope absent from the Paul brief', async () => {
+    const candidate = structuredClone(live.candidate);
+    candidate.goal.scope = { modelled: 'the Pro plan only', alternative: 'all plans', stated_in_brief: true };
+    candidate.identities = [{ outcome: candidate.goal.metric, operation: 'product', factors: ['Pro plan price', 'Pro plan paying subscribers'], provenance: 'explicit' }];
+    candidate.links = candidate.identities[0]!.factors.map((from) => ({ from, to: candidate.goal.metric, provenance: 'explicit', direction: 'positive' }));
+    const { graph, result } = await build(candidate, live.brief);
+    expect(result.ok).toBe(true);
+    const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.nonlinear_identity).toBeUndefined();
+    expect(graph.edges.filter((e: Rec) => e.to === goal.id)).toHaveLength(0);
+    expect((result.constructor_proposals as Rec[]).some((p) => p.kind === 'definition' && p.label === candidate.goal.metric)).toBe(true);
+    expect((result.constructor_proposals as Rec[]).filter((p) => p.kind === 'relationship')).toHaveLength(2);
+  });
+
+  it('does not register an explicit-tagged price-to-churn claim absent from the Paul brief', async () => {
+    const candidate = structuredClone(live.candidate);
+    candidate.identities = [];
+    candidate.links = [{ from: 'Pro plan price', to: 'Monthly churn', direction: 'positive', provenance: 'explicit', effect_amount: null, effect_per_source_change: null, effect_provenance: null }];
+    const { graph, result } = await build(candidate, live.brief);
+    expect(result.ok).toBe(true);
+    expect(graph.edges.some((e: Rec) => e.from === 'pro_plan_price' && e.to === 'monthly_churn')).toBe(false);
+    expect((result.constructor_proposals as Rec[]).some((p) => p.kind === 'relationship' && p.field_path === 'links[Pro plan price->Monthly churn]')).toBe(true);
+  });
+
+  it('keeps a sourced option action while parking its redundant draft link and magnitude', async () => {
+    const sourced = JSON.parse(readFileSync(new URL('./fixtures/m1-live-paul-count-scope-20260929.json', import.meta.url), 'utf8')) as { brief: string; candidate: CandidateModel };
+    const candidate = structuredClone(sourced.candidate);
+    candidate.links = [{ from: 'Raise Pro price to £59', to: 'Pro plan price', direction: 'positive', provenance: 'explicit', effect_amount: 10, effect_per_source_change: 1, effect_provenance: 'explicit' }];
+    const { candidate: partitioned, proposals } = partitionM1Candidate(candidate, sourced.brief);
+    expect(partitioned.links).toHaveLength(0);
+    expect(proposals.some((p) => p.kind === 'relationship' && p.field_path === 'links[Raise Pro price to £59->Pro plan price]')).toBe(true);
+    const { graph, result } = await build(candidate, sourced.brief);
+    expect(result.ok).toBe(true);
+    expect(graph.nodes.some((n: Rec) => n.kind === 'option' && n.label === 'Raise Pro price to £59')).toBe(true);
+    expect(graph.edges.some((e: Rec) => e.from === 'raise_pro_price_to_59' && e.to === 'pro_plan_price')).toBe(true);
+    expect(graph.edges.some((e: Rec) => e.from === 'raise_pro_price_to_59' && e.to === 'pro_plan_price' && e.provenance?.source === 'brief_extraction')).toBe(false);
+  });
+
+  it('leaves a genuinely stated definition pending until a relation quote can be checked', async () => {
     const candidate = structuredClone(live.candidate);
     candidate.goal.scope = { modelled: 'the Pro plan only', alternative: 'all plans', stated_in_brief: true };
     candidate.goal.baseline_value = 73500;
@@ -297,6 +335,7 @@ describe('M1 saved live target-scope regression', () => {
     const { graph, result } = await build(candidate, brief);
     expect(result.ok).toBe(true);
     const goal = graph.nodes.find((n: Rec) => n.kind === 'goal');
-    expect(goal.nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: true });
+    expect(goal.nonlinear_identity).toBeUndefined();
+    expect((result.constructor_proposals as Rec[]).some((p) => p.kind === 'definition' && p.label === candidate.goal.metric)).toBe(true);
   });
 });
