@@ -270,20 +270,18 @@ interface ObservedSnapshot {
 }
 
 /**
- * Is THIS adoption already what the node stores — the same adoption stamp on the same figure, with its review
- * recorded? Then a retry must keep that review byte-identical, or it is not a retry. Pure.
+ * The review already recorded for THIS adoption — the same adoption stamp on the same figure — or `undefined`. A retry
+ * must keep that review byte-identical, or it is not a retry. Pure.
  */
-function sameAdoptionAlreadyRecorded(
+function recordedReviewOfSameAdoption(
   observed: unknown,
   adoptedSource: string,
   next: { readonly value: number; readonly raw_value?: number },
-): boolean {
-  if (observed === null || typeof observed !== 'object') return false;
+): object | undefined {
+  if (observed === null || typeof observed !== 'object') return undefined;
   const o = observed as { source?: unknown; value?: unknown; raw_value?: unknown; reviewed_by_user?: unknown };
-  return o.source === adoptedSource
-    && o.value === next.value
-    && o.raw_value === next.raw_value
-    && o.reviewed_by_user !== null && typeof o.reviewed_by_user === 'object';
+  const same = o.source === adoptedSource && o.value === next.value && o.raw_value === next.raw_value;
+  return same && o.reviewed_by_user !== null && typeof o.reviewed_by_user === 'object' ? o.reviewed_by_user : undefined;
 }
 
 function snapshotObservedState(node: GraphV3T['nodes'][number]): ObservedSnapshot {
@@ -797,9 +795,8 @@ export function createSetFactorValueHandler(): HandlerFn {
         ...(adoptedSource !== undefined
           ? {
               reviewed_by_user:
-                sameAdoptionAlreadyRecorded(node.observed_state, adoptedSource, normalised)
-                  ? (node.observed_state as { reviewed_by_user: unknown }).reviewed_by_user
-                  : { intent: 'confirm' as const, at: new Date().toISOString() },
+                recordedReviewOfSameAdoption(node.observed_state, adoptedSource, normalised)
+                  ?? { intent: 'confirm' as const, at: new Date().toISOString() },
             }
           : {}),
       };
