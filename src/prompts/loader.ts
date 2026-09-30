@@ -191,19 +191,7 @@ export async function loadPrompt(
     });
 
     if (compiled) {
-      // Check if staging version was used by comparing against prompt's activeVersion
-      // If useStaging was requested and version differs from activeVersion, it's staging
-      let isStaging = false;
-      if (useStaging) {
-        try {
-          const prompt = await store.get(compiled.promptId);
-          if (prompt && prompt.stagingVersion && compiled.version === prompt.stagingVersion) {
-            isStaging = true;
-          }
-        } catch {
-          // Ignore errors checking staging status
-        }
-      }
+      const isStaging = compiled.isStaging ?? false;
 
       emit(LoaderTelemetryEvents.PromptLoadedFromStore, {
         taskId,

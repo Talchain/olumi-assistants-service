@@ -601,6 +601,10 @@ export class GovernedPromptStore implements IPromptStore {
     variables: Record<string, string | number>,
     options?: GetCompiledOptions,
   ): Promise<CompiledPrompt | null> {
+    if (this.store.getRuntimeCompiled) {
+      const compiled = await this.store.getRuntimeCompiled(taskId, variables, options);
+      return compiled ? detachCompiledPrompt(compiled) : null;
+    }
     const prompt = selectCanonicalPrompt(taskId, await this.rowsForTask(taskId));
     if (!prompt || prompt.status === 'archived') return null;
     const versionNumber =
@@ -619,6 +623,11 @@ export class GovernedPromptStore implements IPromptStore {
       content: interpolatePrompt(version.content, variables, version.variables),
       compiledAt: new Date().toISOString(),
       variables,
+      isStaging: Boolean(
+        options?.useStaging &&
+          prompt.stagingVersion &&
+          versionNumber === prompt.stagingVersion,
+      ),
       modelConfig: prompt.modelConfig,
     });
   }
