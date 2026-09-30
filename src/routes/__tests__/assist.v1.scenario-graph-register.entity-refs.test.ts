@@ -215,3 +215,80 @@ describe("register — stable entity refs", () => {
     await app2.close();
   });
 });
+
+/**
+ * PR Review CR on #2357 @ `50de4af7`: a NEW node cannot reuse a ref the base already issued — retired before this write
+ * or removed in it. Pinned on the register write path: the bytes handed to the atomic writer, and the identity returned.
+ */
+describe("register — a new node never reuses an issued ref (PR Review CR 3)", () => {
+  async function registerOnto(base: Json, incoming: Json) {
+    vi.resetAllMocks();
+    resolveUserIdentity.mockResolvedValue({ mode: "verified", userId: OWNER });
+    ensureScenarioExists.mockResolvedValue({ user_id: null });
+    getScenarioOwner.mockResolvedValue(null);
+    scenarioExists.mockResolvedValue(true);
+    loadGraph.mockResolvedValue(base);
+    append.mockResolvedValue({ id: "turn-n" });
+    readCommittedTurn.mockResolvedValue(null);
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: incoming, expected_graph_identity_hash: computeGraphIdentityHash(base as never)?.value });
+    await app.close();
+    expect(res.statusCode, res.body).toBe(200);
+    const stored = writtenGraph() as unknown as Json;
+    expect(res.json().graph_identity_hash.value).toBe(computeGraphIdentityHash(stored as never)?.value);
+    return stored;
+  }
+  async function firstConstruction(): Promise<Json> {
+    loadGraph.mockResolvedValue(null);
+    const app = await buildApp();
+    await post(app, SCENARIO, { graph: IMPORTED });
+    await app.close();
+    return writtenGraph() as unknown as Json;
+  }
+  /** `g` without `id`, and a new option `opt_delta` (Delta Hall) wired like `id` was, carrying `ref` if given. */
+  const swapOption = (g: Json, id: string, ref?: string): Json => {
+    const old = (g.nodes as Json[]).find((n) => n.id === id)!;
+    const { ref: _r, ...rest } = old;
+    const delta = { ...rest, id: "opt_delta", label: "Delta Hall", ...(ref === undefined ? {} : { ref }) };
+    return {
+      ...g,
+      nodes: [...(g.nodes as Json[]).filter((n) => n.id !== id), delta],
+      edges: (g.edges as Json[]).map((e) => ({ ...e, ...(e.from === id ? { from: "opt_delta" } : {}), ...(e.to === id ? { to: "opt_delta" } : {}) })),
+    };
+  };
+  const dropOption = (g: Json, id: string): Json => ({
+    ...g,
+    nodes: (g.nodes as Json[]).filter((n) => n.id !== id),
+    edges: (g.edges as Json[]).filter((e) => e.from !== id && e.to !== id),
+  });
+
+  it("RED (removed in this write): the write drops opt_gamma and adds opt_delta carrying opt_gamma's ref → opt_delta is stored with a NEW number", async () => {
+    const first = await firstConstruction();
+    const gammaRef = refsOf(first).opt_gamma as string;
+    const hw = first.ref_high_water.O as number;
+    const stored = await registerOnto(first, swapOption(first, "opt_gamma", gammaRef));
+    expect(refsOf(stored).opt_delta).toBe(`O${hw + 1}`);
+    expect(Object.values(refsOf(stored))).not.toContain(gammaRef);
+    expect(stored.ref_high_water.O).toBe(hw + 1);
+  });
+
+  it("RED (retired before this write): the base no longer holds opt_gamma but remembers its number; a new opt_delta sent with that ref gets a NEW number", async () => {
+    const first = await firstConstruction();
+    const gammaRef = refsOf(first).opt_gamma as string;
+    const hw = first.ref_high_water.O as number;
+    const afterDelete = dropOption(first, "opt_gamma");            // the stored graph after a delete: the counter keeps gamma's number
+    const stored = await registerOnto(afterDelete, swapOption(first, "opt_gamma", gammaRef));
+    expect(refsOf(stored).opt_delta).toBe(`O${hw + 1}`);
+    expect(Object.values(refsOf(stored))).not.toContain(gammaRef);
+  });
+
+  it("CONTROL: the same write with NO ref on opt_delta stores the same new number; every surviving entity keeps its base ref", async () => {
+    const first = await firstConstruction();
+    const hw = first.ref_high_water.O as number;
+    const stored = await registerOnto(first, swapOption(first, "opt_gamma"));
+    expect(refsOf(stored).opt_delta).toBe(`O${hw + 1}`);
+    const { opt_gamma: _g, ...survivors } = refsOf(first);
+    const { opt_delta: _d, ...kept } = refsOf(stored);
+    expect(kept).toEqual(survivors);
+  });
+});

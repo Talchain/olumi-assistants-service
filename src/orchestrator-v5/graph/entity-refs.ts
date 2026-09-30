@@ -134,6 +134,14 @@ export function assignEntityRefs<G>(graph: G, base: unknown): EntityRefAssignmen
     const ref = typeof b.id === 'string' ? refFor(b, b.ref) : null;
     if (ref !== null && !baseRefById.has(b.id as string)) baseRefById.set(b.id as string, ref);
   }
+  // ⛔ NEVER REUSED (PR Review CR on #2357): everything the base ever issued, per prefix. A node the base does not hold
+  // never claims a number at or below it — a ref retired before this write, or removed in it, stays retired, so an
+  // old reference can never come to name a different entity. The same base node keeps its own (`fromBase`).
+  const issuedByBase = combinedHighWater(base);
+  const notYetIssued = (ref: string | null): string | null => {
+    const p = ref === null ? null : parseEntityRef(ref);
+    return p !== null && p.n > (issuedByBase[p.prefix] ?? 0) ? ref : null;
+  };
   // Pass 1 — claims. The base holder of a ref claims it first, so a later copy cannot take it.
   const claimed = new Set<string>();
   const chosen: (string | null)[] = nodes.map(() => null);
@@ -148,7 +156,7 @@ export function assignEntityRefs<G>(graph: G, base: unknown): EntityRefAssignmen
     const fromBase = typeof n.id === 'string' ? refFor(n, baseRefById.get(n.id)) : null;
     // Rule 5: the base decides for an entity it already holds. A ref-less legacy node takes no incoming ref.
     const legacy = typeof n.id === 'string' && baseIds.has(n.id) && fromBase === null;
-    const candidate = fromBase ?? (legacy ? null : refFor(n, n.ref));
+    const candidate = fromBase ?? (legacy ? null : notYetIssued(refFor(n, n.ref)));
     if (candidate !== null && !claimed.has(candidate)) {
       claimed.add(candidate);
       chosen[i] = candidate;

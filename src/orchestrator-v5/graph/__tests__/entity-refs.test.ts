@@ -201,3 +201,45 @@ describe('refs and counters are bounded to safe integers (PR Review CR 2)', () =
     expect(parseEntityRef('O999999999')).toEqual({ prefix: 'O', n: 999999999 });
   });
 });
+
+/**
+ * PR Review CR on #2357 @ `50de4af7`: a NEW node could reuse a retired ref the client supplied. On an existing scenario
+ * only the same base node may carry its ref; a new node never claims a number at or below what the base already issued
+ * — whether that ref was retired before this write or removed in it. First construction and import keep client refs.
+ */
+describe('never reused: a new node cannot claim a number the base already issued (PR Review CR 3)', () => {
+  const retiredBase = g([node('keep', 'option', { ref: 'O1' })], { ref_high_water: { O: 2 } }); // O2 was retired earlier
+
+  it('RED (retired before this write): base holds keep/O1 with O2 retired; a new node sent with ref O2 gets O3', () => {
+    const incoming = g([node('keep', 'option', { ref: 'O1' }), node('fresh', 'option', { ref: 'O2' })], { ref_high_water: { O: 2 } });
+    const out = assignEntityRefs(incoming, retiredBase).graph as Json;
+    expect(refs(out)).toEqual({ keep: 'O1', fresh: 'O3' });
+    expect(out.ref_high_water).toEqual({ O: 3 });
+  });
+
+  it('RED (removed in this write): the base holds opt_keep/O2; the write drops it and adds opt_pilot with ref O2 → opt_pilot is O3', () => {
+    const v1 = assignEntityRefs(FIRST, null).graph as Json;
+    const incoming = { ...v1, nodes: [...(v1.nodes as Json[]).filter((n) => n.id !== 'opt_keep'), node('opt_pilot', 'option', { ref: 'O2' })] };
+    const out = assignEntityRefs(incoming, v1).graph as Json;
+    expect(refs(out).opt_pilot).toBe('O3');
+    expect(refs(out).opt_raise).toBe('O1');
+    expect(Object.values(refs(out))).not.toContain('O2');
+    expect(out.ref_high_water.O).toBe(3);
+  });
+
+  it('CONTROL: the same new node sent with NO ref also gets O3, and keep keeps O1', () => {
+    const out = assignEntityRefs(g([node('keep', 'option', { ref: 'O1' }), node('fresh', 'option')], { ref_high_water: { O: 2 } }), retiredBase).graph as Json;
+    expect(refs(out)).toEqual({ keep: 'O1', fresh: 'O3' });
+  });
+
+  it('CONTROL (boundary): a supplied ref ABOVE the base high-water was never issued, so the new node may keep it', () => {
+    const out = assignEntityRefs(g([node('keep', 'option', { ref: 'O1' }), node('fresh', 'option', { ref: 'O3' })]), retiredBase).graph as Json;
+    expect(refs(out)).toEqual({ keep: 'O1', fresh: 'O3' });
+  });
+
+  it('CONTROL: first construction (no base) and import onto an EMPTY base keep valid client refs', () => {
+    const imported = g([node('a', 'option', { ref: 'O5' }), node('b', 'factor', { ref: 'F2' })]);
+    expect(refs(assignEntityRefs(imported, null).graph as Json)).toEqual({ a: 'O5', b: 'F2' });
+    expect(refs(assignEntityRefs(imported, g([])).graph as Json)).toEqual({ a: 'O5', b: 'F2' });
+  });
+});
