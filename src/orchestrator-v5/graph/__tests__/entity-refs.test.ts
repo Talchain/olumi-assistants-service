@@ -101,7 +101,7 @@ describe('never renumbered, never reused (AIQ condition 1)', () => {
   });
 
   it('a lowered high-water on the incoming graph cannot pull numbers back down', () => {
-    const lowered = { ...v1, ref_high_water: { O: 0 } };
+    const lowered: Json = { ...v1, ref_high_water: { O: 0 } };
     const out = assignEntityRefs({ ...lowered, nodes: [...(lowered.nodes as Json[]), node('opt_new', 'option')] }, v1).graph as Json;
     expect(refs(out).opt_new).toBe('O3');
   });
