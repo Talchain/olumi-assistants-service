@@ -23,7 +23,7 @@ const FIRST = g([
 
 describe('first construction — every entity gets a ref, in array order within its kind', () => {
   it('G1 · O1 · O2 · F1 · F2 · OC1 · R1, and the high-water records each prefix', () => {
-    const out = assignEntityRefs(FIRST).graph as Json;
+    const out = assignEntityRefs(FIRST, null).graph as Json;
     expect(refs(out)).toEqual({ goal_mrr: 'G1', opt_raise: 'O1', opt_keep: 'O2', price: 'F1', churn: 'F2', mrr_12: 'OC1', risk_churn: 'R1' });
     expect(out.ref_high_water).toEqual({ G: 1, O: 2, F: 2, OC: 1, R: 1 });
   });
@@ -37,8 +37,14 @@ describe('first construction — every entity gets a ref, in array order within 
   });
 
   it('CONTROL: a graph that already carries its refs comes back as the SAME object (no spurious write)', () => {
-    const once = assignEntityRefs(FIRST).graph;
+    const once = assignEntityRefs(FIRST, null).graph;
     expect(assignEntityRefs(once, once).graph).toBe(once);
+  });
+});
+
+describe('an UNKNOWN base assigns nothing (rule 6)', () => {
+  it('base === undefined (the writer could not read what it replaces) → the graph passes through untouched', () => {
+    expect(assignEntityRefs(FIRST, undefined).graph).toBe(FIRST);
   });
 });
 
@@ -56,7 +62,7 @@ describe('no backfill: a pre-refs graph is not rewritten by an unchanged write',
 });
 
 describe('never renumbered, never reused (AIQ condition 1)', () => {
-  const v1 = assignEntityRefs(FIRST).graph as Json;
+  const v1 = assignEntityRefs(FIRST, null).graph as Json;
 
   it('delete O2 → add an option → it gets O3, not O2', () => {
     const v2 = { ...v1, nodes: (v1.nodes as Json[]).filter((n) => n.id !== 'opt_keep') };
@@ -91,7 +97,7 @@ describe('never renumbered, never reused (AIQ condition 1)', () => {
 
   it('a malformed or wrong-kind ref is replaced (an option cannot hold "F1")', () => {
     const bad = g([node('opt_a', 'option', { ref: 'F1' }), node('opt_b', 'option', { ref: 'O0' }), node('opt_c', 'option', { ref: 'x' })]);
-    expect(refs(assignEntityRefs(bad).graph as Json)).toEqual({ opt_a: 'O1', opt_b: 'O2', opt_c: 'O3' });
+    expect(refs(assignEntityRefs(bad, null).graph as Json)).toEqual({ opt_a: 'O1', opt_b: 'O2', opt_c: 'O3' });
   });
 
   it('a lowered high-water on the incoming graph cannot pull numbers back down', () => {
@@ -102,7 +108,7 @@ describe('never renumbered, never reused (AIQ condition 1)', () => {
 });
 
 describe('restore (AIQ rows: restore v1 → O2 is back; the next new option is O4, not O3 again)', () => {
-  const v1 = assignEntityRefs(FIRST).graph as Json;                                                   // O1, O2
+  const v1 = assignEntityRefs(FIRST, null).graph as Json;                                                   // O1, O2
   const v2 = { ...v1, nodes: (v1.nodes as Json[]).filter((n) => n.id !== 'opt_keep') };                // O1
   const v3 = assignEntityRefs({ ...v2, nodes: [...v2.nodes, node('opt_pilot', 'option')] }, v2).graph as Json; // O1, O3
 
@@ -126,7 +132,7 @@ describe('restore (AIQ rows: restore v1 → O2 is back; the next new option is O
 });
 
 describe('hash pins (AIQ 5909608045)', () => {
-  const v1 = assignEntityRefs(FIRST).graph as Json;
+  const v1 = assignEntityRefs(FIRST, null).graph as Json;
 
   it('assigning refs never makes a Run stale: the ANALYSIS hash is unchanged', () => {
     expect(computeAnalysisAffectingGraphHash(v1 as never)).toBe(computeAnalysisAffectingGraphHash(FIRST as never));

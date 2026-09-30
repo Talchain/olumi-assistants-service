@@ -25,6 +25,9 @@
  * 5. NO BACKFILL: a node the base already held WITHOUT a ref stays ref-less. Only new entities (and every entity of
  *    a first construction) are issued refs, so an unchanged write to a pre-refs graph is byte-identical: no spurious
  *    version, no identity change. Backfilling older scenarios is a separate, explicit step.
+ * 6. AN UNKNOWN BASE ASSIGNS NOTHING. `base === undefined` means the writer could not read what it replaces (e.g. a
+ *    failed read), so neither carry-forward nor "is this entity new?" can be decided: the graph passes through
+ *    unchanged. A first construction passes `null` (known: nothing there).
  *
  * Pure. Returns the ORIGINAL object when nothing changes, so an unchanged graph is not a spurious write.
  */
@@ -114,9 +117,9 @@ export interface EntityRefAssignment<G> {
  * Give every entity its stable ref, carrying the base's refs forward by node id. `base` is the graph this write
  * replaces (absent on a first write).
  */
-export function assignEntityRefs<G>(graph: G, base?: unknown): EntityRefAssignment<G> {
+export function assignEntityRefs<G>(graph: G, base: unknown): EntityRefAssignment<G> {
   const nodes = nodesOf(graph);
-  if (nodes === null) return { graph, assigned: [], carried: [] };
+  if (nodes === null || base === undefined) return { graph, assigned: [], carried: [] }; // rule 6
 
   const baseRefById = new Map<string, string>();
   const baseIds = new Set<string>();
