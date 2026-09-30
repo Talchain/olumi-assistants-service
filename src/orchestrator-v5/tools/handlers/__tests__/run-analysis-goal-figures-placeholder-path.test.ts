@@ -189,6 +189,21 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     expect(w.message).toContain('moves ‘Costs');
   });
 
+  it('CONTROL (AIQ 5903874730 follow-up): a guessed link out of the limit-watched node into a NON-goal node is still asked for — only a link INTO the goal is the guess', () => {
+    const g = clone(F.graph);
+    const nodes = g.nodes as Json[];
+    const edges = g.edges as Json[];
+    const out = edges.find((e) => e.from === 'migration_downtime' && e.to === 'monthly_cloud_spend')!;
+    const downtime = nodes.find((n) => n.id === 'migration_downtime')!;
+    nodes.push({ ...clone(downtime), id: 'downtime_cost', label: 'Downtime cost' });
+    edges.splice(edges.indexOf(out), 1, { ...clone(out), to: 'downtime_cost' }, { ...clone(out), from: 'downtime_cost' });
+    const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w.node_ids).toContain('downtime_cost');
+    expect(w.message).toContain('‘Migration downtime’ moves ‘Downtime cost’');
+    expect(w.message).toContain('Give a figure');
+    expect(w.message).not.toContain('only guessed');
+  });
+
   it('CONTROL (R3 row): the status quo moves nothing, so its earned 0 stays', async () => {
     const r = await runOn(F.graph);
     const env = r.enrichment ?? r;
