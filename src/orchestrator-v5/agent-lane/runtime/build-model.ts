@@ -1285,6 +1285,8 @@ export async function buildModelFromBrief(
   candidate = preparation.candidate;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
+  // A link size is the user's only where the brief writes it (AIQ #2383 5916497454): the one door for a stated size.
+  const sizeWritten = (value: number, unit: unknown): boolean => figureTheUserWrote(value, unit, brief);
   // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
   // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
   // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).
@@ -1303,7 +1305,7 @@ export async function buildModelFromBrief(
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
   let gapResidual = firstIdentity.residual;
-  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief));
+  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1422,7 +1424,7 @@ export async function buildModelFromBrief(
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
         const retryIdentity = mintOrFold(retryCandidate);
-        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief));
+        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));

@@ -2868,12 +2868,18 @@ export function admitCandidateModel(
    * its module imports stated-by-user.ts, which imports this one). Absent ⇒ nothing (fail closed: exactly as before).
    */
   goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null = () => null,
+  /**
+   * ⛔ Whether the brief WRITES a link's stated size, in the target's unit (`figureTheUserWrote`, injected: stated-by-user.ts
+   * imports this module). A size the drafter tags `explicit` is the user's only then (AIQ #2383 5916497454: the G6 door).
+   * Absent ⇒ never (fail closed): an untagged-by-the-brief size is Olumi's estimate.
+   */
+  sizeWritten: (value: number, unit: unknown) => boolean = () => false,
 ): AdmittedModel {
   candidateModel = withQuantityFrames(candidateModel);
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
     .map((o) => canonicalLabel(o.label)));
-  const first = admitOnce(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief);
+  const first = admitOnce(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten);
   const verdict = judgeOptionIdentity(first, declared);
   // Never withhold a name another entity shares: removing its links would take that entity's with it.
   const otherNames = new Set([
@@ -2898,6 +2904,7 @@ export function admitCandidateModel(
     goalLevelStated,
     targetFigureWrittenAgain,
     goalLevelFromBrief,
+    sizeWritten,
   );
   const options_withheld: WithheldOption[] = withheld.map((w) => ({
     option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
@@ -2925,6 +2932,7 @@ function admitOnce(
   goalLevelStated: (value: number, unit: unknown) => boolean,
   targetFigureWrittenAgain: (value: number, unit: unknown) => boolean,
   goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null,
+  sizeWritten: (value: number, unit: unknown) => boolean,
 ): AdmittedModel {
   const { model: restatedModel, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
   // ⛔ A two-part product goal's rate is the user's own price when Olumi's rate only passes it on (shape 2,
@@ -3648,8 +3656,15 @@ function admitOnce(
     const source = magnitudeNodeById.get(l.from);
     const target = magnitudeNodeById.get(l.to);
     if (source === undefined || target === undefined) continue;
-    // D9: a user's own edit (`user_specified`) always wins; otherwise the size is the user's only when stated as theirs.
-    const user_stated = l.provenance_source === 'user_specified' || (l.effect_provenance ?? l.provenance) === 'explicit';
+    // D9: a user's own edit (`user_specified`) always wins; otherwise the size is the user's only when stated as theirs
+    // AND the brief writes it, in the target's own unit (AIQ #2383 5916497454; the G6 door): a figure the drafter tagged
+    // `explicit` that no sentence carries is Olumi's estimate, never the user's.
+    const taggedTheirs = (l.effect_provenance ?? l.provenance) === 'explicit';
+    // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
+    const levelUnit = target.observed_state?.unit ?? target.unit ?? target.goal_threshold_unit;
+    const written = typeof l.effect_amount === 'number' && Number.isFinite(l.effect_amount)
+      && sizeWritten(Math.abs(l.effect_amount), levelUnit);
+    const user_stated = l.provenance_source === 'user_specified' || (taggedTheirs && written);
     sizing.set(`${l.from}::${l.to}`, sizeLink({
       direction: l.direction,
       effect_amount: l.effect_amount,
