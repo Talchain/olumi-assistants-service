@@ -38,7 +38,8 @@ export function readNumber(brief: string, claim: NumberClaim): { value: number; 
   const rangeContext = /\b(?:between|ranges?)\b[^.!?;]*$/i.test(preceding);
   // A saved numeric quote may omit the action verb; it still must be in this
   // same original clause, never borrowed from an earlier sentence.
-  const clause = brief.slice(0, bound.source.start + at).split(/[.!?;,]/).at(-1) ?? '';
+  const clause = brief.slice(0, bound.source.start + at)
+    .split(/[!?;]|(?<!\d)[.,]|[.,](?!\d)/).at(-1) ?? '';
   const changeAction = /\b(?:raise|increase|lower|reduce|cut|change|move|grow|drop)\s+[a-z][a-z0-9\s'-]*\s+from\b/i.test(clause)
     && !/\b(?:not|never|cannot|can't|and|but|whereas|while)\b/i.test(clause);
   const fromStart = /\bfrom\s*$/i.test(preceding) && changeAction && !rangeContext;

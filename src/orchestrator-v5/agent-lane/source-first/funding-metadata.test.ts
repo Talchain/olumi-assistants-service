@@ -7,8 +7,7 @@ import { readNumber } from './source-binding.js';
 // Exact 506-character brief recovered from R3 accept-paul/paul-scenario-read.json.
 const BRIEF = "I need to accelerate securing funding within the next 2 months. We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK. We'll keep sending cold emails and trying to find warm connections, but I want to explore alternatives to support the funding process, as we'll run out of money soon. For example, angel investors might be able to provide a small amount of funding quicker to buy us more time, but we would need to decide whether the overhead would be worth it.";
 const GOAL = 'I need to accelerate securing funding within the next 2 months.';
-// Own range clause, excluding the separate location qualifier.
-const DEALS = "We've been focused on investment firms that do deals between £1-2 million";
+const DEALS = "We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK.";
 const source = (quote: string): SourceSpan => ({ quote, start: null, end: null });
 const GBP: SourceUnit = { kind: 'currency', currency: 'GBP', period: null, counted_object: null, as_stated: '£' };
 function funding(): SourceMeaning {
@@ -43,6 +42,7 @@ describe('source-first funding metadata without invented funding numbers', () =>
     })]);
     const deal = result.graph.nodes.find((node) => node.id === sourceEntityId('firm_deal_size'))!;
     expect(deal.description).toBe(DEALS);
+    expect(deal.source_quote).toBe(DEALS);
     expect(result.source_bindings.firm_deal_range.quote).toBe(DEALS);
     for (const node of result.graph.nodes) {
       expect(node.observed_state).toBeUndefined();
@@ -86,11 +86,10 @@ describe('source-first funding metadata without invented funding numbers', () =>
 
   it('does not use a broad funding entity quote to own the firm unit or deal range', () => {
     const meaning = funding();
-    const wholeDeals = DEALS + ', mostly based in the UK.';
-    meaning.entities[0].source = source(GOAL + ' ' + wholeDeals);
-    meaning.entity_metadata![0].unit = { value: GBP, authorship: 'explicit', source: source(wholeDeals) };
+    meaning.entities[0].source = source(GOAL + ' ' + DEALS);
+    meaning.entity_metadata![0].unit = { value: GBP, authorship: 'explicit', source: source(DEALS) };
     meaning.evidence_ranges![0].entity_ref = 'funding';
-    meaning.evidence_ranges![0].source = source(wholeDeals);
+    meaning.evidence_ranges![0].source = source(DEALS);
     const result = compileSourceMeaning(BRIEF, meaning);
     expect(goal(result).goal_threshold_unit).toBeUndefined();
     expect(goal(result).goal_horizon_months).toBeUndefined();
@@ -105,7 +104,7 @@ describe('source-first funding metadata without invented funding numbers', () =>
 
   it('withholds attribution even when both entity and metadata use the same broad quote', () => {
     const meaning = funding();
-    const broad = GOAL + ' ' + DEALS + ', mostly based in the UK.';
+    const broad = GOAL + ' ' + DEALS;
     meaning.entities[0].source = source(broad);
     meaning.entity_metadata![0].unit = { value: GBP, authorship: 'explicit', source: source(broad) };
     meaning.evidence_ranges![0].entity_ref = 'funding';
@@ -186,6 +185,15 @@ describe('source-first funding metadata without invented funding numbers', () =>
     const quote = 'Should we raise price from £49 to £59 a month?';
     expect(readNumber(quote, { literal: '£49', value: '49', source: source(quote) })?.value).toBe(49);
     expect(readNumber(quote, { literal: '£59', value: '59', source: source(quote) })?.value).toBe(59);
+  });
+
+  it.each([
+    ['£49.99', '49.99', '£59.99', '59.99'],
+    ['£1,000', '1000', '£1,200', '1200'],
+  ])('keeps numeric punctuation in price changes beginning at %s', (current, currentValue, proposed, proposedValue) => {
+    const quote = `Should we raise price from ${current} to ${proposed} a month?`;
+    expect(readNumber(quote, { literal: current, value: currentValue, source: source(quote) })?.value).toBe(Number(currentValue));
+    expect(readNumber(quote, { literal: proposed, value: proposedValue, source: source(quote) })?.value).toBe(Number(proposedValue));
   });
 
   it('does not convert zero months into an invented one-month deadline', () => {

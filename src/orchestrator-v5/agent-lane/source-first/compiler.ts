@@ -39,13 +39,12 @@ const spanWithin = (inner: BoundSource, outer: BoundSource): boolean =>
   outer.start <= inner.start && inner.end <= outer.end;
 const spansOverlap = (left: BoundSource, right: BoundSource): boolean =>
   left.start < right.end && right.start < left.end;
-/** Containment in a whole paragraph does not identify an entity's own clause.
- * Withdraw broad/compound attribution rather than parse or repair its scope. */
-function isOwnSingleClause(claim: BoundSource, entity: BoundSource): boolean {
-  const clause = entity.quote.trim().replace(/[.!?]$/, '');
+/** Containment in a whole paragraph does not identify an entity's own statement.
+ * Keep same-sentence qualifiers; withdraw multi-statement attribution. */
+function isOwnSingleSentence(claim: BoundSource, entity: BoundSource): boolean {
+  const sentence = entity.quote.trim().replace(/[.!?]$/, '');
   return claim.start === entity.start && claim.end === entity.end
-    && !/[!?;,]|\.(?!\d)/.test(clause)
-    && !/\b(?:and|but|whereas|while)\b/i.test(clause);
+    && !/[!?;]|\.(?!\d)/.test(sentence);
 }
 function namesBoundTarget(label: string, target: BoundSource, action: BoundSource): boolean {
   const words = label.toLowerCase().match(/[a-z0-9]+/g) ?? [];
@@ -115,7 +114,7 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
         // unit-source carrier. Keep it private until the shared contract lands.
         contextual_unit_readings.push({ entity_ref: item.entity_ref, unit: item.unit.value, authorship: 'olumi_reading', source: bound.source });
         issue(item.entity_ref, 'contextual_unit_pending_contract', `Olumi reads "${node.label}" as ${unitText(item.unit.value)} raised; this interpretation has not been added to the saved model.`);
-      } else if (!isOwnSingleClause(bound.source, entitySource)) {
+      } else if (!isOwnSingleSentence(bound.source, entitySource)) {
         issue(item.entity_ref, 'entity_unit_scope_unverified', `Does that unit describe "${node.label}" or a different quantity?`);
       } else {
         metadataUnits.set(item.entity_ref, item.unit.value);
@@ -124,7 +123,7 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     }
     if (item.deadline) {
       const bound = readDeadline(brief, item.deadline);
-      if (node.kind !== 'goal' || !bound || !isOwnSingleClause(bound.source, entitySource)) {
+      if (node.kind !== 'goal' || !bound || !isOwnSingleSentence(bound.source, entitySource)) {
         issue(item.entity_ref, 'entity_deadline_not_grounded', `Which exact deadline was stated for "${node.label}"?`);
       } else {
         node.goal_deadline_as_stated = item.deadline.as_stated;
@@ -136,7 +135,7 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     const node = nodes.get(claim.entity_ref);
     const entitySource = source_bindings[claim.entity_ref];
     const range = readEvidenceRange(brief, claim);
-    if (duplicates.has(claim.ref) || !node || !entitySource || !range || !isOwnSingleClause(range.source, entitySource)) {
+    if (duplicates.has(claim.ref) || !node || !entitySource || !range || !isOwnSingleSentence(range.source, entitySource)) {
       issue(claim.ref, 'evidence_range_not_grounded', `Which quantity and exact range does "${claim.literal}" describe?`); continue;
     }
     source_bindings[claim.ref] = range.source;
