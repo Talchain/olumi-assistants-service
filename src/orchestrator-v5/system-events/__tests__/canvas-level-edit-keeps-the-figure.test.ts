@@ -27,7 +27,7 @@ const cell = (value: number, raw: number | undefined, source = 'brief_extraction
   target_match: { node_id: 'pro_plan_price', confidence: 'high', match_type: 'exact_id' } });
 /** The served `520aab46` shape (W4 run2 pre-read): £49 today on a 0–200 range; "Raise to £59" at 0.295 / £59. */
 function served(priceState: Record<string, unknown> = { cap: 200, unit: '£ per subscriber per month', value: 0.245, source: 'brief_extraction',
-  raw_value: 49, declared_scale: 'unit_interval' }, raiseCell = cell(0.295, 59)) {
+  raw_value: 49, declared_scale: 'unit_interval' }, raiseCell: Record<string, unknown> = cell(0.295, 59)) {
   return GraphV3.parse({
     nodes: [
       { id: 'mrr', kind: 'goal', label: 'Monthly recurring revenue' },

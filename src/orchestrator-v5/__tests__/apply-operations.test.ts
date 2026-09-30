@@ -251,7 +251,7 @@ describe('applyOperations — the accept path writes what was consented to', () 
         value: { interventions: { [QUALITY_ID]: { ...prior, value, raw_value: value, source: 'user_specified', source_quote: quote } } } }]),
     }));
     expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
-    const cold = GraphV3.parse(await h.loadGraph());
+    const cold = GraphV3.parse(await h.store.loadGraph(SCENARIO));
     const savedOption = cold.nodes.find((node) => node.id === OPTION_ID)!;
     expect(savedOption.interventions![QUALITY_ID]!.value).toBe(value);
     expect(savedOption.interventions![QUALITY_ID]!.source_quote).toBe(expectedQuote);
