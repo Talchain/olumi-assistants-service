@@ -140,6 +140,45 @@ describe('A4 guarantee: a written money range no link carries is asked of the re
     expect(inputs).toHaveLength(2);
   });
 
+  // ⛔ CODEX CEE BUDDY 5921674571 (+ PTL 5921699859): "held" once pooled every £ value in the draft, so two UNRELATED
+  // quantities whose values happen to be the range's ends hid it. Held = ONE quantity holds both ends, and the range's
+  // own span is written about that quantity (the strict scoped reader, at each end).
+  it('RED (CODEX entity collision): an unrelated £1m valuation + £2m payroll never hold "£1-2 million" — still asked and adopted', async () => {
+    const first = servedFirstDraft() as Record<string, any>;
+    first.factors = [...first.factors,
+      { label: 'Company valuation', role: 'observable', baseline_known: true, baseline_value: 1000000, unit: '£', provenance: 'ai_proposed', plausible_max: 5000000 },
+      { label: 'Annual payroll', role: 'observable', baseline_known: true, baseline_value: 2000000, unit: '£', provenance: 'ai_proposed', plausible_max: 5000000 }];
+    const { graph, inputs } = await build([first, repairedDraft()]);
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain('£1-2 million');
+    expect(dealLink(graph)?.provenance?.natural_effect?.stated_range?.end).toBe('low');
+  });
+
+  it('RED (the span decides): ONE quantity holding both ends (valuation £1m today, an option taking it to £2m) that the range is not written about — still asked and adopted', async () => {
+    const valued = (d: Record<string, any>) => ({
+      ...d,
+      factors: [...d.factors, { label: 'Company valuation', role: 'controllable', baseline_known: true, baseline_value: 1000000, unit: '£', provenance: 'ai_proposed', plausible_max: 5000000 }],
+      options: [...d.options, { label: 'Raise the valuation', provenance: 'ai_proposed', changes: [], is_status_quo: null, interventions: [
+        { factor_label: 'Company valuation', value: 2000000, value_kind: 'absolute', unit: '£', provenance: 'ai_proposed' },
+      ] }],
+      links: [...d.links, link('Company valuation', 'securing funding')],
+    });
+    const { graph, inputs } = await build([valued(servedFirstDraft()), valued(repairedDraft())]);
+    expect(inputs).toHaveLength(2);
+    expect(dealLink(graph)?.provenance?.natural_effect?.stated_range?.end).toBe('low');
+  });
+
+  it('RED (both ends): the quantity the span names holding ONE end (a £1m "Deal size" today) does not hold the range — still asked', async () => {
+    const sized = (d: Record<string, any>) => ({
+      ...d,
+      factors: [...d.factors, { label: 'Deal size', role: 'observable', baseline_known: true, baseline_value: 1000000, unit: '£', provenance: 'ai_proposed', plausible_max: 5000000 }],
+      links: [...d.links, link('Deal size', 'securing funding')],
+    });
+    const { inputs } = await build([sized(servedFirstDraft()), sized(repairedDraft())]);
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).toContain('£1-2 million');
+  });
+
   it('CONTROL (price levels): a price range whose BOTH ends are the options\' £ levels is held → ONE call', async () => {
     const priced = servedFirstDraft() as Record<string, any>;
     priced.factors = [...priced.factors, { label: 'Pro plan price', role: 'controllable', baseline_known: true, baseline_value: 49, unit: '£', provenance: 'explicit', plausible_max: 200 }];

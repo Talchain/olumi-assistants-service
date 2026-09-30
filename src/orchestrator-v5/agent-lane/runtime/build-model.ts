@@ -59,7 +59,7 @@ import { refitFramesForStatedEffects } from '../refit-frames.js';
 import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
-import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedRange } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
@@ -793,36 +793,43 @@ function inAQuestion(text: string, at: number): boolean {
 }
 
 /**
- * The MONEY the draft holds as a value, in whole currency units at each unit's own scale ("£k": ×1,000): the goal's
- * target and today's level, each factor's today, each option's level for a factor, each limit. Never a frame
- * (`plausible_max`), a count, a horizon or any number in another unit, and never rescaled by guesswork (CODEX CEE BUDDY
- * 5921470248: an hours factor's `plausible_max` of 1000 once "held" £1m).
+ * The MONEY the draft holds as a value, each with the ONE quantity that holds it: the goal's target and today's level,
+ * each factor's today, each option's level for a factor, each limit, in a currency unit. Never a frame (`plausible_max`),
+ * a count, a horizon or any number in another unit (CODEX CEE BUDDY 5921470248: an hours factor's `plausible_max` of
+ * 1000 once "held" £1m).
  */
-function moneyHeldBy(drafted: CandidateModel): { readonly amount: number; readonly code?: string }[] {
-  const out: { amount: number; code?: string }[] = [];
-  const add = (value: unknown, unit: unknown) => {
-    if (typeof value !== 'number' || !Number.isFinite(value) || typeof unit !== 'string') return;
-    const u = readCurrencyUnitWithQualifiers(unit);
-    if (u.kind !== 'currency') return;
-    out.push({ amount: Math.abs(value) * u.multiplier, ...(u.currencyCode !== undefined ? { code: u.currencyCode } : {}) });
+function moneyHeldBy(drafted: CandidateModel): { readonly label: string; readonly value: number; readonly unit: string }[] {
+  const out: { label: string; value: number; unit: string }[] = [];
+  const add = (label: unknown, value: unknown, unit: unknown) => {
+    if (typeof label !== 'string' || label === '' || typeof value !== 'number' || !Number.isFinite(value) || typeof unit !== 'string') return;
+    if (readCurrencyUnitWithQualifiers(unit).kind !== 'currency') return;
+    out.push({ label, value, unit });
   };
-  add(drafted.goal.value, drafted.goal.unit);
-  add(drafted.goal.baseline_value, drafted.goal.unit);
-  for (const f of drafted.factors) add(f.baseline_value, f.unit);
-  for (const o of drafted.options) for (const iv of o.interventions ?? []) add(iv.value, iv.unit);
-  for (const c of drafted.constraints) add(c.value, c.unit);
+  add(drafted.goal.metric, drafted.goal.value, drafted.goal.unit);
+  add(drafted.goal.metric, drafted.goal.baseline_value, drafted.goal.unit);
+  for (const f of drafted.factors) add(f.label, f.baseline_value, f.unit);
+  for (const o of drafted.options) for (const iv of o.interventions ?? []) add(iv.factor_label, iv.value, iv.unit);
+  for (const c of drafted.constraints) add(c.metric, c.value, c.unit);
   return out;
 }
 
+/**
+ * ⛔ A RANGE IS HELD ONLY BY THE ONE QUANTITY IT IS WRITTEN ABOUT (CODEX CEE BUDDY 5921674571; PTL 5921699859). Pooling
+ * every £ value let an unrelated £1m valuation and £2m payroll "hold" "deals between £1-2m", and A4 was never asked. Held
+ * = ONE quantity holds BOTH ends as values, and the brief's span at each end is that value, in its unit and currency,
+ * written about that quantity (`figureTheUserWroteFor`, strict, read `at` that end: the scoped reader #2409's door binds with).
+ * Every miss asks the retry, which is adopted only when a link then CARRIES the range: asking costs one call, never a figure.
+ */
 export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel, 'edges'>, drafted: CandidateModel): string[] {
   const carried = carriedRanges(admitted);
   const held = moneyHeldBy(drafted);
-  const holds = (end: { readonly magnitude: number; readonly currencyCode?: string }) => held.some((h) =>
-    (h.code === undefined || end.currencyCode === undefined || h.code === end.currencyCode)
-    && Math.abs(h.amount - end.magnitude) <= 1e-9 * Math.max(1, end.magnitude));
+  const quantities = [drafted.goal.metric, ...drafted.factors.map((f) => f.label), ...drafted.outcomes.map((o) => o.label), ...drafted.risks.map((r) => r.label)];
+  // The written amount AT that end is this quantity's value, in its unit and currency, and written about it.
+  const holdsAt = (label: string, end: { readonly index: number }) => held.some((h) => h.label === label
+    && figureTheUserWroteFor(h.value, h.unit, brief, { target: [label], others: quantities.filter((q) => q !== label), strict: true, at: end.index }));
+  const heldAsOne = (r: StatedRange) => [...new Set(held.map((h) => h.label))].some((label) => holdsAt(label, r.low) && holdsAt(label, r.high));
   return [...new Map(findStatedRanges(brief).map((r) => [r.text, r] as const)).values()]
-    // Held only as a RANGE (both ends): one end matching another quantity (a £1m goal target) never suppresses A4.
-    .filter((r) => !carried.has(r.text) && !(holds(r.low) && holds(r.high)) && !inAQuestion(brief, r.high.index))
+    .filter((r) => !carried.has(r.text) && !heldAsOne(r) && !inAQuestion(brief, r.high.index))
     .map((r) => r.text).map((t) =>
     `The brief writes "${t}" and no link in the model carries it. If it is a money size PER ONE of something the brief names `
     + '(per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the '
