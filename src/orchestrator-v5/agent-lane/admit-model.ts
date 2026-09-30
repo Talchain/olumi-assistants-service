@@ -17,6 +17,7 @@
  */
 
 import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type QuantityFrameType } from '@talchain/schemas';
+import { limitSinkBranch } from '../../graph/limit-sink-branch.js';
 import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from './product-goal-extra-parent.js';
 import { foldPassThroughRateOntoUsersPrice, sayRateOperandIsUsersPrice } from './product-goal-rate-operand.js';
 import { oneRoutePerEffect } from './one-route-per-effect.js';
@@ -4198,10 +4199,14 @@ function admitOnce(
       }
       return false;
     };
+    // ⛔ ONE DEFINITION WITH READINESS (`limit-sink-branch.ts`; R3 #75 5903589565, P0 partner 5903714338): a limited
+    // terminal and its ancestors, when a lever reaches it, end at the limit — readiness accepts them, so they are never
+    // said to be unconnected (the Agent raised that as "connect downtime to the cost goal", a false cause).
+    const sinkBranch = limitSinkBranch(nodes, edgesNow, constraintResult.constraints.map((c) => c.node_id));
     for (const n of nodes) {
       // A pure limit left with no edge out ends at its limit by construction (above): readiness holds it as a valid
-      // terminal (`isLimitOnlyTally`). One that still feeds something is judged like any other node.
-      if (n.id === goalForReach.id || n.kind === 'decision' || reachesGoal(n.id)
+      // terminal. One that still feeds something is judged like any other node.
+      if (n.id === goalForReach.id || n.kind === 'decision' || reachesGoal(n.id) || sinkBranch.has(n.id)
         || (pureLimits.some((p) => p.node_id === n.id) && !edgesNow.some((e) => e.from === n.id))) continue;
       sayUnreached(n, goalForReach);
     }

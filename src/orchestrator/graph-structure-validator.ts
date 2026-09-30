@@ -79,6 +79,7 @@
  * and acyclicity.
  */
 
+import { limitSinkBranch } from '../graph/limit-sink-branch.js';
 import type { GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
@@ -639,30 +640,28 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   // Served: Paul's budget brief (journey C) never ran — its spend total carries "≤ £30,000", is a sum of the levers'
   // spends, and has no outgoing edge, so this loop refused the whole model on the node the limit watches. A tally bound
   // by a limit is a cost constraint scored against its limit, never a cause of the goal; drafting a tally → goal link to
-  // pass this check would invent the false cause A4b removed. Exempt ONLY when all three hold: a `goal_constraints` row
-  // names the node; it has no outgoing directed edge (a terminal); and every parent is a lever (an option, or a
-  // controllable factor). Any other dead end — including a limited node fed by a non-lever — is still refused.
+  // pass this check would invent the false cause A4b removed.
+  // ⭐ …AND SO IS A LIMIT'S WHOLE BRANCH WHEN THE DECISION MOVES IT (R3 pre-flight #75 5903589565; AIQ 5903604206; DL
+  // lease 5903604509). Served cut-costs (`9f75612`, guest `15f48f0b`): planning quality (a lever) and migration duration
+  // (observable, set by the GCP-share lever) → expected migration downtime "≤ 2 weeks", with no downtime → spend link —
+  // downtime is not a cause of the bill. Every Run was blocked, and 3 of 4 first drafts invented that link to pass here.
+  // A live arm on the corrected prompt then drew downtime's own uncertain causes as roots ("Migration complexity",
+  // observable, no parent) — sound science, and refused by a parents-only rule. Exempt ONLY when all hold: a
+  // `goal_constraints` row names the node; it has no outgoing directed edge (a terminal) and at least one parent; and a
+  // lever (an option or a controllable factor) is among its ancestors — the decision moves it. Exempt are the limited node
+  // and every ancestor of it. Any other dead end — one reaching no limit, a limited node with an onward edge that misses
+  // the goal, or a limited island no lever reaches — is still refused. Journey C's all-lever parents is a case of this;
+  // an exogenous cause of a limited quantity is part of its branch (this supersedes #2129's parents-only contrast).
   const limitTargetIds = new Set(
     (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
   );
-  const kindById = new Map(graph.nodes.map((n) => [n.id, n] as const));
-  const isLever = (id: string): boolean => {
-    const n = kindById.get(id);
-    return n !== undefined && (n.kind === 'option'
-      || (n.kind === 'factor' && (n as { category?: unknown }).category === 'controllable'));
-  };
-  const isLimitOnlyTally = (id: string): boolean => {
-    if (!limitTargetIds.has(id)) return false;
-    if (graph.edges.some((edge) => isDirected(edge) && edge.from === id)) return false;
-    const parents = graph.edges.filter((edge) => isDirected(edge) && edge.to === id).map((edge) => edge.from);
-    return parents.length > 0 && parents.every(isLever);
-  };
+  const limitSinkBranchIds = limitSinkBranch(graph.nodes, graph.edges.filter(isDirected), limitTargetIds);
 
   for (const node of graph.nodes) {
     if (node.kind === 'goal') continue; // Trivially reaches itself; loop 1 owns the goal.
     if (node.kind === 'decision') continue; // Loop 1 owns the decision→goal relationship.
     if (canReachGoal.has(node.id)) continue;
-    if (isLimitOnlyTally(node.id)) continue;
+    if (limitSinkBranchIds.has(node.id)) continue;
     if (node.kind === 'option' && optionsMissingFactorEdge.has(node.id)) continue;
     // Already caught by orphan check if it has no edges at all —
     // but an edged node can still be a dead-end with no path to the goal.

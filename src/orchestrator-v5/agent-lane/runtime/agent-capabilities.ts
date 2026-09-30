@@ -183,6 +183,15 @@ import { edgeReviewedByUser } from '../../../cee/graph-readiness/obligation-prov
  * Whose figure: the labels it is FOR, and every other QUANTITY's label (`figureTheUserWroteFor`). Options and the
  * decision are not quantities a figure measures, and their names reuse the factors' nouns.
  */
+/** The node ids the graph's limits name (`goal_constraints[].node_id`), for `structuralFacts`' limit-branch sink. */
+function limitNodeIdsOf(raw: unknown): string[] {
+  const rows = (raw as { goal_constraints?: unknown } | null | undefined)?.goal_constraints;
+  return (Array.isArray(rows) ? rows : []).flatMap((c) => {
+    const id = (c as { node_id?: unknown } | null)?.node_id;
+    return typeof id === 'string' ? [id] : [];
+  });
+}
+
 function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, ...target: string[]): EntityScope {
   const others = g.nodes
     .filter((n) => n.kind !== 'option' && n.kind !== 'decision')
@@ -2529,7 +2538,7 @@ export function createAgentCapabilities(
         // and the Agent may state them to the user as facts. Without these it
         // has to infer topology from an edge list, and measurably does it worse
         // than the product it is being compared against.
-        structure: structuralFacts(g.nodes, g.edges),
+        structure: structuralFacts(g.nodes, g.edges, limitNodeIdsOf(g.raw)),
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
         ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, g),
@@ -5412,7 +5421,7 @@ export function createAgentCapabilities(
         graph_revision: after.graph_hash,
         // The SAME projection get_canonical_state uses — see projectEntity.
         entities: after.nodes.map(projectEntity),
-        structure: structuralFacts(after.nodes, after.edges),
+        structure: structuralFacts(after.nodes, after.edges, limitNodeIdsOf(after.raw)),
         // (B) The goal as stated, the limits, and the ONE readiness verdict — the same projection as
         // get_canonical_state, so the first reply never contradicts the Run control.
         ...pickKeys(projectModelContext(after), ['goal', 'goals', 'limits', 'readiness']),

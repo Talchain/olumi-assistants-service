@@ -13,6 +13,7 @@
  * may repeat to the user as facts.
  */
 
+import { limitSinkBranch } from '../../graph/limit-sink-branch.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../graph/repair-authored-edge.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline, type BaselineFlagSurfaces } from '../../cee/baseline-identity.js';
@@ -170,7 +171,15 @@ export function heldStatusQuoOptionId(
 export function structuralFacts(
   nodes: readonly GraphNodeLike[],
   edges: readonly GraphEdgeLike[],
+  /**
+   * The nodes the graph's limits name (`goal_constraints[].node_id`). ⛔ A limited terminal's branch, when a lever
+   * reaches it, ends at its limit — readiness accepts it (`graph/limit-sink-branch.ts`, ONE definition), so it is never
+   * listed as unable to reach the goal: the Agent raised that as "connect downtime to the cost goal", a false cause
+   * (R3 #75 5903589565; P0 partner 5903714338).
+   */
+  limitNodeIds: Iterable<string> = [],
 ): StructuralFacts {
+  const sinkBranch = limitSinkBranch(nodes, edges, limitNodeIds);
   const adjacency = new Map<string, string[]>();
   const touched = new Set<string>();
   for (const e of edges) {
@@ -199,7 +208,7 @@ export function structuralFacts(
       if (n.id === goal.id) continue;
       const hit = reachable(adjacency, n.id).has(goal.id);
       if (n.kind === 'option') (hit ? reaching : notReaching).push(labelOf(n.id));
-      else if (!hit && touched.has(n.id)) strandedNonOptions.push(labelOf(n.id));
+      else if (!hit && touched.has(n.id) && !sinkBranch.has(n.id)) strandedNonOptions.push(labelOf(n.id));
     }
   }
 
