@@ -65,6 +65,17 @@ const UNIT_MISMATCH_NOTE =
   'Left out because the figure is in a different kind of unit from the factor (for example a price given for a rate). '
   + 'Never record a figure the user gave for something else as this factor\u2019s value; ask for its own figure if needed.';
 
+/** A "%" figure of 1 or less for a 0–1 share factor: 0.5% or 50%? Nothing proposed; the user is asked (`relative-figure.ts`). */
+const SCALE_AMBIGUOUS_NOTE =
+  'Nothing was proposed for these: the figure was given in percent for a factor measured as a share from 0 to 1, and a figure '
+  + 'of 1 or less could mean either reading (0.5% is 0.005; 0.5 as a share is 50%). Ask the user which they mean, quoting both.';
+
+/** A figure compared the other way from what the factor measures (`relative-figure.ts`, AIQ 5907227964 B). */
+const DIRECTION_CONFLICT_NOTE =
+  'Nothing was proposed for these: the user compared the figure the other way from what the factor measures (for example '
+  + '"AWS costs 25% more" against a GCP saving, which would be 20%, not 25%), or against the factor\u2019s own subject. Ask the '
+  + 'user which figure they mean for the factor; never convert it yourself, and never record the written figure as it.';
+
 /** What the Agent says about a level it marked as the user's that the user never wrote (`stated-by-user.ts`). */
 const NOT_THE_USERS_FIGURE_NOTE =
   'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
@@ -142,6 +153,7 @@ import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { inShareFrame, isShareFactor, relativeFigureAgainst } from '../relative-figure.js';
 import { newFactorScopeIn } from '../figure-scope.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
@@ -3198,10 +3210,13 @@ export function createAgentCapabilities(
       const ambiguous: AmbiguousTarget[] = [];
       const occupied: { label: string; current_value: number }[] = [];
       const unitMismatch: { label: string; value: unknown; unit: string; factor_unit: string }[] = [];
+      const scaleAmbiguous: { label: string; value: number; as_percent: number; as_share: number }[] = [];
+      const directionConflict: { label: string }[] = [];
       const seen = new Set<string>();
       const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; asPercent?: true }[] = [];
 
-      for (const a of input) {
+      for (const given of input) {
+        let a = given;
         const requested = String(a?.factor_label ?? '');
         const res = resolveNamed(g, requested, writable);
         if (res.kind === 'none') { unresolved.push(requested); continue; }
@@ -3216,6 +3231,28 @@ export function createAgentCapabilities(
         const nodeUnit = factorUnitOf(g.raw, node);
         if (unitsConflict(a?.unit, nodeUnit) !== null) {
           unitMismatch.push({ label: node.label, value: a?.value, unit: String(a?.unit), factor_unit: String(nodeUnit) });
+          continue;
+        }
+        /**
+         * ⛔ A CORRECTION LANDS FIRST TIME (`relative-figure.ts`; DL lease 5907111773, AIQ 5907128716 + 5907227964). Served
+         * share build `2366977` (R3 `ccalt` r1): "25%" came as `{25, "%"}` for a 0–1 `proportion` factor, the card read
+         * "0.2% → 25%" and the press was refused at write. A percentage there is read in the factor's frame (25% → 0.25); a
+         * "%" figure of 1 or less is ambiguous (0.5% or 50%?) and asked; a figure the user compared the OTHER way from what
+         * the factor measures ("AWS costs 25% more" against a GCP saving) is no figure for it by any author, and asked.
+         */
+        const shareFactor = isShareFactor(nodeUnit, node.observed_state);
+        const frame = inShareFrame(Number(a?.value), a?.unit, nodeUnit, node.observed_state);
+        if (frame.kind === 'ambiguous') {
+          scaleAmbiguous.push({ label: node.label, value: Number(a?.value), as_percent: frame.asPercent, as_share: frame.asShare });
+          continue;
+        }
+        if (frame.kind === 'converted') a = { ...a, value: frame.value, unit: frame.unit };
+        // The proposed figure read at ITS OWN place first (P0 PARTNER CR 5907476130): "25% cheaper …, though support would be
+        // 10% more expensive" is the user's 25%; only a figure not written the factor's way ("25% more", or a 20% worked out
+        // from it) falls to the whole-message check.
+        if (shareFactor && relativeFigureAgainst(node.label, ctx.user_text, Number(a.value) * 100) !== 'same'
+          && relativeFigureAgainst(node.label, ctx.user_text) === 'opposite') {
+          directionConflict.push({ label: node.label });
           continue;
         }
         /**
@@ -3261,7 +3298,9 @@ export function createAgentCapabilities(
         // read the add-factor door's way (`newFactorScopeIn`: rivals + strict): under the plain reading, served journey E's
         // "Senior engineers cost £120k a year each and juniors £65k a year each" was Olumi's for both salaries (5d73351, 2/2).
         const ownerScope = newFactorScopeIn(g, node.label, String(a?.unit ?? nodeUnit ?? ''), []);
-        const writtenAbout = figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, ownerScope);
+        // A comparison whose direction or concept cannot be read credits nobody: Olumi's, and said (AIQ 5907227964).
+        const readable = !shareFactor || relativeFigureAgainst(node.label, ctx.user_text, Number(a.value) * 100) !== 'unknown';
+        const writtenAbout = readable && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, ownerScope);
         // ⛔ HUMAN CONTROL IS THE PROVENANCE GATE, here too (the DL's ruling on #2235 for the add-factor door; AIQ #75
         // 5902528686). Served cut-costs (DL alt-B r0/r1, CEE 1f9d769): "Our team's quote shows GCP would be about 25% cheaper
         // than AWS for our workload." revised the discount factor to 0.25, the user's exact figure, and stored it as
@@ -3276,7 +3315,7 @@ export function createAgentCapabilities(
         const soleFigure = input.length === 1 && figuresWrittenIn(ctx.user_text) === 1;
         // And nothing BESIDE the figure names another quantity (`nearOnly`): "Keep salary spend under £400k" is the limit's,
         // "our MRR is £12,000" is MRR's, never a revised salary or price, card or not.
-        const quote = !writtenAbout && soleFigure && typeof existing === 'number'
+        const quote = readable && !writtenAbout && soleFigure && typeof existing === 'number'
           && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, { ...ownerScope, nearOnly: true })
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text) : null;
         adopted.push({
@@ -3297,6 +3336,8 @@ export function createAgentCapabilities(
           ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
           ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
+          ...(scaleAmbiguous.length > 0 ? { scale_ambiguous: scaleAmbiguous, scale_ambiguous_note: SCALE_AMBIGUOUS_NOTE } : {}),
+          ...(directionConflict.length > 0 ? { direction_conflict: directionConflict, direction_conflict_note: DIRECTION_CONFLICT_NOTE } : {}),
           detail:
             'None of those could be adopted. Read the state again and use the labels exactly as they appear; ' +
             'factors that already hold a value are left alone.',
@@ -3381,6 +3422,8 @@ export function createAgentCapabilities(
         ...(notAFactor.length > 0 ? { not_a_factor: notAFactor, not_a_factor_note: NOT_A_FACTOR_NOTE } : {}),
         ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
         ...(unitMismatch.length > 0 ? { unit_mismatch: unitMismatch, unit_mismatch_note: UNIT_MISMATCH_NOTE } : {}),
+        ...(scaleAmbiguous.length > 0 ? { scale_ambiguous: scaleAmbiguous, scale_ambiguous_note: SCALE_AMBIGUOUS_NOTE } : {}),
+        ...(directionConflict.length > 0 ? { direction_conflict: directionConflict, direction_conflict_note: DIRECTION_CONFLICT_NOTE } : {}),
         ...(notWritten.length > 0 ? {
           not_the_users_figure: notWritten.map((a) => ({ factor: a.label, value: a.value })),
           not_the_users_figure_note: NOT_THE_USERS_FIGURE_NOTE,
