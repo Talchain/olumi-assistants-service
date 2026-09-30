@@ -433,9 +433,11 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
       || coefficient.value === 0 || (coefficient.value > 0) !== (claim.direction === 'positive') || hasPath(to.id, from.id)) {
       issue(claim.ref, 'causal_parameters_invalid', `Which numerical effect and uncertainty apply from "${from.label}" to "${to.label}"?`); continue;
     }
-    edges.push({ from: from.id, to: to.id, strength: { mean: coefficient.value, std: deviation.value },
-      exists_probability: probability.value, effect_direction: claim.direction,
-      provenance: { source: 'brief_extraction', reasoning: source.source.quote, magnitude: 'user_stated' } });
+    // SourceMeaning has no typed "effect per source change" or uncertainty
+    // unit. GraphV3 strength is normalised; a natural coefficient cannot be
+    // copied there without the conversion inputs required by convertLinkEffect.
+    issue(claim.ref, 'causal_unit_frame_unverified',
+      `Can Olumi verify the stated per-unit effect and uncertainty for "${from.label}" → "${to.label}" before using it?`);
   }
   for (const unknown of meaning.unknowns) issue(unknown.ref, 'stated_unknown', unknown.question);
   const graph = GraphV3.parse({ nodes: [...nodes.values()], edges, ...(constraints.length ? { goal_constraints: constraints } : {}) });

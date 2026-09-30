@@ -140,6 +140,20 @@ describe('source-first compiler', () => {
     expect(result.unresolved).toContainEqual(expect.objectContaining({ code: 'causal_size_unresolved' }));
   });
 
+  it.each(['-0.4', '-4'])('withholds an untyped natural-unit causal coefficient %s', (amount) => {
+    const { brief: original, meaning } = pricing();
+    const quote = `The causal coefficient β is ${amount} subscribers per £1 increase in price, standard deviation 0.1, existence probability 0.8.`;
+    meaning.causal_claims = [{ ref: 'price_effect', from_ref: 'price', to_ref: 'subscribers', direction: 'negative',
+      source: source(quote), coefficient: { literal: amount, value: amount, source: source(quote) },
+      standard_deviation: { literal: '0.1', value: '0.1', source: source(quote) },
+      existence_probability: { literal: '0.8', value: '0.8', source: source(quote) } }];
+    const result = compileSourceMeaning(`${original} ${quote}`, meaning);
+    expect(result.graph.edges.some((edge) => edge.from === sourceEntityId('price') && edge.to === sourceEntityId('subscribers'))).toBe(false);
+    expect(result.source_bindings.price_effect.quote).toBe(quote);
+    expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'price_effect', code: 'causal_unit_frame_unverified' }));
+    expect(result.open_questions.some((question) => question.includes('per-unit') && question.includes('uncertainty'))).toBe(true);
+  });
+
   it('does not silently stamp an explicit sum as an inferred sum', () => {
     const { brief, meaning } = pricing();
     meaning.definitions[0].operation = 'sum';
