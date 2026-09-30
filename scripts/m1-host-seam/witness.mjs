@@ -21,7 +21,7 @@ mkdirSync(out, { recursive: true });
 const brief = readFileSync(briefFile, 'utf8').trim();
 const turn = await buildFromBrief({ base, assistKey, bearer, brief });
 writeFileSync(`${out}/turn.json`, JSON.stringify({ ...turn, response: undefined }, null, 2));
-const rb = await readback({ base, assistKey, bearer, scenarioId: turn.scenario_id });
+const rb = await readback({ base, assistKey, bearer, scenarioId: turn.scenario_id, withBuild: true }); // the ONE /healthz
 writeFileSync(`${out}/readback.json`, JSON.stringify(rb, null, 2));
 console.log(JSON.stringify({
   cee_build: rb.cee_build, scenario_id: rb.scenario_id, signed_in: rb.signed_in,

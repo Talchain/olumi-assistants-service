@@ -82,7 +82,7 @@ export async function sendTurn(opts) {
   const t = await post(ctx, '/agent/v1/turn', {
     scenario_id: opts.scenarioId, turn_id: randomUUID(), kind: 'message', message: opts.message,
     ...(first ? { stage: 'frame', turn_class: 'frame', source: 'composer' } : {}),
-    ...(opts.chip ? { chip: opts.chip } : {}),
+    ...(opts.chip ? { chip: opts.chip, source: 'chip' } : {}),
   }, opts.timeoutMs ?? 300000);
   return {
     scenario_id: opts.scenarioId,
@@ -126,11 +126,15 @@ export async function readback(opts) {
   const ctx = context(opts);
   const sid = opts.scenarioId;
   if (typeof sid !== 'string' || sid.length === 0) throw new Error('scenarioId is required');
+  // ⛔ /healthz only when asked (DL #75 5910624364): each call fans out into full prompt-history reads (Supabase
+  // egress). A witness reads the build ONCE at its start; every other readback leaves `cee_build` null.
   let cee_build = null;
-  try {
-    const h = await ctx.fetchImpl(`${ctx.base}/healthz`, { signal: AbortSignal.timeout(20000) });
-    cee_build = (await h.json())?.build ?? null;
-  } catch { cee_build = null; }
+  if (opts.withBuild === true) {
+    try {
+      const h = await ctx.fetchImpl(`${ctx.base}/healthz`, { signal: AbortSignal.timeout(20000) });
+      cee_build = (await h.json())?.build ?? null;
+    } catch { cee_build = null; }
+  }
   const graphRead = await read(ctx, `/assist/v1/scenarios/${sid}/graph`, {}, opts.timeoutMs ?? 60000);
   const versionsRead = await read(ctx, `/assist/v1/scenarios/${sid}/versions`, {}, opts.timeoutMs ?? 60000);
   const g = graphRead.http === 200 ? graphRead.json : null;
@@ -233,4 +237,31 @@ export function editedSinceConstruction(rb) {
   const c = rb?.construction, mv = rb?.model_version;
   return typeof c?.version_id === 'string' && Number.isInteger(c?.sequence)
     && Number.isInteger(mv?.sequence) && mv.sequence > c.sequence;
+}
+
+/**
+ * A card press, derived ENTIRELY from what the Agent offered (Build 5910076244, AIQ 5909797932). The pressed id must
+ * be one of the LAST reply's `suggested_actions`; the message sent is that card's OWN `message` (the exact reading the
+ * user is approving; the route binds these words to the approval), never its label and never a caller's text. A caller
+ * message that differs is refused, since it would change what the user authorised. The chip carries only the fields
+ * the served UI sends (`id`, `action_type`, `intent`, `parameters`; `buildPayload.ts`).
+ */
+export function chipPressFor(offeredActions, press) {
+  const id = press && typeof press === 'object' ? press.chip?.id ?? press.id : undefined;
+  if (typeof id !== 'string' || id.length === 0) return { ok: false, reason: 'no_chip_id' };
+  const action = (Array.isArray(offeredActions) ? offeredActions : []).find((a) => a && a.id === id);
+  if (action === undefined) return { ok: false, reason: 'not_on_offer' };
+  // An APPROVAL card must carry its own words (Build 5910539697): the route binds them to what is authorised, so a
+  // label is never a substitute. Other cards (amend, run) fall back to the label the user saw.
+  const isApproval = id.startsWith('agent-approve-proposal:');
+  const own = typeof action.message === 'string' && action.message.trim() ? action.message : null;
+  const message = own ?? (!isApproval && typeof action.label === 'string' && action.label.trim() ? action.label : null);
+  if (message === null) return { ok: false, reason: 'card_has_no_words' };
+  const callerMessage = press.message;
+  if (callerMessage !== undefined && callerMessage !== null && callerMessage !== message) {
+    return { ok: false, reason: 'message_differs_from_card' };
+  }
+  const chip = { id };
+  for (const k of ['action_type', 'intent', 'parameters']) if (action[k] !== undefined) chip[k] = action[k];
+  return { ok: true, message, chip };
 }

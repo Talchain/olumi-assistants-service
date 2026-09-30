@@ -62,7 +62,7 @@ test('readback: the object the Lab consumes, with the bearer sent only when give
   };
   const seen = [];
   const secret = 'jwt-secret-value-must-not-leak';
-  const rb = await readback({ base: 'https://cee.example/', assistKey: 'k', bearer: secret, scenarioId: sid, fetchImpl: fakeFetch(routes, seen) });
+  const rb = await readback({ base: 'https://cee.example/', assistKey: 'k', bearer: secret, scenarioId: sid, withBuild: true, fetchImpl: fakeFetch(routes, seen) });
   assert.equal(rb.schema, READBACK_SCHEMA);
   assert.equal(rb.cee_build, '147c0ce');
   assert.equal(rb.brief_text, 'the brief');
@@ -78,6 +78,10 @@ test('readback: the object the Lab consumes, with the bearer sent only when give
   assert.equal(guest.version_binding, 'guest_no_version');
   assert.equal(cardsAllowed(guest), false);
   assert.equal(guestSeen.some((s) => 'authorization' in s.headers), false);
+  // ⛔ No /healthz unless asked (DL 5910624364: each call fans out into full prompt-history reads).
+  assert.equal(guestSeen.some((s) => new URL(s.url).pathname === '/healthz'), false);
+  assert.equal(guest.cee_build, null);
+  assert.equal(seen.filter((s) => new URL(s.url).pathname === '/healthz').length, 1);
 });
 
 test('sameModel: a new version or a new graph between reads is a different model', () => {
@@ -208,8 +212,33 @@ test('sendTurn carries a chip press as the served UI does ({ chip } beside the m
   const pressed = await sendTurn({ base: 'https://c', assistKey: 'k', scenarioId: 's', message: 'Set Paying subscribers to 1600',
     chip: { id: 'agent-approve-proposal:prop_abc123' }, fetchImpl });
   assert.deepEqual(bodies[0].chip, { id: 'agent-approve-proposal:prop_abc123' });
+  assert.equal(bodies[0].source, 'chip');
   assert.equal(bodies[0].kind, 'message');
   assert.deepEqual(pressed.suggested_actions, offeredChips);
   await sendTurn({ base: 'https://c', assistKey: 'k', scenarioId: 's', message: 'hi', fetchImpl });
   assert.equal('chip' in bodies[1], false);
+});
+
+test('chipPressFor — Build 5910076244 / AIQ 5909797932 controls: the press is derived ENTIRELY from the last offer', async () => {
+  const { chipPressFor } = await import('./readback.mjs');
+  const card = { id: 'agent-approve-proposal:prop_abc123', label: 'Record this reading', message: 'Yes, record that reading: 4 fewer subscribers per £1.',
+    action_type: 'approve', detail: 'shown words', extra: 'never forwarded' };
+  const offer = [card, { id: 'agent-amend', label: 'Change something first', message: 'Before you apply it, I want to change some of it.' }];
+  // id-only (what the Build UI sends): the card's OWN message, never its label
+  const idOnly = chipPressFor(offer, { chip: { id: card.id } });
+  assert.deepEqual(idOnly, { ok: true, message: card.message, chip: { id: card.id, action_type: 'approve' } });
+  // the same message echoed back is fine
+  assert.equal(chipPressFor(offer, { chip: { id: card.id }, message: card.message }).ok, true);
+  // a substituted message beside a valid id is REFUSED (it would change what the user authorised)
+  assert.deepEqual(chipPressFor(offer, { chip: { id: card.id }, message: 'Yes, record 40 per £1.' }), { ok: false, reason: 'message_differs_from_card' });
+  // a stale / unknown id is refused
+  assert.deepEqual(chipPressFor(offer, { chip: { id: 'agent-approve-proposal:prop_old999' } }), { ok: false, reason: 'not_on_offer' });
+  assert.deepEqual(chipPressFor([], { chip: { id: card.id } }), { ok: false, reason: 'not_on_offer' });
+  // typed text with no chip is NOT a press
+  assert.deepEqual(chipPressFor(offer, { message: 'Yes, use those.' }), { ok: false, reason: 'no_chip_id' });
+  // a NON-approval card with no message falls back to its label (the words the user saw)…
+  assert.equal(chipPressFor([{ id: 'agent-amend', label: 'Change something first' }], { chip: { id: 'agent-amend' } }).message, 'Change something first');
+  // …but an APPROVAL card without its own words is refused, never approved on its label (Build 5910539697)
+  assert.deepEqual(chipPressFor([{ id: card.id, label: 'Record this reading' }], { chip: { id: card.id } }), { ok: false, reason: 'card_has_no_words' });
+  assert.deepEqual(chipPressFor([{ id: card.id, label: 'Record this reading', message: '  ' }], { chip: { id: card.id } }), { ok: false, reason: 'card_has_no_words' });
 });
