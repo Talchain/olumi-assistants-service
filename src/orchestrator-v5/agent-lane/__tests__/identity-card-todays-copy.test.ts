@@ -45,6 +45,14 @@ describe('an operand holding an EXACT copy of the user’s figure is read at tod
     expect(proposeProductIdentity(g((x) => { node(x, 'current_paying_subscribers').observed_state.source = 'cee_inference'; }))).toBeNull();
   });
 
+  it('CONTROL (P0 PARTNER 5906503452 row E; AIQ 5906521706): the same 1,500 in “customers” is not an exact copy — no card', () => {
+    expect(proposeProductIdentity(g((x) => { node(x, 'paying_subscribers_at_12_months').observed_state.unit = 'customers'; }))).toBeNull();
+  });
+
+  it('CONTROL (row E’s pair): “subscriber” (singular) is the same unit as the user’s “subscribers” — the card', () => {
+    expect(proposeProductIdentity(g((x) => { node(x, 'paying_subscribers_at_12_months').observed_state.unit = 'subscriber'; }))).not.toBeNull();
+  });
+
   it('CONTROL: two user-levelled causes (which is today’s?) — no card', () => {
     expect(proposeProductIdentity(g((x) => { node(x, 'monthly_new_subscribers').observed_state.source = 'brief_extraction'; }))).toBeNull();
   });
