@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
-import type { CandidateModel } from '../admit-model.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
@@ -80,5 +80,12 @@ describe('a limited quantity\'s branch is never said to be unconnected (served c
     const { graph } = await build(draft((c) => { c.constraints = []; }));
     expect(stranded(graph)).toEqual(expect.arrayContaining(['Migration complexity', 'Migration downtime']));
     expect(readinessCodes(graph)).toContain('NO_PATH_TO_GOAL');
+  });
+
+  it('admission never names the branch "unconnected" (its own ledger reads the same sink); the control does', () => {
+    const named = (m: CandidateModel) => admitCandidateModel(m).loss
+      .filter((l) => /no chain of causes runs from it/.test(String(l.reason))).map((l) => l.before);
+    expect(named(draft())).toEqual([]);
+    expect(named(draft((c) => { c.constraints = []; }))).toEqual(expect.arrayContaining(['Migration complexity', 'Migration downtime']));
   });
 });
