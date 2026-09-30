@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import { computeExpectedGraphCasHashes } from '../../context/graph-cas-conflict.js';
 import { applyOlumiOptionAdoption } from '../olumi-option-adoption.js';
@@ -52,5 +53,25 @@ describe('pressing an Olumi option into the comparison', () => {
     expect(applyOlumiOptionAdoption(before, { ...input(before), expected_label: 'Another £54' }).kind).toBe('stale');
     expect(applyOlumiOptionAdoption(before, { ...input(before), base_graph_hash: '0'.repeat(16) }).kind).toBe('stale');
     expect(before.nodes.find((n) => n.id === 'suggested')).not.toHaveProperty('analysis_participation');
+  });
+
+  it('accepts the stored pricing graph shape with the existing £54 suggestion', () => {
+    const fixture = JSON.parse(readFileSync(new URL('../../agent-lane/__tests__/fixtures/served-c96fc4bb-registered-graph-77afc7b.json', import.meta.url), 'utf8')) as {
+      graph: { nodes: Array<Record<string, unknown>> };
+    };
+    const before = fixture.graph;
+    const option = before.nodes.find((n) => n.id === 'raise_price_to_54')!;
+    const cas = computeExpectedGraphCasHashes(before);
+    const applied = applyOlumiOptionAdoption(before, {
+      option_id: 'raise_price_to_54', expected_label: String(option.label),
+      expected_interventions: option.interventions as Record<string, unknown>,
+      base_graph_hash: cas.expectedGraphAnalysisHash!,
+      expected_graph_identity_hash: cas.expectedGraphIdentityHash!,
+    });
+    expect(applied.kind, JSON.stringify(applied)).toBe('mutated');
+    if (applied.kind !== 'mutated') return;
+    expect(applied.graph.nodes.find((n: unknown) => (n as { id?: string }).id === 'raise_price_to_54'))
+      .toMatchObject({ proposed_by: 'olumi', analysis_participation: 'included',
+        interventions: option.interventions });
   });
 });
