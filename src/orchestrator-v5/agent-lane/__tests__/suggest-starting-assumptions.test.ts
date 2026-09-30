@@ -17,7 +17,8 @@ import type { AgentCapabilities, AgentToolContext } from '../runtime/agent-tools
 import { readinessViewOf } from '../readiness-view.js';
 import {
   SUGGEST_STARTING_ASSUMPTIONS_CHIP, STARTING_ASSUMPTIONS_TOOL, NEXT_STEP_AFTER_BLOCKED_RUN_CHIP,
-  offersStartingAssumptions, startingAssumptionsOffered, forcedToolOf, stillValidOffers,
+  offersStartingAssumptions, startingAssumptionsOffered, startingAssumptionsChips, forcedToolOf, stillValidOffers,
+  postWriteReadinessLine,
 } from '../../../routes/agent-v1-turn.js';
 
 type Json = Record<string, any>;
@@ -63,6 +64,35 @@ describe('when the chip is offered: the run is KNOWN refused and Olumi can offer
     ['the readback\'s readiness is unknown (a failed read)', undefined],
   ])('CONTROL: %s → not offered', (_l, analysisReady) => {
     expect(startingAssumptionsOffered(FIX.olumi_levels_unset, analysisReady)).toBe(false);
+  });
+});
+
+/** Both gaps at once: Olumi's option levels unset (Olumi can offer) AND every factor's level removed (the user owes them). */
+const bothGaps = (): Json => {
+  const g = structuredClone(FIX.olumi_levels_unset);
+  for (const n of g.nodes) if (n.kind === 'factor') delete n.observed_state;
+  return g;
+};
+
+describe('AIQ 5913289751 follow-up: when the user ALSO owes an input, both chips, and the approval reply names what is left', () => {
+  it('RED: both gaps → "Suggest starting assumptions" AND the general next step', () => {
+    const view = readinessViewOf(bothGaps());
+    expect(view.needs_from_user.length, 'the user owes an input').toBeGreaterThan(0);
+    expect(view.olumi_can_offer.length, 'Olumi can offer').toBeGreaterThan(0);
+    expect(startingAssumptionsChips(bothGaps(), REFUSED).map((a) => a.id)).toEqual([SUGGEST_STARTING_ASSUMPTIONS_CHIP.id, NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id]);
+  });
+
+  it('CONTROL: only Olumi\'s gap → the specific chip alone (it replaces the general one)', () => {
+    expect(startingAssumptionsChips(FIX.olumi_levels_unset, REFUSED).map((a) => a.id)).toEqual([SUGGEST_STARTING_ASSUMPTIONS_CHIP.id]);
+  });
+
+  it('after Olumi\'s figures are approved, the reply says the run still waits on the USER, in their gap\'s own words', () => {
+    // Approving fills the option levels (Olumi's); the factor levels are still the user's to give.
+    const after = factorLevelsUnset();
+    const owed = readinessViewOf(after).needs_from_user[0]!.message;
+    const line = postWriteReadinessLine(after, REFUSED)!;
+    expect(line.startsWith("The analysis can't run yet.")).toBe(true);
+    expect(line).toContain(owed.trim());
   });
 });
 
@@ -190,6 +220,13 @@ describe('the real route offers the chip, and its press forces the proposal', ()
     const ids = b.suggested_actions.map((a) => a.id);
     expect(ids).toContain(SUGGEST_STARTING_ASSUMPTIONS_CHIP.id);
     expect(ids).not.toContain(NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id);
+  });
+
+  it('RED (follow-up): both gaps on the real route → both chips', async () => {
+    graph = bothGaps();
+    const ids = (await turn({ message: 'What does the model still need?' })).suggested_actions.map((a) => a.id);
+    expect(ids).toContain(SUGGEST_STARTING_ASSUMPTIONS_CHIP.id);
+    expect(ids).toContain(NEXT_STEP_AFTER_BLOCKED_RUN_CHIP.id);
   });
 
   it('CONTROL: the same graph when this turn\'s Run control admits a run → not offered', async () => {

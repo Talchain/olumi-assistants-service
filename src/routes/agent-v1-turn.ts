@@ -598,7 +598,19 @@ export function offersStartingAssumptions(view: { readonly checked: boolean; rea
  * `analysis_ready` (a KNOWN refusal, as `postWriteReadinessLine`), so it never sits beside a Run button.
  */
 export function startingAssumptionsOffered(graph: unknown, analysisReady: unknown): boolean {
-  return knownNotRunnable(analysisReady) && offersStartingAssumptions(readinessViewOf(graph));
+  return startingAssumptionsChips(graph, analysisReady).length > 0;
+}
+
+/**
+ * The chips a known refusal Olumi can help with offers (AIQ 5913289751 follow-up): "Suggest starting assumptions", and
+ * ALSO the general next step while the user still owes an input only they can give. Approving Olumi's figures would
+ * otherwise meet a refused Run with nothing to press. Empty when the chip is not offered. One readiness view, read once.
+ */
+export function startingAssumptionsChips(graph: unknown, analysisReady: unknown): OfferedAction[] {
+  if (!knownNotRunnable(analysisReady)) return [];
+  const view = readinessViewOf(graph);
+  if (!offersStartingAssumptions(view)) return [];
+  return [SUGGEST_STARTING_ASSUMPTIONS_CHIP, ...(view.needs_from_user.length > 0 ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : [])];
 }
 
 /** The first call's forced tool, only when the request declares a tool of that name. */
@@ -2451,8 +2463,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     // ⭐ "Suggest starting assumptions" (P-CORE 5911687135; DL item 5): on the state read back THIS turn, never while an
     // approval is waiting (that card is the next step) and never on an unchecked verdict.
-    const offerStartingAssumptions = approvals.length === 0 && carriedApproval.length === 0
-      && startingAssumptionsOffered(readbackGraph, analysisReady);
+    const startingAssumptions = approvals.length === 0 && carriedApproval.length === 0
+      ? startingAssumptionsChips(readbackGraph, analysisReady) : [];
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
@@ -2463,7 +2475,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
       ...runOutcomeChips,
       // The run is refused and Olumi can fill the gap: the one specific next step replaces the general one.
-      ...(offerStartingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP]
+      ...(startingAssumptions.length > 0 ? startingAssumptions
         : (runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
       // The research control for each query the Agent offered THIS turn: the only way a query is ever sent.
