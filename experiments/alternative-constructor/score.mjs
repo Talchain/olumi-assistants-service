@@ -97,6 +97,74 @@ function cloudRelativeBinding(record, brief, graph, obs) {
   return { applicable: true, verified, status, current_ref: currentIds[0] ?? null,
     target_ref: targetIds[0] ?? null, redundant_question };
 }
+function initialRecoveryScore(record, brief, graph, facts, optionRows, failures, relativeBinding, sizedWithoutUserEvidence) {
+  // This scores whether the saved first output preserves the source and asks a
+  // useful, truthful clarification. A recovery answer in the manifest is sealed gold;
+  // it is never treated as a reply that the constructor has actually processed.
+  const check = (id, passed) => ({ id, passed: Boolean(passed) });
+  const count = (checks) => ({ passed: checks.filter((item) => item.passed).length, total: checks.length, checks });
+  const hasFailure = (kind) => failures.some((failure) => failure.kind === kind);
+  const fidelity = [
+    ...facts.map((fact) => check(`fact:${fact.id}`, fact.retained && fact.source_bound)),
+    ...optionRows.map((option) => check(`option:${option.id}`, option.retained && option.source_bound)),
+  ];
+  if (brief.horizon_months) fidelity.push(check('stated_horizon', !hasFailure('goal_horizon_lost')));
+  if (brief.deadline_quote) fidelity.push(check('stated_deadline', !hasFailure('deadline_lost')));
+  for (const limit of brief.qualitative_limits ?? []) fidelity.push(check(`qualitative_limit:${limit}`, !hasFailure('qualitative_limit_lost')));
+  if (relativeBinding.applicable) fidelity.push(check('current_and_relative_goal_same_source_metric', relativeBinding.verified));
+
+  const questions = [...new Set([...(record.questions ?? []), ...(record.constructor_diagnostics?.unresolved?.map((item) => item.question) ?? [])]
+    .map((item) => typeof item === 'string' ? item : item?.question ?? item?.message ?? '')
+    .map((item) => item.trim()).filter(Boolean))];
+  const questionText = questions.join(' ');
+  const visibleText = `${questionText} ${record.assistant_text ?? ''}`;
+  const redundant = questions.filter((question) => {
+    if (brief.id === 'paul-mrr') return /(?:\b(?:what|how much|provide|tell me)\b.{0,100}\b(?:current|today|baseline|existing)\b.{0,80}\b(?:MRR|monthly recurring revenue)\b|\b(?:what|how much)\b.{0,100}\b(?:MRR|monthly recurring revenue)\b.{0,40}\b(?:current|today|baseline|existing)\b|\bwhat is (?:our |your |the )?(?:MRR|monthly recurring revenue)\b)/i.test(question);
+    if (brief.id === 'cloud') return /\b(?:what|which|provide|tell me)\b.{0,100}\b(?:current|today|baseline|existing)\b.{0,100}\b(?:quantity|value|level|amount|unit|spend|cost)\b/i.test(question);
+    return false;
+  });
+  const nodes = graph.nodes ?? [];
+  const allProAssumed = brief.id === 'paul-mrr' && (
+    nodes.some((node) => node.observed_state?.raw_value === 1500 && /\bpro\b/i.test(label(node)))
+    || nodes.some((node) => node.nonlinear_identity?.operation === 'product'
+      && (node.nonlinear_identity.factor_ids ?? []).some((id) => {
+        const factor = nodes.find((candidate) => candidate.id === id);
+        return factor?.observed_state?.raw_value === 1500 && /subscriber|customer/i.test(label(factor));
+      }))
+  );
+  const unsupportedNumber = failures.some((failure) => ['invented_or_misassigned_user_number', 'unstated_canonical_number', 'known_fabrication'].includes(failure.kind));
+  const unsupportedEffect = sizedWithoutUserEvidence.length > 0;
+  const noUnstatedClaim = !allProAssumed && !unsupportedNumber && !unsupportedEffect && !hasFailure('identity_applied_before_scope_resolved');
+  const needed = {
+    'paul-mrr': /(?:\bMRR\b.{0,110}\b(?:Pro|all plans|same|scope|population)\b|\b(?:Pro|all plans|scope|population)\b.{0,110}\bMRR\b)/i,
+    cloud: /(?:\bGCP\b.{0,110}\b(?:cost|bill|spend|saving|price)\b|\b(?:cost|bill|spend|saving|price)\b.{0,110}\bGCP\b)/i,
+    E: /(?:\b(?:senior|junior)\b.{0,110}\b(?:salar(?:y|ies)|cost|capacity|delivery|productivity)\b|\b(?:salar(?:y|ies)|cost|capacity|delivery|productivity)\b.{0,110}\b(?:senior|junior)\b)/i,
+    support: /(?:\b(?:chat|live chat)\b.{0,110}\b(?:CSAT|satisfaction|effect|capacity|concurrency)\b|\b(?:CSAT|satisfaction|effect|capacity|concurrency)\b.{0,110}\b(?:chat|live chat)\b)/i,
+  }[brief.id];
+  const targetedQuestion = questions.some((question) => needed.test(question)
+    && /\?|\b(?:ask|provide|confirm|clarify|tell me|validate)\b/i.test(question));
+  const uncertaintyExposed = needed.test(visibleText);
+  const withholding = [
+    check('no_unstated_scope_or_causal_claim', noUnstatedClaim),
+    check('missing_evidence_surfaced', uncertaintyExposed),
+  ];
+  const clarification = [
+    check('asks_for_decisive_missing_input', targetedQuestion),
+    check('one_nonredundant_question', targetedQuestion && questions.length === 1 && redundant.length === 0),
+  ];
+  const dimensions = { fidelity: count(fidelity), truthful_withholding: count(withholding), smallest_useful_clarification: count(clarification) };
+  return {
+    basis: 'saved_initial_output_only',
+    dimensions,
+    total: { passed: Object.values(dimensions).reduce((sum, part) => sum + part.passed, 0),
+      possible: Object.values(dimensions).reduce((sum, part) => sum + part.total, 0) },
+    question_count: questions.length, redundant_questions: redundant,
+    unsupported_scope_assumption: allProAssumed, unsupported_numeric_claim: unsupportedNumber,
+    unsupported_sized_causal_edges: sizedWithoutUserEvidence.length,
+    correct_initial_response: Object.values(dimensions).every((part) => part.passed === part.total),
+    withholding_status: noUnstatedClaim ? (uncertaintyExposed ? 'truthful_missing_evidence_exposed' : 'truthful_but_missing_evidence_not_exposed') : 'unsupported_claims_present',
+  };
+}
 export function scoreRecord(record, cases = manifest.briefs) {
   const brief = cases.find((b) => b.id === record.brief);
   if (!brief) throw new Error(`Unknown case ${record.brief}; no silent fallback scoring`);
@@ -138,7 +206,11 @@ export function scoreRecord(record, cases = manifest.briefs) {
   if (brief.horizon_months && !goalNodes.some((n) => n.goal_horizon_months === brief.horizon_months)) failures.push({ kind: 'goal_horizon_lost', expected_months: brief.horizon_months });
   if (brief.deadline_quote && !goalNodes.some((n) => n.goal_deadline_as_stated === brief.deadline_quote)) failures.push({ kind: 'deadline_lost', expected: brief.deadline_quote });
   for (const text of brief.qualitative_limits ?? []) {
-    const held = (graph.goal_constraints ?? []).some((c) => String(c.label ?? '').toLowerCase().includes(text.toLowerCase()) || (text === 'without hiring' && matches('agent|staff|headcount', label((graph.nodes ?? []).find((n) => n.id === c.node_id))) && c.operator === '<=' && c.value === 3));
+    // No-new-hires is not a cap on total staff. Keep this literal limit distinct
+    // from any numerical staffing rewrite, even when that rewrite is labelled user.
+    const held = (graph.goal_constraints ?? []).some((c) => typeof c.value !== 'number'
+      && String(c.label ?? '').toLowerCase().includes(text.toLowerCase())
+      && quotesOf(c).some((quote) => brief.text.includes(quote) && quote.includes(text)));
     if (!held) failures.push({ kind: 'qualitative_limit_lost', expected: text });
   }
   const options = (graph.nodes ?? []).filter((n) => n.kind === 'option');
@@ -161,15 +233,13 @@ export function scoreRecord(record, cases = manifest.briefs) {
     const faithful = brief.facts.some((f) => matches(f.entity, o.entity) && f.role === o.role && numberEqual(f.value, o.value) && unitMatches(f.unit, o.unit) && (!f.option || matches(f.option, label(o.owner))));
     // A baseline option's explicit value may repeat the corresponding current value.
     const repeatedBaseline = o.role === 'intervention' && o.owner.is_baseline === true && brief.facts.some((f) => f.role === 'current' && matches(f.entity, o.entity) && numberEqual(f.value, o.value) && unitMatches(f.unit, o.unit));
-    const noHiring = brief.id === 'support' && o.role === 'limit' && matches('agent|staff|headcount', o.entity) && o.value === 3 && o.operator === '<=';
-    if (!faithful && !repeatedBaseline && !noHiring) failures.push({ kind: 'invented_or_misassigned_user_number', entity: o.entity, role: o.role, value: o.value, unit: o.unit });
+    if (!faithful && !repeatedBaseline) failures.push({ kind: 'invented_or_misassigned_user_number', entity: o.entity, role: o.role, value: o.value, unit: o.unit });
   }
   // M1 fidelity is stricter than truthful labelling: an honestly labelled invention still changes the user's model.
   for (const o of obs.filter((o) => !o.user && typeof o.value === 'number')) {
     const stated = brief.facts.some((f) => matches(f.entity, o.entity) && f.role === o.role && numberEqual(f.value, o.value) && unitMatches(f.unit, o.unit) && (!f.option || matches(f.option, label(o.owner))));
     const baseline = o.role === 'intervention' && o.owner.is_baseline === true && brief.facts.some((f) => f.role === 'current' && matches(f.entity, o.entity) && numberEqual(f.value, o.value) && unitMatches(f.unit, o.unit));
-    const noHiring = brief.id === 'support' && o.role === 'limit' && matches('agent|staff|headcount', o.entity) && o.value === 3 && o.operator === '<=';
-    if (!stated && !baseline && !noHiring) failures.push({ kind: 'unstated_canonical_number', entity: o.entity, role: o.role, value: o.value, unit: o.unit, ownership: 'labelled_olumi_or_unspecified' });
+    if (!stated && !baseline) failures.push({ kind: 'unstated_canonical_number', entity: o.entity, role: o.role, value: o.value, unit: o.unit, ownership: 'labelled_olumi_or_unspecified' });
   }
   for (const n of (graph.nodes ?? []).filter((n) => ['factor', 'risk', 'outcome'].includes(n.kind))) {
     const supportedFact = obs.some((o) => o.node.id === n.id && brief.facts.some((f) => matches(f.entity, o.entity) && f.role === o.role && numberEqual(f.value, o.value) && unitMatches(f.unit, o.unit)));
@@ -213,17 +283,22 @@ export function scoreRecord(record, cases = manifest.briefs) {
     // Compiler carrier links express an admitted definition, not an extra estimated causal coefficient.
     return !(target?.nonlinear_identity?.factor_ids ?? []).includes(e.from);
   });
-  const sizedWithoutUserEvidence = causalEdges.filter((e) => e.strength && e.provenance?.magnitude !== 'olumi_placeholder' && !['user', 'brief_extraction'].includes(e.provenance?.source));
+  // None of the frozen four briefs states a numeric causal effect. A source label
+  // alone cannot make a salary/effect coefficient user evidence. A placeholder
+  // with a natural effect still asserts a numeric relationship.
+  const sizedWithoutUserEvidence = causalEdges.filter((e) => e.strength
+    && (e.provenance?.magnitude !== 'olumi_placeholder' || e.provenance?.natural_effect));
   const forbidden = obs.filter((o) => o.user && (brief.forbidden_user_numbers ?? []).some((v) => numberEqual(v, o.value)));
   for (const o of forbidden) failures.push({ kind: 'known_fabrication', entity: o.entity, value: o.value });
   const modelPresent = (graph.nodes ?? []).length > 0;
+  const initialResponseScore = initialRecoveryScore(record, brief, graph, facts, optionRows, failures, relativeBinding, sizedWithoutUserEvidence);
   return {
     arm: record.arm ?? record.label, brief: brief.id, rep: record.rep, evidence_level: record.evidence_level ?? 'admitted_registration_payload_only',
     model_present: modelPresent, facts, options: optionRows, identity, authority,
     fidelity: { facts_retained: facts.filter((f) => f.retained).length, facts_total: facts.length, source_bound: facts.filter((f) => f.source_bound).length, user_options_retained: optionRows.filter((o) => o.retained).length, user_options_total: optionRows.length, user_options_source_bound: optionRows.filter((o) => o.source_bound).length, relative_target_same_metric_bound: relativeBinding.verified ? 1 : 0, relative_target_same_metric_total: relativeBinding.applicable ? 1 : 0, relative_target_binding: relativeBinding, negative_findings: failures.length, false_user_claims: failures.filter((f) => ['invented_or_misassigned_user_number', 'invented_user_option', 'inferred_identity_stamped_user'].includes(f.kind)).length, unstated_canonical_content: failures.filter((f) => f.kind.startsWith('unstated_canonical_')).length, source_binding_failures: failures.filter((f) => ['source_unbound', 'option_source_unbound'].includes(f.kind)).length, failures },
     scientific_usability: { verified_analysis: record.evidence_level === 'shared_spine_journey' && record.analysis_verified === true, inferred_sized_edges: sizedWithoutUserEvidence.length, identity, unsupported_relationships: record.constructor_diagnostics?.unknown_relationships ?? null },
     complexity: { nodes: graph.nodes?.length ?? 0, edges: graph.edges?.length ?? 0, provider_attempts: record.provider_calls?.length ?? record.structured_raw?.length ?? null, transforms: record.constructor_diagnostics?.transforms ?? null },
-    recovery: { pending_evidence_available: Array.isArray(pending), facts: pendingFacts, retained_pending_only: pendingFacts.filter((f) => f.retained_pending && !f.canonical_retained).length, continuation_verified: record.recovery_verified === true },
+    recovery: { pending_evidence_available: Array.isArray(pending), facts: pendingFacts, retained_pending_only: pendingFacts.filter((f) => f.retained_pending && !f.canonical_retained).length, continuation_verified: record.recovery_verified === true, initial_response_score: initialResponseScore },
     experience: { construction_ms: record.ms ?? null, clarification: record.questions ?? null, recovery_verified: record.recovery_verified === true, user_quality_question: 'Does this model make the decision easier to understand and improve?', user_quality_score: record.user_quality_score ?? null, user_quality_scored_by: record.user_quality_scored_by ?? null },
   };
 }
