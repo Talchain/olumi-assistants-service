@@ -46,13 +46,14 @@ export type PlaceholderPartsReason =
 
 /**
  * A link sized only by Olumi: an `olumi_*` magnitude, OR a plain `defaulted: true` size, and never a link the user sized
- * (`user_specified`). Read through {@link olumiGuessedLink}. A `magnitude: 'user_stated'` size with `defaulted` from a
- * projected spread (MODEL GENERATION 5918011036) stays a guess here until construction's brief check is scoped to the
- * link (#2389; AIQ 5918035214, P0 PARTNER 5918144110): that change lands with it.
+ * (`user_specified`), nor a size construction credits to the user (`magnitude: 'user_stated'`, written only where the
+ * brief writes that link's own figure: #2389's link-scoped check). `defaulted` on such a size marks a projected field
+ * (the spread), not Olumi's size (MODEL GENERATION 5918011036; AIQ 5918035214; P0 PARTNER 5918144110). Read through
+ * {@link olumiGuessedLink}.
  */
 export function olumiSizedLink(e: Rec): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
-  return p?.source !== 'user_specified'
+  return p?.source !== 'user_specified' && p?.magnitude !== 'user_stated'
     && ((typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) || e.defaulted === true);
 }
 
