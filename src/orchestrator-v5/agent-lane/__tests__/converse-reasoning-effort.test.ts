@@ -1,14 +1,10 @@
 /**
- * ⭐ PJ-C1 LATENCY (DL checkpoint #72 5860966219, batch 5): THE AGENT'S CONVERSATION CALLS ASK FOR LOW REASONING EFFORT.
- *
- * Measured on served journey A (`pj-20260927T233309Z`, CEE e09b8c2, 20 conversation calls): a call takes
- * ≈ 1,395 ms + 8.1 ms per output token (r = 0.89), and 2,127 of the 5,367 output tokens were REASONING ≈ 17 s of the
- * journey. The conversation calls (`agent.converse`, and the Run button's one `agent.interpret` call) sent no
- * `reasoning` at all, so the API default applied; only construction set one (`medium`). Proposal #72 5860893020.
- *
- * Construction is untouched: a whole model is built by a different call with its own measured budget.
- * The acceptance is SERVED, not here (AIQ #72 5860911820): the truth rows, read per row, on a journey-A run. These
- * rows pin only what the request carries.
+ * Selected coach request configuration: #78 5915316114 and DL #75 5916003868.
+ * Populated-model conversation and Run interpretation use Sol/high/3400.
+ * This supersedes PJ-C1 batch 5's Terra/low conversation setting; authoritative
+ * empty-model turns retain Terra/low, covered by selected-coach-wiring.test.ts.
+ * Construction keeps its separate Terra/medium budget. These captured requests
+ * prove configuration only, not served quality, latency or joined acceptance.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,7 +28,7 @@ const GRAPH = {
 };
 const STATE = { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } };
 
-describe('batch 5: the conversation calls carry reasoning effort low; construction keeps its own', () => {
+describe('selected coach: populated conversation and Run use high; construction keeps its own', () => {
   let app: FastifyInstance;
   let modelBodies: Body[] = [];
 
@@ -67,14 +63,18 @@ describe('batch 5: the conversation calls carry reasoning effort low; constructi
   });
   beforeEach(() => { modelBodies = []; });
 
-  it('⭐ RED: an ordinary turn’s conversation call asks for reasoning effort low', async () => {
+  it('⭐ RED: a populated turn’s conversation call uses selected Sol/high/3400', async () => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: randomUUID(), message: 'What drives the result most?' } });
     expect(res.statusCode, res.body).toBe(200);
     expect(modelBodies.length).toBeGreaterThan(0);
-    for (const b of modelBodies) expect(b.reasoning, JSON.stringify(b.reasoning)).toEqual({ effort: 'low' });
+    for (const b of modelBodies) {
+      expect(b.model).toBe('gpt-6.1-sol');
+      expect(b.reasoning, JSON.stringify(b.reasoning)).toEqual({ effort: 'high' });
+      expect(b.max_output_tokens).toBe(3400);
+    }
   });
 
-  it('⭐ RED: the Run button’s one interpreting call (tool_choice none) asks for reasoning effort low too', async () => {
+  it('⭐ RED: the Run button’s one interpreting call (tool_choice none) uses selected Sol/high/3400', async () => {
     const res = await app.inject({
       method: 'POST', url: '/agent/v1/turn',
       payload: { kind: 'message', scenario_id: randomUUID(), message: 'Run the analysis please', source: 'chip_click', chip: { action_type: 'run_analysis' } },
@@ -82,7 +82,9 @@ describe('batch 5: the conversation calls carry reasoning effort low; constructi
     expect(res.statusCode, res.body).toBe(200);
     const interpreting = modelBodies.filter((b) => b.tool_choice === 'none');
     expect(interpreting.length, 'the typed Run made its interpreting call').toBe(1);
-    expect(interpreting[0]!.reasoning).toEqual({ effort: 'low' });
+    expect(interpreting[0]!.model).toBe('gpt-6.1-sol');
+    expect(interpreting[0]!.reasoning).toEqual({ effort: 'high' });
+    expect(interpreting[0]!.max_output_tokens).toBe(3400);
   });
 
   it('CONTROL: construction keeps its own measured effort (medium); only the conversation budget changed', async () => {

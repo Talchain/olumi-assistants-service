@@ -13,9 +13,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import { AGENT_TOOLS, SLIGHT_IS_WEAK } from '../runtime/agent-tools.js';
-import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440078';
 const graph = {
@@ -45,9 +45,8 @@ describe('the model is told "Slight" IS `weak`, and asks for a band in the canva
       expect(description, name).toMatch(/never ask whether slight means weak/);
       expect(description, name).toMatch(/slight, moderate, strong or very strong/);
     }
-    // The route's own instruction lists the words too, and it outranks a tool description: it says the same.
-    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route).toMatch(/call propose_link_strength with their word \(weak, moderate, strong or very strong; the canvas calls weak \\u201cslight\\u201d, so a link the user calls slight is weak \\u2014 never ask whether slight means weak\)/);
+    // The host instruction lists the words too, and it outranks a tool description: it says the same.
+    expect(HOST_TOOL_CONTRACT).toMatch(/call propose_link_strength with their word \(weak, moderate, strong or very strong; the canvas calls weak “slight”, so a link the user calls slight is weak — never ask whether slight means weak\)/);
     // The wire value is unchanged: the enum stays the product's four bands.
     expect((tool('propose_link_strength').parameters as { properties: Record<string, { enum?: string[] }> }).properties['strength']?.enum)
       .toEqual(['weak', 'moderate', 'strong', 'very strong']);
