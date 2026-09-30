@@ -15,7 +15,7 @@
  */
 
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
-import { certainOptionRows, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
+import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -7039,7 +7039,7 @@ export function createAgentCapabilities(
       // said as a certainty only when THIS Run's own stored decision earns it — attributed by its run-fact identity.
       // One graph read (the one above when made); a Run that cannot be bound is said as unchecked (`goal-certainty-for-agent.ts`).
       let goalCertainty: Record<string, unknown> | undefined;
-      if (certainOptionRows(result).length > 0) {
+      if (hasGoalCertaintyCandidates(result)) {
         if (postRunRead === undefined) {
           try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
         }

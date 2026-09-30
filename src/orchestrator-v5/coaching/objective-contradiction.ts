@@ -141,6 +141,7 @@
  */
 
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
+import { projectGoalProbabilitiesForTransport } from '../compose/goal-probability-transport.js';
 
 /**
  * The per-option projection this module reads. Structurally typed rather than
@@ -1382,9 +1383,13 @@ export function composeObjectiveContradictionDisclosure(
   records: ReadonlyArray<Record<string, unknown>>,
   leaderWasNamed: boolean,
   goalFrame: GoalFrame,
+  claims?: { readonly goalCertainty: unknown },
 ): string {
   if (!leaderWasNamed) return '';
-  const options = readObjectiveOptionViews(records);
+  const claimedRecords = claims === undefined ? records : projectGoalProbabilitiesForTransport(
+    { option_comparison: records }, claims.goalCertainty,
+  )?.option_comparison as ReadonlyArray<Record<string, unknown>>;
+  const options = readObjectiveOptionViews(claimedRecords);
   if (options.length < 2) return '';
 
   const attainment = attainmentArmMayShip(goalFrame) ? detectGoalAttainmentContradiction(options) : null;
@@ -1398,4 +1403,20 @@ export function composeObjectiveContradictionDisclosure(
     readInterventionViews(rawGraph),
   );
   return buildObjectiveContradictionDisclosure(directional, leaderWasNamed, goalFrame);
+}
+
+/** Existing saved summaries must obey the same recorded certainty as new summaries and option rows. */
+export function projectObjectiveContradictionSummary(
+  summary: string,
+  records: ReadonlyArray<Record<string, unknown>>,
+  goalCertainty: unknown,
+): string {
+  const original = detectGoalAttainmentContradiction(readObjectiveOptionViews(records));
+  if (original === null) return summary;
+  const safeRecords = projectGoalProbabilitiesForTransport({ option_comparison: records }, goalCertainty)
+    ?.option_comparison as ReadonlyArray<Record<string, unknown>>;
+  const permitted = detectGoalAttainmentContradiction(readObjectiveOptionViews(safeRecords));
+  const originalDisclosure = buildObjectiveContradictionDisclosure(original, true, 'goal_framed');
+  const permittedDisclosure = buildObjectiveContradictionDisclosure(permitted, true, 'goal_framed');
+  return originalDisclosure === permittedDisclosure ? summary : summary.replace(originalDisclosure, permittedDisclosure);
 }

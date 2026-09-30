@@ -89,7 +89,7 @@ const factor = (id: string, label: string) => ({
   observed_state: { value: 0.5, cap: 1 },
 });
 
-function graph(goalLabel: string): Json {
+function graph(goalLabel: string, holdAtToday = false): Json {
   return {
     version: '1',
     nodes: [
@@ -97,7 +97,8 @@ function graph(goalLabel: string): Json {
       { id: 'decision', kind: 'decision', label: 'Pricing plan' },
       factor('fac_price', 'Seat Price Level'),
       factor('fac_seats', 'Active paid seats'),
-      { id: 'opt_hold', kind: 'option', label: 'Hold at £49 Per Seat', interventions: { fac_price: 0.49, fac_seats: 0.5 } },
+      // `holdAtToday` (R3 #75 5916385251): Hold sets both factors at today's level, so it moves nothing and its 0 is earned.
+      { id: 'opt_hold', kind: 'option', label: 'Hold at £49 Per Seat', interventions: holdAtToday ? { fac_price: 0.5, fac_seats: 0.5 } : { fac_price: 0.49, fac_seats: 0.5 } },
       { id: 'opt_raise', kind: 'option', label: 'Raise to £59 Per Seat', interventions: { fac_price: 0.59, fac_seats: 0.45 } },
       { id: 'opt_tiers', kind: 'option', label: 'Two-Tier Pricing', interventions: { fac_price: 0.54, fac_seats: 0.55 } },
     ],
@@ -193,9 +194,10 @@ async function runHandler(
   goalLabel: string,
   codes: readonly string[],
   data: DataShape,
-): Promise<{ summary: string; assistantText: string; leadingOptionId: string | null; plotCalls: number }> {
+  holdAtToday = false,
+): Promise<{ summary: string; assistantText: string; leadingOptionId: string | null; plotCalls: number; holdEarned: unknown }> {
   const { client, run } = plotClient(codes, data);
-  const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: scenarioReader(graph(goalLabel)) });
+  const handler = createRunAnalysisHandler({ plotClient: client, scenarioReader: scenarioReader(graph(goalLabel, holdAtToday)) });
   const outcome = await handler(invocation());
   const fact = outcome.handler_facts[0];
   if (fact === undefined || fact.fact_type !== 'run_analysis') {
@@ -206,6 +208,9 @@ async function runHandler(
     assistantText: (outcome as unknown as { assistant_text?: string }).assistant_text ?? '',
     leadingOptionId: fact.result.leading_option_id,
     plotCalls: run.mock.calls.length,
+    // The Run's own recorded decision on Hold's exact 0 (#2369's `recordGoalCertainty`), bound by option id.
+    holdEarned: ((fact.result as { goal_certainty?: { option_id: string; earned: boolean }[] }).goal_certainty ?? [])
+      .find((d) => d.option_id === 'opt_hold')?.earned,
   };
 }
 
@@ -250,11 +255,16 @@ const L = LEVER_AIM;
 const ROWS: ReadonlyArray<[string, DataShape, Codes, string]> = [
   // ── no code: byte-identical to base c1ddb50 (framed lead, framed arms) ─────
   [M, 'none', 'none', FRAMED_LEAD],
-  [M, 'contradicted', 'none', `${FRAMED_LEAD}${ARM_B_FRAMED}`],
+  // RE-PINNED (R3-3 owner R3 #75 5916385251; AIQ 5916386753): the compared exact 0 is unearned (Hold moves price;
+  // fac_price → goal is unsized, not an identity), and an unearned exact 0 can't back an attainment comparison (#2369).
+  // The headline alone. The earned case keeps the arm: the CONTRAST below.
+  [M, 'contradicted', 'none', FRAMED_LEAD],
   [M, 'agrees', 'none', FRAMED_LEAD],
   [M, 'joint', 'none', FRAMED_LEAD],
   [L, 'none', 'none', `${FRAMED_LEAD}${ARM_A_FRAMED}`],
-  [L, 'contradicted', 'none', `${FRAMED_LEAD}${ARM_B_FRAMED}`],
+  // RE-PINNED (same reason, R3 5916385251 / AIQ 5916386753): without the attainment arm, the lever aim's directional
+  // arm stays.
+  [L, 'contradicted', 'none', `${FRAMED_LEAD}${ARM_A_FRAMED}`],
   [L, 'agrees', 'none', `${FRAMED_LEAD}${ARM_A_FRAMED}`],
   [L, 'joint', 'none', `${FRAMED_LEAD}${ARM_A_FRAMED}`],
   // ── DIRECTION alone: the direction clause always; combined without data ───
@@ -317,4 +327,17 @@ describe('⭐ R3-3 — the EXECUTED run_analysis handler composes the untestable
       expect(summary.includes('it assumed a higher value is better')).toBe(codes === 'D' || codes === 'D+T');
     });
   }
+});
+
+describe('R3-3 CONTRAST (R3 #75 5916385251; AIQ 5916386753): where the compared exact 0 IS earned, the attainment arm stays', () => {
+  it('PRECONDITION: in the re-pinned rows the Run records Hold\'s 0 as UNEARNED (it moves price on an unsized link)', async () => {
+    for (const goal of [M, L]) expect((await runHandler(goal, [], 'contradicted')).holdEarned, goal).toBe(false);
+  });
+
+  it('Hold holds today\'s level (moves nothing) → the Run records its 0 as EARNED → "(48% against 0%)" is said', async () => {
+    const r = await runHandler(M, [], 'contradicted', true);
+    expect(r.holdEarned).toBe(true);
+    expect(r.summary).toBe(`${FRAMED_LEAD}${ARM_B_FRAMED}`);
+    expect(isAllowedRunAnalysisAssistantText(r.summary), `egress rejected: ${r.summary}`).toBe(true);
+  });
 });

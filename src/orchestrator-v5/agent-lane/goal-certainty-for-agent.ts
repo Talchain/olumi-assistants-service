@@ -17,6 +17,7 @@
  *     is `unchecked`: never said as 100% or 0%.
  */
 import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
+import { readStoredGoalCertainty } from '../tools/handlers/run-goal-certainty.js';
 
 type Rec = Record<string, unknown>;
 
@@ -54,6 +55,15 @@ export function certainOptionRows(result: unknown): Rec[] {
   return optionRows(result).filter((r) => typeof r.option_id === 'string' && (r.probability_of_goal === 0 || r.probability_of_goal === 1));
 }
 
+const probabilityAbsent = (row: Rec): boolean =>
+  row.probability_of_goal === undefined && row.goal_probability === undefined && row.goalProbability === undefined;
+
+/** A Run may need its stored certainty decision for an exact chance or the sentence beside a transported absence. */
+export function hasGoalCertaintyCandidates(result: unknown): boolean {
+  return optionRows(result).some((r) => typeof r.option_id === 'string'
+    && (r.probability_of_goal === 0 || r.probability_of_goal === 1 || probabilityAbsent(r)));
+}
+
 /** The Run that produced this result, as the Agent received it: its scenario, its result block and its analysis state. */
 export interface RunOfResult {
   readonly scenario_id: string;
@@ -78,22 +88,30 @@ function boundToThisRun(runResult: unknown, run: RunOfResult, read: GoalCertaint
 }
 
 /**
- * `goal_certainty` for the Agent, for one Run's result. `undefined` when no option claims a certainty; otherwise either
- * the decision per certain option with the rule, or `unchecked` (never said as certain).
+ * `goal_certainty` for the Agent, for one Run's result. A transported unearned probability is absent, so its SAME-Run
+ * stored decision still supplies its sentence without restoring the number. Earned numbers must remain in the result.
+ * Otherwise `undefined` when no option claims a certainty, or `unchecked` when an exact value cannot be checked.
  */
 export function goalCertaintyForAgent(runResult: unknown, run: RunOfResult, read: GoalCertaintyRead | null | undefined): Rec | undefined {
   const certain = certainOptionRows(runResult);
-  if (certain.length === 0) return undefined;
-  if (read === null || read === undefined || !boundToThisRun(runResult, run, read)) return { ...UNCHECKED };
+  const rows = optionRows(runResult);
+  if (!hasGoalCertaintyCandidates(runResult)) return undefined;
+  const unchecked = certain.length > 0 ? { ...UNCHECKED } : undefined;
+  if (read === null || read === undefined || !boundToThisRun(runResult, run, read)) return unchecked;
   // Only the executed Run's own record; nothing recorded → unchecked (never recomputed here).
-  if (read.goal_certainty === undefined) return { ...UNCHECKED };
-  const decisions = read.goal_certainty;
-  const byId = new Map(decisions.filter(isRec).map((d) => [String(d.option_id), d] as const));
+  const decisions = readStoredGoalCertainty(read.goal_certainty);
+  if (decisions === undefined) return unchecked;
+  const byId = new Map(decisions.map((d) => [d.option_id, d] as const));
+  if (byId.size !== decisions.length) return { ...UNCHECKED };
   const options: Rec[] = [];
-  for (const o of certain) {
+  for (const o of rows) {
+    if (typeof o.option_id !== 'string') continue;
     const d = byId.get(String(o.option_id));
-    if (d === undefined || d.probability_of_goal !== o.probability_of_goal || typeof d.earned !== 'boolean') return { ...UNCHECKED };
-    if (d.earned === false && (typeof d.say !== 'string' || d.say.trim() === '')) return { ...UNCHECKED };
+    const exact = o.probability_of_goal === 0 || o.probability_of_goal === 1;
+    const withheld = probabilityAbsent(o);
+    if (exact && (d === undefined || d.probability_of_goal !== o.probability_of_goal)) return { ...UNCHECKED };
+    if (!exact && !(withheld && d?.earned === false)) continue;
+    if (d === undefined) continue;
     const label = o.option_label ?? o.label;
     options.push({
       option: typeof label === 'string' ? label : String(o.option_id), option_id: String(o.option_id),
@@ -103,5 +121,5 @@ export function goalCertaintyForAgent(runResult: unknown, run: RunOfResult, read
       earned: d.earned, ...(d.earned === false ? { say: d.say } : {}),
     });
   }
-  return { options, note: GOAL_CERTAINTY_NOTE };
+  return options.length > 0 ? { options, note: GOAL_CERTAINTY_NOTE } : undefined;
 }
