@@ -344,6 +344,9 @@ function deriveValue(rec: RawIntervention, factor: Dict | undefined): number | u
  *   value_confidence             — confidence in the OLD value. A user-specified
  *                                  number does not inherit a prior estimate's
  *                                  confidence.
+ *   source_quote                 — words supporting the OLD figure. A brief
+ *                                  quote saying £59 cannot warrant a later
+ *                                  user-authored £60 intervention.
  */
 /**
  * ⚠ `reasoning` IS ON THIS LIST DELIBERATELY, AND I HAD IT WRONG FIRST.
@@ -369,7 +372,7 @@ function deriveValue(rec: RawIntervention, factor: Dict | undefined): number | u
  */
 const VALUE_DERIVED_OR_OWNED_KEYS: ReadonlySet<string> = new Set([
   'value', 'source', 'target_match',
-  'display_value', 'raw_value', 'value_type', 'encoding_map', 'value_confidence',
+  'display_value', 'raw_value', 'value_type', 'encoding_map', 'value_confidence', 'source_quote',
   'reasoning',
   // The range the OLD figure was read against: it travels with `raw_value`, so a new number never inherits it.
   'cap',

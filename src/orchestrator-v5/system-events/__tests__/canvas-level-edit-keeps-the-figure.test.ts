@@ -31,7 +31,8 @@ function served(priceState: Record<string, unknown> = { cap: 200, unit: '£ per 
   return GraphV3.parse({
     nodes: [
       { id: 'mrr', kind: 'goal', label: 'Monthly recurring revenue' },
-      { id: 'raise_to_59', kind: 'option', label: 'Raise to £59', interventions: { pro_plan_price: raiseCell } },
+      { id: 'raise_to_59', kind: 'option', label: 'Raise to £59', source_quote: 'raise our Pro plan price from £49 to £59',
+        interventions: { pro_plan_price: raiseCell } },
       { id: 'keep_49_price', kind: 'option', label: 'Keep £49 price' },
       { id: 'pro_plan_price', kind: 'factor', label: 'Pro plan price', observed_state: priceState },
     ],
@@ -39,7 +40,7 @@ function served(priceState: Record<string, unknown> = { cap: 200, unit: '£ per 
       from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' })),
   });
 }
-function written(g: ReturnType<typeof served>, modelValue: number): Record<string, unknown> | undefined {
+function writtenGraph(g: ReturnType<typeof served>, modelValue: number): ReturnType<typeof served> | undefined {
   const r = prepareOptionInterventionEdit({ persistedGraph: g, optionId: 'raise_to_59', factorId: 'pro_plan_price', modelValue,
     expectedGraphHash: computeAnalysisAffectingGraphHash(g)! });
   expect(r.kind, JSON.stringify(r)).toBe('prepared');
@@ -48,7 +49,11 @@ function written(g: ReturnType<typeof served>, modelValue: number): Record<strin
   const encoded = encodeOptionInterventionsForEdit(applyPatchOperations(g, ops), new Set(['raise_to_59']));
   const merged = mergeAppliedGraphForPersistence({ appliedGraph: encoded.graph, persistedBase: g, ingressBase: g, scenarioId: 's', requestId: 'r' });
   const after = GraphV3.parse(JSON.parse(JSON.stringify(projectGraphForPersistence(merged))));
-  return after.nodes.find((n) => n.id === 'raise_to_59')?.interventions?.pro_plan_price as Record<string, unknown> | undefined;
+  return after;
+}
+function written(g: ReturnType<typeof served>, modelValue: number): Record<string, unknown> | undefined {
+  const after = writtenGraph(g, modelValue);
+  return after?.nodes.find((n) => n.id === 'raise_to_59')?.interventions?.pro_plan_price as Record<string, unknown> | undefined;
 }
 
 describe('a canvas level edit keeps the user\'s figure (served W4 run2: £59 → £57 on a 0–200 range)', () => {
@@ -82,5 +87,25 @@ describe('a canvas level edit keeps the user\'s figure (served W4 run2: £59 →
   it('CONTROL: with no figure on the committed cell the acknowledgement is unchanged', () => {
     expect(formatOptionEffectWriteAck({ optionLabel: 'Pilot', factorLabel: 'Coverage', committedValue: 0.3 }))
       .toBe('"Pilot" now has an effect value of 0.3 on "Coverage".');
+  });
+
+  it('a changed user price clears the old intervention quote, while option framing and unrelated evidence survive', () => {
+    const oldQuote = 'Pro plan price from £49 to £59 a month';
+    const graph = served(undefined, { ...cell(0.295, 59), source_quote: oldQuote, evidence_refs: ['price-brief'] });
+    const after = writtenGraph(graph, 0.3);
+    const option = after?.nodes.find((n) => n.id === 'raise_to_59');
+    const updated = option?.interventions?.pro_plan_price as Record<string, unknown> | undefined;
+    expect(updated).toMatchObject({ value: 0.3, raw_value: 60, source: 'user_specified', evidence_refs: ['price-brief'] });
+    expect(updated).not.toHaveProperty('source_quote');
+    expect(option?.source_quote).toBe('raise our Pro plan price from £49 to £59');
+  });
+
+  it('a same-value repeat does not rewrite the cell or clear its original quote', () => {
+    const oldQuote = 'Pro plan price from £49 to £59 a month';
+    const graph = served(undefined, { ...cell(0.295, 59), source_quote: oldQuote });
+    const result = prepareOptionInterventionEdit({ persistedGraph: graph, optionId: 'raise_to_59',
+      factorId: 'pro_plan_price', modelValue: 0.295, expectedGraphHash: computeAnalysisAffectingGraphHash(graph)! });
+    expect(result.kind).toBe('unchanged');
+    expect(graph.nodes.find((n) => n.id === 'raise_to_59')?.interventions?.pro_plan_price.source_quote).toBe(oldQuote);
   });
 });
