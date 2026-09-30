@@ -33,6 +33,7 @@ const PRICE_59 = /59/;
 
 const plant = (edit: (m: Rec) => void): string => { const m = JSON.parse(FIXTURE.raw) as Rec; edit(m); return JSON.stringify(m); };
 const linkToChurn = (m: Rec) => { m.links.push({ from: 'Raise price to £59', to: 'Monthly churn', direction: 'positive', provenance: 'explicit' }); };
+const linkToPrice = (m: Rec) => { m.links.push({ from: 'Raise price to £59', to: 'Pro plan monthly price', direction: 'positive', provenance: 'explicit' }); };
 const limitAsAction = (m: Rec) => {
   for (const o of m.options) if (PRICE_59.test(o.label)) o.interventions.push({ factor_label: 'Monthly churn', value: 5, value_kind: 'absolute', unit: '%', provenance: 'explicit' });
 };
@@ -55,6 +56,8 @@ const nodes = (g: Rec): Rec[] => g.nodes ?? [];
 const option59 = (g: Rec): Rec => { const o = nodes(g).find((n) => n.kind === 'option' && PRICE_59.test(String(n.label))); expect(o).toBeDefined(); return o!; };
 const churnId = (g: Rec): string => { const c = nodes(g).find((n) => n.kind === 'factor' && /churn/i.test(String(n.label))); expect(c).toBeDefined(); return c!.id; };
 const priceAction = (g: Rec) => Object.entries(option59(g).interventions ?? {}).find(([t]) => /price/i.test(t));
+const priceId = (g: Rec): string => { const p = nodes(g).find((n) => n.kind === 'factor' && /price/i.test(String(n.label))); expect(p).toBeDefined(); return p!.id; };
+const linkToPriceSource = (g: Rec) => (g.edges ?? []).filter((e: Rec) => e.from === option59(g).id && e.to === priceId(g)).map((e: Rec) => e.provenance?.source);
 const userLinksToChurn = (g: Rec) => (g.edges ?? []).filter((e: Rec) => e.from === option59(g).id && e.to === churnId(g) && USER.has(String(e.provenance?.source)));
 const userActionsOnChurn = (g: Rec) => nodes(g).filter((n) => n.kind === 'option').flatMap((n) =>
   Object.entries(n.interventions ?? {}).filter(([t, iv]: [string, any]) => t === churnId(g) && USER.has(String(iv?.source))));
@@ -78,6 +81,11 @@ describe('an option link or action the brief does not give is never the user\'s'
     const g = await register([plant(linkToChurn), plant((m) => { linkToChurn(m); limitAsAction(m); })]);
     expect(userLinksToChurn(g)).toEqual([]);
     expect(userActionsOnChurn(g)).toEqual([]);
+  });
+
+  it('CONTROL — an "explicit" link from the £59 option to the price it sets stays the user\'s', async () => {
+    const g = await register([plant(linkToPrice)]);
+    expect(linkToPriceSource(g)).toEqual(['brief_extraction']);
   });
 
   it('CONTROL — the churn limit typed as the £59 option\'s "explicit" action is never the user\'s action', async () => {
