@@ -93,6 +93,55 @@ describe('M1 partition replays the four frozen real drafts', () => {
 });
 
 describe('M1 authority and recovery controls', () => {
+  it('does not turn the Paul price action into a user-attributed churn change', async () => {
+    const { brief, candidates } = fixture('paul-mrr');
+    const raw = structuredClone(candidates[0]!);
+    const candidate = { ...raw, options: raw.options.map((o) => o.provenance === 'explicit' ? { ...o, changes: ['Monthly churn'] } : o) };
+    const { graph, result } = await build(candidate, brief);
+    const option = graph.nodes.find((n: Rec) => n.kind === 'option' && n.provenance === 'from_brief');
+    const churn = graph.nodes.find((n: Rec) => n.label === 'Monthly churn');
+    expect(result.ok).toBe(true);
+    expect(option).toBeDefined();
+    expect(churn).toBeDefined();
+    expect(graph.edges.some((e: Rec) => e.from === option.id && e.to === churn.id)).toBe(false);
+    expect((result.constructor_proposals as Rec[]).some((p) => p.field_path === `options[${candidate.options[0]!.label}].changes[Monthly churn]`)).toBe(true);
+  });
+
+  it('rejects an option that borrows the Pro quote for an explicit-tagged Basic price setting', async () => {
+    const sourced = JSON.parse(readFileSync(new URL('./fixtures/m1-live-paul-count-scope-20260929.json', import.meta.url), 'utf8')) as { brief: string; candidate: CandidateModel };
+    const original = sourced.candidate;
+    const price = original.factors.find((f) => f.label === 'Pro plan price')!;
+    const raise = original.options.find((o) => o.label === 'Raise Pro price to £59')!;
+    const setting = raise.interventions![0]!;
+    const candidate = {
+      ...original,
+      factors: [...original.factors, { ...price, label: 'Basic plan price', baseline_known: false, baseline_value: null, provenance: 'inferred' }],
+      options: original.options.map((o) => o === raise ? { ...o, interventions: [...o.interventions!, { ...setting, factor_label: 'Basic plan price' }] } : o),
+    };
+    const { graph, result } = await build(candidate, sourced.brief);
+    const option = graph.nodes.find((n: Rec) => n.kind === 'option' && n.label === raise.label);
+    expect(result.ok).toBe(true);
+    expect(option).toBeUndefined(); // Existing option quote binder rejects the malformed whole option.
+    expect(graph.nodes.some((n: Rec) => n.label === 'Basic plan price')).toBe(false);
+    expect((result.constructor_proposals as Rec[]).some((p) => p.kind === 'option' && p.field_path === `options[${raise.label}]`)).toBe(true);
+  });
+
+  it('keeps a price change named in its source action and the two stated hiring actions', () => {
+    const paul = fixture('paul-mrr');
+    const priceDraft = structuredClone(paul.candidates[0]!);
+    const pricing = { ...priceDraft, options: priceDraft.options.map((o) => o.provenance === 'explicit' ? { ...o, changes: ['Pro plan price'] } : o) };
+    const priced = partitionM1Candidate(pricing, paul.brief);
+    expect(priced.candidate.options.find((o) => o.provenance === 'explicit')?.changes).toContain('Pro plan price');
+    expect(priced.proposals.some((p) => p.field_path.endsWith('.changes[Pro plan price]'))).toBe(false);
+
+    const hiring = fixture('E');
+    const hireDraft = structuredClone(hiring.candidates[0]!);
+    const hires = { ...hireDraft, options: hireDraft.options.map((o) => o.provenance === 'explicit'
+      ? { ...o, changes: [o.label.startsWith('Two') ? 'Senior engineers hired' : 'Junior engineers hired'] } : o) };
+    const admitted = partitionM1Candidate(hires, hiring.brief);
+    expect(admitted.candidate.options.map((o) => o.changes)).toEqual([['Senior engineers hired'], ['Junior engineers hired']]);
+  });
+
   it.each([false, true])('literal listed Option A/Option B retain distinct authorship; borrowed name=%s', async (borrowed) => {
     const raw = structuredClone(fixture('paul-mrr').candidates[0]!);
     const candidate = { ...raw, options: ['A', 'B'].map((letter, i) => ({

@@ -46,6 +46,14 @@ function quotedOptionAgrees(option: CandidateModel['options'][number], quote: st
   });
 }
 
+/** A qualitative change needs its own quantity in the option's opening action, not merely elsewhere in the brief. */
+function actionNamesQuantity(quote: string, label: string): boolean {
+  const opening = quote.split(/\b(?:from|to|at|by|with|without)\b/i, 1)[0] ?? '';
+  const words = (text: string): string => ` ${canonicalLabel(text).replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  const target = words(label);
+  return target.trim() !== '' && words(opening).includes(target);
+}
+
 export interface M1Proposal {
   readonly id: string;
   readonly kind: 'option' | 'factor' | 'risk' | 'outcome' | 'value' | 'relationship' | 'definition' | 'constraint';
@@ -112,7 +120,25 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
       return [];
     }
     if (quote !== undefined) option_quotes.set(canonicalLabel(o.label), quote);
-    if ((o.provenance === 'explicit' && claimedQuote !== undefined) || quote !== undefined) return [{ ...o, provenance: 'explicit' as const }];
+    if ((o.provenance === 'explicit' && claimedQuote !== undefined) || quote !== undefined) {
+      const interventions = (o.interventions ?? []).filter((i) => {
+        if (i.provenance !== 'explicit') return true; // AI estimates are partitioned below.
+        const others = [candidate.goal.metric, ...candidate.factors.map((f) => f.label), ...candidate.outcomes.map((n) => n.label), ...candidate.risks.map((n) => n.label)]
+          .filter((label) => canonicalLabel(label) !== canonicalLabel(i.factor_label));
+        if (claimedQuote !== undefined && figureTheUserWroteFor(i.value, i.unit, claimedQuote, { target: [i.factor_label], others, strict: true })) return true;
+        propose('value', `${o.label}: ${i.factor_label}`, `options[${o.label}].interventions[${i.factor_label}]`, i, 'The option source does not state this setting for the named quantity.');
+        return false;
+      });
+      const changes = (o.changes ?? []).filter((label) => {
+        const intervention = interventions.some((i) => canonicalLabel(i.factor_label) === canonicalLabel(label) && i.provenance === 'explicit');
+        // Hiring's exact "hire two seniors" item is not classified as a listed option,
+        // but its user-stated numeric intervention was checked against claimedQuote above.
+        if ((intervention && claimedQuote !== undefined) || (quote !== undefined && actionNamesQuantity(quote, label))) return true;
+        propose('relationship', `${o.label} → ${label}`, `options[${o.label}].changes[${label}]`, { option: o.label, target: label, source_quote: claimedQuote ?? null }, 'The option source does not establish a change to this quantity.');
+        return false;
+      });
+      return [{ ...o, provenance: 'explicit' as const, interventions, changes }];
+    }
     propose('option', o.label, `options[${o.label}]`, o, 'The source action for this alternative is unverified; confirm it before adding it to the model.');
     return [];
   });
@@ -125,9 +151,6 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
   for (const option of options) {
     for (const i of option.interventions ?? []) if (i.provenance === 'explicit') required.add(canonicalLabel(i.factor_label));
     for (const label of option.changes ?? []) required.add(canonicalLabel(label));
-  }
-  for (const link of candidate.links) if (link.provenance === 'explicit') {
-    required.add(canonicalLabel(link.from)); required.add(canonicalLabel(link.to));
   }
   const placeholders: string[] = [];
   const keepEntity = (kind: 'factor' | 'risk' | 'outcome', entity: { label: string; provenance: string }): boolean => {
@@ -178,8 +201,7 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
     const interventions = (o.interventions ?? []).filter((i) => {
       if (i.provenance === 'explicit' && quantities.has(canonicalLabel(i.factor_label))) return true;
       propose('value', `${o.label}: ${i.factor_label}`, `options[${o.label}].interventions[${i.factor_label}]`, i, 'This option setting was not supplied by the user.');
-      // Keep a qualitative mapping only to an independently retained quantity, never manufacture a factor for a guess.
-      if (quantities.has(canonicalLabel(i.factor_label)) && !changes.includes(i.factor_label)) changes.push(i.factor_label);
+      // A guessed setting does not prove that this option changes its target.
       return false;
     });
     return { ...o, interventions, changes };
