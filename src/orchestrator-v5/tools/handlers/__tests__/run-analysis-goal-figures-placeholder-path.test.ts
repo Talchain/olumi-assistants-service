@@ -177,6 +177,18 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     expect(w.message.length).toBeLessThanOrEqual(400);
   });
 
+  it('keeps the named-link ask within the warning budget when labels are long', () => {
+    const graph = { nodes: [
+      { id: 'switch', kind: 'option', label: 'Switch to GCP' },
+      { id: 'saving', kind: 'factor', label: `Expected saving ${'over many months '.repeat(9)}`, observed_state: { value: 1 } },
+      { id: 'costs', kind: 'goal', label: `Costs ${'across several teams '.repeat(9)}` },
+    ], goal_constraints: [] };
+    const w = placeholderGoalWarning(graph, [{ option_id: 'switch', links: [{ from: 'saving', to: 'costs' }] }], GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w.message.length).toBeLessThanOrEqual(400);
+    expect(w.message).toContain('Give a figure for how ‘Expected saving');
+    expect(w.message).toContain('moves ‘Costs');
+  });
+
   it('CONTROL (R3 row): the status quo moves nothing, so its earned 0 stays', async () => {
     const r = await runOn(F.graph);
     const env = r.enrichment ?? r;

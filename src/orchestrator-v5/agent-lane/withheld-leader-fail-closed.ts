@@ -1064,7 +1064,7 @@ function goalFigureCoHoldOf(blocks: unknown, graph: unknown): GoalFigureCoHold |
   const codes = warnings.filter((w): w is { code: string; node_ids?: unknown; message?: unknown } =>
     typeof (w as { code?: unknown } | null)?.code === 'string');
   if (codes.some((w) => w.code === 'GOAL_FIGURES_PRODUCT_NOT_READ')) {
-    return { why: 'the goal’s product has not been confirmed, so its figures cannot yet support a comparison' };
+    return { why: 'Olumi has not read the goal as a product of its recorded factors, so its figures cannot yet support a comparison' };
   }
   const warning = codes.find((w) => w.code === 'GOAL_FIGURES_PLACEHOLDER_PATH');
   if (warning === undefined) return undefined;
@@ -1609,22 +1609,27 @@ export function enforceAgentLaneLeaderClaimsAtWire(
   try {
     const text = response.assistant_text;
     if (typeof text === 'string' && text.length > 0 && agentLaneLeaderWithheld(opts)) {
-      const projected = dropRankingSentences(text, rankingLabelContext(opts.graph, opts.analysisReady));
+      const withheldReason = claimPermissionsFrom((response as { analysis_state?: unknown }).analysis_state, opts.analysisReady).withheld_reason
+        ?? opts.leaderClaimWithheldReason;
+      const noResult = runStateSaysNoResult((response as { analysis_state?: unknown }).analysis_state) && admissionClause(opts.analysisReady) === undefined;
+      const closing = noResult
+        ? sentence(REASON_NOT_RECORDED)
+        : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
+          separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph));
+      // A second wire pass must not parse a deterministic closing as fresh model prose. Node labels can contain
+      // punctuation and ranking words, so splitting that closing into sentences can otherwise drop half and append it twice.
+      const trimmed = text.trimEnd();
+      const alreadyClosed = trimmed === closing || trimmed.endsWith(`\n\n${closing}`);
+      const projected = dropRankingSentences(alreadyClosed ? trimmed.slice(0, -closing.length).trimEnd() : text,
+        rankingLabelContext(opts.graph, opts.analysisReady));
       if (projected.droppedSentences > 0) {
         droppedSentences = projected.droppedSentences;
-        const withheldReason = claimPermissionsFrom((response as { analysis_state?: unknown }).analysis_state, opts.analysisReady).withheld_reason
-          ?? opts.leaderClaimWithheldReason;
         /**
          * ⛔ NO "ON THIS RUN" WHEN NOTHING RAN (served 651a7fd, journey C run 2): on a run state that proves there is no
          * result, only the admission's reason (a fact about the model) may be appended. A reason read off the claim
          * speaks about a run, so the ranking is dropped and nothing is added, as on the build turn (AX2). A reply the
          * drop would leave empty gets the one sentence that claims no run.
          */
-        const noResult = runStateSaysNoResult((response as { analysis_state?: unknown }).analysis_state) && admissionClause(opts.analysisReady) === undefined;
-        const closing = noResult
-          ? sentence(REASON_NOT_RECORDED)
-          : agentNoLeaderSentence(withheldReason, opts.analysisReady, limitCauseCodesOf((response as { blocks?: unknown }).blocks), opts.limitVerdicts, opts.limitAskIds,
-            separationOf((response as { analysis_state?: unknown }).analysis_state), goalFigureCoHoldOf((response as { blocks?: unknown }).blocks, opts.graph));
         const body = projected.text.trimEnd();
         const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
         next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
