@@ -29,6 +29,30 @@ export const SourceMeaningSchema = z.object({
     label: z.string().min(1).max(250),
     source: SourceSpanSchema,
   }).strict()),
+  // Read old frozen extractions too; the provider schema below requires these
+  // channels on new extractions. Metadata never stands in for a numeric claim.
+  entity_metadata: z.array(z.object({
+    entity_ref: ref,
+    unit: z.object({
+      value: UnitSchema,
+      authorship: z.enum(['explicit', 'interpretation']),
+      source: SourceSpanSchema,
+    }).strict().nullable(),
+    deadline: z.object({
+      as_stated: z.string().min(1).max(60),
+      horizon_months: z.number().int().positive().nullable(),
+      source: SourceSpanSchema,
+    }).strict().nullable(),
+  }).strict()).optional(),
+  evidence_ranges: z.array(z.object({
+    ref,
+    entity_ref: ref,
+    literal: z.string().min(1),
+    lower_value: z.string().regex(/^-?\d+(?:\.\d+)?$/),
+    upper_value: z.string().regex(/^-?\d+(?:\.\d+)?$/),
+    unit: UnitSchema,
+    source: SourceSpanSchema,
+  }).strict()).optional(),
   quantities: z.array(z.object({
     ref,
     entity_ref: ref,
@@ -97,11 +121,15 @@ export type SourceSpan = z.infer<typeof SourceSpanSchema>;
 export type SourceUnit = z.infer<typeof UnitSchema>;
 export type NumberClaim = z.infer<typeof NumberClaimSchema>;
 export type SourceQuantity = SourceMeaning['quantities'][number];
+export type SourceEvidenceRange = NonNullable<SourceMeaning['evidence_ranges']>[number];
+export type SourceDeadline = NonNullable<NonNullable<SourceMeaning['entity_metadata']>[number]['deadline']>;
 
 export function buildSourceMeaningSchema(): Record<string, unknown> {
   const schema = zodToJsonSchema(SourceMeaningSchema, { $refStrategy: 'none' });
   const { $schema: _version, ...body } = schema;
-  return body;
+  // Optional only for backwards-compatible offline parsing, never for new
+  // strict structured output. Every top-level channel must be returned.
+  return { ...body, required: Object.keys((body as { properties?: Record<string, unknown> }).properties ?? {}) };
 }
 
 export const SOURCE_MEANING_INSTRUCTIONS = `Read the original brief into source-grounded typed meaning. You are the faithful M1 constructor, not a creative widener. Return only the requested JSON schema.
@@ -110,6 +138,8 @@ Use short stable internal refs, globally unique across entities, quantities, def
 Copy source quotes exactly from the untouched brief, including punctuation. Quote the smallest complete clause that establishes subject and role, NOT a bare numeric token. Set start and end to null for unique quotes: code locates them exactly. Only use offsets to disambiguate repeated quotes, using UTF-16 positions. A number appearing in the brief does not prove it is a current value.
 Each numeric claim has its exact written literal and expanded decimal value: £75k -> literal £75k, value 75000. Never calculate an unstated value. Separate current, target, proposed_level, absolute_change, relative_change, limit and evidence. For decrease BY 15%, keep value 15, direction decrease, frame change_rel; a level OF 15% has frame level and direction none. EVERY frame level claim has direction none, including proposed levels and targets; 'raise to £59' is proposed_level=59 with direction none, not a signed change. Current values always have frame level. Targets and limits preserve their own frame and strict comparator. No current value is inferred from a target or limit. Unknown is absent, never zero; stated zero is retained.
 Units explicitly retain currency, period and counted object; as_stated copies the unit wording. counted_object means an actual counted population such as subscribers, employees or tickets, never a quantity label such as price, MRR or churn. For total currency or percentages use counted_object null unless a population denominator is stated. Currency/count rate: price per subscriber per month differs from total monthly revenue. Percentage points are not relative percent change. Set horizon_months only for an explicit month count or explicit year converted to months; never invent the year for 'Q3'.
+Use entity_metadata for a stated unit or deadline even when the entity has no numeric current level or target. Bind each metadata item to that entity's own source clause. A currency inferred from context is authorship interpretation, never explicit. Keep deadlines verbatim in as_stated; horizon_months is null unless that deadline explicitly states a month or year count. Do not invent a numeric target to carry metadata.
+Use evidence_ranges for an explicit range about the entity it actually describes. Preserve the whole written literal and its shared scale: '£1-2 million' has endpoints 1000000 and 2000000. A firm's deal-size range belongs to a firm-deal-size entity, never to total funding, its current level or its target. No midpoint, prior distribution, numeric frame or identity is inferred from an evidence range. Return entity_metadata: [] and evidence_ranges: [] when absent.
 Each explicit option references exactly the quantities it changes. Quote the option's complete own clause including its intervention details, so its source and intervention sources overlap. An intervention's quantity_ref points to its stated level or change, never a target for the whole problem. Its numeric source must overlap that same intervention source. If the option names a change but gives no amount, quantity_ref is null. Do not manufacture a status-quo option; mark it only if the brief gives that alternative.
 Before returning check: every options[].entity_ref names an entity of kind option, NEVER a decision entity. A question can contain an action: in 'Should we raise our Pro plan price from £49 to £59 a month?', make the raise-price action its own option entity and options[] entry, with an intervention on the price factor pointing to the stated £59 proposed level. A decision entity may retain the question, but its ref must not appear in options[]. The question does not state an effect on MRR or churn.
 Bind current and desired change to the same metric ref when the brief uses the same scope, even if it calls the current measure 'spend' and the desired measure 'costs'. In 'Monthly spend is £45k; we want to cut costs by 20%', one goal entity carries both the £45k current level and the 20% decrease as a relative_change claim with frame change_rel. Do not make a separate factor for that current level, calculate an unstated absolute target, or treat 20% as the current level. Distinguish refs only when the brief really distinguishes scope; ask if scope is genuinely unclear. Current MRR and a target for that same MRR likewise use ONE goal entity with current and target quantity claims.

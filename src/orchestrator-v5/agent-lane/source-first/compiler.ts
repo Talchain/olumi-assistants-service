@@ -7,8 +7,8 @@ import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constant
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 // A pure numeric encoding helper, not the CandidateModel admission/repair chain.
 import { admitStatedGoalLevel, defaultFrameFor } from '../admit-model.js';
-import { SourceMeaningSchema, type SourceMeaning, type SourceQuantity } from './meaning.js';
-import { bindSource, readNumber, quantityProblem, unitText, compatibleUnits, type BoundSource } from './source-binding.js';
+import { SourceMeaningSchema, type SourceMeaning, type SourceQuantity, type SourceUnit } from './meaning.js';
+import { bindSource, readNumber, readDeadline, readEvidenceRange, sourceUnitProblem, quantityProblem, unitText, compatibleUnits, type BoundSource } from './source-binding.js';
 
 export interface SourceFinding {
   ref: string;
@@ -22,6 +22,9 @@ export interface SourceFirstCompilation {
   proposals: SourceMeaning['proposals'];
   source_bindings: Record<string, BoundSource>;
   reference_ids: Record<string, string>;
+  /** Private readings; GraphV3 has no unit-authorship or evidence-range carrier. */
+  contextual_unit_readings: Array<{ entity_ref: string; unit: SourceUnit; authorship: 'olumi_reading'; source: BoundSource }>;
+  evidence_ranges: Array<{ ref: string; entity_ref: string; literal: string; lower_value: number; upper_value: number; unit: SourceUnit; source: BoundSource }>;
   /** No semantic repairs are performed. Every unrepresented claim is explicit. */
   loss: SourceFinding[];
   trace: { architecture: 'source_first'; transforms: number; repairs: number; retries: number;
@@ -61,12 +64,15 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
   const edges: EdgeV3T[] = [];
   const constraints: GoalConstraintT[] = [];
   const proposals = [...meaning.proposals];
+  const contextual_unit_readings: SourceFirstCompilation['contextual_unit_readings'] = [];
+  const evidence_ranges: SourceFirstCompilation['evidence_ranges'] = [];
+  const metadataUnits = new Map<string, SourceUnit>();
   let projectedOptionQuantities = 0;
   const accepted = new Map<string, { claim: SourceQuantity; value: number }>();
   const issue = (ref: string, code: string, question: string): void => {
     if (!unresolved.some((item) => item.ref === ref && item.code === code)) unresolved.push({ ref, code, question });
   };
-  const allRefs = [...meaning.entities, ...meaning.quantities, ...meaning.definitions, ...meaning.causal_claims, ...meaning.unknowns, ...meaning.proposals].map((item) => item.ref);
+  const allRefs = [...meaning.entities, ...meaning.quantities, ...(meaning.evidence_ranges ?? []), ...meaning.definitions, ...meaning.causal_claims, ...meaning.unknowns, ...meaning.proposals].map((item) => item.ref);
   const duplicates = new Set(allRefs.filter((ref, index) => allRefs.indexOf(ref) !== index));
   for (const ref of duplicates) issue(ref, 'duplicate_reference', `Which distinct item does "${ref}" refer to?`);
   for (const entity of meaning.entities) {
@@ -84,6 +90,53 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
       ...(entity.label !== source.source.quote ? { label_authored: true } : {}),
       ...(entity.kind === 'factor' ? { category: 'external' as const } : {}),
     });
+  }
+  const metadata = meaning.entity_metadata ?? [];
+  for (const item of metadata) {
+    const node = nodes.get(item.entity_ref);
+    const entitySource = source_bindings[item.entity_ref];
+    if (!node || !entitySource || metadata.filter((entry) => entry.entity_ref === item.entity_ref).length !== 1) {
+      issue(item.entity_ref, 'entity_metadata_unbound', 'Which single stated quantity does this unit or deadline describe?'); continue;
+    }
+    if (item.unit) {
+      const bound = bindSource(brief, item.unit.source);
+      if (!bound.ok || sourceUnitProblem(item.unit.value, bound.source.quote)) {
+        issue(item.entity_ref, 'entity_unit_not_grounded', `Which source states the unit of "${node.label}"?`);
+      } else if (item.unit.authorship === 'interpretation') {
+        // AIQ 5914471584 permits this reading but requires a distinct durable
+        // unit-source carrier. Keep it private until the shared contract lands.
+        contextual_unit_readings.push({ entity_ref: item.entity_ref, unit: item.unit.value, authorship: 'olumi_reading', source: bound.source });
+        issue(item.entity_ref, 'contextual_unit_pending_contract', `Olumi reads "${node.label}" as ${unitText(item.unit.value)} raised; this interpretation has not been added to the saved model.`);
+      } else if (!spanWithin(bound.source, entitySource)) {
+        issue(item.entity_ref, 'entity_unit_scope_unverified', `Does that unit describe "${node.label}" or a different quantity?`);
+      } else {
+        metadataUnits.set(item.entity_ref, item.unit.value);
+        if (node.kind === 'goal') node.goal_threshold_unit = unitText(item.unit.value);
+      }
+    }
+    if (item.deadline) {
+      const bound = readDeadline(brief, item.deadline);
+      if (node.kind !== 'goal' || !bound || !spanWithin(bound.source, entitySource)) {
+        issue(item.entity_ref, 'entity_deadline_not_grounded', `Which exact deadline was stated for "${node.label}"?`);
+      } else {
+        node.goal_deadline_as_stated = item.deadline.as_stated;
+        if (item.deadline.horizon_months !== null) node.goal_horizon_months = item.deadline.horizon_months;
+      }
+    }
+  }
+  for (const claim of meaning.evidence_ranges ?? []) {
+    const node = nodes.get(claim.entity_ref);
+    const entitySource = source_bindings[claim.entity_ref];
+    const range = readEvidenceRange(brief, claim);
+    if (duplicates.has(claim.ref) || !node || !entitySource || !range || !spanWithin(range.source, entitySource)) {
+      issue(claim.ref, 'evidence_range_not_grounded', `Which quantity and exact range does "${claim.literal}" describe?`); continue;
+    }
+    source_bindings[claim.ref] = range.source;
+    evidence_ranges.push({ ref: claim.ref, entity_ref: claim.entity_ref, literal: claim.literal,
+      lower_value: range.lower, upper_value: range.upper, unit: claim.unit, source: range.source });
+    node.description = [...new Set([node.source_quote!, node.description, range.source.quote].filter(Boolean))].join('\n');
+    // Evidence is retained as exact text, never a current level, target, cap,
+    // prior, structural identity or natural effect.
   }
   for (const claim of meaning.quantities) {
     if (duplicates.has(claim.ref)) continue;
@@ -121,8 +174,9 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     const targets = held.filter(({ claim }) => claim.role === 'target'
       || (node.kind === 'goal' && claim.role === 'relative_change'));
     const levelUnits = held.filter(({ claim }) => claim.frame === 'level' && claim.role !== 'evidence');
-    const unit = currents[0]?.claim.unit ?? levelUnits[0]?.claim.unit;
-    if (unit && levelUnits.some(({ claim }) => !compatibleUnits(unit, claim.unit))) {
+    const unit = currents[0]?.claim.unit ?? levelUnits[0]?.claim.unit ?? metadataUnits.get(ref);
+    if (unit && (levelUnits.some(({ claim }) => !compatibleUnits(unit, claim.unit))
+      || (metadataUnits.has(ref) && !compatibleUnits(unit, metadataUnits.get(ref)!)))) {
       issue(ref, 'incompatible_quantity_units', `Which unit and period should "${node.label}" use?`);
       for (const { claim } of held) accepted.delete(claim.ref);
       continue;
@@ -608,7 +662,7 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
   const graph = GraphV3.parse({ nodes: [...nodes.values()], edges, ...(constraints.length ? { goal_constraints: constraints } : {}) });
   return {
     graph, open_questions: [...new Set(unresolved.map((item) => item.question))], unresolved,
-    proposals, source_bindings, reference_ids, loss: [...unresolved],
+    proposals, source_bindings, reference_ids, contextual_unit_readings, evidence_ranges, loss: [...unresolved],
     trace: { architecture: 'source_first', transforms: 1, repairs: 0, retries: 0,
       source_offset_corrections: Object.values(source_bindings).filter((source) => source.offset_corrected).length,
       level_direction_annotations_ignored: [...accepted.values()].filter(({ claim }) => claim.frame === 'level' && claim.direction !== 'none').length,

@@ -1,4 +1,4 @@
-import type { NumberClaim, SourceSpan, SourceQuantity, SourceUnit } from './meaning.js';
+import type { NumberClaim, SourceSpan, SourceQuantity, SourceUnit, SourceEvidenceRange, SourceDeadline } from './meaning.js';
 
 export type BoundSource = { quote: string; start: number; end: number; offset_corrected?: true };
 export type Binding = { ok: true; source: BoundSource } | { ok: false; reason: string };
@@ -34,7 +34,8 @@ export function readNumber(brief: string, claim: NumberClaim): { value: number; 
   const following = bound.source.quote.slice(at + claim.literal.length);
   if (bound.source.quote.indexOf(claim.literal, at + 1) >= 0
     || /[\d.,+-]/.test(bound.source.quote[at - 1] ?? '')
-    || /^[\da-z]|^[.,]\d/i.test(following)) return null;
+    || /^[\da-z]|^[.,]\d/i.test(following)
+    || /^\s*(?:-|–|—)\s*(?:[£$€]\s*)?\d/i.test(following)) return null;
   // These are numeric spellings, not inferred values. Preserve the full quote
   // (including "about") and require the decoded value to equal the typed one.
   const spelling = claim.literal.trim().replace(/^(?:about|approximately|roughly|around)\s+/i, '')
@@ -50,6 +51,53 @@ export function readNumber(brief: string, claim: NumberClaim): { value: number; 
   if (!Number.isFinite(value) || !Number.isFinite(claimed)
     || Math.abs(value - claimed) > Number.EPSILON * Math.max(1, Math.abs(value)) * 4) return null;
   return { value: claimed, source: bound.source };
+}
+
+/** Decode a written range, including a scale shared by its two endpoints. */
+export function readEvidenceRange(brief: string, claim: SourceEvidenceRange): { lower: number; upper: number; source: BoundSource } | null {
+  const bound = bindSource(brief, claim.source);
+  if (!bound.ok || !bound.source.quote.includes(claim.literal)
+    || sourceUnitProblem(claim.unit, bound.source.quote)) return null;
+  const parsed = /^(?:£|\$|€|GBP\s*|USD\s*|EUR\s*)?(\d[\d,]*(?:\.\d+)?)\s*(k|m|million|thousand)?\s*(?:-|–|—|to)\s*(?:£|\$|€|GBP\s*|USD\s*|EUR\s*)?(\d[\d,]*(?:\.\d+)?)\s*(k|m|million|thousand)?$/i.exec(claim.literal.trim());
+  if (!parsed) return null;
+  const codes = [...claim.literal.matchAll(/£|\$|€|GBP|USD|EUR/gi)].map(([token]) =>
+    token === '£' ? 'GBP' : token === '$' ? 'USD' : token === '€' ? 'EUR' : token.toUpperCase());
+  if (codes.length && (claim.unit.kind !== 'currency' || codes.some((code) => code !== claim.unit.currency))) return null;
+  const multiplier = (scale: string) => /^(k|thousand)$/i.test(scale) ? 1_000 : /^(m|million)$/i.test(scale) ? 1_000_000 : 1;
+  const lower = Number(parsed[1].replaceAll(',', '')) * multiplier(parsed[2] ?? parsed[4] ?? '');
+  const upper = Number(parsed[3].replaceAll(',', '')) * multiplier(parsed[4] ?? parsed[2] ?? '');
+  if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower > upper
+    || lower !== Number(claim.lower_value) || upper !== Number(claim.upper_value)) return null;
+  return { lower, upper, source: bound.source };
+}
+
+/** A deadline is metadata about the goal, never its target or current level. */
+export function readDeadline(brief: string, claim: SourceDeadline): { source: BoundSource } | null {
+  const bound = bindSource(brief, claim.source);
+  if (!bound.ok || !bound.source.quote.includes(claim.as_stated)
+    || !/^(within|in|by|before)\b/i.test(claim.as_stated)
+    || /\b(?:not|never|cannot|can't)\s+(?:be\s+)?(?:within|in|by|before)\b/i.test(bound.source.quote)) return null;
+  if (claim.horizon_months !== null) {
+    const parsed = /^(?:within|in|by|before)\s+(?:the\s+)?(?:next\s+)?(\d+|one|a)\s+(months?|years?)$/i.exec(claim.as_stated);
+    const count = parsed ? /^\d+$/.test(parsed[1]) ? Number(parsed[1]) : 1 : null;
+    const months = parsed && count !== null ? count * (/^year/i.test(parsed[2]) ? 12 : 1) : null;
+    if (months === null || months <= 0 || months !== claim.horizon_months) return null;
+  }
+  return { source: bound.source };
+}
+
+export function sourceUnitProblem(unit: SourceUnit, context: string): string | null {
+  if (unit.kind === 'currency') {
+    const currencyPattern = unit.currency === 'GBP' ? /£|\bGBP\b|pounds?/i
+      : unit.currency === 'USD' ? /\$|\bUSD\b|dollars?/i : unit.currency === 'EUR' ? /€|\bEUR\b|euros?/i : null;
+    if (!currencyPattern?.test(context)) return 'currency_not_grounded';
+  } else if (unit.currency !== null) return 'currency_on_non_currency_unit';
+  if (unit.kind === 'percent' && !/%|percent/i.test(context)) return 'percent_not_grounded';
+  if (unit.kind === 'percentage_points' && !/percentage[ -]points?|\bpp\b/i.test(context)) return 'percentage_points_not_grounded';
+  const periods = { day: /\b(daily|days?)\b/i, week: /\b(weekly|weeks?)\b/i, month: /\b(monthly|months?|MRR)\b/i,
+    quarter: /\b(quarterly|quarters?)\b/i, year: /\b(annual(?:ly)?|yearly|years?|ARR)\b/i };
+  if (unit.period !== null && !periods[unit.period].test(context)) return 'period_not_grounded';
+  return null;
 }
 
 /** Detect explicit contradictions; successful text binding is not semantic proof. */
@@ -76,17 +124,8 @@ export function quantityProblem(quantity: SourceQuantity, context: string): stri
   }
   if (quantity.frame !== 'level' && quantity.direction === 'decrease' && !/\b(reduc\w*|cut\w*|decreas\w*|lower\w*|less|drop\w*|save\w*)\b/i.test(quote)) return 'change_direction_not_grounded';
   if (quantity.frame !== 'level' && quantity.direction === 'increase' && !/\b(increas\w*|rais\w*|grow\w*|growth|more|add\w*|improv\w*)\b/i.test(quote)) return 'change_direction_not_grounded';
-  const unit = quantity.unit;
-  if (unit.kind === 'currency') {
-    const currencyPattern = unit.currency === 'GBP' ? /£|\bGBP\b|pounds?/i
-      : unit.currency === 'USD' ? /\$|\bUSD\b|dollars?/i : unit.currency === 'EUR' ? /€|\bEUR\b|euros?/i : null;
-    if (!currencyPattern?.test(context)) return 'currency_not_grounded';
-  } else if (unit.currency !== null) return 'currency_on_non_currency_unit';
-  if (unit.kind === 'percent' && !/%|percent/i.test(context)) return 'percent_not_grounded';
-  if (unit.kind === 'percentage_points' && !/percentage[ -]points?|\bpp\b/i.test(context)) return 'percentage_points_not_grounded';
-  const periods = { day: /\b(daily|days?)\b/i, week: /\b(weekly|weeks?)\b/i, month: /\b(monthly|months?|MRR)\b/i,
-    quarter: /\b(quarterly|quarters?)\b/i, year: /\b(annual(?:ly)?|yearly|years?|ARR)\b/i };
-  if (unit.period !== null && !periods[unit.period].test(context)) return 'period_not_grounded';
+  const unitProblem = sourceUnitProblem(quantity.unit, context);
+  if (unitProblem) return unitProblem;
   // Period and deadline are different. A provider's incidental horizon field
   // cannot invalidate a sound current value or limit; only targets consume it.
   if (quantity.role === 'target' && quantity.horizon_months !== null) {
