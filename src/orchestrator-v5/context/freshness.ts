@@ -44,6 +44,7 @@ import {
   extractAnalysedOptionIds,
 } from './option-identity.js';
 import { isAnalysisRefusalFact } from './analysis-refusal-continuity.js';
+import { normalizeRunGoalUnit } from './run-goal-unit.js';
 
 /**
  * Four-valued freshness state. Reachable from new code paths only as
@@ -61,6 +62,11 @@ export type FreshnessReason =
   | 'graph_hash_match'
   | 'graph_hash_diverged'
   | 'model_restored_after_analysis'
+  /** The hash does not include the goal's display unit. A Run-input snapshot
+   * must agree with that unit before old figures may be called current. */
+  | 'goal_unit_changed'
+  /** A snapshotted Run was read without one verifiable selected goal. */
+  | 'goal_snapshot_unverified'
   | 'legacy_fact_missing_hash'
   | 'current_graph_hash_unavailable'
   | 'no_successful_run_analysis_fact'
@@ -97,13 +103,15 @@ export type FreshnessReason =
 /**
  * Optional read-state the caller may thread into {@link deriveAnalysisFreshness}.
  *
- * OMITTING IT IS BACK-COMPATIBLE BY DESIGN: every existing caller gets exactly
- * the pre-fix verdict, so wiring this is a per-caller decision rather than a
- * silent estate-wide behaviour change. Only a caller that can genuinely
- * distinguish "the store said there is nothing" from "the store could not be
- * read" should pass it — CEE #977's `PriorFactsReadResult` is that distinction.
+ * Legacy facts retain their hash verdict. A Run that supplies a selected-goal
+ * snapshot also requires the current graph; missing proof fails closed. Only
+ * callers that distinguish an empty store from a failed read should supply
+ * priorFactsReadOk — CEE #977's `PriorFactsReadResult` is that distinction.
  */
 export interface DeriveAnalysisFreshnessOptions {
+  /** The same current graph used for the hash, before any unit defaults. A
+   * Run with an input snapshot cannot be declared fresh without this proof. */
+  readonly currentGraph?: unknown;
   /**
    * `false` ⇒ the prior-fact read DEGRADED (threw), so an empty fact list is
    * uninformative. `true` ⇒ the read succeeded and an empty list genuinely
@@ -583,14 +591,16 @@ function checkHardInvariants(
       assertExhaustive(derivation.freshness);
   }
 
-  // Invariant 2: identical-hash ⇒ fresh unless a later restore explicitly
-  // invalidated that fact. Hash equality proves matching bytes, not chronology:
-  // A -> analyse -> B -> restore A must remain stale until a newer rerun.
+  // Invariant 2: identical-hash ⇒ fresh unless chronology or the snapshotted
+  // goal unit invalidates that fact. Goal units are outside the hash projection;
+  // A -> analyse -> B -> restore A also remains stale until a newer rerun.
   if (
     derivation.graph_hash_at_run !== null &&
     derivation.current_graph_hash !== null &&
     derivation.graph_hash_at_run === derivation.current_graph_hash &&
     derivation.reason !== 'model_restored_after_analysis' &&
+    derivation.reason !== 'goal_unit_changed' &&
+    derivation.reason !== 'goal_snapshot_unverified' &&
     derivation.freshness !== 'fresh'
   ) {
     return { coerce_to: 'fresh' };
@@ -762,6 +772,19 @@ export function deriveAnalysisFreshness(
     };
   }
 
+  // SC-24's one Run-input snapshot owns the unit at computation time. The
+  // canonical graph hash does not include goal_threshold_unit, so equality
+  // alone cannot license relabelling a saved figure after a unit-only edit.
+  // Legacy facts keep their old verdict; their labelled figures retain the
+  // narrower hash-bound-unit projection (AIQ #75 5912905493).
+  if (base.freshness === 'fresh') {
+    const goalBinding = compareRunGoalUnitSnapshot(selected.fact, opts?.currentGraph);
+    if (goalBinding === 'unit_changed' || goalBinding === 'unverified') {
+      base = { ...base, freshness: 'stale', reason: goalBinding === 'unit_changed'
+        ? 'goal_unit_changed' : 'goal_snapshot_unverified' };
+    }
+  }
+
   // Option-identity guard. Only engaged when the caller threaded current graph
   // option IDs (flag on) AND the hash comparison was IMPOSSIBLE (the `unknown`
   // paths: legacy fact missing hash / current graph hash unavailable). A
@@ -785,6 +808,50 @@ export function deriveAnalysisFreshness(
   }
 
   return enforceInvariants(base);
+}
+
+/** Human copy for the existing freshness_reason text carrier; no new wire enum. */
+export function goalSnapshotStaleMessage(reason: FreshnessReason): string | undefined {
+  if (reason === 'goal_unit_changed') return 'your goal’s unit changed';
+  if (reason === 'goal_snapshot_unverified') return 'the saved goal’s unit could not be confirmed';
+  return undefined;
+}
+
+/** Read only SC-24's existing input_snapshot.goal carrier. No second snapshot,
+ * numeric inference or unit default is created by this currentness gate. */
+function compareRunGoalUnitSnapshot(
+  fact: HandlerFact,
+  currentGraph: unknown,
+): 'legacy' | 'match' | 'unit_changed' | 'unverified' {
+  const record = (value: unknown): Record<string, unknown> | null =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown> : null;
+  const result = record((fact as { result?: unknown }).result);
+  if (result?.input_snapshot === undefined) return 'legacy';
+  const snapshot = record(result.input_snapshot);
+  if (snapshot === null) return 'unverified';
+  // Goal-free strategic work remains supported. A snapshot without a goal
+  // asserts no goal unit, and never creates a synthetic goal or value.
+  if (snapshot.goal === undefined || snapshot.goal === null) return 'legacy';
+  const goalAtRun = record(snapshot.goal);
+  const graph = record(currentGraph);
+  if (goalAtRun === null || typeof goalAtRun.node_id !== 'string' || goalAtRun.node_id.trim() === ''
+    || graph === null || !Array.isArray(graph.nodes)) return 'unverified';
+  const goals = graph.nodes.map(record).filter((node) => node?.kind === 'goal');
+  if (graph.goal_node_id !== undefined
+    && (typeof graph.goal_node_id !== 'string' || graph.goal_node_id.trim() === '')) return 'unverified';
+  const selectedId = graph.goal_node_id === undefined
+    ? goals.length === 1 ? goals[0]?.id : undefined : graph.goal_node_id;
+  const selected = goals.filter((node) => node?.id === selectedId);
+  if (selected.length !== 1 || selectedId !== goalAtRun.node_id) return 'unverified';
+  const persistedUnit = selected[0]?.goal_threshold_unit;
+  // Refuse malformed current types before the shared sent-unit normalization.
+  if (persistedUnit !== undefined && persistedUnit !== null && typeof persistedUnit !== 'string') return 'unverified';
+  const currentUnit = normalizeRunGoalUnit(persistedUnit);
+  // Both absent means no unit was asserted by either input. A removal/addition
+  // is a change; an invalid supplied unit is never repaired to GBP here.
+  if (goalAtRun.unit !== undefined && normalizeRunGoalUnit(goalAtRun.unit) === undefined) return 'unverified';
+  return goalAtRun.unit === currentUnit ? 'match' : 'unit_changed';
 }
 
 /**

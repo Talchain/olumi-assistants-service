@@ -61,15 +61,16 @@ async function storedVerdict(graph: Json): Promise<Json> {
 
 /**
  * The same served graph with price's path to churn (`price → price_sensitivity → churn`, links nobody sized; the risk
- * node has no other link) replaced by ONE link Olumi sized in churn's unit — so the rows below pin B5's WHOSE-level
- * rule, not R-c's parts predicate.
+ * node has no other link) replaced by ONE link sized in churn's unit — so the rows below pin B5's WHOSE-level rule, not
+ * R-c's parts predicate. Sized by the USER: an Olumi size is its guess under B6 (AIQ #75 5916187873) and would withhold
+ * every price option's P before the level is read.
  */
 function withSizedChurnLink(g: Json): Json {
   const graph = clone(g);
   graph.nodes = (graph.nodes as Json[]).filter((n) => n.id !== 'price_sensitivity');
   graph.edges = (graph.edges as Json[]).filter((e) => e.from !== 'price_sensitivity' && e.to !== 'price_sensitivity');
   (graph.edges as Json[]).push({ from: 'pro_plan_price', to: 'monthly_churn', strength: { mean: 0.3, std: 0.15 }, exists_probability: 0.9, effect_direction: 'positive',
-    provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', natural_effect: { amount: 0.5, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } });
+    provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 0.5, amount_unit: 'percentage points', per_source_change: 10, per_source_change_unit: 'GBP per month', strength_mean: 0.3, strength_mean_frame: 'edge_strength' } } });
   return graph;
 }
 
@@ -79,10 +80,10 @@ describe('B5-1 at the call site: the stored verdict on Paul\'s 17d1 run', () => 
     expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'unscored', reason: 'parts_links_placeholder' }]);
     expect(v.joint).toEqual({ state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: [CHURN] });
   });
-  it('with the link sized: churn is estimate_only (Olumi\'s 3 %) and a joint that is not scored', async () => {
+  it('B6 SUPERSEDES B5\'s estimate_only here (AIQ 5916187873 (ii)): the link sized, churn\'s level Olumi\'s 3 % → every option withheld, the row unscored', async () => {
     const v = await storedVerdict(withSizedChurnLink(input.graph));
-    expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'estimate_only', reason: 'level_olumi_estimate' }]);
-    expect(v.joint).toEqual({ state: 'estimate_only' });
+    expect(v.per_limit).toEqual([{ constraint_id: CHURN, state: 'unscored', reason: 'limit_rests_on_olumi_guess' }]);
+    expect(v.joint).toMatchObject({ state: 'withheld' });
   });
   it('DERIVED (churn\'s level marked as the user\'s assumption): the call site names it THEIRS, level_user_assumption', async () => {
     const graph = withSizedChurnLink(input.graph);

@@ -40,7 +40,9 @@ import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
-import { sizeLink, type LinkSizing, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
+import { sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+/** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
+export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
 import {
@@ -162,8 +164,16 @@ export interface CandidateModel {
     is_status_quo?: boolean | null;
   }[];
   readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
-  readonly risks: readonly { label: string; provenance: string }[];
-  readonly outcomes: readonly { label: string; provenance: string }[];
+  /**
+   * ⭐ A QUANTITY OUTCOME OR A RISK'S EXPOSURE CARRIES THE FRAME A FACTOR DOES (DL #75 5916155976 (a); R3 5916156932 (b)):
+   * `unit` + `plausible_max`, nullable. Without them no size into or out of the node can be read (`resolveMagnitudeFrame`
+   * has nothing to read), so a goal fed by an outcome or a risk could never be sized in its own unit. Optional here: the
+   * banked contract has neither field.
+   * `analysis_participation` is never the drafter's (the strict schema has no such key): only
+   * `rerouteExtraParentsOfProductGoal` writes it, on Olumi's risk whose effect the model already carries (DL 5916217417).
+   */
+  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded' }[];
+  readonly outcomes: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
   readonly links: readonly CandidateLink[];
   /**
    * Quantities the drafter DECLARES to be other quantities multiplied together (C46). Never
@@ -699,6 +709,16 @@ export function metricNamesLabel(metric: string, label: string): boolean {
  * the Agent adds (`propose_new_option` `new_factors[].today`) is framed by THIS function, so it is stored exactly as a
  * baseline the brief states — never a second framer.
  */
+/**
+ * A quantity outcome's or a risk exposure's range, on the node, as `scale_frame` — the carrier a factor with no baseline
+ * uses — only when a usable range (> 1) was drafted. Nothing otherwise: a qualitative outcome or an occurrence-only risk
+ * stays exactly as before.
+ */
+function framedByRange(x: { plausible_max?: number | null }): { node?: { scale_frame: number } } {
+  const c = x.plausible_max;
+  return typeof c === 'number' && Number.isFinite(c) && c > 1 ? { node: { scale_frame: c } } : {};
+}
+
 export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
 }): Record<string, unknown> {
@@ -2814,6 +2834,22 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
  * exactly the graph that is registered — as if the drafter had never drafted it. It is said, never
  * silent: `options_withheld` carries the step, and the ledger records it.
  */
+/**
+ * The ONE place an outcome's or a risk's frame is normalised (DL #75 5916270318, option D): an absent `unit` or
+ * `plausible_max` (a candidate recorded before the frames existed) is null, exactly what the strict drafter writes for
+ * "not a quantity". Here, at admission's entry, and not where the draft is parsed: the parsed draft is echoed to a retry
+ * byte for byte, and a recorded draft must build exactly as it did.
+ */
+export function withQuantityFrames(candidate: CandidateModel): CandidateModel {
+  const framed = <T extends { unit?: string | null; plausible_max?: number | null }>(x: T): T =>
+    ({ ...x, unit: x.unit ?? null, plausible_max: x.plausible_max ?? null });
+  return {
+    ...candidate,
+    ...(Array.isArray(candidate.risks) ? { risks: candidate.risks.map(framed) } : {}),
+    ...(Array.isArray(candidate.outcomes) ? { outcomes: candidate.outcomes.map(framed) } : {}),
+  };
+}
+
 export function admitCandidateModel(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
@@ -2836,11 +2872,25 @@ export function admitCandidateModel(
    * its module imports stated-by-user.ts, which imports this one). Absent ⇒ nothing (fail closed: exactly as before).
    */
   goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null = () => null,
+  /**
+   * ⛔ Whether the brief WRITES a link's stated size, in the target's unit, ABOUT THIS LINK (`figureTheUserWroteFor`,
+   * strict, scoped to the link's two ends against every other quantity; injected: stated-by-user.ts imports this module).
+   * A size the drafter tags `explicit` is the user's only then (AIQ #2383 5916497454: the G6 door; P0 PARTNER #2389 HARD
+   * condition: "Our burn is £30,000 a month" is not £30,000 per conversation). Absent ⇒ never (fail closed).
+   */
+  sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean = () => false,
+  /**
+   * ⭐ A4 (R3 C1/C2 5918513716; AIQ 5919953251): the range the brief writes this LINK's size as one end of, in one span
+   * about the link's source (`writtenRangeFor`, injected for the same reason). The size is then said with its range, as a
+   * bound. Absent ⇒ none (the size reads as before).
+   */
+  sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
 ): AdmittedModel {
+  candidateModel = withQuantityFrames(candidateModel);
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
     .map((o) => canonicalLabel(o.label)));
-  const first = admitOnce(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief);
+  const first = admitOnce(candidateModel, widened, brief, goalLevelStated, targetFigureWrittenAgain, goalLevelFromBrief, sizeWritten, sizeRangeEnd);
   const verdict = judgeOptionIdentity(first, declared);
   // Never withhold a name another entity shares: removing its links would take that entity's with it.
   const otherNames = new Set([
@@ -2865,6 +2915,8 @@ export function admitCandidateModel(
     goalLevelStated,
     targetFigureWrittenAgain,
     goalLevelFromBrief,
+    sizeWritten,
+    sizeRangeEnd,
   );
   const options_withheld: WithheldOption[] = withheld.map((w) => ({
     option: w.option, like: w.like, reason: 'option_indistinct', sentence: indistinctStep(w.option, w.like),
@@ -2892,6 +2944,8 @@ function admitOnce(
   goalLevelStated: (value: number, unit: unknown) => boolean,
   targetFigureWrittenAgain: (value: number, unit: unknown) => boolean,
   goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null,
+  sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean,
+  sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null,
 ): AdmittedModel {
   const { model: restatedModel, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
   // ⛔ A two-part product goal's rate is the user's own price when Olumi's rate only passes it on (shape 2,
@@ -3196,8 +3250,18 @@ function admitOnce(
         })(),
       },
     })),
-    ...model.risks.map((r) => ({ label: r.label, kind: 'risk' as const, provenance: r.provenance })),
-    ...model.outcomes.map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: o.provenance })),
+    // The factor path's own carrier for a range with no level (`scale_frame`, above): a quantity outcome, or a risk
+    // drafted as its exposure, is framed exactly as a factor with no baseline is. No new frame type (DL 5916155976).
+    // ⛔ STRUCTURE IS NEVER REMOVED TO SATISFY A FIGURE RULE (DL 5916217417): a risk kept out of the calculation keeps its
+    // node, its words and its link; the run guard hands PLoT the model without it, and says so. One `node` for both.
+    ...model.risks.map((r) => {
+      const node = {
+        ...((framedByRange(r) as { node?: Partial<AdmittedNode> }).node ?? {}),
+        ...(r.analysis_participation === 'retained_excluded' ? { analysis_participation: 'retained_excluded' as const } : {}),
+      };
+      return { label: r.label, kind: 'risk' as const, provenance: r.provenance, ...(Object.keys(node).length > 0 ? { node } : {}) };
+    }),
+    ...model.outcomes.map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: o.provenance, ...framedByRange(o) })),
     ...(widened.proposed_options ?? []).map((o) => ({ label: o.label, kind: 'option' as const, provenance: 'ai_proposed' })),
     ...(widened.proposed_factors ?? []).map((f) => ({ label: f.label, kind: 'factor' as const, provenance: 'ai_proposed' })),
     ...(widened.proposed_risks ?? []).map((r) => ({ label: r.label, kind: 'risk' as const, provenance: 'ai_proposed' })),
@@ -3392,7 +3456,7 @@ function admitOnce(
    * the link sizing below.
    */
   const unitById = new Map<string, string>();
-  for (const f of model.factors) {
+  for (const f of [...model.factors, ...model.outcomes, ...model.risks]) {
     const id = ids.get(f.label);
     if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
   }
@@ -3608,18 +3672,39 @@ function admitOnce(
     ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
   }]));
   const sizing = new Map<string, LinkSizing>();
+  // Every quantity a stated size could be about (options and the decision name none): the size door's rivals.
+  const quantityLabels = nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => n.label);
   for (const l of resolvable) {
     if (l.direction === 'unknown' || typeof l.strength_mean === 'number') continue;
     const source = magnitudeNodeById.get(l.from);
     const target = magnitudeNodeById.get(l.to);
     if (source === undefined || target === undefined) continue;
-    // D9: a user's own edit (`user_specified`) always wins; otherwise the size is the user's only when stated as theirs.
-    const user_stated = l.provenance_source === 'user_specified' || (l.effect_provenance ?? l.provenance) === 'explicit';
+    // D9: a user's own edit (`user_specified`) always wins; otherwise the size is the user's only when stated as theirs
+    // AND the brief writes it, in the target's own unit (AIQ #2383 5916497454; the G6 door): a figure the drafter tagged
+    // `explicit` that no sentence carries is Olumi's estimate, never the user's.
+    const taggedTheirs = (l.effect_provenance ?? l.provenance) === 'explicit';
+    // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
+    const levelUnit = target.observed_state?.unit ?? target.unit ?? target.goal_threshold_unit;
+    const written = typeof l.effect_amount === 'number' && Number.isFinite(l.effect_amount)
+      && sizeWritten(Math.abs(l.effect_amount), levelUnit, {
+        target: [source.label, target.label],
+        others: quantityLabels.filter((q) => q !== source.label && q !== target.label),
+      });
+    const user_stated = l.provenance_source === 'user_specified' || (taggedTheirs && written);
+    // A4: a size the brief writes only as one END of a range is said with that range (a user's own edit never is).
+    const range = user_stated && l.provenance_source !== 'user_specified'
+      ? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
+        source: source.label,
+        sourceUnit: source.unit,
+        others: quantityLabels.filter((q) => q !== source.label),
+      })
+      : null;
     sizing.set(`${l.from}::${l.to}`, sizeLink({
       direction: l.direction,
       effect_amount: l.effect_amount,
       effect_per_source_change: l.effect_per_source_change,
       user_stated,
+      ...(range !== null ? { stated_range: range } : {}),
     }, source, target));
   }
 

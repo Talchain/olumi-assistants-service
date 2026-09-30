@@ -871,8 +871,10 @@ export function createAddConstraintHandler(): HandlerFn {
       // figure keeps it ("under 5%"). Only a TYPED comparator the caller relays (`statedConstraintOperator`, the Agent's
       // limit door) restates it: strict sets it, non-strict clears it. Read through `statedOperatorOf`, and written only
       // as the strict twin of THIS row's operator, so a contradicting stamp is never carried or minted.
+      // DR row 1 (CODEX CEE BUDDY 5918898090): the approved goal card's comparator is the words it DISPLAYED ("at least"),
+      // a statement rather than an omission, so it never inherits a strict comparator from the row it replaces.
       const statedOperator = invocation.statedConstraintOperator
-        ?? (frameCarrier === undefined ? undefined : statedOperatorOf(frameCarrier));
+        ?? (frameCarrier === undefined || invocation.holdsGoalDirection === true ? undefined : statedOperatorOf(frameCarrier));
       const operatorAsStated =
         statedOperator === '<' && operator === '<=' ? ('<' as const)
           : statedOperator === '>' && operator === '>=' ? ('>' as const)
@@ -1035,7 +1037,21 @@ export function createAddConstraintHandler(): HandlerFn {
         targetNode.threshold_source === 'user' &&
         typeof targetNode.success_threshold === 'number' &&
         targetNode.success_threshold !== params.value;
+      // ⭐ DR row 1 (CODEX CEE BUDDY 5918509191): the APPROVED card states the goal's direction with its target, so a
+      // restated target the goal holds WITHOUT that direction (absent, or the opposite) is a change the user made, never
+      // a no-op: it commits the comparator and moves the analysis hash. Only the card sets the side-band.
+      const cardGoalDirection = ownsGoalThresholdChannel && invocation.holdsGoalDirection === true
+        ? (operatorAsStated ?? operator) : undefined;
+      // ⛔ An approved CEILING on the goal (CODEX CEE BUDDY 5918898090; DL 5918915292; AIQ 5919045720) contradicts any
+      // floor held before, so that direction goes (C3: the latest statement replaces). It is not held as `<=`: the
+      // goal's threshold channel carries floors only ("at most stamps nothing"), and a ceiling stamped there is sent no
+      // direction unless proven, so PLoT would score P(goal ≥ ceiling) under "at most" (measured, MG SUCCESSOR 30 Sep).
+      const cardClearsGoalDirection = targetNode.kind === 'goal' && invocation.holdsGoalDirection === true
+        && operator === '<=';
+      const directionDisagrees = (cardGoalDirection !== undefined && targetNode.goal_direction !== cardGoalDirection)
+        || (cardClearsGoalDirection && targetNode.goal_direction !== undefined && targetNode.goal_direction !== null);
       const rowValueUnchanged =
+        !directionDisagrees &&
         existing !== undefined &&
         existing.value === newConstraint.value &&
         existing.unit === newConstraint.unit &&
@@ -1043,6 +1059,7 @@ export function createAddConstraintHandler(): HandlerFn {
         statedOperatorOf(existing) === statedOperatorOf(newConstraint) &&
         !userStampDisagrees;
       const nodeChannelUnchanged =
+        !directionDisagrees &&
         ownsGoalThresholdChannel &&
         typeof targetNode.goal_threshold_raw === 'number' &&
         targetNode.goal_threshold_raw === params.value &&
@@ -1365,6 +1382,10 @@ export function createAddConstraintHandler(): HandlerFn {
               ? list
               : [...list, constraintParse.data];
         clone.goal_constraints = next;
+        if (cardClearsGoalDirection) {
+          const goalNode = clone.nodes.find((n) => n.id === targetId);
+          if (goalNode !== undefined) delete (goalNode as { goal_direction?: unknown }).goal_direction;
+        }
         if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
           if (goalNode) {
@@ -1381,6 +1402,12 @@ export function createAddConstraintHandler(): HandlerFn {
             // screen after a reload. This row is `provenance: 'explicit'` (the user stated it): the pair is theirs.
             goalNode.success_threshold = params.value;
             goalNode.threshold_source = 'user';
+            // ⭐ DR row 1 (DL #75 5918381864; AIQ 5918365996; R3 5918409192 C1–C4): the user's APPROVED card states the
+            // target AND its comparator in one statement, so the goal node holds both, in this same write (C1), replacing
+            // any comparator held before (C3; the analysis hash moves). Only the card sets the side-band, and this block
+            // runs only for the goal's own row (C4). A held floor sends PLoT nothing new (`resolveGoalDirection`); the
+            // headline stops saying the analysis "was not told which way your goal points".
+            if (cardGoalDirection !== undefined) goalNode.goal_direction = cardGoalDirection;
             // Unit is ALWAYS reconciled (review hardening): the node's
             // threshold unit follows the constraint row's effective unit.
             // Gate-1 doctrine note: with `existing?.unit` now in the

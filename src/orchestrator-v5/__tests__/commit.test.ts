@@ -501,7 +501,8 @@ answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
     const { store, appendCalls } = makeSpyStore();
     await commitDirectAnswer(composed(), { ...META, graph: clean }, store);
     setTestSink(null);
-    expect(appendCalls[0]!.graph).toEqual(clean);
+    // Unchanged but for the stable ref a FIRST write gets (#2357 B1: nothing is stored, so the factor is F1).
+    expect(appendCalls[0]!.graph).toEqual({ ...clean, nodes: [{ ...clean.nodes[0], ref: 'F1' }], ref_high_water: { F: 1 } });
     expect(events.filter((e) => e === 'v5.graph_persist.intercept_repair')).toHaveLength(0);
   });
 

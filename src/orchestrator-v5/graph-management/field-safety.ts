@@ -198,7 +198,8 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'startertitle',
   'interventionkeys',
   // The goal's stated direction and deadline (G1), DECLARED on NodeV3 so every write keeps them. Written only by
-  // construction, from the brief (`holdStatedGoalAttributes`); a producer that could set one would state a
+  // construction, from the brief (`holdStatedGoalAttributes`), and the direction also by the user's APPROVED goal
+  // target card (DR row 1, `add_constraint` behind `holdsGoalDirection`); a producer that could set one would state a
   // deadline or a direction the user never gave, as theirs.
   'goal_direction',
   'goal_sense_reading',

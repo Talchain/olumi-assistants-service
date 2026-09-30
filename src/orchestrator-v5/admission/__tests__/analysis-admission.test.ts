@@ -680,6 +680,18 @@ function nodeOf(graph: Record<string, unknown>, id: string): Record<string, unkn
  */
 const PAUL_DRAFT = 'src/orchestrator-v5/coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.draft-graph.json';
 
+/**
+ * The same graph with NO stated target, so DECISION-REPRESENTATION row 4's verdict has no subject (#2371): these rows
+ * keep testing their own axis. Only the goal's raw target and its own limit row go; nothing else about the capture moves.
+ */
+function withoutTarget<G>(graph: G): G {
+  const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
+  const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
+  for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
+  return c as unknown as G;
+}
+
 function paulDraft(): Record<string, unknown> {
   const parsed = JSON.parse(readFileSync(PAUL_DRAFT, 'utf8')) as { graph: unknown };
   return JSON.parse(JSON.stringify(parsed.graph)) as Record<string, unknown>;
@@ -747,7 +759,9 @@ describe('the floor is MATERIALITY, not "somebody typed one number somewhere"', 
 
     expect(signals.material_parameters_user_stated).toBe(1);
     expect(semanticQualitySufficient(signals)).toBe(true);
-    expect(resolveAnalysisAdmission(graph).permitted_analysis_mode).toBe('comparative_leader');
+    // The materiality axis, with DR row 4 held off (#2371): his draft's target can't be tested yet, which caps the
+    // real draft at `exploratory` (`target-testability.test.ts`); without the target the floor decides alone.
+    expect(resolveAnalysisAdmission(withoutTarget(graph)).permitted_analysis_mode).toBe('comparative_leader');
   });
 
   it('arm B — the SAME ONE stamp moved to a NON-material root: quantified_provisional', () => {

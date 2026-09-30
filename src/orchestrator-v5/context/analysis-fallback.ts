@@ -82,6 +82,7 @@ import { investigationPriorityFromEnrichment } from '../coaching/investigation-p
 import { deriveFactorInvestigationFromEnrichment } from './factor-investigation-licence.js';
 import { selectRunAnalysisFact } from './freshness.js';
 import { emitUnknownEnrichmentKeyTelemetry } from './enrichment-manifest.js';
+import { projectGoalProbabilitiesForTransport } from '../compose/goal-probability-transport.js';
 
 export const FALLBACK_STALENESS_REASON = 'loaded_from_prior_run_freshness_unknown';
 
@@ -593,7 +594,9 @@ export function buildAnalysisFromPriorFacts(
   const enrichment = result.enrichment;
   const enrichmentRecord =
     enrichment && typeof enrichment === 'object' && !Array.isArray(enrichment)
-      ? (enrichment as Record<string, unknown>)
+      // The follow-up prompt consumes the same Run-owned certainty permission
+      // as its public result, before compaction or any fallback reconciliation.
+      ? projectGoalProbabilitiesForTransport(enrichment as Record<string, unknown>, result.goal_certainty) ?? null
       : null;
   if (enrichmentRecord !== null) {
     // Runtime tripwire (context-audit #1). This is the single seam where the

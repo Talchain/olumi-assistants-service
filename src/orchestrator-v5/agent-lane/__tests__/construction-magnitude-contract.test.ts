@@ -35,6 +35,8 @@ const link = (from: string, to: string, direction: 'positive' | 'negative', size
   effect_amount: size.amount, effect_per_source_change: size.per, effect_provenance: size.by,
 });
 
+/** The user's own size is theirs only where the brief WRITES it (AIQ #2383 5916497454): the R4 rows' brief says it. */
+const SAYS_SIX = ' The AI release cuts monthly churn by 6 points.';
 const BRIEF =
   'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the '
   + 'Pro plan price from £49 to £59 per month with the next AI feature release? Our monthly churn is 4% today, from our billing data.';
@@ -85,7 +87,7 @@ function t3(aiToChurn: Size, aiToChurnProvenance: Prov = 'inferred') {
 /** The production contract: the candidate must pass the real strict schema, as the model's output would. */
 const strict = new Ajv({ strict: false }).compile(buildCandidateSchema());
 
-async function register(wire: Record<string, unknown>): Promise<{ graph: Graph; out: Record<string, unknown> }> {
+async function register(wire: Record<string, unknown>, brief: string = BRIEF): Promise<{ graph: Graph; out: Record<string, unknown> }> {
   expect(strict(wire), JSON.stringify(strict.errors)).toBe(true);
   let body: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -96,7 +98,7 @@ async function register(wire: Record<string, unknown>): Promise<{ graph: Graph; 
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', BRIEF, d, call) as Record<string, unknown>;
+  const out = await buildModelFromBrief('77777777-7777-4777-8777-777777777777', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return { graph: GraphV3.parse(body) as unknown as Graph, out };
 }
@@ -149,8 +151,16 @@ describe('R1–R4: Paul\'s T3 AI -> churn link is sized on churn\'s own frame', 
     expect(asked[0]).toContain('4% today');
   });
 
+  // ⛔ AIQ #2383 5916497454: a size the drafter tags `explicit` that NO sentence writes is Olumi's, exactly as R3.
+  it('R4b: "−6 points" tagged explicit but written nowhere in the brief is Olumi\'s: the placeholder stands in, never user_stated', async () => {
+    const { graph } = await register(t3({ amount: -6, per: 1, by: 'explicit' }, 'explicit'));
+    const e = edge(graph, AI, CHURN);
+    expect(e.provenance?.magnitude).toBe('olumi_placeholder');
+    expect(e.strength.mean).toBe(-0.01);
+  });
+
   it('R4: the user\'s own out-of-domain "−6 points" is kept exactly as stated, stamped user_stated, and asked', async () => {
-    const { graph, out } = await register(t3({ amount: -6, per: 1, by: 'explicit' }, 'explicit'));
+    const { graph, out } = await register(t3({ amount: -6, per: 1, by: 'explicit' }, 'explicit'), BRIEF + SAYS_SIX);
     const e = edge(graph, AI, CHURN);
     expect(e.strength.mean).toBe(-0.06);
     expect(e.strength.std).toBe(0.03);
@@ -317,7 +327,7 @@ describe('natural_effect: the size the edge carries, in natural units, keyed to 
   });
 
   it('R4: the user\'s own "−6 points" is said exactly as they stated it, keyed to −0.06', async () => {
-    const { graph } = await register(t3({ amount: -6, per: 1, by: 'explicit' }, 'explicit'));
+    const { graph } = await register(t3({ amount: -6, per: 1, by: 'explicit' }, 'explicit'), BRIEF + SAYS_SIX);
     const e = edge(graph, AI, CHURN);
     expect(natural(e)).toStrictEqual({ amount: -6, amount_unit: 'percentage points', per_source_change: 1, per_source_change_unit: 'switch', strength_mean: -0.06, strength_mean_frame: 'edge_strength' });
   });

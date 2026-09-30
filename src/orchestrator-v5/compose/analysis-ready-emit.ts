@@ -21,7 +21,7 @@
  */
 
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
-import type { FreshnessDerivation, FreshnessReason } from '../context/freshness.js';
+import { goalSnapshotStaleMessage, type FreshnessDerivation, type FreshnessReason } from '../context/freshness.js';
 import { blockedIdentityCarrier } from '../../schemas/analysis-ready.js';
 
 export type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
@@ -194,7 +194,7 @@ export function attachComputedAt(
     ...payload,
     computed_at: computedAt,
     freshness: freshness.freshness,
-    freshness_reason: freshness.reason,
+    freshness_reason: goalSnapshotStaleMessage(freshness.reason) ?? freshness.reason,
   };
   if (freshness.graph_hash_at_run !== null) {
     out.graph_hash_at_run = freshness.graph_hash_at_run;

@@ -27,7 +27,7 @@ interface ModelShape {
   readonly goal: { readonly metric: string; readonly unit?: string | null };
   readonly factors: readonly { readonly label: string; readonly unit: string | null; readonly baseline_known: boolean; readonly baseline_value: number | null }[];
   readonly links: readonly Link[];
-  readonly risks?: readonly { readonly label: string; readonly provenance?: string }[];
+  readonly risks?: readonly { readonly label: string; readonly provenance?: string; readonly analysis_participation?: 'retained_excluded' }[];
   readonly identities?: readonly { readonly outcome: string; readonly operation: string; readonly factors: readonly string[] }[];
 }
 
@@ -36,7 +36,7 @@ export type ExtraParentOfProductGoal =
       readonly amount: number; readonly per: number; readonly converted: number; readonly rateLevel: number;
       readonly goalUnit: string; readonly fromUnit: string; readonly volumeUnit: string; readonly rateUnit: string }
   | { readonly kind: 'rerouted_unsized'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string }
-  | { readonly kind: 'dropped_already_carried'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string;
+  | { readonly kind: 'kept_out_already_carried'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string;
       readonly via: readonly string[] };
 
 const key = (s: string): string => s.trim().toLowerCase();
@@ -102,7 +102,7 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
   };
   const found: ExtraParentOfProductGoal[] = [];
   const links: Link[] = [];
-  const dropped = new Set<string>();
+  const keptOut = new Set<string>();
   for (const l of model.links) {
     if (key(l.to) !== goal || operands.has(key(l.from))) { links.push(l); continue; }
     // A link the user stated (or sized) is theirs: never dropped or re-pointed here (AIQ 5902792262).
@@ -126,19 +126,21 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
     if (risk && reactsToRate && reaches(l.from, l) === undefined && l.effect_provenance == null && !finite(l.effect_amount)
       && rate !== undefined && volume !== undefined && !isMoney(volume.unit)) {
       const via = rateRoutesToVolume(l.from);
-      // ⛔ R3 5906615257 / AIQ 5906624217 row 2: only OLUMI'S risk is dropped. A risk the user named is their concern:
+      // ⛔ R3 5906615257 / AIQ 5906624217 row 2: only OLUMI'S risk is kept out of the calculation. A risk the user named is their concern:
       // never removed, even with no link out, so it is left exactly as drafted (no card), a conservative under-claim.
       if (via.length > 0 && (model.risks ?? []).some((r) => key(r.label) === key(l.from) && usersRisk(r, brief))) { links.push(l); continue; }
-      // ⛔ A RISK LEFT WITH NO LINK OUT IS NOT KEPT "INFORMATIONAL" (R3 5906615257, AIQ 5906624217 accepted): admission's
-      // risk repair re-links it to the goal (a third parent again, no card), and readiness withholds anything with no
-      // path to the goal. So the risk goes WITH its link, and that is said. A risk with another link out is left exactly
-      // as drafted (no card): that link either dead-ends (readiness withholds the node anyway, "ask what it affects") or
-      // reaches the goal through another parent (no card either way), so dropping this one alone claims nothing true.
+      // ⛔ A FIGURE RULE NEVER REMOVES STRUCTURE (DL #75 5916217417; supersedes "the risk goes WITH its link", R3 5906615257 /
+      // AIQ 5906624217). Served 30 Sep: drafted models with no risk rose to 81%, and this rule took the one risk the
+      // £85k MRR draft carried. The risk KEEPS its node, its words and this link, and is kept OUT OF THE CALCULATION
+      // (`analysis_participation: 'retained_excluded'`): the run guard hands PLoT the model without it, so the price's
+      // effect is counted once, through the named route; the card reads the analysed parents (`identity-proposal.ts`).
+      // A risk with another link out is left exactly as drafted (no card), as before.
       const onlyLinkOut = !model.links.some((c) => c !== l && key(c.from) === key(l.from));
       if (via.length > 0 && !onlyLinkOut) { links.push(l); continue; }
       if (via.length > 0) {
-        dropped.add(key(l.from));
-        found.push({ kind: 'dropped_already_carried', from: l.from, goal: model.goal.metric, rate: rate.label, volume: volume.label, via });
+        links.push(l);
+        keptOut.add(key(l.from));
+        found.push({ kind: 'kept_out_already_carried', from: l.from, goal: model.goal.metric, rate: rate.label, volume: volume.label, via });
         continue;
       }
       links.push({ ...l, to: volume.label });
@@ -170,19 +172,19 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M,
       rateUnit: wholeUnit(rate.unit ?? '', rateU.currencyDisplay) });
   }
   if (found.length === 0) return { model, found };
-  if (dropped.size === 0) return { model: { ...model, links } as M, found };
-  return { model: { ...model, links: links.filter((c) => !dropped.has(key(c.to))),
-    risks: (model.risks ?? []).filter((r) => !dropped.has(key(r.label))) } as M, found };
+  if (keptOut.size === 0) return { model: { ...model, links } as M, found };
+  return { model: { ...model, links,
+    risks: (model.risks ?? []).map((r) => (keptOut.has(key(r.label)) ? { ...r, analysis_participation: 'retained_excluded' as const } : r)) } as M, found };
 }
 
 /** The one sentence each finding is said with (`not_represented`). */
 export function sayExtraParentOfProductGoal(f: ExtraParentOfProductGoal): string {
   // AIQ 5906371639's words: the move is said; nothing is sized.
-  if (f.kind === 'dropped_already_carried') {
+  if (f.kind === 'kept_out_already_carried') {
     const list = f.via.map((v) => `‘${v}’`).join(' and ');
-    // AIQ 5906624217: the rate by its own name (never "the price"), and a removed risk is said, or the user looks for it.
+    // AIQ 5906624217: the rate by its own name (never "the price"). The risk stays on the model, so where it went is said.
     return `I had ‘${f.from}’ moving ‘${f.goal}’ directly; with ‘${f.goal}’ read as ‘${f.rate}’ × ‘${f.volume}’, the effect of ‘${f.rate}’ on `
-      + `‘${f.volume}’ is already in the model through ${list}, so I haven't added it again, and I've taken ‘${f.from}’ out of the model.`;
+      + `‘${f.volume}’ is already in the model through ${list}, so I've kept ‘${f.from}’ in the model but out of the calculation, so it isn't counted twice.`;
   }
   if (f.kind === 'rerouted_unsized') {
     return `I had ‘${f.from}’ moving ‘${f.goal}’ directly; with ‘${f.goal}’ read as ‘${f.rate}’ × ‘${f.volume}’ it now moves ‘${f.volume}’.`;

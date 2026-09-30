@@ -1,6 +1,7 @@
-import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
+import type { AnalysisStateV1, OlumiResponse, RunDelta } from '@talchain/schemas/boundary';
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
 import type { SelectedRunFigure } from './selected-run-figures.js';
+import type { AnalysisReadyPayload } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 
 type ResultBlock = OlumiResponse['blocks'][number];
 type RunHashes = Pick<FreshnessDerivation, 'graph_hash_at_run' | 'current_graph_hash'>;
@@ -17,6 +18,8 @@ type RunHashes = Pick<FreshnessDerivation, 'graph_hash_at_run' | 'current_graph_
  * admission record's wider digest.
  */
 export interface CurrentReadProjection {
+  /** Readiness evidence belongs to this selected Run, never a second top-level authority. */
+  readonly analysis_ready?: AnalysisReadyPayload;
   readonly run_state: AnalysisStateV1['run_state'] | null;
   readonly computed_against_hash: string | null;
   readonly current_analysis_hash: string | null;
@@ -24,12 +27,19 @@ export interface CurrentReadProjection {
   readonly result: ResultBlock | null;
   /** Measures attested by that same selected Run, never by a historical copy. */
   readonly figures: readonly SelectedRunFigure[];
+  /**
+   * SC-24: this selected Run's comparison with the Run before it — the turn's own producer (`buildRunDelta`). It
+   * carries per-option shares, which are figures, so it rides HERE under the same currentness gate (CURRENT-READ-v1
+   * row 1): only when the selected Run is `complete_current`. ABSENT = no delta for this Run — never "nothing changed".
+   */
+  readonly run_delta?: RunDelta;
 }
 
 export type CurrentReadInput =
   | { readonly analysisState: null; readonly derivation?: null; readonly analysisResult?: null }
   | { readonly analysisState: AnalysisStateV1; readonly derivation: RunHashes; readonly analysisResult: ResultBlock | null;
-      readonly figures?: readonly SelectedRunFigure[] };
+      readonly analysisReady?: AnalysisReadyPayload;
+      readonly figures?: readonly SelectedRunFigure[]; readonly runDelta?: RunDelta };
 
 export function projectCurrentRead(input: CurrentReadInput): CurrentReadProjection {
   if (input.analysisState === null) {
@@ -37,6 +47,7 @@ export function projectCurrentRead(input: CurrentReadInput): CurrentReadProjecti
   }
 
   return {
+    ...(input.analysisReady === undefined ? {} : { analysis_ready: input.analysisReady }),
     run_state: input.analysisState.run_state,
     computed_against_hash: input.derivation.graph_hash_at_run,
     current_analysis_hash: input.derivation.current_graph_hash,
@@ -46,5 +57,7 @@ export function projectCurrentRead(input: CurrentReadInput): CurrentReadProjecti
     result: input.analysisState.run_state.kind === 'complete_current' ? input.analysisResult : null,
     figures: input.analysisState.run_state.kind === 'complete_current' && input.analysisResult !== null
       ? input.figures ?? [] : [],
+    ...(input.analysisState.run_state.kind === 'complete_current' && input.analysisResult !== null
+      && input.runDelta !== undefined ? { run_delta: input.runDelta } : {}),
   };
 }

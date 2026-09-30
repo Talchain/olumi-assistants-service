@@ -592,6 +592,12 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
    *   · `threshold_source` is NOT value-bearing: it names WHO stated the target, a provenance, the same
    *     case as `goal_threshold_cap_provenance` above. It asserts no magnitude and must not join.
    */
+  /*
+   * ── DECISION RECORDED, 30 Sep: `ref` (stable entity references, `graph/entity-refs.ts`; DL lease #75 5909544405) ──
+   *   · NOT value-bearing. `ref` is display identity (`O2`, `F1` …): a name for the entity that never renumbers,
+   *     the same case as `label`. It asserts no magnitude and must NOT join `carriesValue`: a node that carries a
+   *     ref and no value is still valueless. It is IN the identity hash and OUT of the analysis hash (AIQ 5909608045).
+   */
   it("the NodeV3 key set is unchanged — a new field forces a value-bearing decision", () => {
     expect(Object.keys(NodeV3.shape).sort()).toEqual([
       // COLLAB Track A, 18 Sep. THE VALUE-BEARING DECISION THIS GUARD DEMANDS,
@@ -666,6 +672,7 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // measures (a level, or a change from today), never HOW MUCH: the sibling of `goal_threshold_frame` and
       // `goal_direction` above. A node carrying only a frame carries no value; joining would let "change" read as one.
       "quantity_frame",
+      "ref",
       "scale_frame",
       "source_quote",
       "starterId",
@@ -673,6 +680,11 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "success_threshold",
       "threshold_source",
       "uncertainty_drivers",
+      // MG 0.67.0, 30 Sep (PTL A; P0 SHARED DATA 5914707462, AIQ 5914471584) — THE VALUE-BEARING DECISION: `unit_reading`
+      // is NOT value-bearing and must NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). It says WHICH unit a quantity
+      // is read in and WHO read it ({unit, source, source_quote}, closed), never HOW MUCH: the sibling of
+      // `quantity_frame`. A node carrying only a unit reading carries no value; joining would let a unit read as a figure.
+      "unit_reading",
     ]);
   });
 });

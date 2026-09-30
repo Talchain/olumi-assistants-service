@@ -15,7 +15,7 @@ import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
 
-import { selectRunAnalysisFact, type FreshnessDerivation } from './context/freshness.js';
+import { goalSnapshotStaleMessage, selectRunAnalysisFact, type FreshnessDerivation } from './context/freshness.js';
 import { selectCanonicalAnalysisState } from './context/canonical-analysis-state.js';
 import { TelemetryEvents, emit } from '../utils/telemetry.js';
 import type { SuggestedAction } from './compose/types.js';
@@ -81,6 +81,9 @@ import {
   mayPresentLeaderClaimForFact,
 } from './compose/unrequested-analysis-confinement.js';
 import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ordering.js';
+import { projectGoalProbabilitiesForTransport } from './compose/goal-probability-transport.js';
+import { projectObjectiveContradictionSummary } from './coaching/objective-contradiction.js';
+import { readOptionResultSources } from '../orchestrator/context/option-result-source.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
@@ -242,6 +245,8 @@ export interface ComposeToolCallInput {
    * Undefined for handler turns that do not produce this fact shape.
    */
   readonly handlerFacts?: readonly HandlerFact[];
+  /** Truth input independent of lifecycle telemetry; never inferred by compose. */
+  readonly freshness?: FreshnessDerivation;
   /**
    * Exact current canonical readiness. Factor-EVPPI guidance is science advice
    * and therefore requires positive `ready` permission; absent/unknown and
@@ -399,6 +404,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.flipFocusFactorId,
     input.analysisReadyStatus,
     input.analysisReady,
+    input.freshness,
   );
 
   return {
@@ -462,6 +468,7 @@ function buildBlocksFromFacts(
   flipFocusFactorId?: string,
   analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
   analysisReady?: unknown,
+  freshness?: FreshnessDerivation,
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
@@ -522,6 +529,19 @@ function buildBlocksFromFacts(
   for (const fact of facts) {
     if (fact.fact_type === 'run_analysis') {
       currentTurnRunAnalysisHandled = true;
+      // Hash equality cannot make an incompatible Run unit current. Reuse the
+      // central verdict before any result, Phase 3 card or focus is rebuilt.
+      const currentFreshness = freshness ?? lifecycle?.freshness;
+      const unitStaleMessage = currentFreshness?.freshness === 'stale'
+        ? goalSnapshotStaleMessage(currentFreshness.reason) : undefined;
+      if (unitStaleMessage !== undefined) {
+        const staleBlock = buildStaleRerunCoachingBlock({
+          created_at: new Date().toISOString(),
+          graph_hash_at_generation: currentFreshness!.graph_hash_at_run ?? '',
+        }, unitStaleMessage);
+        if (staleBlock !== null) blocks.push(staleBlock);
+        continue;
+      }
       blocks.push(buildAnalysisResultBlock(fact, analysisReady));
 
       // PR 3 lifecycle branch 1 — fresh blocks from current-turn fact.
@@ -1279,7 +1299,10 @@ function buildAnalysisResultBlockUnconfined(
   // `projectTransportEnrichmentForWithheldClaim` discards whole are never
   // cloned in the first place. Pure work-avoidance: the projection below still
   // runs and still owns the policy, and it would drop these keys anyway.
-  const safeTransport = toSafeTransportEnrichment(enrichment, !mayNameLeadingOption);
+  const safeTransport = projectGoalProbabilitiesForTransport(
+    toSafeTransportEnrichment(enrichment, !mayNameLeadingOption),
+    fact.result.goal_certainty,
+  );
   // TIED-OPTION ORDERING — only on the branch that is allowed to present a
   // ranking at all. A tie in `win_probability` is currently broken ARBITRARILY:
   // on capture 20260828T141150Z "keep what we have" is presented ABOVE "Phased
@@ -1323,7 +1346,12 @@ function buildAnalysisResultBlockUnconfined(
     //
     // Conditional, never blanket: a leader-free summary ships byte-identical on
     // a withheld turn. See `projectAnalysisSummaryForWithheldClaim`.
-    summary: mayNameLeadingOption ? summary : projectAnalysisSummaryForWithheldClaim(summary),
+    summary: (() => {
+      const claimSafeSummary = readOptionResultSources(enrichment ?? {}).reduce(
+        (copy, records) => projectObjectiveContradictionSummary(copy, records, fact.result.goal_certainty), summary,
+      );
+      return mayNameLeadingOption ? claimSafeSummary : projectAnalysisSummaryForWithheldClaim(claimSafeSummary);
+    })(),
     // `null` is the schema's own honest value here (`leading_option_id:
     // z.string().nullable()`, boundary/blocks.ts — the key is REQUIRED, so
     // `null` is the strongest available "no leader is being put forward";
@@ -1791,7 +1819,7 @@ function buildLifecycleBlocksFromPrior(
     const staleBlock = buildStaleRerunCoachingBlock({
       created_at: new Date().toISOString(),
       graph_hash_at_generation: sourceGraphHash,
-    });
+    }, goalSnapshotStaleMessage(freshness.reason));
     const blocks: OlumiResponse['blocks'] = staleBlock ? [staleBlock] : [];
     emitLifecycle(lifecycle, {
       lifecycle_state: 'emitted_stale',

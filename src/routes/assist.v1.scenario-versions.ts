@@ -135,6 +135,7 @@ import {
   CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
 } from "../orchestrator/route-v2-preflight.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { raiseRefHighWaterForRestore } from "../orchestrator-v5/graph/entity-refs.js";
 import { assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
 import {
   PersistedGraphInvariantError,
@@ -1016,11 +1017,14 @@ export default async function route(app: FastifyInstance) {
         headResult.status === "ok" ? headResult.value : null;
 
       // ── 7. Normalise the stored target; still no client graph authority ──
-      const graphForStore = projectGraphForPersistence(parsedGraph.data, {
+      // The restored refs come back exactly (a restored node brings its own ref); only `ref_high_water` rises to cover
+      // everything the current graph issued, so the next new entity never reuses a number. The counter is outside the
+      // identity hash, so these bytes still bind to the target version (`graph/entity-refs.ts`).
+      const graphForStore = raiseRefHighWaterForRestore(projectGraphForPersistence(parsedGraph.data, {
         scenarioId: ctx.scenarioId,
         turnClass: "direct_answer",
         source: "version_restore",
-      });
+      }), currentGraph);
 
       const returnLeg = isReturnLegRestore({
         head,

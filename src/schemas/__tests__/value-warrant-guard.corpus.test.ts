@@ -294,7 +294,7 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 43 sites, 30 findings, 20 OPEN, 10 accepted", () => {
+  it("the first cut is an ENUMERATION: 45 sites, 32 findings, 20 OPEN, 12 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
@@ -313,14 +313,17 @@ describe("the live value-bearing contract, adjudicated", () => {
     // Olumi's decrease reading was taken from — names its own warrant `threshold_frame` (change_rel | change_abs).
     // +1 site / +0 findings, FIELD (29 Sep, MG): CEE's NodeV3 `goal_level_reading.level` — the brief's figure Olumi reads
     // as a change goal's today level (AIQ (b)) — names its own warrant `level_unit`.
-    expect(SITES.length).toBe(43);
-    expect(FINDINGS.length).toBe(30);
+    // +2 sites / +2 findings / +2 ACCEPTED, NONE (30 Sep, A4 CEE #2409): `natural_effect.stated_range.{low,high}` — the
+    // written range a user's size is one end of. In the enclosing `amount_unit`, sourced by `text`, written only on the
+    // user's own size (value-warrant-guard.ts records the inheritance).
+    expect(SITES.length).toBe(45);
+    expect(FINDINGS.length).toBe(32);
     expect(report.open.length).toBe(20);
-    expect(report.accepted.length).toBe(10);
+    expect(report.accepted.length).toBe(12);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(9);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(4);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(15);
-    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(15);
+    expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(17);
   });
 
   it("no decision is a bare exemption — each one argues, or names the one that does", () => {

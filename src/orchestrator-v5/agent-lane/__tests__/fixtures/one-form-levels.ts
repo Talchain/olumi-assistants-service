@@ -30,12 +30,25 @@ function servedFrameOf(factor: Dict | undefined): { frame: number; unit: unknown
   return undefined;
 }
 
+/**
+ * 0.67.0 `unit_reading` (`goal-unit-reading.ts`): every graph served before it holds no reading on its goal. A goal's
+ * reading is removed ONLY when the served goal holds none and it is the writer's closed shape — `{unit, source,
+ * source_quote}` with a non-empty quote and a known source — so a malformed or extra member still fails the compare.
+ * What the writer derives is pinned by `goal-unit-reading.test.ts` and `construction-goal-unit-reading.test.ts`.
+ */
+const isWrittenUnitReading = (r: unknown): boolean =>
+  isDict(r) && Object.keys(r).length === 3 && typeof r.unit === 'string' && r.unit !== ''
+  && (r.source === 'olumi_reading' || r.source === 'user_stated') && typeof r.source_quote === 'string' && r.source_quote !== '';
+
 export function asServedBeforeOneForm<G>(graph: G, served: unknown): G {
   const out = structuredClone(graph);
   const nodes = isDict(out) && Array.isArray(out.nodes) ? (out.nodes as unknown[]).filter(isDict) : [];
   const servedNodes = isDict(served) && Array.isArray(served.nodes) ? (served.nodes as unknown[]).filter(isDict) : [];
   const servedById = new Map(servedNodes.map((n) => [n.id, n] as const));
   for (const node of nodes) {
+    if (node.kind === 'goal' && isWrittenUnitReading(node.unit_reading) && servedById.get(node.id)?.unit_reading === undefined) {
+      delete node.unit_reading;
+    }
     if (node.kind !== 'option' || !isDict(node.interventions)) continue;
     for (const [key, cell] of Object.entries(node.interventions)) {
       if (!isDict(cell)) continue;

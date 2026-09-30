@@ -40,6 +40,7 @@ import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
 import { readOptionResultSources } from "./option-result-source.js";
 import {
+  OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
   PLACEHOLDER_PARTS_REASON,
   optionIdOf,
@@ -1754,6 +1755,7 @@ export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
   ['target_unanchored', 2],
   [PLACEHOLDER_PARTS_REASON, 2],
   [PARTS_IDENTITY_UNMODELLED_REASON, 2],
+  [OLUMI_GUESS_LIMIT_REASON, 2],
   ['threshold_clamped', 3],
   ['CONSTRAINT_NOT_CONVERTIBLE', 4],
   ['CONSTRAINT_OUT_OF_DOMAIN', 4],

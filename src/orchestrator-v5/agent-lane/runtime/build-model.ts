@@ -56,14 +56,55 @@ import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-readi
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { refitFramesForStatedEffects } from '../refit-frames.js';
-import { creditStatedFactorLevels, figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
+import { goalUnitReading } from '../goal-unit-reading.js';
 import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
 
 /** The construction contract: the banked schema plus typed interventions. */
+/**
+ * An outcome's or a risk's quantity frame, as the drafter states it. A risk that bears on a MONEY goal is drafted as its
+ * money EXPOSURE (R3 5916156932 PoC shortcut), so its link to the goal is money to money and can be sized.
+ */
+const QUANTITY_FRAME = {
+  unit: { anyOf: [{ type: 'string' }, { type: 'null' }], description:
+    'For an outcome that is a QUANTITY (a count such as "qualified conversations", an amount of money): its unit. A risk that '
+    + 'bears on a money goal is drafted as its money EXPOSURE (for example "Funding lost to distraction"), with the money unit. '
+    + 'null for an outcome or risk that is not a quantity.' },
+  plausible_max: { anyOf: [{ type: 'number' }, { type: 'null' }], description:
+    'With a unit: a SCALE for it, exactly as for a factor \u2014 a round number comfortably above anything realistic. null with no unit.' },
+} as const;
+
+/**
+ * ⭐ STRICT ONLY AT THE OPENAI BOUNDARY (DL #75 5916270318, option D). OpenAI's strict json_schema needs every property in
+ * `required`. The candidate contract (`buildCandidateSchema`) lets an outcome or a risk omit its frame, so a candidate
+ * recorded before the frames existed still validates, and admission reads an absent frame as null (`withQuantityFrames`);
+ * what is SENT requires every property, each missing key appended in order. Every other object already requires all of its keys, so only the outcome and risk frames change.
+ */
+export function strictForTheDrafter(schema: Record<string, unknown>): Record<string, unknown> {
+  const walk = (s: unknown): unknown => {
+    if (Array.isArray(s)) return s.map(walk);
+    if (s === null || typeof s !== 'object') return s;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(s as Record<string, unknown>)) {
+      out[k] = k === 'properties' && v !== null && typeof v === 'object' && !Array.isArray(v)
+        ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([name, sub]) => [name, walk(sub)]))
+        : walk(v);
+    }
+    const properties = out['properties'];
+    if (out['type'] === 'object' && properties !== null && typeof properties === 'object' && !Array.isArray(properties)) {
+      const required = Array.isArray(out['required']) ? [...(out['required'] as string[])] : [];
+      for (const name of Object.keys(properties)) if (!required.includes(name)) required.push(name);
+      out['required'] = required;
+    }
+    return out;
+  };
+  return walk(schema) as Record<string, unknown>;
+}
+
 export function buildCandidateSchema(): Record<string, unknown> {
   const provenance = { type: 'string', enum: ['explicit', 'inferred', 'ai_proposed'] };
   const obj = (properties: Record<string, unknown>, required: string[]) => ({
@@ -170,8 +211,12 @@ export function buildCandidateSchema(): Record<string, unknown> {
       plausible_max: { type: 'number',
         description: 'REQUIRED, and NEVER null. The top of the range this factor could plausibly take, in its own unit \u2014 the SCALE it is read against, not a prediction. A percentage or a score out of 100: 100. A count, an amount or a price: a round number comfortably above anything realistic (a \u00a349 price might use 200; 300 subscribers might use 2000). Something ALREADY between 0 and 1: exactly 1. Every factor gets one, with or without a baseline today \u2014 a value adopted later is read against this same range.' },
     }, ['label', 'role', 'baseline_known', 'baseline_value', 'unit', 'provenance', 'plausible_max']) },
-    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
-    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance }, ['label', 'provenance']) },
+    // ⭐ THE FRAME A FACTOR HAS (DL #75 5916155976 (a); R3 5916156932 (b)): without `unit` + `plausible_max` no size into or
+    // out of an outcome or a risk can be read, so a goal they feed could never be sized in its own unit.
+    // ⛔ OPTIONAL HERE, REQUIRED ONLY WHERE IT IS SENT (DL 5916270318, option D): a candidate recorded before the frames
+    // existed still validates against this contract, and `strictForTheDrafter` requires both keys of the drafter itself.
+    risks: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
+    outcomes: { type: 'array', items: obj({ label: { type: 'string' }, provenance, ...QUANTITY_FRAME }, ['label', 'provenance']) },
     links: { type: 'array', description:
       'Causal links, stated as hypotheses. Every factor you keep needs at least one link FROM it toward the goal metric (directly, or via a kept outcome that links to the goal). Never link an option directly to a risk \u2014 link the option to the factor it changes and the factor to the risk, because a bare option-to-risk link cannot be analysed.',
       items: obj({
@@ -187,6 +232,12 @@ export function buildCandidateSchema(): Record<string, unknown> {
         'The change in the SOURCE\u2019s own unit that causes `effect_amount`: 1 for switching a yes/no on, 10 for a GBP 10 price rise. null when `effect_amount` is null.' },
       effect_provenance: { anyOf: [provenance, { type: 'null' }], description:
         '"explicit" only when the user stated this size; null when `effect_amount` is null.' },
+      // ⭐ DL #75 5916504679: the drafter's word that a link holds by definition. Optional in the contract (a recorded
+      // candidate validates unchanged), required in what is sent (`strictForTheDrafter`); checked before any edge has it.
+      definitional: { anyOf: [{ type: 'boolean' }, { type: 'null' }], description:
+        'true ONLY when this link holds BY DEFINITION, not by estimate: the source is part of the target\u2019s own quantity, in the SAME unit, '
+        + 'so one unit of the source moves the target by exactly one unit (money lost to a risk is money the goal does not get: '
+        + 'effect_amount -1, effect_per_source_change 1). null for every other link.' },
     }, ['from', 'to', 'direction', 'provenance', 'effect_amount', 'effect_per_source_change', 'effect_provenance']) },
     /**
      * ⛔ C46: a product the analysis can only ADD UP must be DECLARED, never read off a label.
@@ -252,7 +303,11 @@ export const BUILD_INSTRUCTIONS = [
   'KEEP THE FIRST MODEL DECISION-CRITICAL, NOT COMPREHENSIVE \u2014 BUT NOT THIN. The shape to aim for is this envelope: one goal; '
   + 'EVERY option the user stated, never dropped or merged, and normally 3 to 5 options in total \u2014 when the user states fewer than 3, add carrying on as now if they did not state it, then the strongest alternative the question itself points to (such as a partial, phased or smaller version of a stated option), each marked "ai_proposed"; '
   + 'roughly 4 to 8 factors that actually move the goal \u2014 besides any factor an option sets directly, name the MECHANISMS through which those changes reach the goal, never an option merely restated as a quantity; '
+  // ⛔ A FIGURE RULE NEVER REMOVES STRUCTURE (DL #75 5916217417): drafted models with NO risk rose from ≤8% (20–27 Sep)
+  // to 81% (30 Sep). Measured on staging 68c9789c (MG, 0 retries): both MRR briefs drafted 0 risks, hiring 2, funding
+  // 1. Every rule below that limits how a risk is LINKED or SIZED had been read as a reason to leave the risk out.
   + 'and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could reverse the answer). '
+  + 'ALWAYS KEEP AT LEAST ONE RISK: the downside that could reverse the answer is part of the decision the user must weigh. The rules below limit how a risk is LINKED or SIZED; none of them is a reason to leave a risk out. '
   + 'A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. '
   + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
   // ⛔ THE COUNT IS THE GATE'S (AIQ #70 5858990481 item 5: the first draft's budget is the truth-safe lever). The rule
@@ -299,6 +354,11 @@ export const BUILD_INSTRUCTIONS = [
   // ⭐ THE MAGNITUDE CONTRACT (D1): ONE sentence. Admission reads the size on each end's own frame and never
   // lets it run a bounded quantity out of its range (served T3: a frame-blind 0.5 moved churn by about 50 points).
   'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
+  // ⛔ A4 (R3 #75 5918453000; AIQ 5918516441 / 5918523203; R3 5918513716; DL 5918542181): Paul's brief states investment
+  // firms "do deals between £1-2m", and no node or link carried it, so every £ figure into his goal was Olumi's
+  // default. The size is per DEAL, never per conversation (that would claim every conversation brings £1m). One general
+  // rule, no domain example: the countable the size is per becomes a quantity, and a stated range gives its LOW end.
+  'A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING (per deal, per contract, per subscriber) belongs on the link from THAT countable to the money goal. Keep the countable as its own quantity (an outcome such as "Deals closed", unit "deals", with a `plausible_max`), link it to the goal with that size per one (`effect_per_source_change` 1, `effect_provenance` "explicit"), and never put the size on a link from anything else. When the brief gives a RANGE for that size, use its LOW end. What moves the countable (how many conversations become deals, say) is not stated: link it with your own estimate or no size, never "explicit", and ask it in `unknowns`.',
   // ⛔ R-c (AI Quality 5881541947 / 5882087383): a limit is checked only when every link from what an option changes to
   // the limited quantity carries a size in that quantity's own unit, and a risk has no unit. Measured (MG 7×3, 29 Sep):
   // 10 of 12 A/C churn limits reached churn only through a risk, so none of them could be checked. The first wording
@@ -307,7 +367,7 @@ export const BUILD_INSTRUCTIONS = [
   // kept a price-sensitivity risk → MRR beside the new sized price → churn path on 5/21 drafts (A-0, A-2, C-1, cloud-2,
   // techlead-1): the same loss counted twice. No domain example: a worked example steers every brief. A first wording
   // ("keep a risk only for a separate harm … otherwise leave it out") also dropped separate harms: risks 23 → 10 (lsD).
-  'A LIMIT CAN ONLY BE CHECKED THROUGH SIZED LINKS. NO LINK MAY POINT FROM A RISK TO A QUANTITY IN `constraints`: a risk has no unit, so that link cannot be sized and the user’s limit cannot be checked. Instead, link every factor an option changes that moves the limited quantity STRAIGHT to it and give that link its size. That sized link already IS the risk of the limited quantity moving the wrong way, so do not ALSO keep that one risk as a node: it would count the same loss twice. Every OTHER risk stays exactly as you would draw it, linked to the goal metric or to the quantity it threatens.',
+  'A LIMIT CAN ONLY BE CHECKED THROUGH SIZED LINKS. NO LINK MAY POINT FROM A RISK TO A QUANTITY IN `constraints`: a risk has no unit, so that link cannot be sized and the user’s limit cannot be checked. Instead, link every factor an option changes that moves the limited quantity STRAIGHT to it and give that link its size. That sized link already carries the limited quantity moving the wrong way, so do not size that loss a second time: keep that risk as a node, linked to the goal metric with all three size fields null. Every OTHER risk stays exactly as you would draw it, linked to the goal metric or to the quantity it threatens.',
   'GIVE EVERY FACTOR A `plausible_max`. IT IS REQUIRED AND NEVER NULL, for every factor, whether or not it has a baseline today. A number above 1 with no range beside it CANNOT BE ANALYSED \u2014 the engine has nothing to read it against, Olumi refuses the WHOLE analysis rather than guess, and NO LATER EDIT CAN SUPPLY THE RANGE: the only remedy is rebuilding the model. The range is a SCALE, not a forecast: 100 for a percentage or a score out of 100, exactly 1 for something already between 0 and 1, and a round number comfortably above anything realistic for a count, an amount or a price. Measured twice on real models.',
   'Labels are NAMES, not sentences.',
   'Set `decision_question` to the question the brief asks, copied VERBATIM from the brief (only the question itself, without any lead-in clause), or null if it asks none. Never reword it.',
@@ -1219,7 +1279,7 @@ export async function buildModelFromBrief(
       input: brief,
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
-      schema: buildCandidateSchema(),
+      schema: strictForTheDrafter(buildCandidateSchema()),
     });
     if (out.status === 'incomplete') cutOff = out.incomplete_reason ?? 'unspecified';
     if (out.text.length === 0) {
@@ -1253,6 +1313,13 @@ export async function buildModelFromBrief(
   candidate = preparation.candidate;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
+  // A link size is the user's only where the brief writes it ABOUT THIS LINK (AIQ #2383 5916497454; P0 PARTNER #2389): the
+  // strict scoped reading, the link's two ends against every other quantity.
+  const sizeWritten = (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }): boolean =>
+    figureTheUserWroteFor(value, unit, brief, { target: scope.target, others: scope.others, strict: true });
+  // A4: the range the brief writes that size as one end of ("deals between £1-2m"), said with it (R3 C1/C2).
+  const sizeRangeEnd = (value: number, unit: unknown, scope: { source: string; sourceUnit: unknown; others: readonly string[] }) =>
+    writtenRangeFor(value, unit, brief, scope);
   // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
   // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
   // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).
@@ -1271,7 +1338,7 @@ export async function buildModelFromBrief(
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
   let gapResidual = firstIdentity.residual;
-  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief));
+  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1379,7 +1446,7 @@ export async function buildModelFromBrief(
           : `${brief}\n\nYour previous model, to shrink: ${JSON.stringify(firstCandidate)}`,
         max_output_tokens: budget.max_output_tokens,
         reasoning_effort: budget.reasoning_effort,
-        schema: retrySchemaPinningGoal(candidate.goal, candidate.decision_question),
+        schema: strictForTheDrafter(retrySchemaPinningGoal(candidate.goal, candidate.decision_question)),
       });
       if (retry.text.length > 0) {
         const retryApart = keepOptionsAndQuantitiesApart(JSON.parse(retry.text) as CandidateModel);
@@ -1390,7 +1457,7 @@ export async function buildModelFromBrief(
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
         const retryIdentity = mintOrFold(retryCandidate);
-        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief));
+        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1589,8 +1656,14 @@ export async function buildModelFromBrief(
    */
   const deadlineWords = statedGoal.horizon.status === 'unresolved' ? statedGoal.horizon.wording.trim() : '';
   const deadlineHeld = deadlineWords !== '' && deadlineWords.length <= 60;
-  const goalNodes = deadlineHeld
-    ? statedGoal.nodes.map((n) => (n.kind === 'goal' ? { ...n, goal_deadline_as_stated: deadlineWords } : n))
+  // ⭐ 0.67.0 `unit_reading` (PTL A; AIQ 5914471584): the goal's unit, said with its author — Olumi's reading unless the
+  // brief writes the goal's own target in it. A reading, never a figure (`goal-unit-reading.ts`).
+  // ONE authority for the goal node (P0 PARTNER CR on #2381): `user_stated` only where the node holds its target as the user's.
+  const unitReading = goalUnitReading(candidate.goal, brief, statedGoal.held.target);
+  const goalNodes = deadlineHeld || unitReading !== undefined
+    ? statedGoal.nodes.map((n) => (n.kind === 'goal'
+      ? { ...n, ...(deadlineHeld ? { goal_deadline_as_stated: deadlineWords } : {}), ...(unitReading !== undefined ? { unit_reading: unitReading } : {}) }
+      : n))
     : statedGoal.nodes;
 
   const parked = (candidate as { unknowns?: unknown }).unknowns;
@@ -1894,13 +1967,14 @@ export async function buildModelFromBrief(
         // up — the missing capability in plain English — or a declaration that did not hold.
         // `loop_withheld` / `loop_kept`: a loop the model could not hold (`admit-model.ts`,
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
+        // `stated_range_end`: the user's size is one END of a range they wrote, said with the range as a floor (A4, R3 C1/C2).
         // `magnitude_unconvertible`: a stated size that could not be read on the two ends' frames, so the standard
         // placeholder stands in (magnitude contract, D2/D6) — never dropped unseen.
         // `set_aside_estimate`: Olumi's own stated size that no edge carries, said as "Olumi's guess, set aside: NOT in the model".
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

@@ -44,6 +44,7 @@ import type {
 } from './session/store.js';
 import { StateCommitFailedError } from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
+import { assignEntityRefs } from './graph/entity-refs.js';
 import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
 import { appendCheckedGraphWrite } from './persist-graph-write.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
@@ -155,6 +156,13 @@ export interface CommitMetadata {
    * mode `edit-graph.ts:2750-2755` exists to avoid).
    */
   readonly baseGraphForInvariants?: unknown;
+  /**
+   * ⭐ STABLE ENTITY REFS ONLY (`graph/entity-refs.ts`; DL CR B1 on #2357): the graph this write REPLACES, so the
+   * allocator carries each entity's ref forward and never reissues a retired number. `null` = there is none (a first
+   * write). Read ONLY by the allocator — never by the invariant floor or the version policy, which keep
+   * `baseGraphForInvariants`. When neither is given on a graph write, the commit reads the stored graph once for it.
+   */
+  readonly refBaseGraph?: unknown;
   /**
    * V5 Signature Loop — pending proposals carried in from the PRIOR turn (the
    * caller's `most_recent_pending_actions`). `commitDirectAnswer` re-persists
@@ -1186,6 +1194,27 @@ export function graphWasProvided(graph: unknown): boolean {
  * is returned so the caller can set stage_indicator='analyse'. On RPC failure
  * the whole call throws (StateCommitFailedError) — there is no partial state.
  */
+/**
+ * ⛔ THE GRAPH A WRITE REPLACES, FOR THE REF ALLOCATOR (DL CR B1 on #2357). Writers that passed no base skipped the
+ * allocator (rule 6), so a redraft stored no refs and no high-water and the next added option was O1 AGAIN, and an
+ * LLM-drafted model never got refs. The one place every graph write passes decides it: the caller's
+ * `baseGraphForInvariants`, else its `refBaseGraph` (the executor's server read; `null` on a first write), else ONE
+ * read of the stored graph. A read that fails gives `undefined`: the allocator assigns nothing (rule 6) rather than
+ * guess a base. No graph → nothing to allocate, no read.
+ */
+async function refBaseFor(metadata: CommitMetadata, store: Pick<SessionStore, 'loadGraph'>): Promise<unknown> {
+  if (!graphWasProvided(metadata.graph)) return undefined;
+  if (metadata.baseGraphForInvariants !== undefined) return metadata.baseGraphForInvariants;
+  if (metadata.refBaseGraph !== undefined) return metadata.refBaseGraph;
+  try {
+    return (await store.loadGraph(metadata.scenario_id)) ?? null;
+  } catch (err) {
+    log.warn({ event: 'v5.commit.ref_base_read_failed', scenario_id: metadata.scenario_id, err: err instanceof Error ? err.message : String(err) },
+      'stable refs: the graph this write replaces could not be read; no refs are assigned on this write (rule 6)');
+    return undefined;
+  }
+}
+
 export async function commitDirectAnswer(
   response: OlumiResponse,
   metadata: CommitMetadata,
@@ -1224,12 +1253,14 @@ export async function commitDirectAnswer(
   // fired, freshness, the pending's re-pin and the held thread were all decided
   // against a graph we did not store. Ordering is the whole fix: project first,
   // then derive every hash-dependent decision from the projected bytes.
-  const projectedGraphForStore = projectGraphForPersistence(metadata.graph, {
+  // Stable entity refs go on the SAME projected bytes, before any hash is taken from them (`graph/entity-refs.ts`):
+  // the base's ref for a node id wins, so an edit path that dropped `ref` cannot renumber an entity.
+  const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
-  });
+  }), await refBaseFor(metadata, store)).graph;
   const atomicVersionPlan = buildAtomicCommittedModelVersion(
     projectedGraphForStore,
     metadata,

@@ -94,6 +94,8 @@
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
+import { buildRunDelta } from '../orchestrator-v5/coaching/build-run-delta.js';
+import { selectTwoNewestRunAnalysisFacts } from '../orchestrator-v5/coaching/compare-runs.js';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
@@ -101,6 +103,7 @@ import {
   loadScenarioAnalysisFactsForRead,
 } from '../orchestrator-v5/build-turn-context.js';
 import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
+import { attachComputedAt } from '../orchestrator-v5/compose/analysis-ready-emit.js';
 import {
   composeAnalysisStateV1,
   readRawRobustnessFromResponseBody,
@@ -333,6 +336,7 @@ export async function readScenarioAnalysis(
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
       analysisInvalidatedAt,
+      currentGraph: params.graph,
     });
 
     // The result block first, so the verdict's `leader_claim` can be composed
@@ -392,6 +396,7 @@ export async function readScenarioAnalysis(
         canonical: selectCanonicalAnalysisState({
           priorFacts: facts,
           currentGraphHash,
+          currentGraph: params.graph,
           ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
           priorFactsReadOk: factsReadOk,
           analysisInvalidatedAt,
@@ -464,13 +469,26 @@ export async function readScenarioAnalysis(
       }) ?? null;
 
     const boundResult = analysisResult !== null && analysisState !== null
-      ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState)[0] ?? null
+      ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState, derivation.reason)[0] ?? null
       : analysisResult;
+    // SC-24: the displayed Run's comparison with the Run before it — the same producer and permission the turn used.
+    // Only for a DELIVERED fact that is the pair's newer end, with no newer Run withholding its claim; `current_read`
+    // then adds its own currentness gate (row 1). It never rides top-level on the read.
+    const runDelta = (() => {
+      if (fact === null || boundResult === null || newerClaimWithholds) return undefined;
+      const pair = selectTwoNewestRunAnalysisFacts(facts);
+      if (pair === null || pair.current !== fact) return undefined;
+      const built = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: mayPresentLeaderClaimForFact(fact) });
+      return built.kind === 'ok' ? built.delta : undefined;
+    })();
     return {
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })
         : projectCurrentRead({
             analysisState, derivation, analysisResult: boundResult,
+            ...(analysisReady !== undefined && (derivation.reason === 'goal_unit_changed'
+              || derivation.reason === 'goal_snapshot_unverified')
+              ? { analysisReady: attachComputedAt(analysisReady, derivation) } : {}),
             figures: projectSelectedRunFigures({
               scenarioId: params.scenarioId,
               runState: analysisState.run_state,
@@ -482,6 +500,7 @@ export async function readScenarioAnalysis(
               currentResult: boundResult,
               selectedFact: fact?.result ?? null,
             }),
+            ...(runDelta !== undefined ? { runDelta } : {}),
           }),
       analysis_state: analysisState,
       analysis_result: boundResult,

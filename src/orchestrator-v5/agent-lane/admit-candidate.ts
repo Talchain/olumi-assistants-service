@@ -95,6 +95,11 @@ export interface CandidateLink {
   readonly effect_per_source_change?: number | null;
   /** Who stated the size. `null`/absent falls back to the link's own `provenance`. */
   readonly effect_provenance?: string | null;
+  /**
+   * The drafter's word that this link holds BY DEFINITION (DL #75 5916504679). Never enough on its own:
+   * `definitionalLink` checks it deterministically before any edge carries the type.
+   */
+  readonly definitional?: boolean | null;
 }
 
 export interface AdmittedEdge {
@@ -107,7 +112,8 @@ export interface AdmittedEdge {
    * `magnitude` (D9): who sized it. `natural_effect`: the size it carries in natural units, with the β it was written
    * for (`strength_mean`, the staleness key). Both absent on an edge that keeps today's projection unchanged.
    */
-  provenance?: { source: string; reasoning?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect };
+  /** `definitional`: the size holds by definition, checked (`definitionalLink`); absent on every other edge. */
+  provenance?: { source: string; reasoning?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; definitional?: true };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
 }
@@ -195,6 +201,21 @@ function magnitudeNotes(fieldPath: string, link: CandidateLink, sized: LinkSizin
       severity: 'warn',
     });
   }
+  // ⭐ A4 (R3 C1/C2 5918513716, AIQ 5918523203): the user's size is one END of a range they wrote. Said with the range
+  // wherever it is said (`not_represented`), and read as a floor (the low end) or a ceiling (the high end): never the
+  // user's single figure, and never a figure through this link without "at least" / "at most".
+  const range = sized.outcome === 'user_stated' ? sized.natural_effect?.stated_range : undefined;
+  if (range !== undefined && sized.range_words !== undefined) {
+    notes.push({
+      code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE,
+      layer: 'cee',
+      field_path: `${fieldPath}.stated_range_end`,
+      before: { low: range.low, high: range.high },
+      after: sized.natural_effect!.amount,
+      reason: sized.range_words,
+      severity: 'warn',
+    });
+  }
   // ⛔ OLUMI'S SIZE THE EDGE DOES NOT CARRY is typed as set aside (`build-model.ts` → `set_aside_estimates`), so the Agent
   // never lists it among the model's inputs: its only other trace is the question above, which quotes it.
   if (sized.set_aside === true && sized.statement !== undefined) {
@@ -222,6 +243,26 @@ function magnitudeNotes(fieldPath: string, link: CandidateLink, sized: LinkSizin
  * which alone knows both ends' frames and the options' levels. A link it does not size, or sizes `unchanged`, is
  * admitted exactly as before.
  */
+/**
+ * ⭐ A LINK THAT HOLDS BY DEFINITION, CHECKED, NEVER CLAIMED (DL #75 5916504679; R3 5916476294 / 5916525389).
+ *
+ * "Funding lost to distraction" → "securing funding" is −£1 per £1 because the exposure IS money the raise does not get,
+ * not because anyone estimated it. Typed as Olumi's guess, it would make Paul's goal ask him to size a definition. The
+ * drafter's word (`definitional: true`) is required and is never enough: the edge carries the type ONLY when its own
+ * natural size proves it, deterministically:
+ *   · the size is exactly ±1 (`|amount / per_source_change| = 1`);
+ *   · both ends are read in ONE unit (`amount_unit` and `per_source_change_unit` are the same, so the two nodes' units
+ *     match: a pound of the source is a pound of the target).
+ * Anything else stays exactly what it was (an Olumi size or placeholder). The magnitude author is unchanged.
+ */
+export function definitionalLink(link: CandidateLink, sized: LinkSizing): boolean {
+  const ne = sized.natural_effect;
+  if (link.definitional !== true || ne === undefined || sized.outcome === 'placeholder') return false;
+  if (!Number.isFinite(ne.amount) || !Number.isFinite(ne.per_source_change) || ne.per_source_change === 0) return false;
+  const unit = (u: string) => u.trim().toLowerCase();
+  return Math.abs(ne.amount / ne.per_source_change) === 1 && unit(ne.amount_unit) !== '' && unit(ne.amount_unit) === unit(ne.per_source_change_unit);
+}
+
 export function admitCandidateLinks(
   links: readonly CandidateLink[],
   sizing: ReadonlyMap<string, LinkSizing> = new Map(),
@@ -273,6 +314,7 @@ export function admitCandidateLinks(
           source: link.provenance_source ?? provenanceSourceFor(link.provenance),
           magnitude: sized.magnitude!,
           ...(sized.natural_effect !== undefined ? { natural_effect: sized.natural_effect } : {}),
+          ...(definitionalLink(link, sized) ? { definitional: true as const } : {}),
         },
       };
       projected_fields[key] = projected;
@@ -311,7 +353,9 @@ export function admitCandidateLinks(
             before: { effect_amount: link.effect_amount ?? null, effect_per_source_change: link.effect_per_source_change ?? null },
             after: sized.mean,
             reason:
-              `${sized.outcome === 'user_stated' ? 'Stated by the user' : 'Olumi\'s estimate'}: ${sized.statement ?? 'as given'}. ` +
+              `${sized.outcome === 'user_stated'
+                ? (sized.natural_effect?.stated_range !== undefined ? `One end of the range the user wrote ("${sized.natural_effect.stated_range.text}")` : 'Stated by the user')
+                : 'Olumi\'s estimate'}: ${sized.statement ?? 'as given'}. ` +
               'Read on the ranges the two are measured on, that is the strength shown.',
             severity: 'info',
           });

@@ -23,6 +23,18 @@ import { gateAnalysableOptions } from '../../../orchestrator-v5/tools/handlers/a
 import { resolveAnalysisAdmission } from '../../../orchestrator-v5/admission/analysis-admission.js';
 import { readinessSentence, readinessViewOf } from '../../../orchestrator-v5/agent-lane/readiness-view.js';
 
+/**
+ * The same graph with NO stated target, so DECISION-REPRESENTATION row 4's verdict has no subject (#2371): these rows
+ * keep testing their own axis. Only the goal's raw target and its own limit row go; nothing else about the capture moves.
+ */
+function withoutTarget<G>(graph: G): G {
+  const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
+  const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
+  for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
+  return c as unknown as G;
+}
+
 type Json = Record<string, any>;
 const SERVED = JSON.parse(
   readFileSync(new URL('./fixtures/served-held-status-quo.bf-054503-t0.json', import.meta.url), 'utf8'),
@@ -82,7 +94,7 @@ describe('a held status quo is compared, so nothing says it is left out', () => 
   });
 
   it('⭐ the Agent\'s sentence (served: "…it will leave out "Status Quo" until its levels are set") is plain "can run now"', () => {
-    expect(readinessSentence(readinessViewOf(SERVED))).toBe('The analysis can run now.');
+    expect(readinessSentence(readinessViewOf(withoutTarget(SERVED)))).toBe('The analysis can run now.');
   });
 
   it('⭐ admission does not say "leaving out one option" beside a run that compares every option', () => {
@@ -102,7 +114,7 @@ describe('a held status quo is compared, so nothing says it is left out', () => 
     expect(gate.held).toEqual([STATUS_QUO]);
     const plan = assessRouteAdmission(graph).scaffold_plan;
     expect(plan.excluded_option_ids).toEqual([id]);
-    expect(readinessSentence(readinessViewOf(graph))).toBe('The analysis can run now; it will leave out "Decide later" until its levels are set.');
+    expect(readinessSentence(readinessViewOf(withoutTarget(graph)))).toBe('The analysis can run now; it will leave out "Decide later" until its levels are set.');
     expect(structuralReason(graph)).toMatchObject({ code: 'RUN_WILL_EXCLUDE_OPTIONS', message: 'Analysis can run, leaving out one option you have not set values for.' });
   });
 

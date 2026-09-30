@@ -15,7 +15,7 @@
  */
 
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
-import { certainOptionRows, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
+import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -182,7 +182,7 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
-import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel } from '../goal-current-level.js';
+import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
@@ -828,8 +828,10 @@ interface GraphRead {
     defaulted?: unknown;
   }[];
   readonly analysis_state: unknown;
+  /** Existing cold-read freshness text, projected to AI context without a second derivation. */
+  readonly analysis_ready?: unknown;
   /**
-   * The read's own `analysis_admission` (top level on the graph read, which carries no `analysis_ready`): its
+   * The read's own `analysis_admission` (top level on the graph read, whose admission remains separate from freshness): its
    * `permitted_analysis_mode` is the mode half of the selected Run's leader permission (`claimPermissionsFrom`).
    */
   readonly analysis_admission?: unknown;
@@ -1033,7 +1035,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
  * constant 0.8 on every headroom-derived cap), limits from `goal_constraints` as stored, link strength and
  * provenance as stored. Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
  */
-function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state'>): Record<string, unknown> {
+function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_ready'>): Record<string, unknown> {
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
   const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label] as const));
@@ -1127,7 +1129,7 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
     ...(limits.length > 0 ? { limits } : {}),
     links,
     readiness: readinessViewOf(g.raw),
-    ...(earlierAnalysisOf(g.analysis_state) ?? {}),
+    ...(earlierAnalysisOf(g.analysis_state, g.analysis_ready) ?? {}),
   };
 }
 
@@ -1272,9 +1274,13 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   } };
 }
 
-function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> } | undefined {
+function earlierAnalysisOf(state: unknown, analysisReady?: unknown): { analysis: Record<string, unknown> } | undefined {
   if (state === null || typeof state !== 'object') return undefined;
-  const { readiness: _placeholder, ...rest } = state as Record<string, unknown>;
+  const { readiness: _placeholder, ...stateRest } = state as Record<string, unknown>;
+  const ready = analysisReady !== null && typeof analysisReady === 'object'
+    ? analysisReady as Record<string, unknown> : null;
+  const rest: Record<string, unknown> = { ...stateRest, ...(ready?.freshness === 'stale' && typeof ready.freshness_reason === 'string'
+    ? { freshness_reason: ready.freshness_reason } : {}) };
   // The read retains the older successful Run's lifecycle when a newer
   // degraded Run supersedes it. Do not echo `complete_current` to the Agent:
   // the old result is absent and the canonical verdict requires a rerun.
@@ -1629,6 +1635,10 @@ export function createAgentCapabilities(
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
+      ...(() => {
+        const readiness = (r.json.current_read as { analysis_ready?: unknown } | undefined)?.analysis_ready;
+        return readiness === undefined ? {} : { analysis_ready: readiness };
+      })(),
       ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
@@ -3090,14 +3100,55 @@ export function createAgentCapabilities(
       }
       // ⛔ …and written ABOUT this goal (DL #72 5862394804): "300 Pro paying subscribers" is never a £300 MRR target.
       if (!figureTheUserWroteFor(value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
+      /**
+       * ⭐ THE GOAL'S LEVEL TODAY, WHEN THE USER STATED IT BESIDE THE TARGET — on THIS card, written on THIS approval
+       * (AIQ #75 5913873948 row G6, 5913897396, 5913952911; DL 5913935708). R3's run: "We have secured £0 so far and need
+       * at least £1m" gave a card for the target only and the reply "I'll then record the current £0 level", which
+       * nothing ever recorded. A stated level (0 included) is the user's figure: the level door's own words rule
+       * (`statedGoalLevelInUsersWords`), against the unit the target is written in. It is framed against the target
+       * only once the target is written (the apply branch), by the level door itself. The sentence it was written in
+       * travels with it: the approval arrives on a later turn, whose own text does not hold it.
+       */
+      const levelArg = (args as { current_level?: unknown }).current_level;
+      let currentLevel: { value: number; unit: string; quote: string } | undefined;
+      if (levelArg !== undefined && levelArg !== null) {
+        const lv = (levelArg as { value?: unknown }).value;
+        const lu = (levelArg as { unit?: unknown }).unit;
+        if (typeof lv !== 'number' || !Number.isFinite(lv) || typeof lu !== 'string' || lu.trim() === '') {
+          return { ok: false, mutated: false, refusal: 'unreadable_current_level',
+            detail: 'Today’s level needs the figure and its unit, as the user wrote them. Nothing was prepared; ask the user for whichever is missing.' };
+        }
+        const inWords = statedGoalLevelInUsersWords(lv, lu, { label: goal.label, unit }, ctx.user_text);
+        if (!inWords.ok) return { ok: false, mutated: false, refusal: inWords.refusal, detail: inWords.detail };
+        /**
+         * ⛔ BOUND TO THE GOAL, IN THE TARGET'S OWN STATEMENT (AIQ CHANGES_REQUIRED on #2373; the #2275 authorship-door
+         * class). Paul's answer holds three £ amounts — "about £180k in the bank … roughly £45k a month … secured £0 so far
+         * and need at least £1m" — and each passed the words rule, so only the model's choice kept cash in the bank
+         * from being stored as his funding secured. The level must be written (a) in the SAME sentence as the target
+         * figure, and (b) about this goal, strictly (`figureTheUserWroteFor`, the target's own scope). Every miss refuses
+         * the card: the Agent offers the target alone, with no promise.
+         */
+        const sameStatement = inWords.quote !== null && figureTheUserWrote(value, unit, inWords.quote);
+        const aboutTheGoal = figureTheUserWroteFor(inWords.raw, unit, ctx.user_text, { ...scopeIn(g, goal.label), strict: true });
+        if (!sameStatement || !aboutTheGoal) {
+          return { ok: false, mutated: false, refusal: 'current_level_not_bound',
+            detail: `${targetFigure(inWords.raw, unit)} is not written as today's level of "${goal.label}" in the same statement as its target, `
+              + 'so nothing was prepared. Offer the target on its own, and never say today’s level will be recorded.' };
+        }
+        currentLevel = { value: inWords.raw, unit, quote: inWords.quote! };
+      }
+      const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
-        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit } }],
+        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit, ...(currentLevel !== undefined ? { current_level: currentLevel } : {}) } }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}`,
+        // AIQ's words for the one card (5913952911): both figures, the user's own.
+        public_label: today === undefined
+          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}`
+          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`,
       });
       proposals.put(proposal);
       return {
@@ -3109,8 +3160,11 @@ export function createAgentCapabilities(
           label: goal.label,
           current_target: trio.goal_threshold_raw === undefined ? null : targetFigure(trio.goal_threshold_raw, trio.goal_threshold_unit ?? ''),
           becomes: `${DIRECTION_WORDS[type]} ${figure}`,
+          ...(today !== undefined ? { today } : {}),
         },
-        note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target — never the id — and call authorise_change with this proposal_id once they agree.`,
+        note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
+          + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
+          + ' — never the id — and call authorise_change with this proposal_id once they agree.',
       };
     },
 
@@ -4157,10 +4211,44 @@ export function createAgentCapabilities(
         const receipts = receipt.summary !== null ? [receipt.summary] : [];
         proposals.markApplied(decision.proposal.proposal_id, receipts);
         const goalLabel = String(after!.nodes.find((x) => x.id === op.path)?.label ?? 'the goal');
-        return {
+        const targetSaid = `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, as you stated it.`;
+        const applied = {
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-          follow_up: `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, as you stated it.`,
+          follow_up: targetSaid,
+        };
+        /**
+         * ⭐ TODAY'S LEVEL, ON THE SAME APPROVAL (AIQ #75 5913952911): prepared by the level door against the target just
+         * written — the door's own words rule, unit rule and `admitStatedGoalLevel` — then written by its own CAS-gated
+         * writer, on the revision read back above. The goal's cap and its provenance are left exactly as the target
+         * writer set them. Either write failing is said by name: the target stays set, the level is not recorded.
+         */
+        const level = (op.value as { current_level?: { value: number; unit: string; quote: string } }).current_level;
+        if (level === undefined) return applied;
+        const todaySaid = targetFigure(level.value, level.unit);
+        const notRecorded = (why: unknown): ToolResult => ({
+          ...applied,
+          follow_up: `${targetSaid} Its level today (${todaySaid}) was not recorded, so nothing about today’s level changed.`,
+          level_not_recorded: true,
+          note: `The target is set. Today's level was NOT recorded (${String(why ?? 'refused')}). Say both plainly, and never say today's level was saved.`,
+        });
+        const levelCtx = { ...ctx, user_text: level.quote, user_turn_text: level.quote };
+        const prepared = await proposeGoalCurrentLevel({ readGraph: async () => after, proposals }, levelCtx, {
+          goal_label: goalLabel, value: level.value, unit: level.unit, goal_is: v.constraint_type, user_stated: true,
+        });
+        const levelProposal = prepared.ok && typeof prepared.proposal_id === 'string' ? proposals.get(prepared.proposal_id) : undefined;
+        if (levelProposal === undefined) return notRecorded(prepared.refusal);
+        const written = await applyGoalCurrentLevel({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, levelProposal, after!);
+        if (written.ok !== true || written.applied !== true) {
+          // ⛔ P0 PARTNER CR on #2373 (5914335527): the level proposal this branch made internally was never shown as a
+          // card, so it must not stay outstanding — the next "yes" would record what this reply says was not recorded.
+          proposals.discard(levelProposal.proposal_id);
+          return notRecorded(written.refusal);
+        }
+        return {
+          ...applied,
+          receipts: [...receipts, ...((written.receipts as ReceiptSummary[] | undefined) ?? [])],
+          follow_up: `${targetSaid} Its level today is recorded as ${todaySaid}, your figure.`,
         };
       }
 
@@ -6961,7 +7049,7 @@ export function createAgentCapabilities(
       // said as a certainty only when THIS Run's own stored decision earns it — attributed by its run-fact identity.
       // One graph read (the one above when made); a Run that cannot be bound is said as unchecked (`goal-certainty-for-agent.ts`).
       let goalCertainty: Record<string, unknown> | undefined;
-      if (certainOptionRows(result).length > 0) {
+      if (hasGoalCertaintyCandidates(result)) {
         if (postRunRead === undefined) {
           try { postRunRead = await readGraph(ctx.scenario_id); } catch { postRunRead = null; }
         }

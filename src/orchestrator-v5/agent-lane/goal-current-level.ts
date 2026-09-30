@@ -341,6 +341,59 @@ export function isGoalCurrentLevelProposal(p: StructuredProposal): boolean {
 }
 
 /**
+ * ⭐ THE USER'S STATED LEVEL OF THE GOAL, in the goal's own unit AND in their own written words, or why not. ONE rule for
+ * the level door (`proposeGoalCurrentLevel`) and for the target card that carries a level stated beside the target
+ * (AIQ #75 5913897396: "stated (including 0) → the user's figure, proposed in the SAME card as the target"). `quote` is
+ * the sentence the figure was written in: an approval arrives on a later turn, so the apply-time re-check reads it.
+ *
+ * ── IN THE USER'S OWN WORDS? (Runtime's seam review of #1985, 5845078745; the #1978 class)
+ * `user_stated` is the Agent's self-report — the flag that stored a served 0% churn as the user's (#70 5843805457).
+ * It stands only when the figure AS RECORDED (a stated k/m suffix already scaled, so "£12k" grounds 12 £k but
+ * never a bare 12) is written in what the user TYPED in this conversation (`ctx.user_text`, bound by the route:
+ * composer messages only), in the goal's own kind of unit. Otherwise nothing is prepared, and the Agent asks.
+ *
+ * ⛔ IN THE CURRENCY AND FRAME THE USER WROTE IT IN (verify of f41c3c30, DEFECT_FOUND B1/B2). `figureTheUserWrote`
+ * checks a written amount's KIND, never its currency, and a bare number grounds any unit — so "$12,000", "12,000 USD"
+ * or "12,000 subscribers" was recorded as the user's £12,000 MRR. It also reads "3%" as 0.03 (a share kept as 0–1),
+ * so on a goal measured in "%" a typed 3% was recorded as 0.03%. The figure must ALSO pass the brief path's own rule,
+ * `isAmountStatedInBrief` (`stated-amounts.ts`): a money figure needs an amount written in the SAME currency, a
+ * percentage one written as a percentage, at the same magnitude — never a fraction of it, never a bare number. The
+ * three-argument form: `raw` is already the figure in its unit, so there is no cap to de-normalise by.
+ *
+ * THE UNIT IS THE ONE THE FIGURE IS RECORDED IN, after any suffix was scaled: the goal's unit head (the M-rung is
+ * given `{ unit: goalHead }` and emits exactly that unit), because `readUnit` reads a qualified phrase ("GBP MRR",
+ * "£ per month") as plain, and plain refuses every written currency. With no goal unit, the Agent's own unit — the
+ * one `raw` is in. Never the unit before scaling: "£k" would read the scaled 12000 as £12m.
+ */
+export function statedGoalLevelInUsersWords(
+  value: number,
+  statedUnitArg: unknown,
+  goal: { readonly label: string; readonly unit: string | undefined },
+  userText: string | undefined,
+):
+  | { readonly ok: true; readonly raw: number; readonly statedUnit: string; readonly normalised?: UnitNormalised; readonly quote: string | null }
+  | { readonly ok: false; readonly refusal: string; readonly detail: string } {
+  const stated = readStatedGoalLevel(value, statedUnitArg, goal);
+  if (!stated.ok) return stated;
+  const raw = stated.raw;
+  const statedUnit = typeof statedUnitArg === 'string' ? statedUnitArg.trim() : '';
+  const goalUnit = goal.unit;
+  const recordedIn = goalUnit !== undefined ? (unitPhraseHead(goalUnit) ?? goalUnit) : statedUnit;
+  if (!figureTheUserWrote(raw, goalUnit ?? statedUnit, userText) || !isAmountStatedInBrief(raw, recordedIn, userText)) {
+    return {
+      ok: false,
+      refusal: 'figure_not_in_users_words',
+      detail:
+        `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''} is not a figure the user wrote in this conversation, so it is ` +
+        `never recorded as their current level of "${goal.label}". Nothing was prepared. Say so plainly, and ask the user ` +
+        `for today's figure for "${goal.label}" in their own words.` +
+        (unitPhraseFamily(goalUnit) === 'percent' ? ' A percentage is passed as the user wrote it: 3% is 3, never 0.03.' : ''),
+    };
+  }
+  return { ok: true, raw, statedUnit, ...(stated.normalised !== undefined ? { normalised: stated.normalised } : {}), quote: writtenIn(userText ?? '', raw)?.quote ?? null };
+}
+
+/**
  * Prepare the change: every admission question, then ONE held proposal. Writes nothing.
  */
 export async function proposeGoalCurrentLevel(
@@ -402,42 +455,12 @@ export async function proposeGoalCurrentLevel(
   }
   const goalUnit = typeof node.goal_threshold_unit === 'string' && node.goal_threshold_unit.trim() !== '' ? node.goal_threshold_unit : undefined;
 
-  // ── IN THE GOAL'S OWN UNIT? (scaled by a stated k/m suffix only as the M-rung scales a limit; else refused)
-  const stated = readStatedGoalLevel(value, args?.unit, { label: goal.label, unit: goalUnit });
-  if (!stated.ok) return refuse(stated.refusal, stated.detail);
-  const raw = stated.raw;
-  const statedUnit = typeof args?.unit === 'string' ? args.unit.trim() : '';
-
-  /**
-   * ── IN THE USER'S OWN WORDS? (Runtime's seam review of #1985, 5845078745; the #1978 class)
-   * `user_stated` is the Agent's self-report — the flag that stored a served 0% churn as the user's (#70 5843805457).
-   * It stands only when the figure AS RECORDED (a stated k/m suffix already scaled, so "£12k" grounds 12 £k but
-   * never a bare 12) is written in what the user TYPED in this conversation (`ctx.user_text`, bound by the route:
-   * composer messages only), in the goal's own kind of unit. Otherwise nothing is prepared, and the Agent asks.
-   *
-   * ⛔ IN THE CURRENCY AND FRAME THE USER WROTE IT IN (verify of f41c3c30, DEFECT_FOUND B1/B2). `figureTheUserWrote`
-   * checks a written amount's KIND, never its currency, and a bare number grounds any unit — so "$12,000", "12,000 USD"
-   * or "12,000 subscribers" was recorded as the user's £12,000 MRR. It also reads "3%" as 0.03 (a share kept as 0–1),
-   * so on a goal measured in "%" a typed 3% was recorded as 0.03%. The figure must ALSO pass the brief path's own rule,
-   * `isAmountStatedInBrief` (`stated-amounts.ts`): a money figure needs an amount written in the SAME currency, a
-   * percentage one written as a percentage, at the same magnitude — never a fraction of it, never a bare number. The
-   * three-argument form: `raw` is already the figure in its unit, so there is no cap to de-normalise by.
-   *
-   * THE UNIT IS THE ONE THE FIGURE IS RECORDED IN, after any suffix was scaled: the goal's unit head (the M-rung is
-   * given `{ unit: goalHead }` and emits exactly that unit), because `readUnit` reads a qualified phrase ("GBP MRR",
-   * "£ per month") as plain, and plain refuses every written currency. With no goal unit, the Agent's own unit — the
-   * one `raw` is in. Never the unit before scaling: "£k" would read the scaled 12000 as £12m.
-   */
-  const recordedIn = goalUnit !== undefined ? (unitPhraseHead(goalUnit) ?? goalUnit) : statedUnit;
-  if (!figureTheUserWrote(raw, goalUnit ?? statedUnit, ctx.user_text) || !isAmountStatedInBrief(raw, recordedIn, ctx.user_text)) {
-    return refuse(
-      'figure_not_in_users_words',
-      `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''} is not a figure the user wrote in this conversation, so it is ` +
-      `never recorded as their current level of "${goal.label}". Nothing was prepared. Say so plainly, and ask the user ` +
-      `for today's figure for "${goal.label}" in their own words.` +
-      (unitPhraseFamily(goalUnit) === 'percent' ? ' A percentage is passed as the user wrote it: 3% is 3, never 0.03.' : ''),
-    );
-  }
+  // ── IN THE GOAL'S OWN UNIT, AND IN THE USER'S OWN WORDS? One rule, shared with the target card (`statedGoalLevelInUsersWords`).
+  const inWords = statedGoalLevelInUsersWords(value, args?.unit, { label: goal.label, unit: goalUnit }, ctx.user_text);
+  if (!inWords.ok) return refuse(inWords.refusal, inWords.detail);
+  const stated = inWords;
+  const raw = inWords.raw;
+  const statedUnit = inWords.statedUnit;
 
   if (isChange) return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit);
   // (Checked above for a level goal; restated so the level path below reads them as numbers.)
@@ -543,9 +566,14 @@ function writtenIn(text: string, raw: number): { written: string; quote: string 
     const suffix = (/(k|m|bn)$/i.exec(token)?.[1] ?? '').toLowerCase();
     const n = Number(token.replace(/[£$€,\s]/g, '').replace(/(k|m|bn)$/i, ''));
     if (!Number.isFinite(n) || Math.abs(n * (scale[suffix] ?? 1) - raw) > 1e-9 * Math.max(1, raw)) continue;
-    const start = Math.max(text.lastIndexOf('.', m.index!) + 1, text.lastIndexOf('\n', m.index!) + 1, 0);
-    const endAt = [text.indexOf('.', m.index! + token.length), text.indexOf('\n', m.index! + token.length)].filter((i) => i >= 0);
-    const quote = text.slice(start, endAt.length > 0 ? Math.min(...endAt) : text.length).trim().slice(0, 160);
+    // ⛔ A sentence ends at . ? ! followed by a space (or the text's end), or at a new line — NEVER at a decimal point
+    // (MG SUCCESSOR #75 5918338227, measured): "We have secured £0 so far and need at least £1.2m." was quoted as "…at
+    // least £1", so the target was not in the level's statement and Paul's own £0 was refused `current_level_not_bound`.
+    let start = 0;
+    for (const b of text.slice(0, m.index!).matchAll(/[.?!](?=\s)|\n/g)) start = b.index! + 1;
+    const tail = m.index! + token.length;
+    const endRel = text.slice(tail).search(/[.?!](?=\s|$)|\n/);
+    const quote = text.slice(start, endRel === -1 ? text.length : tail + endRel).trim().slice(0, 160);
     return { written: token, quote: quote === '' ? token : quote };
   }
   return null;

@@ -45,7 +45,8 @@ import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
-import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { targetTestabilityOf, targetNotTestableWarning } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import type {
   RunAnalysisArgs,
@@ -124,6 +125,7 @@ import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import { filterOlumiProposedOptions } from './olumi-option-filter.js';
+import { buildRunInputSnapshot, runIdFor } from './run-input-snapshot.js';
 import {
   carryLevelLimitBaselines,
   carryLimitTargetCaps,
@@ -1168,6 +1170,44 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     }
     const runComputedAt = new Date().toISOString();
 
+    // --- 3.9. SC-24: record what this Run is SENT, and its execution identity ----------------------------------
+    // Captured here — after the last write to `plotPayload` and before dispatch — from the request's own values, so
+    // a later "what changed between two Runs" diffs two real inputs (schemas 0.68.0 `input_snapshot`, `run_id`).
+    // `input_snapshot.goal` is the ONE Run-attested goal unit P0 SHARED DATA's currentness gate reads.
+    // A snapshot the contract refuses is dropped, never allowed to fail the Run: its delta says `not_recorded`.
+    const runId = runIdFor({
+      scenarioId: args.scenario_id,
+      turnId: invocation.payload.turn_id,
+      graphHashAtRun,
+    });
+    const submittedIds = new Set(
+      submittedOptions.map((o) => (typeof o.option_id === 'string' ? o.option_id : typeof o.id === 'string' ? o.id : null)),
+    );
+    const olumiExcluded = (gate.options as ReadonlyArray<Record<string, unknown>>).flatMap((o) => {
+      const id = typeof o.option_id === 'string' ? o.option_id : typeof o.id === 'string' ? o.id : null;
+      return id !== null && !submittedIds.has(id)
+        ? [{ option_id: id, label: typeof o.label === 'string' ? o.label : null, reason: 'olumi_proposed' as const }]
+        : [];
+    });
+    const inputSnapshot = buildRunInputSnapshot({
+      submittedOptions: submittedOptions as ReadonlyArray<Record<string, unknown>>,
+      rawObjectsPerOption,
+      wirePerOption: requestProjection.perOption as ReadonlyArray<Readonly<Record<string, number>>>,
+      heldFactorIdsByOptionId: scaffoldedFactorIdsByOptionId,
+      optionsNotSent: [
+        ...gate.excluded.map((e) => ({ option_id: e.option_id, label: e.label, reason: 'not_analysable' as const })),
+        ...olumiExcluded,
+      ],
+      wireGraph: plotPayload.graph,
+      plotPayload,
+    });
+    if (inputSnapshot === null) {
+      log.warn(
+        { event: 'run_analysis.input_snapshot_not_recorded', request_id: invocation.requestId, scenario_id: args.scenario_id },
+        'Run input snapshot refused by the contract; this Run records no inputs',
+      );
+    }
+
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
     // Fix 4 review fix (round 2): every timing site is gated on the flag.
@@ -1832,6 +1872,25 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       }
     }
 
+    // ⛔ DR ROW 4 (AIQ #2371 5914730220 / 5915342964): a target this run can't test (the verdict that capped the admission's
+    // mode at `exploratory`) has no goal chance for ANY option, as it has no leader or share. Runs after every earlier
+    // withhold, and withholds whatever options STILL show a goal figure: (S) is per option, so "something was withheld"
+    // never means "every chance is gone" (AIQ's executed run: m1 + one option's placeholder lever kept £59's 0.9929).
+    {
+      const before = response;
+      response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis);
+      if (response !== before) {
+        log.info(
+          {
+            event: 'run_analysis.goal_figures_withheld_target_not_testable',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+          },
+          'run_analysis: goal figures withheld: the goal\'s target can\'t be tested yet',
+        );
+      }
+    }
+
     const analysisStatus = readAnalysisStatus(response);
     const resultRecords = readResultRecords(response);
     // D-ask-1 disclosure honesty (2026-07-25): the option ids that ACTUALLY
@@ -2416,11 +2475,28 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Fed from the RAW PERSISTED GRAPH (goal label + option interventions) and
     // the SAME `resultRecords` every other seam on this path reads, so the
     // sentence can never describe a different run than the summary it rides on.
+    // 0.63.0 (DL 5883197828): the Run's own goal certainty, decided once from the stored graph this Run's hash binds
+    // and its own PLoT body. Every consumer reads this array; none recomputes it. Not recorded ⇒ absent, never a failed Run.
+    const goalCertainty = recordGoalCertainty(snapshot.rawPersistedGraph, response, graphHashAtRun);
+    if (!goalCertainty.recorded && goalCertainty.reason !== 'no_run_hash') {
+      log.warn(
+        {
+          event: 'v5.run_analysis.goal_certainty_not_recorded',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          reason: goalCertainty.reason,
+          ...(goalCertainty.detail !== undefined ? { detail: goalCertainty.detail } : {}),
+        },
+        'run_analysis — goal certainty not recorded on the Run (absent = not recorded; the Run itself stands)',
+      );
+    }
+
     const objectiveContradictionDisclosure = composeObjectiveContradictionDisclosure(
       snapshot.rawPersistedGraph,
       resultRecords,
       headline !== null,
       goalFrame,
+      { goalCertainty: goalCertainty.recorded ? goalCertainty.decisions : undefined },
     );
     // ⭐ THE UNSET-OPTION-EFFECT DISCLOSURE, LAST OF THE FIVE.
     //
@@ -2562,22 +2638,6 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       });
     }
 
-    // 0.63.0 (DL 5883197828): the Run's own goal certainty, decided once from the stored graph this Run's hash binds
-    // and its own PLoT body. Every consumer reads this array; none recomputes it. Not recorded ⇒ absent, never a failed Run.
-    const goalCertainty = recordGoalCertainty(snapshot.rawPersistedGraph, response, graphHashAtRun);
-    if (!goalCertainty.recorded && goalCertainty.reason !== 'no_run_hash') {
-      log.warn(
-        {
-          event: 'v5.run_analysis.goal_certainty_not_recorded',
-          request_id: invocation.requestId,
-          scenario_id: args.scenario_id,
-          reason: goalCertainty.reason,
-          ...(goalCertainty.detail !== undefined ? { detail: goalCertainty.detail } : {}),
-        },
-        'run_analysis — goal certainty not recorded on the Run (absent = not recorded; the Run itself stands)',
-      );
-    }
-
     const leaderPermission = applyNonlinearIdentityToLeaderPermission(
       applyIntakeToLeaderPermission(
         projectClaimSafety(constraintVerdict),
@@ -2611,6 +2671,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
         ...(goalCertainty.recorded ? { goal_certainty: goalCertainty.decisions } : {}),
         computed_at: runComputedAt,
+        // SC-24 (schemas 0.68.0): the Run's execution identity and the input it was sent (3.9 above).
+        run_id: runId,
+        ...(inputSnapshot !== null ? { input_snapshot: inputSnapshot } : {}),
         // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT
         // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and
         // read back on every path that rebuilds from them, rather than
@@ -3354,4 +3417,33 @@ function readOrchestratorErrorMessage(runError: unknown): string | null {
   if (orch === null || typeof orch !== 'object') return null;
   const message = (orch as Record<string, unknown>).message;
   return typeof message === 'string' && message.trim().length > 0 ? message : null;
+}
+
+/** The option ids an envelope scores, and those whose goal figures it still shows, in any option-result carrier. */
+function goalFigureOptions(envelope: unknown): { scored: string[]; shown: string[] } {
+  const scored = new Set<string>();
+  const shown = new Set<string>();
+  for (const r of readOptionResultSources(envelope as Record<string, unknown>).flat()) {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    if (id === undefined || id === '') continue;
+    scored.add(id);
+    if (typeof r.probability_of_goal === 'number' || typeof r.probability_of_joint_goal === 'number') shown.add(id);
+  }
+  return { scored: [...scored], shown: [...shown] };
+}
+
+/**
+ * ⛔ DR ROW 4 IN THE RUN (AIQ #2371 5914730220 / 5915342964): when the goal's target can't be tested
+ * (`targetVerdictCapsOrdering`), every option that STILL shows a goal figure after the earlier withholds has it withheld
+ * under `GOAL_FIGURES_TARGET_NOT_TESTABLE` (the leader and shares go with it). Options an earlier withhold already took keep
+ * that withhold's own reason. Returns `response` itself when nothing is left to withhold or the target is testable. Pure.
+ */
+export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown): E {
+  const { scored, shown } = goalFigureOptions(response);
+  // A run that shows no goal figure and was withheld by nothing still names no leader and no share under `exploratory`
+  // (the whole-run arm); a run an earlier withhold already emptied keeps that withhold's reason alone.
+  const ids = shown.length > 0 ? shown : runWithheldGoalFigures(response as Record<string, unknown>) ? [] : scored;
+  if (ids.length === 0) return response;
+  const warning = targetNotTestableWarning(graph, targetTestabilityOf(graph), ids, GOAL_FIGURES_TARGET_NOT_TESTABLE);
+  return warning === null ? response : withholdOptionGoalFigures(response, new Set(ids), warning);
 }

@@ -35,21 +35,26 @@ describe('⭐ each limit row carries MG’s ask, verbatim', () => {
    * R-c per option (AI Quality #72 5900908629): on C10 both Olumi options move churn through price on an unsized link, so
    * the churn row's ask is MG's level question word for word, then the link-size question (`limit-checks.ts`).
    */
-  const CHURN_LINK_ASK = 'How much does ‘Pro plan price’ change ‘Monthly churn’?';
-  const withLinkAsk = (cid: string, ask: string | undefined) => (cid === CHURN ? `${ask} ${CHURN_LINK_ASK}` : ask);
+  /**
+   * ⛔ B6 SUPERSEDES MG's level question on these rows (AIQ #75 5916187873 (a)+(b)): each served option whose P rests on
+   * Olumi's figure is withheld, and the row's ONE question is the first withheld option's arm question — never MG's
+   * "can only be checked against Olumi's estimate", which would call a withheld guess a check.
+   */
+  const LIMIT_B6_ASK = 'What’s each option’s likely range for ‘Total investment’?';
+  const CHURN_B6_ASK = 'What is ‘Monthly churn’ today? How much does ‘Pro plan price’ change ‘Monthly churn’?';
 
-  it('RED (served C10): each estimate_only row carries its limit’s question, word for word', () => {
+  it('B6 (served C10): each row asks its first withheld option\'s arm question, and never MG\'s "checked against" wording', () => {
     const rows = limitChecksForAgent(FX.graph, FX.limit_verdicts)!;
-    const asks = asksOf(FX.graph);
-    expect(rows.map((r) => [r.constraint_id, r.ask])).toEqual(rows.map((r) => [r.constraint_id, withLinkAsk(r.constraint_id, asks.get(r.constraint_id))]));
-    expect(rows.find((r) => r.constraint_id === LIMIT)!.ask).toMatch(/^What is "Total investment" today/);
+    expect(rows.map((r) => [r.constraint_id, r.ask])).toEqual([[LIMIT, LIMIT_B6_ASK], [CHURN, CHURN_B6_ASK]]);
+    for (const r of rows) expect(r.ask).not.toMatch(/checked against/);
   });
 
   it('CONTRAST: a limit checked against the user’s own figures carries no ask, even if one were produced', () => {
     const scored = { per_limit: FX.limit_verdicts.per_limit.map((r) => (r.constraint_id === LIMIT ? { constraint_id: LIMIT, state: 'scored' } : r)), joint: FX.limit_verdicts.joint } as unknown as StoredLimitVerdicts;
     const rows = limitChecksForAgent(FX.graph, scored)!;
-    expect(rows.find((r) => r.constraint_id === LIMIT)).not.toHaveProperty('ask');
-    expect(rows.find((r) => r.constraint_id === CHURN)!.ask).toBe(withLinkAsk(CHURN, asksOf(FX.graph).get(CHURN)));
+    // MG's level question never rides a scored row; only B6's question for the two options set at Olumi's £20,000 does.
+    expect(rows.find((r) => r.constraint_id === LIMIT)!.ask).toBe(LIMIT_B6_ASK);
+    expect(rows.find((r) => r.constraint_id === CHURN)!.ask).toBe(CHURN_B6_ASK);
   });
 
   it('CONTRAST: where MG asks nothing (every figure on the limit is the user’s), that row gains no ask key', () => {
@@ -64,7 +69,7 @@ describe('⭐ each limit row carries MG’s ask, verbatim', () => {
     expect(asksOf(g).has(LIMIT), 'control: MG’s producer is silent on this limit').toBe(false);
     const rows = limitChecksForAgent(g, FX.limit_verdicts)!;
     expect(rows.find((r) => r.constraint_id === LIMIT)).not.toHaveProperty('ask');
-    expect(rows.find((r) => r.constraint_id === CHURN)!.ask).toBe(withLinkAsk(CHURN, asksOf(g).get(CHURN)));
+    expect(rows.find((r) => r.constraint_id === CHURN)!.ask).toBe(CHURN_B6_ASK);
   });
 
   it('the note tells the model to ask it once, in its words', () => {
@@ -86,6 +91,6 @@ describe('⭐ each limit row carries MG’s ask, verbatim', () => {
     const r = await caps.runAnalysis({ scenario_id: '550e8400-e29b-41d4-a716-4466554400e1', authenticated_user_id: null, request_id: 'r' } as never, {} as never);
     const checks = (r as { limit_checks?: { limits: { constraint_id: string; ask?: string }[] } }).limit_checks;
     expect(checks, JSON.stringify(Object.keys(r))).toBeDefined();
-    expect(checks!.limits.find((l) => l.constraint_id === LIMIT)!.ask).toBe(asksOf(FX.graph).get(LIMIT));
+    expect(checks!.limits.find((l) => l.constraint_id === LIMIT)!.ask).toBe(LIMIT_B6_ASK);
   });
 });

@@ -44,6 +44,14 @@ import { ContextPackRunDeltaSchema } from '../../src/orchestrator-v5/context/con
 const DELIBERATELY_OMITTED = 'flip_thresholds';
 
 /**
+ * SC-24's pair members, omitted for a SECOND reviewed reason: an `input_changes` row has no author, so a model handed
+ * it says "you changed …" of an input an approved Olumi proposal changed (AIQ binding rule, schemas #76 5916401270).
+ * They serve the wire and the cold read; projecting them into the prompt waits for per-end provenance and its review.
+ */
+const SC24_OMITTED: readonly string[] = ['endpoints', 'input_changes', 'input_coverage'];
+const OMITTED = new Set([DELIBERATELY_OMITTED, ...SC24_OMITTED]);
+
+/**
  * `RunDeltaSchema` is a `ZodEffects` (it carries `refineRunDelta`), so it has no
  * `.shape` of its own. `.innerType()` is zod's PUBLIC accessor for the wrapped
  * object — used in preference to reaching into `._def`, so a zod upgrade breaks
@@ -89,6 +97,8 @@ describe('run_delta context-pack projection — key-set parity with the wire', (
         `genuinely dropped it, delete DELIBERATELY_OMITTED and this guard becomes a ` +
         `plain equality — but verify that at the contract before weakening anything.`,
     ).toContain(DELIBERATELY_OMITTED);
+    // Each SC-24 omission is a real wire key, not a misspelling that would make the filter above a no-op.
+    for (const key of SC24_OMITTED) expect(wire, `the wire RunDelta no longer carries \`${key}\``).toContain(key);
   });
 
   /**
@@ -98,19 +108,23 @@ describe('run_delta context-pack projection — key-set parity with the wire', (
    */
   it('projects EXACTLY the wire key set minus the one deliberate omission', () => {
     const expected = wireKeys()
-      .filter((k) => k !== DELIBERATELY_OMITTED)
+      .filter((k) => !OMITTED.has(k))
       .sort();
     const actual = projectionKeys().sort();
 
     expect(
       actual,
       `context-pack run_delta projection has drifted from the wire RunDelta.\n` +
-        `  wire (minus ${DELIBERATELY_OMITTED}): ${expected.join(', ')}\n` +
+        `  wire (minus ${[...OMITTED].join(', ')}): ${expected.join(', ')}\n` +
         `  projection:                          ${actual.join(', ')}\n` +
         `A key present on the wire but absent here never reaches the model. A key ` +
         `here but absent on the wire cannot be populated. Adding a NEW wire field to ` +
         `the prompt is a claim-safety decision — take the review, then project it.`,
     ).toEqual(expected);
+  });
+
+  it('omits the SC-24 pair members (an input row has no author — claim safety, not oversight)', () => {
+    for (const key of SC24_OMITTED) expect(projectionKeys()).not.toContain(key);
   });
 
   it(`omits \`${DELIBERATELY_OMITTED}\` (claim safety, not oversight)`, () => {

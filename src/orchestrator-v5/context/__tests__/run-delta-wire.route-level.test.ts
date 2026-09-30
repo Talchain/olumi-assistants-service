@@ -232,8 +232,11 @@ describe('run_delta reaches the rendered routing prompt', () => {
     // Indeterminate folds to false — a false "your leader changed" rewrites the
     // user's decision; a false "nothing changed" merely withholds.
     expect(leader.changed).toBe(false);
-    // CONTRAST CONTROL: the movement numbers are NOT leader claims and survive.
-    expect((delta!.win_probabilities as unknown[]).length).toBeGreaterThan(0);
+    // ⛔ RE-PINNED (AIQ F1 on #2378, CURRENT-READ-v1 row 9: leader_claim.permitted === false → no shares). The old
+    // contrast here said the shares "are NOT leader claims and survive"; they are — "opt-a 62% → 45%, opt-b 38% → 55%"
+    // names the withheld leader by arithmetic. The shares go; the consequence itself stays (contrast below).
+    expect(delta!.win_probabilities).toEqual([]);
+    expect(delta!.attribution_case, 'the delta itself survives the withheld leader').toEqual(expect.any(String));
   });
 
   /**

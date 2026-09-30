@@ -12,6 +12,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 
@@ -83,10 +84,10 @@ describe('a level is the user\'s, Olumi\'s disclosed estimate, or unset — neve
   });
 
   it('⛔ the governing text permits what C2 adds, in every place it is stated (#1982 review B1)', () => {
-    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    const route = HOST_TOOL_CONTRACT;
     const tools = readFileSync(new URL('../runtime/agent-tools.ts', import.meta.url), 'utf8');
     // Levels: the user's figure, or Olumi's own marked estimate for an option Olumi suggested — never "ONLY the user's".
-    expect(route).toContain('your own suggested figure, marked `estimate` with its basis, which is recorded and shown as Olumi\\u2019s estimate, never as theirs');
+    expect(route).toContain('your own suggested figure, marked `estimate` with its basis, which is recorded and shown as Olumi\u2019s estimate, never as theirs');
     expect(tools).toContain('your own suggested figure with estimate: true and a basis, recorded and shown as Olumi\\u2019s estimate. Never a placeholder.');
     for (const text of [route, tools]) {
       expect(text).not.toContain('ONLY for a figure the user stated');

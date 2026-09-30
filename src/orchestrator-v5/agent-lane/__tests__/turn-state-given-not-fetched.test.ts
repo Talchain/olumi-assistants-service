@@ -10,8 +10,7 @@
  * move together, that the given state never enters the history, and that superseded snapshots are pruned.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { runAgentTurn } from '../runtime/agent-loop.js';
 import { issueContextPacket } from '../runtime/request-assembly.js';
 import * as historyStore from '../history-store.js';
@@ -191,9 +190,8 @@ describe('C1 — a superseded snapshot is not kept in the history', () => {
 
 describe('C1 follow-up — the route\u2019s own system prompt says the same as the given item', () => {
   it('RED: the Agent instructions line about CURRENT MODEL STATE says a later tool result in the turn supersedes it', () => {
-    // AGENT_INSTRUCTIONS is module-private; the line is read from the route source, as the estate's scanner tests do.
-    const src = readFileSync(fileURLToPath(new URL('../../../routes/agent-v1-turn.ts', import.meta.url)), 'utf8');
-    const lines = src.split('\n').filter((l) => l.includes('Each turn opens with a CURRENT MODEL STATE input'));
+    // Inspect the actual retained clause through the next host instruction, preserving the single-clause control.
+    const lines = HOST_TOOL_CONTRACT.match(/Each turn opens with a CURRENT MODEL STATE input:.*?(?= Offer only a change one of your tools can propose)/g) ?? [];
     expect(lines, 'control: exactly one instructions line names the given state').toHaveLength(1);
     expect(lines[0]).toContain('supersedes it');
     expect(lines[0]).toContain('describe the model from the latest');

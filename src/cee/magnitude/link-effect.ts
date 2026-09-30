@@ -34,6 +34,7 @@ import { classifyUnitScaleClass, unitPinnedScaleFrame } from '../draft/records/u
 import { readCurrencyUnitWithQualifiers } from '../provenance/stated-amounts.js';
 import { recoverScaleFrame } from '../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 import { isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
+import { sayFigure } from '../../orchestrator-v5/agent-lane/say-figure.js';
 
 /** Who sized a link (D9). Declared once, on `EdgeProvenanceV3.magnitude`. */
 export type MagnitudeAuthor = NonNullable<EdgeProvenanceV3T['magnitude']>;
@@ -227,6 +228,19 @@ export interface LinkStatement {
   readonly effect_per_source_change?: number | null;
   /** True when the USER stated the size (never overridden, D7). */
   readonly user_stated: boolean;
+  /**
+   * ⭐ A4 (R3 C1/C2 5918513716): the user's size is ONE END of a range they wrote ("£1-2m" per deal), in the
+   * target's unit. Said with the range wherever the size is said, and carried on the edge (`natural_effect.stated_range`).
+   */
+  readonly stated_range?: StatedRangeEnd;
+}
+
+/** One end of a range the user wrote, in the size's own unit: `text` is the range exactly as written. */
+export interface StatedRangeEnd {
+  readonly low: number;
+  readonly high: number;
+  readonly text: string;
+  readonly end: 'low' | 'high';
 }
 
 /**
@@ -244,6 +258,11 @@ export interface NaturalEffect {
   readonly strength_mean: number;
   /** `strength_mean` is on the edge's normalised strength frame, never in natural units. */
   readonly strength_mean_frame: 'edge_strength';
+  /**
+   * ⭐ A4: `amount` is one end of this range the user wrote (the low end: every figure through the link is a floor). A
+   * reader says the range beside the amount, never the amount alone as the user's figure (R3 C1, AIQ 5918523203).
+   */
+  readonly stated_range?: StatedRangeEnd;
 }
 
 /** Why a stated size is not what the edge carries, or why it is asked about. */
@@ -271,6 +290,11 @@ export interface LinkSizing {
   readonly problem?: LinkSizeProblem;
   /** Asked where the user always sees it (`open_questions`). */
   readonly question?: string;
+  /**
+   * ⭐ A4 (R3 C1/C2 5918513716): the user's size is one END of a range they wrote — the sentence that says it with the
+   * range, as a floor or a ceiling ("£1,000,000 per deal … is the low end of your "£1-2m" range …").
+   */
+  readonly range_words?: string;
   /**
    * ⛔ OLUMI'S STATED SIZE WAS NOT USED (D5 / D8 / target-sized / unconvertible / sign conflict): the edge carries a
    * placeholder or today's default, never this size. Only Olumi's (a user's own size is never "set aside" here). The
@@ -408,7 +432,10 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
   const stated = finite(amount) && finite(per);
   const beta = stated ? convertLinkEffect(amount, per, targetFrame, sourceFrame) : null;
   const statement = stated ? statementWords(amount, per, source, target, sourceFrame, targetFrame) : undefined;
-  const who = link.user_stated ? 'You said' : 'Olumi estimated that';
+  // A4: a size read from one end of a range the user wrote is said WITH the range, never as their single figure (R3 C1).
+  const range = link.user_stated ? link.stated_range : undefined;
+  const who = !link.user_stated ? 'Olumi estimated that'
+    : range === undefined ? 'You said' : `You wrote "${range.text}"; its ${range.end} end says`;
   // The natural size of what the edge CARRIES; never of an estimate set aside (the placeholder's own is said instead).
   const natural = (b: number, statedPer: number | undefined): { natural_effect?: NaturalEffect } => {
     const n = naturalEffectOf(b, source, target, statedPer);
@@ -455,14 +482,28 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
     if (link.user_stated) {
       // D7: kept exactly as stated, whatever the frame says; asked about when it cannot hold.
       const question = issue === 'out_of_domain'
-        ? `You said ${statement}, but "${target.label}" is ${today(check!)} today, so that cannot hold across your options. `
+        ? `${who} ${statement}, but "${target.label}" is ${today(check!)} today, so that cannot hold across your options. `
           + `It is kept exactly as you said it. Should the size of that effect change, or today's level of "${target.label}"?`
         : issue === 'not_representable'
-          ? `You said ${statement}, ${NOT_REPRESENTABLE}: it would be cut short. It is kept exactly as you said it. Is that the size you meant?`
+          ? `${who} ${statement}, ${NOT_REPRESENTABLE}: it would be cut short. It is kept exactly as you said it. Is that the size you meant?`
           : undefined;
+      const carried = natural(beta, per as number).natural_effect;
+      // C1: the figure is said WITH the range it is one end of, never as "your £1m"; C2: a floor (or ceiling), "at least".
+      const perWords = (per as number) === 1 ? unitAfterOne(sourceUnitWords(source, sourceFrame)) : `${fmt(per as number)} ${sourceUnitWords(source, sourceFrame)}`;
+      // The bound is the END × the link's SIGN on the goal (R3 5919768182, AIQ 5919953251): (low, +) and (high, −) are a floor,
+      // (low, −) and (high, +) a ceiling. A link not straight into the goal says the range and no bound word.
+      const floor = (range?.end === 'low') === (sign === 1);
+      const bound = target.kind !== 'goal' ? '.'
+        : `, so any figure that runs through this link is a ${floor ? 'floor: at least' : 'ceiling: at most'} that much.`;
+      const range_words = range === undefined || carried === undefined ? undefined
+        : `${sayFigure(Math.abs(amount as number), unitOf(target) ?? '')} per ${perWords} on "${source.label}" → "${target.label}" is the `
+          + `${range.end} end of your "${range.text}" range${bound}`;
       return {
         outcome: 'user_stated', mean: beta, std: sigma, magnitude: 'user_stated', statement, stated_strength: beta,
-        ...natural(beta, per as number),
+        ...(carried === undefined ? {} : {
+          natural_effect: range === undefined ? carried : { ...carried, stated_range: { low: range.low, high: range.high, text: range.text, end: range.end } },
+        }),
+        ...(range_words !== undefined ? { range_words } : {}),
         ...(issue !== undefined ? { problem: issue, question: question! } : {}),
       };
     }

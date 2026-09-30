@@ -131,6 +131,8 @@ let inner: Record<string, unknown>[] = [];
 /** Runs inside the inner request's preHandler — BEFORE route-v2 reads the store (a writer racing the approval). */
 let onInner: ((body: Record<string, unknown>) => void) | undefined;
 let innerStatus: number[] = [];
+let registerStale = false;
+let registrations: unknown[] = [];
 
 const SAID = 'We need at least £60k MRR by the end of the year.';
 const RAW_CODE = /\b[a-z]+(?:_[a-z]+)+\b|\b[A-Z]+(?:_[A-Z]+)+\b/;
@@ -160,12 +162,23 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
       const g = graphOf.get((req.params as { id: string }).id) ?? null;
       return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never) };
     });
+    // The level door's writer (`applyGoalCurrentLevel`): the registration seam, CAS on the analysis hash it was approved on.
+    app.post('/assist/v1/scenarios/:id/graph/register', async (req, reply) => {
+      const sid = (req.params as { id: string }).id;
+      const body = req.body as { graph: unknown; expected_graph_hash?: string };
+      if (registerStale || (body.expected_graph_hash !== undefined && body.expected_graph_hash !== computeAnalysisAffectingGraphHash(graphOf.get(sid) as never))) {
+        return reply.code(409).send({ code: 'GRAPH_STALE' });
+      }
+      registrations.push(body.graph);
+      graphOf.set(sid, jsonbOrder(JSON.parse(JSON.stringify(body.graph))));
+      return { model_version: { version_number: 2, version_id: 'v-level', mutation_id: 'm-level' } };
+    });
     await app.register(ceeOrchestratorRouteV2);
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 600_000);
   afterAll(async () => { await app?.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; innerStatus = []; onInner = undefined; routerCalls.length = 0; anthropicCalls.length = 0; });
+  beforeEach(() => { nextScenario(); script = []; openAiCalls = 0; inner = []; innerStatus = []; onInner = undefined; routerCalls.length = 0; anthropicCalls.length = 0; registerStale = false; registrations = []; });
   afterEach(() => {
     expect(routerCalls, 'route-v2\'s LLM router was reached').toEqual([]);
     expect(anthropicCalls, 'the Anthropic transport was reached').toEqual([]);
@@ -279,5 +292,141 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     expect(t.assistant_text, t.assistant_text).toContain(ADD_CONSTRAINT_USER_GUIDANCE);
     expect(t.assistant_text, t.assistant_text).not.toMatch(RAW_CODE);
     expect(graphNow(), 'nothing was written').toEqual(seed);
+  }, 180_000);
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // ⭐ TODAY'S LEVEL ON THE SAME CARD (AIQ #75 5913873948 row G6 · 5913897396 · 5913952911; DL 5913935708). R3's run of
+  // Paul's brief: "We have secured £0 so far and need at least £1 million" gave a card for the target only, and "I'll then
+  // record the current £0 level", which nothing recorded. A stated level (0 included) is the user's figure: ONE card, ONE
+  // approval, both written, either failure named.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  const proposeWithToday = (today: number, message: string) => {
+    script = [
+      () => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'The user stated their target and today\'s MRR.', current_level: { value: today, unit: '£' } }),
+      () => say('I would set MRR\'s target to at least £60,000 and record today\'s £0. Shall I?'),
+    ];
+    return turn({ message });
+  };
+
+  for (const [today, message, said] of [
+    [0, 'We have £0 MRR so far and need at least £60k MRR.', '£0'],
+    [12000, 'Our MRR is £12,000 today and we need at least £60k MRR.', '£12,000'],
+  ] as const) {
+    it(`RED: target + today's ${said} on ONE card → ONE approval writes both, in the user's figures, and the goal's scale is left as the target writer set it`, async () => {
+      graphOf.set(SCENARIO, seedGraph());
+      const t1 = await proposeWithToday(today, message);
+      const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+      expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+      const chips = approveChipOf(t1);
+      expect(chips, JSON.stringify(t1.suggested_actions)).toHaveLength(1);
+      expect(systemEvents(), 'a proposal writes nothing').toEqual([]);
+      expect(registrations).toEqual([]);
+
+      const t2 = await turn({ message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
+      expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+      const goal = goalNow() as Record<string, unknown>;
+      expect(goal).toEqual(expect.objectContaining({ goal_threshold_raw: 60000, threshold_source: 'user' }));
+      expect(goal.observed_state, JSON.stringify(goal)).toEqual(expect.objectContaining({ raw_value: today, baseline: expect.any(Number), source: 'user_override' }));
+      expect(registrations, 'exactly one level write').toHaveLength(1);
+      expect(t2.assistant_text, t2.assistant_text).toContain(`Its level today is recorded as ${said}, your figure.`);
+      expect(t2.assistant_text, t2.assistant_text).not.toMatch(RAW_CODE);
+    }, 180_000);
+  }
+
+  it('CONTROL (R3/AIQ case d): the goal\'s cap and its provenance are exactly the target writer\'s, with or without today\'s level', async () => {
+    const scaleOf = () => { const g = goalNow() as Record<string, unknown>; return { cap: g.goal_threshold_cap, provenance: g.goal_threshold_cap_provenance }; };
+    graphOf.set(SCENARIO, seedGraph());
+    const plain = approveChipOf(await proposeTarget())[0]!;
+    await turn({ message: plain.message, source: 'chip', chip: { id: plain.id } });
+    const targetOnly = scaleOf();
+    expect(targetOnly.cap, 'the control: the target writer set a scale').toEqual(expect.any(Number));
+    nextScenario();
+    graphOf.set(SCENARIO, seedGraph());
+    const both = approveChipOf(await proposeWithToday(0, 'We have £0 MRR so far and need at least £60k MRR.'))[0]!;
+    await turn({ message: both.message, source: 'chip', chip: { id: both.id } });
+    expect(scaleOf()).toEqual(targetOnly);
+  }, 180_000);
+
+  it('RED: a today\'s level the user did not write → refused, NOTHING prepared (no card promising what it cannot record)', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const t1 = await proposeWithToday(5000, 'We need at least £60k MRR.');
+    const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+    expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'figure_not_in_users_words' }));
+    expect(approveChipOf(t1)).toEqual([]);
+  }, 180_000);
+
+  it('RED: the level write is refused after the target lands → the target is set, and the reply says today\'s level was NOT recorded', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const chip = approveChipOf(await proposeWithToday(0, 'We have £0 MRR so far and need at least £60k MRR.'))[0]!;
+    registerStale = true;
+    const t2 = await turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    expect(goalNow()).toEqual(expect.objectContaining({ goal_threshold_raw: 60000 }));
+    expect((goalNow() as Record<string, unknown>).observed_state).toBeUndefined();
+    expect(t2.assistant_text, t2.assistant_text).toContain('The goal "MRR" now has the target at least £60,000, as you stated it.');
+    expect(t2.assistant_text, t2.assistant_text).toContain('Its level today (£0) was not recorded');
+    expect(t2.assistant_text, t2.assistant_text).not.toMatch(/level today is recorded/);
+    // ⛔ P0 PARTNER CR (5914335527): the NEXT turn has no pending level approval — one "yes" would record what was refused.
+    let seen = '';
+    script = [
+      () => fnCall('get_canonical_state', {}),
+      (body) => { seen = JSON.stringify(body); return say('Here is the model.'); },
+    ];
+    await turn({ message: 'What does the model hold now?' });
+    expect(seen, 'the control: the state read reached the model').toContain('awaiting_your_approval');
+    expect(seen).not.toContain('Record the current level');
+  }, 180_000);
+
+  // ⛔ AIQ CHANGES_REQUIRED on #2373: the level must be bound to the GOAL, in the target's own statement. Paul's exact
+  // answer (R3 `accept-paul.mjs` ANSWER) holds three £ amounts; only the one written as the goal's level today may ride.
+  const PAUL = 'We have about £180k in the bank and spend roughly £45k a month, so about 4 months of runway. We have secured £0 so far and need at least £1 million.';
+  const fundingSeed = () => {
+    const g = seedGraph() as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[]; goal_node_id: string };
+    return {
+      ...g,
+      nodes: g.nodes.map((n) => (n.id === 'goal_mrr' ? { id: 'goal_mrr', kind: 'goal', label: 'securing funding', goal_threshold_unit: '£' } : n)),
+    };
+  };
+  const proposeFunding = (today: number) => {
+    script = [
+      () => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 1000000, unit: '£', rationale: 'Paul stated his target.', current_level: { value: today, unit: '£' } }),
+      () => say('Shall I record it?'),
+    ];
+    return turn({ message: PAUL });
+  };
+  for (const [today, name] of [[180000, 'cash in the bank (£180k)'], [45000, 'monthly spend (£45k)']] as const) {
+    it(`RED: Paul's answer — ${name} as today's level → refused, NOTHING prepared`, async () => {
+      graphOf.set(SCENARIO, fundingSeed());
+      const t1 = await proposeFunding(today);
+      const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+      expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'current_level_not_bound' }));
+      expect(approveChipOf(t1)).toEqual([]);
+    }, 180_000);
+  }
+  // ⛔ A DECIMAL IS NOT A SENTENCE END (MG SUCCESSOR #75 5918338227, measured on staging `d3d28031`): with Paul's real
+  // target, "£1.2m", the level's quote was cut at "£1." ("…need at least £1"), so the target was not in its statement and
+  // his own £0 was refused `current_level_not_bound`: no card, so the funding goal had no today's level (DR row 4 P1).
+  for (const message of [
+    'We have secured £0 so far and need at least £1.2m.',
+    'We have about £180k in the bank and spend roughly £45k a month, so about 4 months of runway. We have secured £0 so far and need at least £1.2m.',
+  ]) {
+    it(`RED: "${message.slice(-52)}" → his £0 secured rides the £1.2m target card`, async () => {
+      graphOf.set(SCENARIO, fundingSeed());
+      script = [
+        () => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 1200000, unit: '£', rationale: 'Paul stated his target.', current_level: { value: 0, unit: '£' } }),
+        () => say('Shall I record it?'),
+      ];
+      const t1 = await turn({ message });
+      const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+      expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+      expect(approveChipOf(t1)).toHaveLength(1);
+    }, 180_000);
+  }
+
+  it('CONTROL: Paul\'s answer — his stated £0 secured rides the target card (the positive control)', async () => {
+    graphOf.set(SCENARIO, fundingSeed());
+    const t1 = await proposeFunding(0);
+    const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+    expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(approveChipOf(t1)).toHaveLength(1);
   }, 180_000);
 });

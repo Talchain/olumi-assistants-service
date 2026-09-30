@@ -194,6 +194,12 @@ export const NodeV3 = z.object({
   label: z.string(),
   /** Optional description */
   description: z.string().optional(),
+  /**
+   * Stable entity reference (`O2`, `F1`, `OC1` …) — display identity that never renumbers and is never reused
+   * (`orchestrator-v5/graph/entity-refs.ts`). Assigned by the graph writers before they hash; a malformed value is
+   * dropped here and re-issued there, never a reason to refuse a graph.
+   */
+  ref: z.string().regex(/^(OC|G|O|F|R|D|A)[1-9][0-9]{0,8}$/).optional().catch(undefined),
   /** Quantitative data for factor nodes */
   observed_state: ObservedStateV3.optional(),
   /** Factor category (V12.4+): controllable, observable, external - only for factor nodes */
@@ -251,6 +257,19 @@ export const NodeV3 = z.object({
    * (contract-field-guard `stripped:cee.NodeV3:quantity_frame`). A malformed value is dropped, never a reason to refuse.
    */
   quantity_frame: QuantityFrame.optional().catch(undefined),
+  /**
+   * ⭐ WHICH UNIT THIS QUANTITY IS READ IN, AND WHO READ IT (`@talchain/schemas` 0.67.0 `NodeV3Schema.unit_reading`, MG;
+   * PTL A — Paul's funding goal read in GBP from "deals between £1-2m"; P0 SHARED DATA 5914707462, AIQ 5914471584).
+   * A READING, never a figure: no value, level, target or cap, and on its own it never makes a goal target-testable.
+   * Declared because `NodeV3` strips undeclared keys: without it a construction writer's reading would be lost on the
+   * register write. Out of the analysis hash (its allow-list), in the identity hash like any node content. A malformed
+   * reading is dropped, never a reason to refuse the graph.
+   */
+  unit_reading: z.object({
+    unit: z.string().min(1).max(40),
+    source: z.enum(['olumi_reading', 'user_stated']),
+    source_quote: z.string().min(1).max(500),
+  }).strict().optional().catch(undefined),
   /**
    * ⛔ WHO STATED THE GOAL TARGET, AND THE TARGET THEY STATED (goal nodes; written by the UI's register).
    *
@@ -634,7 +653,14 @@ export const EdgeProvenanceV3 = z.object({
     per_source_change_unit: z.string(),
     strength_mean: z.number().finite(),
     strength_mean_frame: z.literal("edge_strength"),
+    /** A4: `amount` is one end of this range the user wrote ("£1-2m"); said with it, never alone. Malformed: dropped. */
+    stated_range: z.object({ low: z.number().finite(), high: z.number().finite(), text: z.string().min(1), end: z.enum(["low", "high"]) }).optional().catch(undefined),
   }).optional().catch(undefined),
+  /**
+   * The link holds BY DEFINITION, checked at construction (`definitionalLink`: ±1 in one unit, on the drafter's word; DL
+   * #75 5916504679), so its size is not Olumi's guess. Only `true` or absent; anything else is dropped.
+   */
+  definitional: z.literal(true).optional().catch(undefined),
 }).passthrough(); // CIL Phase 0: preserve additive fields
 export type EdgeProvenanceV3T = z.infer<typeof EdgeProvenanceV3>;
 
@@ -964,6 +990,11 @@ export const GraphV3 = z.object({
    * compiled constraint nodes when present.
    */
   goal_constraints: z.array(GoalConstraintSchema).optional(),
+  /**
+   * The highest stable entity ref number ever issued per prefix (`entity-refs.ts`), so a retired ref is never
+   * reissued. A counter, not content: excluded from the identity hash and absent from the analysis projection.
+   */
+  ref_high_water: z.record(z.string(), z.number().int().nonnegative().max(999_999_999)).optional().catch(undefined),
 });
 export type GraphV3T = z.infer<typeof GraphV3>;
 

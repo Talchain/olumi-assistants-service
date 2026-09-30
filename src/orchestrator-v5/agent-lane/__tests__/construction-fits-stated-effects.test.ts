@@ -39,7 +39,7 @@ function draft(stated: boolean): Rec {
   };
 }
 
-async function build(candidate: unknown): Promise<Rec> {
+async function build(candidate: unknown, brief: string = MRR): Promise<Rec> {
   let stored: string | undefined;
   const dispatch: InternalDispatch = async (path, body) => {
     if (path.endsWith('/graph/register')) {
@@ -49,7 +49,7 @@ async function build(candidate: unknown): Promise<Rec> {
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: null } };
   };
   const call: CallStructuredModel = async () => ({ text: JSON.stringify(candidate) });
-  const result = await buildModelFromBrief('7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d', MRR, dispatch, call) as Rec;
+  const result = await buildModelFromBrief('7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d', brief, dispatch, call) as Rec;
   expect(result.ok, JSON.stringify(result).slice(0, 600)).toBe(true);
   return GraphV3.parse(JSON.parse(stored!)) as unknown as Rec;
 }
@@ -60,8 +60,16 @@ const linkInto = (g: Rec, label: string): Rec => {
 };
 
 describe('construction fits a user-stated size by widening its target', () => {
-  it('⭐ RED (run 4 shape, real build): "£49 per subscriber" → the saved MRR frame is widened and the stated link is in contract', async () => {
+  // ⛔ A stated size is the user's only where the brief writes it ABOUT THIS LINK (#2389; P0 PARTNER's HARD condition,
+  // AIQ). Run 4's brief writes £49 only as the Pro plan PRICE, so its drafter's "£49 per subscriber" is Olumi's derivation
+  // (row below). This row's brief states the link itself, so the frames-v1 widening is tested on a size that IS the user's.
+  it('RED (run 4 brief): £49 written only as the price → "£49 per subscriber" on subscribers → MRR is Olumi\'s, not the user\'s', async () => {
     const g = await build(draft(true));
+    expect(linkInto(g, 'Paying subscribers').provenance?.magnitude).not.toBe('user_stated');
+  });
+
+  it('⭐ RED (run 4 shape, real build): "£49 per subscriber" → the saved MRR frame is widened and the stated link is in contract', async () => {
+    const g = await build(draft(true), `${MRR} Each paying subscriber adds £49 to MRR.`);
     expect(linkInto(g, 'Paying subscribers').provenance?.magnitude, 'PRECONDITION: the link carries the stated size').toBe('user_stated');
     expect(Math.abs(linkInto(g, 'Paying subscribers').strength.mean)).toBeLessThanOrEqual(1);
     expect(goal(g).goal_threshold_cap_provenance).toBe('stated_effect_fit');

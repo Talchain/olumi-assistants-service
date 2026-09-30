@@ -174,7 +174,7 @@ import type {
 
 import { blockerIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { CanonicalAnalysisState } from '../context/canonical-analysis-state.js';
-import type { FreshnessDerivation } from '../context/freshness.js';
+import type { FreshnessDerivation, FreshnessReason } from '../context/freshness.js';
 import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
@@ -1116,9 +1116,11 @@ export function composeAnalysisStateV1(
 export function projectAnalysisBlocksForRunBinding(
   blocks: OlumiResponse['blocks'],
   state: AnalysisStateV1,
+  freshnessReason?: FreshnessReason,
 ): OlumiResponse['blocks'] {
   const reason = state.leader_claim.withheld_reason;
-  if (reason === WITHHELD_RUN_IDENTITY_CONFLICT
+  if (freshnessReason === 'goal_unit_changed' || freshnessReason === 'goal_snapshot_unverified'
+    || reason === WITHHELD_RUN_IDENTITY_CONFLICT
     || state.contradictions.includes('fact_status_success_but_degraded_newer')) {
     return blocks.filter((block) => block.type !== 'analysis_result');
   }

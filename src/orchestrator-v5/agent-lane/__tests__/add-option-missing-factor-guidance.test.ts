@@ -8,9 +8,9 @@
  * with NOTHING the model represents must never be pushed onto an unrelated factor.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { planNewOption } from '../propose-new-option.js';
 import { AGENT_TOOLS } from '../runtime/agent-tools.js';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 
 const graph = [{ id: 'price', kind: 'factor', label: 'Pro plan price' }];
 
@@ -63,20 +63,17 @@ describe('the retry the refusal asks for is one the tool allows', () => {
   });
 
   it('RED: the Agent\'s instructions say the same for an option with nothing the model represents', () => {
-    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     // DL 5843303596: the missing factor is added in the same change; an unrelated link is still never made.
-    expect(route).toContain('If part of what an option does has no factor in the model, add that factor IN THE SAME CHANGE through `new_factors`');
-    expect(route).toContain('Never link an option to an unrelated factor instead.');
-    expect(route).not.toContain('offer to add that factor first');
+    expect(HOST_TOOL_CONTRACT).toContain('If part of what an option does has no factor in the model, add that factor IN THE SAME CHANGE through `new_factors`');
+    expect(HOST_TOOL_CONTRACT).toContain('Never link an option to an unrelated factor instead.');
+    expect(HOST_TOOL_CONTRACT).not.toContain('offer to add that factor first');
   });
 
   it('RED (#1953 review B1): the instructions never add an option that would only repeat today\'s values — it would vanish into carrying on as now', () => {
-    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route).toContain('unless what it would set there is what the model already has today (for example keeping a price at its current level): then it could not be told apart from carrying on as now, so do not add it');
+    expect(HOST_TOOL_CONTRACT).toContain('unless what it would set there is what the model already has today (for example keeping a price at its current level): then it could not be told apart from carrying on as now, so do not add it');
   });
 
   it('(#1953 review N1) "add them now" still asks when which way an option pushes a factor is unclear', () => {
-    const route = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(route).toContain('do not first ask what they do, unless which way it pushes a factor is unclear');
+    expect(HOST_TOOL_CONTRACT).toContain('do not first ask what they do, unless which way it pushes a factor is unclear');
   });
 });

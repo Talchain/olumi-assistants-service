@@ -233,7 +233,13 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // against the PUBLISHED tarballs (sha1 `0089b2c3…` → `26500d2b…`): the FILE SET naming `edge_strength_edit` is
     // identical (the same six files), and 0 changed lines name a strength or a band (the diff is the node vocabulary,
     // the generated constants, the adoption manifest and package.json).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.64.0');
+    //
+    // 0.64.0 → 0.68.0 (schemas #75/#77/#76: TEMPORAL range, unit reading + stable refs, SC-24; tag `v0.68.0`, main
+    // `fcdb0952`), RE-DERIVED on 30 Sep against the PUBLISHED tarballs (sha1 `26500d2b…` → `5a401a9a…`): the FILE SET
+    // naming `edge_strength_edit` is identical (the same six files); `enums.*` and `turn-payload.js` are byte-unchanged.
+    // Of the changed lines, 3 name a strength: an IMPORT LIST in `fixtures/index.js` (appends UnitReading/EntityRef/
+    // RefHighWater schemas) and one SC-24 input-row fixture (`field: 'strength'`), neither the member nor its band.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.68.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

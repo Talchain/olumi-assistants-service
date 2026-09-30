@@ -149,6 +149,7 @@ import {
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { assignEntityRefs } from "../orchestrator-v5/graph/entity-refs.js";
 import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
@@ -706,6 +707,9 @@ export default async function route(app: FastifyInstance) {
       // baseline", i.e. observe-only. That is the correct degrade: a read
       // failure must not start refusing registrations it cannot adjudicate.
       let baseGraphForInvariants: unknown;
+      // Stable entity refs (`graph/entity-refs.ts`) on the bytes this route hashes AND on the bytes its replay check
+      // re-derives — one helper, one base, so a lost-response retry still matches its own committed request hash.
+      const withEntityRefs = <G,>(g: G): G => assignEntityRefs(g, baseGraphForInvariants).graph;
       try {
         const base = await store.loadGraph(scenarioId);
         baseGraphForInvariants = base;
@@ -860,11 +864,11 @@ export default async function route(app: FastifyInstance) {
           try {
             const committed = await store.readCommittedTurn(scenarioId, registrationTurnId(scenarioId, operationId));
             if (committed === null) return false;
-            const bytes = projectGraphForPersistence(graphToRegister, {
+            const bytes = withEntityRefs(projectGraphForPersistence(graphToRegister, {
               scenarioId,
               turnClass: "direct_answer",
               source: "graph_registration",
-            });
+            }));
             return committed.request_hash === registrationRequestHash(bytes, brief.value);
           } catch {
             return false;
@@ -978,11 +982,11 @@ export default async function route(app: FastifyInstance) {
       // which a graph is persisted". Hashing before it would advertise an
       // identity for bytes we do not store, which is the exact ordering defect
       // `commit.ts` was restructured to close.
-      const graphForStore = projectGraphForPersistence(graphToRegister, {
+      const graphForStore = withEntityRefs(projectGraphForPersistence(graphToRegister, {
         scenarioId,
         turnClass: "direct_answer",
         source: "graph_registration",
-      });
+      }));
 
       const turnId = registrationTurnId(scenarioId, operationId);
       const requestHash = registrationRequestHash(graphForStore, brief.value);

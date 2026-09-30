@@ -13,10 +13,12 @@
  */
 import { readRatifiedConstraints, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 import {
+  OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
   PLACEHOLDER_PARTS_REASON,
   optionIdOf,
   placeholderPartsFinding,
+  type PlaceholderPartsFinding,
 } from '../../orchestrator/context/placeholder-parts.js';
 import { log } from '../../utils/telemetry.js';
 import { limitCheckAsks } from './limited-level-ask.js';
@@ -64,6 +66,29 @@ const PARTS_LIMIT_SENTENCES: ReadonlyMap<string, string> = new Map([
   [PARTS_IDENTITY_UNMODELLED_REASON, 'the model cannot yet combine its parts the way they really combine.'],
 ]);
 
+/**
+ * ⛔ B6's words and its ONE question, per arm (AIQ #75 5916187873 (a)): true for that trigger only, never a generic
+ * "couldn't check", and never "checked against …" ((b): a verdict resting on Olumi's guess is not a check). A label the
+ * graph lacks leaves the arm unsaid, never guessed.
+ */
+function guessWords(
+  f: PlaceholderPartsFinding,
+  labelOf: (id: unknown) => string | null,
+  target: string | null,
+): { why: string; ask: string } | null {
+  if (f.arm === 'link' && f.link !== undefined) {
+    const [x, y] = [labelOf(f.link.from), labelOf(f.link.to)];
+    return x === null || y === null ? null
+      : { why: `it depends on how strongly ${q(x)} moves ${q(y)}, which Olumi estimated.`, ask: `How much does ${q(x)} change ${q(y)}?` };
+  }
+  if (target === null) return null;
+  if (f.arm === 'level') return { why: `it starts from Olumi’s estimate of today’s ${q(target)}.`, ask: `What is ${q(target)} today?` };
+  if (f.arm === 'point') {
+    return { why: `it uses a single Olumi figure for ${q(target)}.`, ask: `What’s each option’s likely range for ${q(target)}?` };
+  }
+  return null;
+}
+
 const andList = (xs: readonly string[]): string =>
   xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 
@@ -77,10 +102,10 @@ const andList = (xs: readonly string[]): string =>
 function withheldOptionsFor(
   graph: unknown,
   targetId: string | null,
-): { labels: string[]; byReason: Map<string, string[]>; asks: string[] } {
+): WithheldOptions {
   const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
   const edges = (graph as { edges?: unknown } | null | undefined)?.edges;
-  if (targetId === null || !Array.isArray(nodes)) return { labels: [], byReason: new Map(), asks: [] };
+  if (targetId === null || !Array.isArray(nodes)) return NONE_WITHHELD();
   const recs = nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object');
   const links = Array.isArray(edges) ? edges.filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object') : [];
   const labelOf = (id: unknown): string | null => {
@@ -88,21 +113,37 @@ function withheldOptionsFor(
     return typeof l === 'string' && l.trim() !== '' ? l.trim() : null;
   };
   const target = labelOf(targetId);
-  const labels: string[] = [];
-  const byReason = new Map<string, string[]>();
-  const asks: string[] = [];
+  const out = NONE_WITHHELD();
   for (const o of recs.filter((n) => n.kind === 'option')) {
     const finding = placeholderPartsFinding(targetId, recs, links, [o]);
     const label = labelOf(optionIdOf(o));
     if (finding === null || label === null) continue;
-    labels.push(label);
-    byReason.set(finding.reason, [...(byReason.get(finding.reason) ?? []), label]);
+    out.labels.push(label);
+    if (finding.reason === OLUMI_GUESS_LIMIT_REASON) {
+      const words = guessWords(finding, labelOf, target);
+      if (words === null) continue;
+      out.guesses.set(words.why, [...(out.guesses.get(words.why) ?? []), label]);
+      out.guessAsk ??= words.ask;
+      continue;
+    }
+    out.byReason.set(finding.reason, [...(out.byReason.get(finding.reason) ?? []), label]);
     const part = finding.reason === PLACEHOLDER_PARTS_REASON ? labelOf(finding.partId) : null;
     const ask = part !== null && target !== null ? `How much does ${q(part)} change ${q(target)}?` : null;
-    if (ask !== null && !asks.includes(ask)) asks.push(ask);
+    if (ask !== null && !out.asks.includes(ask)) out.asks.push(ask);
   }
-  return { labels, byReason, asks };
+  return out;
 }
+
+interface WithheldOptions {
+  labels: string[];
+  byReason: Map<string, string[]>;
+  asks: string[];
+  /** B6: the options withheld for resting on Olumi's guess, by their arm's words (AIQ 5916187873 (a)). */
+  guesses: Map<string, string[]>;
+  /** B6's ONE question: the first withheld option's arm's ask. */
+  guessAsk?: string;
+}
+const NONE_WITHHELD = (): WithheldOptions => ({ labels: [], byReason: new Map(), asks: [], guesses: new Map() });
 
 /** {@link withheldOptionsFor} that never throws: a failure costs only the per-option words and asks, never the rows. */
 function withheldOptionsOrNone(graph: unknown, targetId: string | null): ReturnType<typeof withheldOptionsFor> {
@@ -110,7 +151,7 @@ function withheldOptionsOrNone(graph: unknown, targetId: string | null): ReturnT
     return withheldOptionsFor(graph, targetId);
   } catch (err) {
     log.warn({ event: 'agent_lane.limit_withheld_options_failed', err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the options withheld on a limit could not be read; the row goes without them');
-    return { labels: [], byReason: new Map(), asks: [] };
+    return NONE_WITHHELD();
   }
 }
 
@@ -137,10 +178,10 @@ function sentenceFor(label: string, state: LimitCheck['state'], reason: string |
 }
 
 export const LIMIT_CHECKS_NOTE =
-  'How each of the user’s limits was checked in this run. Say it only with its sentence here. A limit checked against '
-  + 'Olumi’s estimates WAS checked: never call it not checkable or unchecked, and never ask for a way to make it checkable. '
-  + 'Only a limit whose state is unscored cannot be checked yet, and only the options its sentence names could not be '
-  + 'checked on it. Where a limit has an ask, ask it once, in its words, after its sentence.';
+  'How each of the user’s limits was checked in this run. Say it only with its sentence here. Where its sentence says a '
+  + 'limit is not shown for an option, give no chance for it, never say it is met or breached, and never say it was '
+  + 'checked against anything. Only the options its sentence names were not checked on it. Where a limit has an ask, '
+  + 'ask it once, in its words, after its sentence.';
 
 /** MG's one question per limit on this graph, by `constraint_id`. A producer failure costs only the asks, never the rows. */
 function asksByLimit(graph: unknown): ReadonlyMap<string, string> {
@@ -182,17 +223,32 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
       && (OFF_SCALE_LIMIT_REASONS.has(row.reason) || PARTS_LIMIT_SENTENCES.has(row.reason));
     const ask = row.state === 'scored' || levelCannotHelp ? undefined : asks.get(row.constraint_id);
     // R-c per option: a row the options checked, with some options' own check withheld — say which, and ask once. An
-    // unscored row checked no option, so it names none (its own sentence already says it could not be checked).
-    const perOption = row.state === 'unscored'
-      ? { labels: [], byReason: new Map<string, string[]>(), asks: [] }
-      : withheldOptionsOrNone(graph, limit?.node_id ?? null);
+    // unscored row checked no option, so it names none (its own sentence already says it could not be checked)...
+    const perOptionRow = row.state !== 'unscored' || row.reason === PLACEHOLDER_PARTS_REASON
+      || row.reason === PARTS_IDENTITY_UNMODELLED_REASON || row.reason === OLUMI_GUESS_LIMIT_REASON;
+    const perOption = perOptionRow ? withheldOptionsOrNone(graph, limit?.node_id ?? null) : NONE_WITHHELD();
+    // ...unless B6 withheld one of its options (AIQ 5916187873): then every option was withheld PER OPTION, for its own
+    // reason, and the row says each one — never one option's reason as if it were every option's.
+    if (row.state === 'unscored' && perOption.guesses.size === 0) {
+      perOption.labels.length = 0;
+      perOption.byReason.clear();
+      perOption.asks.length = 0;
+    }
     const why = [...PER_OPTION_WHY].filter(([reason]) => perOption.byReason.has(reason)).map(([reason, [one, many]]) => {
       const named = perOption.byReason.get(reason)!;
       return `For ${andList(named.map(q))} it couldn’t be checked: ${named.length === 1 ? one : many}`;
     });
-    const say = [sentenceFor(label, row.state, row.reason), ...why].join(' ');
+    const guessed = [...perOption.guesses].map(([words, named]) => `For ${andList(named.map(q))} it isn’t shown: ${words}`);
+    // B6 supersedes B5's "checked against Olumi's estimates" (AIQ 5916187873): with an option withheld for Olumi's guess,
+    // the row no longer claims a check against those estimates, and Olumi's level ask (which says it would be) yields to
+    // the ONE question of the first withheld option's arm.
+    const b6 = perOption.guesses.size > 0;
+    const rowSays = !b6 ? [sentenceFor(label, row.state, row.reason)]
+      : row.state === 'unscored' ? [`${q(label)} isn’t shown for any option.`]
+        : row.state === 'estimate_only' && row.reason === 'level_olumi_estimate' ? [] : [sentenceFor(label, row.state, row.reason)];
+    const say = [...rowSays, ...why, ...guessed].join(' ');
     // The link-size questions are MG's ask, never the sentence's (one wording, one producer): after the level ask.
-    const allAsks = [...(ask !== undefined ? [ask] : []), ...perOption.asks].join(' ');
+    const allAsks = [...(ask !== undefined && !b6 ? [ask] : []), ...(perOption.guessAsk !== undefined ? [perOption.guessAsk] : []), ...perOption.asks].join(' ');
     out.push({
       constraint_id: row.constraint_id, limit: label, state: row.state, say,
       ...(allAsks !== '' ? { ask: allAsks } : {}),
