@@ -17,6 +17,11 @@
  * the target through a placeholder has ITS P withheld, with the per-option reason and ask; the row folds over the other
  * options and is withheld for its parts only when none is left. The rows below that pinned the per-limit fold (no
  * baseline, the whole row `unscored`, no ask) are re-pinned to that rule, each saying so. Rows: `placeholder-parts-per-option-a3`.
+ *
+ * ⛔ B6 SUPERSEDES R-e AND THE "SIZED BY OLUMI → FOLDS NORMALLY" CONTROLS (AIQ #75 5916187873; DL 5915507578 item 1):
+ * a limit P resting on a link Olumi sized, on Olumi's (non-definitional) level, or on Olumi's single point is Olumi's
+ * guess, not a check, and is withheld per option (`limit-rests-on-olumi-guess.test.ts`). Rows whose AXIS is R-c's
+ * placeholder rule keep testing it on the user's-level twin (`usersLevel`) and assert the placeholder reason by name.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -25,7 +30,7 @@ import {
   deriveConstraintVerdict,
   readRatifiedConstraints,
 } from '../constraint-feasibility.js';
-import { targetMovedOnlyThroughPlaceholderParts } from '../placeholder-parts.js';
+import { placeholderMovedOptions, targetMovedOnlyThroughPlaceholderParts } from '../placeholder-parts.js';
 import { levelLimitBaselineNodeIds } from '../../../orchestrator-v5/tools/handlers/level-limit-baseline.js';
 import { limitChecksForAgent } from '../../../orchestrator-v5/agent-lane/limit-checks.js';
 
@@ -67,6 +72,13 @@ function cloudWith(frame: 'level' | 'change_abs', edit?: (g: Json) => void): { g
   limit.value_frame = frame;
   edit?.(graph);
   return { graph, options: optionsOf(graph) };
+}
+
+/** B6's other inputs made the user's: the limited node's level is theirs, so only the link rules speak. */
+function usersLevel(graph: Json, nodeId: string): Json {
+  const g = structuredClone(graph);
+  (g.nodes as Json[]).find((n) => n.id === nodeId)!.observed_state.source = 'user';
+  return g;
 }
 
 /** A PLoT response in which ISL SCORED the limit on every option, decision-grade, `frame_verdict: 'scored'`. */
@@ -120,9 +132,9 @@ describe('the ONE predicate (targetMovedOnlyThroughPlaceholderParts)', () => {
     const { graph, options } = journeyCPartsOnly('change_abs');
     expect(on(graph, options, BUDGET_LABEL)).toBe('parts_links_placeholder');
   });
-  it('R-e: cloud downtime, moved only through parts on Olumi-sized links in weeks → not withheld', () => {
+  it('B6 SUPERSEDES R-e (AIQ 5916187873 (i)): cloud downtime, moved only through parts on Olumi-sized links in weeks → Olumi\'s guess, not a placeholder', () => {
     const { graph, options } = cloudWith('change_abs');
-    expect(on(graph, options, DOWNTIME_LABEL)).toBeNull();
+    expect(on(graph, options, DOWNTIME_LABEL)).toBe('limit_rests_on_olumi_guess');
   });
   it('(ii): the same sized links, but the target declares a nonlinear identity → parts_identity_unmodelled', () => {
     const { graph, options } = cloudWith('change_abs', (g) => {
@@ -247,7 +259,19 @@ describe('R-c on journey A (served 17d1): the churn limit moved by price only th
   const fold = (g: Json) => rowFor(g, optionsOf(g), CHURN_LIMIT);
   /** Per option (AIQ 5900908629): the options whose own churn P is withheld. */
   const withheld = (g: Json) => [...(collectLimitLevelOwners(g, readRatifiedConstraints(g), optionsOf(g)).placeholderMovedOptionIds.get(CHURN_LIMIT) ?? [])].sort();
+  /** Per option, WHY (R-c's placeholder vs B6's guess), so a re-pin keeps naming the rule it tests. */
+  const why = (g: Json) => Object.fromEntries(placeholderMovedOptions(churnId(), g.nodes, g.edges, optionsOf(g)));
   const PRICE_OPTIONS = ['increase_price_to_54', 'increase_price_to_59'];
+  /** Journey A with churn's 3% made the user's: B6's level arm is out, so R-c's rows keep their axis. */
+  const mine = (g: Json = A) => usersLevel(g, churnId());
+  /** A link the USER sized, as #2274 writes it: their source, no Olumi default. */
+  const userSized = (): Json => {
+    const g = sized('user_stated');
+    const e = (g.edges as Json[]).find((x) => x.to === churnId() && x.from === idOf(g, 'Pro plan price'))!;
+    e.provenance.source = 'user_specified';
+    delete e.defaulted;
+    return g;
+  };
 
   it('PRECONDITION (served bytes): churn\'s only way in is price_sensitivity, on links with no size; the churn limit is a "%" level', () => {
     const into = (A.edges as Json[]).filter((e) => e.to === churnId());
@@ -255,15 +279,19 @@ describe('R-c on journey A (served 17d1): the churn limit moved by price only th
     expect(into[0].provenance.magnitude).toBe('olumi_placeholder');
     expect((A.goal_constraints as Json[]).find((c) => c.constraint_id === CHURN_LIMIT)).toMatchObject({ unit: '%', value_frame: 'level' });
   });
-  it('PER OPTION — the churn baseline CARRIES (PLoT scores every option); both price options have their own P withheld', () => {
+  it('PER OPTION — the churn baseline CARRIES (PLoT scores every option); both price options have their own P withheld as placeholders', () => {
     expect(carried(A)).toBe(true);
-    expect(withheld(A)).toEqual(PRICE_OPTIONS);
+    expect(withheld(mine())).toEqual(PRICE_OPTIONS);
+    expect(why(mine())).toEqual({ increase_price_to_54: 'parts_links_placeholder', increase_price_to_59: 'parts_links_placeholder' });
+    // B6 (ii), as served: keep-current's P is Olumi's 3% against the 4% limit, so it is withheld too (AIQ 5916187873 (c)).
+    expect(why(A)).toEqual({ ...why(mine()), keep_current_49_price: 'limit_rests_on_olumi_guess' });
   });
-  it('PER OPTION — the fold reads only the option no placeholder moves (keep current, Olumi\'s 3%): estimate_only, never a price option\'s placeholder P', () => {
-    expect(fold(A)).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
+  it('PER OPTION — the fold reads only the option no placeholder moves (keep current, the user\'s 3% in the twin): scored, never a price option\'s placeholder P', () => {
+    expect(fold(mine())).toEqual({ constraint_id: CHURN_LIMIT, state: 'scored' });
+    expect(fold(A)).toMatchObject({ constraint_id: CHURN_LIMIT, state: 'unscored' });
     // With the two price options alone (none left to fold over), the row itself is withheld for its parts.
     const priceOnly = optionsOf(A).filter((o) => PRICE_OPTIONS.includes(o.option_id));
-    expect(rowFor(A, priceOnly, CHURN_LIMIT)).toEqual({ constraint_id: CHURN_LIMIT, state: 'unscored', reason: 'parts_links_placeholder' });
+    expect(rowFor(mine(), priceOnly, CHURN_LIMIT)).toEqual({ constraint_id: CHURN_LIMIT, state: 'unscored', reason: 'parts_links_placeholder' });
   });
   it('RULE 3(f) — the leader verdict never reads the placeholder\'s P as the limit met: unevaluated on churn, as for any unchecked limit', () => {
     const options = optionsOf(A);
@@ -274,8 +302,17 @@ describe('R-c on journey A (served 17d1): the churn limit moved by price only th
     expect(v.mayNameLeadingOption).toBe(false);
     expect(v.constraints.map((c) => c.constraint_id)).toEqual([CHURN_LIMIT]);
   });
-  it('RULE 3(f) CONTROL — the same run with the link sized: the leader is decided on the certified score (evaluated_feasible)', () => {
+  it('B6 SUPERSEDES RULE 3(f)\'s control (AIQ 5916187873 (i)): the link sized by OLUMI is its guess → unevaluated, the leader withheld', () => {
     const g = sized('olumi_estimate');
+    const options = optionsOf(g);
+    const ratified = readRatifiedConstraints(g);
+    const v = deriveConstraintVerdict(scoredEnvelope(CHURN_LIMIT, churnId(), options), ratified, options[1]!.option_id, undefined, new Set(),
+      collectLimitLevelOwners(g, ratified, options));
+    expect(v.state).toBe('unevaluated');
+    expect(v.mayNameLeadingOption).toBe(false);
+  });
+  it('RULE 3(f) CONTROL — the link sized by the USER and churn\'s level theirs: the leader is decided on the certified score (evaluated_feasible)', () => {
+    const g = mine(userSized());
     const options = optionsOf(g);
     const ratified = readRatifiedConstraints(g);
     const v = deriveConstraintVerdict(scoredEnvelope(CHURN_LIMIT, churnId(), options), ratified, options[1]!.option_id, undefined, new Set(),
@@ -283,17 +320,19 @@ describe('R-c on journey A (served 17d1): the churn limit moved by price only th
     expect(v.state).toBe('evaluated_feasible');
   });
   it('said per option, WITH the link-size question (AIQ 5900908629 supersedes 5882619314\'s no-ask: a size the user gives is written as theirs, #2274)', () => {
-    const row = fold(A)!;
-    const check = limitChecksForAgent(A, { per_limit: [row], joint: { state: row.state } } as never)!
+    const g = mine();
+    const row = fold(g)!;
+    const check = limitChecksForAgent(g, { per_limit: [row], joint: { state: row.state } } as never)!
       .find((c) => c.constraint_id === CHURN_LIMIT)!;
-    expect(check.say).toBe('‘Monthly churn’ was checked, but only against Olumi’s estimates, not figures you gave. For ‘Increase price to £59’ and '
+    expect(check.say).toBe('‘Monthly churn’ was checked against the figures in your model. For ‘Increase price to £59’ and '
       + '‘Increase price to £54’ it couldn’t be checked: those options move it through a link Olumi has not sized (a placeholder, not an estimate).');
     expect(check.withheld_for).toEqual(['Increase price to £59', 'Increase price to £54']);
     expect(check.ask).toMatch(/How much does ‘Pro plan price’ change ‘Monthly churn’\?$/);
   });
-  it('CONTROL — the same limit, the price → churn link SIZED by Olumi in churn\'s unit: it carries, and folds normally (estimate_only)', () => {
+  it('B6 SUPERSEDES this control (AIQ 5916187873 (i)+(ii)): the price → churn link SIZED by Olumi still carries, but every P rests on its guess → withheld', () => {
     expect(carried(sized('olumi_estimate'))).toBe(true);
-    expect(fold(sized('olumi_estimate'))).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
+    expect(fold(sized('olumi_estimate'))).toMatchObject({ constraint_id: CHURN_LIMIT, state: 'unscored', reason: 'limit_rests_on_olumi_guess' });
+    expect(new Set(Object.values(why(sized('olumi_estimate'))))).toEqual(new Set(['limit_rests_on_olumi_guess']));
   });
   it('PRECONDITION: churn is a percentage LEVEL on 100, so the sizer says a link into it in "percentage points"', () => {
     expect((A.nodes as Json[]).find((n) => n.id === churnId())!.observed_state.unit).toBe('% per month');
@@ -303,15 +342,20 @@ describe('R-c on journey A (served 17d1): the churn limit moved by price only th
     for (const unit of ['percent change', 'percentile rank', 'subscribers per month']) {
       const g = sized('olumi_estimate', 'percentage points');
       (g.nodes as Json[]).find((n) => n.id === churnId())!.observed_state.unit = unit;
-      expect(withheld(g), unit).toEqual(PRICE_OPTIONS);
+      expect(why(mine(g)), unit).toEqual({ increase_price_to_54: 'parts_links_placeholder', increase_price_to_59: 'parts_links_placeholder' });
     }
-    expect(withheld(sized('olumi_estimate', 'percentage points'))).toEqual([]);
+    // In churn's own unit the link is SIZED (no placeholder); B6 then names it Olumi's guess, never a placeholder.
+    expect(why(mine(sized('olumi_estimate', 'percentage points')))).toEqual({ increase_price_to_54: 'limit_rests_on_olumi_guess', increase_price_to_59: 'limit_rests_on_olumi_guess' });
   });
   it('a natural effect in the node\'s raw spelling ("% per month") is not what the sizer writes for a level on 100 → the price options are withheld', () => {
-    expect(withheld(sized('olumi_estimate', '% per month'))).toEqual(PRICE_OPTIONS);
+    expect(why(mine(sized('olumi_estimate', '% per month')))).toEqual({ increase_price_to_54: 'parts_links_placeholder', increase_price_to_59: 'parts_links_placeholder' });
   });
-  it('CONTROL — the link sized by the USER (user_stated): it carries, and folds normally', () => {
-    expect(carried(sized('user_stated'))).toBe(true);
-    expect(fold(sized('user_stated'))).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
+  it('CONTROL — the link sized by the USER and churn\'s level theirs: it carries, and nothing is withheld (scored)', () => {
+    expect(carried(userSized())).toBe(true);
+    expect(withheld(mine(userSized()))).toEqual([]);
+    expect(fold(mine(userSized()))).toEqual({ constraint_id: CHURN_LIMIT, state: 'scored' });
+  });
+  it('B6 (ii): the link sized by the USER, but churn\'s level Olumi\'s 3% → every option withheld for that level (AIQ 5916187873)', () => {
+    expect(new Set(Object.values(why(userSized())))).toEqual(new Set(['limit_rests_on_olumi_guess']));
   });
 });

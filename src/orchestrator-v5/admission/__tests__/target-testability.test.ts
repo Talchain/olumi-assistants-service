@@ -238,3 +238,54 @@ describe('the Agent reads it before any Run, and the post-write line says it', (
     expect(postWriteReadinessLine(FIX.mrr, { status: 'ready', may_run: true })).not.toContain("can't yet test");
   });
 });
+
+/**
+ * ⭐ A LINK THAT HOLDS BY DEFINITION IS NO GUESS — CHECKED, NEVER CLAIMED (DL #75 5916504679; R3 5916525389, its rows).
+ * R3's funding graph: every link into the goal user-sized except "Funding lost to distraction" → funding at −1 £ per £,
+ * Olumi's size. Construction types such a link `provenance.definitional` only when its own size proves it (#2386); this
+ * reader re-checks the stored edge, so a tag the size does not prove never lifts the cap, and it is never the question.
+ * `tagged` writes `strength_mean` = the edge's β, as the sizer writes every natural effect (`link-effect.ts` `natural()`).
+ */
+describe('a definitional link (money lost is money not raised) is no Olumi guess, only when its own size proves it', () => {
+  const F = JSON.parse(readFileSync(new URL('./fixtures/r3-funding-definitional-20260930.json', import.meta.url), 'utf8')).graph as Json;
+  const RISK = (e: Json) => e.from === 'funding_lost_distraction' && e.to === 'securing_funding';
+  const tagged = (edit?: (ne: Json, g: Json, e: Json) => void): Json => {
+    const g = structuredClone(F);
+    const e = g.edges.find(RISK);
+    e.provenance.definitional = true;
+    e.provenance.natural_effect.strength_mean = e.strength.mean;
+    edit?.(e.provenance.natural_effect, g, e);
+    return g;
+  };
+  const p5 = (g: Json) => { const v = targetTestabilityOf(g); return v.kind === 'not_testable' ? v.failures.filter((f) => f.precondition === 'P5') : []; };
+
+  it('PRECONDITION: untagged, the risk\'s −1 £ per £ is Olumi\'s guess on the goal\'s path, and it is the lever asked about', () => {
+    expect(F.edges.find(RISK).provenance).toMatchObject({ magnitude: 'olumi_estimate', natural_effect: { amount: -1, amount_unit: '£', per_source_change: 1, per_source_change_unit: '£' } });
+    expect(p5(F)).toEqual([expect.objectContaining({ code: 'goal_path_unsized', lever: expect.stringMatching(/distraction/i) })]);
+  });
+
+  it('GREEN: typed and proven (−1 £ per £; the goal and the risk in £; written for the β it holds) → no guess on the path', () => {
+    expect(p5(tagged())).toEqual([]);
+  });
+
+  it('RED (P0 PARTNER CR 5917993638): typed and proven, then β re-estimated −0.5 → −0.2 (a stale size) → the lever is asked again', () => {
+    expect(p5(tagged((_ne, _g, e) => { e.strength.mean = -0.2; })).map((f) => f.lever)).toEqual([expect.stringMatching(/distraction/i)]);
+  });
+
+  it('RED: typed, but the size says no β it was written for (no `strength_mean`) → still a guess (fails closed)', () => {
+    expect(p5(tagged((ne) => { delete ne.strength_mean; })).map((f) => f.lever)).toEqual([expect.stringMatching(/distraction/i)]);
+  });
+
+  it('RED (the DL\'s guard): typed, but the risk read in hours/week → still Olumi\'s guess', () => {
+    expect(p5(tagged((ne) => { ne.per_source_change_unit = 'hours/week'; })).map((f) => f.lever)).toEqual([expect.stringMatching(/distraction/i)]);
+  });
+
+  it('RED: typed, but −0.4 £ per £ → still a guess (a definition moves the target by exactly one unit)', () => {
+    expect(p5(tagged((ne) => { ne.amount = -0.4; })).map((f) => f.lever)).toEqual([expect.stringMatching(/distraction/i)]);
+  });
+
+  it('RED: typed and one-for-one, but the risk node itself is read in another unit → still a guess', () => {
+    const g = tagged((_ne, graph) => { graph.nodes.find((n: Json) => n.id === 'funding_lost_distraction').unit = 'hours/week'; });
+    expect(p5(g).map((f) => f.lever)).toEqual([expect.stringMatching(/distraction/i)]);
+  });
+});

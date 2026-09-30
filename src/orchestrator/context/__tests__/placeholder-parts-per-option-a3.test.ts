@@ -13,6 +13,10 @@
  *
  * The carrier rows read a SERVED PLoT body (`17d1cd3a.plot-response.json`, journey A) — every place an option's result on
  * a limit surfaces there — so the withhold is checked against the whole body, not the carriers the author thought of.
+ *
+ * ⛔ B6 SUPERSEDES THE "SCORED" ROWS AS SERVED (AIQ #75 5916187873): churn's 3% is Olumi's estimate and the feature-release
+ * link is Olumi's, so as captured every option's churn P rests on Olumi's guess and is withheld. AIQ's per-option
+ * placeholder rule is kept on the twin where those two inputs are Paul's (`mine`), and the served shape asserts B6.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -23,6 +27,7 @@ import {
   readRatifiedConstraints,
   withholdOptionLimitScores,
 } from '../constraint-feasibility.js';
+import { placeholderMovedOptions } from '../placeholder-parts.js';
 import { levelLimitBaselineNodeIds } from '../../../orchestrator-v5/tools/handlers/level-limit-baseline.js';
 import { limitChecksForAgent } from '../../../orchestrator-v5/agent-lane/limit-checks.js';
 
@@ -35,6 +40,15 @@ const CHURN = 'monthly_churn';
 const byLimitOf = (graph: Json, options: Json[]) =>
   collectLimitLevelOwners(graph, readRatifiedConstraints(graph.goal_constraints ?? REP1.goal_constraints), options).placeholderMovedOptionIds;
 const graphOf = (): Json => ({ ...structuredClone(REP1.graph), goal_constraints: structuredClone(REP1.goal_constraints) });
+/** The A3 twin with B6's inputs made Paul's: churn's 3% is his, and so is the feature-release → churn size. */
+const mine = (): Json => {
+  const g = graphOf();
+  (g.nodes as Json[]).find((n) => n.id === CHURN)!.observed_state.source = 'user';
+  const e = (g.edges as Json[]).find((x) => x.from === 'pro_feature_release' && x.to === CHURN)!;
+  e.provenance.source = 'user_specified';
+  delete e.defaulted;
+  return g;
+};
 
 /** PLoT scored churn ≤ 4% on every option it was sent, decision-grade (what the carried baseline makes possible). */
 function scoredEnvelope(optionIds: readonly string[], p = 1): Json {
@@ -71,8 +85,15 @@ describe('PRECONDITIONS — the captured request, read off its bytes', () => {
   });
 });
 
-describe('AIQ 5900908629 — the five rows on the rep1 request shape', () => {
-  const withheld = () => byLimitOf(graphOf(), REP1.options).get(CHURN_LIMIT) ?? new Set<string>();
+describe('AIQ 5900908629 — the five rows on the rep1 request shape (Paul\'s level and links: `mine`)', () => {
+  const withheld = () => byLimitOf(mine(), REP1.options).get(CHURN_LIMIT) ?? new Set<string>();
+
+  it('B6 AS SERVED (AIQ 5916187873): every option withheld — placeholders as placeholders, the rest for Olumi\'s guess', () => {
+    expect(Object.fromEntries(placeholderMovedOptions(CHURN, graphOf().nodes, graphOf().edges, REP1.options))).toEqual({
+      raise_pro_price_to_59: 'limit_rests_on_olumi_guess', raise_pro_price_to_54: 'limit_rests_on_olumi_guess',
+      c8342a91: 'limit_rests_on_olumi_guess', '7f996d9a': 'parts_links_placeholder', c0ce789c: 'parts_links_placeholder',
+    });
+  });
 
   it('⭐ raise_pro_price_to_59: scored (Paul\'s own strength is authored)', () => {
     expect(withheld().has('raise_pro_price_to_59')).toBe(false);
@@ -95,7 +116,7 @@ describe('AIQ 5900908629 — the five rows on the rep1 request shape', () => {
     expect(levelLimitBaselineNodeIds(g, g.goal_constraints, REP1.goal_node_id, REP1.options).has(CHURN)).toBe(true);
   });
   it('the row is NOT withheld for its parts: it folds over the three scored options (never unscored / parts_links_placeholder)', () => {
-    const g = graphOf();
+    const g = mine();
     const ratified = readRatifiedConstraints(g.goal_constraints);
     const ids = (REP1.options as Json[]).map((o) => o.option_id as string);
     const owners = collectLimitLevelOwners(g, ratified, REP1.options);
@@ -119,13 +140,13 @@ describe('AIQ 5900908629 — the five rows on the rep1 request shape', () => {
     expect(v.mayNameLeadingOption).toBe(false);
   });
   it('said: the two withheld options by name, and one question per unsized part', () => {
-    const g = graphOf();
-    const row = { constraint_id: CHURN_LIMIT, state: 'estimate_only' as const, reason: 'level_olumi_estimate' };
-    const check = limitChecksForAgent(g, { per_limit: [row], joint: { state: 'estimate_only' } } as never)!
+    const g = mine();
+    const row = { constraint_id: CHURN_LIMIT, state: 'scored' as const };
+    const check = limitChecksForAgent(g, { per_limit: [row], joint: { state: 'scored' } } as never)!
       .find((c) => c.constraint_id === CHURN_LIMIT)!;
     expect(check.withheld_for).toEqual(['Retention intervention for at-risk accounts', '£59 for new Pro customers; grandfather existing customers']);
     expect(check.say).toContain('For ‘Retention intervention for at-risk accounts’ and ‘£59 for new Pro customers; grandfather existing customers’ it couldn’t be checked: those options move it through a link Olumi has not sized (a placeholder, not an estimate).');
-    // The question is MG's ask, never the sentence's: after the level ask (Olumi's 3%), one per unsized part.
+    // The question is MG's ask, never the sentence's: one per unsized part (Paul's own level asks nothing).
     expect(check.say).not.toContain('How much');
     expect(check.ask).toMatch(/How much does ‘At-risk account retention intervention’ change ‘Monthly churn’\? How much does ‘Grandfather existing customers’ change ‘Monthly churn’\?$/);
     expect(check.say).not.toContain('Raise Pro Price');
@@ -136,7 +157,15 @@ describe('the whole carrier class, on a SERVED PLoT body (journey A 17d1: both p
   const A = read('tests/fixtures/cross-service/b5-per-limit/17d1cd3a.graph.json').graph as Json;
   const BODY = read('tests/fixtures/cross-service/b5-per-limit/17d1cd3a.plot-response.json');
   const optionsOfA = (A.nodes as Json[]).filter((n) => n.kind === 'option').map((n) => ({ option_id: n.id, interventions: n.interventions ?? {} }));
-  const byLimit = collectLimitLevelOwners(A, readRatifiedConstraints(A), optionsOfA).placeholderMovedOptionIds;
+  /** Journey A with churn's 3% made the user's (B6's level arm out), so these rows keep the placeholder carrier class. */
+  const A_MINE = structuredClone(A);
+  (A_MINE.nodes as Json[]).find((n) => n.label === 'Monthly churn')!.observed_state.source = 'user';
+  const byLimit = collectLimitLevelOwners(A_MINE, readRatifiedConstraints(A_MINE), optionsOfA).placeholderMovedOptionIds;
+
+  it('B6 AS SERVED (AIQ 5916187873 (c)): keep-current\'s P is Olumi\'s 3% against the 4% limit, so it is withheld too', () => {
+    const served = collectLimitLevelOwners(A, readRatifiedConstraints(A), optionsOfA).placeholderMovedOptionIds;
+    expect([...(served.get(CHURN_LIMIT) ?? [])].sort()).toEqual(['increase_price_to_54', 'increase_price_to_59', 'keep_current_49_price']);
+  });
   const out = withholdOptionLimitScores(structuredClone(BODY), byLimit);
   const entry = (id: string) => (out.option_comparison as Json[]).find((o) => o.option_id === id)!;
 

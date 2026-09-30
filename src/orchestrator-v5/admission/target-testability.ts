@@ -16,6 +16,7 @@
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
+import { asAnalysed, nodeUnitOf, olumiGuessedLink } from '../../orchestrator/context/placeholder-parts.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -54,16 +55,6 @@ export type TargetTestability =
  *   it). A structural link nobody sized carries no guess and is not a failure here.
  * A confirmed identity's ISL rules are checked by the Run, so that pass stays listed as unchecked.
  */
-const OLUMI_SIZED = /^olumi_/;
-/**
- * A link sized only by Olumi (R3 #2371 5914745577): an `olumi_*` magnitude, OR a plain `defaulted: true` size (~58% of
- * Olumi's served defaults carry no marker; m1's churn → subscribers-at-12-months is one, the link that turns a monthly
- * rate into a year's loss). The user's own size never is.
- */
-function olumiGuess(e: Rec): boolean {
-  const p = isRec(e.provenance) ? e.provenance : undefined;
-  return p?.source !== 'user_specified' && ((typeof p?.magnitude === 'string' && OLUMI_SIZED.test(p.magnitude)) || e.defaulted === true);
-}
 function sizedInGoalUnit(e: Rec, goalUnit: string | undefined): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
   const ne = isRec(p?.natural_effect) ? p!.natural_effect as Rec : undefined;
@@ -111,23 +102,6 @@ export function targetVerdictCapsOrdering(verdict: TargetTestability): boolean {
   return verdict.kind === 'not_testable' && verdict.failures.some((f) => CAPS_THE_ORDERING.has(f.code));
 }
 
-/**
- * The graph the Run computes on (P0 PARTNER #75 5916838445): a node the user kept out of the calculation
- * (`analysis_participation: 'retained_excluded'`, the exact literal `run-analysis-participation-guard.ts` acts on) and
- * every edge touching it are handed to PLoT absent, so they are never on the goal's path here either. The goal itself
- * is never dropped (the guard refuses that run instead).
- */
-function asAnalysed(graph: Rec & { nodes: unknown[] }): Rec & { nodes: unknown[] } {
-  const out = new Set(graph.nodes.filter((n) => isRec(n) && n.analysis_participation === 'retained_excluded' && n.kind !== 'goal')
-    .map((n) => (n as Rec).id));
-  if (out.size === 0) return graph;
-  return {
-    ...graph,
-    nodes: graph.nodes.filter((n) => !(isRec(n) && out.has(n.id))),
-    edges: Array.isArray(graph.edges) ? graph.edges.filter((e) => !(isRec(e) && (out.has(e.from) || out.has(e.to)))) : graph.edges,
-  };
-}
-
 export function targetTestabilityOf(input: unknown): TargetTestability {
   if (!isRec(input) || !Array.isArray(input.nodes)) return { kind: 'no_goal' };
   const graph = asAnalysed(input as Rec & { nodes: unknown[] });
@@ -170,7 +144,12 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links). An operand edge
     // INTO a confirmed identity is exact, not sized (R3 5914745577: `price → mrr`, `subscribers → mrr`).
     const exactInto = new Set(nodes.filter((n) => isRec(n.nonlinear_identity) && n.nonlinear_identity.stated_in_brief !== false).map((n) => n.id));
-    const guess = edges.find((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to) && olumiGuess(e));
+    // A link Olumi sized (R3 #2371 5914745577: an `olumi_*` magnitude, or a plain `defaulted: true` size — m1's churn →
+    // subscribers-at-12-months) that does not hold by definition: B6's ONE test (`olumiGuessedLink`), so the goal and a
+    // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
+    const unitOf = nodeUnitOf(nodes);
+    const guess = edges.find((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
+      && olumiGuessedLink(e, unitOf));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     const unconverted = identityForwarded ? undefined : into.find((e) => !sizedInGoalUnit(e, goalUnit));

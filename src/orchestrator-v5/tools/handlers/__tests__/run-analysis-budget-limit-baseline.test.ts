@@ -412,12 +412,13 @@ describe('AIQ REQUIRED row 1 (#72 5869646768) — C15 at the limit: the £30,000
 });
 
 describe('AIQ REQUIRED row 2 (#72 5869646768, B5) — WHOSE baseline: Olumi\'s £0 is estimate_only, the user\'s £0 is scored', () => {
-  it('C01 (spend £0 = cee_inference): the budget limit is estimate_only / level_olumi_estimate, "checked … only against Olumi\'s estimates"', async () => {
+  it('C01 (spend £0 = cee_inference): the budget limit is estimate_only / level_olumi_estimate; B6 SUPERSEDES "checked … only against Olumi\'s estimates" (AIQ 5916187873)', async () => {
     const graph = SERVED.c01;
     expect(nodeOf(graph, BUDGET_LABEL).observed_state.source).toBe('cee_inference');
     const result = await storedRunOf(graph, CAPTURED.c01);
     expect(budgetRowOf(result)).toEqual({ constraint_id: BUDGET_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
-    expect(budgetSayOf(graph, result)).toBe('‘Total initiative spend’ was checked, but only against Olumi’s estimates, not figures you gave.');
+    // The two options that SET the total do so at Olumi's single figure (arm (iii)); today's £0 is definitional ((c)).
+    expect(budgetSayOf(graph, result)).toBe('For ‘Features and Price Rise’ and ‘Additional Advertising’ it isn’t shown: it uses a single Olumi figure for ‘Total initiative spend’.');
   });
 
   it('C15 (spend £0 = user_override): the budget limit is scored, "checked against the figures in your model"', async () => {
@@ -435,13 +436,25 @@ describe('AIQ REQUIRED row 2 (#72 5869646768, B5) — WHOSE baseline: Olumi\'s �
     expect(budgetRowOf(result)).toEqual({ constraint_id: BUDGET_LIMIT, state: 'scored' });
   });
 
-  it('SCOPE (per option, AIQ 5900908629): on both runs churn folds over the options no placeholder moves (Olumi\'s level: estimate_only); the placeholder-moved options\' churn P is gone from the stored result — row 2 is bound to the budget limit by id', async () => {
+  it('B6 AS SERVED (AIQ 5916187873 (c)): churn\'s level is Olumi\'s 3%, so on both runs every option\'s churn P is withheld and the row is unscored', async () => {
     const CHURN_LIMIT = 'agent-lane:monthly_churn:<=';
     for (const k of ['c01', 'c15'] as const) {
       const result = await storedRunOf(SERVED[k], CAPTURED[k]);
-      const rows = result.constraint_verdict.per_limit as Json[];
-      expect(rows.find((r) => r.constraint_id === CHURN_LIMIT), k).toEqual({ constraint_id: CHURN_LIMIT, state: 'estimate_only', reason: 'level_olumi_estimate' });
+      expect((result.constraint_verdict.per_limit as Json[]).find((r) => r.constraint_id === CHURN_LIMIT), k).toMatchObject({ state: 'unscored' });
       const moved = collectLimitLevelOwners(SERVED[k], readRatifiedConstraints(SERVED[k]), optionsOf(SERVED[k])).placeholderMovedOptionIds.get(CHURN_LIMIT);
+      expect(moved?.size, k).toBe(optionsOf(SERVED[k]).length);
+    }
+  });
+
+  it('SCOPE (per option, AIQ 5900908629; on the twin where churn\'s 3% is the user\'s, so B6\'s level arm is out): churn folds over the options no placeholder moves; the placeholder-moved options\' churn P is gone from the stored result — row 2 is bound to the budget limit by id', async () => {
+    const CHURN_LIMIT = 'agent-lane:monthly_churn:<=';
+    for (const k of ['c01', 'c15'] as const) {
+      const served = structuredClone(SERVED[k]);
+      nodeOf(served, 'Monthly churn').observed_state.source = 'user';
+      const result = await storedRunOf(served, CAPTURED[k]);
+      const rows = result.constraint_verdict.per_limit as Json[];
+      expect(rows.find((r) => r.constraint_id === CHURN_LIMIT), k).toEqual({ constraint_id: CHURN_LIMIT, state: 'scored' });
+      const moved = collectLimitLevelOwners(served, readRatifiedConstraints(served), optionsOf(served)).placeholderMovedOptionIds.get(CHURN_LIMIT);
       expect(moved?.size ?? 0, k).toBeGreaterThan(0);
       // Whole-result scan: no entry for a withheld option still carries a churn P; a kept option still does (control).
       const hits: string[] = [];

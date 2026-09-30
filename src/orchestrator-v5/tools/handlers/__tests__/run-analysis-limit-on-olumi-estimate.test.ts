@@ -31,7 +31,9 @@ function graphWith(leaderChurn: Rec | undefined): Rec {
     nodes: [
       { id: 'goal', kind: 'goal', label: 'MRR' },
       { id: 'fac_price', kind: 'factor', label: 'Pro plan price' },
-      { id: 'fac_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.04, raw_value: 4, cap: 100, unit: '%' } },
+      // The user's own 4%: these rows pin who SETS churn. An unowned level would itself be Olumi's guess under B6 (ii)
+      // (AIQ #75 5916187873), withholding the holders' P before the setter is ever read.
+      { id: 'fac_churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.04, raw_value: 4, cap: 100, unit: '%', source: 'user' } },
       { id: 'opt_hold', kind: 'option', label: 'Keep £49', interventions: { fac_price: { value: 0.49, source: 'user_specified' } } },
       {
         id: 'opt_raise',
