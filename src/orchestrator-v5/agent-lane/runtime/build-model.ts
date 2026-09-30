@@ -1306,7 +1306,8 @@ export async function buildModelFromBrief(
   const sizeWritten = (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }): boolean =>
     figureTheUserWroteFor(value, unit, brief, { target: scope.target, others: scope.others, strict: true });
   // A4: the range the brief writes that size as one end of ("deals between £1-2m"), said with it (R3 C1/C2).
-  const sizeRangeEnd = (value: number, unit: unknown) => writtenRangeFor(value, unit, brief);
+  const sizeRangeEnd = (value: number, unit: unknown, scope: { source: string; sourceUnit: unknown; others: readonly string[] }) =>
+    writtenRangeFor(value, unit, brief, scope);
   // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
   // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
   // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).

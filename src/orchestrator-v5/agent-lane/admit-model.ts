@@ -41,6 +41,8 @@ import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/st
 import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
 import { sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+/** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
+export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
 import { goalLevelSentence } from '../goal-target/goal-level-reading.js';
 import {
@@ -2878,10 +2880,11 @@ export function admitCandidateModel(
    */
   sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean = () => false,
   /**
-   * ⭐ A4 (R3 C1/C2 5918513716): the range the brief writes a written size as ONE END of (`writtenRangeFor`, injected for
-   * the same reason). The size is then said with its range and read as a floor. Absent ⇒ none (the size reads as before).
+   * ⭐ A4 (R3 C1/C2 5918513716; AIQ 5919953251): the range the brief writes this LINK's size as one end of, in one span
+   * about the link's source (`writtenRangeFor`, injected for the same reason). The size is then said with its range, as a
+   * bound. Absent ⇒ none (the size reads as before).
    */
-  sizeRangeEnd: (value: number, unit: unknown) => StatedRangeEnd | null = () => null,
+  sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null = () => null,
 ): AdmittedModel {
   candidateModel = withQuantityFrames(candidateModel);
   const declared = new Set(candidateModel.options
@@ -2942,7 +2945,7 @@ function admitOnce(
   targetFigureWrittenAgain: (value: number, unit: unknown) => boolean,
   goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null,
   sizeWritten: (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }) => boolean,
-  sizeRangeEnd: (value: number, unit: unknown) => StatedRangeEnd | null,
+  sizeRangeEnd: (value: number, unit: unknown, scope: SizeRangeScope) => StatedRangeEnd | null,
 ): AdmittedModel {
   const { model: restatedModel, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
   // ⛔ A two-part product goal's rate is the user's own price when Olumi's rate only passes it on (shape 2,
@@ -3689,7 +3692,13 @@ function admitOnce(
       });
     const user_stated = l.provenance_source === 'user_specified' || (taggedTheirs && written);
     // A4: a size the brief writes only as one END of a range is said with that range (a user's own edit never is).
-    const range = user_stated && l.provenance_source !== 'user_specified' ? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit) : null;
+    const range = user_stated && l.provenance_source !== 'user_specified'
+      ? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
+        source: source.label,
+        sourceUnit: source.unit,
+        others: quantityLabels.filter((q) => q !== source.label),
+      })
+      : null;
     sizing.set(`${l.from}::${l.to}`, sizeLink({
       direction: l.direction,
       effect_amount: l.effect_amount,

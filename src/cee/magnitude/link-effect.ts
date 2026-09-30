@@ -490,10 +490,14 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
       const carried = natural(beta, per as number).natural_effect;
       // C1: the figure is said WITH the range it is one end of, never as "your £1m"; C2: a floor (or ceiling), "at least".
       const perWords = (per as number) === 1 ? unitAfterOne(sourceUnitWords(source, sourceFrame)) : `${fmt(per as number)} ${sourceUnitWords(source, sourceFrame)}`;
+      // The bound is the END × the link's SIGN on the goal (R3 5919768182, AIQ 5919953251): (low, +) and (high, −) are a floor,
+      // (low, −) and (high, +) a ceiling. A link not straight into the goal says the range and no bound word.
+      const floor = (range?.end === 'low') === (sign === 1);
+      const bound = target.kind !== 'goal' ? '.'
+        : `, so any figure that runs through this link is a ${floor ? 'floor: at least' : 'ceiling: at most'} that much.`;
       const range_words = range === undefined || carried === undefined ? undefined
         : `${sayFigure(Math.abs(amount as number), unitOf(target) ?? '')} per ${perWords} on "${source.label}" → "${target.label}" is the `
-          + `${range.end} end of your "${range.text}" range, so any figure that runs through this link is a `
-          + `${range.end === 'low' ? 'floor: at least' : 'ceiling: at most'} that much.`;
+          + `${range.end} end of your "${range.text}" range${bound}`;
       return {
         outcome: 'user_stated', mean: beta, std: sigma, magnitude: 'user_stated', statement, stated_strength: beta,
         ...(carried === undefined ? {} : {

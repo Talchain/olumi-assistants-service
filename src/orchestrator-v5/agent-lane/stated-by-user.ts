@@ -398,6 +398,11 @@ export interface EntityScope {
    *    "the user's, for any target". The user is asked.
    */
   readonly strict?: true;
+  /**
+   * ⭐ A4 (CODEX CEE BUDDY 5919834707, AIQ 5919953251): read ONLY the written amount that starts at this index — one span,
+   * never "the same figure anywhere". Opt-in, passed only by `writtenRangeFor`; every other door reads as before.
+   */
+  readonly at?: number;
 }
 
 /** A label's words, lower-cased, three characters or more ("Pro plan price" → pro, plan, price; "MRR" → mrr). */
@@ -444,22 +449,31 @@ export function factorTheUserNamed(
 }
 
 /**
- * ⭐ THE WRITTEN RANGE A FIGURE IS ONE END OF (A4, R3 C1/C2 5918513716, AIQ 5918523203): "deals between £1-2m" writes
- * £1,000,000 only as the LOW end of a range, so the size is said with its range ("£1,000,000 per deal, the low end of
- * your £1-2m range") and read as a floor, never as the user's single figure. `null` when the figure is no end of a
- * money range the text writes (in the unit's currency, `amountIs`).
+ * ⭐ THE WRITTEN RANGE A LINK'S SIZE IS ONE END OF (A4; R3 C1/C2 5918513716; the whole identity, AIQ 5919953251 + CODEX
+ * CEE BUDDY 5919834707): "deals between £1-2m" writes £1,000,000 only as the LOW end of a range, so the size is
+ * said with its range and read as a bound, never as the user's single figure. The SAME span must carry the whole identity:
+ *  · the end IS the size, in the target's unit and currency (`amountIs`, the currency-range reader's reading);
+ *  · the span is about the link's SOURCE — its countable, and no other quantity (`figureTheUserWroteFor`, strict, read at
+ *    that one span: "Angel investor outreach budgets range between £1-2m" is the angels', never the deals');
+ *  · a size PER ONE of that countable: a money source (a budget, a price) is not a per-one size.
+ * `null` otherwise: the size stays the user's point exactly as the #2389 door admits it, with no range words.
  */
 export function writtenRangeFor(
   value: number,
   unit: unknown,
   userText: string | null | undefined,
+  scope: { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] },
 ): { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high' } | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
+  if (unitPhraseFamily(scope.sourceUnit) === 'currency') return null;
   const family = unitPhraseFamily(unit);
   for (const r of findStatedRanges(userText)) {
     const end = amountIs(r.low, value, unit, family, userText) ? 'low' : amountIs(r.high, value, unit, family, userText) ? 'high' : null;
+    if (end === null) continue;
+    const at = (end === 'low' ? r.low : r.high).index;
+    if (!figureTheUserWroteFor(value, unit, userText, { target: [scope.source], others: scope.others, strict: true, at })) continue;
     // In the unit's own scale, as the size is ("£m": 1 and 2, never 1,000,000 and 2,000,000).
-    if (end !== null) return { low: r.low.magnitude / moneyUnitScale(unit), high: r.high.magnitude / moneyUnitScale(unit), text: r.text, end };
+    return { low: r.low.magnitude / moneyUnitScale(unit), high: r.high.magnitude / moneyUnitScale(unit), text: r.text, end };
   }
   return null;
 }
@@ -507,6 +521,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
   const written = [...findStatedAmounts(userText), ...countsInWords(userText)];
   const severalFigures = written.length >= 2;
   return written.some((a) => {
+    if (scope.at !== undefined && a.index !== scope.at) return false;
     if (!amountIs(a, value, unit, family, userText)) return false;
     const decisiveTarget = ownKind(a.kind) ? decisiveOwnKind : decisiveAnyKind;
     const amountEnd = a.index + a.matchedText.length;

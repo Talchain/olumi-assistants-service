@@ -21,6 +21,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 type Prov = 'explicit' | 'inferred' | 'ai_proposed';
 type Size = { amount: number; per: number; by: Prov };
 type NE = { amount?: number; amount_unit?: string; per_source_change_unit?: string; stated_range?: { low: number; high: number; text: string; end: string } };
+type Wire = ReturnType<typeof deals>;
 type Edge = { from: string; to: string; provenance?: { magnitude?: string; natural_effect?: NE } };
 type Graph = { nodes: { id: string; kind: string }[]; edges: Edge[] };
 
@@ -32,8 +33,8 @@ const BRIEF =
   + 'investors might be able to provide a small amount of funding quicker to buy us more time, but we would need to decide '
   + 'whether the overhead would be worth it. We need to raise at least £1.2m.';
 
-const link = (from: string, to: string, size?: Size) => ({
-  from, to, direction: 'positive' as const, provenance: 'inferred' as Prov,
+const link = (from: string, to: string, size?: Size, direction: 'positive' | 'negative' = 'positive') => ({
+  from, to, direction, provenance: 'inferred' as Prov,
   effect_amount: size?.amount ?? null, effect_per_source_change: size?.per ?? null, effect_provenance: size?.by ?? null,
 });
 
@@ -173,5 +174,72 @@ describe('A4: "deals between £1-2 million" is £1,000,000 per deal, the low end
     const { graph } = await build(deals({ deals: { amount: 1000000, per: 1, by: 'ai_proposed' } }));
     expect(edge(graph, DEALS, GOAL)!.provenance?.magnitude).not.toBe('user_stated');
     expect(edge(graph, DEALS, GOAL)!.provenance?.natural_effect?.stated_range).toBeUndefined();
+  });
+});
+
+/**
+ * ⛔ THE WHOLE IDENTITY (CODEX CEE BUDDY 5919834707; AIQ 5919953251; R3 5919968627): a size carries a written range only
+ * when ONE span carries it about this link's source, per one of it, in the target's currency — and the bound word is
+ * the end × the link's sign on the goal. Anything else: no range, no range sentence; the size stays the #2389 point.
+ */
+describe('A4: the range binds only to its own span, and its bound word follows the link\'s sign', () => {
+  const SINGLE = BRIEF.replace('between £1-2 million', 'that each bring in £1m');
+  const ANGEL_RANGE = 'Angel investor outreach budgets range between £1-2 million.';
+  const noRange = (graph: Graph, out: Record<string, unknown>) => {
+    expect(edge(graph, DEALS, GOAL)!.provenance?.magnitude).toBe('user_stated');
+    expect(edge(graph, DEALS, GOAL)!.provenance?.natural_effect?.stated_range).toBeUndefined();
+    expect(said(out).filter((s) => s.includes('end of your'))).toEqual([]);
+  };
+
+  it('RED (CODEX): another quantity\'s range APPENDED beside a single "£1m" per deal → the deal size takes no range', async () => {
+    const { graph, out } = await build(deals({ deals: LOW }), `${SINGLE} ${ANGEL_RANGE}`);
+    noRange(graph, out);
+  });
+
+  it('RED (CODEX): the same range PREPENDED → no range', async () => {
+    const { graph, out } = await build(deals({ deals: LOW }), `${ANGEL_RANGE} ${SINGLE}`);
+    noRange(graph, out);
+  });
+
+  it('two links sharing a numeral: each takes only its own span (the deal range stays the deals\', never the angels\')', async () => {
+    const { graph, out } = await build(
+      deals({ deals: LOW, angel: { amount: 1000000, per: 1, by: 'explicit' } }),
+      `${BRIEF} Angel investors could each give £1m.`,
+    );
+    expect(edge(graph, DEALS, GOAL)!.provenance?.natural_effect?.stated_range?.end).toBe('low');
+    expect(edge(graph, ANGEL, GOAL)!.provenance?.natural_effect?.stated_range).toBeUndefined();
+    expect(said(out).filter((s) => s.includes('end of your'))).toHaveLength(1);
+  });
+
+  it('CONTROL (currency): "deals between €1-2 million" is not £1m per deal — not the user\'s, no range', async () => {
+    const { graph } = await build(deals({ deals: LOW }), BRIEF.replace('£1-2 million', '€1-2 million'));
+    expect(edge(graph, DEALS, GOAL)!.provenance?.magnitude).not.toBe('user_stated');
+    expect(edge(graph, DEALS, GOAL)!.provenance?.natural_effect?.stated_range).toBeUndefined();
+  });
+
+  it('SIGN (R3): a £ cost per hire that LOWERS the goal, at its low end, is a CEILING on what runs through it ("at most")', async () => {
+    const wire = deals({ deals: LOW }) as Wire & Record<string, any>;
+    wire.factors.push({ label: 'Hires', role: 'observable', baseline_known: true, baseline_value: 0, unit: 'hires', provenance: 'ai_proposed', plausible_max: 10 });
+    wire.links.push(link('Hires', 'securing funding', { amount: -40000, per: 1, by: 'explicit' }, 'negative'));
+    const { graph, out } = await build(wire, `${BRIEF} Each hire costs £40-60k of the round.`);
+    const e = edge(graph, 'hires', GOAL);
+    expect(e!.provenance?.magnitude).toBe('user_stated');
+    expect(e!.provenance?.natural_effect?.stated_range).toEqual({ low: 40000, high: 60000, text: '£40-60k', end: 'low' });
+    expect(said(out).filter((s) => s.includes('£40,000'))).toEqual([
+      '£40,000 per hire on "Hires" → "securing funding" is the low end of your "£40-60k" range, '
+        + 'so any figure that runs through this link is a ceiling: at most that much.',
+    ]);
+  });
+
+  it('a link NOT straight into the goal says the range and no bound word', async () => {
+    const wire = deals({}) as Wire & Record<string, any>;
+    wire.outcomes.push({ label: 'Funding raised', provenance: 'inferred', unit: '£', plausible_max: 5000000 });
+    wire.links = wire.links.filter((l: { from: string }) => l.from !== 'Deals closed');
+    wire.links.push(link('Deals closed', 'Funding raised', LOW), link('Funding raised', 'securing funding'));
+    const { graph, out } = await build(wire);
+    expect(edge(graph, DEALS, 'funding_raised')!.provenance?.natural_effect?.stated_range?.end).toBe('low');
+    expect(said(out).filter((s) => s.includes('end of your'))).toEqual([
+      '£1,000,000 per deal on "Deals closed" → "Funding raised" is the low end of your "£1-2 million" range.',
+    ]);
   });
 });
