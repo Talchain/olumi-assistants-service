@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
+import { DEFAULT_EXISTS_PROBABILITY } from '@talchain/schemas';
 import { GraphV3, type GraphV3T, type NodeV3T, type EdgeV3T } from '../../../schemas/cee-v3.js';
+import { sizeLink, type MagnitudeNode } from '../../../cee/magnitude/link-effect.js';
 import type { GoalConstraintT } from '../../../schemas/assist.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
@@ -425,19 +427,79 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     const coefficient = claim.coefficient && readNumber(brief, claim.coefficient);
     const deviation = claim.standard_deviation && readNumber(brief, claim.standard_deviation);
     const probability = claim.existence_probability && readNumber(brief, claim.existence_probability);
-    if (claim.direction === 'unknown' || !coefficient || !deviation || !probability) {
-      issue(claim.ref, 'causal_size_unresolved', `How does "${from.label}" affect "${to.label}"? The stated relationship has no complete numerical specification.`); continue;
+    const natural = claim.natural_effect;
+    if (claim.direction === 'unknown' || (!natural && !coefficient)) {
+      issue(claim.ref, 'causal_size_unresolved', `How much does "${from.label}" change "${to.label}" per stated change in "${from.label}"?`); continue;
     }
-    if (!/coefficient|\bbeta\b|\bβ\b/i.test(claim.coefficient!.source.quote)
-      || deviation.value <= 0 || probability.value < 0 || probability.value > 1
-      || coefficient.value === 0 || (coefficient.value > 0) !== (claim.direction === 'positive') || hasPath(to.id, from.id)) {
-      issue(claim.ref, 'causal_parameters_invalid', `Which numerical effect and uncertainty apply from "${from.label}" to "${to.label}"?`); continue;
+    // A bare coefficient may be a natural-unit amount or a normalised beta.
+    // An explicit spread likewise needs its own frame; neither can be copied
+    // into GraphV3's normalised strength by matching the digits in a quote.
+    if (!natural || claim.coefficient !== null || deviation || (claim.standard_deviation && !deviation)) {
+      issue(claim.ref, 'causal_unit_frame_unverified',
+        `Can Olumi verify the stated per-unit effect and uncertainty for "${from.label}" → "${to.label}" before using it?`); continue;
     }
-    // SourceMeaning has no typed "effect per source change" or uncertainty
-    // unit. GraphV3 strength is normalised; a natural coefficient cannot be
-    // copied there without the conversion inputs required by convertLinkEffect.
-    issue(claim.ref, 'causal_unit_frame_unverified',
-      `Can Olumi verify the stated per-unit effect and uncertainty for "${from.label}" → "${to.label}" before using it?`);
+    const amount = readNumber(brief, natural.amount);
+    const per = readNumber(brief, natural.per_source_change);
+    const sourceUnit = claimsFor(claim.from_ref).find(({ claim: held }) => held.frame === 'level')?.claim.unit;
+    const targetUnit = claimsFor(claim.to_ref).find(({ claim: held }) => held.frame === 'level')?.claim.unit;
+    const boundAmount = amount && spanWithin(amount.source, source.source);
+    const boundPer = per && spanWithin(per.source, source.source);
+    const quote = source.source.quote.toLowerCase();
+    const namesBoth = quote.includes(from.label.toLowerCase()) && quote.includes(to.label.toLowerCase());
+    const unitWordsGrounded = source.source.quote.toLowerCase().includes(natural.amount_unit.as_stated.toLowerCase())
+      && source.source.quote.toLowerCase().includes(natural.per_source_change_unit.as_stated.toLowerCase());
+    const amountAt = source.source.quote.indexOf(natural.amount.literal);
+    const amountContext = amountAt < 0 ? '' : source.source.quote.slice(Math.max(0, amountAt - 25), amountAt + natural.amount.literal.length + 35);
+    const directionGrounded = claim.direction === 'negative'
+      ? /(?:-|\b(?:fewer|less|lost|lose|loses|lower|lowers|reduce|reduces|decrease|decreases|drop|drops|fall|falls)\b)/i.test(amountContext)
+      : /(?:\+|\b(?:more|gain|gains|raise|raises|increase|increases|grow|grows|add|adds)\b)/i.test(amountContext);
+    if (!sourceUnit || !targetUnit) {
+      issue(claim.ref, 'causal_unit_frame_unverified',
+        `What measured source and target units should the stated effect from "${from.label}" to "${to.label}" use?`); continue;
+    }
+    if (!boundAmount || !boundPer || !namesBoth || !unitWordsGrounded || !directionGrounded
+      || !compatibleUnits(sourceUnit, natural.per_source_change_unit)
+      || !compatibleUnits(targetUnit, natural.amount_unit) || !per || per.value <= 0
+      || !amount || amount.value === 0 || hasPath(to.id, from.id)) {
+      issue(claim.ref, 'causal_natural_effect_unverified',
+        `Which exact source and target changes, units and direction did the stated effect from "${from.label}" to "${to.label}" mean?`); continue;
+    }
+    if (claim.existence_probability !== null && (!probability || !spanWithin(probability.source, source.source)
+      || !/\b(?:probability|likelihood|chance)\b/i.test(probability.source.quote)
+      || probability.value < 0 || probability.value > 1)) {
+      issue(claim.ref, 'causal_probability_unverified', `What likelihood was stated for "${from.label}" affecting "${to.label}"?`); continue;
+    }
+    const optionLevels = (node: NodeV3T) => [...nodes.values()].filter((candidate) => candidate.kind === 'option')
+      .flatMap((candidate) => {
+        const level = candidate.interventions?.[node.id]?.value;
+        return typeof level === 'number' && Number.isFinite(level) ? [level] : [];
+      });
+    const magnitudeNode = (node: NodeV3T, unit: string): MagnitudeNode => ({
+      label: node.label, kind: node.kind, scale_frame: node.scale_frame,
+      observed_state: node.observed_state, goal_threshold_cap: node.goal_threshold_cap,
+      goal_threshold_unit: node.goal_threshold_unit, unit, option_levels: optionLevels(node),
+    });
+    const sized = sizeLink({
+      direction: claim.direction,
+      effect_amount: claim.direction === 'negative' ? -Math.abs(amount.value) : Math.abs(amount.value),
+      effect_per_source_change: per.value,
+      user_stated: true,
+    }, magnitudeNode(from, unitText(sourceUnit)), magnitudeNode(to, unitText(targetUnit)));
+    if (sized.outcome !== 'user_stated' || sized.problem || !sized.natural_effect) {
+      issue(claim.ref, sized.problem ?? 'causal_unit_frame_unverified', sized.question
+        ?? `How should the stated natural effect from "${from.label}" to "${to.label}" be measured?`); continue;
+    }
+    edges.push({
+      from: from.id, to: to.id,
+      strength: { mean: sized.mean, std: sized.std },
+      exists_probability: probability?.value ?? DEFAULT_EXISTS_PROBABILITY,
+      effect_direction: claim.direction,
+      provenance: { source: 'brief_extraction', reasoning: source.source.quote,
+        magnitude: sized.magnitude, natural_effect: sized.natural_effect },
+      // The spread and (unless supplied) existence probability are Olumi's,
+      // not additional claims by the user who stated the natural mean.
+      defaulted: true,
+    });
   }
   for (const unknown of meaning.unknowns) issue(unknown.ref, 'stated_unknown', unknown.question);
   const graph = GraphV3.parse({ nodes: [...nodes.values()], edges, ...(constraints.length ? { goal_constraints: constraints } : {}) });

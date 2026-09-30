@@ -63,9 +63,16 @@ export const SourceMeaningSchema = z.object({
     to_ref: ref,
     direction: z.enum(['positive', 'negative', 'unknown']),
     source: SourceSpanSchema,
-    // Only explicitly supplied coefficients qualify. Natural effects needing
-    // elicitation remain unresolved; none of these numbers has a default.
+    // A bare coefficient has no unit/frame authority and is retained outside
+    // GraphV3. A stated natural effect can be passed to the existing magnitude
+    // contract only when both measured changes and their units are grounded.
     coefficient: NumberClaimSchema.nullable(),
+    natural_effect: z.object({
+      amount: NumberClaimSchema,
+      amount_unit: UnitSchema,
+      per_source_change: NumberClaimSchema,
+      per_source_change_unit: UnitSchema,
+    }).strict().nullable(),
     standard_deviation: NumberClaimSchema.nullable(),
     existence_probability: NumberClaimSchema.nullable(),
   }).strict()),
@@ -106,5 +113,5 @@ Units explicitly retain currency, period and counted object; as_stated copies th
 Each explicit option references exactly the quantities it changes. Quote the option's complete own clause including its intervention details, so its source and intervention sources overlap. An intervention's quantity_ref points to its stated level or change, never a target for the whole problem. Its numeric source must overlap that same intervention source. If the option names a change but gives no amount, quantity_ref is null. Do not manufacture a status-quo option; mark it only if the brief gives that alternative.
 Before returning check: every options[].entity_ref names an entity of kind option, NEVER a decision entity. 'Should we raise the price?' contains an explicit raise-price option even if you also retain its question as a decision; those are separate refs. Current MRR and a target for that same MRR use ONE goal entity with current and target quantity claims, not separate same-label factor/goal entities. Distinguish refs only when the brief really distinguishes scope.
 Definitions name the exact target and operand refs, not nearby intermediates. Explicit definitions require a source clause stating that relationship. A justified domain definition can be labelled interpretation, but compatible units and numerical coincidence alone are insufficient. If price times subscribers differs from stated MRR, preserve every figure and ask which revenue scope is intended; do not invent a reconciliation amount.
-Causal claims are separate from definitions. Do not guess behavioural strength, probability or uncertainty. coefficient, standard_deviation and existence_probability stay null unless the brief explicitly supplies those parameters. An unknown relationship stays unknown. Avoid cycles and invented connectivity.
+Causal claims are separate from definitions. Do not guess behavioural strength, probability or uncertainty. A natural effect such as "4 fewer subscribers per £1 increase in price" belongs in natural_effect: amount 4 subscribers, per_source_change £1 in the price unit. Copy each number and unit from its own source clause and retain the source and target refs. Never put a natural-unit figure in coefficient; leave coefficient null. natural_effect is null unless the brief supplies BOTH a target change and a source change. coefficient, standard_deviation and existence_probability stay null unless the brief explicitly supplies those parameters. If an uncertainty figure has no explicit frame, retain its exact words but do not guess what it measures. An unknown relationship stays unknown. Avoid cycles and invented connectivity.
 Ask the smallest useful clarification for genuine unresolved meaning. Preserve all unambiguous content. Do not ask the user to repeat a number they supplied. Distinguish a model the product can retain from one ready for analysis.`;

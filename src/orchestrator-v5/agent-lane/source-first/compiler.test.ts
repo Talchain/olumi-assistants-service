@@ -134,7 +134,7 @@ describe('source-first compiler', () => {
   it('preserves a stated causal claim as unresolved without inventing effect sizes', () => {
     const { brief: original, meaning } = pricing();
     const quote = 'Raising price may reduce subscribers.';
-    meaning.causal_claims = [{ ref: 'churn_effect', from_ref: 'price', to_ref: 'subscribers', direction: 'negative', source: source(quote), coefficient: null, standard_deviation: null, existence_probability: null }];
+    meaning.causal_claims = [{ ref: 'churn_effect', from_ref: 'price', to_ref: 'subscribers', direction: 'negative', source: source(quote), coefficient: null, natural_effect: null, standard_deviation: null, existence_probability: null }];
     const result = compileSourceMeaning(`${original} ${quote}`, meaning);
     expect(result.graph.edges.find((edge) => edge.from === sourceEntityId('price') && edge.to === sourceEntityId('subscribers'))).toBeUndefined();
     expect(result.unresolved).toContainEqual(expect.objectContaining({ code: 'causal_size_unresolved' }));
@@ -144,7 +144,7 @@ describe('source-first compiler', () => {
     const { brief: original, meaning } = pricing();
     const quote = `The causal coefficient β is ${amount} subscribers per £1 increase in price, standard deviation 0.1, existence probability 0.8.`;
     meaning.causal_claims = [{ ref: 'price_effect', from_ref: 'price', to_ref: 'subscribers', direction: 'negative',
-      source: source(quote), coefficient: { literal: amount, value: amount, source: source(quote) },
+      source: source(quote), coefficient: { literal: amount, value: amount, source: source(quote) }, natural_effect: null,
       standard_deviation: { literal: '0.1', value: '0.1', source: source(quote) },
       existence_probability: { literal: '0.8', value: '0.8', source: source(quote) } }];
     const result = compileSourceMeaning(`${original} ${quote}`, meaning);
@@ -152,6 +152,68 @@ describe('source-first compiler', () => {
     expect(result.source_bindings.price_effect.quote).toBe(quote);
     expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'price_effect', code: 'causal_unit_frame_unverified' }));
     expect(result.open_questions.some((question) => question.includes('per-unit') && question.includes('uncertainty'))).toBe(true);
+  });
+
+  it.each([['4', -0.04], ['0.4', -0.004]])('normalises a source-bound natural effect of %s subscribers per £1', (amount, beta) => {
+    const { brief: original, meaning } = pricing();
+    const quote = `A £1 increase in price loses ${amount} subscribers.`;
+    meaning.causal_claims = [{ ref: 'price_effect', from_ref: 'price', to_ref: 'subscribers', direction: 'negative',
+      source: source(quote), coefficient: null,
+      natural_effect: { amount: { literal: amount, value: amount, source: source(quote) }, amount_unit: count,
+        per_source_change: { literal: '£1', value: '1', source: source(quote) },
+        per_source_change_unit: { ...money('subscriber'), as_stated: '£' } },
+      standard_deviation: null, existence_probability: null }];
+    const result = compileSourceMeaning(`${original} ${quote}`, meaning);
+    const edge = result.graph.edges.find((item) => item.from === sourceEntityId('price') && item.to === sourceEntityId('subscribers'));
+    expect(edge?.strength.mean).toBeCloseTo(beta);
+    expect(edge?.provenance).toMatchObject({ source: 'brief_extraction', magnitude: 'user_stated',
+      natural_effect: { amount: -Number(amount), amount_unit: 'subscribers', per_source_change: 1,
+        per_source_change_unit: 'GBP per subscriber per month', strength_mean: beta, strength_mean_frame: 'edge_strength' } });
+    expect(edge?.defaulted).toBe(true);
+    expect(result.unresolved).toEqual([]);
+    expect(GraphV3.safeParse(result.graph).success).toBe(true);
+  });
+
+  it('withholds a natural effect with mismatched units, absent frame or unframed stated uncertainty', () => {
+    const { brief: original, meaning } = pricing();
+    const quote = 'A £1 increase in price loses 4 subscribers; standard deviation is 0.1.';
+    const effect = { amount: { literal: '4', value: '4', source: source(quote) }, amount_unit: count,
+      per_source_change: { literal: '£1', value: '1', source: source(quote) },
+      per_source_change_unit: { ...money('subscriber'), as_stated: '£' } };
+    meaning.causal_claims = [{ ref: 'price_effect', from_ref: 'price', to_ref: 'subscribers', direction: 'negative',
+      source: source(quote), coefficient: null, natural_effect: effect,
+      standard_deviation: { literal: '0.1', value: '0.1', source: source(quote) }, existence_probability: null }];
+    const brief = `${original} ${quote}`;
+    const statedSpread = compileSourceMeaning(brief, meaning);
+    expect(statedSpread.graph.edges.some((edge) => edge.from === sourceEntityId('price') && edge.to === sourceEntityId('subscribers'))).toBe(false);
+    expect(statedSpread.unresolved).toContainEqual(expect.objectContaining({ code: 'causal_unit_frame_unverified' }));
+
+    meaning.causal_claims[0].standard_deviation = null;
+    meaning.causal_claims[0].natural_effect!.amount_unit = { ...count, counted_object: 'tickets', as_stated: 'subscribers' };
+    const wrongUnit = compileSourceMeaning(brief, meaning);
+    expect(wrongUnit.graph.edges.some((edge) => edge.from === sourceEntityId('price') && edge.to === sourceEntityId('subscribers'))).toBe(false);
+    expect(wrongUnit.unresolved).toContainEqual(expect.objectContaining({ code: 'causal_natural_effect_unverified' }));
+
+    meaning.causal_claims[0].natural_effect!.amount_unit = count;
+    meaning.quantities = meaning.quantities.filter((claim) => claim.ref !== 'current_subscribers');
+    const missingFrame = compileSourceMeaning(brief, meaning);
+    expect(missingFrame.graph.edges.some((edge) => edge.from === sourceEntityId('price') && edge.to === sourceEntityId('subscribers'))).toBe(false);
+    expect(missingFrame.unresolved).toContainEqual(expect.objectContaining({ code: 'causal_unit_frame_unverified' }));
+  });
+
+  it('holds a user effect beyond the engine range with its exact statement and a question', () => {
+    const { brief: original, meaning } = pricing();
+    const quote = 'A £1 increase in price loses 4000 subscribers.';
+    meaning.causal_claims = [{ ref: 'price_effect', from_ref: 'price', to_ref: 'subscribers', direction: 'negative',
+      source: source(quote), coefficient: null,
+      natural_effect: { amount: { literal: '4000', value: '4000', source: source(quote) }, amount_unit: count,
+        per_source_change: { literal: '£1', value: '1', source: source(quote) },
+        per_source_change_unit: { ...money('subscriber'), as_stated: '£' } },
+      standard_deviation: null, existence_probability: null }];
+    const result = compileSourceMeaning(`${original} ${quote}`, meaning);
+    expect(result.graph.edges.some((edge) => edge.from === sourceEntityId('price') && edge.to === sourceEntityId('subscribers'))).toBe(false);
+    expect(result.source_bindings.price_effect.quote).toBe(quote);
+    expect(result.unresolved).toContainEqual(expect.objectContaining({ code: 'not_representable', question: expect.stringContaining('4000 subscribers') }));
   });
 
   it('does not silently stamp an explicit sum as an inferred sum', () => {
