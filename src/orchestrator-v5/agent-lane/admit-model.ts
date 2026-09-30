@@ -3568,6 +3568,38 @@ function admitOnce(
     if (n.goal_threshold_frame === 'change_rel') return Math.abs(raw * today);
     return Math.abs(raw - today);
   };
+  /**
+   * ⛔ THE TARGET IS NOT A LEVEL EITHER (MG handover §8 item 2.1; live arm draft 0 on `f95ea20`, cut-costs): the drafter
+   * gave "Saving at full GCP migration" an Olumi level of £9,000 a month — exactly the gap to the user's own target (20%
+   * of £45,000) — and it was stored and shown as Olumi's assumption. #2321's rule for a link size (`target_sized`), for a
+   * level: Olumi's own level (`cee_inference`) in the goal's own unit within 1% of the gap is set aside — the node keeps
+   * its frame (`scale_frame`), so nothing blocks the Run — and asked (`.target_level_question`, routed to
+   * `open_questions` by `build-model.ts`). A figure the user gave is never touched. Before sizing, so no link is sized
+   * from it either.
+   */
+  const goalNode = nodes.find((n) => n.kind === 'goal');
+  const gap = goalNode === undefined ? undefined : goalGap(goalNode);
+  const goalUnit = unitKey(goalNode?.observed_state?.unit ?? goalNode?.goal_threshold_unit);
+  if (gap !== undefined && gap > 0 && goalUnit !== null) {
+    for (const n of nodes) {
+      const os = n.observed_state;
+      if (n === goalNode || os === undefined || os.source !== 'cee_inference') continue;
+      const raw = typeof os.raw_value === 'number' ? os.raw_value : os.value;
+      const unit = os.unit ?? unitById.get(n.id);
+      if (!Number.isFinite(raw) || unitKey(unit) !== goalUnit || Math.abs(raw - gap) > 0.01 * gap) continue;
+      const frame = typeof os.cap === 'number' ? os.cap : n.scale_frame;
+      delete n.observed_state;
+      if (typeof frame === 'number' && n.scale_frame === undefined) n.scale_frame = frame;
+      loss.push({
+        field_path: `nodes[${n.id}].observed_state.target_level_question`,
+        before: raw,
+        after: null,
+        reason: `Olumi estimated "${n.label}" at ${raw} ${unit}, which is exactly the gap to your target. A target is what you `
+          + `want, not evidence of where a figure stands, so it was not used. What figure should Olumi use for "${n.label}"?`,
+        severity: 'warn',
+      } as RepairEntry);
+    }
+  }
   const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
     label: n.label,
     kind: n.kind,
