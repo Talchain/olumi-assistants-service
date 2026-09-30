@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { contentHash } from './pinned-runtime/artefact-runtime/canonical.ts';
 import { MM1_PROPOSAL_JSON_SCHEMA, validateMM1Output } from './pinned-runtime/artefact-runtime/evals/mm-1/package.ts';
 import { MM1_WIDENING_PROMPT, MM1_DIFFERENT_MODEL, MM1_EFFORT } from './pinned-runtime/artefact-runtime/evals/mm-1/sealed-provider-pack.ts';
@@ -19,7 +20,26 @@ export function assertPinnedSource() {
   }
 }
 
-export function currentM2Input({ session_id, brief, graph }) {
+export function currentM2Input(snapshot) {
+  if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw new Error('invalid_current_m1_binding');
+  }
+  const canonical = Object.hasOwn(snapshot, 'canonical_binding') ? snapshot.canonical_binding : null;
+  if (canonical !== null && (typeof canonical !== 'object' || Array.isArray(canonical) ||
+      (snapshot.session_id !== undefined && snapshot.session_id !== canonical.session_id) ||
+      (snapshot.brief !== undefined && snapshot.brief !== canonical.brief) ||
+      (snapshot.graph !== undefined && !isDeepStrictEqual(snapshot.graph, canonical.graph)) ||
+      canonical.graph_identity_hash?.kind !== 'graph_identity_hash' ||
+      canonical.graph_identity_hash?.algorithm !== 'sha256' ||
+      !/^[a-f0-9]{64}$/.test(canonical.graph_identity_hash?.value ?? '') ||
+      !/^[a-f0-9]{16}$/.test(canonical.graph_hash ?? '') ||
+      typeof canonical.scenario_id !== 'string' || !canonical.scenario_id ||
+      typeof canonical.model_version?.version_id !== 'string' || !canonical.model_version.version_id ||
+      canonical.model_version.graph_identity_hash !== canonical.graph_identity_hash.value)) {
+    throw new Error('invalid_canonical_m1_binding');
+  }
+  if (Object.hasOwn(snapshot, 'canonical_binding') && canonical === null) throw new Error('invalid_canonical_m1_binding');
+  const { session_id, brief, graph } = canonical ?? snapshot;
   if (typeof session_id !== 'string' || !session_id || typeof brief !== 'string' || !brief.trim() || brief.length > 12000 ||
       graph === null || typeof graph !== 'object' || !Array.isArray(graph.nodes) || graph.nodes.length === 0) {
     throw new Error('invalid_current_m1_binding');
@@ -28,19 +48,25 @@ export function currentM2Input({ session_id, brief, graph }) {
   if (refs.some(id => typeof id !== 'string' || !id.trim()) || new Set(refs).size !== refs.length) {
     throw new Error('invalid_current_m1_refs');
   }
-  const graphHash = contentHash(graph); // Full model identity; CEE's analysis projection intentionally omits some content.
+  const graphHash = canonical ? canonical.graph_identity_hash.value : contentHash(graph);
+  const graphRevision = canonical ? canonical.model_version.version_id : graphHash;
+  const scenarioId = canonical ? canonical.scenario_id : session_id;
   const binding = {
-    brief: { id: `lab:${session_id}`, revision: graphHash, text: brief, content_hash: contentHash(brief) },
-    admitted_m1: { scenario_id: session_id, graph_revision: graphHash, graph_hash: graphHash,
-      model: graph, model_refs: refs, model_name: 'existing_lab_snapshot' },
+    brief: { id: canonical ? `scenario:${scenarioId}` : `lab:${session_id}`,
+      revision: canonical ? contentHash(brief) : graphHash, text: brief, content_hash: contentHash(brief) },
+    admitted_m1: { scenario_id: scenarioId, graph_revision: graphRevision, graph_hash: graphHash,
+      model: graph, model_refs: refs, model_name: canonical ? 'registered_canonical_m1' : 'existing_lab_snapshot' },
     evidence_refs: [], validation_warning_codes: [],
   };
   const providerInput = {
     brief: binding.brief,
-    admitted_m1: { scenario_id: session_id, graph_revision: graphHash, graph_hash: graphHash, model: graph, model_refs: refs },
+    admitted_m1: { scenario_id: scenarioId, graph_revision: graphRevision, graph_hash: graphHash, model: graph, model_refs: refs },
     evidence_refs: [], validation_warning_codes: [],
   };
-  return { binding, providerInput, input_hash: contentHash(providerInput), graph_hash: graphHash };
+  return { binding, providerInput, input_hash: contentHash(providerInput),
+    graph_hash: canonical ? canonical.graph_hash : graphHash, session_id,
+    ...(canonical ? { canonical_receipt: { scenario_id: scenarioId, graph_identity_hash: graphHash,
+      model_version_id: graphRevision } } : {}) };
 }
 
 /** OpenAI requires an explicit type beside JSON Schema const; this changes transport syntax only. */
@@ -96,8 +122,9 @@ export async function callM2(snapshot, send = fetch) {
     : { accepted: false, errors: [response.ok ? `provider_${raw.status ?? 'incomplete'}` : `provider_http_${response.status}`], proposals: [] };
   return {
     accepted: verdict.accepted, proposals: verdict.proposals, errors: verdict.errors,
-    receipt: { mode: 'live_m2_read_only', source, session_id: snapshot.session_id, model: request.model,
+    receipt: { mode: 'live_m2_read_only', source, session_id: current.session_id, model: request.model,
       effort: MM1_EFFORT, input_hash: current.input_hash, graph_hash: current.graph_hash,
+      ...(current.canonical_receipt ?? {}),
       instruction_hash: createHash('sha256').update(instructions).digest('hex'),
       schema_hash: contentHash(MM1_PROPOSAL_JSON_SCHEMA), provider_schema_hash: contentHash(request.text.format.schema),
       request_input: current.providerInput,
