@@ -66,7 +66,7 @@ export function conversationPromptAlias(toolChoice: unknown): AgentPromptAlias {
  * the call then JSON-encodes and sends — never from what the caller meant to send:
  *   · the alias and the instructions sha, as {@link agentPromptIdentity};
  *   · `tools_sha256` / `schema_sha256`: sha256 of the sent `tools` / `text.format.schema`, JSON-encoded, as MG's Baseline
- *     v1 manifest defines them (schema = sha256(JSON.stringify(buildCandidateSchema()))). Absent when not sent;
+ *     v1 manifest defines them (schema = sha256(JSON.stringify(strictForTheDrafter(buildCandidateSchema())))). Absent when not sent;
  *   · the sent `reasoning.effort` and `max_output_tokens`;
  *   · `cee_build` (the full commit) and the environment with its source (`getRuntimeEnvResolution`).
  * NEVER THROWS: it sits on the path to the provider.

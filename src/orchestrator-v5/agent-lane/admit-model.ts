@@ -162,8 +162,14 @@ export interface CandidateModel {
     is_status_quo?: boolean | null;
   }[];
   readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
-  readonly risks: readonly { label: string; provenance: string }[];
-  readonly outcomes: readonly { label: string; provenance: string }[];
+  /**
+   * ⭐ A QUANTITY OUTCOME OR A RISK'S EXPOSURE CARRIES THE FRAME A FACTOR DOES (DL #75 5916155976 (a); R3 5916156932 (b)):
+   * `unit` + `plausible_max`, nullable. Without them no size into or out of the node can be read (`resolveMagnitudeFrame`
+   * has nothing to read), so a goal fed by an outcome or a risk could never be sized in its own unit. Optional here: the
+   * banked contract has neither field.
+   */
+  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
+  readonly outcomes: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
   readonly links: readonly CandidateLink[];
   /**
    * Quantities the drafter DECLARES to be other quantities multiplied together (C46). Never
@@ -699,6 +705,16 @@ export function metricNamesLabel(metric: string, label: string): boolean {
  * the Agent adds (`propose_new_option` `new_factors[].today`) is framed by THIS function, so it is stored exactly as a
  * baseline the brief states — never a second framer.
  */
+/**
+ * A quantity outcome's or a risk exposure's range, on the node, as `scale_frame` — the carrier a factor with no baseline
+ * uses — only when a usable range (> 1) was drafted. Nothing otherwise: a qualitative outcome or an occurrence-only risk
+ * stays exactly as before.
+ */
+function framedByRange(x: { plausible_max?: number | null }): { node?: { scale_frame: number } } {
+  const c = x.plausible_max;
+  return typeof c === 'number' && Number.isFinite(c) && c > 1 ? { node: { scale_frame: c } } : {};
+}
+
 export function framedObservedState(f: {
   baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null;
 }): Record<string, unknown> {
@@ -2814,6 +2830,22 @@ export function admitGoalLevelBesideHeldCeiling<N extends { readonly kind?: unkn
  * exactly the graph that is registered — as if the drafter had never drafted it. It is said, never
  * silent: `options_withheld` carries the step, and the ledger records it.
  */
+/**
+ * The ONE place an outcome's or a risk's frame is normalised (DL #75 5916270318, option D): an absent `unit` or
+ * `plausible_max` (a candidate recorded before the frames existed) is null, exactly what the strict drafter writes for
+ * "not a quantity". Here, at admission's entry, and not where the draft is parsed: the parsed draft is echoed to a retry
+ * byte for byte, and a recorded draft must build exactly as it did.
+ */
+export function withQuantityFrames(candidate: CandidateModel): CandidateModel {
+  const framed = <T extends { unit?: string | null; plausible_max?: number | null }>(x: T): T =>
+    ({ ...x, unit: x.unit ?? null, plausible_max: x.plausible_max ?? null });
+  return {
+    ...candidate,
+    ...(Array.isArray(candidate.risks) ? { risks: candidate.risks.map(framed) } : {}),
+    ...(Array.isArray(candidate.outcomes) ? { outcomes: candidate.outcomes.map(framed) } : {}),
+  };
+}
+
 export function admitCandidateModel(
   candidateModel: CandidateModel,
   widened: WidenerAdditions = {},
@@ -2837,6 +2869,7 @@ export function admitCandidateModel(
    */
   goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null = () => null,
 ): AdmittedModel {
+  candidateModel = withQuantityFrames(candidateModel);
   const declared = new Set(candidateModel.options
     .filter((o) => readIsBaseline({ ...(typeof o.is_status_quo === 'boolean' ? { is_baseline: o.is_status_quo } : {}) }) === true)
     .map((o) => canonicalLabel(o.label)));
@@ -3196,8 +3229,10 @@ function admitOnce(
         })(),
       },
     })),
-    ...model.risks.map((r) => ({ label: r.label, kind: 'risk' as const, provenance: r.provenance })),
-    ...model.outcomes.map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: o.provenance })),
+    // The factor path's own carrier for a range with no level (`scale_frame`, above): a quantity outcome, or a risk
+    // drafted as its exposure, is framed exactly as a factor with no baseline is. No new frame type (DL 5916155976).
+    ...model.risks.map((r) => ({ label: r.label, kind: 'risk' as const, provenance: r.provenance, ...framedByRange(r) })),
+    ...model.outcomes.map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: o.provenance, ...framedByRange(o) })),
     ...(widened.proposed_options ?? []).map((o) => ({ label: o.label, kind: 'option' as const, provenance: 'ai_proposed' })),
     ...(widened.proposed_factors ?? []).map((f) => ({ label: f.label, kind: 'factor' as const, provenance: 'ai_proposed' })),
     ...(widened.proposed_risks ?? []).map((r) => ({ label: r.label, kind: 'risk' as const, provenance: 'ai_proposed' })),
@@ -3392,7 +3427,7 @@ function admitOnce(
    * the link sizing below.
    */
   const unitById = new Map<string, string>();
-  for (const f of model.factors) {
+  for (const f of [...model.factors, ...model.outcomes, ...model.risks]) {
     const id = ids.get(f.label);
     if (id !== undefined && typeof f.unit === 'string') unitById.set(id, f.unit);
   }
