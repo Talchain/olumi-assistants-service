@@ -1,6 +1,7 @@
 import { budgetFor } from '../model-budgets.js';
 import type { CallStructuredModel } from '../runtime/build-model.js';
 import { compileSourceMeaning, type SourceFirstCompilation } from './compiler.js';
+import { selectSourceFirstClarification } from './clarification.js';
 import { buildSourceMeaningSchema, SOURCE_MEANING_INSTRUCTIONS, SourceMeaningSchema } from './meaning.js';
 
 export { compileSourceMeaning, sourceEntityId } from './compiler.js';
@@ -27,5 +28,7 @@ export async function buildSourceFirstModel(
   if (output.status === 'incomplete') throw new Error(`source_first_incomplete:${output.incomplete_reason ?? 'unspecified'}`);
   if (!output.text.trim()) throw new Error('source_first_no_structured_output');
   const meaning = SourceMeaningSchema.parse(JSON.parse(output.text));
-  return { ...compileSourceMeaning(brief, meaning), meaning, usage: output.usage, latency_ms: Date.now() - started };
+  const compiled = compileSourceMeaning(brief, meaning);
+  return { ...compiled, open_questions: selectSourceFirstClarification(brief, meaning, compiled),
+    meaning, usage: output.usage, latency_ms: Date.now() - started };
 }
