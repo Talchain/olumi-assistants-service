@@ -322,11 +322,13 @@ async function getReadinessSnapshot(trigger: PromptResolveTrigger): Promise<Read
       const result = { ready: false, coverage: failedCoverage() };
       if (generation === snapshotGeneration) snapshot = result;
       return result;
-    } finally {
-      if (inflightSnapshot === probe) inflightSnapshot = null;
     }
   })();
   inflightSnapshot = probe;
+  const clearInflight = () => {
+    if (inflightSnapshot === probe) inflightSnapshot = null;
+  };
+  void probe.then(clearInflight, clearInflight);
   return probe;
 }
 
