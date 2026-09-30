@@ -28,6 +28,9 @@ const files = ['src/orchestrator-v5/agent-lane/__tests__/ai-experience-lab.manua
   'scripts/ai-experience-lab/regions-cases.json',
   'scripts/ai-experience-lab/canonical-m1-guard.mjs',
   'scripts/ai-experience-lab/m2-runner.mjs',
+  'scripts/m1-host-seam/readback.mjs',
+  'scripts/m1-host-seam/readback.test.mjs',
+  'scripts/m1-host-seam/witness.mjs',
   'scripts/ai-experience-lab/pinned-runtime/artefact-runtime/canonical.ts',
   'scripts/ai-experience-lab/pinned-runtime/artefact-runtime/evals/mm-1/package.ts',
   'scripts/ai-experience-lab/pinned-runtime/artefact-runtime/evals/mm-1/sealed-provider-pack.ts'];
