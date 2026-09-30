@@ -623,6 +623,7 @@ import {
   analysisGraphIdentityForRead,
   bindAnalysisSnapshotForTurn,
 } from './run-analysis-snapshot-binding.js';
+import { priorRunForSeed } from './coaching/seed-reuse.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -1225,6 +1226,8 @@ export async function runTurnExecutor(
       context.persistedGraph,
       context.persistedGraphRead,
     ),
+    // C1 — the Run a rerun this turn would pair with, from the SAME prior facts (`coaching/seed-reuse.ts`).
+    priorRunSeed: priorRunForSeed(context.prior_facts),
   });
 
   // Track 2 — pending-confirmation truth, derived ONCE at ORIENT time from the

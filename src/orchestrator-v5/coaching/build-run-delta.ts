@@ -72,6 +72,7 @@ import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.
 // (CLAUDE.md trap #12). Behaviour here is unchanged by the move.
 import { noiseVerdictForProportions } from './win-probability-noise-band.js';
 import { diffRunInputs } from './run-input-changes.js';
+import { drawStructureKeyOfFact } from './draw-structure.js';
 
 /**
  * Why no delta was produced. A DISCRIMINATED reason rather than a bare `null`,
@@ -181,6 +182,15 @@ function finiteNumber(value: unknown): number | null {
  * `builds` is the exception and is allowed to be null: the contract models its
  * absence explicitly as the tri-state 'unknown'.
  */
+/**
+ * PLoT's `meta.seed_used` echo for ONE Run, read by the SAME reader `seed_equal` compares — so the seed C1 seed reuse
+ * lends (`seed-reuse.ts`) is byte-identical to what the next pair's `seed_equal` will read. Null when the Run could
+ * not be paired at all (no graph hash, no echo, no sample count).
+ */
+export function runSeedEcho(fact: HandlerFact): string | null {
+  return readRunEchoes(fact)?.seedUsed ?? null;
+}
+
 function readRunEchoes(fact: HandlerFact): RunEchoes | null {
   const result = asRecord((fact as { result?: unknown }).result);
   if (result === null) return null;
@@ -369,15 +379,23 @@ function deriveBuildsEquality(
  * fixture). So build DRIFT is observable today, flag-off; build EQUALITY —
  * which is what C1 needs — is not.
  */
-function classifyAttribution(provenance: {
-  readonly seed_equal: boolean;
-  readonly hash_equal: boolean;
-  readonly builds_equal: RunDeltaBuildsEqualityLiteral;
-  readonly n_equal: boolean;
-}): RunDeltaAttributionCaseLiteral | null {
+function classifyAttribution(
+  provenance: {
+    readonly seed_equal: boolean;
+    readonly hash_equal: boolean;
+    readonly builds_equal: RunDeltaBuildsEqualityLiteral;
+    readonly n_equal: boolean;
+  },
+  /**
+   * Both Runs recorded their inputs and the DRAW STRUCTURE differs (`draw-structure.ts`): the same seed no longer lines
+   * the draws up, so the pair is as unpaired as two fresh seeds (R3 #75 5920859011). `false` when either Run recorded
+   * no inputs — a legacy pair keeps exactly today's classification.
+   */
+  drawStructureChanged: boolean,
+): RunDeltaAttributionCaseLiteral | null {
   // Observed divergences first, most fundamental first. Each of these is a
   // fact we measured off two echoes.
-  if (!provenance.seed_equal) return 'C2_unpaired';
+  if (!provenance.seed_equal || drawStructureChanged) return 'C2_unpaired';
   if (!provenance.n_equal) return 'C4_budget_drift';
   if (provenance.builds_equal === 'unequal') return 'C3_engine_drift';
 
@@ -531,7 +549,11 @@ export function buildRunDelta(input: {
   // so a true £59 → £60 input change showed nothing. When both Runs recorded their inputs, the pair is emitted as
   // `C5_unattributed` — no causal reading, no magnitude — so the input rows can travel. Without recorded inputs there
   // is still nothing honest to show, and the old refusal stands.
-  const classified = classifyAttribution(pairProvenance);
+  const priorDrawStructure = drawStructureKeyOfFact(pair.prior);
+  const currentDrawStructure = drawStructureKeyOfFact(pair.current);
+  const drawStructureChanged =
+    priorDrawStructure !== null && currentDrawStructure !== null && priorDrawStructure !== currentDrawStructure;
+  const classified = classifyAttribution(pairProvenance, drawStructureChanged);
   if (classified === null && inputs.kind !== 'compared') {
     return { kind: 'none', reason: 'no_honest_attribution_case' };
   }

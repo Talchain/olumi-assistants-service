@@ -142,7 +142,8 @@ import {
   readinessQuestions,
   resolveRunAdmission,
 } from './analysis-ready-core.js';
-import { AnalysisSnapshotDivergedError } from '../../run-analysis-snapshot-binding.js';
+import { AnalysisSnapshotDivergedError, currentBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
+import { decideSeedReuse } from '../../coaching/seed-reuse.js';
 // The 2026-08-28 disclosure defect: the run proceeds past unset option effects
 // (the compute-discard waiver) and the analyse turn says nothing about them.
 import {
@@ -1207,6 +1208,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'Run input snapshot refused by the contract; this Run records no inputs',
       );
     }
+
+    // C1 "why it moved" (`coaching/seed-reuse.ts`; R3 #75 5920656318 S1–S4 + 5920859011): a rerun whose DRAW STRUCTURE
+    // matches the Run it will be paired with reuses that Run's own PLoT seed echo, so the two draw the same samples and
+    // a value edit is attributable (C1). Set AFTER the snapshot, so `sent_digest` stays a digest of the inputs alone.
+    const bound = currentBoundAnalysisSnapshot();
+    const seedReuse = decideSeedReuse({
+      prior: bound !== undefined && bound.scenarioId === args.scenario_id ? bound.priorRunSeed : undefined,
+      current: inputSnapshot,
+      explicitSeed: plotPayload.seed,
+    });
+    if (seedReuse.seed !== undefined) plotPayload.seed = seedReuse.seed;
+    log.info(
+      { event: 'run_analysis.seed_reuse', request_id: invocation.requestId, scenario_id: args.scenario_id, reason: seedReuse.reason },
+      'run_analysis seed decision',
+    );
 
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
