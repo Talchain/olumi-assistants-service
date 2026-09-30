@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pruneSupersededToolOutputs, type KeptRunReadback } from '../history-store.js';
+import { GOAL_CERTAINTY_NOTE } from '../goal-certainty-for-agent.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440079';
 const HASH = '7b53bf0ada890991';
@@ -25,7 +26,7 @@ const goal_certainty = { options: [
   { option_id: 'p49', option: 'Keep £49', earned: true, probability_of_goal: 0 },
   { option_id: 'p54', option: 'Raise to £54', earned: false, probability_of_goal: 1, say: 'The £54 route has an unsized path to the goal.' },
   { option_id: 'p59', option: 'Raise to £59', earned: false, probability_of_goal: 1, say: 'The £59 route has an unsized path to the goal.' },
-] };
+], note: GOAL_CERTAINTY_NOTE };
 const run = {
   ok: true, ran: true, result,
   claim_permissions: { leader_may_be_named: false, withheld_reason: 'constraint_verdict_withheld' },
@@ -36,6 +37,7 @@ const readback = (computed_at = RUN_AT, kind = 'complete_current' as 'complete_c
   scenarioId: SCENARIO,
   analysisState: { run_state: { kind, computed_at } },
   analysisResult: kind === 'complete_current' ? result : undefined,
+  goalCertainty: kind === 'complete_current' ? goal_certainty.options.map(({ option: _label, ...decision }) => decision) : undefined,
 });
 const pair = (value: unknown) => [
   { type: 'function_call', name: 'run_analysis', call_id: 'run', arguments: '{}' },
@@ -73,24 +75,27 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
   });
 
   it('R4 absent stays absent on an otherwise current Run', () => {
-    const noOutcome = { ...result, enrichment: { ...result.enrichment, option_comparison: rows.map((row, i) => i === 1 ? { option_id: row.option_id, option_label: row.option_label } : row) } };
+    const noOutcome = { ...result, enrichment: { ...result.enrichment, option_comparison: rows.map((row, i) => {
+      if (i !== 1) return row;
+      const { outcome: _outcome, ...withoutOutcome } = row;
+      return withoutOutcome;
+    }) } };
     const kept = projected({ ...run, result: noOutcome }, { ...readback(), analysisResult: noOutcome });
     expect(kept.result.option_comparison[1]).toEqual({ option_id: 'p54', label: 'Raise to £54' });
     expect(kept.result.option_comparison[0].outcome).toEqual(outcomes[0]);
   });
 
-  it('a same-identity tool copy cannot refill or override the selected Run’s outcomes', () => {
+  it('a same-identity tool copy with different stored option decisions cannot override the selected Run', () => {
     const selectedRows = [
       { ...rows[2], outcome: { p10: 1, p90: 2 } },
-      { option_id: 'p54', option_label: 'Raise to £54' },
+      { option_id: 'p54', option_label: 'Raise to £54', win_probability: 0.3, probability_of_goal: 1 },
       rows[0],
     ];
     const selected = { ...result, enrichment: { ...result.enrichment, option_comparison: selectedRows } };
     const kept = projected(run, { ...readback(), analysisResult: selected });
-    expect(kept.result.option_comparison.map((row: Record<string, unknown>) => row.option_id)).toEqual(['p59', 'p54', 'p49']);
-    expect(kept.result.option_comparison[0].outcome).toEqual({ p10: 1, p90: 2 });
-    expect(kept.result.option_comparison[1]).not.toHaveProperty('outcome');
-    expect(kept.result.option_comparison[2].outcome).toEqual(outcomes[0]);
+    expect(kept.stale).toBe(true);
+    expect(kept.result).toEqual({ computed_against_hash: HASH });
+    expect(kept.goal_certainty).toBeUndefined();
   });
 
   it('R5 earned zero stays, unearned 0/1 does not', () => {
@@ -100,6 +105,25 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
       { option: 'Raise to £54', option_id: 'p54', earned: false, say: goal_certainty.options[1]!.say },
       { option: 'Raise to £59', option_id: 'p59', earned: false, say: goal_certainty.options[2]!.say },
     ]);
+  });
+
+  it('same-Run identity does not preserve old earned certainty or caveats when the stored decision is missing or changed', () => {
+    const selected = readback();
+    expect(projected(run, selected).goal_certainty.options[0].probability_of_goal).toBe(0);
+    for (const goalCertainty of [
+      undefined,
+      selected.goalCertainty?.map((decision) => decision.option_id === 'p49'
+        ? { ...decision, earned: false, say: 'The baseline goal chance is unverified.' } : decision),
+      selected.goalCertainty?.map((decision) => decision.option_id === 'p54'
+        ? { ...decision, say: 'A changed uncertainty statement.' } : decision),
+    ]) {
+      const conflicted = projected(run, { ...selected, goalCertainty });
+      expect(conflicted.stale).toBe(true);
+      expect(conflicted.stale_note).toMatch(/selected saved run does not confirm/);
+      expect(conflicted.result).toEqual({ computed_against_hash: HASH });
+      expect(conflicted.goal_certainty).toBeUndefined();
+      expect(conflicted.claim_permissions).toBeUndefined();
+    }
   });
 
   it('two Runs with the same graph hash: the older kept Run is never current', () => {
@@ -119,11 +143,12 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
     expect(projected({ ...run, run_identity: undefined }, readback()).stale).toBe(true);
   });
 
-  it('a stale projection stays range-free if the same Run becomes current again without its old certainty caveats', () => {
+  it('a stale projection can regain ranges only from the selected Run and its stored certainty', () => {
     const stale = projected(run, readback(RUN_AT, 'complete_stale'));
     const current = projected(stale, readback());
     expect(current.stale).toBeUndefined();
-    expect(current.result.option_comparison.map((row: Record<string, unknown>) => row.outcome)).toEqual([undefined, undefined, undefined]);
+    expect(current.result.option_comparison.map((row: Record<string, unknown>) => row.outcome)).toEqual(outcomes);
+    expect(current.goal_certainty.options[1].say).toBe(goal_certainty.options[1]!.say);
     expect(projected(current, readback())).toEqual(current);
   });
 });

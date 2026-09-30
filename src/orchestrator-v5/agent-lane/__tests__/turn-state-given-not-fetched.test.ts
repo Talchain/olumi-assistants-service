@@ -343,7 +343,7 @@ describe('an applied proposal and an earlier approval are not kept in the histor
  *   - BOTH: no constraint probabilities (until B5 per_limit lands), and a run the model has moved past says so.
  */
 describe('the kept run is compacted by its own permission, and marked stale once the model moves', () => {
-  type Readback = { scenarioId?: string; analysisState?: unknown; analysisResult?: unknown };
+  type Readback = { scenarioId?: string; analysisState?: unknown; analysisResult?: unknown; analysisReady?: unknown; goalCertainty?: unknown };
   type Prune = (items: readonly unknown[], approvalsThisTurn?: readonly unknown[], readback?: Readback) => unknown[];
   const prune = (items: readonly unknown[], readback?: Readback) =>
     (historyStore as unknown as { pruneSupersededToolOutputs: Prune }).pruneSupersededToolOutputs(items, [], readback);
@@ -370,9 +370,18 @@ describe('the kept run is compacted by its own permission, and marked stale once
   const namesConstraintProbability = (k: string) => /constraint/i.test(k) && /probabilit/i.test(k);
   const RAW = RUN_RESULT.result as Record<string, any>;
   const STAMP = RAW.computed_against_hash as string;
+  const PERMITTED_READBACK = {
+    ...SERVED_READBACK,
+    analysisState: {
+      ...(SERVED_READBACK.analysisState as Record<string, unknown>),
+      leader_claim: { permitted: true, separation: 'separated' },
+    },
+  };
+  const selectedFor = (run: { claim_permissions?: { leader_may_be_named?: boolean } }) =>
+    run.claim_permissions?.leader_may_be_named === true ? PERMITTED_READBACK : SERVED_READBACK;
   const HEAVY = ['robustness', 'p_win_sensitivity', 'factor_evppi', 'edge_e_values'];
   /** The Run chip's fast path keeps the post-run readback beside the run (agent-v1-turn.ts, FAST PATH 3). */
-  const viaRunChip = (run: object) => ({ ...run, canonical_state: {
+  const viaRunChip = <T extends object>(run: T) => ({ ...run, canonical_state: {
     analysis_state: SERVED_READBACK.analysisState, analysis_ready: SERVED_READBACK.analysisReady, run_delta_absence_reason: 'unrequested_run_in_pair',
   } });
   /** The model after an approved edit: the read route's verdict turns stale and it ships no result (scenario-graph-analysis-read.ts). */
@@ -442,7 +451,7 @@ describe('the kept run is compacted by its own permission, and marked stale once
   it('RED (row 2): a PERMITTED run keeps win_probabilities and option_comparison, and drops the four heavy fields', () => {
     expect(RUN_RESULT_PERMITTED.claim_permissions.leader_may_be_named, 'control: the permitted variant may name a leader').toBe(true);
     for (const k of HEAVY) expect(Object.keys(RAW.enrichment), `control: the served run carries ${k}`).toContain(k);
-    const kept = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), SERVED_READBACK));
+    const kept = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), PERMITTED_READBACK));
     expect(kept.result.win_probabilities).toEqual(RAW.win_probabilities);
     expect(kept.result.enrichment.option_comparison.map((o: { label: string; win_probability: number; outcome: unknown }) => [o.label, o.win_probability, o.outcome]))
       .toEqual(RAW.enrichment.option_comparison.map((o: { label: string; win_probability: number; outcome: unknown }) => [o.label, o.win_probability, o.outcome]));
@@ -454,9 +463,40 @@ describe('the kept run is compacted by its own permission, and marked stale once
     expect(kept.claim_permissions).toEqual(RUN_RESULT_PERMITTED.claim_permissions);
   });
 
+  it('same-Run identity cannot preserve an earlier permitted leader after the selected permission changes', () => {
+    const selected = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), PERMITTED_READBACK));
+    expect(selected.claim_permissions.leader_may_be_named).toBe(true);
+    expect(selected.result.win_probabilities).toEqual(RAW.win_probabilities);
+
+    const conflicted = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), SERVED_READBACK));
+    expect(conflicted.stale).toBe(true);
+    expect(conflicted.stale_note).toMatch(/selected saved run does not confirm/);
+    expect(conflicted.result).toEqual({ type: RAW.type, computed_against_hash: STAMP });
+    expect(conflicted.claim_permissions).toBeUndefined();
+    expect(conflicted.goal_certainty).toBeUndefined();
+    expect(keysOf(conflicted)).not.toContain('leading_option_id');
+    expect(keysOf(conflicted)).not.toContain('outcome');
+  });
+
+  it('same-Run identity cannot refill an outcome missing from the selected saved result', () => {
+    const selectedResult = structuredClone(PERMITTED_READBACK.analysisResult) as Record<string, any>;
+    const first = selectedResult.enrichment.option_comparison[0];
+    const { outcome: _outcome, ...withoutOutcome } = first;
+    selectedResult.enrichment.option_comparison[0] = withoutOutcome;
+    expect(RAW.enrichment.option_comparison[0].outcome).toBeDefined();
+    expect(selectedResult.enrichment.option_comparison[0].outcome).toBeUndefined();
+
+    const conflicted = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), { ...PERMITTED_READBACK, analysisResult: selectedResult }));
+    expect(conflicted.stale).toBe(true);
+    expect(conflicted.result).toEqual({ type: RAW.type, computed_against_hash: STAMP });
+    expect(conflicted.claim_permissions).toBeUndefined();
+    expect(keysOf(conflicted)).not.toContain('outcome');
+    expect(keysOf(conflicted)).not.toContain('win_probability');
+  });
+
   it('RED (row 3): a model edit after the run marks the kept run stale; the same history with no edit does not', () => {
     for (const run of [RUN_RESULT, RUN_RESULT_PERMITTED, viaRunChip(RUN_RESULT_PERMITTED)]) {
-      const current = keptRun(prune(afterRun(run), SERVED_READBACK));
+      const current = keptRun(prune(afterRun(run), selectedFor(run)));
       expect(current.stale, 'no edit: the readback selected this very run').toBeUndefined();
       expect(current.stale_note).toBeUndefined();
       const edited = keptRun(prune(afterRun(run), EDITED));
@@ -473,14 +513,15 @@ describe('the kept run is compacted by its own permission, and marked stale once
         expect(k.stale_note).toMatch(/could not confirm/);
       }
       // Re-derived each turn, never sticky: stale after the edit, current again once the readback selects it again.
-      expect(keptRun(prune(prune(afterRun(run), EDITED), SERVED_READBACK)).stale).toBeUndefined();
+      expect(keptRun(prune(prune(afterRun(run), EDITED), selectedFor(run))).stale).toBeUndefined();
     }
   });
 
   it('a stale served Run, permitted or withheld, keeps identity and rerun note without old claims', () => {
-    const current = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), SERVED_READBACK));
+    const current = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), PERMITTED_READBACK));
     expect(current.claim_permissions.leader_may_be_named).toBe(true);
-    expect(keysOf(current), 'control: the current permitted Run really carries goal figures').toContain('probability_of_goal');
+    expect(keysOf(current), 'control: the current permitted Run carries measured outcomes').toContain('outcome');
+    expect(keysOf(current), 'unearned or unchecked exact goal chances are not current claims').not.toContain('probability_of_goal');
 
     for (const run of [RUN_RESULT_PERMITTED, RUN_RESULT]) {
       const once = prune(afterRun(run), EDITED);
@@ -512,17 +553,17 @@ describe('the kept run is compacted by its own permission, and marked stale once
   it('RED (row 4): constraint_probabilities is dropped from the kept run, whatever its permission', () => {
     expect(keysOf(RUN_RESULT_PERMITTED), 'control: the served run carries them').toContain('constraint_probabilities');
     for (const run of [RUN_RESULT, RUN_RESULT_PERMITTED, viaRunChip(RUN_RESULT_PERMITTED)]) {
-      const kept = keptRun(prune(afterRun(run), SERVED_READBACK));
+      const kept = keptRun(prune(afterRun(run), selectedFor(run)));
       expect(keysOf(kept).filter(namesConstraintProbability)).toEqual([]);
     }
     // CONTRAST: the sibling per-option constraint fields stay on a permitted run — only the probabilities go.
-    const permitted = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), SERVED_READBACK));
+    const permitted = keptRun(prune(afterRun(RUN_RESULT_PERMITTED), PERMITTED_READBACK));
     expect(permitted.result.enrichment.option_comparison[0].constraint_margins).toEqual(RAW.enrichment.option_comparison[0].constraint_margins);
   });
 
   it('pairing, idempotence and the latest-run-only rule hold for the projected run', () => {
     for (const run of [RUN_RESULT, RUN_RESULT_PERMITTED, viaRunChip(RUN_RESULT), viaRunChip(RUN_RESULT_PERMITTED)]) {
-      for (const readback of [SERVED_READBACK, EDITED, undefined]) {
+      for (const readback of [selectedFor(run), EDITED, undefined]) {
         const once = prune(afterRun(run), readback);
         expect(prune(once, readback), 'pruning twice changes nothing').toEqual(once);
         expect(outputOf(prune(once, readback), 'call_run')).toBe(outputOf(once, 'call_run'));

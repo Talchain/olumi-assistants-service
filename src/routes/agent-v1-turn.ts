@@ -2292,7 +2292,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * unreadable state stores the run as unconfirmed: fail closed). No extra read: this is the read the reply needs.
      */
     // PJ-C1 tokens: a pair the prune stubbed carries nothing, so it leaves with its reasoning (`dropSupersededPairs`).
-    histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals, { scenarioId, analysisState, analysisResult })));
+    histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals,
+      { scenarioId, analysisState, analysisResult, analysisReady, goalCertainty })));
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');

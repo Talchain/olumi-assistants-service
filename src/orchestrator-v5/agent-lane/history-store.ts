@@ -1,4 +1,8 @@
+import { isDeepStrictEqual } from 'node:util';
 import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
+import { analysisResultForAgent } from './decision-sensitivity.js';
+import { claimPermissionsFrom } from './first-analysis.js';
+import { goalCertaintyForAgent } from './goal-certainty-for-agent.js';
 
 /**
  * Conversation history, bounded in both directions.
@@ -171,7 +175,14 @@ const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'o
  * The route's final readback of the turn (`readBackState`, agent-v1-turn.ts): the scenario's canonical verdict and the
  * result that verdict selected. `undefined` — or a readback that failed — vouches for nothing.
  */
-export interface KeptRunReadback { readonly scenarioId?: string; readonly analysisState?: unknown; readonly analysisResult?: unknown }
+export interface KeptRunReadback {
+  readonly scenarioId?: string;
+  readonly analysisState?: unknown;
+  readonly analysisResult?: unknown;
+  readonly analysisReady?: unknown;
+  /** The selected fact's stored decisions; absence is unrecorded, never permission to repeat an old certainty. */
+  readonly goalCertainty?: readonly unknown[];
+}
 
 /** A kept run the model has moved past. */
 export const STALE_RUN_NOTE = 'The model has changed since this run, so these are not the current model’s figures: do not quote them as current. Offer to run the analysis again.';
@@ -179,6 +190,8 @@ export const STALE_RUN_NOTE = 'The model has changed since this run, so these ar
 export const SUPERSEDED_RUN_NOTE = 'A different analysis run is selected now, so figures from this earlier run are not the current run’s figures. Use the latest saved run.';
 /** A kept run no readback could vouch for (the read failed): fail closed, never presented as current. */
 export const UNCONFIRMED_RUN_NOTE = 'Olumi could not confirm this run is of the current model, so do not quote its figures as the current model’s.';
+/** The fact identity matched, but the selected saved payload did not confirm this older tool copy. */
+export const SELECTED_RUN_CONFLICT_NOTE = 'The selected saved run does not confirm this earlier tool copy, so use the current model state instead of its old claims.';
 
 /** AIQ's permitted drops: what a follow-up question does not need from a run that may name its leader. */
 const HEAVY_WHEN_PERMITTED: ReadonlySet<string> = new Set(['robustness', 'p_win_sensitivity', 'factor_evppi', 'edge_e_values']);
@@ -189,7 +202,7 @@ const RE_RANKING_NAMED: ReadonlySet<string> = new Set(['probability_of_goal', 'p
 /** Until B5 `per_limit` lands, no key naming constraint probabilities is kept, whatever the permission. */
 const namesConstraintProbability = (key: string): boolean => /constraint/i.test(key) && /probabilit/i.test(key);
 /** What a withheld run keeps at its top level, in this order (a fixed order is what makes a re-prune byte-identical). */
-const KEPT_WHEN_WITHHELD = ['ok', 'mutated', 'ran', 'status', 'what_is_missing', 'blockers', 'options', 'result', 'claim_permissions', 'goal_chance', 'goal_certainty', 'run_identity'] as const;
+const KEPT_WHEN_WITHHELD = ['ok', 'mutated', 'ran', 'status', 'what_is_missing', 'blockers', 'options', 'result', 'claim_permissions', 'goal_chance', 'run_identity'] as const;
 /** A compared option's identity — its id and its label, however the producer named them; nothing it scored. */
 const optionLabelOf = (o: unknown): Rec => {
   const r = recordOf(o) ?? {};
@@ -246,7 +259,7 @@ function withheldResult(result: Rec, selected: unknown, goalCertainty: unknown, 
   const hadOutcomeOrCertainty = compared?.some((raw) => recordOf(raw)?.outcome !== undefined) === true || goalCertainty !== undefined;
   // A matching Run tuple is necessary for currency, but it does not prove payload equality. For a current Run,
   // the canonical selected result owns both option order and outcomes; an old tool copy cannot refill an omission.
-  const displayed = current && Array.isArray(selectedCompared) ? selectedCompared : compared;
+  const displayed = current ? (Array.isArray(selectedCompared) ? selectedCompared : undefined) : compared;
   const byId = new Map<string, Rec>();
   if (current && Array.isArray(selectedCompared)) {
     for (const raw of selectedCompared) {
@@ -315,6 +328,51 @@ function staleNoteFor(run: Rec, result: Rec, readback: KeptRunReadback | undefin
   return moved ? STALE_RUN_NOTE : UNCONFIRMED_RUN_NOTE;
 }
 
+/** A saved-result conflict is not a stale graph: retain the Run identity, never its old claims. */
+function identityOnlyRun(run: Rec, result: Rec, note: string): Rec {
+  return {
+    ...pick(run, ['ok', 'mutated', 'ran', 'status']),
+    result: pick(result, ['type', 'computed_against_hash']),
+    ...pick(run, ['run_identity']),
+    stale: true,
+    stale_note: note,
+  };
+}
+
+/** Exact 0/1 goal chances travel only when this selected Run's stored decision earned that option's figure. */
+function withoutUnearnedGoalCertainties(value: unknown, selectedCertainty: unknown): unknown {
+  const earned = new Map<string, number>();
+  const options = recordOf(selectedCertainty)?.options;
+  if (Array.isArray(options)) for (const raw of options) {
+    const row = recordOf(raw);
+    if (row?.earned === true && typeof row.option_id === 'string'
+      && (row.probability_of_goal === 0 || row.probability_of_goal === 1)) {
+      earned.set(row.option_id, row.probability_of_goal);
+    }
+  }
+  const visit = (part: unknown): unknown => {
+    if (Array.isArray(part)) return part.map(visit);
+    const row = recordOf(part);
+    if (row === undefined) return part;
+    const id = typeof row.option_id === 'string' ? row.option_id : typeof row.id === 'string' ? row.id : undefined;
+    const out: Rec = {};
+    for (const [key, member] of Object.entries(row)) {
+      if (key === 'probability_of_goal' && (member === 0 || member === 1) && (id === undefined || earned.get(id) !== member)) continue;
+      out[key] = visit(member);
+    }
+    return out;
+  };
+  return visit(value);
+}
+
+/** Normalize both the old tool copy and selected result under the same compact, certainty-aware history policy. */
+function permittedResult(value: Rec, selectedCertainty: unknown): Rec {
+  const enrichment = recordOf(value.enrichment);
+  const light = enrichment === undefined ? value
+    : { ...value, enrichment: Object.fromEntries(Object.entries(enrichment).filter(([k]) => !HEAVY_WHEN_PERMITTED.has(k))) };
+  return withoutUnearnedGoalCertainties(withoutKeys(light, namesConstraintProbability), selectedCertainty) as Rec;
+}
+
 /**
  * ⭐ THE KEPT RUN IS A PROJECTION OF THE RUN, BY ITS OWN PERMISSION (AI Quality ruling, #70 5859279825 + 5859288025;
  * R&C's pinned key set). The latest run's output is the one C1 keeps, and on the served A02 run its `result` is ~11.9 KB
@@ -340,32 +398,51 @@ function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec 
   const result = recordOf(run?.result);
   if (run === undefined || result === undefined) return undefined;
   const note = staleNoteFor(run, result, readback);
-  if (note !== undefined) return {
-    ...pick(run, ['ok', 'mutated', 'ran', 'status']),
-    result: pick(result, ['type', 'computed_against_hash']),
-    ...pick(run, ['run_identity']),
-    stale: true,
-    stale_note: note,
-  };
+  if (note !== undefined) return identityOnlyRun(run, result, note);
+  const selectedResult = recordOf(analysisResultForAgent(readback?.analysisResult));
+  if (selectedResult === undefined || readback?.scenarioId === undefined) {
+    return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
+  }
+  const selectedCertainty = goalCertaintyForAgent(selectedResult,
+    { scenario_id: readback.scenarioId, analysis_state: readback.analysisState },
+    { raw: null, analysis_state: readback.analysisState, analysis_result: readback.analysisResult,
+      goal_certainty: readback.goalCertainty });
+  // A tuple match does not prove that an old earned 0/1 or withholding sentence is still the saved decision.
+  if (run.goal_certainty !== undefined
+    && !isDeepStrictEqual(keptGoalCertainty(run.goal_certainty), keptGoalCertainty(selectedCertainty))) {
+    return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
+  }
   const permitted = recordOf(run.claim_permissions)?.leader_may_be_named === true;
   let kept: Rec;
   if (permitted) {
-    const { stale: _s, stale_note: _n, canonical_state: canonical, ...rest } = run;
-    const enrichment = recordOf(result.enrichment);
+    const ownPermission = recordOf(run.claim_permissions);
+    const selectedPermission = claimPermissionsFrom(readback.analysisState, readback.analysisReady, { requested: true });
+    if (selectedPermission.leader_may_be_named !== true
+      || ownPermission?.withheld_reason !== selectedPermission.withheld_reason
+      || ownPermission?.permitted_analysis_mode !== selectedPermission.permitted_analysis_mode
+      || ownPermission?.provisional !== selectedPermission.provisional) {
+      return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
+    }
+    const selectedKeptResult = permittedResult(selectedResult, selectedCertainty);
+    if (!isDeepStrictEqual(permittedResult(result, selectedCertainty), selectedKeptResult)) {
+      return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
+    }
+    const { stale: _s, stale_note: _n, canonical_state: canonical, goal_certainty: _c, ...rest } = run;
     const canon = recordOf(canonical);
     const delta = canon === undefined ? {} : pick(canon, ['run_delta', 'run_delta_absence_reason']);
     kept = {
       ...rest,
-      result: enrichment === undefined ? result
-        : { ...result, enrichment: Object.fromEntries(Object.entries(enrichment).filter(([k]) => !HEAVY_WHEN_PERMITTED.has(k))) },
+      result: selectedKeptResult,
+      claim_permissions: selectedPermission,
       ...(Object.keys(delta).length > 0 ? { canonical_state: delta } : {}),
     };
     kept = withoutKeys(kept, namesConstraintProbability) as Rec;
   } else {
-    kept = withoutKeys({ ...pick(run, KEPT_WHEN_WITHHELD), result: withheldResult(result, readback?.analysisResult, run.goal_certainty, note === undefined) },
+    kept = withoutKeys({ ...pick(run, KEPT_WHEN_WITHHELD), result: withheldResult(selectedResult, readback?.analysisResult, selectedCertainty, true) },
       (k) => (RE_RANKING_KEY.test(k) || RE_RANKING_NAMED.has(k) || namesConstraintProbability(k))) as Rec;
   }
-  if (kept.goal_certainty !== undefined) kept.goal_certainty = keptGoalCertainty(run.goal_certainty);
+  if (selectedCertainty !== undefined) kept.goal_certainty = keptGoalCertainty(selectedCertainty);
+  else delete kept.goal_certainty;
   return kept;
 }
 
