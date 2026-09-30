@@ -104,6 +104,16 @@ function withheldOptionsFor(
   return { labels, byReason, asks };
 }
 
+/** {@link withheldOptionsFor} that never throws: a failure costs only the per-option words and asks, never the rows. */
+function withheldOptionsOrNone(graph: unknown, targetId: string | null): ReturnType<typeof withheldOptionsFor> {
+  try {
+    return withheldOptionsFor(graph, targetId);
+  } catch (err) {
+    log.warn({ event: 'agent_lane.limit_withheld_options_failed', err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the options withheld on a limit could not be read; the row goes without them');
+    return { labels: [], byReason: new Map(), asks: [] };
+  }
+}
+
 /** Why an option's own check was withheld, by the predicate's reason: an unsized link, or parts the engine cannot combine. */
 const PER_OPTION_WHY: ReadonlyMap<string, readonly [one: string, many: string]> = new Map([
   [PLACEHOLDER_PARTS_REASON, ['that option moves it through a link Olumi has not sized (a placeholder, not an estimate).',
@@ -175,7 +185,7 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     // unscored row checked no option, so it names none (its own sentence already says it could not be checked).
     const perOption = row.state === 'unscored'
       ? { labels: [], byReason: new Map<string, string[]>(), asks: [] }
-      : withheldOptionsFor(graph, limit?.node_id ?? null);
+      : withheldOptionsOrNone(graph, limit?.node_id ?? null);
     const why = [...PER_OPTION_WHY].filter(([reason]) => perOption.byReason.has(reason)).map(([reason, [one, many]]) => {
       const named = perOption.byReason.get(reason)!;
       return `For ${andList(named.map(q))} it couldn’t be checked: ${named.length === 1 ? one : many}`;
