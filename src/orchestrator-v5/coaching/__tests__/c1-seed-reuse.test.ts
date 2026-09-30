@@ -95,6 +95,14 @@ describe('draw-structure key — what lines two Runs\' draws up (R3 5920859011)'
   it('a factor value crossing 0 IS a structure change (point_mass draws nothing)', () => {
     expect(drawStructureKey(snap((s) => { churn(s).raw = 0; churn(s).encoded = 0; }))).not.toBe(base);
   });
+  it('a stated range on a setting (added, or its bounds moved) IS a structure change — its draws are not verified here', () => {
+    const withRange = (low: number, high: number) => snap((s) => {
+      ((s as unknown as Mut).options as Mut[])[0]!.settings[0].range = { low, high, meaning: 'likely_range', source: 'user_stated' };
+    });
+    expect(drawStructureKey(withRange(50, 70))).not.toBe(base);
+    expect(drawStructureKey(withRange(50, 80))).not.toBe(drawStructureKey(withRange(50, 70)));
+    expect(drawStructureKey(withRange(50, 70)), 'CONTROL: the same range twice is the same structure').toBe(drawStructureKey(withRange(50, 70)));
+  });
   it('key order never matters: the same inputs listed in another order give the same key', () => {
     expect(drawStructureKey(snap((s) => { ((s as unknown as Mut).options as Mut[]).reverse(); }))).toBe(base);
   });
