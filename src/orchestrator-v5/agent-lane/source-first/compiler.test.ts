@@ -19,7 +19,7 @@ function pricing() {
   const brief = 'Current price is £49 per subscriber a month. We have 1,500 subscribers. Current MRR is £73,500 a month. MRR is price times subscribers. Our target MRR is above £85k a month within a year. Option: raise price to £59 per subscriber a month.';
   const meaning = empty();
   meaning.entities = [
-    { ref: 'price', kind: 'factor', label: 'Pro price', source: source('Current price is £49 per subscriber a month.') },
+    { ref: 'price', kind: 'factor', label: 'Price', source: source('Current price is £49 per subscriber a month.') },
     { ref: 'subscribers', kind: 'factor', label: 'Subscribers', source: source('We have 1,500 subscribers.') },
     { ref: 'mrr', kind: 'goal', label: 'MRR', source: source('Current MRR is £73,500 a month.') },
     { ref: 'raise', kind: 'option', label: 'Raise price', source: source('Option: raise price to £59 per subscriber a month.') },
@@ -342,6 +342,39 @@ describe('saved source-first graph reaches product lineage and option readers', 
     expect(result.graph.edges.some((edge) => edge.to === sourceEntityId('o1')
       && [sourceEntityId('d1'), sourceEntityId('d2')].includes(edge.from))).toBe(false);
     expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'o1', code: 'decision_option_scope_ambiguous' }));
+  });
+  it('refuses a price-only option linked to churn before writing an edge or setting', () => {
+    const captured = structuredClone(captures.find((item) => item.case === 'paul-mrr')!);
+    captured.meaning.entities.push({ ref: 'f3', kind: 'factor', label: 'Monthly churn',
+      source: source('Monthly churn must stay below 5%') });
+    captured.meaning.options[0].interventions[0].entity_ref = 'f3';
+    const churnId = sourceEntityId('f3');
+    const optionId = sourceEntityId('o1');
+    const wrongRef = compileSourceMeaning(captured.brief, captured.meaning);
+    expect(wrongRef.graph.edges.some((edge) => edge.from === optionId && edge.to === churnId)).toBe(false);
+    expect(wrongRef.graph.nodes.find((node) => node.id === optionId)?.interventions).toEqual({});
+    expect(wrongRef.unresolved).toContainEqual(expect.objectContaining({ code: 'intervention_role_mismatch' }));
+
+    // Even changing the quantity's typed ref cannot turn a price clause into
+    // evidence that the option changes churn.
+    captured.meaning.quantities.find((claim) => claim.ref === 'q2')!.entity_ref = 'f3';
+    const borrowedQuote = compileSourceMeaning(captured.brief, captured.meaning);
+    expect(borrowedQuote.graph.edges.some((edge) => edge.from === optionId && edge.to === churnId)).toBe(false);
+    expect(borrowedQuote.graph.nodes.find((node) => node.id === optionId)?.interventions).toEqual({});
+    expect(borrowedQuote.unresolved).toContainEqual(expect.objectContaining({ ref: 'f3', code: 'intervention_target_source_mismatch' }));
+  });
+  it('refuses a qualitative action attached to the wrong factor', () => {
+    const captured = structuredClone(captures.find((item) => item.case === 'support')!);
+    const optionId = sourceEntityId('o1');
+    const channelId = sourceEntityId('f1');
+    const agentsId = sourceEntityId('f2');
+    const supported = compileSourceMeaning(captured.brief, captured.meaning);
+    expect(supported.graph.edges).toContainEqual(expect.objectContaining({ from: optionId, to: channelId, origin: 'structural' }));
+    captured.meaning.options[0].interventions[0].entity_ref = 'f2';
+    const wrong = compileSourceMeaning(captured.brief, captured.meaning);
+    expect(wrong.graph.edges.some((edge) => edge.from === optionId && edge.to === agentsId)).toBe(false);
+    expect(wrong.graph.nodes.find((node) => node.id === optionId)?.interventions).toEqual({});
+    expect(wrong.unresolved).toContainEqual(expect.objectContaining({ ref: 'f2', code: 'intervention_target_source_mismatch' }));
   });
 });
 

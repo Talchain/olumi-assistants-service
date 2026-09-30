@@ -30,6 +30,17 @@ export function sourceEntityId(ref: string): string {
   return `sf_${createHash('sha256').update(ref).digest('hex').slice(0, 20)}`;
 }
 
+const spanWithin = (inner: BoundSource, outer: BoundSource): boolean =>
+  outer.start <= inner.start && inner.end <= outer.end;
+const spansOverlap = (left: BoundSource, right: BoundSource): boolean =>
+  left.start < right.end && right.start < left.end;
+function namesBoundTarget(label: string, target: BoundSource, action: BoundSource): boolean {
+  const words = label.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const phrases = words.length === 1 ? words : words.slice(1).map((word, index) => `${words[index]} ${word}`);
+  return phrases.some((phrase) => phrase.length >= 4
+    && target.quote.toLowerCase().includes(phrase) && action.quote.toLowerCase().includes(phrase));
+}
+
 /** Keep a quarter deadline verbatim when the goal's own bound source states one. */
 function statedQuarterDeadline(quote: string): string | undefined {
   const matches = [...quote.matchAll(/\b(?:by|before)\s+(?:the\s+end\s+of\s+)?Q[1-4]\b/gi)]
@@ -203,8 +214,13 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     node.interventions = {};
     for (const intervention of option.interventions) {
       let target = nodes.get(intervention.entity_ref);
+      let targetSource = source_bindings[intervention.entity_ref];
       const source = bindSource(brief, intervention.source);
       const quantity = intervention.quantity_ref === null ? undefined : accepted.get(intervention.quantity_ref);
+      // A separately stated current level need not repeat inside the option.
+      // A validated change explicitly referring to this target can bind it to
+      // the action instead; a number assigned to another target cannot.
+      if (quantity?.claim.entity_ref === intervention.entity_ref) targetSource = source_bindings[quantity.claim.ref];
       // The source IR already names a proposed count and its owning option.
       // GraphV3 needs separate nodes for the alternative and the quantity it
       // sets. Project that typed quantity; do not turn an option into a factor
@@ -241,6 +257,7 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
           nodes.set(quantityRef, target);
           reference_ids[quantityRef] = target.id;
           source_bindings[quantityRef] = numberSource;
+          targetSource = numberSource;
           projectedOptionQuantities++;
         }
       }
@@ -248,22 +265,32 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
         issue(option.entity_ref, 'intervention_target_unresolved', `Which controllable quantity does "${node.label}" change?`); continue;
       }
       const optionSource = source_bindings[option.entity_ref];
-      if (optionSource.end <= source.source.start || source.source.end <= optionSource.start) {
+      if (!spanWithin(source.source, optionSource)) {
         issue(option.entity_ref, 'intervention_option_source_mismatch', `Does this change belong to "${node.label}"?`); continue;
+      }
+      if (intervention.quantity_ref !== null) {
+        if (!quantity || quantity.claim.entity_ref !== intervention.entity_ref
+          || !['proposed_level', 'absolute_change', 'relative_change', ...(node.is_baseline ? ['current'] : [])].includes(quantity.claim.role)) {
+          issue(intervention.quantity_ref, 'intervention_role_mismatch', `What level or change of "${target.label}" belongs to "${node.label}"?`); continue;
+        }
+        const numericSource = source_bindings[intervention.quantity_ref];
+        if (!spanWithin(numericSource, source.source)) {
+          issue(intervention.quantity_ref, 'intervention_quantity_source_mismatch', `Which stated figure belongs to "${node.label}"?`); continue;
+        }
+      }
+      // An option quote cannot authorise a link to an unrelated factor. Its
+      // action must overlap the target's independent source and name it there.
+      // The same check applies when the action has no numeric level.
+      if (!spansOverlap(targetSource, source.source) || !namesBoundTarget(target.label, targetSource, source.source)) {
+        issue(intervention.entity_ref, 'intervention_target_source_mismatch',
+          `Does "${node.label}" change "${target.label}"? Its stated option does not name that quantity.`); continue;
       }
       structuralEdge(node, target, source.source.quote);
       target.category = 'controllable';
       if (intervention.quantity_ref === null) {
         issue(option.entity_ref, 'intervention_level_missing', `What level of "${target.label}" does "${node.label}" set?`); continue;
       }
-      if (!quantity || quantity.claim.entity_ref !== intervention.entity_ref
-        || !['proposed_level', 'absolute_change', 'relative_change', ...(node.is_baseline ? ['current'] : [])].includes(quantity.claim.role)) {
-        issue(intervention.quantity_ref, 'intervention_role_mismatch', `What level or change of "${target.label}" belongs to "${node.label}"?`); continue;
-      }
-      const numericSource = source_bindings[intervention.quantity_ref];
-      if (numericSource.end <= source.source.start || source.source.end <= numericSource.start) {
-        issue(intervention.quantity_ref, 'intervention_quantity_source_mismatch', `Which stated figure belongs to "${node.label}"?`); continue;
-      }
+      if (!quantity) continue; // Checked above; retained for type narrowing.
       usedQuantityRefs.add(intervention.quantity_ref);
       let value = quantity.value;
       let derived = false;
