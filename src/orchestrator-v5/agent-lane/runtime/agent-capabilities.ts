@@ -3948,7 +3948,7 @@ export function createAgentCapabilities(
         proposals.markApplied(decision.proposal.proposal_id, receipts);
         return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id,
           receipts, ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-          follow_up: `Included "${adopted.label}" in your comparison. Its Olumi origin and each level's recorded source remain unchanged. The earlier analysis describes the previous comparison; run it again to include this option.`,
+          follow_up: `Included "${adopted.label}" in your comparison. Its Olumi origin and each level's recorded source remain unchanged. Any earlier result is now out of date; run analysis to include this option.`,
         };
       }
 

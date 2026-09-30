@@ -750,16 +750,19 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(graphNow().nodes.find((node) => node.id === 'opt_b')).toMatchObject({ proposed_by: 'olumi' });
 
     const before = structuredClone(graphNow());
+    expect('analysis_state' in before, 'this adoption has no prior Run').toBe(false);
     script = [() => fnCall('authorise_change', { proposal_id: toolOutput.proposal_id }), () => say('Please use the card.')];
     const plainYes = await turn({ message: 'yes' });
     expect(plainYes._agent.tool_calls.find((call) => call.name === 'authorise_change'))
       .toMatchObject({ ok: false, mutated: false, refusal: 'approve_on_card' });
     expect(graphNow()).toEqual(before);
 
-    script = [() => say('Included the suggestion; the old Run is stale. Run again to compare all three options.')];
+    script = [() => say('Included the suggestion; run analysis to compare all three options.')];
     const pressed = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
     expect(pressed._agent.tool_calls.find((call) => call.name === 'authorise_change'))
       .toMatchObject({ ok: true, mutated: true });
+    expect(pressed.assistant_text).toContain('Any earlier result is now out of date; run analysis to include this option.');
+    expect(pressed.assistant_text).not.toMatch(/the earlier analysis|run it again/i);
     expect(approveChipOf(pressed), 'the applied proposal is no longer offered').toBeUndefined();
     const after = graphNow();
     expect(after.nodes.filter((node) => node.kind === 'option')).toHaveLength(3);
