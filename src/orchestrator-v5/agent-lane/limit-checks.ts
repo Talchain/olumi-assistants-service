@@ -12,7 +12,12 @@
  * is left out, never named by guess.
  */
 import { readRatifiedConstraints, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
-import { PARTS_IDENTITY_UNMODELLED_REASON, PLACEHOLDER_PARTS_REASON } from '../../orchestrator/context/placeholder-parts.js';
+import {
+  PARTS_IDENTITY_UNMODELLED_REASON,
+  PLACEHOLDER_PARTS_REASON,
+  optionIdOf,
+  placeholderPartsFinding,
+} from '../../orchestrator/context/placeholder-parts.js';
 import { log } from '../../utils/telemetry.js';
 import { limitCheckAsks } from './limited-level-ask.js';
 
@@ -28,6 +33,12 @@ export interface LimitCheck {
    * checked against THEIR figures. Read off the same graph; absent when MG asks nothing, and never on a `scored` limit.
    */
   readonly ask?: string;
+  /**
+   * R-c per option (AI Quality #72 5900908629): the options whose own check of this limit was withheld because they move
+   * its quantity through a link Olumi has not sized (or through parts the engine cannot combine), by label. Said in
+   * `say`; one question per unsized part joins `ask`.
+   */
+  readonly withheld_for?: readonly string[];
 }
 
 const q = (label: string): string => `‘${label}’`;
@@ -53,6 +64,64 @@ const PARTS_LIMIT_SENTENCES: ReadonlyMap<string, string> = new Map([
   [PARTS_IDENTITY_UNMODELLED_REASON, 'the model cannot yet combine its parts the way they really combine.'],
 ]);
 
+const andList = (xs: readonly string[]): string =>
+  xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+
+/**
+ * ⭐ R-c PER OPTION, SAID (AI Quality #72 5900908629). The options PLoT scored whose check of a limit was withheld: each
+ * moves the limit's quantity through a part whose link Olumi has not sized. Re-read off the SAME stored graph and the same
+ * predicate the run withheld them by (`placeholderPartsFinding`, per option), so the words and the numbers cannot
+ * disagree. Returns their labels and one question per part: a size the user gives is written as theirs (#2274) and ends
+ * the withhold. Nothing when the row is itself withheld for its parts (every option was such an option).
+ */
+function withheldOptionsFor(
+  graph: unknown,
+  targetId: string | null,
+): { labels: string[]; byReason: Map<string, string[]>; asks: string[] } {
+  const nodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const edges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  if (targetId === null || !Array.isArray(nodes)) return { labels: [], byReason: new Map(), asks: [] };
+  const recs = nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object');
+  const links = Array.isArray(edges) ? edges.filter((e): e is Record<string, unknown> => e !== null && typeof e === 'object') : [];
+  const labelOf = (id: unknown): string | null => {
+    const l = recs.find((n) => n.id === id)?.label;
+    return typeof l === 'string' && l.trim() !== '' ? l.trim() : null;
+  };
+  const target = labelOf(targetId);
+  const labels: string[] = [];
+  const byReason = new Map<string, string[]>();
+  const asks: string[] = [];
+  for (const o of recs.filter((n) => n.kind === 'option')) {
+    const finding = placeholderPartsFinding(targetId, recs, links, [o]);
+    const label = labelOf(optionIdOf(o));
+    if (finding === null || label === null) continue;
+    labels.push(label);
+    byReason.set(finding.reason, [...(byReason.get(finding.reason) ?? []), label]);
+    const part = finding.reason === PLACEHOLDER_PARTS_REASON ? labelOf(finding.partId) : null;
+    const ask = part !== null && target !== null ? `How much does ${q(part)} change ${q(target)}?` : null;
+    if (ask !== null && !asks.includes(ask)) asks.push(ask);
+  }
+  return { labels, byReason, asks };
+}
+
+/** {@link withheldOptionsFor} that never throws: a failure costs only the per-option words and asks, never the rows. */
+function withheldOptionsOrNone(graph: unknown, targetId: string | null): ReturnType<typeof withheldOptionsFor> {
+  try {
+    return withheldOptionsFor(graph, targetId);
+  } catch (err) {
+    log.warn({ event: 'agent_lane.limit_withheld_options_failed', err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the options withheld on a limit could not be read; the row goes without them');
+    return { labels: [], byReason: new Map(), asks: [] };
+  }
+}
+
+/** Why an option's own check was withheld, by the predicate's reason: an unsized link, or parts the engine cannot combine. */
+const PER_OPTION_WHY: ReadonlyMap<string, readonly [one: string, many: string]> = new Map([
+  [PLACEHOLDER_PARTS_REASON, ['that option moves it through a link Olumi has not sized (a placeholder, not an estimate).',
+    'those options move it through a link Olumi has not sized (a placeholder, not an estimate).']],
+  [PARTS_IDENTITY_UNMODELLED_REASON, ['that option moves it through parts the model cannot yet combine the way they really combine.',
+    'those options move it through parts the model cannot yet combine the way they really combine.']],
+]);
+
 /** One sentence per state (and, for `estimate_only`, per whose figure it was checked against). */
 function sentenceFor(label: string, state: LimitCheck['state'], reason: string | undefined): string {
   if (state === 'scored') return `${q(label)} was checked against the figures in your model.`;
@@ -70,8 +139,8 @@ function sentenceFor(label: string, state: LimitCheck['state'], reason: string |
 export const LIMIT_CHECKS_NOTE =
   'How each of the user’s limits was checked in this run. Say it only with its sentence here. A limit checked against '
   + 'Olumi’s estimates WAS checked: never call it not checkable or unchecked, and never ask for a way to make it checkable. '
-  + 'Only a limit whose state is unscored cannot be checked yet. Where a limit has an ask, ask it once, in its words, '
-  + 'after its sentence.';
+  + 'Only a limit whose state is unscored cannot be checked yet, and only the options its sentence names could not be '
+  + 'checked on it. Where a limit has an ask, ask it once, in its words, after its sentence.';
 
 /** MG's one question per limit on this graph, by `constraint_id`. A producer failure costs only the asks, never the rows. */
 function asksByLimit(graph: unknown): ReadonlyMap<string, string> {
@@ -112,7 +181,23 @@ export function limitChecksForAgent(graph: unknown, verdicts: StoredLimitVerdict
     const levelCannotHelp = row.state === 'unscored' && typeof row.reason === 'string'
       && (OFF_SCALE_LIMIT_REASONS.has(row.reason) || PARTS_LIMIT_SENTENCES.has(row.reason));
     const ask = row.state === 'scored' || levelCannotHelp ? undefined : asks.get(row.constraint_id);
-    out.push({ constraint_id: row.constraint_id, limit: label, state: row.state, say: sentenceFor(label, row.state, row.reason), ...(ask !== undefined ? { ask } : {}) });
+    // R-c per option: a row the options checked, with some options' own check withheld — say which, and ask once. An
+    // unscored row checked no option, so it names none (its own sentence already says it could not be checked).
+    const perOption = row.state === 'unscored'
+      ? { labels: [], byReason: new Map<string, string[]>(), asks: [] }
+      : withheldOptionsOrNone(graph, limit?.node_id ?? null);
+    const why = [...PER_OPTION_WHY].filter(([reason]) => perOption.byReason.has(reason)).map(([reason, [one, many]]) => {
+      const named = perOption.byReason.get(reason)!;
+      return `For ${andList(named.map(q))} it couldn’t be checked: ${named.length === 1 ? one : many}`;
+    });
+    const say = [sentenceFor(label, row.state, row.reason), ...why].join(' ');
+    // The link-size questions are MG's ask, never the sentence's (one wording, one producer): after the level ask.
+    const allAsks = [...(ask !== undefined ? [ask] : []), ...perOption.asks].join(' ');
+    out.push({
+      constraint_id: row.constraint_id, limit: label, state: row.state, say,
+      ...(allAsks !== '' ? { ask: allAsks } : {}),
+      ...(perOption.labels.length > 0 ? { withheld_for: perOption.labels } : {}),
+    });
   }
   return out.length > 0 ? out : undefined;
 }

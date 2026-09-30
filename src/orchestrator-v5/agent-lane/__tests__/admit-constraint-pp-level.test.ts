@@ -24,6 +24,7 @@ import {
   type LimitTargetScale,
 } from '../admit-constraint.js';
 import { levelLimitBaselineNodeIds } from '../../tools/handlers/level-limit-baseline.js';
+import { collectLimitLevelOwners, readRatifiedConstraints } from '../../../orchestrator/context/constraint-feasibility.js';
 
 type Rec = Record<string, unknown>;
 interface Run { goal_node_id: string; graph: { nodes: Rec[]; edges: Rec[]; goal_constraints: Rec[] } }
@@ -89,11 +90,14 @@ describe('F-C: a LEVEL limit in percentage points is a percent', () => {
     expect([...admitted]).toEqual(['monthly_churn']);
   });
 
-  it('[served run 2] R-c (AI Quality 5882087383): with the run\'s options it carries NOTHING — price also reaches churn through the unsized risk node', () => {
-    const options = (RUN2.graph.nodes as Array<Record<string, unknown>>).filter((n) => n.kind === 'option').map((n) => ({ interventions: n.interventions ?? {} }));
+  it('[served run 2] R-c PER OPTION (AI Quality 5900908629): with the run\'s options the baseline CARRIES; each option reaching churn through the unsized risk node has its own P withheld', () => {
+    const options = (RUN2.graph.nodes as Array<Record<string, unknown>>).filter((n) => n.kind === 'option').map((n) => ({ option_id: n.id, interventions: n.interventions ?? {} }));
     const unsized = (RUN2.graph.edges as Array<Record<string, any>>).filter((e) => e.to === 'monthly_churn' && e.provenance?.magnitude === undefined).map((e) => e.from);
     expect(unsized).toContain('price_sensitivity_risk');
-    expect([...levelLimitBaselineNodeIds(RUN2.graph, [admit(RUN2)], RUN2.goal_node_id, options)]).toEqual([]);
+    expect([...levelLimitBaselineNodeIds(RUN2.graph, [admit(RUN2)], RUN2.goal_node_id, options)]).toEqual(['monthly_churn']);
+    const c = admit(RUN2);
+    const withheld = collectLimitLevelOwners(RUN2.graph, readRatifiedConstraints([c]), options).placeholderMovedOptionIds.get(c.constraint_id as string);
+    expect(withheld?.size ?? 0).toBeGreaterThan(0);
   });
 
   it('[served run 1] contrast: "percent per month" is relabelled exactly as it was served', () => {

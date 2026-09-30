@@ -62,3 +62,24 @@ describe('a link the USER sized ends the R-c withhold on the limit it moves', ()
     expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)).toBeNull();
   });
 });
+
+describe('a strength the USER stated (no natural size) is theirs for R-c, not a placeholder (lock A PJ-A3)', () => {
+  const CHURN = { id: 'churn', kind: 'factor', label: 'Monthly churn', observed_state: { value: 0.03, raw_value: 3, cap: 100, unit: '%', source: 'cee_inference' } };
+  const userStrength = (g: Rec): Rec => ({ ...g, edges: edgesOf(g).map((e) => (e.from === 'price' && e.to === 'churn'
+    ? { ...e, strength: { mean: 0.85, std: 0.0866 }, defaulted: false, provenance: { source: 'user_specified' } } : e)) });
+  it('ROW: Paul\'s "very high" price → churn (`user_specified` 0.85) — no withhold', () => {
+    const g = userStrength(graph(CHURN));
+    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)).toBeNull();
+  });
+  it('CONTROL: the same link as Olumi\'s placeholder still withholds', () => {
+    const g = graph(CHURN);
+    expect(placeholderPartsFinding('churn', nodesOf(g), edgesOf(g), OPTIONS)?.reason).toBe(PLACEHOLDER_PARTS_REASON);
+  });
+  it('CONTROL: a user strength elsewhere does not excuse a placeholder on the path', () => {
+    const g = userStrength(graph(CHURN));
+    const g2 = { ...g, nodes: [...nodesOf(g), { id: 'retain', kind: 'factor', label: 'Retention offer' }],
+      edges: [...edgesOf(g), { from: 'retain', to: 'churn', strength: { mean: -0.0075, std: 0.004 }, exists_probability: 0.9,
+        effect_direction: 'negative', defaulted: true, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } }] };
+    expect(placeholderPartsFinding('churn', nodesOf(g2), edgesOf(g2), [{ interventions: { retain: 1 } }])?.reason).toBe(PLACEHOLDER_PARTS_REASON);
+  });
+});

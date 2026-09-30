@@ -38,6 +38,9 @@ function world(verdicts: unknown | null = FX.limit_verdicts) {
   return createAgentCapabilities(d, new ProposalStore());
 }
 
+/** R-c per option (AI Quality #72 5900908629): the C10 options whose own churn check is withheld, as the sentence names them. */
+const CHURN_WITHHELD = ' For ‘Features and Pro price’ and ‘Additional advertising’ it couldn’t be checked: those options move it through a link Olumi has not sized (a placeholder, not an estimate).';
+
 describe('⛔ run_analysis says how each of the user’s limits was checked', () => {
   it('the served premise: the run withheld its leader with the generic reason, and both limits are estimate_only', () => {
     expect((FX.analysis_state as { leader_claim?: { withheld_reason?: string } }).leader_claim?.withheld_reason).toBe('constraint_verdict_withheld');
@@ -51,7 +54,9 @@ describe('⛔ run_analysis says how each of the user’s limits was checked', ()
     // Each row also carries MG's ask for that limit, verbatim (`limit-checks-carry-the-ask.test.ts` binds the join).
     expect(checks!.limits.map(({ ask: _ask, ...row }: { ask?: string } & Record<string, unknown>) => row)).toEqual([
       { constraint_id: 'agent-lane:total_investment:<=', limit: 'Total investment', state: 'estimate_only', say: '‘Total investment’ was checked, but only against Olumi’s estimates, not figures you gave.' },
-      { constraint_id: 'agent-lane:monthly_churn:<=', limit: 'Monthly churn', state: 'estimate_only', say: '‘Monthly churn’ was checked, but only against Olumi’s estimates, not figures you gave.' },
+      // R-c per option (AIQ 5900908629): both Olumi options move churn through price on an unsized link — named, not hidden.
+      { constraint_id: 'agent-lane:monthly_churn:<=', limit: 'Monthly churn', state: 'estimate_only', say: '‘Monthly churn’ was checked, but only against Olumi’s estimates, not figures you gave.'
+        + CHURN_WITHHELD, withheld_for: ['Features and Pro price', 'Additional advertising'] },
     ]);
     expect(checks!.note).toBe(LIMIT_CHECKS_NOTE);
     expect(JSON.stringify(checks)).not.toMatch(/cannot be checked in this model/);
@@ -64,13 +69,13 @@ describe('⛔ run_analysis says how each of the user’s limits was checked', ()
     ], joint: { state: 'withheld' as const } };
     expect(limitChecksForAgent(FX.graph, rows)!.map((c) => c.say)).toEqual([
       '‘Total investment’ cannot be checked in this model yet.',
-      '‘Monthly churn’ was checked against the figures in your model.',
+      `‘Monthly churn’ was checked against the figures in your model.${CHURN_WITHHELD}`,
     ]);
   });
 
   it('CONTROL: a limit checked against a figure the user accepted as an assumption says so', () => {
     const rows = { per_limit: [{ constraint_id: 'agent-lane:monthly_churn:<=', state: 'estimate_only' as const, reason: 'level_user_assumption' }], joint: { state: 'estimate_only' as const } };
-    expect(limitChecksForAgent(FX.graph, rows)![0]!.say).toBe('‘Monthly churn’ was checked, against a figure you accepted as an assumption.');
+    expect(limitChecksForAgent(FX.graph, rows)![0]!.say).toBe(`‘Monthly churn’ was checked, against a figure you accepted as an assumption.${CHURN_WITHHELD}`);
   });
 
   it('CONTROL: no per-limit rows on the read → no limit_checks (nothing invented); a row whose limit has no label is left out', async () => {

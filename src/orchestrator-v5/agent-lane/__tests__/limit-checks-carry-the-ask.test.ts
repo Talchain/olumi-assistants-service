@@ -31,10 +31,17 @@ describe('⭐ each limit row carries MG’s ask, verbatim', () => {
     expect([...asksOf(FX.graph).keys()].sort()).toEqual([CHURN, LIMIT].sort());
   });
 
+  /**
+   * R-c per option (AI Quality #72 5900908629): on C10 both Olumi options move churn through price on an unsized link, so
+   * the churn row's ask is MG's level question word for word, then the link-size question (`limit-checks.ts`).
+   */
+  const CHURN_LINK_ASK = 'How much does ‘Pro plan price’ change ‘Monthly churn’?';
+  const withLinkAsk = (cid: string, ask: string | undefined) => (cid === CHURN ? `${ask} ${CHURN_LINK_ASK}` : ask);
+
   it('RED (served C10): each estimate_only row carries its limit’s question, word for word', () => {
     const rows = limitChecksForAgent(FX.graph, FX.limit_verdicts)!;
     const asks = asksOf(FX.graph);
-    expect(rows.map((r) => [r.constraint_id, r.ask])).toEqual(rows.map((r) => [r.constraint_id, asks.get(r.constraint_id)]));
+    expect(rows.map((r) => [r.constraint_id, r.ask])).toEqual(rows.map((r) => [r.constraint_id, withLinkAsk(r.constraint_id, asks.get(r.constraint_id))]));
     expect(rows.find((r) => r.constraint_id === LIMIT)!.ask).toMatch(/^What is "Total investment" today/);
   });
 
@@ -42,7 +49,7 @@ describe('⭐ each limit row carries MG’s ask, verbatim', () => {
     const scored = { per_limit: FX.limit_verdicts.per_limit.map((r) => (r.constraint_id === LIMIT ? { constraint_id: LIMIT, state: 'scored' } : r)), joint: FX.limit_verdicts.joint } as unknown as StoredLimitVerdicts;
     const rows = limitChecksForAgent(FX.graph, scored)!;
     expect(rows.find((r) => r.constraint_id === LIMIT)).not.toHaveProperty('ask');
-    expect(rows.find((r) => r.constraint_id === CHURN)!.ask).toBe(asksOf(FX.graph).get(CHURN));
+    expect(rows.find((r) => r.constraint_id === CHURN)!.ask).toBe(withLinkAsk(CHURN, asksOf(FX.graph).get(CHURN)));
   });
 
   it('CONTRAST: where MG asks nothing (every figure on the limit is the user’s), that row gains no ask key', () => {
@@ -57,7 +64,7 @@ describe('⭐ each limit row carries MG’s ask, verbatim', () => {
     expect(asksOf(g).has(LIMIT), 'control: MG’s producer is silent on this limit').toBe(false);
     const rows = limitChecksForAgent(g, FX.limit_verdicts)!;
     expect(rows.find((r) => r.constraint_id === LIMIT)).not.toHaveProperty('ask');
-    expect(rows.find((r) => r.constraint_id === CHURN)!.ask).toBe(asksOf(g).get(CHURN));
+    expect(rows.find((r) => r.constraint_id === CHURN)!.ask).toBe(withLinkAsk(CHURN, asksOf(g).get(CHURN)));
   });
 
   it('the note tells the model to ask it once, in its words', () => {

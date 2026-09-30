@@ -19,7 +19,28 @@ describe('a throwing ask producer never costs the run its limit rows', () => {
     expect(rows.map((r) => r.constraint_id)).toEqual(FX.limit_verdicts.per_limit.map((r) => r.constraint_id));
     for (const r of rows) {
       expect(r.say).toMatch(/was checked, but only against Olumi’s estimates/);
-      expect(r).not.toHaveProperty('ask');
+      // Only the throwing producer's asks are lost. R-c per option (AIQ 5900908629): churn's link-size question comes from
+      // the per-option withhold, which did not throw, so it alone remains; no level question survives.
+      if (r.constraint_id === 'agent-lane:monthly_churn:<=') expect(r.ask).toBe('How much does ‘Pro plan price’ change ‘Monthly churn’?');
+      else expect(r).not.toHaveProperty('ask');
     }
+  });
+});
+
+describe('a throwing per-option withhold never costs the run its limit rows', () => {
+  it('every row stays, with its level sentence; only the per-option words and link-size asks are lost', async () => {
+    vi.resetModules();
+    vi.doMock('../../../orchestrator/context/placeholder-parts.js', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      placeholderPartsFinding: () => { throw new Error('boom'); },
+    }));
+    const { limitChecksForAgent } = await import('../limit-checks.js');
+    const rows = limitChecksForAgent(FX.graph, FX.limit_verdicts)!;
+    expect(rows.map((r) => r.constraint_id)).toEqual(FX.limit_verdicts.per_limit.map((r) => r.constraint_id));
+    for (const r of rows) {
+      expect(r.say).toBe(`‘${r.limit}’ was checked, but only against Olumi’s estimates, not figures you gave.`);
+      expect(r).not.toHaveProperty('withheld_for');
+    }
+    vi.doUnmock('../../../orchestrator/context/placeholder-parts.js');
   });
 });

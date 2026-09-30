@@ -53,6 +53,7 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   collectLeaderEstimatedTargetIds,
   collectLimitLevelOwners,
+  withholdOptionLimitScores,
   deriveConstraintVerdict,
   readRatifiedConstraints,
   projectClaimSafety,
@@ -1745,6 +1746,29 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // (analysis_status: "computed" with full option_comparison[] — hash
     // 2d2aab36...). Pre-hardening behaviour hard-matched on 'completed' only
     // and rejected 'computed' from real staging as analysis_not_completed.
+    // ⭐ R-c PER OPTION (AI Quality #72 5900908629; lock A PJ-A3, R3 5900778834). The level limit's baseline now always
+    // carries (`level-limit-baseline.ts`), so PLoT scores every option; an option that moves the limit's target through an
+    // unsized Olumi link has ITS P for that limit withheld HERE, before any reader (verdict, headline, fact, Agent), read
+    // off the same analysed graph and the options PLoT scored — the one predicate the verdict's R-c reads.
+    const placeholderMovedByLimit = collectLimitLevelOwners(
+      graphForAnalysis,
+      readRatifiedConstraints(snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph),
+      finalWireOptions,
+    ).placeholderMovedOptionIds;
+    if (placeholderMovedByLimit.size > 0) {
+      response = withholdOptionLimitScores(response, placeholderMovedByLimit);
+      log.info(
+        {
+          event: 'run_analysis.limit_p_withheld_for_placeholder_moved_options',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          // Redacted: ids only.
+          withheld: [...placeholderMovedByLimit].map(([constraint_id, ids]) => ({ constraint_id, option_ids: [...ids] })),
+        },
+        'run_analysis: a limit\'s P is withheld for the options that move its target through an unsized Olumi link',
+      );
+    }
+
     const analysisStatus = readAnalysisStatus(response);
     const resultRecords = readResultRecords(response);
     // D-ask-1 disclosure honesty (2026-07-25): the option ids that ACTUALLY
