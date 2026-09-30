@@ -250,6 +250,17 @@ describe('the frames meet DR row 4: only a size the brief writes lifts the lever
     expect(targetTestabilityOf(graph).kind).toBe('not_testable');
   });
 
+  // ⛔ P0 PARTNER's HARD condition on #2389: the written figure must be ABOUT THIS LINK (strict, scoped to its two ends).
+  it('RED (P0 PARTNER #2389): "Our burn is £30,000 a month" writes £30,000, but not per conversation → Olumi\'s estimate', async () => {
+    const { graph } = await build(only('explicit'), `${BRIEF} Our burn is £30,000 a month.`);
+    expect(edge(graph, CONV, GOAL)!.provenance?.magnitude).toBe('olumi_estimate');
+  });
+
+  it('CONTROL (P0 PARTNER #2389): "Each qualified investor conversation brings about £30,000 towards securing funding" → the user\'s', async () => {
+    const { graph } = await build(only('explicit'), `${BRIEF} Each qualified investor conversation brings about £30,000 towards securing funding.`);
+    expect(edge(graph, CONV, GOAL)!.provenance?.magnitude).toBe('user_stated');
+  });
+
   // ⚠ SEAM (reported to DR row 4's owner): this edge also carries `defaulted: true` (its spread is projected), which
   // `olumiGuess` counts as a guess unless the source is `user_specified`. The author of the SIZE is decided here.
   it('CONTROL: the same £30,000 the brief WRITES is the user\'s size (`user_stated`, £)', async () => {

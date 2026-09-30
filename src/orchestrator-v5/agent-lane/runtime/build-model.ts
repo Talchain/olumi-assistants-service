@@ -56,7 +56,7 @@ import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-readi
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { refitFramesForStatedEffects } from '../refit-frames.js';
-import { creditStatedFactorLevels, figureTheUserWrote, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
@@ -1285,8 +1285,10 @@ export async function buildModelFromBrief(
   candidate = preparation.candidate;
   // ⛔ A figure written only as the goal's TARGET is not also its current level (R3 #72 5885498117; DL 5885526452 (3)).
   const writtenAgain = (value: number, unit: unknown): boolean => timesTheUserWrote(value, unit, brief) >= 2;
-  // A link size is the user's only where the brief writes it (AIQ #2383 5916497454): the one door for a stated size.
-  const sizeWritten = (value: number, unit: unknown): boolean => figureTheUserWrote(value, unit, brief);
+  // A link size is the user's only where the brief writes it ABOUT THIS LINK (AIQ #2383 5916497454; P0 PARTNER #2389): the
+  // strict scoped reading, the link's two ends against every other quantity.
+  const sizeWritten = (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }): boolean =>
+    figureTheUserWroteFor(value, unit, brief, { target: scope.target, others: scope.others, strict: true });
   // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
   // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
   // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).
