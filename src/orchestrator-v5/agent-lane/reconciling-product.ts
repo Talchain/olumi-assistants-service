@@ -285,7 +285,7 @@ export function withoutGapResidual(candidate: CandidateModel, brief: string): { 
   if (touching.length !== 1 || touching[0]!.to !== metric) return null;
   if (touching[0]!.provenance === 'explicit' || touching[0]!.effect_provenance === 'explicit') return null;
   if (candidate.options.some((opt) => (opt.interventions ?? []).some((i) => i.factor_label === label))) return null;
-  if (candidate.constraints.some((c) => Object.values(c as unknown as Record<string, unknown>).includes(label))) return null;
+  if (candidate.constraints.some((c) => c.metric === label)) return null;
   const ids = (candidate.identities ?? []).filter((i) => i.outcome === metric || i.factors.includes(label));
   if (ids.some((i) => i.outcome !== metric || i.operation !== 'product' || i.factors.length !== 2 || !i.factors.every((f) => users.includes(f)))) return null;
   return {
