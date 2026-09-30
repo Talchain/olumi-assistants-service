@@ -30,12 +30,12 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _resetConfigCache } from '../../config/index.js';
 import { loadDskBundle, getDskVersionHash, _resetDskBundle } from '../../orchestrator/dsk-loader.js';
 import {
   checkFeatureHealth,
+  evaluateFeatureEvidence,
   logFeatureHealth,
   FEATURE_DECLARATIONS,
   type FeatureHealthCheck,
@@ -47,13 +47,8 @@ import {
 
 /** Every flag this report reads, so each scenario starts from a known floor. */
 const ALL_FLAG_ENV = [
-  'BIL_ENABLED',
   'DSK_ENABLED',
   'ENABLE_DSK_V0',
-  'DSK_COACHING_ENABLED',
-  'CEE_ZONE2_REGISTRY_ENABLED',
-  'ENABLE_ORCHESTRATOR_V2',
-  'CEE_BRIEF_DETECTION_ENABLED',
   'CEE_GROUNDING_ENABLED',
   'CEE_CAUSAL_VALIDATION_ENABLED',
   'ISL_BASE_URL',
@@ -80,12 +75,7 @@ function check(byName: Map<string, FeatureHealthCheck>, name: string): FeatureHe
 
 /** Every flag on, ISL configured — the staging-like "everything armed" case. */
 const ALL_ON: Record<string, string> = {
-  BIL_ENABLED: 'true',
   DSK_ENABLED: 'true',
-  DSK_COACHING_ENABLED: 'true',
-  CEE_ZONE2_REGISTRY_ENABLED: 'true',
-  ENABLE_ORCHESTRATOR_V2: 'true',
-  CEE_BRIEF_DETECTION_ENABLED: 'true',
   CEE_GROUNDING_ENABLED: 'true',
   CEE_CAUSAL_VALIDATION_ENABLED: 'true',
   ISL_BASE_URL: 'https://isl.invalid',
@@ -106,58 +96,27 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('feature health: a deleted or uncalled producer must NOT report healthy', () => {
-  // Producer deleted in f957d6d8 (#615): src/orchestrator/brief-intelligence/**
-  it('BIL: flag on, producer deleted → unhealthy, naming the unresolvable module', async () => {
-    const { byName } = await reportFor({ BIL_ENABLED: 'true' });
-    const bil = check(byName, 'BIL');
-    expect(bil.enabled).toBe(true);
-    expect(bil.healthy).toBe(false);
-    expect(bil.reason).toMatch(/producer_module_unresolvable/);
-    expect(bil.reason).toMatch(/brief-intelligence/);
+  // The mechanism, on the evidence itself: since 2026-09-30 no declared feature is dead (the six were retired, see
+  // retired-dead-flags.test.ts), so these rows keep the probe's negative paths tested.
+  it('a producer module that no longer resolves is unhealthy, naming the module (a real f957d6d8 deletion)', async () => {
+    const verdict = await evaluateFeatureEvidence({
+      kind: 'producer_module', specifier: '../orchestrator/brief-intelligence/extract.js', producesExport: 'extractBriefIntelligence',
+    });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toMatch(/^producer_module_unresolvable: .*brief-intelligence/);
   });
 
-  // The known instance. All three dependency flags true on staging, and the
-  // producer (src/orchestrator/dsk-coaching/**) has been deleted since 22 Jul.
-  it('DSK_coaching: all three flags on, producer deleted → unhealthy', async () => {
-    stubEnv({ DSK_ENABLED: 'true', BIL_ENABLED: 'true', DSK_COACHING_ENABLED: 'true' });
-    loadDskBundle();
-    const report = await checkFeatureHealth();
-    const byName = new Map(report.checks.map((c) => [c.name, c]));
-    const coaching = check(byName, 'DSK_coaching');
-    expect(coaching.enabled).toBe(true);
-    expect(coaching.healthy).toBe(false);
-    expect(coaching.reason).toMatch(/producer_module_unresolvable/);
-    expect(coaching.reason).toMatch(/dsk-coaching/);
+  it('a module that resolves without its producing export is unhealthy', async () => {
+    const verdict = await evaluateFeatureEvidence({ kind: 'producer_module', specifier: '../grounding/index.js', producesExport: 'noSuchProducer' });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toMatch(/^producer_export_missing:/);
+    // CONTROL: the same module with its real export is healthy.
+    expect((await evaluateFeatureEvidence({ kind: 'producer_module', specifier: '../grounding/index.js', producesExport: 'extractTextFromPdf' })).ok).toBe(true);
   });
 
-  it('zone2_registry: flag on, prompt-zones deleted → unhealthy', async () => {
-    const { byName } = await reportFor({ CEE_ZONE2_REGISTRY_ENABLED: 'true' });
-    const zone2 = check(byName, 'zone2_registry');
-    expect(zone2.healthy).toBe(false);
-    expect(zone2.reason).toMatch(/prompt-zones/);
-  });
-
-  it('orchestrator_v2: flag on, five-phase pipeline deleted → unhealthy', async () => {
-    const { byName } = await reportFor({ ENABLE_ORCHESTRATOR_V2: 'true' });
-    const v2 = check(byName, 'orchestrator_v2');
-    expect(v2.healthy).toBe(false);
-    expect(v2.reason).toMatch(/pipeline/);
-  });
-
-  it('brief_detection: flag on, intent-gate deleted → unhealthy', async () => {
-    const { byName } = await reportFor({ CEE_BRIEF_DETECTION_ENABLED: 'true' });
-    const brief = check(byName, 'brief_detection');
-    expect(brief.healthy).toBe(false);
-    expect(brief.reason).toMatch(/intent-gate/);
-  });
-
-  it('entity_memory: producer present but uncalled → unhealthy, not a hardcoded true', async () => {
-    const { byName } = await reportFor({});
-    const entity = check(byName, 'entity_memory');
-    expect(entity.enabled).toBe(true); // unconditional feature, still reported
-    expect(entity.healthy).toBe(false);
-    expect(entity.reason).toMatch(/no_producer/);
-    expect(entity.reason).toMatch(/trackEntityStates/);
+  it('a producer with no caller is unhealthy, never a hardcoded true', async () => {
+    const verdict = await evaluateFeatureEvidence({ kind: 'no_producer', describes: 'nothing calls it' });
+    expect(verdict).toEqual({ ok: false, reason: 'no_producer: nothing calls it' });
   });
 
   // loadDskBundle() returns silently on ENOENT / bad JSON / bad shape / HASH
@@ -180,19 +139,18 @@ describe('feature health: a deleted or uncalled producer must NOT report healthy
     expect(causal.reason).toMatch(/dependency_unsatisfied/);
   });
 
-  it('the startup log line WARNs and carries the dead subsystems in its details', async () => {
+  it('the startup log line WARNs and carries the unhealthy subsystem in its details', async () => {
     const { log } = await import('../../utils/telemetry.js');
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
     try {
-      stubEnv(ALL_ON);
+      stubEnv({ ...ALL_ON, ISL_BASE_URL: '' });
       loadDskBundle();
       await logFeatureHealth();
       expect(warn).toHaveBeenCalled();
       const [payload, message] = warn.mock.calls[0] as [Record<string, unknown>, string];
       expect(payload.event).toBe('feature_health');
-      expect(payload.unhealthy).toBeGreaterThanOrEqual(6);
-      expect(String(message)).toMatch(/DSK_coaching=✗/);
-      expect(String(message)).toMatch(/BIL=✗/);
+      expect(payload.unhealthy).toBe(1);
+      expect(String(message)).toMatch(/causal_validation=✗ \(dependency_unsatisfied/);
     } finally {
       warn.mockRestore();
     }
@@ -232,8 +190,8 @@ describe('feature health: live subsystems still report healthy', () => {
 
   it('a disabled feature is reported disabled, not unhealthy-with-a-cause', async () => {
     const { report, byName } = await reportFor({});
-    expect(check(byName, 'BIL').enabled).toBe(false);
-    expect(check(byName, 'BIL').reason).toBe('disabled');
+    expect(check(byName, 'grounding').enabled).toBe(false);
+    expect(check(byName, 'grounding').reason).toBe('disabled');
     expect(report.disabled_count).toBeGreaterThan(0);
   });
 
@@ -247,16 +205,9 @@ describe('feature health: live subsystems still report healthy', () => {
     const healthy = report.checks.filter((c) => c.enabled && c.healthy).map((c) => c.name).sort();
     const unhealthy = report.checks.filter((c) => c.enabled && !c.healthy).map((c) => c.name).sort();
     expect(healthy).toEqual(['DSK', 'causal_validation', 'grounding']);
-    expect(unhealthy).toEqual([
-      'BIL',
-      'DSK_coaching',
-      'brief_detection',
-      'entity_memory',
-      'orchestrator_v2',
-      'zone2_registry',
-    ]);
+    expect(unhealthy).toEqual([]);
     expect(report.healthy_count).toBe(3);
-    expect(report.unhealthy_count).toBe(6);
+    expect(report.unhealthy_count).toBe(0);
   });
 });
 
@@ -281,25 +232,6 @@ function producerFileExists(specifier: string): boolean {
   return fs.existsSync(asJs) || fs.existsSync(asTs);
 }
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-
-/**
- * The set of `src/` files deleted by `f957d6d8` — read from the record that was
- * generated mechanically from that commit (see the file's own header for the
- * regenerate command and for why recording an IMMUTABLE commit's file list is
- * not a trap-12 mirror).
- */
-function deletedByF957d6d8(): Set<string> {
-  const recordPath = fileURLToPath(new URL('./deleted-src-f957d6d8.txt', import.meta.url));
-  return new Set(
-    fs
-      .readFileSync(recordPath, 'utf8')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0 && !line.startsWith('#')),
-  );
-}
-
 const moduleBackedDeclarations = () =>
   FEATURE_DECLARATIONS.filter((d) => d.evidence.kind === 'producer_module').map((d) => ({
     name: d.name,
@@ -316,7 +248,7 @@ describe('feature health: the verdicts are DERIVED, and drift fails loud', () =>
 
     const moduleBacked = moduleBackedDeclarations();
     // Guard the guard: if this list empties, the assertion below is vacuous.
-    expect(moduleBacked.length).toBeGreaterThanOrEqual(5);
+    expect(moduleBacked.length).toBeGreaterThanOrEqual(1);
 
     for (const declaration of moduleBacked) {
       const onDisk = producerFileExists(declaration.specifier);
@@ -329,70 +261,6 @@ describe('feature health: the verdicts are DERIVED, and drift fails loud', () =>
           `producing export; an absent-but-healthy one should be impossible.`,
       ).toBe(onDisk);
     }
-  });
-
-  /**
-   * AMENDMENT 1 (adversarial review of PR #756). The agreement check above
-   * CANNOT catch a typo'd or stale specifier: a path that never existed is
-   * "absent" to both `import()` and `fs`, so they agree and the check passes
-   * with the right verdict for the wrong reason. The reviewer proved it —
-   * `…/extract.js` → `…/extractTYPO.js` left the suite 17/17 green — and the
-   * consequence is worse than untidy: a restored producer at the REAL path
-   * would report unhealthy forever, silently killing the self-healing property
-   * that is the whole point of `producer_module` evidence.
-   *
-   * So every specifier that names an absent path must name a path that was
-   * genuinely DELETED, cross-checked against the mechanically-derived record of
-   * `f957d6d8`. A typo is not in that record, so a typo REDs here.
-   *
-   * Why a record file and not `git` directly (THE canonical copy — the record
-   * file's header points here rather than duplicating it, S2-14): the workflow
-   * that RUNS this suite — `ci.yml`'s required `Lint, TypeCheck, Unit Tests`
-   * job — checks out with a bare `actions/checkout@v4` (`ci.yml:19`), which
-   * defaults to `fetch-depth: 1`, so the deletion commit is not in this
-   * suite's shallow clone. A git probe would either RED in CI or need a
-   * skip-escape — and a control that skips is a control that tests nothing
-   * (trap 13). (Scoped deliberately: one job in the repo,
-   * `openapi-validation.yml:30`, DOES set `fetch-depth: 0` — it just does not
-   * run this suite, so it cannot supply the history here.)
-   */
-  it('every ABSENT producer specifier names a path that was really deleted', () => {
-    const deleted = deletedByF957d6d8();
-
-    // Guard the guard twice: the record must have loaded, and it must be able
-    // to answer NO — otherwise "is it in the record?" proves nothing.
-    expect(deleted.size).toBeGreaterThan(100);
-    expect(deleted.has('src/orchestrator/brief-intelligence/extractTYPO.ts')).toBe(false);
-
-    const moduleBacked = moduleBackedDeclarations();
-    expect(moduleBacked.length).toBeGreaterThanOrEqual(5);
-
-    let absentCount = 0;
-    for (const declaration of moduleBacked) {
-      if (producerFileExists(declaration.specifier)) continue; // live producer
-      absentCount += 1;
-      const repoRelativeTs = path
-        .relative(REPO_ROOT, specifierToRepoPath(declaration.specifier))
-        .replace(/\.js$/, '.ts');
-      expect(
-        deleted.has(repoRelativeTs),
-        `${declaration.name}: specifier "${declaration.specifier}" resolves to ` +
-          `${repoRelativeTs}, which is absent from the tree AND absent from the ` +
-          `f957d6d8 deletion record — so it is a TYPO or a stale rename, not a ` +
-          `deleted producer. Left alone, this feature reports unhealthy forever ` +
-          `even after its real producer is restored.`,
-      ).toBe(true);
-    }
-    // The loop must have asserted at least once, or this test is vacuous.
-    // Deliberately >= 1 rather than >= 5: restoring one producer is legitimate
-    // and must not RED here (the RED-first tests and the partition control are
-    // what force a restoration to be re-derived). Zero means every producer is
-    // back and this pin has nothing left to check — revisit it then.
-    expect(
-      absentCount,
-      'no producer_module specifier is absent any more — every dead producer ' +
-        'has been restored, so this pin now checks nothing and should be revisited',
-    ).toBeGreaterThanOrEqual(1);
   });
 
   /**
@@ -421,66 +289,6 @@ describe('feature health: the verdicts are DERIVED, and drift fails loud', () =>
     }
     // Guard the guard: with no live module-backed declaration this proves nothing.
     expect(live.length).toBeGreaterThanOrEqual(1);
-  });
-
-  /**
-   * The one verdict that cannot be derived at runtime: `entity_memory` is dead
-   * because its producer has no CALLER, not because its module is gone — a
-   * module probe would report a false green. So pin the caller count here.
-   *
-   * Scope: every `*.ts` under `src/`, excluding test files and exactly two
-   * files that NAME the symbol without calling it — the producer itself, and
-   * `feature-health.ts`, whose evidence text quotes it. Any THIRD file
-   * mentioning it REDs here. Read through Node's `fs` rather than `grep`,
-   * which is blind to this repo's NUL-sentinel source files (trap 17).
-   *
-   * KNOWN HOLE, named rather than papered over (adversarial review of PR #756):
-   * this is a string match, so a caller could evade it by going through an
-   * alias re-exported from INSIDE the producer file — which is on the exclusion
-   * list — e.g. `export const track = trackEntityStates` there, then importing
-   * `track` elsewhere. Contrived enough to be worth a comment and not a code
-   * change: wiring entity memory up that way, rather than calling the function
-   * by name, would be a deliberate act. If it ever happens, the `no_producer`
-   * verdict below goes stale silently, which is the one failure mode this test
-   * exists to prevent.
-   */
-  it('entity_memory stays no_producer only while trackEntityStates has no caller', () => {
-    const srcRoot = fileURLToPath(new URL('../../', import.meta.url));
-    const producerFile = path.join(srcRoot, 'orchestrator', 'context', 'entity-state-tracker.ts');
-    const documentsItWithoutCalling = [
-      producerFile,
-      path.join(srcRoot, 'diagnostics', 'feature-health.ts'),
-    ];
-    expect(fs.existsSync(producerFile)).toBe(true); // the producer really is still there
-
-    const callers: string[] = [];
-    let scanned = 0;
-    const walk = (dir: string): void => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
-          walk(full);
-          continue;
-        }
-        if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) continue;
-        if (documentsItWithoutCalling.includes(full)) continue;
-        scanned += 1;
-        if (fs.readFileSync(full, 'utf8').includes('trackEntityStates')) {
-          callers.push(path.relative(srcRoot, full));
-        }
-      }
-    };
-    walk(srcRoot);
-
-    // Guard the guard: a walk that scanned nothing would assert nothing.
-    expect(scanned).toBeGreaterThan(500);
-    expect(
-      callers,
-      `trackEntityStates() now has ${callers.length} caller(s) in src/ (${callers.join(', ')}). ` +
-        `entity_memory's health verdict is pinned to "no_producer" — upgrade it to a real ` +
-        `runtime_state/producer_module probe instead of leaving it permanently red.`,
-    ).toEqual([]);
   });
 
   it('no check derives its verdict from the flag alone', async () => {

@@ -356,8 +356,6 @@ export interface EnrichedContext {
   decision_continuity?: DecisionContinuity;
   /** Entity-aware detail blocks — populated by Phase 1 when message references graph entities. */
   referenced_entities?: ReferencedEntityDetail[];
-  /** Cross-turn entity interaction state — populated by Phase 1 when CEE_ENTITY_MEMORY_ENABLED. */
-  entity_state_map?: import("../context/entity-state-tracker.js").EntityStateMap;
   /** Zone 2 blocks that activated but rendered empty — populated by Phase 3 prompt assembly. */
   zone2_empty_blocks?: string[];
 
