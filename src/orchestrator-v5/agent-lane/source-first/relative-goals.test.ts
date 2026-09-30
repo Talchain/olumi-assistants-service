@@ -24,7 +24,16 @@ describe('relative goals use typed metric references', () => {
     expect(graph.nodes.find((node) => node.id === sourceEntityId('f1'))?.observed_state).toMatchObject({ raw_value: 45000, unit: 'GBP per month' });
     expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'q2', code: 'relative_goal_metric_unbound' }));
     expect(result.unresolved.some((finding) => finding.ref === 'q2' && finding.code === 'unassigned_change')).toBe(false);
-    expect(graph.edges).toEqual([expect.objectContaining({ from: sourceEntityId('d1'), to: sourceEntityId('o1'), origin: 'structural' })]);
+    const baseline = graph.nodes.find((node) => node.id === sourceEntityId('status_quo:o1'))!;
+    expect(baseline).toMatchObject({ kind: 'option', label: 'Stay on AWS', is_baseline: true,
+      option_origin: 'status_quo_implied', source_quote: 'from AWS', interventions: {} });
+    expect(graph.nodes.find((node) => node.id === sourceEntityId('o1'))?.is_baseline).toBeUndefined();
+    // Ownership of today's provider does not establish a causal effect or bind the cost goal.
+    expect(graph.edges.map((edge) => ({ from: edge.from, to: edge.to, origin: edge.origin,
+      source: edge.provenance?.source }))).toEqual([
+      { from: sourceEntityId('d1'), to: sourceEntityId('o1'), origin: 'structural', source: 'brief_extraction' },
+      { from: sourceEntityId('d1'), to: baseline.id, origin: 'structural', source: 'domain_knowledge' },
+    ]);
   });
 
   it('compiles the full canonical target only when current and change already share one metric reference', () => {
