@@ -17,4 +17,8 @@ describe("construction keeps an activity's effort and its cost apart (DL 5915507
     expect(text).toMatch(/draft TWO quantities, never one that means both/);
     expect(text).toMatch(/Never name a lever the options set for its cost \("overhead"\)/);
   });
+
+  it('AIQ CR (5916139879): the rule never splits MONEY the options set — a spend lever stays one quantity in its money unit', () => {
+    expect(String(BUILD_INSTRUCTIONS)).toMatch(/This never splits MONEY the options set: a budget, a price, a spend or a split of spend IS the lever, and stays ONE quantity in its own money unit\./);
+  });
 });
