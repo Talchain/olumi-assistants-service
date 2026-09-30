@@ -15,9 +15,10 @@
  * and PLoT/ISL frame-check it (a zero operand is withdrawn; ISL's k-scale absorbs the ≤ 5% gap).
  */
 import type { CandidateModel } from './admit-model.js';
-import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
+import { sayFigure } from './say-figure.js';
 
 /** ISL `robustness_analyzer_v2.py` `IDENTITY_RECONCILIATION_TOLERANCE`: the same share, never a looser one. */
 export const RECONCILIATION_TOLERANCE = 0.05;
@@ -223,6 +224,85 @@ export function withReconcilingProductIdentity(candidate: CandidateModel, brief:
     ...candidate,
     identities: [...(candidate.identities ?? []), { outcome: r.metric, operation: 'product', factors: [r.parts[0].label, r.parts[1].label], provenance: 'inferred' }],
   };
+}
+
+/** Olumi's own money parent of the goal that only made the goal's stated level add up: dropped, and said. */
+export interface GapResidual {
+  readonly goal: string; readonly label: string; readonly value: number; readonly code: string; readonly period: 'month' | 'year';
+  readonly o: number; readonly parts: readonly [string, string]; readonly levels: readonly [number, number];
+}
+
+/** The residual must BE the brief's own gap, to rounding: 0.5% of the goal's level (£375 on £75k). */
+const GAP_ROUNDING = 0.005;
+
+/**
+ * ⛔ OLUMI'S GAP RESIDUAL IS NOT A REVENUE STREAM (R3 5904253749, served `ef042ce` m0 `c8108752`; AIQ 5904262145 +
+ * 5904406904; DL 5904403673). 1 in 10 served constructor drafts gave MRR three parents: the user's £49 and 1,500, and an
+ * Olumi "non-Pro MRR" of £1,500/month — exactly £75,000 − £49 × 1,500, a stream the brief never names. Three parents
+ * meant no product reading and no card, and Run 1 stated an additive "£59 → £75.0k–£78.4k".
+ *
+ * Dropped (and SAID, AIQ's condition) only when it is nothing but that plug:
+ *  · the goal's level o is the user's, and its non-option parents are EXACTLY the user's two levels a, b plus this one;
+ *  · a × b reconciles with o within ISL's 5% and the units compose (the card's own reading, so the card then applies);
+ *  · it is Olumi's (not explicit, not a figure the brief writes), money in the goal's own currency AND period, sized to
+ *    o − a·b within 0.5% of o;
+ *  · nothing else touches it: no link in, one link out (into the goal, not the user's), no option sets it, no limit
+ *    names it, and no goal identity other than a product over exactly a × b.
+ * A user-stated other revenue, an Olumi addend of any other size, or one with causes of its own is kept as today.
+ */
+export function withoutGapResidual(candidate: CandidateModel, brief: string): { model: CandidateModel; residual: GapResidual } | null {
+  const goal = candidate.goal;
+  const metric = goal?.metric;
+  const o = goal?.baseline_value;
+  if (goal === undefined || goal.baseline_known !== true || goal.baseline_provenance !== 'explicit' || !stated(o)) return null;
+  if (!figureTheUserWrote(o, goal.unit, brief) || !levelWrittenApartFromTarget(o, goal.unit, goal.value, brief)) return null;
+  const options = new Set(candidate.options.map((opt) => opt.label));
+  const all = [...new Set(candidate.links.filter((l) => l.to === metric).map((l) => l.from))].filter((s) => !options.has(s));
+  if (all.length !== 3) return null;
+  const factor = (label: string) => candidate.factors.find((f) => f.label === label);
+  const users = all.filter((s) => {
+    const f = factor(s);
+    return f !== undefined && f.baseline_known === true && f.provenance === 'explicit' && stated(f.baseline_value) && figureTheUserWrote(f.baseline_value, f.unit, brief);
+  });
+  if (users.length !== 2) return null;
+  const [a, b] = users.map((s) => factor(s)!) as [NonNullable<ReturnType<typeof factor>>, NonNullable<ReturnType<typeof factor>>];
+  const product = (a.baseline_value as number) * (b.baseline_value as number);
+  if (Math.abs(o - product) > RECONCILIATION_TOLERANCE * Math.abs(o)) return null;
+  const composes = unitsCompose(goal.unit, metric, a, b);
+  if (composes.kind === 'no') return null;
+  const [rate, count] = composes.rate === b.label ? [b, a] : [a, b];
+  const label = all.find((s) => !users.includes(s))!;
+  const r = factor(label);
+  if (r === undefined || r.provenance === 'explicit' || r.baseline_known === true || !stated(r.baseline_value)) return null;
+  const gm = readMoneyTotal(goal.unit, metric);
+  // ⛔ Money the brief WRITES at this size is the user's, whatever the draft tagged. A bare count is not money: on Paul's
+  // brief the gap (£1,500) equals the subscriber count (1,500), which `figureTheUserWrote` reads as the same figure.
+  const size = r.baseline_value;
+  if (findStatedAmounts(brief).some((m) => m.kind === 'currency' && Math.abs(m.magnitude - Math.abs(size)) < 0.5)) return null;
+  const rm = readMoneyTotal(r.unit, label);
+  if (gm === null || rm === null || gm.code !== rm.code || gm.period !== rm.period) return null;
+  if (Math.abs(r.baseline_value - (o - product)) > GAP_ROUNDING * Math.abs(o)) return null;
+  const touching = candidate.links.filter((l) => l.from === label || l.to === label);
+  if (touching.length !== 1 || touching[0]!.to !== metric) return null;
+  if (touching[0]!.provenance === 'explicit' || touching[0]!.effect_provenance === 'explicit') return null;
+  if (candidate.options.some((opt) => (opt.interventions ?? []).some((i) => i.factor_label === label))) return null;
+  if (candidate.constraints.some((c) => c.metric === label)) return null;
+  const ids = (candidate.identities ?? []).filter((i) => i.outcome === metric || i.factors.includes(label));
+  if (ids.some((i) => i.outcome !== metric || i.operation !== 'product' || i.factors.length !== 2 || !i.factors.every((f) => users.includes(f)))) return null;
+  return {
+    model: { ...candidate, factors: candidate.factors.filter((f) => f.label !== label), links: candidate.links.filter((l) => l !== touching[0]) },
+    residual: { goal: metric, label, value: r.baseline_value, code: gm.code, period: gm.period, o, parts: [rate.label, count.label], levels: [rate.baseline_value as number, count.baseline_value as number] },
+  };
+}
+
+/**
+ * AIQ 5904406904's condition: the drop is said, in Olumi's voice, with the card's own figures — the card's own formatter
+ * (`sayFigure`), so a £49.99 price is never misquoted as £50 (AIQ 5904567773 follow-up 1).
+ */
+export function gapResidualLine(g: GapResidual): string {
+  const money = (v: number): string => sayFigure(v, g.code);
+  return `I had added ‘${g.label}’ of ${money(g.value)} a ${g.period} so that ‘${g.goal}’ matched your ${money(g.o)}; that was my guess, `
+    + `not something you said, so I've taken it out. Your ${money(g.levels[0])} × ${sayFigure(g.levels[1], '')} = ${money(g.levels[0] * g.levels[1])} is on the card for you to confirm.`;
 }
 
 /** A goal product the draft declared whose units provably don't combine into the goal's: dropped, and said. */
