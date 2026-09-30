@@ -81,6 +81,7 @@ import {
   mayPresentLeaderClaimForFact,
 } from './compose/unrequested-analysis-confinement.js';
 import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ordering.js';
+import { projectGoalProbabilitiesForTransport } from './compose/goal-probability-transport.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
@@ -1279,7 +1280,10 @@ function buildAnalysisResultBlockUnconfined(
   // `projectTransportEnrichmentForWithheldClaim` discards whole are never
   // cloned in the first place. Pure work-avoidance: the projection below still
   // runs and still owns the policy, and it would drop these keys anyway.
-  const safeTransport = toSafeTransportEnrichment(enrichment, !mayNameLeadingOption);
+  const safeTransport = projectGoalProbabilitiesForTransport(
+    toSafeTransportEnrichment(enrichment, !mayNameLeadingOption),
+    fact.result.goal_certainty,
+  );
   // TIED-OPTION ORDERING — only on the branch that is allowed to present a
   // ranking at all. A tie in `win_probability` is currently broken ARBITRARILY:
   // on capture 20260828T141150Z "keep what we have" is presented ABOVE "Phased
