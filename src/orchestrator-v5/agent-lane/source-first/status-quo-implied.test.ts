@@ -10,6 +10,30 @@ const captures: Array<{ case: string; brief: string; meaning: SourceMeaning }> =
   JSON.parse(readFileSync(new URL('./fixtures/repaired-live-source-meaning.json', import.meta.url), 'utf8'));
 
 describe('source-bound implied status quo', () => {
+  it.each(['paul-mrr', 'cloud', 'support'])('is invariant to an exact whole-question option quote in %s', (caseId) => {
+    const captured = captures.find((item) => item.case === caseId)!;
+    const narrow = compileSourceMeaning(captured.brief, captured.meaning);
+    const wideMeaning = structuredClone(captured.meaning);
+    wideMeaning.entities.find((entity) => entity.ref === 'o1')!.source =
+      wideMeaning.entities.find((entity) => entity.ref === 'd1')!.source;
+    const wide = compileSourceMeaning(captured.brief, wideMeaning);
+    const baseline = (graph: typeof wide.graph) => graph.nodes.find((node) => node.option_origin === 'status_quo_implied');
+    expect(baseline(wide.graph)).toEqual(baseline(narrow.graph));
+    expect(wide.source_bindings.o1.quote).toBe(wideMeaning.entities.find((entity) => entity.ref === 'd1')!.source.quote);
+    expect(captured.brief.slice(wide.source_bindings.o1.start, wide.source_bindings.o1.end)).toBe(wide.source_bindings.o1.quote);
+  });
+
+  it('does not imply a hold from a negated whole-question action', () => {
+    const captured = structuredClone(captures.find((item) => item.case === 'paul-mrr')!);
+    captured.brief = captured.brief.replace('Should we raise', 'Should we not raise');
+    const question = captured.brief.slice(0, captured.brief.indexOf('?') + 1);
+    captured.meaning.entities.find((entity) => entity.ref === 'd1')!.source = { quote: question, start: null, end: null };
+    captured.meaning.entities.find((entity) => entity.ref === 'o1')!.source = { quote: question, start: null, end: null };
+    const result = compileSourceMeaning(captured.brief, captured.meaning);
+    expect(result.source_bindings.o1.quote).toBe(question);
+    expect(result.graph.nodes.some((node) => node.option_origin === 'status_quo_implied')).toBe(false);
+  });
+
   it.each([
     ['paul-mrr', 'from £49', 'Keep Pro plan price at £49'],
     ['cloud', 'from AWS', 'Stay on AWS'],

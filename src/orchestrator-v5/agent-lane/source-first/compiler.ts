@@ -368,9 +368,14 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     const alternative = statedOptions[0];
     const action = source_bindings[alternative.entity_ref];
     const beforeAction = action ? brief.slice(0, action.start).split(/[.!?;]/).at(-1) ?? '' : '';
-    const changeQuestion = action && /\b(?:raise|increase|move|switch|shift|change|replace|migrate)\b/i.test(action.quote)
+    const actionVerb = action ? /\b(?:raise|increase|move|switch|shift|change|replace|migrate)\b/i.exec(action.quote) : null;
+    // The exact source span may start at the action or include its question.
+    // Only a question in the same clause, before that action, can imply a hold.
+    const questionPrefix = actionVerb
+      ? `${beforeAction}${action!.quote.slice(0, actionVerb.index)}`.split(/[.!?;]/).at(-1) ?? '' : '';
+    const changeQuestion = action && actionVerb
       && !/\b(?:not|never|avoid)\s+(?:raise|increase|move|switch|shift|change|replace|migrate)\b/i.test(action.quote)
-      && /\b(?:should|could)\s+we\b/i.test(beforeAction);
+      && /\b(?:should|could)\s+we\b/i.test(questionPrefix);
     const fromTo = changeQuestion ? /\bfrom\s+([^.!?;,]{1,60}?)\s+to\s+([^.!?;,]{1,60}?)(?=$|[.!?;,])/i.exec(action.quote) : null;
     const oldState = fromTo?.[1]?.trim();
     const newState = fromTo?.[2]?.trim();
