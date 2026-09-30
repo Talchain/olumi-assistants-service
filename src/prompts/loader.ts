@@ -20,6 +20,7 @@ import {
 } from './tracked.js';
 import type { FallbackReason } from './resolution-policy.js';
 import { getRegisteredDefaultPrompt } from './default-registry.js';
+import { recordRuntimePromptResolution } from './runtime-health.js';
 
 export { getDefaultPrompts, registerDefaultPrompt } from './default-registry.js';
 
@@ -222,7 +223,7 @@ export async function loadPrompt(
         isStaging ? 'Staging prompt loaded from store' : 'Prompt loaded from store'
       );
 
-      return {
+      const loaded: LoadedPrompt = {
         content: compiled.content,
         source: 'store',
         promptId: compiled.promptId,
@@ -230,11 +231,15 @@ export async function loadPrompt(
         isStaging,
         modelConfig: compiled.modelConfig,
       };
+      if (trigger === 'runtime') recordRuntimePromptResolution(taskId, 'store', loaded.version);
+      return loaded;
     }
 
     // No managed prompt found, fall back to default
     log.debug({ taskId }, 'No managed prompt found, using default');
-    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'not_found');
+    const loaded = loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'not_found');
+    if (trigger === 'runtime') recordRuntimePromptResolution(taskId, 'default', undefined, 'not_found');
+    return loaded;
   } catch (error) {
     // Error loading from store, fall back to default.
     //
@@ -254,7 +259,9 @@ export async function loadPrompt(
       correlationId,
     });
 
-    return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'fetch_error');
+    const loaded = loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'fetch_error');
+    if (trigger === 'runtime') recordRuntimePromptResolution(taskId, 'default', undefined, 'fetch_error');
+    return loaded;
   }
 }
 

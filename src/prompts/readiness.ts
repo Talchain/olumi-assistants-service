@@ -4,7 +4,8 @@
  * Single boolean exposed on /healthz: `prompts_ready`. True iff each of the
  * five PMS-tracked prompt keys resolves from any source (store or registered
  * default). The health result is a process-local snapshot refreshed at boot
- * and explicit prompt reload, never by a recurring load-balancer probe.
+ * and explicit prompt reload. Actual runtime failures overlay that snapshot
+ * in memory, never by a recurring load-balancer probe.
  *
  * Telemetry from these probe calls passes `trigger: 'healthz'` / `'status'`
  * so dashboards can filter probe noise out of real-traffic
@@ -27,6 +28,7 @@ import { dispositionOf, gateActiveOf, gateOf, type PromptDisposition } from './e
 import { log } from '../utils/telemetry.js';
 import { getRoutingLiveStatus } from './routing-live-status.js';
 import type { CeeTaskId } from './schema.js';
+import { clearRuntimePromptResolutions, getRuntimePromptResolution } from './runtime-health.js';
 
 interface ReadinessSnapshot {
   ready: boolean;
@@ -259,7 +261,7 @@ export interface CriticalPromptCoverage {
   fetch_error: TrackedKey[];
 }
 
-function coverageFromStatuses(statuses: Array<PromptKeyStatus & { key: TrackedKey }>): CriticalPromptCoverage {
+function coverageFromStatuses(statuses: Array<Pick<PromptKeyStatus, 'source' | 'version' | 'pms_task' | 'snapshot_error' | 'fallback_reason'> & { key: TrackedKey }>): CriticalPromptCoverage {
   const keys = statuses.map((s) => ({
     key: s.key,
     source: s.source,
@@ -339,14 +341,25 @@ export async function warmPromptReadinessSnapshot(trigger: PromptResolveTrigger)
 
 /** The load-balancer path must never start a prompt-store read. */
 export function getPromptHealthSnapshot(): ReadinessSnapshot {
-  return snapshot ?? { ready: false, coverage: failedCoverage() };
+  const base = snapshot ?? { ready: false, coverage: failedCoverage() };
+  // Runtime lookups are the only fresh evidence between explicit reloads.
+  // Overlay them on the boot snapshot so a later 402 cannot leave health
+  // falsely green, while this load-balancer path remains entirely local.
+  const keys = base.coverage.keys.map((key) => {
+    const latest = getRuntimePromptResolution(key.key);
+    if (!latest) return key;
+    return { ...key, ...latest, fallback_reason: latest.fallback_reason };
+  });
+  const coverage = coverageFromStatuses(keys);
+  return { ready: base.ready, coverage };
 }
 
 /** Repeated calls have no TTL or database work; promotion explicitly resets it. */
 export async function getCriticalPromptCoverage(
   trigger: PromptResolveTrigger = 'healthz',
 ): Promise<CriticalPromptCoverage> {
-  return (await getReadinessSnapshot(trigger)).coverage;
+  await getReadinessSnapshot(trigger);
+  return getPromptHealthSnapshot().coverage;
 }
 
 /**
@@ -358,6 +371,7 @@ export function resetPromptsReadyCache(): void {
   snapshotGeneration += 1;
   snapshot = null;
   inflightSnapshot = null;
+  clearRuntimePromptResolutions();
 }
 
 /** @deprecated use resetPromptsReadyCache() — kept for back-compat. */

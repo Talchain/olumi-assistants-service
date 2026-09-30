@@ -19,10 +19,13 @@
  * load balancer: the route still returns 200.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 
-const storeBehaviour: { mode: 'throws' | 'not_found' } = { mode: 'throws' };
+const storeBehaviour: { mode: 'throws' | 'not_found' | 'healthy'; reads: number } = {
+  mode: 'throws',
+  reads: 0,
+};
 
 vi.mock('../../src/prompts/store.js', async (importOriginal) => {
   // importOriginal spread — never a bare factory (it would REPLACE the module
@@ -33,8 +36,12 @@ vi.mock('../../src/prompts/store.js', async (importOriginal) => {
     isDbBackedStoreHealthy: () => true,
     getPromptStore: () => ({
       getCompiled: async () => {
+        storeBehaviour.reads += 1;
         if (storeBehaviour.mode === 'throws') {
           throw new SyntaxError('Unexpected end of JSON input');
+        }
+        if (storeBehaviour.mode === 'healthy') {
+          return { promptId: 'prompt-1', version: 1, content: 'Managed prompt' };
         }
         return null;
       },
@@ -44,11 +51,14 @@ vi.mock('../../src/prompts/store.js', async (importOriginal) => {
 });
 
 const { build } = await import('../../src/server.js');
-const { __resetPromptsReadyCacheForTests } = await import('../../src/prompts/readiness.js');
+const { __resetPromptsReadyCacheForTests, warmPromptReadinessSnapshot } = await import(
+  '../../src/prompts/readiness.js'
+);
 const { __resetRoutingLiveStatusProviderForTests } = await import(
   '../../src/prompts/routing-live-status.js'
 );
 const { registerAllDefaultPrompts } = await import('../../src/prompts/defaults.js');
+const { loadPrompt } = await import('../../src/prompts/loader.js');
 
 describe('/healthz — prompt-store fetch failure degrades loudly', () => {
   let app: FastifyInstance;
@@ -64,14 +74,12 @@ describe('/healthz — prompt-store fetch failure degrades loudly', () => {
     await app.close();
   });
 
-  beforeEach(() => {
-    __resetPromptsReadyCacheForTests();
-    // Force every critical key (routing included) down the loadPrompt path so
-    // the probe is deterministic rather than served from a boot snapshot.
-    __resetRoutingLiveStatusProviderForTests();
-  });
-
   async function healthz() {
+    // The route reads a boot/promotion snapshot without touching PMS. Refresh
+    // that snapshot under this test's selected store behaviour first.
+    __resetPromptsReadyCacheForTests();
+    __resetRoutingLiveStatusProviderForTests();
+    await warmPromptReadinessSnapshot('reload');
     const res = await app.inject({ method: 'GET', url: '/healthz' });
     return { status: res.statusCode, body: res.json() as Record<string, unknown> };
   }
@@ -103,5 +111,32 @@ describe('/healthz — prompt-store fetch failure degrades loudly', () => {
     // coverage, so the honest signal IS false — the alarm is scoped tighter
     // than `critical_prompts_pms` on purpose.
     expect(body.critical_prompts_pms).toBe(false);
+  });
+
+  it('degrades after a later runtime store failure and recovers after a successful runtime read', async () => {
+    storeBehaviour.mode = 'healthy';
+    const initial = await healthz();
+    expect(initial.body.critical_prompts_pms).toBe(true);
+    expect(initial.body.degraded_reasons ?? []).not.toContain('critical_prompt_fetch_error');
+
+    storeBehaviour.mode = 'throws';
+    const fallback = await loadPrompt('draft_graph', { trigger: 'runtime' });
+    expect(fallback.source).toBe('default');
+    expect(fallback.fallbackReason).toBe('fetch_error');
+    const readsBeforeHealth = storeBehaviour.reads;
+    const failed = await app.inject({ method: 'GET', url: '/healthz' });
+    const failedBody = failed.json() as Record<string, unknown>;
+    expect(failed.statusCode).toBe(200);
+    expect(failedBody.degraded_reasons).toContain('critical_prompt_fetch_error');
+    expect(failedBody.critical_prompts_pms).toBe(false);
+    expect(storeBehaviour.reads).toBe(readsBeforeHealth);
+
+    storeBehaviour.mode = 'healthy';
+    expect((await loadPrompt('draft_graph', { trigger: 'runtime' })).source).toBe('store');
+    const readsBeforeRecoveryHealth = storeBehaviour.reads;
+    const recovered = (await app.inject({ method: 'GET', url: '/healthz' })).json() as Record<string, unknown>;
+    expect(recovered.degraded_reasons ?? []).not.toContain('critical_prompt_fetch_error');
+    expect(recovered.critical_prompts_pms).toBe(true);
+    expect(storeBehaviour.reads).toBe(readsBeforeRecoveryHealth);
   });
 });
