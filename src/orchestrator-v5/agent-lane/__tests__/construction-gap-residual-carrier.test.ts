@@ -58,6 +58,7 @@ describe('Olumi’s gap residual beside a carrier is taken out and said; the car
     const card = proposeProductIdentity(graph);
     expect(card).not.toBeNull();
     expect(card!.outcome_id).toBe(carrierOf(graph).id);
+    expect(card!.words.startsWith('Is “Pro subscription MRR at month 12” “Pro plan price” × “Paying subscribers at month 12”? ')).toBe(true);
     expect(card!.words).toContain('Today that is £49 × 1,500 (your “Current paying subscribers”) = £73,500, close to your £75,000 “MRR”.');
   });
 
@@ -71,7 +72,7 @@ describe('Olumi’s gap residual beside a carrier is taken out and said; the car
     const { graph } = await build(m8());
     const card = proposeProductIdentity(graph)!;
     const r = applyIdentityConfirmEdit({ persistedGraph: graph, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
-      expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never), reading_token: identityConfirmReadingToken(card) });
+      expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never) ?? '', reading_token: identityConfirmReadingToken(card) });
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     const after = (r as { mutatedGraph: Graph }).mutatedGraph;
     expect(carrierOf(after).nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: true });
