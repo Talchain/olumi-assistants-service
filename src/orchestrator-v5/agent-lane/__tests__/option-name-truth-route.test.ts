@@ -68,7 +68,7 @@ describe('Agent Run result names a changed option level without renaming the gra
   });
 
   it('keeps an earlier Run result historical even when this reply also has a current Run', async () => {
-    modelText = 'In the earlier run, Raise Pro plan price from £49 to £59: 20% of simulations.';
+    modelText = 'In the earlier run:\nRaise Pro plan price from £49 to £59: 20% of simulations.';
     try {
       const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
         kind: 'message', scenario_id: SCENARIO, message: 'Run and compare with the earlier result.', source: 'chip_click',
@@ -76,7 +76,7 @@ describe('Agent Run result names a changed option level without renaming the gra
       } });
       expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
       const body = r.json() as { assistant_text: string };
-      expect(body.assistant_text).toContain('In the earlier run, Raise Pro plan price from £49 to £59: 20%');
+      expect(body.assistant_text).toContain('In the earlier run:\nRaise Pro plan price from £49 to £59: 20%');
       expect(body.assistant_text).not.toContain('(set to £60/month)');
       expect(writes.at(-1)).not.toContain('(set to £60/month)');
     } finally {
