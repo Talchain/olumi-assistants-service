@@ -1643,15 +1643,15 @@ export async function buildModelFromBrief(
    * silent duplicate"). `not_represented` reaches only the Agent's model; `open_questions` is appended to the
    * reply by the server every time. Placed after the deadline and ahead of the drafter's own questions, so the
    * five-question cap cannot hide it. A group of USER options nothing tells apart is asked about here, once.
-   */
+  */
   const withheldOptions = [...(admitted.options_withheld ?? []), ...carriedWithheld];
+  const pendingM1Additions = faithfulM1 ? preparation.additions_without_total.filter((a) => a.reason === 'baseline_unknown') : [];
   openQuestions.unshift(
     ...withheldOptions.map((w) => w.sentence),
+    ...pendingM1Additions.map((a) => `What is "${a.factor}" today? Your addition of ${a.value}${a.unit ? ` ${a.unit}` : ''} for "${a.option}" is kept pending until its starting level is known.`),
     ...(admitted.indistinct_stated_options ?? []).flatMap((g) => {
-      const pending = preparation.additions_without_total.filter((a) => a.reason === 'baseline_unknown' && g.options.some((o) => canonicalLabel(o) === canonicalLabel(a.option)));
-      if (!faithfulM1 || !g.options.every((o) => pending.some((a) => canonicalLabel(a.option) === canonicalLabel(o)))) return [g.question];
-      // The user already told these actions apart. Ask for the missing starting levels, not their difference again.
-      return pending.map((a) => `What is "${a.factor}" today? Your addition of ${a.value}${a.unit ? ` ${a.unit}` : ''} for "${a.option}" is kept pending until its starting level is known.`);
+      // The user already told these actions apart; the missing starting levels are asked above.
+      return faithfulM1 && g.options.every((o) => pendingM1Additions.some((a) => canonicalLabel(a.option) === canonicalLabel(o))) ? [] : [g.question];
     }),
   );
   /**
