@@ -44,6 +44,19 @@ describe('screenFigureProvenance', () => {
     expect(of(s.figures, '£250,000')).toEqual({ source: 'derived_operands_not_shown', op: '+k*', operands: ['£120k', '2', '£65k'] });
   });
 
+  it('v0.2 coach (D2): shown working with a written count binds as arithmetic; S07 now has no invented figure', () => {
+    const s12 = q1['S12-D2'];
+    const a = screenFigureProvenance({ text: s12.reply, userTexts: s12.user_texts, graph: s12.graph });
+    expect(a.unbound).toEqual([]);
+    expect(of(a.figures, '£250,000')).toEqual({ source: 'arithmetic', op: '+k*', operands: ['£120,000', '2', '£65,000'] });
+    const s09 = q1['S09-D2'];
+    const b = screenFigureProvenance({ text: s09.reply, userTexts: s09.user_texts, graph: s09.graph });
+    expect(b.unbound).toEqual([]);
+    expect(of(b.figures, '£15,000')).toMatchObject({ source: 'arithmetic', op: '/k' });
+    const s07 = q1['S07-D2'];
+    expect(screenFigureProvenance({ text: s07.reply, userTexts: s07.user_texts, graph: s07.graph }).no_source).toEqual([]);
+  });
+
   it('a written figure chains: headroom £400k − £240,000 is one step from a figure the reply wrote down', () => {
     const t = q1['S12-B'];
     const s = screenFigureProvenance({ text: t.reply, userTexts: t.user_texts, graph: t.graph });

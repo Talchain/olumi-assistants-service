@@ -57,7 +57,7 @@ export type FigureBinding =
   | { readonly source: "proposal"; readonly proposal_id: string; readonly labelled: boolean }
   | { readonly source: "run"; readonly option_id: string | null; readonly measure: string; readonly run_hash: string }
   | { readonly source: "engine"; readonly path: string }
-  | { readonly source: "arithmetic"; readonly op: ArithmeticOp; readonly operands: readonly [string, string] }
+  | { readonly source: "arithmetic"; readonly op: ArithmeticOp | "k*" | "/k" | "+k*"; readonly operands: readonly string[] }
   | { readonly source: "derived_operands_not_shown"; readonly op: ArithmeticOp | "k*" | "/k" | "+k*"; readonly operands: readonly string[] }
   | { readonly source: "no_source" };
 
@@ -283,6 +283,13 @@ export function screenFigureProvenance(input: FigureProvenanceInput): FigureProv
             break search;
           }
         }
+      }
+      // Shown with a written count ("£30,000 ÷ 2", "£120,000 + (2 × £65,000)"): the same one-step forms as a
+      // derivation, over the sentence's OWN bound figures and the counts written in it (COACH-Q1 D2 S09 / S12).
+      if (binding.source === "no_source" && operands.length > 0) {
+        const own = operands.map((o) => ({ value: o.magnitude, label: o.matchedText.trim(), kind: o.kind as OperandKind }));
+        const shown = derive(a.kind, a.magnitude, tol, own, namedCounts(sentence));
+        if (shown !== null && shown.source === "derived_operands_not_shown") binding = { source: "arithmetic", op: shown.op, operands: shown.operands };
       }
     }
     if (binding.source === "no_source" && a.kind !== "plain") binding = derive(a.kind, a.magnitude, tol, pool, namedCounts(`${sentence} ${HALF_CUE.test(latestUser) ? "half" : ""}`)) ?? binding;

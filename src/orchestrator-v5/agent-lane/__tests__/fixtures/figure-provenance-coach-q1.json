@@ -1,5 +1,5 @@
 {
- "_source": "COACH-Q1 (programme-docs prompt-strike/p-core-1-run-20260930 openai/ai-experience/2026-09-30/coaching-screen/q1-BD/raw/<turn>-r1-<arm>.response.json; fixtures coaching-screen/fixtures/<turn>.json) and the real-route gate run 1 (real-route-gate/run1 @ 50ce5eba: PC01-r1-COACHv02). Replies verbatim; graphs trimmed to ids and stored figures. Also real-route-gate run 2 PC01-r2-P0 (served Terra control).",
+ "_source": "COACH-Q1 (programme-docs prompt-strike/p-core-1-run-20260930 openai/ai-experience/2026-09-30/coaching-screen/q1-BD/raw/<turn>-r1-<arm>.response.json; fixtures coaching-screen/fixtures/<turn>.json) and the real-route gate run 1 (real-route-gate/run1 @ 50ce5eba: PC01-r1-COACHv02). Replies verbatim; graphs trimmed to ids and stored figures. Also real-route-gate run 2 PC01-r2-P0 (served Terra control). D2 = COACH-Q1 arm D with overlay v0.2 (CALCULATION BOUNDARY), /private/tmp/ps-coachD2 → banked coaching-screen/q1-D2.",
  "turns": {
   "S07-D": {
    "user_texts": [
@@ -890,6 +890,495 @@
      "text": "{\"assumptions\":[{\"factor_label\":\"Trial-to-Pro conversion\",\"value\":10,\"unit\":\"%\",\"basis\":\"Provisional planning baseline for a SaaS trial funnel; replace with observed cohort conversion when available.\"},{\"factor_label\":\"New Pro customer price\",\"value\":49,\"unit\":\"GBP/month\",\"basis\":\"Uses the current Pro plan price as the pre-option baseline.\"},{\"factor_label\":\"Grandfather existing Pro customers\",\"value\":0,\"unit\":\"binary\",\"basis\":\"Assumes grandfathering is not in place today.\"},{\"factor_label\":\"Competitor AI pricing response\",\"value\":0,\"unit\":\"effect scale\",\"basis\":\"Assumes no competitive AI pricing response is active today; this is a scenario placeholder, not a measurement.\"}],\"option_levels\":[{\"option_label\":\"Improve trial-to-Pro conversion\",\"factor_label\":\"Trial-to-Pro conversion\",\"value\":12,\"basis\":\"Olumi assumption: a focused conversion initiative raises the provisional 10% baseline by 2 percentage points.\",\"user_stated\":false},{\"option_label\":\"Retention intervention for at-risk accounts\",\"factor_label\":\"Monthly churn\",\"value\":2.5,\"basis\":\"Olumi assumption: the intervention reduces the current 3% monthly churn rate by 0.5 percentage points.\",\"user_stated\":false},{\"option_label\":\"£59 for new Pro customers; grandfather existing customers\",\"factor_label\":\"New Pro customer price\",\"value\":59,\"basis\":\"The option label states £59 for new Pro customers.\",\"user_stated\":false},{\"option_label\":\"£59 for new Pro customers; grandfather existing customers\",\"factor_label\":\"Grandfather existing Pro customers\",\"value\":1,\"basis\":\"The option label states that existing customers are grandfathered.\",\"user_stated\":false},{\"option_label\":\"Competitor AI pricing response\",\"factor_label\":\"Competitor AI pricing response\",\"value\":1,\"basis\":\"Olumi assumption: this scenario represents a competitor response being active on the factor’s effect scale.\",\"user_stated\":false}]}"
     }
    ]
+  },
+  "S07-D2": {
+   "user_texts": [
+    "We need to reach £100k MRR within 6 months with a £20k budget, while keeping monthly churn under 4%. Should we develop new features and increase our Pro plan price from £49 to £59 per month in the next release, or invest in additional advertising?",
+    "Yes, use those.",
+    "Run analysis.",
+    "Our current MRR is £72,000."
+   ],
+   "graph": {
+    "nodes": [
+     {
+      "id": "decision_mrr",
+      "kind": "decision",
+      "label": "Decision: MRR"
+     },
+     {
+      "id": "mrr",
+      "kind": "goal",
+      "label": "MRR",
+      "goal_threshold_raw": 100000,
+      "goal_threshold_unit": "GBP/month"
+     },
+     {
+      "id": "feature_and_price_release",
+      "kind": "option",
+      "label": "Feature and price release",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.295,
+        "source": "brief_extraction"
+       },
+       "release_investment": {
+        "value": 0.4,
+        "source": "brief_extraction"
+       },
+       "additional_advertising_spend": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       },
+       "new_feature_development_spend": {
+        "value": 0.4,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "advertising_push",
+      "kind": "option",
+      "label": "Advertising push",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.245,
+        "source": "brief_extraction"
+       },
+       "release_investment": {
+        "value": 0.4,
+        "source": "brief_extraction"
+       },
+       "additional_advertising_spend": {
+        "value": 0.4,
+        "source": "cee_hypothesis"
+       },
+       "new_feature_development_spend": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "split_release_and_campaign",
+      "kind": "option",
+      "label": "Split release and campaign",
+      "interventions": {
+       "pro_plan_price": {
+        "value": 0.295,
+        "source": "brief_extraction"
+       },
+       "release_investment": {
+        "value": 0.4,
+        "source": "brief_extraction"
+       },
+       "additional_advertising_spend": {
+        "value": 0.2,
+        "source": "cee_hypothesis"
+       },
+       "new_feature_development_spend": {
+        "value": 0.2,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "carry_on_as_now",
+      "kind": "option",
+      "label": "Carry on as now"
+     },
+     {
+      "id": "pro_plan_price",
+      "kind": "factor",
+      "label": "Pro plan price",
+      "observed_state": {
+       "cap": 200,
+       "unit": "GBP/month",
+       "value": 0.245,
+       "source": "brief_extraction",
+       "raw_value": 49,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "new_feature_development_spend",
+      "kind": "factor",
+      "label": "New-feature development spend",
+      "observed_state": {
+       "cap": 50000,
+       "unit": "GBP",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "additional_advertising_spend",
+      "kind": "factor",
+      "label": "Additional advertising spend",
+      "observed_state": {
+       "cap": 50000,
+       "unit": "GBP",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "release_investment",
+      "kind": "factor",
+      "label": "Release investment",
+      "observed_state": {
+       "cap": 50000,
+       "unit": "GBP",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "pro_plan_feature_value",
+      "kind": "factor",
+      "label": "Pro plan feature value",
+      "observed_state": {
+       "unit": "score out of 100",
+       "value": 0.5,
+       "source": "cee_inference",
+       "raw_value": 50,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "price_resistance",
+      "kind": "risk",
+      "label": "Price resistance"
+     },
+     {
+      "id": "monthly_pro_subscriber_acquisition",
+      "kind": "outcome",
+      "label": "Monthly Pro subscriber…"
+     },
+     {
+      "id": "monthly_churn",
+      "kind": "factor",
+      "label": "Monthly churn",
+      "observed_state": {
+       "unit": "%",
+       "value": 0.03,
+       "source": "user_assumption",
+       "raw_value": 3
+      }
+     }
+    ],
+    "goal_constraints": [
+     {
+      "constraint_id": "agent-lane:release_investment:<=",
+      "node_id": "release_investment",
+      "value": 20000,
+      "operator": "<=",
+      "unit": "GBP"
+     },
+     {
+      "constraint_id": "agent-lane:monthly_churn:<=",
+      "node_id": "monthly_churn",
+      "value": 4,
+      "operator": "<=",
+      "unit": "%"
+     }
+    ]
+   },
+   "reply": "Your current MRR is **£72,000/month**. If that covers the same plans as your target, the gap is:\n\n**£100,000 − £72,000 = £28,000/month** in additional MRR within six months. That is simple arithmetic, not a forecast.\n\nThis supplies the missing baseline, but it has not yet been incorporated into the model. The existing comparison still does not establish whether either option can meet your six-month target.\n\n**Do both the £72,000 baseline and £100,000 target cover all plans, or Pro only?** That distinction matters because the model currently focuses on Pro pricing and subscriber acquisition."
+  },
+  "S09-D2": {
+   "user_texts": [
+    "We need to reach £100k MRR within 6 months with a £20k budget, while keeping monthly churn under 4%. Should we develop new features and increase our Pro plan price from £49 to £59 per month in the next release, or invest in additional advertising?",
+    "Yes, use those.",
+    "Run the analysis",
+    "Our current MRR is £72,000.",
+    "Yes, record it.",
+    "I've just found out that we've had a budget increase, and we have £30,000 to spend.",
+    "Yes, change that limit.",
+    "Let's spit it 50/50 at this stage."
+   ],
+   "graph": {
+    "nodes": [
+     {
+      "id": "decision_mrr",
+      "kind": "decision",
+      "label": "Decision: MRR"
+     },
+     {
+      "id": "mrr",
+      "kind": "goal",
+      "label": "MRR",
+      "goal_threshold_raw": 100000,
+      "goal_threshold_unit": "GBP per month"
+     },
+     {
+      "id": "features_59_pro_price",
+      "kind": "option",
+      "label": "Features + £59 Pro price",
+      "interventions": {
+       "pro_plan_monthly_price": {
+        "value": 0.295,
+        "source": "brief_extraction"
+       },
+       "incremental_6_month_spend": {
+        "value": 0.4,
+        "source": "cee_hypothesis"
+       },
+       "incremental_advertising_spend_6_months": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       },
+       "incremental_feature_investment_6_months": {
+        "value": 0.4,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "additional_advertising",
+      "kind": "option",
+      "label": "Additional advertising",
+      "interventions": {
+       "pro_plan_monthly_price": {
+        "value": 0.245,
+        "source": "brief_extraction"
+       },
+       "incremental_6_month_spend": {
+        "value": 0.4,
+        "source": "cee_hypothesis"
+       },
+       "incremental_advertising_spend_6_months": {
+        "value": 0.4,
+        "source": "cee_hypothesis"
+       },
+       "incremental_feature_investment_6_months": {
+        "value": 0,
+        "source": "cee_hypothesis"
+       }
+      }
+     },
+     {
+      "id": "carry_on_as_now",
+      "kind": "option",
+      "label": "Carry on as now"
+     },
+     {
+      "id": "pro_plan_monthly_price",
+      "kind": "factor",
+      "label": "Pro plan monthly price",
+      "observed_state": {
+       "cap": 200,
+       "unit": "GBP per month",
+       "value": 0.245,
+       "source": "brief_extraction",
+       "raw_value": 49,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "incremental_feature_investment_6_months",
+      "kind": "factor",
+      "label": "Incremental feature investment…",
+      "observed_state": {
+       "cap": 50000,
+       "unit": "GBP",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "incremental_advertising_spend_6_months",
+      "kind": "factor",
+      "label": "Incremental advertising spend…",
+      "observed_state": {
+       "cap": 50000,
+       "unit": "GBP",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "incremental_6_month_spend",
+      "kind": "factor",
+      "label": "Incremental 6-month spend",
+      "observed_state": {
+       "cap": 50000,
+       "unit": "GBP",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "monthly_churn",
+      "kind": "factor",
+      "label": "Monthly churn",
+      "observed_state": {
+       "unit": "%",
+       "value": 0.03,
+       "source": "user_assumption",
+       "raw_value": 3
+      }
+     }
+    ],
+    "goal_constraints": [
+     {
+      "constraint_id": "agent-lane:incremental_6_month_spend:<=",
+      "node_id": "incremental_6_month_spend",
+      "value": 30000,
+      "operator": "<=",
+      "unit": "GBP"
+     },
+     {
+      "constraint_id": "agent-lane:monthly_churn:<=",
+      "node_id": "monthly_churn",
+      "value": 4,
+      "operator": "<=",
+      "unit": "%"
+     }
+    ]
+   },
+   "reply": "A 50/50 split means **£15,000 for feature development and £15,000 for advertising over six months** (simple arithmetic: £30,000 ÷ 2).\n\nThat creates a combined option; it doesn’t settle the pricing decision. I haven’t changed the model.\n\nShould this combined option **raise the Pro price to £59 per month**, or **keep it at £49**?"
+  },
+  "S12-D2": {
+   "user_texts": [
+    "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?",
+    "Run the analysis",
+    "Senior engineers cost £120k a year each and juniors £65k a year each.",
+    "Record them as annual salaries: £120,000 per senior engineer and £65,000 per junior engineer.",
+    "We could also consider one senior and two juniors."
+   ],
+   "graph": {
+    "nodes": [
+     {
+      "id": "should_we_hire_two_senior_engineers_or_four_junior_engineers_to_ship_the_new_platform_by_q3_while_ke",
+      "kind": "decision",
+      "label": "Should we hire two senior…"
+     },
+     {
+      "id": "ship_the_new_platform",
+      "kind": "goal",
+      "label": "ship the new platform",
+      "goal_threshold_unit": "% completion"
+     },
+     {
+      "id": "two_senior_engineers",
+      "kind": "option",
+      "label": "Two senior engineers",
+      "interventions": {
+       "senior_engineers_hired": {
+        "unit": "engineers",
+        "value": 0.1,
+        "source": "brief_extraction",
+        "raw_value": 2,
+        "target_match": {
+         "node_id": "senior_engineers_hired",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "four_junior_engineers",
+      "kind": "option",
+      "label": "Four junior engineers",
+      "interventions": {
+       "junior_engineers_hired": {
+        "unit": "engineers",
+        "value": 0.13333333333333333,
+        "source": "brief_extraction",
+        "raw_value": 4,
+        "target_match": {
+         "node_id": "junior_engineers_hired",
+         "confidence": "high",
+         "match_type": "exact_id"
+        }
+       }
+      }
+     },
+     {
+      "id": "carry_on_as_now",
+      "kind": "option",
+      "label": "Carry on as now"
+     },
+     {
+      "id": "senior_engineers_hired",
+      "kind": "factor",
+      "label": "Senior engineers hired",
+      "observed_state": {
+       "cap": 20,
+       "unit": "engineers",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "junior_engineers_hired",
+      "kind": "factor",
+      "label": "Junior engineers hired",
+      "observed_state": {
+       "cap": 30,
+       "unit": "engineers",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "declared_scale": "unit_interval"
+      }
+     },
+     {
+      "id": "engineering_delivery_capacity",
+      "kind": "factor",
+      "label": "Engineering delivery capacity",
+      "observed_state": {
+       "unit": "FTE-equivalents",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "annual_salary_spend",
+      "kind": "factor",
+      "label": "Annual salary spend",
+      "observed_state": {
+       "unit": "GBP/year",
+       "value": 0,
+       "source": "cee_inference",
+       "raw_value": 0,
+       "extractionType": "inferred"
+      }
+     },
+     {
+      "id": "hiring_lead_time",
+      "kind": "risk",
+      "label": "Hiring lead time"
+     }
+    ],
+    "goal_constraints": [
+     {
+      "constraint_id": "agent-lane:annual_salary_spend:<=",
+      "node_id": "annual_salary_spend",
+      "value": 400000,
+      "operator": "<=",
+      "unit": "GBP/year"
+     }
+    ]
+   },
+   "reply": "**One senior and two juniors is a distinct third hiring mix.** Using your salary rates, simple arithmetic gives:\n\n£120,000 + (2 × £65,000) = **£250,000/year for the new hires alone**.\n\nThat is below your stated limit of **under £400,000/year**, but total compliance remains unknown if the limit also includes existing payroll.\n\nThis mix would test whether senior technical leadership plus junior capacity can support Q3 delivery—or whether mentoring demands would reduce the senior’s delivery time. The salary calculation does not establish delivery feasibility.\n\nIt has **not been added to the model**, and the current analysis does not assess it."
   }
  }
 }
