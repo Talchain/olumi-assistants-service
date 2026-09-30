@@ -103,8 +103,13 @@ describe('draw-structure key — what lines two Runs\' draws up (R3 5920859011)'
     expect(drawStructureKey(withRange(50, 80))).not.toBe(drawStructureKey(withRange(50, 70)));
     expect(drawStructureKey(withRange(50, 70)), 'CONTROL: the same range twice is the same structure').toBe(drawStructureKey(withRange(50, 70)));
   });
-  it('key order never matters: the same inputs listed in another order give the same key', () => {
-    expect(drawStructureKey(snap((s) => { ((s as unknown as Mut).options as Mut[]).reverse(); }))).toBe(base);
+  it('ORDER IS STRUCTURE: the same links in another order ARE a structure change (ISL draws in list order)', () => {
+    const twoLinks = (reverse: boolean) => snap((s) => {
+      const links = [...((s as unknown as Mut).links as Mut[]), { from: 'fac_churn', to: 'goal_mrr', mean: -0.3, exists_probability: 1 }];
+      (s as unknown as Mut).links = reverse ? links.reverse() : links;
+    });
+    expect(drawStructureKey(twoLinks(true))).not.toBe(drawStructureKey(twoLinks(false)));
+    expect(drawStructureKey(twoLinks(false)), 'CONTROL: the identical input twice is the same structure').toBe(drawStructureKey(twoLinks(false)));
   });
 });
 
