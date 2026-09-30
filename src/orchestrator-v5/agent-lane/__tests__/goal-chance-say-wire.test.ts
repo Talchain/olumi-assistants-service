@@ -20,8 +20,9 @@ const graph = { nodes: [
   { id: 'keep', kind: 'option', label: 'Keep £49' },
   { id: 'mrr', kind: 'goal', label: 'MRR' },
 ], edges: [] };
+type WireOpts = Parameters<typeof enforceAgentLaneLeaderClaimsAtWire>[1];
 const opts = { requestId: 'goal-say', exitPath: 'agent_lane_v1', mayNameLeadingOption: false,
-  leaderClaimWithheldReason: 'separation_unavailable', graph, analysisReady, protectedGoalChanceSay: say } as never;
+  leaderClaimWithheldReason: 'separation_unavailable', graph, analysisReady, protectedGoalChanceSay: say } as unknown as WireOpts;
 const response = (assistant_text: string, runKind = 'complete_current'): OlumiResponse => ({
   assistant_text, blocks: [block], suggested_actions: [],
   analysis_state: { run_state: { kind: runKind }, leader_claim: { permitted: false, withheld_reason: 'separation_unavailable' } },
