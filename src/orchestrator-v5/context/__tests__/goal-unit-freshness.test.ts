@@ -11,7 +11,7 @@ import { selectCanonicalAnalysisState } from '../canonical-analysis-state.js';
 
 const HASH = 'e7d843f951477155';
 const AT = '2026-09-30T11:02:22.019Z';
-const graph = (unit: string | undefined = 'GBP/month') => ({
+const graph = (unit: string | null | undefined = 'GBP/month') => ({
   goal_node_id: 'mrr',
   nodes: [{ id: 'mrr', kind: 'goal', label: 'Monthly revenue', goal_threshold_unit: unit }],
   edges: [],
@@ -54,7 +54,8 @@ describe('the selected Run goal unit is part of currentness', () => {
   });
 
   it.each([undefined, null, { nodes: [] }, { nodes: [graph().nodes[0], graph().nodes[0]] },
-    { goal_node_id: 'other', nodes: graph().nodes }, graph('')])(
+    { goal_node_id: 'other', nodes: graph().nodes },
+    { ...graph(), nodes: [{ ...graph().nodes[0], goal_threshold_unit: 42 }] }])(
     'fails closed when the current selected goal cannot be uniquely verified: %j', (currentGraph) => {
       expect(derive(currentGraph)).toMatchObject({ freshness: 'stale', reason: 'goal_snapshot_unverified' });
     });
@@ -81,7 +82,15 @@ describe('the selected Run goal unit is part of currentness', () => {
     expect(derive(noUnit)).toMatchObject({ reason: 'goal_unit_changed' });
   });
 
-  it.each([null, { goal: [] }, { goal: {} }, { goal: { node_id: 'mrr', unit: 0 } }])(
+  it.each([null, ''])('an omitted outbound unit becomes current after rerun from persisted %j', (unit) => {
+    const rerun = fact({ goal: { node_id: 'mrr', label: 'Monthly revenue', target_raw: 85_000 } });
+    expect(derive(graph(unit), rerun)).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match',
+      graph_hash_at_run: HASH, current_graph_hash: HASH, computed_at: AT, selected_fact_index: 0 });
+    expect(derive(graph(unit))).toMatchObject({ freshness: 'stale', reason: 'goal_unit_changed' });
+  });
+
+  it.each([null, { goal: [] }, { goal: {} }, { goal: { node_id: 'mrr', unit: 0 } },
+    { goal: { node_id: 'mrr', unit: null } }, { goal: { node_id: 'mrr', unit: '' } }])(
     'fails closed on a malformed present snapshot: %j', (snapshot) => {
       expect(derive(graph(), fact(snapshot))).toMatchObject({ freshness: 'stale', reason: 'goal_snapshot_unverified' });
     });
