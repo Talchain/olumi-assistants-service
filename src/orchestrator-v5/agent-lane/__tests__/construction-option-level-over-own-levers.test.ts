@@ -20,7 +20,7 @@ import { describe, it, expect } from 'vitest';
 import { Ajv } from 'ajv';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import { dropOptionLevelsOverOwnLevers } from '../option-level-over-own-levers.js';
+import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
 
 const SCENARIO = '1f9d7698-0000-4000-8000-0000000e0f16';
 const BRIEF = 'Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?';
@@ -73,7 +73,9 @@ describe('an option sets what the user chose, not a total its own levers compute
   it('ROW 1 (E-FIG shape, served rep1/rep3): the options set their headcounts only; salary spend follows from them', async () => {
     const { graph: g, out } = await buildWithOut(WIRE_74);
     // Said, never silent: the sentence reaches the Agent's model (`not_represented`).
-    expect(((out.not_represented ?? []) as string[]).filter((l) => l.includes('your limit on "Annual salary spend" is checked through those'))).toHaveLength(2);
+    expect(((out.not_represented ?? []) as string[]).filter((l) => l.includes('Your limit on "Annual salary spend" now follows from what this option does through'))).toHaveLength(2);
+    // AIQ 5902622248 (1): the figure in its unit, never a bare number.
+    expect((out.not_represented as string[]).some((l) => l.includes('"Hire two senior engineers" had "Annual salary spend" at £300,000 / year, a figure I proposed.'))).toBe(true);
     const spend = spendId(g);
     for (const [prefix, word, n] of [['Hire two senior', 'senior', 2], ['Hire four junior', 'junior', 4]] as const) {
       const sets = optionSets(g, prefix);
@@ -116,8 +118,13 @@ describe('the guard itself: narrow on purpose (0-LLM corpus: 54 unrestricted non
         { factor_label: 'Monthly churn', value: 2.5, provenance: 'ai_proposed' }] }],
       links: [{ from: 'At-risk account retention intervention', to: 'Monthly churn' }],
       constraints: [{ metric: 'Monthly churn' }],
+      factors: [{ label: 'Monthly churn', unit: '%' }, { label: 'At-risk account retention intervention', unit: null }],
     });
     expect(r.dropped.map((d) => [d.factor, d.via])).toEqual([['Monthly churn', ['At-risk account retention intervention']]]);
+    // AIQ 5902622248: said as "2.5%", and in words true when the lever link is a placeholder (R-c withholds).
+    expect(r.dropped[0]!.unit).toBe('%');
+    expect(sayOptionLevelOverOwnLevers(r.dropped[0]!)).toBe('"Retention intervention for at-risk accounts" had "Monthly churn" at 2.5%, a figure I proposed. '
+      + 'Your limit on "Monthly churn" now follows from what this option does through "At-risk account retention intervention", not from my figure.');
     expect(r.model.options[0]!.interventions!.map((i) => i.factor_label)).toEqual(['At-risk account retention intervention']);
   });
   it('an Olumi total on a limited node its own lever feeds (also through a middle node) → dropped', () => {

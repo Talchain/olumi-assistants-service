@@ -37,7 +37,7 @@ import { createHash } from 'node:crypto';
 import { FRESH_READ } from '../turn-read-cache.js';
 import { keepOptionsAndQuantitiesApart, keptApartLine, notToldApartLine } from '../keep-options-apart.js';
 import { markOlumiOptions } from '../olumi-option-marker.js';
-import { dropOptionLevelsOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
+import { dropOptionLevelsOverOwnLevers, sayOptionLevelOverOwnLevers, type OptionLevelOverOwnLevers } from '../option-level-over-own-levers.js';
 import { admitCandidateModel, admitGoalLevelBesideHeldCeiling, canonicalLabel, carryWithheldOptions, slugId, findMechanismPath, limitedOutcomeFrame, metricNamesLabel, productIdentityOpenQuestions, sumIdentityOpenQuestions, unlevelledProductQuestions, type AdmittedModel, type CandidateModel, type WithheldOption } from '../admit-model.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import {
@@ -1821,9 +1821,7 @@ export async function buildModelFromBrief(
       ...preparation.provenance_demoted.map((d) =>
         `I've treated your ${d.value} for "${d.factor}" in "${d.option}" as a working figure because the current ` +
         `level of "${d.factor}" is unknown \u2014 confirm it and I'll mark it as yours.`),
-      ...preparation.levels_over_own_levers.map((d) =>
-        `"${d.option}" had "${d.factor}" at ${d.value}, a figure I proposed, while the option already moves it through ` +
-        `${d.via.map((v) => `"${v}"`).join(' and ')}; your limit on "${d.factor}" is checked through those, not against my figure.`),
+      ...preparation.levels_over_own_levers.map(sayOptionLevelOverOwnLevers),
       directionless.length > 0
         ? `${directionless.length} relationship(s) were left out because nobody has stated which way they run.`
         : undefined,

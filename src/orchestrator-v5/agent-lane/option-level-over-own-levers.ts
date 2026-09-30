@@ -21,15 +21,19 @@
  * separately. Only cross-unit levers are this guard's (headcount → £ salary spend; a retention switch → churn %). Pure.
  */
 
+import { sayFigureRead } from './say-figure.js';
+
 export interface OptionLevelOverOwnLevers {
   readonly option: string;
   readonly factor: string;
   readonly value: number;
+  /** The dropped level's unit (the intervention's, else the factor's), so it is said as the user writes it. */
+  readonly unit: string | undefined;
   /** The option's own levers whose links reach `factor`. */
   readonly via: readonly string[];
 }
 
-interface Intervention { readonly factor_label: string; readonly value: number; readonly provenance: string }
+interface Intervention { readonly factor_label: string; readonly value: number; readonly unit?: string; readonly provenance: string }
 interface ModelShape {
   readonly options: readonly { readonly label: string; readonly interventions?: readonly Intervention[] }[];
   readonly factors?: readonly { readonly label: string; readonly unit: string | null }[];
@@ -52,6 +56,7 @@ export function dropOptionLevelsOverOwnLevers<M extends ModelShape>(model: M): {
     }
     return out;
   };
+  const unitRaw = new Map((model.factors ?? []).map((f) => [key(f.label), typeof f.unit === 'string' && f.unit.trim() !== '' ? f.unit : undefined]));
   const unitOf = new Map((model.factors ?? []).map((f) => [key(f.label), typeof f.unit === 'string' && f.unit.trim() !== '' ? key(f.unit) : undefined]));
   const sameUnit = (a: string, b: string): boolean => unitOf.get(key(a)) !== undefined && unitOf.get(key(a)) === unitOf.get(key(b));
   const dropped: OptionLevelOverOwnLevers[] = [];
@@ -64,9 +69,22 @@ export function dropOptionLevelsOverOwnLevers<M extends ModelShape>(model: M): {
       const via = ivs.filter((p) => p !== iv && up.has(key(p.factor_label))).map((p) => p.factor_label);
       if (via.length === 0 || via.every((v) => sameUnit(v, iv.factor_label))) continue;
       drop.add(iv);
-      dropped.push({ option: o.label, factor: iv.factor_label, value: iv.value, via });
+      const unit = typeof iv.unit === 'string' && iv.unit.trim() !== '' ? iv.unit : unitRaw.get(key(iv.factor_label));
+      dropped.push({ option: o.label, factor: iv.factor_label, value: iv.value, unit, via });
     }
     return drop.size === 0 ? o : { ...o, interventions: ivs.filter((iv) => !drop.has(iv)) };
   });
   return dropped.length === 0 ? { model, dropped } : { model: { ...model, options } as M, dropped };
+}
+
+/**
+ * The one sentence a drop is said with (AIQ #75 5902622248): the figure in its unit ("2.5%", "£300,000 / year"), and
+ * words true whether the lever links are sized (the limit is checked through them) or placeholders (R-c withholds the
+ * option's verdict): the limit now FOLLOWS FROM what the option does, not from Olumi's figure.
+ */
+export function sayOptionLevelOverOwnLevers(d: OptionLevelOverOwnLevers): string {
+  const figure = sayFigureRead(d.value, d.unit ?? '');
+  const via = d.via.map((v) => `"${v}"`).join(' and ');
+  return `"${d.option}" had "${d.factor}" at ${figure}, a figure I proposed. Your limit on "${d.factor}" now follows from `
+    + `what this option does through ${via}, not from my figure.`;
 }
