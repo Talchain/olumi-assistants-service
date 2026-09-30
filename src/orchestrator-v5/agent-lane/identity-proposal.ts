@@ -190,7 +190,8 @@ function proposeOnGoal(graph: unknown): IdentityProposal | null {
   const money = (v: number): string => sayFigure(v, r.code);
   const today = r.count.today ?? r.rate.today;
   const figures = `${money(r.rate.value)} × ${sayFigure(r.count.value, '')}${today !== undefined ? ` (your “${today}”)` : ''}`;
-  const words = `Is “${goalLabel}” your “${r.rate.label}” × “${r.count.label}”? `
+  // AIQ 5904696715: an operand read at today's level is Olumi's outcome, not the user's, so the reading is not "your" one.
+  const words = `Is “${goalLabel}” ${today !== undefined ? '' : 'your '}“${r.rate.label}” × “${r.count.label}”? `
     + `${today !== undefined ? 'Today that is ' : ''}${figures} = ${money(r.rate.value * r.count.value)}, close to your ${money(o.value)}. `
     // AIQ 5888571809: the card says what "Yes" does. It does NOT run anything: an approval runs nothing (Paul's ruling,
     // #63 5812069638; enforced server-side), so the Run stays the user's own press (Runtime 5888628288 option (b)).
@@ -268,7 +269,7 @@ function proposeOnCarrier(graph: unknown): IdentityProposal | null {
     const made = r.rate.value * r.count.value;
     const today = r.count.today ?? r.rate.today;
     const figures = `${money(r.rate.value)} × ${sayFigure(r.count.value, '')}${today !== undefined ? ` (your “${today}”)` : ''}`;
-    const words = `Is “${carrierLabel}” your “${r.rate.label}” × “${r.count.label}”? `
+    const words = `Is “${carrierLabel}” ${today !== undefined ? '' : 'your '}“${r.rate.label}” × “${r.count.label}”? `
       + `${today !== undefined ? 'Today that is ' : ''}${figures} = ${money(made)}${besideTheCarrier(others, byId, goalMoney, r.code, made, o.value, goalLabel)} `
       + `If yes, Olumi will calculate “${carrierLabel}” that way, and you can run the analysis again.`;
     if (words.length > CARD_WORDS_MAX) continue;

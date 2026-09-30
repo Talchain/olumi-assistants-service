@@ -36,14 +36,15 @@ describe('a product over an unlevelled operand gets the card, on the user’s TO
     expect(card).not.toBeNull();
     expect(card!.outcome_id).toBe(goalOf(M1).id);
     expect(card!.factor_ids).toEqual(['pro_plan_price', 'paying_subscribers_at_12_months']);
-    expect(card!.words).toContain('“Paying subscribers at 12 months”');
+    // AIQ 5904696715: the month-12 outcome is Olumi's, so the reading is not called "your" one.
+    expect(card!.words.startsWith('Is “MRR” “Pro plan price” × “Paying subscribers at 12 months”? ')).toBe(true);
     expect(card!.words).toContain('Today that is £49 × 1,500 (your “Current paying subscribers”) = £73,500, close to your £75,000.');
   });
 
   it('POST-YES: the real writer confirms exactly the stored reading (stated), nothing else changes', () => {
     const card = proposeProductIdentity(M1)!;
     const r = applyIdentityConfirmEdit({ persistedGraph: M1, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
-      expected_graph_hash: computeAnalysisAffectingGraphHash(M1 as never), reading_token: identityConfirmReadingToken(card) });
+      expected_graph_hash: computeAnalysisAffectingGraphHash(M1 as never) ?? '', reading_token: identityConfirmReadingToken(card) });
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
     const after = (r as { mutatedGraph: Graph }).mutatedGraph;
     expect(goalOf(after).nonlinear_identity).toMatchObject({ operation: 'product', factor_ids: ['pro_plan_price', 'paying_subscribers_at_12_months'], stated_in_brief: true });
