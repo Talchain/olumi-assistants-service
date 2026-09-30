@@ -963,7 +963,9 @@ function figureOnFactorRange(
   const os = (factor.observed_state ?? {}) as { cap?: unknown; value?: unknown; raw_value?: unknown };
   const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
   const cap = positive(os.cap) ? os.cap : positive(factor.scale_frame) ? factor.scale_frame : undefined;
-  if (cap === undefined) return undefined;
+  // The card's own rule (UI `resolveOptionTargetEntryFrame`): a range of 1 or less is shown on the model scale, so no
+  // figure is read on it here either (MG 5903379881).
+  if (cap === undefined || cap <= 1) return undefined;
   const readOn = (raw: unknown, value: unknown): boolean =>
     typeof raw !== 'number' || typeof value !== 'number' || Math.abs(raw / cap - value) <= 1e-9;
   const cell = (existing ?? {}) as { value?: unknown; raw_value?: unknown; unit?: unknown };

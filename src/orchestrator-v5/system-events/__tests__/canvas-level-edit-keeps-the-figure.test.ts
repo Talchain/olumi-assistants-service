@@ -82,6 +82,12 @@ describe('a canvas level edit keeps the user\'s figure (served W4 run2: £59 →
     expect(cellAfter).not.toHaveProperty('raw_value');
   });
 
+  it('CONTROL (MG 5903379881; the card\'s cap > 1 rule): a range of 1 is shown on the model scale, so no figure is read on it', () => {
+    const cellAfter = written(served({ cap: 1, unit: 'share', value: 0.245, source: 'brief_extraction', raw_value: 0.245,
+      declared_scale: 'unit_interval' }, cell(0.295, undefined)), 0.285);
+    expect(cellAfter).not.toHaveProperty('raw_value');
+  });
+
   it('CONTROL: with no figure on the committed cell the acknowledgement is unchanged', () => {
     expect(formatOptionEffectWriteAck({ optionLabel: 'Pilot', factorLabel: 'Coverage', committedValue: 0.3 }))
       .toBe('"Pilot" now has an effect value of 0.3 on "Coverage".');

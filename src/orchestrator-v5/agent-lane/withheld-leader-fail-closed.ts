@@ -71,6 +71,7 @@
  */
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { log } from '../../utils/telemetry.js';
+import { goalChanceWithheldForAgent, sameWordsIn } from './goal-chance-withheld.js';
 import { analysisReadyPermitsLeaderNaming, permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
 import {
   leaderClaimReasonKind,
@@ -1428,7 +1429,7 @@ export interface FailClosedProseResult {
  */
 const CITATION_ONLY = /^\s*(?:\[\d+\]\s*)+$/;
 
-export function dropRankingSentences(text: string, labels: RankingLabelContext = NO_LABELS): FailClosedProseResult {
+export function dropRankingSentences(text: string, labels: RankingLabelContext = NO_LABELS, protectedExactLine?: string): FailClosedProseResult {
   if (typeof text !== 'string' || text.length === 0) return { text, droppedSentences: 0 };
   type Seg = Segment;
   const segs: Seg[] = [];
@@ -1527,6 +1528,18 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
       if (cells.slice(1).some((c) => isRankedListItem(`- ${cells[0]!}: ${c}`, true, labels))) drops[i] = drops[i]!.map(() => true);
     }
   }
+  // Classify against the ORIGINAL prose, including the typed warning's option names: a later bare
+  // 71%/29% split can depend on that context. Only after every contextual rule has run do we keep
+  // the exact standalone warning line itself, without excusing neighboring model-authored claims.
+  if (protectedExactLine !== undefined) {
+    let kept = false;
+    segs.forEach((seg, r) => {
+      if (!kept && 'units' in seg && seg.units.join('') === protectedExactLine) {
+        drops[r] = drops[r]!.map(() => false);
+        kept = true;
+      }
+    });
+  }
   const lines: Array<Seg | null> = segs.map((seg, r) => {
     if ('sep' in seg) return seg;
     const drop = drops[r]!;
@@ -1609,6 +1622,8 @@ export function enforceAgentLaneLeaderClaimsAtWire(
     readonly limitVerdicts?: StoredLimitVerdicts;
     /** The limits MG asks about on the same readback's graph (`limitAskIdsOf`): their ask replaces the generic one. */
     readonly limitAskIds?: ReadonlySet<string>;
+    /** Typed goal explanation offered by this turn's Run tool; checked against the final readback. */
+    readonly protectedGoalChanceSay?: string | null;
   },
 ): WireLeaderClaimEnforcementResult {
   let next = response;
@@ -1627,8 +1642,17 @@ export function enforceAgentLaneLeaderClaimsAtWire(
       // punctuation and ranking words, so splitting that closing into sentences can otherwise drop half and append it twice.
       const trimmed = text.trimEnd();
       const alreadyClosed = trimmed === closing || trimmed.endsWith(`\n\n${closing}`);
-      const projected = dropRankingSentences(alreadyClosed ? trimmed.slice(0, -closing.length).trimEnd() : text,
-        rankingLabelContext(opts.graph, opts.analysisReady));
+      const projectionInput = alreadyClosed ? trimmed.slice(0, -closing.length).trimEnd() : text;
+      const resultBlock = Array.isArray(response.blocks)
+        ? response.blocks.find((block) => (block as { type?: unknown } | null)?.type === 'analysis_result') : undefined;
+      const readbackSay = goalChanceWithheldForAgent(resultBlock)?.say;
+      // An earlier Run may have supplied the tool sentence, then been superseded before final readback.
+      // Protect it only when the current saved result independently carries the exact same typed reason.
+      const typedSay = (response as { analysis_state?: { run_state?: { kind?: unknown } } }).analysis_state?.run_state?.kind === 'complete_current'
+        && typeof readbackSay === 'string' && readbackSay !== '' && readbackSay === opts.protectedGoalChanceSay
+        ? readbackSay : null;
+      const projected = dropRankingSentences(projectionInput, rankingLabelContext(opts.graph, opts.analysisReady),
+        typedSay !== null && !typedSay.includes('\n') ? typedSay : undefined);
       if (projected.droppedSentences > 0) {
         droppedSentences = projected.droppedSentences;
         /**
@@ -1637,7 +1661,19 @@ export function enforceAgentLaneLeaderClaimsAtWire(
          * speaks about a run, so the ranking is dropped and nothing is added, as on the build turn (AX2). A reply the
          * drop would leave empty gets the one sentence that claims no run.
          */
-        const body = projected.text.trimEnd();
+        // The Agent can put the typed reason inline or restyle its quotes. The route then owes no
+        // second line, but the ranking filter can remove that copy. Restore only a reason that was
+        // actually in the input and is now absent; an unrelated warning must not appear by magic.
+        const lostTypedSay = typedSay !== null && sameWordsIn(projectionInput, typedSay)
+          && !sameWordsIn(projected.text, typedSay);
+        // A multi-sentence warning can lose its ranking-sounding first sentence while its exact
+        // ask survives. Remove those surviving typed fragments before restoring the full line once.
+        const withoutTypedFragments = lostTypedSay
+          ? finerSentences(typedSay).reduce((body, fragment) => body.replace(fragment.trim(), ''), projected.text)
+          : projected.text;
+        const body = lostTypedSay
+          ? [withoutTypedFragments.trimEnd(), typedSay].filter((part) => part !== '').join('\n\n')
+          : withoutTypedFragments.trimEnd();
         const alreadySaid = closing === PRODUCT_IDENTITY_SENTENCE && replyAlreadySaysProductReason(body, opts.graph);
         next = { ...response, assistant_text: body.length === 0 ? closing : opts.sayWhyWithheld === false || noResult || alreadySaid ? body : `${body}\n\n${closing}` } as OlumiResponse;
         log.info(

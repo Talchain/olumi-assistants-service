@@ -143,6 +143,24 @@ export function unitsCompose(goalUnit: unknown, goalLabel: string, a: { unit: un
   return confirm;
 }
 
+/**
+ * Two units naming the same quantity as `unitsCompose` reads them (AIQ 5906521706, P0 PARTNER row E): the same count noun
+ * ("subscribers" = "subscriber"; never "customers"), or the same money (currency, period and denominator). A unit neither
+ * reads is compared word for word; no unit on either side is never the same.
+ */
+export function sameUnit(a: unknown, b: unknown): boolean {
+  const ca = readCount(a); const cb = readCount(b);
+  if (ca !== null || cb !== null) return ca !== null && cb !== null && ca.join(' ') === cb.join(' ');
+  const ma = readMoney(a, ''); const mb = readMoney(b, '');
+  if (ma !== null || mb !== null) {
+    return ma !== null && mb !== null && ma.code === mb.code && ma.period === mb.period && ma.mixed === mb.mixed
+      && (ma.per ?? []).join(' ') === (mb.per ?? []).join(' ');
+  }
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const wa = words(a).join(' ');
+  return wa !== '' && wa === words(b).join(' ');
+}
+
 export type Composition =
   | { readonly kind: 'proof' | 'confirm'; readonly rate: string; readonly count: string; readonly code: string }
   | { readonly kind: 'no' };
@@ -152,20 +170,34 @@ const NO: Composition = { kind: 'no' };
 function twoUserPartsBesideRepointable(candidate: CandidateModel, metric: string, sources: readonly string[]): string[] | null {
   const factor = (label: string) => candidate.factors.find((f) => f.label === label);
   const users = sources.filter((s) => { const f = factor(s); return f !== undefined && f.baseline_known === true && f.provenance === 'explicit' && stated(f.baseline_value); });
-  if (users.length !== 2) return null;
+  // A brief that also states a third parent's level ("churn is 3.5%") has three of the user's figures among the parents
+  // (P0 PARTNER 5904117525): the product is the ONE pair of them that reconciles with the goal and whose units compose.
+  let pair: string[] = users;
+  if (users.length > 2) {
+    const o = candidate.goal.baseline_value;
+    const pairs: string[][] = [];
+    for (let i = 0; i < users.length; i += 1) for (let j = i + 1; j < users.length; j += 1) {
+      const a = factor(users[i]!)!; const b = factor(users[j]!)!;
+      if (!stated(o) || Math.abs(o - (a.baseline_value as number) * (b.baseline_value as number)) > RECONCILIATION_TOLERANCE * Math.abs(o)) continue;
+      if (unitsCompose(candidate.goal.unit, metric, a, b).kind !== 'no') pairs.push([users[i]!, users[j]!]);
+    }
+    if (pairs.length !== 1) return null;
+    pair = pairs[0]!;
+  }
+  if (pair.length !== 2) return null;
   const reaches = (from: string, skip: unknown): boolean => {
     const seen = new Set([from]); const queue = [from];
     while (queue.length > 0) {
       const at = queue.shift()!;
       for (const l of candidate.links) {
         if (l === skip || l.from !== at || l.to === metric) continue;
-        if (users.includes(l.to)) return true;
+        if (pair.includes(l.to)) return true;
         if (!seen.has(l.to)) { seen.add(l.to); queue.push(l.to); }
       }
     }
     return false;
   };
-  for (const s of sources.filter((x) => !users.includes(x))) {
+  for (const s of sources.filter((x) => !pair.includes(x))) {
     const f = factor(s);
     const links = candidate.links.filter((l) => l.from === s && l.to === metric);
     if (f === undefined || links.length !== 1 || readCurrencyUnitWithQualifiers(f.unit).kind === 'currency') return null;
@@ -173,7 +205,7 @@ function twoUserPartsBesideRepointable(candidate: CandidateModel, metric: string
     if (l.provenance === 'explicit' || l.effect_provenance == null || l.effect_provenance === 'explicit') return null;
     if (!stated(l.effect_amount ?? null) || !stated(l.effect_per_source_change ?? null) || reaches(s, l)) return null;
   }
-  return users;
+  return pair;
 }
 
 /**
@@ -233,7 +265,7 @@ export interface GapResidual {
 }
 
 /** The residual must BE the brief's own gap, to rounding: 0.5% of the goal's level (£375 on £75k). */
-const GAP_ROUNDING = 0.005;
+export const GAP_ROUNDING = 0.005;
 
 /**
  * ⛔ OLUMI'S GAP RESIDUAL IS NOT A REVENUE STREAM (R3 5904253749, served `ef042ce` m0 `c8108752`; AIQ 5904262145 +
@@ -258,20 +290,23 @@ export function withoutGapResidual(candidate: CandidateModel, brief: string): { 
   if (!figureTheUserWrote(o, goal.unit, brief) || !levelWrittenApartFromTarget(o, goal.unit, goal.value, brief)) return null;
   const options = new Set(candidate.options.map((opt) => opt.label));
   const all = [...new Set(candidate.links.filter((l) => l.to === metric).map((l) => l.from))].filter((s) => !options.has(s));
-  if (all.length !== 3) return null;
   const factor = (label: string) => candidate.factors.find((f) => f.label === label);
-  const users = all.filter((s) => {
-    const f = factor(s);
+  const isUsers = (label: string): boolean => {
+    const f = factor(label);
     return f !== undefined && f.baseline_known === true && f.provenance === 'explicit' && stated(f.baseline_value) && figureTheUserWrote(f.baseline_value, f.unit, brief);
-  });
-  if (users.length !== 2) return null;
-  const [a, b] = users.map((s) => factor(s)!) as [NonNullable<ReturnType<typeof factor>>, NonNullable<ReturnType<typeof factor>>];
+  };
+  // The user's product beside the residual: the goal's own two user parents (m0), or ONE carrier whose declared product is
+  // a user part × an unlevelled operand read at TODAY's level through its one user-levelled cause (m8).
+  const read = all.length === 3 ? twoUsersBeside(all, isUsers) : all.length === 2 ? carrierAtTodayBeside(candidate, all, isUsers) : null;
+  if (read === null) return null;
+  const a = factor(read.a)!;
+  const b = factor(read.b)!;
   const product = (a.baseline_value as number) * (b.baseline_value as number);
   if (Math.abs(o - product) > RECONCILIATION_TOLERANCE * Math.abs(o)) return null;
   const composes = unitsCompose(goal.unit, metric, a, b);
   if (composes.kind === 'no') return null;
   const [rate, count] = composes.rate === b.label ? [b, a] : [a, b];
-  const label = all.find((s) => !users.includes(s))!;
+  const label = read.residual;
   const r = factor(label);
   if (r === undefined || r.provenance === 'explicit' || r.baseline_known === true || !stated(r.baseline_value)) return null;
   const gm = readMoneyTotal(goal.unit, metric);
@@ -288,11 +323,55 @@ export function withoutGapResidual(candidate: CandidateModel, brief: string): { 
   if (candidate.options.some((opt) => (opt.interventions ?? []).some((i) => i.factor_label === label))) return null;
   if (candidate.constraints.some((c) => c.metric === label)) return null;
   const ids = (candidate.identities ?? []).filter((i) => i.outcome === metric || i.factors.includes(label));
-  if (ids.some((i) => i.outcome !== metric || i.operation !== 'product' || i.factors.length !== 2 || !i.factors.every((f) => users.includes(f)))) return null;
+  if (ids.some((i) => i.outcome !== metric || i.operation !== 'product' || i.factors.length !== 2 || !i.factors.every((f) => read.goalProductParts.includes(f)))) return null;
   return {
     model: { ...candidate, factors: candidate.factors.filter((f) => f.label !== label), links: candidate.links.filter((l) => l !== touching[0]) },
     residual: { goal: metric, label, value: r.baseline_value, code: gm.code, period: gm.period, o, parts: [rate.label, count.label], levels: [rate.baseline_value as number, count.baseline_value as number] },
   };
+}
+
+interface ResidualReading {
+  /** The two user factors whose TODAY levels make the product. */
+  readonly a: string; readonly b: string;
+  /** The goal parent that is the candidate residual. */
+  readonly residual: string;
+  /** The parts a goal-level product may be declared over (none may name the residual). */
+  readonly goalProductParts: readonly string[];
+}
+
+/** m0: exactly two of the goal's three parents are the user's levels; the third is the candidate residual. */
+function twoUsersBeside(all: readonly string[], isUsers: (label: string) => boolean): ResidualReading | null {
+  const users = all.filter(isUsers);
+  if (users.length !== 2) return null;
+  return { a: users[0]!, b: users[1]!, residual: all.find((s) => !users.includes(s))!, goalProductParts: users };
+}
+
+/**
+ * m8 (R3 5904253749 served `ef042ce` `5c909daa`): MRR = ‘Pro plan MRR’ (Olumi's product of ‘Pro plan price’ × ‘Month-12
+ * paying subscribers’) + Olumi's ‘non-Pro MRR’ £1,500. The carrier's product is read at TODAY's level exactly as the card
+ * reads it (`identity-proposal.ts` `todaysOperand`): one part is the user's factor, the other has no level and ONE cause
+ * carrying the user's level. The carrier holds nothing but that product (its only causes are the two parts).
+ */
+function carrierAtTodayBeside(candidate: CandidateModel, all: readonly string[], isUsers: (label: string) => boolean): ResidualReading | null {
+  const options = new Set(candidate.options.map((opt) => opt.label));
+  const causesOf = (label: string): string[] => [...new Set(candidate.links.filter((l) => l.to === label).map((l) => l.from))].filter((s) => !options.has(s));
+  for (const [carrier, residual] of [[all[0]!, all[1]!], [all[1]!, all[0]!]] as const) {
+    const products = (candidate.identities ?? []).filter((i) => i.outcome === carrier);
+    if (products.length !== 1 || products[0]!.operation !== 'product' || products[0]!.factors.length !== 2) continue;
+    const [x, y] = products[0]!.factors as [string, string];
+    const causes = causesOf(carrier);
+    if (causes.length !== 2 || !causes.includes(x) || !causes.includes(y)) continue;
+    for (const [user, operand] of [[x, y], [y, x]] as const) {
+      if (!isUsers(user)) continue;
+      const f = candidate.factors.find((n) => n.label === operand);
+      const unlevelled = candidate.outcomes.some((n) => n.label === operand) || (f !== undefined && !stated(f.baseline_value));
+      if (!unlevelled || (candidate.identities ?? []).some((i) => i.outcome === operand)) continue;
+      const levelled = causesOf(operand).filter(isUsers);
+      if (levelled.length !== 1 || (candidate.identities ?? []).some((i) => i.outcome === levelled[0])) continue;
+      return { a: user, b: levelled[0]!, residual, goalProductParts: [] };
+    }
+  }
+  return null;
 }
 
 /**
@@ -301,8 +380,10 @@ export function withoutGapResidual(candidate: CandidateModel, brief: string): { 
  */
 export function gapResidualLine(g: GapResidual): string {
   const money = (v: number): string => sayFigure(v, g.code);
-  return `I had added ‘${g.label}’ of ${money(g.value)} a ${g.period} so that ‘${g.goal}’ matched your ${money(g.o)}; that was my guess, `
-    + `not something you said, so I've taken it out. Your ${money(g.levels[0])} × ${sayFigure(g.levels[1], '')} = ${money(g.levels[0] * g.levels[1])} is on the card for you to confirm.`;
+  // AIQ 5904567773 follow-up 2: the brief may NAME such a stream without a figure ("plus some add-on revenue"), so the
+  // line claims only what the code checked — the brief writes no money of this size — never that the stream is unnamed.
+  return `I had added ‘${g.label}’ of ${money(g.value)} a ${g.period} so that ‘${g.goal}’ matched your ${money(g.o)}. Its size was my guess, `
+    + `not a figure you gave, so I've taken it out. Your ${money(g.levels[0])} × ${sayFigure(g.levels[1], '')} = ${money(g.levels[0] * g.levels[1])} is on the card for you to confirm.`;
 }
 
 /** A goal product the draft declared whose units provably don't combine into the goal's: dropped, and said. */

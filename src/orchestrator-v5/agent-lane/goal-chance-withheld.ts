@@ -116,6 +116,12 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
  * pass inside a build — and a later run that did not withhold owes nothing.
  */
 export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
+  const say = goalChanceSayFromThisTurn(toolResults);
+  return say !== null && !sameWordsIn(replyText, say) ? say : null;
+}
+
+/** The latest Run this turn's typed sentence; a later Run without a warning clears an earlier one. */
+export function goalChanceSayFromThisTurn(toolResults: readonly unknown[]): string | null {
   let say: string | undefined;
   for (const r of toolResults) {
     const rec = recordOf(r);
@@ -124,7 +130,7 @@ export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: s
     if (chance?.withheld === true && typeof chance.say === 'string' && chance.say.trim() !== '') say = chance.say;
     else if (rec?.ran === true || firstPass?.ran === true) say = undefined;
   }
-  return say !== undefined && !sameWordsIn(replyText, say) ? say : null;
+  return say ?? null;
 }
 
 /**
@@ -133,9 +139,8 @@ export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: s
  * every quote mark and markdown emphasis mark removed and whitespace collapsed; any other change (a word, a figure, the
  * operator) is not the sentence, so it is still owed.
  */
-function sameWordsIn(text: string, sentence: string): boolean {
+export function sameWordsIn(text: string, sentence: string): boolean {
   const plain = (t: string): string => t.replace(/[\u0027\u0022\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2032\u2033`]|\*\*|__|(?<![\w])[*_]|[*_](?![\w])/g, '')
     .replace(/\s+/g, ' ').trim();
   return plain(text).includes(plain(sentence));
 }
-

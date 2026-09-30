@@ -76,6 +76,18 @@ export type FactorValueOperator = 'set' | 'increase' | 'decrease' | 'multiply';
  * (reachable before any of this work) READS as unitless — which is what
  * retires the malformed-copy path rather than merely stopping new instances.
  */
+/**
+ * ⭐ A FACTOR STORED AS A 0–1 PROPORTION, BY THE ONE RULE (the docblock at its use in `evaluateFactorValueProposal`):
+ * a cap of exactly 1, or a proportion-class unit token that NOTHING CONTRADICTS (no cap, no recoverable
+ * `value`/`raw_value` frame). The token alone is not a range declaration. Exported so a second reader
+ * (`agent-lane/relative-figure.ts`, a percent read in a share factor's frame) uses this rule, never a copy.
+ */
+export const PROPORTION_UNIT_TOKENS: ReadonlySet<string> = new Set(['scale', 'unit_interval', 'ratio', 'proportion']);
+export function isProportionScaledFactor(f: { unit: unknown; cap: number | undefined; value: number | undefined; raw_value: number | undefined }): boolean {
+  const isProportionUnit = typeof f.unit === 'string' && PROPORTION_UNIT_TOKENS.has(f.unit.trim().toLowerCase());
+  return f.cap === 1 || (isProportionUnit && f.cap === undefined && recoverScaleFrame({ value: f.value, raw_value: f.raw_value }) === undefined);
+}
+
 export function canonicaliseUnitForDisplay(unit: string | undefined): string | undefined {
   if (unit === undefined) return undefined;
   const trimmed = unit.trim();
@@ -924,14 +936,7 @@ function evaluateFactorValueProposalImpl(
    *   0.8 months genuinely could mean 0.8 or 80%. On a proportion unit there is
    *   no second reading to be ambiguous between — pinned by controls.
    */
-  const PROPORTION_UNIT_TOKENS: ReadonlySet<string> = new Set([
-    'scale',
-    'unit_interval',
-    'ratio',
-    'proportion',
-  ]);
-  const isProportionUnit =
-    typeof factorUnit === 'string' && PROPORTION_UNIT_TOKENS.has(factorUnit.trim().toLowerCase());
+
   /**
    * ⛔ THE UNIT TOKEN IS NOT ENOUGH ON ITS OWN, AND THE ESTATE SAYS SO.
    *
@@ -963,14 +968,7 @@ function evaluateFactorValueProposalImpl(
    * `value: 0.3`, NO cap and NO raw_value — nothing contradicts the token, and
    * the factor could previously not be set to any sub-1 value at all.
    */
-  const isProportionScaledFactor =
-    cap === 1 ||
-    (isProportionUnit &&
-      cap === undefined &&
-      recoverScaleFrame({
-        value: factorObservedValue,
-        raw_value: factorObservedRawValue,
-      }) === undefined);
+  const proportionScaled = isProportionScaledFactor({ unit: factorUnit, cap, value: factorObservedValue, raw_value: factorObservedRawValue });
   // R2-1 (PR #926 round-2 re-review): the gate above keyed ONLY on a unit
   // string, and records-drafted factors can never carry one (the records
   // grammar has no unit field on claims) — so the whole records population
@@ -989,7 +987,7 @@ function evaluateFactorValueProposalImpl(
   if (
     !suppressBareRatioGate &&
     operator !== 'multiply' &&
-    !isProportionScaledFactor &&
+    !proportionScaled &&
     !inputHasUnit &&
     (effectiveUnit !== undefined || frameRecoverable) &&
     rawInput !== 0 &&

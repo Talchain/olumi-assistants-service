@@ -75,7 +75,7 @@ describe('Olumi’s gap residual beside the user’s price × subscribers is tak
 
   it('RED: the drop is SAID in the build’s own words (AIQ 5904406904), with the card’s figures', async () => {
     const { out } = await build(m0());
-    expect(said(out)).toContain('I had added ‘Other MRR’ of £1,500 a month so that ‘MRR’ matched your £75,000; that was my guess');
+    expect(said(out)).toContain('I had added ‘Other MRR’ of £1,500 a month so that ‘MRR’ matched your £75,000. Its size was my guess, not a figure you gave');
     expect(said(out)).toContain('Your £49 × 1,500 = £73,500 is on the card for you to confirm.');
   });
 
@@ -83,7 +83,7 @@ describe('Olumi’s gap residual beside the user’s price × subscribers is tak
     const { graph } = await build(m0());
     const card = proposeProductIdentity(graph)!;
     const r = applyIdentityConfirmEdit({ persistedGraph: graph, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
-      expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never), reading_token: identityConfirmReadingToken(card) });
+      expected_graph_hash: computeAnalysisAffectingGraphHash(graph as never) ?? '', reading_token: identityConfirmReadingToken(card) });
     expect(r.kind).toBe('mutated');
     const after = (r as { mutatedGraph: { nodes: Json[]; edges: Json[] } }).mutatedGraph;
     expect(goalOf(after).nonlinear_identity).toMatchObject({ operation: 'product', stated_in_brief: true });
@@ -104,6 +104,13 @@ describe('Olumi’s gap residual beside the user’s price × subscribers is tak
     expect(proposeProductIdentity(graph)!.words).toContain('£49.99 × 1,500 = £74,985');
   });
 
+  it('a stream the brief NAMES without a figure: the line claims only that its SIZE was a guess (AIQ 5904567773 follow-up 2)', async () => {
+    const brief = BRIEF.replace('£75k MRR.', '£75k MRR, including some add-on revenue.');
+    const { out } = await build(m0((c) => { c.factors.find((f: Json) => f.label === 'Other MRR').label = 'Add-on revenue'; c.links.find((l: Json) => l.from === 'Other MRR').from = 'Add-on revenue'; }), brief);
+    expect(said(out)).toContain('I had added ‘Add-on revenue’ of £1,500 a month so that ‘MRR’ matched your £75,000. Its size was my guess, not a figure you gave');
+    expect(said(out)).not.toContain('not something you said');
+  });
+
   it('CONTROL: an Olumi addend NOT equal to the gap stays, and there is no card', async () => {
     const { graph } = await build(m0((c) => { c.factors.find((f: Json) => f.label === 'Other MRR').baseline_value = 6000; }));
     expect(residualNode(graph)).toBeDefined();
@@ -115,7 +122,7 @@ describe('Olumi’s gap residual beside the user’s price × subscribers is tak
     const brief = BRIEF.replace('£75k MRR.', '£75k MRR, including £1,500 a month from other plans.');
     const { graph, out } = await build(m0((c) => { const f = c.factors.find((x: Json) => x.label === 'Other MRR'); f.provenance = 'explicit'; f.baseline_known = true; }), brief);
     expect(residualNode(graph)).toBeDefined();
-    expect(said(out)).not.toContain('that was my guess');
+    expect(said(out)).not.toContain('Its size was my guess');
   });
 
   it('CONTROL: money the brief WRITES at the residual\u2019s size stays, even tagged as Olumi\u2019s', async () => {
