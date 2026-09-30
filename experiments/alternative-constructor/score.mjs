@@ -63,6 +63,40 @@ function observations(graph) {
   for (const c of graph.goal_constraints ?? []) out.push({ node: byId.get(c.node_id) ?? {}, owner: c, entity: label(byId.get(c.node_id)) || c.label, role: 'limit', value: c.value, unit: c.unit, operator: c.operator_as_stated ?? c.operator, sources: [c], user: USER.has(c.provenance), frame: c.value_frame, target_exists: byId.has(c.node_id) });
   return out;
 }
+function cloudRelativeBinding(record, brief, graph, obs) {
+  if (brief.id !== 'cloud') return { applicable: false, verified: false, status: 'not_applicable', redundant_question: false };
+  const currentFact = brief.facts.find((fact) => fact.id === 'spend-current');
+  const targetFact = brief.facts.find((fact) => fact.id === 'cost-reduction');
+  const currentObservations = obs.filter((item) => item.role === 'current'
+    && matches(currentFact.entity, item.entity) && numberEqual(item.value, currentFact.value)
+    && unitMatches(currentFact.unit, item.unit)
+    && sourceResult(item.sources, currentFact, brief).bound);
+  const currentIds = [...new Set(currentObservations.map((item) => item.node.id))];
+  const targetObservations = obs.filter((item) => item.role === 'relative_change'
+    && matches(targetFact.entity, item.entity) && numberEqual(item.value, targetFact.value)
+    && unitMatches(targetFact.unit, item.unit)
+    && sourceResult(item.sources, targetFact, brief).bound);
+  // A text-only target is still evidence of the provider's metric reference;
+  // it does not earn numeric-target credit or license a label-based merge.
+  const pendingGoals = (graph.nodes ?? []).filter((node) => node.kind === 'goal'
+    && matches(targetFact.entity, label(node)) && sourceResult([node], targetFact, brief).bound);
+  const targetIds = [...new Set((targetObservations.length ? targetObservations.map((item) => item.node.id)
+    : pendingGoals.map((node) => node.id)))];
+  const shared = currentIds.length === 1 && targetIds.length === 1 && currentIds[0] === targetIds[0];
+  const verified = shared && targetObservations.length > 0;
+  const status = currentIds.length !== 1 ? 'current_missing_or_ambiguous'
+    : targetIds.length !== 1 ? 'target_missing_or_ambiguous'
+      : verified ? 'source_bound_shared_reference'
+        : shared ? 'pending_on_shared_reference' : 'split_references';
+  const questions = [record.assistant_text, ...(record.questions ?? []),
+    ...(record.constructor_diagnostics?.unresolved ?? []).map((finding) => finding.question)]
+    .map((question) => typeof question === 'string' ? question : question?.question ?? '')
+    .filter(Boolean);
+  const redundant_question = currentIds.length === 1 && targetIds.length === 1
+    && questions.some((question) => /\b(?:what|which)\b.{0,100}\b(?:current|today|baseline)\b.{0,100}\b(?:quantity|value|level|amount|unit|spend|cost)\b/i.test(question));
+  return { applicable: true, verified, status, current_ref: currentIds[0] ?? null,
+    target_ref: targetIds[0] ?? null, redundant_question };
+}
 export function scoreRecord(record, cases = manifest.briefs) {
   const brief = cases.find((b) => b.id === record.brief);
   if (!brief) throw new Error(`Unknown case ${record.brief}; no silent fallback scoring`);
@@ -95,6 +129,11 @@ export function scoreRecord(record, cases = manifest.briefs) {
     const targetNodes = obs.filter((o) => o.role === target.role && matches(target.entity, o.entity) && numberEqual(o.value, target.value) && unitMatches(target.unit, o.unit)).map((o) => o.node.id);
     if (currentNodes.length && targetNodes.length && !currentNodes.some((id) => targetNodes.includes(id))) failures.push({ kind: 'current_target_different_quantity', current: current.id, target: target.id });
   }
+  const relativeBinding = cloudRelativeBinding(record, brief, graph, obs);
+  if (relativeBinding.status === 'split_references' && !failures.some((failure) => failure.kind === 'current_target_different_quantity')) {
+    failures.push({ kind: 'relative_target_split_from_current', current: 'spend-current', target: 'cost-reduction' });
+  }
+  if (relativeBinding.redundant_question) failures.push({ kind: 'redundant_current_quantity_question', fact: 'spend-current' });
   const goalNodes = (graph.nodes ?? []).filter((n) => n.kind === 'goal');
   if (brief.horizon_months && !goalNodes.some((n) => n.goal_horizon_months === brief.horizon_months)) failures.push({ kind: 'goal_horizon_lost', expected_months: brief.horizon_months });
   if (brief.deadline_quote && !goalNodes.some((n) => n.goal_deadline_as_stated === brief.deadline_quote)) failures.push({ kind: 'deadline_lost', expected: brief.deadline_quote });
@@ -181,7 +220,7 @@ export function scoreRecord(record, cases = manifest.briefs) {
   return {
     arm: record.arm ?? record.label, brief: brief.id, rep: record.rep, evidence_level: record.evidence_level ?? 'admitted_registration_payload_only',
     model_present: modelPresent, facts, options: optionRows, identity, authority,
-    fidelity: { facts_retained: facts.filter((f) => f.retained).length, facts_total: facts.length, source_bound: facts.filter((f) => f.source_bound).length, user_options_retained: optionRows.filter((o) => o.retained).length, user_options_total: optionRows.length, user_options_source_bound: optionRows.filter((o) => o.source_bound).length, negative_findings: failures.length, false_user_claims: failures.filter((f) => ['invented_or_misassigned_user_number', 'invented_user_option', 'inferred_identity_stamped_user'].includes(f.kind)).length, unstated_canonical_content: failures.filter((f) => f.kind.startsWith('unstated_canonical_')).length, source_binding_failures: failures.filter((f) => ['source_unbound', 'option_source_unbound'].includes(f.kind)).length, failures },
+    fidelity: { facts_retained: facts.filter((f) => f.retained).length, facts_total: facts.length, source_bound: facts.filter((f) => f.source_bound).length, user_options_retained: optionRows.filter((o) => o.retained).length, user_options_total: optionRows.length, user_options_source_bound: optionRows.filter((o) => o.source_bound).length, relative_target_same_metric_bound: relativeBinding.verified ? 1 : 0, relative_target_same_metric_total: relativeBinding.applicable ? 1 : 0, relative_target_binding: relativeBinding, negative_findings: failures.length, false_user_claims: failures.filter((f) => ['invented_or_misassigned_user_number', 'invented_user_option', 'inferred_identity_stamped_user'].includes(f.kind)).length, unstated_canonical_content: failures.filter((f) => f.kind.startsWith('unstated_canonical_')).length, source_binding_failures: failures.filter((f) => ['source_unbound', 'option_source_unbound'].includes(f.kind)).length, failures },
     scientific_usability: { verified_analysis: record.evidence_level === 'shared_spine_journey' && record.analysis_verified === true, inferred_sized_edges: sizedWithoutUserEvidence.length, identity, unsupported_relationships: record.constructor_diagnostics?.unknown_relationships ?? null },
     complexity: { nodes: graph.nodes?.length ?? 0, edges: graph.edges?.length ?? 0, provider_attempts: record.provider_calls?.length ?? record.structured_raw?.length ?? null, transforms: record.constructor_diagnostics?.transforms ?? null },
     recovery: { pending_evidence_available: Array.isArray(pending), facts: pendingFacts, retained_pending_only: pendingFacts.filter((f) => f.retained_pending && !f.canonical_retained).length, continuation_verified: record.recovery_verified === true },

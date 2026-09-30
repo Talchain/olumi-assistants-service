@@ -1,0 +1,167 @@
+{
+  "arm": "source_first_e031d96_frozen_meaning",
+  "brief": "cloud",
+  "rep": 0,
+  "source_sha256": "d9f8d181c2cf06bff07f0612df92266e972c3ea1e85f0584a73ff3f296bdfbe3",
+  "source_head": "e031d96902a41f88412c0f82826419d780a54e5a",
+  "fixture_sha256": "bf0ab3eba811786804bca69c319204e8daba65022bd40d1b59984c309616d7e6",
+  "original_prompt_sha256": "5d4cc6f50a92dd17110921606fe97030de2f0f395203929c181c46454592a914",
+  "evidence_level": "frozen_meaning_compiler_payload_replay_only",
+  "provider_attempts": 0,
+  "graph": {
+    "nodes": [
+      {
+        "id": "sf_8b53639f152c8fc6ef30",
+        "kind": "decision",
+        "label": "Switch cloud provider from AWS to GCP",
+        "provenance": "from_brief",
+        "source_quote": "Should we switch our cloud provider from AWS to GCP?",
+        "label_authored": true
+      },
+      {
+        "id": "sf_3f524cdc07a11d7c6220",
+        "kind": "factor",
+        "label": "Monthly cloud spend",
+        "description": "Monthly spend is £45k",
+        "observed_state": {
+          "value": 0.45,
+          "unit": "GBP per month",
+          "source": "brief_extraction",
+          "raw_value": 45000,
+          "extractionType": "explicit",
+          "source_quote": "Monthly spend is £45k"
+        },
+        "category": "observable",
+        "scale_frame": 100000,
+        "provenance": "from_brief",
+        "source_quote": "Monthly spend is £45k",
+        "label_authored": true
+      },
+      {
+        "id": "sf_711430f6164e93803d93",
+        "kind": "goal",
+        "label": "Cloud cost reduction",
+        "description": "we want to cut costs by 20%",
+        "scale_frame": 1,
+        "provenance": "from_brief",
+        "source_quote": "we want to cut costs by 20%",
+        "label_authored": true
+      },
+      {
+        "id": "sf_82f3e9c695dc6b8d1b11",
+        "kind": "risk",
+        "label": "Migration downtime risk",
+        "description": "without more than 2 weeks of migration downtime risk.",
+        "scale_frame": 10,
+        "provenance": "from_brief",
+        "source_quote": "without more than 2 weeks of migration downtime risk.",
+        "label_authored": true
+      },
+      {
+        "id": "sf_2352da7280f1decc3acf",
+        "kind": "option",
+        "label": "Switch cloud provider from AWS to GCP",
+        "interventions": {},
+        "provenance": "from_brief",
+        "source_quote": "switch our cloud provider from AWS to GCP",
+        "label_authored": true
+      }
+    ],
+    "edges": [],
+    "goal_constraints": [
+      {
+        "constraint_id": "sf_58e2791934fdd9cfdd6d",
+        "node_id": "sf_82f3e9c695dc6b8d1b11",
+        "operator": "<=",
+        "value": 2,
+        "label": "Migration downtime risk",
+        "unit": "weeks",
+        "source_quote": "without more than 2 weeks of migration downtime risk.",
+        "provenance": "explicit",
+        "value_frame": "level"
+      }
+    ]
+  },
+  "questions": [
+    "What current quantity and unit does the stated 20% change in \"Cloud cost reduction\" apply to?",
+    "Is the stated two-week limit a limit on expected migration downtime, worst-case downtime, or a broader downtime-risk measure?"
+  ],
+  "proposals": [],
+  "constructor_diagnostics": {
+    "unresolved": [
+      {
+        "ref": "q2",
+        "code": "relative_goal_metric_unbound",
+        "question": "What current quantity and unit does the stated 20% change in \"Cloud cost reduction\" apply to?"
+      },
+      {
+        "ref": "u1",
+        "code": "stated_unknown",
+        "question": "Is the stated two-week limit a limit on expected migration downtime, worst-case downtime, or a broader downtime-risk measure?"
+      }
+    ],
+    "loss": [
+      {
+        "ref": "q2",
+        "code": "relative_goal_metric_unbound",
+        "question": "What current quantity and unit does the stated 20% change in \"Cloud cost reduction\" apply to?"
+      },
+      {
+        "ref": "u1",
+        "code": "stated_unknown",
+        "question": "Is the stated two-week limit a limit on expected migration downtime, worst-case downtime, or a broader downtime-risk measure?"
+      }
+    ],
+    "trace": {
+      "architecture": "source_first",
+      "transforms": 1,
+      "repairs": 0,
+      "retries": 0,
+      "source_offset_corrections": 0,
+      "level_direction_annotations_ignored": 0,
+      "projected_option_quantities": 0
+    }
+  },
+  "source_bindings": {
+    "d1": {
+      "quote": "Should we switch our cloud provider from AWS to GCP?",
+      "start": 0,
+      "end": 52
+    },
+    "f1": {
+      "quote": "Monthly spend is £45k",
+      "start": 53,
+      "end": 74
+    },
+    "g1": {
+      "quote": "we want to cut costs by 20%",
+      "start": 76,
+      "end": 103
+    },
+    "r1": {
+      "quote": "without more than 2 weeks of migration downtime risk.",
+      "start": 104,
+      "end": 157
+    },
+    "o1": {
+      "quote": "switch our cloud provider from AWS to GCP",
+      "start": 10,
+      "end": 51
+    },
+    "q1": {
+      "quote": "Monthly spend is £45k",
+      "start": 53,
+      "end": 74
+    },
+    "q2": {
+      "quote": "we want to cut costs by 20%",
+      "start": 76,
+      "end": 103
+    },
+    "q3": {
+      "quote": "without more than 2 weeks of migration downtime risk.",
+      "start": 104,
+      "end": 157
+    }
+  }
+}
