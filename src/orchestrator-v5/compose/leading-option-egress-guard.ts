@@ -101,7 +101,10 @@
 
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
-import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
+import {
+  analysisReadyPermitsLeaderNaming,
+  permittedAnalysisModeFromAnalysisReady,
+} from '../admission/analysis-admission.js';
 import { splitIntoRedactableUnits } from './redactable-units.js';
 
 /**
@@ -880,6 +883,12 @@ export interface LeadingOptionEgressGuardOpts {
    */
   readonly analysisReady?: unknown;
   /**
+   * The run SEPARATED the options (`analysis_state.leader_claim.separation === 'separated'`), threaded from the same
+   * composed claim the enforcer reads. Read ONLY by {@link leaderPermittedWithProvisionalCaveat}. Absent ⇒ `false` ⇒
+   * today's behaviour exactly.
+   */
+  readonly separationEstablished?: boolean;
+  /**
    * ⚠ THERE IS DELIBERATELY NO `enforce` MEMBER HERE (ROADMAP 2.1264). It
    * existed, it gated no byte of the response, and its only effect was to
    * mislabel the telemetry — see the module docstring. If you are reaching for
@@ -1234,6 +1243,27 @@ export function findLeaderClaims(response: OlumiResponse): LeaderClaimHit[] {
  * NEVER THROWS — see the module docstring. A scan failure is itself reported as
  * an invariant violation and the response passes through.
  */
+/**
+ * ⭐ THE ENFORCER'S PERMIT-WITH-CAVEAT ARM, as ONE predicate both rails read (DL #77 5913488508 item 2).
+ *
+ * Paul ruled `quantified_provisional` is caveat, not withhold, for a run that SEPARATED the options: the enforcer
+ * keeps the leader and appends the provisional caveat. The alarm mirrored only "entitled AND the admission licenses a
+ * leader", so on exactly this population it logged ERROR `leading_option_claim_withheld_at_egress` over a leader the
+ * enforcer had deliberately kept — Paul's funding test, runs 2 and 3 (`chip_click`, hit_count 12, `enforced: false`,
+ * no enforcer edit). The detector was WIDER than the thing it measures, so its ERROR stopped meaning residue.
+ */
+export function leaderPermittedWithProvisionalCaveat(o: {
+  readonly mayNameLeadingOption: boolean;
+  readonly separationEstablished?: boolean;
+  readonly analysisReady?: unknown;
+}): boolean {
+  return (
+    o.mayNameLeadingOption &&
+    o.separationEstablished === true &&
+    permittedAnalysisModeFromAnalysisReady(o.analysisReady) === 'quantified_provisional'
+  );
+}
+
 export function guardLeadingOptionClaimsAtEgress(
   response: OlumiResponse,
   opts: LeadingOptionEgressGuardOpts,
@@ -1246,6 +1276,8 @@ export function guardLeadingOptionClaimsAtEgress(
   if (opts.mayNameLeadingOption && analysisReadyPermitsLeaderNaming(opts.analysisReady)) {
     return response;
   }
+  // …and the third arm the enforcer has: permit WITH the caveat. The same predicate, never a copy.
+  if (leaderPermittedWithProvisionalCaveat(opts)) return response;
 
   let hits: LeaderClaimHit[];
   try {

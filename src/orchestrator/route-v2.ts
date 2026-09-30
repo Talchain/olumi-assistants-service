@@ -1854,6 +1854,16 @@ async function sendFinalised200(
   // `sanitiseOlumiResponseForEgress` exists to catch. Re-finalising is still
   // required: the spread breaks WeakSet membership (the finaliser brand).
   // ═══════════════════════════════════════════════════════════════════════════
+  // Read ONCE from the composed claim on this body and handed to BOTH rails, so the enforcer and the Layer-3
+  // alarm cannot disagree about which turns keep the leader with the provisional caveat (DL #77 5913488508 item 2).
+  const wireSeparationEstablished =
+    (
+      wireBody as {
+        readonly analysis_state?: {
+          readonly leader_claim?: { readonly separation?: unknown };
+        };
+      }
+    ).analysis_state?.leader_claim?.separation === 'separated';
   const wireEnforcement = enforceLeadingOptionClaimsAtWire(wireBody, {
     requestId,
     exitPath,
@@ -1889,14 +1899,7 @@ async function sendFinalised200(
     // the very body being enforced, so the enforcer and every structured
     // consumer read one interpretation rather than two. Absent field ⇒ absent
     // operand ⇒ today's behaviour exactly.
-    separationEstablished:
-      (
-        wireBody as {
-          readonly analysis_state?: {
-            readonly leader_claim?: { readonly separation?: unknown };
-          };
-        }
-      ).analysis_state?.leader_claim?.separation === 'separated',
+    separationEstablished: wireSeparationEstablished,
     // ⭐ THE NARROWING OPERAND, from the SAME already-composed claim on this
     // very body — so the enforcer and every structured consumer read ONE
     // interpretation of the separation question rather than two. Absent field
@@ -2120,6 +2123,9 @@ async function sendFinalised200(
     // the very turns the enforcer just edited — a detector narrower than the
     // thing it measures. Same object, same field, one shared reader.
     analysisReady: ctx.analysisReady,
+    // …and the enforcer's permit-with-caveat arm, from the same read: without it the alarm logged ERROR over a leader
+    // the enforcer had deliberately kept (Paul's funding test, runs 2 and 3).
+    separationEstablished: wireSeparationEstablished,
   });
   // Count the client-visible fail-closed outcome at the same exactly-once seam
   // as the response. Derivation-level reads may retry or recover, so emitting

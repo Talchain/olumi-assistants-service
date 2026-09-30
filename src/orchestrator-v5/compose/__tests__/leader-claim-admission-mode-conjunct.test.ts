@@ -589,3 +589,46 @@ describe('permittedAnalysisModeFromAnalysisReady — the field reader', () => {
     expect(analysisReadyPermitsLeaderNaming({ analysis_admission: null })).toBe(true);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⛔ THE ALARM MIRRORS THE ENFORCER'S PERMIT-WITH-CAVEAT ARM TOO (DL #77 5913488508 item 2).
+// Paul's funding test, runs 2 and 3 (`chip_click`, 12:46 and 13:07Z): ERROR
+// `leading_option_claim_withheld_at_egress`, hit_count 12, `enforced: false`, and no enforcer edit. Those
+// are the entitled, SEPARATED, `quantified_provisional` Runs Paul ruled "caveat, not withhold": the
+// enforcer kept the leader and appended the caveat, while the alarm, mirroring only "entitled AND the
+// admission licenses a leader", reported a withheld leader on the leader the enforcer had kept.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('the alarm mirrors the permit-with-caveat arm — no false ERROR on a leader the enforcer kept', () => {
+  const EVENT = 'v5.egress.leading_option_claim_withheld_violated';
+
+  it('RED: entitled + separated + quantified_provisional → kept with the caveat, and the alarm is silent on what ships', () => {
+    const cell = { mayNameLeadingOption: true, separationEstablished: true, analysisReady: analysisReady('quantified_provisional') };
+    const enforced = enforceLeadingOptionClaimsAtWire(envelope(ANSWER), { ...WIRE_OPTS, ...cell });
+    expect(enforced.response.assistant_text, 'the control: the leader is kept').toContain(FOUNDER_CLAIM);
+    expect(enforced.response.assistant_text, 'the control: with the caveat').toContain('These figures are provisional');
+    events.length = 0;
+    expect(guardLeadingOptionClaimsAtEgress(enforced.response, { ...ALARM_OPTS, ...cell })).toBe(enforced.response);
+    expect(events.map((e) => e.name)).not.toContain(EVENT);
+  });
+
+  it('CONTROL: the same cell WITHOUT separation still reports (the founder’s cell)', () => {
+    guardLeadingOptionClaimsAtEgress(envelope(ANSWER), {
+      ...ALARM_OPTS, mayNameLeadingOption: true, separationEstablished: false, analysisReady: analysisReady('quantified_provisional'),
+    });
+    expect(events.map((e) => e.name)).toContain(EVENT);
+  });
+
+  it('CONTROL: separated but NOT entitled still reports', () => {
+    guardLeadingOptionClaimsAtEgress(envelope(ANSWER), {
+      ...ALARM_OPTS, mayNameLeadingOption: false, separationEstablished: true, analysisReady: analysisReady('quantified_provisional'),
+    });
+    expect(events.map((e) => e.name)).toContain(EVENT);
+  });
+
+  it('CONTROL: separated + entitled below the provisional mode (exploratory) still reports', () => {
+    guardLeadingOptionClaimsAtEgress(envelope(ANSWER), {
+      ...ALARM_OPTS, mayNameLeadingOption: true, separationEstablished: true, analysisReady: analysisReady('exploratory'),
+    });
+    expect(events.map((e) => e.name)).toContain(EVENT);
+  });
+});

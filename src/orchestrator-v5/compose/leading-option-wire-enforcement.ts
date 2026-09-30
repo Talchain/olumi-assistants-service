@@ -204,11 +204,11 @@ import {
   keyDesignatesLeadingOption,
   assertedLeaderNamesItsOwnSubject,
   BLOCK_PROSE_FIELDS,
+  leaderPermittedWithProvisionalCaveat,
 } from './leading-option-egress-guard.js';
 import { replaceAssertingUnits, splitIntoRedactableUnits } from './redactable-units.js';
 import {
   analysisReadyPermitsLeaderNaming,
-  permittedAnalysisModeFromAnalysisReady,
   semanticReasonFromAnalysisReady,
   semanticReasons,
   type AdmissionReasonCode,
@@ -1076,10 +1076,8 @@ export function enforceLeadingOptionClaimsAtWire(
   // ⚠ Narrow by construction: it requires the mode to be EXACTLY the provisional
   //   cap. A lower mode, an unknown separation, a near tie, an unentitled turn
   //   or an absent admission all still withhold, unchanged.
-  const separableProvisional =
-    opts.separationEstablished === true &&
-    permittedAnalysisModeFromAnalysisReady(opts.analysisReady) === 'quantified_provisional';
-  if (opts.mayNameLeadingOption && separableProvisional) {
+  // The alarm reads this same predicate, so the two rails cannot disagree about which turns keep the leader.
+  if (leaderPermittedWithProvisionalCaveat(opts)) {
     // PERMIT-WITH-CAVEAT, not permit. See {@link PROVISIONAL_FIGURES_CAVEAT}:
     // the review's second finding was that returning the response untouched
     // here admits an unqualified assertion, and it does. Both surfaces that
