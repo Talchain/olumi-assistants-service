@@ -100,11 +100,19 @@ describe('a goal read as price × subscribers gets no third direct parent', () =
     expect(edge(graph, 'Monthly churn', 'Paying subscribers')?.provenance?.natural_effect?.amount).toBeCloseTo(-15, 6);
   });
 
-  it('CONTROL (a double route: churn → subscribers AND churn → MRR): the direct link is taken out, and said', async () => {
+  it('CONTROL (C46 rule 7: a direct cause that ALSO feeds an operand is an addend): the direct link is kept, nothing said', async () => {
     const { graph, out } = await build(draft((c) => { c.links.push(link('Monthly churn', 'Paying subscribers', 'negative', -15, 1, 'ai_proposed')); }));
-    expect(parentsOf(graph)).toHaveLength(2);
-    expect(edge(graph, 'Monthly churn', 'GOAL')).toBeUndefined();
-    expect(((out.not_represented ?? []) as string[]).some((l) => l.includes('count it twice'))).toBe(true);
+    expect(edge(graph, 'Monthly churn', 'GOAL')).toBeDefined();
+    expect(((out.not_represented ?? []) as string[]).some((l) => l.includes('"Monthly churn" was linked straight'))).toBe(false);
+  });
+
+  it('CONTROL (a money parent is an addend in the goal\'s own terms): Olumi-sized "Other plan revenue" → MRR is not re-pointed', async () => {
+    const { graph } = await build(draft((c) => {
+      c.factors.push({ label: 'Other plan revenue', role: 'observable', baseline_known: false, baseline_value: 5000, unit: 'GBP/month', provenance: 'ai_proposed', plausible_max: 20000 });
+      c.links.push(link('Other plan revenue', 'Monthly recurring revenue', 'positive', 1, 1, 'ai_proposed'));
+    }));
+    expect(edge(graph, 'Other plan revenue', 'GOAL')).toBeDefined();
+    expect(edge(graph, 'Other plan revenue', 'Paying subscribers')).toBeUndefined();
   });
 
   it('ROW (AIQ 5902792262): the USER stated churn → MRR and only Olumi routes churn through subscribers — the user\'s direct link is kept, nothing said', async () => {

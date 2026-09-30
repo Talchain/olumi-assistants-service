@@ -6,8 +6,10 @@
  * `churn → MRR` link, Olumi's estimate of −£735/month per churn point (= 15 subscribers × £49). The card needs exactly two
  * parents, so it never came; and churn acts THROUGH subscribers in MRR = price × subscribers, so the direct link misplaces
  * it. It is not dropped (that would erase the price rise's churn penalty from MRR, an optimistic false figure):
- *   · an extra parent that already reaches an operand is a DOUBLE route: the direct link is taken out;
- *   · else, an Olumi-sized extra link is RE-POINTED to the volume operand (the operand not priced in money per unit),
+ *   · an extra parent that already reaches an operand is an ADDEND (C46 rule 7: a discount cuts revenue directly AND
+ *     adds subscribers), a money parent is an addend in the goal's own terms, and a risk is not a factor: all are left
+ *     exactly as drafted;
+ *   · else, an Olumi-sized extra link from a non-money factor is RE-POINTED to the volume operand (the operand not priced in money per unit),
  *     its size converted through the product at the rate operand's stated level (−735 ÷ £49 = −15 subscribers per
  *     point). Still Olumi's estimate, and said.
  * Anything else (a size the user stated, no size, no stated rate level, not exactly one money-rate operand) is left
@@ -29,7 +31,6 @@ interface ModelShape {
 }
 
 export type ExtraParentOfProductGoal =
-  | { readonly kind: 'double_route'; readonly from: string; readonly goal: string; readonly through: string }
   | { readonly kind: 'rerouted'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string;
       readonly amount: number; readonly per: number; readonly converted: number; readonly rateLevel: number;
       readonly goalUnit: string; readonly fromUnit: string; readonly volumeUnit: string; readonly rateUnit: string };
@@ -74,11 +75,12 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
     if (key(l.to) !== goal || operands.has(key(l.from))) { links.push(l); continue; }
     // A link the user stated (or sized) is theirs: never dropped or re-pointed here (AIQ 5902792262).
     if (l.provenance === 'explicit' || l.effect_provenance === 'explicit') { links.push(l); continue; }
-    const through = reaches(l.from, l);
-    if (through !== undefined) {
-      found.push({ kind: 'double_route', from: l.from, goal: model.goal.metric, through });
-      continue;
-    }
+    // ⛔ C46 RULE 7 (CI on #2328 e216097c: construction-product-identity + c46-leader-withheld-on-a-product): a direct cause
+    // of the goal that ALSO feeds an operand is an ADDEND — a discount cuts revenue directly AND adds subscribers. Two
+    // mechanisms, not one counted twice, so it is left exactly as drafted. So is a money parent (an addend in the goal's
+    // own terms) and anything that is not a factor (a risk): only a non-money factor's link is re-pointed.
+    const from = factor(l.from);
+    if (reaches(l.from, l) !== undefined || from === undefined || isMoney(from.unit)) { links.push(l); continue; }
     const sized = l.effect_provenance != null && finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0;
     if (!sized || rate === undefined || volume === undefined || isMoney(volume.unit) || !rate.baseline_known || !finite(rate.baseline_value) || rate.baseline_value <= 0) {
       links.push(l);
@@ -107,9 +109,6 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
 
 /** The one sentence each finding is said with (`not_represented`). */
 export function sayExtraParentOfProductGoal(f: ExtraParentOfProductGoal): string {
-  if (f.kind === 'double_route') {
-    return `"${f.from}" was linked straight to "${f.goal}" as well as through "${f.through}", which would count it twice, so the direct link was taken out.`;
-  }
   return `"${f.from}" was linked straight to "${f.goal}", beside "${f.goal}" = "${f.rate}" × "${f.volume}", so it now acts through "${f.volume}": `
     + `${sayFigureRead(f.amount, f.goalUnit)} per ${sayFigureRead(f.per, f.fromUnit)} of "${f.from}" is ${sayFigureRead(f.converted, f.volumeUnit)} `
     + `at today's ${sayFigureRead(f.rateLevel, f.rateUnit)}. That size is still my estimate.`;
