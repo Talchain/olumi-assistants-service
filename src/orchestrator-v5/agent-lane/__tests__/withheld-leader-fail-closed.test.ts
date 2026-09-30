@@ -313,8 +313,9 @@ describe('review of #1871 — withheld is exactly the shared gate’s withhold a
 
   it('SEPARABLE PROVISIONAL (entitled, separated, quantified_provisional): caveat, not withhold — nothing is removed', () => {
     const out = gate({ permitted: true, separated: true, mode: 'quantified_provisional' });
-    expect(out.startsWith(reply)).toBe(true);
-    expect(out).toContain(PROVISIONAL_FIGURES_CAVEAT.trim().slice(0, 40));
+    // The caveat leads, the reply follows untouched (AIQ #75 5913751874: the provisional sentence comes first).
+    expect(out.startsWith(PROVISIONAL_FIGURES_CAVEAT)).toBe(true);
+    expect(out.endsWith(reply)).toBe(true);
   });
   it('the AUTOMATIC first run (not entitled) is withheld: the ranking sentence goes', () => {
     const out = gate({ permitted: false, separated: true, mode: 'quantified_provisional', reason: 'auto_initiated' });
@@ -1489,6 +1490,6 @@ describe('a sentence naming ONE option as separated ranks the options', () => {
   });
 
   it('CONTROL: on the permit-with-caveat turn (entitled, separated, quantified_provisional) the served headline is kept', () => {
-    expect(gate({ permitted: true }).startsWith(reply)).toBe(true);
+    expect(gate({ permitted: true }).endsWith(reply)).toBe(true); // after the leading caveat (AIQ 5913751874)
   });
 });

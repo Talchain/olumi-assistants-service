@@ -976,11 +976,15 @@ export const PROVISIONAL_FIGURES_CAVEATS: readonly string[] = [
   ]),
 ];
 
-/** Append the caveat once. Identity on the constant, never a language test. */
+/**
+ * Put the caveat FIRST, once (AIQ #75 5913751874). The qualification is read before the figures it qualifies:
+ * on Paul's served run 3 the reply named the leader and its 83% and the caveat came last, at char 792 of 1003.
+ * Identity on the constant, never a language test.
+ */
 function withProvisionalCaveat(text: string, caveat: string): string {
   if (text.includes(caveat)) return text;
-  const trimmed = text.trimEnd();
-  return trimmed.length === 0 ? caveat : `${trimmed}\n\n${caveat}`;
+  const trimmed = text.trim();
+  return trimmed.length === 0 ? caveat : `${caveat}\n\n${trimmed}`;
 }
 
 /**

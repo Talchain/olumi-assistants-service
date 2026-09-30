@@ -112,13 +112,13 @@ describe('the provisional caveat says the admission’s own cause (Canvas #13)',
 
   it('row 1: an all-Olumi model keeps today’s words, on the answer and the summary', () => {
     const t = turn(readinessOf(allOlumi()));
-    for (const surface of [t.text, t.summary]) expect(surface).toBe(`${ANSWER}\n\n${TODAY} ${SECOND}`);
+    for (const surface of [t.text, t.summary]) expect(surface).toBe(`${TODAY} ${SECOND}\n\n${ANSWER}`);
   });
 
   it('RED row 2: after the user sets values off the decision’s path, nothing says “machine-authored”', () => {
     const t = turn(readinessOf(userSetOffPath()));
     for (const surface of [t.text, t.summary]) {
-      expect(surface).toBe(`${ANSWER}\n\n${AIQ_NOT_MATERIAL} ${SECOND}`);
+      expect(surface).toBe(`${AIQ_NOT_MATERIAL} ${SECOND}\n\n${ANSWER}`);
       expect(surface).not.toMatch(/machine-authored/);
     }
   });
@@ -134,22 +134,22 @@ describe('the provisional caveat says the admission’s own cause (Canvas #13)',
 
   it('RED: with no cause on the payload, the caveat is neutral and never names an author', () => {
     const t = turn({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional' } });
-    expect(t.text).toBe(`${ANSWER}\n\n${NEUTRAL} ${SECOND}`);
+    expect(t.text).toBe(`${NEUTRAL} ${SECOND}\n\n${ANSWER}`);
     expect(t.text).not.toMatch(/machine-authored|your own estimates/i);
   });
 
   it('the neutral fallback quotes the admission’s own reason only for a cause that can make the mode provisional', () => {
     const payload = (code: string) => ({ analysis_admission: { permitted_analysis_mode: 'quantified_provisional', reasons: [
       { field: 'semantic_quality_sufficient', code, message: 'a payload’s own words are never quoted' }] } });
-    expect(turn(payload('NO_COMPARISON_SUBSTRATE')).text).toBe(`${ANSWER}\n\n${NEUTRAL} ` +
-      `Nothing in this model connects the options to your goal, so there is no comparison to draw a leader from. ${SECOND}`);
+    expect(turn(payload('NO_COMPARISON_SUBSTRATE')).text).toBe(`${NEUTRAL} ` +
+      `Nothing in this model connects the options to your goal, so there is no comparison to draw a leader from. ${SECOND}\n\n${ANSWER}`);
     // Inconsistent with the provisional mode (it makes the mode comparative_leader), so neutral alone.
-    expect(turn(payload('CONFIDENCE_PARAMETERS_PARTLY_USER_STATED')).text).toBe(`${ANSWER}\n\n${NEUTRAL} ${SECOND}`);
-    expect(turn(payload('SOMETHING_NEW')).text).toBe(`${ANSWER}\n\n${NEUTRAL} ${SECOND}`);
+    expect(turn(payload('CONFIDENCE_PARAMETERS_PARTLY_USER_STATED')).text).toBe(`${NEUTRAL} ${SECOND}\n\n${ANSWER}`);
+    expect(turn(payload('SOMETHING_NEW')).text).toBe(`${NEUTRAL} ${SECOND}\n\n${ANSWER}`);
   });
 
   it('row 4 (control): the second sentence is unchanged whatever the cause', () => {
-    for (const g of [allOlumi(), userSetOffPath()]) expect(turn(readinessOf(g)).text.endsWith(` ${SECOND}`)).toBe(true);
+    for (const g of [allOlumi(), userSetOffPath()]) expect(turn(readinessOf(g)).text.includes(` ${SECOND}\n\n${ANSWER}`)).toBe(true);
   });
 
   it('idempotent: a caveated answer is not caveated twice', () => {
@@ -162,7 +162,7 @@ describe('the provisional caveat says the admission’s own cause (Canvas #13)',
   });
 
   it('the Agent lane keeps every cause’s caveat (server sentences are protected by identity)', () => {
-    const caveatOf = (text: string) => `Kept.\n\n${text.slice(ANSWER.length).trim()}`;
+    const caveatOf = (text: string) => `Kept.\n\n${text.slice(0, text.length - ANSWER.length).trim()}`;
     const neutral = turn({ analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional' } }).text;
     for (const text of [turn(readinessOf(allOlumi())).text, turn(readinessOf(userSetOffPath())).text, neutral]) {
       expect(dropRankingSentences(caveatOf(text)).droppedSentences).toBe(0);
