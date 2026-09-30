@@ -53,6 +53,12 @@ describe('never renumbered, never reused (AIQ condition 1)', () => {
     expect(v3.ref_high_water.O).toBe(3);
   });
 
+  it('an edit path that drops the counter AND the deleted node: the BASE still remembers O2 was issued → the new option is O3', () => {
+    const { ref_high_water: _hw, ...noCounter } = v1;
+    const incoming = { ...noCounter, nodes: [...(v1.nodes as Json[]).filter((n) => n.id !== 'opt_keep'), node('opt_pilot', 'option')] };
+    expect(refs(assignEntityRefs(incoming, v1).graph as Json).opt_pilot).toBe('O3');
+  });
+
   it('an edit path that DROPS `ref` gets it back from the base by node id (carry-forward), never a new number', () => {
     const stripped = { ...v1, nodes: (v1.nodes as Json[]).map(({ ref: _ref, ...rest }) => rest) };
     expect(refs(assignEntityRefs(stripped, v1).graph as Json)).toEqual(refs(v1));
