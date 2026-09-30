@@ -31,11 +31,23 @@ export function readNumber(brief: string, claim: NumberClaim): { value: number; 
   const bound = bindSource(brief, claim.source);
   if (!bound.ok || !bound.source.quote.includes(claim.literal)) return null;
   const at = bound.source.quote.indexOf(claim.literal);
+  const preceding = bound.source.quote.slice(0, at);
   const following = bound.source.quote.slice(at + claim.literal.length);
+  // A range endpoint is not an independent scalar. Keep the separate "from
+  // £49 to £59" current/proposed reading; explicit ranges cannot use it.
+  const rangeContext = /\b(?:between|ranges?)\b[^.!?;]*$/i.test(preceding);
+  const fromStart = /\bfrom\s*$/i.test(preceding) && !rangeContext;
+  const fromEnd = /\bfrom\s*[£$€]?\s*\d[\d,.]*(?:\s*(?:k|m|million|thousand))?\s+to\s*[£$€]?\s*$/i.test(preceding) && !rangeContext;
+  const upperDash = /\d[\d,.]*(?:\s*(?:k|m|million|thousand))?\s*[-–—]\s*[£$€]?\s*$/i.test(preceding);
+  const upperTo = /\d[\d,.]*(?:\s*(?:k|m|million|thousand))?\s+to\s*[£$€]?\s*$/i.test(preceding) && !fromEnd;
+  const lowerTo = /^\s+to\s*[£$€]?\s*\d/i.test(following) && !fromStart;
+  const betweenStart = /\bbetween\s*$/i.test(preceding) && /^\s+and\s*[£$€]?\s*\d/i.test(following);
+  const betweenEnd = /\bbetween\s+[£$€]?\s*\d[\d,.]*(?:\s*(?:k|m|million|thousand))?\s+and\s*[£$€]?\s*$/i.test(preceding);
   if (bound.source.quote.indexOf(claim.literal, at + 1) >= 0
     || /[\d.,+-]/.test(bound.source.quote[at - 1] ?? '')
     || /^[\da-z]|^[.,]\d/i.test(following)
-    || /^\s*(?:-|–|—)\s*(?:[£$€]\s*)?\d/i.test(following)) return null;
+    || /^\s*(?:-|–|—)\s*(?:[£$€]\s*)?\d/i.test(following)
+    || upperDash || upperTo || lowerTo || betweenStart || betweenEnd) return null;
   // These are numeric spellings, not inferred values. Preserve the full quote
   // (including "about") and require the decoded value to equal the typed one.
   const spelling = claim.literal.trim().replace(/^(?:about|approximately|roughly|around)\s+/i, '')
@@ -77,12 +89,15 @@ export function readDeadline(brief: string, claim: SourceDeadline): { source: Bo
   if (!bound.ok || !bound.source.quote.includes(claim.as_stated)
     || !/^(within|in|by|before)\b/i.test(claim.as_stated)
     || /\b(?:not|never|cannot|can't)\s+(?:be\s+)?(?:within|in|by|before)\b/i.test(bound.source.quote)) return null;
-  if (claim.horizon_months !== null) {
-    const parsed = /^(?:within|in|by|before)\s+(?:the\s+)?(?:next\s+)?(\d+|one|a)\s+(months?|years?)$/i.exec(claim.as_stated);
-    const count = parsed ? /^\d+$/.test(parsed[1]) ? Number(parsed[1]) : 1 : null;
-    const months = parsed && count !== null ? count * (/^year/i.test(parsed[2]) ? 12 : 1) : null;
-    if (months === null || months <= 0 || months !== claim.horizon_months) return null;
-  }
+  const before = bound.source.quote.slice(0, bound.source.quote.indexOf(claim.as_stated)).split(/[.!?;]/).at(-1) ?? '';
+  if (/\b(?:not|never|cannot|can't)\b/i.test(before)) return null;
+  const parsed = /^(?:within|in|by|before)\s+(?:the\s+)?(?:next\s+)?(\d+|one|a)\s+(months?|years?)$/i.exec(claim.as_stated);
+  const quarter = /^(?:by|before)\s+(?:the\s+end\s+of\s+)?Q[1-4]$/i.test(claim.as_stated);
+  if (!parsed && !quarter) return null;
+  const count = parsed ? /^\d+$/.test(parsed[1]) ? Number(parsed[1]) : 1 : null;
+  const months = parsed && count !== null ? count * (/^year/i.test(parsed[2]) ? 12 : 1) : null;
+  if (parsed && (months === null || months <= 0)) return null;
+  if (claim.horizon_months !== null && months !== claim.horizon_months) return null;
   return { source: bound.source };
 }
 

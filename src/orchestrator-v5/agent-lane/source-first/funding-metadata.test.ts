@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { compileSourceMeaning, sourceEntityId } from './compiler.js';
 import { buildSourceMeaningSchema, SourceMeaningSchema, type SourceMeaning, type SourceSpan, type SourceUnit } from './meaning.js';
+import { readNumber } from './source-binding.js';
 
 // Exact 506-character brief recovered from R3 accept-paul/paul-scenario-read.json.
 const BRIEF = "I need to accelerate securing funding within the next 2 months. We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK. We'll keep sending cold emails and trying to find warm connections, but I want to explore alternatives to support the funding process, as we'll run out of money soon. For example, angel investors might be able to provide a small amount of funding quicker to buy us more time, but we would need to decide whether the overhead would be worth it.";
@@ -126,6 +127,33 @@ describe('source-first funding metadata without invented funding numbers', () =>
     expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'false_target', code: 'number_not_grounded' }));
   });
 
+  it.each([
+    ['£1 to 2 million', '£1', '1'],
+    ['£1 – 2 million', '2 million', '2000000'],
+    ['£1 — £2 million', '£2 million', '2000000'],
+    ['£1 - £2 million', '£2 million', '2000000'],
+    ['between £1 million and £2 million', '£1 million', '1000000'],
+    ['between £1 million and £2 million', '£2 million', '2000000'],
+  ])('does not turn an endpoint in %s into a scalar target', (range, literal, value) => {
+    const quote = 'Investment firms do deals ' + range + '.';
+    const meaning = funding();
+    meaning.entities = [{ ref: 'funding', kind: 'goal', label: 'securing funding', source: source(GOAL) }];
+    meaning.evidence_ranges = [];
+    meaning.quantities = [{ ref: 'false_target', entity_ref: 'funding', role: 'target',
+      frame: 'level', direction: 'none', number: { literal, value, source: source(quote) },
+      unit: GBP, comparator: '>=', horizon_months: null }];
+    const result = compileSourceMeaning(GOAL + ' ' + quote, meaning);
+    expect(goal(result).goal_threshold_raw).toBeUndefined();
+    expect(goal(result).goal_threshold_cap).toBeUndefined();
+    expect(result.unresolved).toContainEqual(expect.objectContaining({ ref: 'false_target', code: 'number_not_grounded' }));
+  });
+
+  it('preserves the separate current and proposed price in a from/to action', () => {
+    const quote = 'Should we raise price from £49 to £59 a month?';
+    expect(readNumber(quote, { literal: '£49', value: '49', source: source(quote) })?.value).toBe(49);
+    expect(readNumber(quote, { literal: '£59', value: '59', source: source(quote) })?.value).toBe(59);
+  });
+
   it('does not convert zero months into an invented one-month deadline', () => {
     const brief = 'We need funding within 0 months.';
     const meaning = funding();
@@ -148,6 +176,19 @@ describe('source-first funding metadata without invented funding numbers', () =>
     const meaning = funding();
     meaning.entity_metadata![0].deadline!.source = source(DEALS);
     expect(goal(compileSourceMeaning(BRIEF, meaning)).goal_horizon_months).toBeUndefined();
+  });
+
+  it.each(['We need funding within our budget.', 'We do not need funding within the next 2 months.'])('does not admit an arbitrary or negated deadline: %s', (brief) => {
+    const meaning = funding();
+    meaning.entities = [{ ref: 'funding', kind: 'goal', label: 'Funding', source: source(brief) }];
+    meaning.entity_metadata![0].deadline = {
+      as_stated: brief.includes('budget') ? 'within our budget' : 'within the next 2 months',
+      horizon_months: null, source: source(brief),
+    };
+    meaning.evidence_ranges = [];
+    const result = compileSourceMeaning(brief, meaning);
+    expect(goal(result).goal_deadline_as_stated).toBeUndefined();
+    expect(result.unresolved).toContainEqual(expect.objectContaining({ code: 'entity_deadline_not_grounded' }));
   });
 
   it('keeps old frozen meaning parseable and requires both new channels on new structured output', () => {
