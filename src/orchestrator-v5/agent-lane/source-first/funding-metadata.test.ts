@@ -7,7 +7,8 @@ import { readNumber } from './source-binding.js';
 // Exact 506-character brief recovered from R3 accept-paul/paul-scenario-read.json.
 const BRIEF = "I need to accelerate securing funding within the next 2 months. We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK. We'll keep sending cold emails and trying to find warm connections, but I want to explore alternatives to support the funding process, as we'll run out of money soon. For example, angel investors might be able to provide a small amount of funding quicker to buy us more time, but we would need to decide whether the overhead would be worth it.";
 const GOAL = 'I need to accelerate securing funding within the next 2 months.';
-const DEALS = "We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK.";
+// Own range clause, excluding the separate location qualifier.
+const DEALS = "We've been focused on investment firms that do deals between £1-2 million";
 const source = (quote: string): SourceSpan => ({ quote, start: null, end: null });
 const GBP: SourceUnit = { kind: 'currency', currency: 'GBP', period: null, counted_object: null, as_stated: '£' };
 function funding(): SourceMeaning {
@@ -83,6 +84,37 @@ describe('source-first funding metadata without invented funding numbers', () =>
     expect(result.unresolved).toContainEqual(expect.objectContaining({ code: 'entity_unit_scope_unverified' }));
   });
 
+  it('does not use a broad funding entity quote to own the firm unit or deal range', () => {
+    const meaning = funding();
+    const wholeDeals = DEALS + ', mostly based in the UK.';
+    meaning.entities[0].source = source(GOAL + ' ' + wholeDeals);
+    meaning.entity_metadata![0].unit = { value: GBP, authorship: 'explicit', source: source(wholeDeals) };
+    meaning.evidence_ranges![0].entity_ref = 'funding';
+    meaning.evidence_ranges![0].source = source(wholeDeals);
+    const result = compileSourceMeaning(BRIEF, meaning);
+    expect(goal(result).goal_threshold_unit).toBeUndefined();
+    expect(goal(result).goal_horizon_months).toBeUndefined();
+    expect(goal(result).goal_deadline_as_stated).toBeUndefined();
+    expect(result.evidence_ranges).toEqual([]);
+    expect(result.unresolved).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'entity_unit_scope_unverified' }),
+      expect.objectContaining({ code: 'entity_deadline_not_grounded' }),
+      expect.objectContaining({ code: 'evidence_range_not_grounded' }),
+    ]));
+  });
+
+  it('withholds attribution even when both entity and metadata use the same broad quote', () => {
+    const meaning = funding();
+    const broad = GOAL + ' ' + DEALS + ', mostly based in the UK.';
+    meaning.entities[0].source = source(broad);
+    meaning.entity_metadata![0].unit = { value: GBP, authorship: 'explicit', source: source(broad) };
+    meaning.evidence_ranges![0].entity_ref = 'funding';
+    meaning.evidence_ranges![0].source = source(broad);
+    const result = compileSourceMeaning(BRIEF, meaning);
+    expect(goal(result).goal_threshold_unit).toBeUndefined();
+    expect(result.evidence_ranges).toEqual([]);
+  });
+
   it('can retain an explicitly stated goal unit without a numeric target or current level', () => {
     const brief = 'We measure total funding in GBP within the next 2 months.';
     const meaning = funding();
@@ -134,6 +166,8 @@ describe('source-first funding metadata without invented funding numbers', () =>
     ['£1 - £2 million', '£2 million', '2000000'],
     ['between £1 million and £2 million', '£1 million', '1000000'],
     ['between £1 million and £2 million', '£2 million', '2000000'],
+    ['from £1 million to £2 million', '£1 million', '1000000'],
+    ['from £1 million to £2 million', '£2 million', '2000000'],
   ])('does not turn an endpoint in %s into a scalar target', (range, literal, value) => {
     const quote = 'Investment firms do deals ' + range + '.';
     const meaning = funding();
