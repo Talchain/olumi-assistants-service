@@ -5582,13 +5582,30 @@ export function createAgentCapabilities(
               detail: `"${suggested.label}" is already Olumi's suggestion. Adoption keeps its existing links and levels; nothing was prepared with additional edits. Propose its participation alone, then edit its effects separately.` };
           }
           const expectedInterventions = structuredClone(suggested.interventions ?? {});
+          // The Run and canonical Agent reader use the normalized value in the
+          // factor's frame. A stale raw display value cannot be the consent
+          // reading for a different figure the Run would actually compare.
+          const conflictingLevels = Object.entries(expectedInterventions).filter(([factorId, cell]) => {
+            if (cell === null || typeof cell !== 'object') return false;
+            const level = cell as { value?: unknown; raw_value?: unknown };
+            if (typeof level.raw_value !== 'number' || !Number.isFinite(level.raw_value)) return false;
+            if (typeof level.value !== 'number' || !Number.isFinite(level.value)) return true;
+            const factor = g.nodes.find((n) => n.id === factorId);
+            const frame = levelFrameOf(factor);
+            const canonical = frame === null ? level.value : level.value * frame;
+            return Math.abs(level.raw_value - canonical) > Math.max(1e-9, Math.abs(canonical) * 1e-6);
+          });
+          if (conflictingLevels.length > 0) {
+            return { ok: false, mutated: false, refusal: 'inconsistent_stored_level',
+              detail: `The stored display level for "${suggested.label}" disagrees with the level its comparison would use. Nothing was prepared; check that option's level before including it.` };
+          }
           const levelWords = Object.entries(expectedInterventions).map(([factorId, raw]) => {
             const factor = g.nodes.find((n) => n.id === factorId);
             const level = raw !== null && typeof raw === 'object' ? raw as Record<string, unknown> : { value: raw };
             const frame = levelFrameOf(factor);
             const storedRaw = typeof level.raw_value === 'number' && Number.isFinite(level.raw_value) ? level.raw_value : null;
             const normalized = typeof level.value === 'number' && Number.isFinite(level.value) ? level.value : null;
-            const figure = storedRaw ?? (normalized !== null && frame !== null ? Number((normalized * frame).toPrecision(12)) : normalized);
+            const figure = normalized !== null && frame !== null ? Number((normalized * frame).toPrecision(12)) : normalized;
             const unitValue = typeof level.unit === 'string' && level.unit.trim() !== ''
               ? level.unit.trim() : factor?.observed_state?.unit;
             const unit = (storedRaw !== null || frame !== null) && typeof unitValue === 'string' && unitValue !== ''

@@ -862,8 +862,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
       ? { ...node, proposed_by: 'olumi', interventions: {
         fac_price: { value: 0.295, raw_value: 59, unit: 'GBP', source: 'cee_hypothesis' },
-        fac_1: { value: 0.4, raw_value: 4, unit: 'units', source: 'brief_extraction' },
-        fac_2: { value: 0.5, raw_value: 5, unit: 'units', source: 'user_specified' },
+        fac_1: { value: 0.02, raw_value: 4, unit: 'units', source: 'brief_extraction' },
+        fac_2: { value: 0.025, raw_value: 5, unit: 'units', source: 'user_specified' },
       } }
       : node) });
     script = [
@@ -892,6 +892,23 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(approve, 'the finalised response keeps the approval button').toBeDefined();
     expect(approve?.label).toBe('Add this suggestion to my comparison');
     expect(approve?.detail).toContain("Price: 57 GBP (Olumi's suggested estimate)");
+    expect(graphNow().nodes.find((node) => node.id === 'opt_b')?.analysis_participation).toBeUndefined();
+  }, 120_000);
+
+  it('refuses a card whose displayed raw level disagrees with the level the Run would compare', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, label: 'Raise to £54', proposed_by: 'olumi',
+        interventions: { fac_price: { value: 0.285, raw_value: 54, unit: 'GBP', source: 'cee_hypothesis' } } }
+      : node) });
+    script = [
+      () => fnCall('propose_new_option', { label: 'Raise to £54', acts_on: [], rationale: 'Please add your suggestion.' }),
+      () => say('That level needs checking before I can offer it.'),
+    ];
+    const result = await turn({ message: 'Please add "Raise to £54" as one of my options.' });
+    expect(result._agent.tool_calls.find((call) => call.name === 'propose_new_option'))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'inconsistent_stored_level' });
+    expect(approveChipOf(result)).toBeUndefined();
     expect(graphNow().nodes.find((node) => node.id === 'opt_b')?.analysis_participation).toBeUndefined();
   }, 120_000);
 
