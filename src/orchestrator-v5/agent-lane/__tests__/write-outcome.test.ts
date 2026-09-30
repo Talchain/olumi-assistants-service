@@ -137,6 +137,17 @@ describe('the write-status line is composed from the tool results', () => {
     expect(n.status).toBe('That change was already saved (version 4); nothing was written again.');
   });
 
+  it('a typed yes cannot adopt an Olumi option and points to the displayed card', () => {
+    const n = narrateWriteOutcome(
+      'Please press the displayed adoption card; a typed “yes” cannot adopt this option.',
+      [{ name: 'authorise_change' }],
+      [{ ok: false, mutated: false, refusal: 'approve_on_card' }],
+    );
+    expect(n.text).toContain('Please press the displayed adoption card');
+    expect(n.status).toBe('Not saved: a typed “yes” cannot adopt an Olumi suggestion — press the displayed adoption card to include it.');
+    expect(n.status).not.toContain('ask me to try again');
+  });
+
   it('CONTRAST: a turn that neither wrote nor claimed to adds no status line and changes no words', () => {
     const text = 'Nothing has been changed yet. Approve this specific link if you want it added.';
     const n = narrateWriteOutcome(text, [{ name: 'propose_model_change' }], [{ ok: true, mutated: false, proposal_id: 'prop_1' }]);

@@ -63,6 +63,7 @@ const REFUSAL_WORDS: Record<string, string> = {
   model_changed_while_proposing: 'the model changed while it was being put together',
   model_already_exists: 'a model already exists for this decision',
   read_only_preview: 'this preview cannot change the model',
+  approve_on_card: 'a typed “yes” cannot adopt an Olumi suggestion — press the displayed adoption card to include it',
   // ⛔ A REFUSED BUILD, IN WORDS WITH A NEXT STEP (served `785185b7`, scenario
   // `03b93536`): the user read "it was refused (model_too_large)" — a code, no
   // reason, nothing to do next. Every refusal `runtime/build-model.ts` returns.
