@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../goal-chance-withheld.js';
@@ -97,9 +97,8 @@ describe('W3: a saved current Run that may name its leader gives each option its
 
 describe('W3: the route says an interior chance is a recorded model chance (AIQ 5902935366)', () => {
   it('the saved-Run instruction reads a row chance as a model output, and keeps goal_certainty for exact 0/1 only', () => {
-    // AGENT_INSTRUCTIONS is module-private; the line is read from the route source, as the estate's scanner tests do.
-    const src = readFileSync(fileURLToPath(new URL('../../../routes/agent-v1-turn.ts', import.meta.url)), 'utf8');
-    const lines = src.split('\n').filter((l) => l.includes('For a CURRENT saved Run'));
+    // Inspect this retained clause only: the neighbouring clause begins at the next exact host instruction.
+    const lines = HOST_TOOL_CONTRACT.match(/For a CURRENT saved Run,.*?(?= Earlier assistant replies can describe a Run)/g) ?? [];
     expect(lines, 'control: exactly one saved-Run instruction line').toHaveLength(1);
     expect(lines[0]).toContain('recorded model chance, not a guarantee');
     expect(lines[0]).toContain('reaches the target in about N% of model runs');

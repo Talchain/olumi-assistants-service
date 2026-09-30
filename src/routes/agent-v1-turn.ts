@@ -62,8 +62,8 @@ import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtim
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
-import { budgetFor } from '../orchestrator-v5/agent-lane/model-budgets.js';
-import { SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
+import { budgetFor, conversationBudgetFor, type CallBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
+import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsOf, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
@@ -349,7 +349,9 @@ const MUTATION_INSTRUCTION =
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
 
-const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace('{{MODE_AND_AUTHORITY}}', MUTATION_INSTRUCTION);
+const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
+  '{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT].join(' '),
+);
 
 /**
  * Read the persisted state back for the response: `graph_hash`, readiness and
@@ -990,8 +992,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
 
 
-  const callModel: CallModel = async (req) => onceMoreOnTransportFailure('conversation', async () => {
-    const budget = budgetFor('gpt-6.1-sol', 'conversation');
+  const callModelFor = (budget: CallBudget): CallModel => async (req) => onceMoreOnTransportFailure('conversation', async () => {
     /**
      * ⭐ THE HANDLE IS KEPT SO CACHING CAN BE MEASURED AT ALL.
      *
@@ -1733,7 +1734,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     const history = histories.get(sessionId);
-    const budget = budgetFor('gpt-6.1-sol', 'conversation');
+    let budget = conversationBudgetFor(false);
     /** Every tool runs as THIS request: its scenario, its user, and the user's own words (`stated-by-user.ts`). */
     const typedNow = typedByUser(body) ? message : null;
     // The typed approve chip this request pressed — bound here, never from model output. ⛔ Its words (as the product
@@ -1912,7 +1913,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (outcome !== undefined) { runOutcomeChips = outcome.chips.map((c) => ({ ...c })); runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
       runInterpreted = ran.refusal !== 'run_failed' && outcome === undefined;
       if (runInterpreted) try {
-        const resp = await callModel({
+        const resp = await callModelFor(budget)({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
           instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
@@ -2014,6 +2015,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let canonicalContext: Parameters<typeof runAgentTurn>[0]['canonicalContext'];
       try {
         const st = await capabilities.getCanonicalState(toolCtx);
+        // Select once from the initial host read; registration later in this turn cannot switch the model.
+        budget = conversationBudgetFor(st.ok === true && (st as { empty?: unknown }).empty === true);
         const revision = (st as { graph_revision?: unknown }).graph_revision;
         /**
          * ⭐ C6-1b: AN EMPTY MODEL IS A KNOWN STATE, NOT AN UNKNOWN ONE. The graph read answers an empty scenario with
@@ -2074,7 +2077,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
         },
         capabilities,
-        callModel,
+        callModelFor(budget),
       );
     } catch (err) {
       log.error({ err: String(err), scenario_id: scenarioId }, 'agent-lane turn failed');

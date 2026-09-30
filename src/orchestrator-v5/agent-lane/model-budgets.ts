@@ -138,3 +138,12 @@ export function budgetFor(model: string, role: CallBudget['role']): CallBudget {
   }
   return hit;
 }
+
+/**
+ * DL #75 5916003868: the initial authoritative empty-model read fixes the
+ * build turn to its measured Terra reserves. Every hop keeps that budget,
+ * even after registration; a later turn reads the model anew.
+ */
+export function conversationBudgetFor(knownEmptyModel: boolean): CallBudget {
+  return budgetFor(knownEmptyModel ? 'gpt-5.6-terra' : 'gpt-6.1-sol', 'conversation');
+}
