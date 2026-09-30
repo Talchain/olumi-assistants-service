@@ -1195,8 +1195,8 @@ export function agentNoLeaderReason(
 
 /**
  * Server-authored sentences kept by IDENTITY, never by a language test: the shared gate's own
- * replacement and provisional caveat ("…fitted your goal better than the alternatives…" is a
- * definition of the figures, not a ranking), and this module's own sentences.
+ * replacement and provisional caveat ("…fitted your goal better than the others is not the chance…"
+ * distinguishes a win share from a goal chance; it is not a ranking), and this module's own sentences.
  */
 const PROTECTED_SENTENCES: ReadonlySet<string> = new Set(
   [WIRE_WITHHELD_LEADER_REPLACEMENT, ...splitIntoRedactableUnits(PROVISIONAL_FIGURES_CAVEAT), ...AGENT_NO_LEADER_SENTENCES].map((s) => s.trim()),

@@ -912,10 +912,16 @@ function projectField(
  * share is not the chance the goal is achieved. It is now said with none of the
  * claim vocabulary, and with goal-fit rather than contest framing.
  */
+/**
+ * ⛔ AIQ #75 5902364862 (i): the second sentence USED to read "Treat each percentage as how often that option fitted
+ *    your goal better than the alternatives across the simulated runs, not as the chance the goal is achieved." On
+ *    served cut-costs (CEE `1f9d769`, 8 of 15 turns) the reply's percentage WAS the wire `probability_of_goal` ("reaches
+ *    that target in 46% of simulated runs"), so the caveat denied a real goal chance. It must never redefine a figure on
+ *    the page: it now states the distinction in general, in AIQ's words.
+ */
 export const PROVISIONAL_FIGURES_CAVEAT =
   'These figures are provisional: every estimate behind them is machine-authored and unconfirmed. ' +
-  'Treat each percentage as how often that option fitted your goal better than the alternatives ' +
-  'across the simulated runs, not as the chance the goal is achieved.';
+  'A share of runs in which an option fitted your goal better than the others is not the chance of reaching your target.';
 
 /** Append the caveat once. Identity on the constant, never a language test. */
 function withProvisionalCaveat(text: string): string {

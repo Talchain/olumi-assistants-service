@@ -210,6 +210,23 @@ export function heldComparatorSense(held: unknown): EmittedGoalDirection | undef
 }
 
 /**
+ * ⛔ THE USER HELD THE GOAL AS A FLOOR, SO HIGHER IS BETTER (AIQ #75 5901136155). True when the goal node holds the
+ * user's `'>='` / `'>'` and the target is not a NEGATIVE typed change: "at least a 20% cut" is held `'>='` on a change
+ * of −20%, and it points DOWN (cloud-0, MG 5871403407). PLoT still reports GOAL_DIRECTION_UNATTESTED on such a run,
+ * because `maximise` is never sent (header), but the direction was not assumed: it is the user's. Nothing is sent from
+ * this; the headline reads it so as not to say the direction was assumed.
+ */
+export function heldGoalPointsUp(graph: unknown, goalNodeId: unknown): boolean {
+  const held = readHeldGoalComparator(graph, goalNodeId);
+  if (held !== '>=' && held !== '>') return false;
+  const node = readNodes(graph).find((n) => n.id === goalNodeId);
+  const frame = node?.goal_threshold_frame;
+  const raw = node?.goal_threshold_raw;
+  const isChange = frame === 'change_rel' || frame === 'change_abs' || frame === 'delta';
+  return !(isChange && typeof raw === 'number' && raw < 0);
+}
+
+/**
  * The direction to send, and where it came from — the user's HELD comparator when the goal node holds one (see the
  * header's table), otherwise the label classifier. `undefined` ⇒ the caller omits the key (today's maximiser).
  */
