@@ -56,7 +56,7 @@ import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-readi
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { refitFramesForStatedEffects } from '../refit-frames.js';
-import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
+import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
 import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
@@ -342,6 +342,11 @@ export const BUILD_INSTRUCTIONS = [
   // ⭐ THE MAGNITUDE CONTRACT (D1): ONE sentence. Admission reads the size on each end's own frame and never
   // lets it run a bounded quantity out of its range (served T3: a frame-blind 0.5 moved churn by about 50 points).
   'STATE EACH LINK’S SIZE IN NATURAL UNITS: `effect_amount` is the signed change in the target’s own unit (in points for a percentage, so 4% to 3% is -1) caused by `effect_per_source_change` of the source in its own unit (1 for switching a yes/no on), with `effect_provenance` "explicit" only when the user stated that size, and all three null when you cannot give a defensible size.',
+  // ⛔ A4 (R3 #75 5918453000; AIQ 5918516441 / 5918523203; R3 5918513716; DL 5918542181): Paul's brief states investment
+  // firms "do deals between £1-2m", and no node or link carried it, so every £ figure into his goal was Olumi's
+  // default. The size is per DEAL, never per conversation (that would claim every conversation brings £1m). One general
+  // rule, no domain example: the countable the size is per becomes a quantity, and a stated range gives its LOW end.
+  'A MONEY SIZE THE BRIEF STATES PER ONE OF SOMETHING (per deal, per contract, per subscriber) belongs on the link from THAT countable to the money goal. Keep the countable as its own quantity (an outcome such as "Deals closed", unit "deals", with a `plausible_max`), link it to the goal with that size per one (`effect_per_source_change` 1, `effect_provenance` "explicit"), and never put the size on a link from anything else. When the brief gives a RANGE for that size, use its LOW end. What moves the countable (how many conversations become deals, say) is not stated: link it with your own estimate or no size, never "explicit", and ask it in `unknowns`.',
   // ⛔ R-c (AI Quality 5881541947 / 5882087383): a limit is checked only when every link from what an option changes to
   // the limited quantity carries a size in that quantity's own unit, and a risk has no unit. Measured (MG 7×3, 29 Sep):
   // 10 of 12 A/C churn limits reached churn only through a risk, so none of them could be checked. The first wording
@@ -1300,6 +1305,8 @@ export async function buildModelFromBrief(
   // strict scoped reading, the link's two ends against every other quantity.
   const sizeWritten = (value: number, unit: unknown, scope: { target: readonly string[]; others: readonly string[] }): boolean =>
     figureTheUserWroteFor(value, unit, brief, { target: scope.target, others: scope.others, strict: true });
+  // A4: the range the brief writes that size as one end of ("deals between £1-2m"), said with it (R3 C1/C2).
+  const sizeRangeEnd = (value: number, unit: unknown) => writtenRangeFor(value, unit, brief);
   // ⛔ A goal whose stated level is the product of its two stated parts is declared one (R3 #72 5886596030).
   // #2286's mint on the goal's two parts, or (when the drafter put the product on a carrier that is the goal's only parent)
   // the carrier folded into the goal under the SAME proof (`goal-product-carrier.ts`, MG #72 5888469185 class 1).
@@ -1318,7 +1325,7 @@ export async function buildModelFromBrief(
   let foldedCarrier = firstIdentity.folded;
   let droppedProducts = firstIdentity.dropped;
   let gapResidual = firstIdentity.residual;
-  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten);
+  let admitted = admitCandidateModel(firstIdentity.model, {}, brief, goalLevelTheUserWrote(candidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
   preparation = gapsOnRegisteredOptions(preparation, firstCandidate, admitted);
 
   /**
@@ -1437,7 +1444,7 @@ export async function buildModelFromBrief(
         const retryPrepared = prepareProvisionalCandidate(retryRaw);
         const retryCandidate = retryPrepared.candidate;
         const retryIdentity = mintOrFold(retryCandidate);
-        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten);
+        const retryAdmitted = admitCandidateModel(retryIdentity.model, {}, brief, goalLevelTheUserWrote(retryCandidate, brief), writtenAgain, (c) => briefGoalLevel(c, brief), sizeWritten, sizeRangeEnd);
         // ⛔ Leave out only what the FIRST draft never registered: withholding a registered option never closes its gaps in the count (adversarial verify of 843c0960).
         const firstGone = new Set((admitted.options_withheld ?? []).map((w) => canonicalLabel(w.option)));
         const firstRegistered = new Set(firstCandidate.options.map((o) => canonicalLabel(o.label)).filter((l) => !firstGone.has(l)));
@@ -1947,13 +1954,14 @@ export async function buildModelFromBrief(
         // up — the missing capability in plain English — or a declaration that did not hold.
         // `loop_withheld` / `loop_kept`: a loop the model could not hold (`admit-model.ts`,
         // `breakLoops`) — which link was left out, or that the user's own loop was kept.
+        // `stated_range_end`: the user's size is one END of a range they wrote, said with the range as a floor (A4, R3 C1/C2).
         // `magnitude_unconvertible`: a stated size that could not be read on the two ends' frames, so the standard
         // placeholder stands in (magnitude contract, D2/D6) — never dropped unseen.
         // `set_aside_estimate`: Olumi's own stated size that no edge carries, said as "Olumi's guess, set aside: NOT in the model".
         // `pure_limit`: a user-limited cost roll-up's Olumi-signed edge into the goal that was not drawn (`findPureLimits`).
         // `one_route`: a factor → risk link left out because the risk only re-drew the factor's own direct link
         // (`oneRoutePerEffect`, PR Review CR on #2276): the risk stays, and why its link went is said.
-        .filter((l) => /\.(horizon_months|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual)$|\.observed_state\.baseline$/.test(l.field_path))
+        .filter((l) => /\.(horizon_months|stated_range_end|goal_operator|mechanism_missing|status_quo_held|bound_direction|level_restated|frame_widened|signed_level_withheld|nonlinear_identity|nonlinear_identity_rejected|goal_sense_reading|goal_level_reading|loop_withheld|loop_kept|magnitude_unconvertible|set_aside_estimate|pure_limit|one_route|label_kept_apart|folded_into_goal|gap_residual)$|\.observed_state\.baseline$/.test(l.field_path))
         .map((l) => l.reason),
     ].filter((s): s is string => s !== undefined),
   };

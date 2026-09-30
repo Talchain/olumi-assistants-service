@@ -30,7 +30,7 @@
  * `readCurrencyUnitWithQualifiers`, the reading `isAmountStatedInBrief` gives the same unit; a unit with no letter, or
  * one that is not money, is ×1 as before. So a scaled unit never reads the UNSCALED figure: 49 in £k is never "£49".
  */
-import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
 import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT, type CandidateModel } from './admit-model.js';
@@ -441,6 +441,27 @@ export function factorTheUserNamed(
   const own = wordsOf(factorLabel).filter((w) => !shared.some((s) => sameWord(w, s)));
   const typed = wordsOf(turnText);
   return own.some((w) => typed.some((t) => sameWord(w, t)));
+}
+
+/**
+ * ⭐ THE WRITTEN RANGE A FIGURE IS ONE END OF (A4, R3 C1/C2 5918513716, AIQ 5918523203): "deals between £1-2m" writes
+ * £1,000,000 only as the LOW end of a range, so the size is said with its range ("£1,000,000 per deal, the low end of
+ * your £1-2m range") and read as a floor, never as the user's single figure. `null` when the figure is no end of a
+ * money range the text writes (in the unit's currency, `amountIs`).
+ */
+export function writtenRangeFor(
+  value: number,
+  unit: unknown,
+  userText: string | null | undefined,
+): { readonly low: number; readonly high: number; readonly text: string; readonly end: 'low' | 'high' } | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return null;
+  const family = unitPhraseFamily(unit);
+  for (const r of findStatedRanges(userText)) {
+    const end = amountIs(r.low, value, unit, family, userText) ? 'low' : amountIs(r.high, value, unit, family, userText) ? 'high' : null;
+    // In the unit's own scale, as the size is ("£m": 1 and 2, never 1,000,000 and 2,000,000).
+    if (end !== null) return { low: r.low.magnitude / moneyUnitScale(unit), high: r.high.magnitude / moneyUnitScale(unit), text: r.text, end };
+  }
+  return null;
 }
 
 /**

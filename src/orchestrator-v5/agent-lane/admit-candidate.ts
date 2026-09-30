@@ -201,6 +201,21 @@ function magnitudeNotes(fieldPath: string, link: CandidateLink, sized: LinkSizin
       severity: 'warn',
     });
   }
+  // ⭐ A4 (R3 C1/C2 5918513716, AIQ 5918523203): the user's size is one END of a range they wrote. Said with the range
+  // wherever it is said (`not_represented`), and read as a floor (the low end) or a ceiling (the high end): never the
+  // user's single figure, and never a figure through this link without "at least" / "at most".
+  const range = sized.outcome === 'user_stated' ? sized.natural_effect?.stated_range : undefined;
+  if (range !== undefined && sized.range_words !== undefined) {
+    notes.push({
+      code: REPAIR_CODES.NORMALISE_STRENGTH_RANGE,
+      layer: 'cee',
+      field_path: `${fieldPath}.stated_range_end`,
+      before: { low: range.low, high: range.high },
+      after: sized.natural_effect!.amount,
+      reason: sized.range_words,
+      severity: 'warn',
+    });
+  }
   // ⛔ OLUMI'S SIZE THE EDGE DOES NOT CARRY is typed as set aside (`build-model.ts` → `set_aside_estimates`), so the Agent
   // never lists it among the model's inputs: its only other trace is the question above, which quotes it.
   if (sized.set_aside === true && sized.statement !== undefined) {
@@ -338,7 +353,9 @@ export function admitCandidateLinks(
             before: { effect_amount: link.effect_amount ?? null, effect_per_source_change: link.effect_per_source_change ?? null },
             after: sized.mean,
             reason:
-              `${sized.outcome === 'user_stated' ? 'Stated by the user' : 'Olumi\'s estimate'}: ${sized.statement ?? 'as given'}. ` +
+              `${sized.outcome === 'user_stated'
+                ? (sized.natural_effect?.stated_range !== undefined ? `One end of the range the user wrote ("${sized.natural_effect.stated_range.text}")` : 'Stated by the user')
+                : 'Olumi\'s estimate'}: ${sized.statement ?? 'as given'}. ` +
               'Read on the ranges the two are measured on, that is the strength shown.',
             severity: 'info',
           });
