@@ -39,7 +39,7 @@ import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../sys
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
-import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { isProportionScaledFactorState, unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
 /**
@@ -143,7 +143,7 @@ import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { newFactorScopeIn } from '../figure-scope.js';
-import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
+import { classifyUnitScaleClass, isPercentScaledUnit } from '../../../cee/draft/records/unit-scale-class.js';
 import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
@@ -3279,14 +3279,26 @@ export function createAgentCapabilities(
         const quote = !writtenAbout && soleFigure && typeof existing === 'number'
           && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, { ...ownerScope, nearOnly: true })
           ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text) : null;
+        // ⛔ A PERCENT ON A 0–1 FACTOR IS STORED ON ITS SCALE (R3 joined ccalt r1 `4f6334be`, final CEE `2366977`): the Agent
+        // proposed the user's "25% cheaper" as 25 % onto `GCP saving rate` (`proportion`, 0.2, nothing contradicting the
+        // token). Adopted raw, the approval read "0.2% → 25%" and the writer refused it ("rejected as invalid"): the edit
+        // never landed. A factor whose native range IS [0,1] (the value gate's own rule, `isProportionScaledFactorState`)
+        // takes a percent in (1, 100] as v ÷ 100, in its own unit, shown as the percent the user wrote. Who wrote it is read
+        // off the figure AS WRITTEN (above), never the stored 0.25.
+        const os = (node.observed_state ?? {}) as { cap?: unknown; value?: unknown; raw_value?: unknown };
+        const percentOnShare = isPercentScaledUnit(typeof a?.unit === 'string' ? a.unit : undefined)
+          && Number(a.value) > 1 && Number(a.value) <= 100
+          && isProportionScaledFactorState(nodeUnit, typeof os.cap === 'number' ? os.cap : undefined, os.value, os.raw_value);
         adopted.push({
           id: node.id, label: node.label,
-          value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
+          value: percentOnShare ? Number(a.value) / 100 : Number(a.value),
+          unit: percentOnShare ? String(nodeUnit) : String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
           ...(typeof existing === 'number' ? { replaces: existing } : {}),
           userWrote: writtenAbout || quote !== null,
           ...(quote !== null ? { quote } : {}),
           // A 0–1 share the user wrote as a percentage ("25%" for 0.25) is shown in their units: "15% → 25%" (AIQ 5902884139).
-          ...(quote !== null && Math.abs(Number(a.value)) <= 1 && figureTheUserWrote(Number(a.value) * 100, '%', ctx.user_text) ? { asPercent: true as const } : {}),
+          ...(percentOnShare || (quote !== null && Math.abs(Number(a.value)) <= 1 && figureTheUserWrote(Number(a.value) * 100, '%', ctx.user_text))
+            ? { asPercent: true as const } : {}),
         });
       }
 

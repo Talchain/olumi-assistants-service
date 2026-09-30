@@ -625,6 +625,31 @@ export function resolveExistingRawValue(snapshot: {
  *
  * British English. No internal terms in user-facing copy.
  */
+/**
+ * The proportion-class unit tokens actually present in the estate (30-day census: `scale`, `unit_interval`, `ratio`,
+ * `proportion`). A CLOSED vocabulary from live data, never a predicate: see `isProportionScaledFactor` below.
+ */
+export const PROPORTION_UNIT_TOKENS: ReadonlySet<string> = new Set([
+  'scale',
+  'unit_interval',
+  'ratio',
+  'proportion',
+]);
+
+/**
+ * ⭐ ONE DEFINITION: a factor whose own native range IS [0,1] — its cap is exactly 1, or its unit is a proportion token
+ * and NOTHING contradicts it (no other cap, no recoverable `value`/`raw_value` frame). Read by this gate
+ * (`isProportionScaledFactor`) and by `propose_assumptions`, which stores a user's "25%" there as 0.25 (MG, R3 joined
+ * ccalt r1 `4f6334be`: 25 was adopted raw, shown "0.2% → 25%", and refused at approval).
+ */
+export function isProportionScaledFactorState(
+  unit: unknown, cap: number | undefined, value: unknown, rawValue: unknown,
+): boolean {
+  const isProportionUnit = typeof unit === 'string' && PROPORTION_UNIT_TOKENS.has(unit.trim().toLowerCase());
+  return cap === 1 || (isProportionUnit && cap === undefined
+    && recoverScaleFrame({ value, raw_value: rawValue }) === undefined);
+}
+
 export function evaluateFactorValueProposal(
   input: EvaluateFactorValueProposalInput,
 ): FactorValueProposalEvaluation {
@@ -924,12 +949,6 @@ function evaluateFactorValueProposalImpl(
    *   0.8 months genuinely could mean 0.8 or 80%. On a proportion unit there is
    *   no second reading to be ambiguous between — pinned by controls.
    */
-  const PROPORTION_UNIT_TOKENS: ReadonlySet<string> = new Set([
-    'scale',
-    'unit_interval',
-    'ratio',
-    'proportion',
-  ]);
   const isProportionUnit =
     typeof factorUnit === 'string' && PROPORTION_UNIT_TOKENS.has(factorUnit.trim().toLowerCase());
   /**
@@ -963,14 +982,7 @@ function evaluateFactorValueProposalImpl(
    * `value: 0.3`, NO cap and NO raw_value — nothing contradicts the token, and
    * the factor could previously not be set to any sub-1 value at all.
    */
-  const isProportionScaledFactor =
-    cap === 1 ||
-    (isProportionUnit &&
-      cap === undefined &&
-      recoverScaleFrame({
-        value: factorObservedValue,
-        raw_value: factorObservedRawValue,
-      }) === undefined);
+  const isProportionScaledFactor = isProportionScaledFactorState(factorUnit, cap, factorObservedValue, factorObservedRawValue);
   // R2-1 (PR #926 round-2 re-review): the gate above keyed ONLY on a unit
   // string, and records-drafted factors can never carry one (the records
   // grammar has no unit field on claims) — so the whole records population
