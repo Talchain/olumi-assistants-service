@@ -73,6 +73,15 @@ describe('a canvas level edit keeps the user\'s figure (served W4 run2: £59 →
     expect(written(served(undefined, cell(0.5, 59)), 0.285)).not.toHaveProperty('raw_value');
   });
 
+  // MG #2332 follow-up (5903381005): the FACTOR's own level must be read on the range too (£49 at 0.3, not 0.245), or no
+  // figure is minted — the range is not the one its level was normalised by.
+  it('CONTROL: a factor whose own level disagrees with its range (£49 at 0.3, not 0.245) mints no figure', () => {
+    const drifted = { cap: 200, unit: '£ per subscriber per month', value: 0.3, source: 'brief_extraction', raw_value: 49, declared_scale: 'unit_interval' };
+    const cellAfter = written(served(drifted), 0.285);
+    expect(cellAfter).toMatchObject({ value: 0.285, source: 'user_specified' });
+    expect(cellAfter).not.toHaveProperty('raw_value');
+  });
+
   it('CONTROL (MG 5903379881; the card\'s cap > 1 rule): a range of 1 is shown on the model scale, so no figure is read on it', () => {
     const cellAfter = written(served({ cap: 1, unit: 'share', value: 0.245, source: 'brief_extraction', raw_value: 0.245,
       declared_scale: 'unit_interval' }, cell(0.295, undefined)), 0.285);

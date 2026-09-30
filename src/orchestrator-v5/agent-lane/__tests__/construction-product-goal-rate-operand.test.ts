@@ -122,6 +122,13 @@ describe('a product goal\'s rate is the user\'s own price when Olumi\'s rate onl
     expect(r.model).toBe(c);
   });
 
+  it('CONTROL (MG 5903525530, the function itself): a rate in £k per subscriber is not the user\'s £ price — no fold across a scale', () => {
+    const c = draft((m) => { m.factors[1].unit = '£k per subscriber per month'; }) as unknown as Parameters<typeof foldPassThroughRateOntoUsersPrice>[0];
+    const r = foldPassThroughRateOntoUsersPrice(c);
+    expect(r.found).toEqual([]);
+    expect(r.model).toBe(c);
+  });
+
   it('CONTROL (the function itself): the same pass-through in £ IS folded — the row above is decided by the currency alone', () => {
     const c = draft() as unknown as Parameters<typeof foldPassThroughRateOntoUsersPrice>[0];
     expect(foldPassThroughRateOntoUsersPrice(c).found.map((f) => f.price)).toEqual(['Pro plan price']);
