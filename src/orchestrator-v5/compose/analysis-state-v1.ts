@@ -1064,6 +1064,13 @@ export function composeAnalysisStateV1(
   }
 
   const runState = composeRunState(input);
+  // A newer degraded Run can withdraw the older completed Run's claim while
+  // the freshness selector still holds that older Run for historical prose.
+  // Its robustness belongs to the suppressed result block, not to the
+  // current claim on this turn or cold read.
+  const claimInput = canonical.contradictions.includes('fact_status_success_but_degraded_newer')
+    ? { ...input, rawRobustness: null }
+    : input;
   return {
     run_state: runState,
     readiness: {
@@ -1072,8 +1079,8 @@ export function composeAnalysisStateV1(
       // nothing is blocking. It is distinct from `analysis_state` being absent.
       blockers: wireBlockers(input.readiness, readinessStatus),
     },
-    leader_claim: composeLeaderClaim(input, runState),
-    robustness: composeRobustness(input),
+    leader_claim: composeLeaderClaim(claimInput, runState),
+    robustness: composeRobustness(claimInput),
     // The five predicates are COPIED from the canonical verdict, never
     // recomputed: a consumer that re-derives them re-opens the divergence this
     // contract closes, and so would a second derivation here.
@@ -1101,8 +1108,7 @@ export function projectAnalysisBlocksForRunBinding(
 ): OlumiResponse['blocks'] {
   const reason = state.leader_claim.withheld_reason;
   if (reason === WITHHELD_RUN_IDENTITY_CONFLICT
-    || (state.leader_claim.permitted === false
-      && state.contradictions.includes('fact_status_success_but_degraded_newer'))) {
+    || state.contradictions.includes('fact_status_success_but_degraded_newer')) {
     return blocks.filter((block) => block.type !== 'analysis_result');
   }
   if (state.leader_claim.permitted !== false && reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;

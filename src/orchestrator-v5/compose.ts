@@ -16,6 +16,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 import type { GraphPatchBlockData } from '../orchestrator/types.js';
 
 import { selectRunAnalysisFact, type FreshnessDerivation } from './context/freshness.js';
+import { selectCanonicalAnalysisState } from './context/canonical-analysis-state.js';
 import { TelemetryEvents, emit } from '../utils/telemetry.js';
 import type { SuggestedAction } from './compose/types.js';
 import {
@@ -1804,6 +1805,27 @@ function buildLifecycleBlocksFromPrior(
     return blocks;
   }
 
+  // Freshness selects the newest SUCCESSFUL Run. A newer partial/failed Run
+  // can still exist on the same graph, so its contradiction must be checked
+  // before rebuilding cards from the older success. Use the canonical fact
+  // selector that the turn/read analysis_state uses; otherwise a result block
+  // can be suppressed there while this lifecycle still emits old leader prose.
+  if (selectCanonicalAnalysisState({
+    priorFacts,
+    currentGraphHash: freshness.current_graph_hash,
+  }).contradictions.includes('fact_status_success_but_degraded_newer')) {
+    emitLifecycle(lifecycle, {
+      lifecycle_state: 'skipped_shadowed',
+      selected_fact_index: freshness.selected_fact_index,
+      graph_hash_at_run: freshness.graph_hash_at_run,
+      current_graph_hash: freshness.current_graph_hash,
+      reason: 'newer_degraded_run',
+      block_count: 0,
+      stale_coaching_emitted: false,
+    });
+    return [];
+  }
+
   // verdict === 'fresh' — emit the result summary block PLUS rebuilt Phase 3
   // blocks from the prior fact.
   //
@@ -1899,6 +1921,7 @@ interface LifecycleTelemetryPayload {
     | 'emitted_stale'
     | 'skipped_unknown'
     | 'skipped_none'
+    | 'skipped_shadowed'
     | 'rebuild_failed';
   readonly selected_fact_index: number | null;
   readonly graph_hash_at_run: string | null;

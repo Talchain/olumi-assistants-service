@@ -137,6 +137,8 @@ describe('the reload names the cause of a withheld leader that it can prove', ()
     const result = await reloadWith([newer, older], 'w-newer-shadow');
     expect(result.analysis_state?.leader_claim.permitted).toBe(false);
     expect(result.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(result.analysis_state?.robustness).toEqual({});
+    expect(result.analysis_state?.leader_claim.separation).toBeUndefined();
     expect(result.analysis_result).toBeNull();
     expect(result.analysis_constraint_verdict_state, 'no old selected-Run sidecar reaches the Agent read').toBeUndefined();
   });

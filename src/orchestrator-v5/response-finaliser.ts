@@ -113,7 +113,7 @@ import { nodesUnderANonlinearIdentity } from './agent-lane/admit-model.js';
  * {@link RunDeltaRefusal} members are the PRODUCER's and arrive by passthrough —
  * re-spelling them here would be a second list free to drift from the one
  * `buildRunDelta` actually returns (this estate's dominant defect: the
- * hand-maintained mirror). The three below are the CALLER's, and the producer
+ * hand-maintained mirror). The four below are the CALLER's, and the producer
  * cannot see them: it is never invoked on these paths, so it has no reason to
  * offer.
  *
@@ -129,7 +129,9 @@ export type RunDeltaDisclosureReason =
   /** The composer could not confirm the two runs are the same subject. */
   | 'run_identity_unconfirmed'
   /** The composer found the two runs are demonstrably different subjects. */
-  | 'run_identity_conflict';
+  | 'run_identity_conflict'
+  /** A newer degraded Run supersedes the older successful pair. */
+  | 'newer_run_degraded';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
 
@@ -863,6 +865,13 @@ function attachRunDelta(
         : 'run_identity_conflict',
       withoutDelta as OlumiResponse,
     );
+  }
+  // C2: the delta builder selects successful Runs. A newer partial Run can
+  // supersede both without appearing in that pair, so their old comparison
+  // must not be presented as the current turn's change.
+  if (response.analysis_state?.contradictions.includes('fact_status_success_but_degraded_newer')) {
+    const { run_delta: _shadowedDelta, ...withoutDelta } = response;
+    return disclose('skipped', 'newer_run_degraded', withoutDelta as OlumiResponse);
   }
   if (ctx.priorFacts === undefined) return disclose('skipped', 'prior_facts_absent', response);
   const built = buildRunDelta({
