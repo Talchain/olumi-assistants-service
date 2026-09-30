@@ -9,7 +9,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const SCENARIO = "a6ccf5cf-aab0-4f01-b889-e0d6c072067c";
 const OWNER = "0f8a1b2c-3d4e-4f50-9a6b-7c8d9e0f1a2b";
-const OTHER_USER = "9e8d7c6b-5a49-4382-b716-0c5d4e3f2a1b";
 
 // `vi.hoisted` + SPREAD the real config: a `vi.mock` factory REPLACES the
 // module, so a hand-listed stub silently drops every key added since it was
@@ -67,16 +66,7 @@ vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
 
 import registerRoute from "../assist.v1.scenario-graph-register.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
-import { computeExpectedGraphCasHashes } from "../../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../../orchestrator-v5/persisted-graph-projection.js";
-import { GraphV3 } from "../../schemas/cee-v3.js";
-import { GraphStaleWriteError } from "../../orchestrator-v5/session/store.js";
-import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../../config/graphCaps.js";
-import { resolveCeeRateLimit } from "../../cee/config/limits.js";
-import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
-import { checkPersistedGraphInvariants } from "../../orchestrator-v5/persisted-graph-invariants.js";
-import { currentTurnFenceSlot, TurnFenceRejectedError } from "../../orchestrator-v5/session/turn-fence.js";
-import { registrationRequestHash, registrationTurnId } from "../../orchestrator-v5/graph-registration/registration-identity.js";
 
 
 
