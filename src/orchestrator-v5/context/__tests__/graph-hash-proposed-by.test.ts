@@ -3,7 +3,7 @@
  * marker MG 5887738387 / #2295; published vocabulary schemas #73).
  *
  * Construction marks an option Olumi added `proposed_by: 'olumi'`; the Run's post-gate filter keeps it out of the
- * ordinary comparison; an approved "add to comparison" removes the mark. MEASURED at staging 0497e52e: an authorship-only
+ * ordinary comparison; an approved "add to comparison" now records `analysis_participation: 'included'` while preserving the mark. MEASURED at staging 0497e52e: an authorship-only
  * change to an option (provenance + origin) left this hash unchanged, so the Run that excluded the option would have
  * kept reading CURRENT after the user adopted it. The published node vocabulary now carries `proposed_by` (projection
  * v4), and `projectNode` iterates it, so the vendor pin alone makes the hash see the marker.
@@ -60,6 +60,13 @@ describe('0.64.0 — `proposed_by` enters the analysis revision (projection v4)'
 
   it('H1: adopting Olumi\'s option (the marker removed, nothing else) MOVES the hash — the excluding Run reads stale', () => {
     expect(hashOf(marked())).not.toBe(hashOf(unmarked()));
+  });
+
+  it('H1b: adopting participation in place moves the hash while Olumi origin and levels remain', () => {
+    const adopted = marked();
+    adopted.nodes = adopted.nodes.map((n) => n.id === 'mod_54' ? { ...n, analysis_participation: 'included' } : n);
+    expect(adopted.nodes.find((n) => n.id === 'mod_54')?.proposed_by).toBe('olumi');
+    expect(hashOf(adopted)).not.toBe(hashOf(marked()));
   });
 
   it('H2: a label-only edit on the proposed option does NOT move the hash', () => {

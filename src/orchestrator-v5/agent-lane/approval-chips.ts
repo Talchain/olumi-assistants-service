@@ -159,6 +159,15 @@ export function approvalChipsFor(
     const detail = typeof held.held_detail === 'string' && held.held_detail.trim() !== '' ? held.held_detail : undefined;
     return [{ id: approvalChipIdFor(proposalId), label, message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
   }
+  // Adoption is a proposal about an EXISTING Olumi option. The card, including every displayed
+  // level, is derived from the stored proposal; only its exact pressed words authorise the write.
+  const stored = labelSourceFor?.(proposalId)?.proposal;
+  const adoption = stored?.operations.length === 1 && stored.operations[0]?.op === 'adopt_olumi_option'
+    ? stored.operations[0].value as { approval_message?: unknown } | undefined : undefined;
+  if (adoption !== undefined && typeof adoption.approval_message === 'string' && adoption.approval_message !== '') {
+    return [{ id: approvalChipIdFor(proposalId), label: 'Add this suggestion to my comparison',
+      message: adoption.approval_message, detail: stored!.public_label }, AMEND_CHIP];
+  }
   const reading = readingShownFor(tool, labelSourceFor?.(proposalId));
   if (reading !== undefined) return [{ id: approvalChipIdFor(proposalId), ...reading, message: approve.message }, AMEND_CHIP];
   // ⛔ A reading of the goal is confirmed ONLY on a card showing its exact words (`identity-card.ts`): none, no button.

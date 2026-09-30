@@ -24,6 +24,19 @@ describe('filterOlumiProposedOptions', () => {
     expect(r.keptOlumiProvisional).toBe(false);
   });
 
+  it('a pressed adoption participates as the third user option while retaining its Olumi origin', () => {
+    const submitted = [opt('raise_59'), opt('keep_49', 2), opt('phased', 3)];
+    const before = graphOf(node('raise_59'), node('keep_49'), node('phased', true));
+    expect(filterOlumiProposedOptions({ submitted, graph: before }).options.map((o) => o.option_id))
+      .toEqual(['raise_59', 'keep_49']);
+    const after = graphOf(node('raise_59'), node('keep_49'), {
+      ...node('phased', true), analysis_participation: 'included',
+    });
+    const result = filterOlumiProposedOptions({ submitted, graph: after });
+    expect(result.options.map((o) => o.option_id)).toEqual(['raise_59', 'keep_49', 'phased']);
+    expect(result.keptOlumiProvisional).toBe(false);
+  });
+
   it('the served W3 held baseline and user price change remain the submitted comparison', () => {
     const served = JSON.parse(readFileSync(new URL(
       '../../../agent-lane/__tests__/fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url,

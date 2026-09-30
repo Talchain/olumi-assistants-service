@@ -263,8 +263,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     type: 'function',
     name: 'propose_new_option',
     description:
-      'Add an option the user has just asked for, when the model does NOT already have it. '
-      + 'A stored option marked `proposed_by: olumi` is Olumi\'s suggestion, not compared as the user\'s; this tool cannot adopt it into their comparison. Say adoption is not available yet; do not call this tool to add a duplicate. '
+      'Add an option the user has just asked for. If its exact label already identifies a stored option marked `proposed_by: olumi`, call this tool with that label and no edits to offer adoption of the SAME option into their comparison. Its Olumi origin and suggested levels remain labelled as Olumi\'s; do not call it an existing user option or a user-stated figure. '
       + 'This does NOT change anything: it prepares ONE complete change and returns its id, which you keep for '
       + 'authorise_change: show the user the option and what it will be linked to, never the id, before asking them to approve. '
       + 'The option is linked from the decision automatically. Name the factors it would change, using the labels '

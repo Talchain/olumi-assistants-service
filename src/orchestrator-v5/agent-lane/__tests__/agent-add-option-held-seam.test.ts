@@ -106,7 +106,7 @@ vi.mock('../../../adapters/llm/router.js', () => {
 });
 vi.mock('../../../adapters/llm/prompt-loader.js', () => ({ getSystemPrompt: async () => 'test system prompt' }));
 
-type Chip = { id: string; label: string; message: string };
+type Chip = { id: string; label: string; message: string; detail?: string };
 type Body = { assistant_text: string; suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string }; _provider_calls?: { provider: string; outcome?: string }[];
   _agent: { tool_calls: { name: string; ok: boolean; mutated?: boolean; refusal?: string; proposal_id?: string; conflict_fields?: string[]; rejected_levels?: Record<string, unknown>[] }[] } };
 
@@ -160,13 +160,15 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const { ceeOrchestratorRouteV2 } = await import('../../../orchestrator/route-v2.js');
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const { computeGraphIdentityHash } = await import('../../context/graph-identity.js');
     const a = Fastify({ logger: false });
     a.addHook('preHandler', async (req) => { if (req.url === '/orchestrate/v2/turn') { inner.push(req.body as Record<string, unknown>); onInner?.(req.body as Record<string, unknown>); } });
     a.addHook('onSend', async (req, _reply, payload) => { if (req.url === '/orchestrate/v2/turn') onInnerSent?.(req.body as Record<string, unknown>); return payload; });
     a.post('/assist/v1/scenarios/:id/graph', async (req) => {
       graphReads += 1;
       const g = graphOf.get((req.params as { id: string }).id) ?? null;
-      return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never) };
+      return { graph: g, graph_hash: g === null ? null : computeAnalysisAffectingGraphHash(g as never),
+        graph_identity_hash: g === null ? null : computeGraphIdentityHash(g as never) };
     });
     await a.register(ceeOrchestratorRouteV2);
     await a.register(agentV1TurnRoute);
@@ -194,7 +196,8 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     return r.json() as Body;
   };
-  const graphNow = () => graphOf.get(SCENARIO) as { nodes: { id: string; kind: string; label: string; interventions?: Record<string, unknown> }[]; edges: { from: string; to: string }[] };
+  const graphNow = () => graphOf.get(SCENARIO) as { nodes: { id: string; kind: string; label: string; proposed_by?: string;
+    analysis_participation?: string; interventions?: Record<string, unknown> }[]; edges: { from: string; to: string }[] };
   const approveChipOf = (b: Body) => b.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
   const readiness = async () => {
     const { buildCanonicalAnalysisReadyFromGraph } = await import('../../../orchestrator/tools/analysis-ready-helper.js');
@@ -719,26 +722,124 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(approveChipOf(t1)).toBeUndefined();
   }, 120_000);
 
-  it('a marked Olumi twin cannot be described as the user\'s existing comparison or silently added', async () => {
+  it('an exact-label Olumi suggestion waits for its displayed card; model yes cannot write, and the card includes the same option', async () => {
     const graph = seedGraph();
-    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
-      ? { ...node, proposed_by: 'olumi' }
-      : node) });
-    let toolOutput: { ok?: boolean; detail?: string } = {};
+    graphOf.set(SCENARIO, { ...graph, nodes: [...graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, label: 'Raise to £54', proposed_by: 'olumi',
+        interventions: { fac_price: { value: 0.27, raw_value: 54, unit: 'GBP', source: 'cee_hypothesis' } } }
+      : node), { id: 'opt_c', kind: 'option', label: 'Lower to £44',
+        interventions: { fac_price: { value: 0.22, raw_value: 44, unit: 'GBP' } } }],
+      edges: [...graph.edges, { ...graph.edges[0]!, to: 'opt_c' }, { ...graph.edges[2]!, from: 'opt_c' }] });
+    let toolOutput: { ok?: boolean; detail?: string; proposal_id?: string; option?: { label?: string } } = {};
     script = [
-      () => fnCall('propose_new_option', { label: 'Test £59 at release', acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP' } }], rationale: 'Please add your suggestion.' }),
+      () => fnCall('propose_new_option', { label: 'Raise to £54', acts_on: [], rationale: 'Please add your suggestion.' }),
       (body) => {
         const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
         toolOutput = JSON.parse(String(out?.output ?? '{}')) as typeof toolOutput;
-        return say("That's Olumi's suggestion, not compared as yours; adopting it isn't available yet.");
+        return say("Olumi suggested Raise to £54. Its £54 Price level is Olumi's estimate. Add that option to your comparison?");
       },
     ];
-    const turnResult = await turn({ message: 'Add your £59 suggestion as mine.' });
-    expect(toolOutput.ok).toBe(false);
-    expect(toolOutput.detail).toContain("Olumi's suggestion, not compared as yours");
-    expect(toolOutput.detail).toContain("Adopting one into your comparison isn't available yet");
+    const turnResult = await turn({ message: 'Please add "Raise to £54" as one of my options.' });
+    expect(toolOutput.ok, JSON.stringify(toolOutput)).toBe(true);
+    expect(toolOutput.proposal_id).toMatch(/^prop_[0-9a-f]+$/);
+    expect(toolOutput.option?.label).toBe('Raise to £54');
     expect(inner, 'no write or held proposal').toEqual([]);
-    expect(approveChipOf(turnResult)).toBeUndefined();
+    const approve = approveChipOf(turnResult);
+    expect(approve?.message).toContain('Olumi\'s suggestion');
+    expect(graphNow().nodes.find((node) => node.id === 'opt_b')).toMatchObject({ proposed_by: 'olumi' });
+
+    const before = structuredClone(graphNow());
+    script = [() => fnCall('authorise_change', { proposal_id: toolOutput.proposal_id }), () => say('Please use the card.')];
+    const plainYes = await turn({ message: 'yes' });
+    expect(plainYes._agent.tool_calls.find((call) => call.name === 'authorise_change'))
+      .toMatchObject({ ok: false, mutated: false, refusal: 'approve_on_card' });
+    expect(graphNow()).toEqual(before);
+
+    script = [() => say('Included the suggestion; the old Run is stale. Run again to compare all three options.')];
+    const pressed = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(pressed._agent.tool_calls.find((call) => call.name === 'authorise_change'))
+      .toMatchObject({ ok: true, mutated: true });
+    expect(approveChipOf(pressed), 'the applied proposal is no longer offered').toBeUndefined();
+    const after = graphNow();
+    expect(after.nodes.filter((node) => node.kind === 'option')).toHaveLength(3);
+    expect(after.nodes.find((node) => node.id === 'opt_b')).toMatchObject({
+      proposed_by: 'olumi', analysis_participation: 'included', interventions: before.nodes.find((node) => node.id === 'opt_b')!.interventions,
+    });
+    expect(after.edges).toEqual(before.edges);
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    expect(computeAnalysisAffectingGraphHash(after as never)).not.toBe(computeAnalysisAffectingGraphHash(before as never));
+    const { filterOlumiProposedOptions } = await import('../../tools/handlers/olumi-option-filter.js');
+    const submitted = after.nodes.filter((node) => node.kind === 'option');
+    expect(filterOlumiProposedOptions({ graph: before, submitted }).options.map((node) => node.id)).toEqual(['opt_a', 'opt_c']);
+    expect(filterOlumiProposedOptions({ graph: after, submitted }).options.map((node) => node.id)).toEqual(['opt_a', 'opt_b', 'opt_c']);
+    const graphWrites = () => store.append.mock.calls.filter(([write]) => write.scenario_id === SCENARIO && write.graph !== undefined).length;
+    expect(graphWrites()).toBe(1);
+    script = [() => fnCall('authorise_change', { proposal_id: toolOutput.proposal_id }), () => say('No second write.')];
+    const retried = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
+    expect(retried._agent.tool_calls.find((call) => call.name === 'authorise_change'))
+      .toMatchObject({ ok: true, mutated: false });
+    expect(graphWrites(), 'the same card cannot create a second graph version').toBe(1);
+  }, 120_000);
+
+  it('a unique marked £54 suggestion can be offered when the user refers to its figure without repeating its exact label', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, label: 'Raise to £54', proposed_by: 'olumi',
+        interventions: { fac_price: { value: 0.27, raw_value: 54, unit: 'GBP', source: 'cee_hypothesis' } } }
+      : node) });
+    let output: { ok?: boolean; refusal?: string } = {};
+    script = [
+      () => fnCall('propose_new_option', { label: 'Raise to £54', acts_on: [], rationale: 'The user asked to include the suggestion.' }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        output = JSON.parse(String(out?.output ?? '{}')) as typeof output;
+        return say('I can offer the £54 suggestion for your comparison.');
+      },
+    ];
+    const result = await turn({ message: 'Please add your £54 suggestion to my options.' });
+    expect(output.ok, JSON.stringify(output)).toBe(true);
+    expect(approveChipOf(result)).toBeDefined();
+    expect(graphNow().nodes.find((node) => node.id === 'opt_b')?.analysis_participation).toBeUndefined();
+  }, 120_000);
+
+  it('a figure-only reference does not choose among multiple marked suggestions', async () => {
+    const graph = seedGraph();
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.kind === 'option'
+      ? { ...node, proposed_by: 'olumi' }
+      : node) });
+    let output: { ok?: boolean; refusal?: string } = {};
+    script = [
+      () => fnCall('propose_new_option', { label: 'Raise to £59', acts_on: [], rationale: 'The user asked to include the suggestion.' }),
+      (body) => {
+        const out = (body['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
+        output = JSON.parse(String(out?.output ?? '{}')) as typeof output;
+        return say('Which suggestion do you mean?');
+      },
+    ];
+    const result = await turn({ message: 'Please add your £59 suggestion to my options.' });
+    expect(output.refusal).toBe('option_not_requested');
+    expect(approveChipOf(result)).toBeUndefined();
+    expect(graphNow().nodes.find((node) => node.id === 'opt_b')?.analysis_participation).toBeUndefined();
+  }, 120_000);
+
+  it('the adoption card names each existing level source without making Olumi the author of a user level', async () => {
+    const graph = seedGraph(3);
+    graphOf.set(SCENARIO, { ...graph, nodes: graph.nodes.map((node) => node.id === 'opt_b'
+      ? { ...node, proposed_by: 'olumi', interventions: {
+        fac_price: { value: 0.295, raw_value: 59, unit: 'GBP', source: 'cee_hypothesis' },
+        fac_1: { value: 0.4, raw_value: 4, unit: 'units', source: 'brief_extraction' },
+        fac_2: { value: 0.5, raw_value: 5, unit: 'units', source: 'user_specified' },
+      } }
+      : node) });
+    script = [
+      () => fnCall('propose_new_option', { label: 'Raise to £59', acts_on: [], rationale: 'Please add this suggestion.' }),
+      () => say('I can offer this suggestion for your comparison.'),
+    ];
+    const result = await turn({ message: 'Please add "Raise to £59" as one of my options.' });
+    const detail = approveChipOf(result)?.detail;
+    expect(detail).toContain("Price: 59 GBP (Olumi's suggested estimate)");
+    expect(detail).toContain('Factor 1: 4 units (from your original brief)');
+    expect(detail).toContain('Factor 2: 5 units (set by you)');
   }, 120_000);
 
   it('[q5] RED (DL #70 5846812818, served F4/F4e): TWO options in one request, one a twin of "Raise to £59" → the valid one is still proposed as ONE change with ONE chip, the twin is named as not added, and approving adds only the valid one', async () => {
