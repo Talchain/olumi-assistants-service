@@ -452,7 +452,14 @@ export function placeholderGoalWarning(
   // ⛔ ASK ONLY FOR A SIZE THAT CAN MAKE THE FIGURE RIGHT (AIQ 5902834053; MG successor 5902809244): a link from a node
   // that holds no level would add the same amount to EVERY option once sized ("Stay on AWS" would save too), so it is
   // named but not asked; its figures stay withheld until the model gives that node a level.
-  const asked = named.filter((l) => levelOf(byId.get(l.from)).value !== undefined);
+  // ⛔ NEVER ASK THE USER TO SIZE A GUESSED LINK OUT OF A NODE THEIR LIMIT WATCHES (AIQ 5903604206 / 5903627210; R3
+  // 5903589565): "Give a figure for how 'Migration downtime' moves 'Monthly cloud spend'" presupposes a cause Olumi guessed —
+  // downtime does not drive the bill — and the user's answer would turn Olumi's mechanism into a user-stated link. It is said
+  // as the guess it is, and not asked; nothing is offered that no writer delivers (no tool removes a link).
+  const limitIds = new Set((isRec(graph) && Array.isArray(graph.goal_constraints) ? graph.goal_constraints : [])
+    .filter(isRec).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'));
+  const guessed = named.filter((l) => limitIds.has(l.from));
+  const asked = named.filter((l) => !limitIds.has(l.from) && levelOf(byId.get(l.from)).value !== undefined);
   const byTarget = new Map<string, string[]>();
   for (const l of named) byTarget.set(l.to, [...(byTarget.get(l.to) ?? []), l.from]);
   const phrases = [...byTarget].slice(0, 2).map(([to, froms]) =>
@@ -464,9 +471,12 @@ export function placeholderGoalWarning(
   const ask = asked.length === 0 ? ''
     : asked.length === named.length ? (asked.length === 1 ? ' Give a figure for that link and Olumi will use it.' : ' Give a figure for each link and Olumi will use them.')
       : ` Give a figure for how ${list(asked.slice(0, 2).map((l) => `${label(l.from)} moves ${label(l.to)}`))} and Olumi will use it.`;
-  const message = `Not shown. ${sized === '' ? 'T' : sized}his run can’t say how likely ${opts} ${verb} to reach the goal, or which option does best.${ask}`;
+  const guess = guessed.length === 0 ? ''
+    : ` Olumi only guessed that ${list(guessed.slice(0, 2).map((l) => `${label(l.from)} changes ${label(l.to)}`))}, so you aren’t asked `
+      + `to size ${guessed.length === 1 ? 'that link' : 'those links'}.`;
+  const message = `Not shown. ${sized === '' ? 'T' : sized}his run can’t say how likely ${opts} ${verb} to reach the goal, or which option does best.${ask}${guess}`;
   return {
-    code, message: message.length <= 400 ? message : `Not shown. This run can’t say how likely ${opts} ${verb} to reach the goal: a link on the way is not sized.${ask}`,
+    code, message: message.length <= 400 ? message : `Not shown. This run can’t say how likely ${opts} ${verb} to reach the goal: a link on the way is not sized.${ask}${guess}`,
     severity: 'warning',
     node_ids: [...new Set(links.flatMap((l) => [l.from, l.to]))],
     option_ids: paths.map((p) => p.option_id),
