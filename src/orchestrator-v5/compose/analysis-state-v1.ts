@@ -1114,6 +1114,9 @@ export function projectAnalysisBlocksForRunBinding(
   if (state.leader_claim.permitted !== false && reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;
   return blocks.map((block) => {
     if (block.type !== 'analysis_result') return block;
+    // A transport block carrying only enrichment has no leader claim to
+    // project. Keep its independent evidence and diagnostics intact.
+    if (block.leading_option_id === undefined && block.summary === undefined) return block;
     return {
       ...block,
       leading_option_id: null,

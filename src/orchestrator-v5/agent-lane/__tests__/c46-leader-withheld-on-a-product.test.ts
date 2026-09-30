@@ -425,10 +425,12 @@ describe('(b)+(c) run_analysis withholds the leader PLoT ranks first when its si
  * carrying on as now alone; and "Raise Pro to £59" (+ through Pro MRR, − through refunds) against keeping £49.
  */
 describe('(b) rule 7 on the Run: a leader whose routes through and around the product disagree is withheld', () => {
-  const SQ_TODAY = (levels: [string, number, string][]) => ({ label: 'Carry on as now', provenance: 'ai_proposed', is_status_quo: true, changes: [],
-    interventions: levels.map(([factor_label, value, unit]) => ({ factor_label, value, value_kind: 'absolute', unit, provenance: 'ai_proposed' })) });
-  const at = (label: string, factor_label: string, value: number, unit: string) => ({ label, provenance: 'ai_proposed', is_status_quo: null, changes: [],
-    interventions: [{ factor_label, value, value_kind: 'absolute', unit, provenance: 'ai_proposed' }] });
+  // These sign tests need two user-authored comparators. Marking both as
+  // ai_proposed exercises the separate provisional-option withhold instead.
+  const SQ_TODAY = (levels: [string, number, string][]) => ({ label: 'Carry on as now', provenance: 'explicit', is_status_quo: true, changes: [],
+    interventions: levels.map(([factor_label, value, unit]) => ({ factor_label, value, value_kind: 'absolute', unit, provenance: 'explicit' })) });
+  const at = (label: string, factor_label: string, value: number, unit: string) => ({ label, provenance: 'explicit', is_status_quo: null, changes: [],
+    interventions: [{ factor_label, value, value_kind: 'absolute', unit, provenance: 'explicit' }] });
   function discount(direct: Dir, withReferral: boolean): Record<string, unknown> {
     return {
       goal, constraints: [],

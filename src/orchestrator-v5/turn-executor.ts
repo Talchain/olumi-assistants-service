@@ -3517,7 +3517,15 @@ export async function runTurnExecutor(
         // the pack named the leader while the read route and the turn payload withheld it as
         // `analysis_out_of_date`. Read off the SAME durable derivation `display_analysis` is built from; the run's
         // real verdict state is passed so the no-cause note is chosen, exactly as on the admission arm below.
-        modelFacingClaimSafety: !mayNameLeadingOptionForRun || promptAnalysisFreshness?.freshness === 'stale'
+        // A newer refused/partial Run can leave the older successful result
+        // available for historical context while withdrawing its current
+        // leader claim. The read route and turn payload already use this same
+        // canonical contradiction to suppress the leader. Apply it before the
+        // model-facing projection too, so the Agent cannot name an older
+        // leader that both served consumers withhold.
+        modelFacingClaimSafety: !mayNameLeadingOptionForRun
+          || promptAnalysisFreshness?.freshness === 'stale'
+          || contextPackPromptCanonical?.contradictions.includes('fact_status_success_but_degraded_newer') === true
           ? {
               status: 'withheld',
               constraintVerdictState: constraintVerdictStateForRun,
