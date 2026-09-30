@@ -232,6 +232,9 @@ test('chipPressFor — Build 5910076244 / AIQ 5909797932 controls: the press is 
   assert.deepEqual(chipPressFor([], { chip: { id: card.id } }), { ok: false, reason: 'not_on_offer' });
   // typed text with no chip is NOT a press
   assert.deepEqual(chipPressFor(offer, { message: 'Yes, use those.' }), { ok: false, reason: 'no_chip_id' });
-  // a card with no message falls back to its label (the words the user saw)
-  assert.equal(chipPressFor([{ id: 'x', label: 'Add this option' }], { chip: { id: 'x' } }).message, 'Add this option');
+  // a NON-approval card with no message falls back to its label (the words the user saw)…
+  assert.equal(chipPressFor([{ id: 'agent-amend', label: 'Change something first' }], { chip: { id: 'agent-amend' } }).message, 'Change something first');
+  // …but an APPROVAL card without its own words is refused, never approved on its label (Build 5910539697)
+  assert.deepEqual(chipPressFor([{ id: card.id, label: 'Record this reading' }], { chip: { id: card.id } }), { ok: false, reason: 'card_has_no_words' });
+  assert.deepEqual(chipPressFor([{ id: card.id, label: 'Record this reading', message: '  ' }], { chip: { id: card.id } }), { ok: false, reason: 'card_has_no_words' });
 });

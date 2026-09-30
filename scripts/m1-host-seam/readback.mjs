@@ -247,8 +247,11 @@ export function chipPressFor(offeredActions, press) {
   if (typeof id !== 'string' || id.length === 0) return { ok: false, reason: 'no_chip_id' };
   const action = (Array.isArray(offeredActions) ? offeredActions : []).find((a) => a && a.id === id);
   if (action === undefined) return { ok: false, reason: 'not_on_offer' };
-  const message = typeof action.message === 'string' && action.message.trim() ? action.message
-    : typeof action.label === 'string' && action.label.trim() ? action.label : null;
+  // An APPROVAL card must carry its own words (Build 5910539697): the route binds them to what is authorised, so a
+  // label is never a substitute. Other cards (amend, run) fall back to the label the user saw.
+  const isApproval = id.startsWith('agent-approve-proposal:');
+  const own = typeof action.message === 'string' && action.message.trim() ? action.message : null;
+  const message = own ?? (!isApproval && typeof action.label === 'string' && action.label.trim() ? action.label : null);
   if (message === null) return { ok: false, reason: 'card_has_no_words' };
   const callerMessage = press.message;
   if (callerMessage !== undefined && callerMessage !== null && callerMessage !== message) {

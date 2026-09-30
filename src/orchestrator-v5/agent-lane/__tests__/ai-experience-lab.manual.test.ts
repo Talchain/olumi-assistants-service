@@ -199,7 +199,8 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
       try {
         const turn = await seam.buildFromBrief({ ...host, brief: body.brief.trim() });
         fresh.add(turn.scenario_id);
-        recordOffered(turn.scenario_id, (turn as { suggested_actions?: unknown }).suggested_actions);
+        // Offers come only from a reply that arrived (a failed turn leaves none live).
+        recordOffered(turn.scenario_id, (turn as { http?: number }).http === 200 ? (turn as { suggested_actions?: unknown }).suggested_actions : []);
         const rb = await readFresh(turn.scenario_id);
         const { response: _response, ...turnView } = turn;
         return { mode: 'fresh', ...view(rb), turn: turnView };
@@ -335,8 +336,11 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
       if (busy) return reply.code(409).send({ error: 'One lab turn is already running. Please wait.' });
       busy = true; const start = Date.now();
       try {
+        // Fail closed (Build 5910539697): the old offers die BEFORE the upstream turn, and new ones are recorded only
+        // from a confirmed reply, so a lost or failed turn can never leave an earlier approval pressable.
+        offered.delete(sid);
         const turn = await seam.sendTurn({ ...host, scenarioId: sid, message: body.message, ...(chip ? { chip } : {}) });
-        recordOffered(sid, (turn as { suggested_actions?: unknown }).suggested_actions);
+        if (turn.http === 200) recordOffered(sid, (turn as { suggested_actions?: unknown }).suggested_actions);
         const rb = await readFresh(sid);
         const receipt = { timestamp: new Date().toISOString(), head, source_hash, session_id: sid, mode: 'fresh',
           status: turn.http, latency_ms: Date.now() - start, message: body.message, response: turn.response };
