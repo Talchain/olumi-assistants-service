@@ -50,6 +50,17 @@ describe('the user\'s "25% cheaper" lands first time, as theirs, in the factor\'
     }
   });
 
+  it('P0 PARTNER CR 5907476130: an UNRELATED figure going the other way never refuses the user\'s own "25% cheaper"', async () => {
+    for (const said of [`${EDIT.slice(0, -1)}, though support would be 10% more expensive.`,
+      "Our team's quote shows GCP would be about 25% cheaper than AWS for us. Separately, churn is 3% higher this quarter."]) {
+      const { r, op } = await propose(said, 25, '%');
+      // Proposed and saveable, never refused. WHOSE it is with two figures written stays the #2235 ruling (the strict
+      // matcher decides; "GCP" is shared with rival labels here, so Olumi's, said): an under-claim, AIQ's call to widen.
+      expect(op, said).toMatchObject({ value: 0.25, unit: 'proportion' });
+      expect(r.direction_conflict, said).toBeUndefined();
+    }
+  });
+
   it('AIQ B: compared against the factor\'s OWN subject ("AWS is 25% cheaper than GCP") → asked, nothing written', async () => {
     const { r, op } = await propose('Our team\'s quote shows AWS is about 25% cheaper than GCP for our workload.', 25, '%');
     expect(op).toBeNull();

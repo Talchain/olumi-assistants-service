@@ -3247,7 +3247,11 @@ export function createAgentCapabilities(
           continue;
         }
         if (frame.kind === 'converted') a = { ...a, value: frame.value, unit: frame.unit };
-        if (shareFactor && relativeFigureAgainst(node.label, ctx.user_text) === 'opposite') {
+        // The proposed figure read at ITS OWN place first (P0 PARTNER CR 5907476130): "25% cheaper …, though support would be
+        // 10% more expensive" is the user's 25%; only a figure not written the factor's way ("25% more", or a 20% worked out
+        // from it) falls to the whole-message check.
+        if (shareFactor && relativeFigureAgainst(node.label, ctx.user_text, Number(a.value) * 100) !== 'same'
+          && relativeFigureAgainst(node.label, ctx.user_text) === 'opposite') {
           directionConflict.push({ label: node.label });
           continue;
         }
