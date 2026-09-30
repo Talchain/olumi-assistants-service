@@ -2148,7 +2148,7 @@ packages:
     engines: {node: '>=10'}
 
   '@talchain/schemas@file:vendor/talchain-schemas-0.68.0.tgz':
-    resolution: {integrity: sha512-J8+dJ/2F+75JMrm92DUpwoKevHPukRBm/jZKTmIpJnMJaOhhfeoUfPAjmQWvNkpc/IABaQySa7TfEcz0uQ0q6Q==, tarball: file:vendor/talchain-schemas-0.68.0.tgz}
+    resolution: {integrity: sha512-RYdizwyDs+sNNtUY0whBJiR4Pr/yssJ+5hgTplCbliwNOGj5KQoxsl0aPmCaldwpjbacdSRMKZaPQU+0fBo4eA==, tarball: file:vendor/talchain-schemas-0.68.0.tgz}
     version: 0.68.0
     engines: {node: '>=18.0.0'}
 
