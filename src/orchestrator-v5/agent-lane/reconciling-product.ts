@@ -348,8 +348,10 @@ function carrierAtTodayBeside(candidate: CandidateModel, all: readonly string[],
  */
 export function gapResidualLine(g: GapResidual): string {
   const money = (v: number): string => sayFigure(v, g.code);
-  return `I had added ‘${g.label}’ of ${money(g.value)} a ${g.period} so that ‘${g.goal}’ matched your ${money(g.o)}; that was my guess, `
-    + `not something you said, so I've taken it out. Your ${money(g.levels[0])} × ${sayFigure(g.levels[1], '')} = ${money(g.levels[0] * g.levels[1])} is on the card for you to confirm.`;
+  // AIQ 5904567773 follow-up 2: the brief may NAME such a stream without a figure ("plus some add-on revenue"), so the
+  // line claims only what the code checked — the brief writes no money of this size — never that the stream is unnamed.
+  return `I had added ‘${g.label}’ of ${money(g.value)} a ${g.period} so that ‘${g.goal}’ matched your ${money(g.o)}. Its size was my guess, `
+    + `not a figure you gave, so I've taken it out. Your ${money(g.levels[0])} × ${sayFigure(g.levels[1], '')} = ${money(g.levels[0] * g.levels[1])} is on the card for you to confirm.`;
 }
 
 /** A goal product the draft declared whose units provably don't combine into the goal's: dropped, and said. */

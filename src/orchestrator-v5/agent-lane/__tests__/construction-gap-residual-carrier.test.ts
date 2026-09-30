@@ -63,7 +63,7 @@ describe('Olumi’s gap residual beside a carrier is taken out and said; the car
 
   it('RED: the drop is SAID (AIQ 5904406904), with the card’s figures', async () => {
     const { out } = await build(m8());
-    expect(JSON.stringify(out)).toContain('I had added ‘Other MRR’ of £1,500 a month so that ‘MRR’ matched your £75,000; that was my guess');
+    expect(JSON.stringify(out)).toContain('I had added ‘Other MRR’ of £1,500 a month so that ‘MRR’ matched your £75,000. Its size was my guess, not a figure you gave');
     expect(JSON.stringify(out)).toContain('Your £49 × 1,500 = £73,500 is on the card for you to confirm.');
   });
 
