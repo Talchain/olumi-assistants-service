@@ -59,6 +59,7 @@ import {
 import type { ObservationType } from '../prompts/stores/observations.js';
 import { getBraintrustManager } from '../prompts/braintrust.js';
 import { invalidatePromptCache, getPromptVerifySnapshot } from '../adapters/llm/prompt-loader.js';
+import { resetPromptsReadyCache, warmPromptReadinessSnapshot } from '../prompts/readiness.js';
 import { log, emit, TelemetryEvents, hashIP } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { ModelAssignmentError, resolveModelAssignment } from '../config/model-assignment.js';
@@ -82,6 +83,12 @@ const AdminTelemetryEvents = {
   AdminPromptAccess: 'admin.prompt.access',
   AdminExperimentAccess: 'admin.experiment.access',
 } as const;
+
+/** Admin writes refresh readiness once; the load-balancer never triggers PMS reads. */
+async function refreshPromptReadinessAfterWrite(): Promise<void> {
+  resetPromptsReadyCache();
+  await warmPromptReadinessSnapshot('reload');
+}
 
 /**
  * Check if prompt management is enabled
@@ -419,6 +426,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       // Invalidate cache for the task to ensure fresh prompt is loaded
       invalidatePromptCache(prompt.taskId, 'prompt_created');
+      await refreshPromptReadinessAfterWrite();
 
       return reply.status(201).send(prompt);
     } catch (error) {
@@ -619,6 +627,13 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       // Invalidate cache for the task to ensure fresh prompt is loaded
       invalidatePromptCache(prompt.taskId, 'prompt_updated');
+      if (
+        body.data.status !== undefined ||
+        body.data.activeVersion !== undefined ||
+        body.data.stagingVersion !== undefined
+      ) {
+        await refreshPromptReadinessAfterWrite();
+      }
 
       return reply.status(200).send(prompt);
     } catch (error) {
@@ -676,6 +691,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
       // Invalidate cache for the task
       if (taskId) {
         invalidatePromptCache(taskId, hardDelete ? 'prompt_deleted' : 'prompt_archived');
+        await refreshPromptReadinessAfterWrite();
       }
 
       return reply.status(204).send();
@@ -822,6 +838,7 @@ export async function adminPromptRoutes(app: FastifyInstance): Promise<void> {
 
       // Invalidate cache for the task to ensure fresh prompt is loaded
       invalidatePromptCache(prompt.taskId, 'version_rollback');
+      await refreshPromptReadinessAfterWrite();
 
       return reply.status(200).send(prompt);
     } catch (error) {

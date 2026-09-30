@@ -17,16 +17,15 @@
  * So the composition was unpinned in both directions, and the PR's claim is a
  * claim ABOUT the composition. This file closes exactly that gap.
  *
- * ⚠ THIS IS A CONTRACT PIN, NOT AN ASPIRATION. #1288 delivers an
- * ATTRIBUTABLE degradation, deliberately NOT a PREVENTABLE one. The assertions
- * below therefore pin the CURRENT, NARROWED contract in BOTH directions —
- * including the uncomfortable half:
+ * Admin history is an explicit read. Runtime compilation selects only one
+ * version, so malformed metadata in an old version cannot affect a live prompt.
+ * The assertions pin both paths:
  *
- *   - the malformed row DOES raise the ERROR/event signal;
+ *   - an admin history read of a malformed row DOES raise the ERROR/event signal;
  *   - a valid row does NOT;
- *   - the substituted `[]` DOES reach governed compilation as an ordinary
+ *   - the substituted `[]` DOES reach governed admin history as an ordinary
  *     empty list;
- *   - `loadPrompt` DOES still report `source: 'store'`, and the
+ *   - runtime `loadPrompt` does not read test_cases, still reports `store`, and
  *     `critical_prompt_fetch_error` health reason DOES stay absent.
  *
  * The last two are asserted precisely BECAUSE they are the limitation. If a
@@ -192,6 +191,12 @@ async function composeWith(versions: Array<Record<string, unknown>>) {
   mockChain.order.mockImplementation(() =>
     Promise.resolve({ data: versions, error: null }),
   );
+  mockChain.single.mockImplementation(() =>
+    Promise.resolve({
+      data: versions.find((row) => row.version === ELECTED_VERSION) ?? null,
+      error: null,
+    }),
+  );
 
   // Clear whatever store setup logged/emitted, so every assertion below is
   // about the DECODE and the composition, never about initialisation.
@@ -207,7 +212,7 @@ const MALFORMED = versionRow(ELECTED_VERSION, { test_cases: '[' });
 const KNOWN_EMPTY = versionRow(ELECTED_VERSION, { test_cases: '[]' });
 /** Its decodable twin, populated — the ordinary healthy row. */
 const POPULATED = versionRow(ELECTED_VERSION, {
-  test_cases: JSON.stringify([{ name: 'case-a', variables: { brief: 'x' } }]),
+  test_cases: JSON.stringify([{ id: 'case-a', name: 'case-a', input: 'x', variables: { brief: 'x' } }]),
 });
 /** The valid sibling that must remain intact through every case. */
 const VALID_SIBLING = versionRow(1, { test_cases: '[]' });
@@ -229,11 +234,11 @@ beforeEach(() => {
 //    governed composition, not the raw adapter.
 // ===========================================================================
 
-describe('composed: an undecodable column is attributable through governed election', () => {
-  it('emits the degradation event and logs at ERROR when loadPrompt serves the row', async () => {
+describe('composed: an undecodable column is attributable on explicit admin history', () => {
+  it('emits the degradation event and logs at ERROR when history reads the row', async () => {
     await composeWith([VALID_SIBLING, MALFORMED]);
 
-    await loadPrompt('draft_graph', { trigger: 'status', useStaging: false });
+    await governedStore.list({ taskId: 'draft_graph' });
 
     const events = degradationEvents();
     expect(events).toHaveLength(1);
@@ -261,7 +266,7 @@ describe('composed: an undecodable column is attributable through governed elect
     // cover this branch.
     await composeWith([VALID_SIBLING, versionRow(ELECTED_VERSION, { test_cases: {} })]);
 
-    await loadPrompt('draft_graph', { trigger: 'status', useStaging: false });
+    await governedStore.list({ taskId: 'draft_graph' });
 
     const events = degradationEvents();
     expect(events).toHaveLength(1);
@@ -286,13 +291,13 @@ describe('composed: an undecodable column is attributable through governed elect
 describe('composed: decodable rows raise nothing', () => {
   it('a genuinely empty serialized list emits no degradation event', async () => {
     await composeWith([VALID_SIBLING, KNOWN_EMPTY]);
-    await loadPrompt('draft_graph', { trigger: 'status', useStaging: false });
+    await governedStore.list({ taskId: 'draft_graph' });
     expect(degradationEvents()).toEqual([]);
   });
 
   it('a populated serialized list emits no degradation event', async () => {
     await composeWith([VALID_SIBLING, POPULATED]);
-    await loadPrompt('draft_graph', { trigger: 'status', useStaging: false });
+    await governedStore.list({ taskId: 'draft_graph' });
     expect(degradationEvents()).toEqual([]);
   });
 
@@ -300,17 +305,16 @@ describe('composed: decodable rows raise nothing', () => {
     // The P0 row: PostgREST delivered a JS ARRAY where the row type asserted a
     // string. This must be decodable, silently and correctly.
     await composeWith([VALID_SIBLING, versionRow(ELECTED_VERSION, { test_cases: [] })]);
-    await loadPrompt('draft_graph', { trigger: 'status', useStaging: false });
+    await governedStore.list({ taskId: 'draft_graph' });
     expect(degradationEvents()).toEqual([]);
   });
 });
 
 // ===========================================================================
-// 3. The substitution REACHES governed compilation as `[]` — and the elected
-//    prompt still serves. This is the limitation, pinned deliberately.
+// 3. The substitution REACHES governed admin history as `[]`.
 // ===========================================================================
 
-describe('composed: the substituted [] passes the governed boundary as an ordinary list', () => {
+describe('composed: the substituted [] passes the governed admin boundary as an ordinary list', () => {
   it('governed list() hands the elected version testCases: [] for an undecodable column', async () => {
     await composeWith([VALID_SIBLING, MALFORMED]);
 
@@ -383,9 +387,11 @@ describe('composed: the degradation does NOT reach loader source or health', () 
   it('critical_prompt_fetch_error CANNOT fire for this class', async () => {
     await composeWith([VALID_SIBLING, MALFORMED]);
 
-    // Prove the degradation really did occur on this composition first —
-    // otherwise the absence below is an assertion about nothing.
+    // Runtime no longer reads `test_cases`, even on the selected version.
     await loadPrompt('draft_graph', { trigger: 'status', useStaging: false });
+    expect(degradationEvents()).toEqual([]);
+    // The same malformed row remains attributable when history is requested.
+    await governedStore.list({ taskId: 'draft_graph' });
     expect(degradationEvents().length).toBeGreaterThan(0);
 
     __resetPromptsReadyCacheForTests();

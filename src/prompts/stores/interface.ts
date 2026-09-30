@@ -172,6 +172,13 @@ export interface IPromptStore {
     options?: GetCompiledOptions
   ): Promise<CompiledPrompt | null>;
 
+  /** Optional bounded runtime read; history remains on explicit admin get/list. */
+  getRuntimeCompiled?(
+    taskId: string,
+    variables: Record<string, string | number>,
+    options?: GetCompiledOptions,
+  ): Promise<CompiledPrompt | null>;
+
   /**
    * Get the active prompt for a task.
    *
