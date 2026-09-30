@@ -72,7 +72,7 @@ import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.
 // (CLAUDE.md trap #12). Behaviour here is unchanged by the move.
 import { noiseVerdictForProportions } from './win-probability-noise-band.js';
 import { diffRunInputs } from './run-input-changes.js';
-import { drawStructureKeyOfFact } from './draw-structure.js';
+import { islDrawStructureKeyOfFact } from './draw-structure.js';
 
 /**
  * Why no delta was produced. A DISCRIMINATED reason rather than a bare `null`,
@@ -387,22 +387,24 @@ function classifyAttribution(
     readonly n_equal: boolean;
   },
   /**
-   * Both Runs recorded their inputs and the DRAW STRUCTURE differs (`draw-structure.ts`): the same seed no longer lines
-   * the draws up, so the pair is as unpaired as two fresh seeds (R3 #75 5920859011). `false` when either Run recorded
-   * no inputs — a legacy pair keeps exactly today's classification.
+   * Both Runs' RECORDED PLoT→ISL requests show the same draw structure (`draw-structure.ts` `islDrawStructureKey`).
+   * C1 needs it: the same seed on a different draw structure misaligns the draws, so the movement is not attributable
+   * (R3 #75 5920859011). Fails CLOSED — a Run with no recorded request cannot show its draws line up (AI EXPERIENCE
+   * BUILD CR 5921519604). C0 does not need it: an equal analysis hash on an equal build sends an identical request.
    */
-  drawStructureChanged: boolean,
+  drawStructureVerified: boolean,
 ): RunDeltaAttributionCaseLiteral | null {
   // Observed divergences first, most fundamental first. Each of these is a
   // fact we measured off two echoes.
-  if (!provenance.seed_equal || drawStructureChanged) return 'C2_unpaired';
+  if (!provenance.seed_equal) return 'C2_unpaired';
   if (!provenance.n_equal) return 'C4_budget_drift';
   if (provenance.builds_equal === 'unequal') return 'C3_engine_drift';
 
   // Past every observed divergence. Only the two VERIFIED cases remain, and
   // both require a positively-confirmed builds equality.
   if (provenance.builds_equal === 'equal') {
-    return provenance.hash_equal ? 'C0_identical' : 'C1_attributable';
+    if (provenance.hash_equal) return 'C0_identical';
+    return drawStructureVerified ? 'C1_attributable' : 'C2_unpaired';
   }
 
   // seed, n and hash all agree but builds is unverifiable. Nothing in the table
@@ -549,11 +551,11 @@ export function buildRunDelta(input: {
   // so a true £59 → £60 input change showed nothing. When both Runs recorded their inputs, the pair is emitted as
   // `C5_unattributed` — no causal reading, no magnitude — so the input rows can travel. Without recorded inputs there
   // is still nothing honest to show, and the old refusal stands.
-  const priorDrawStructure = drawStructureKeyOfFact(pair.prior);
-  const currentDrawStructure = drawStructureKeyOfFact(pair.current);
-  const drawStructureChanged =
-    priorDrawStructure !== null && currentDrawStructure !== null && priorDrawStructure !== currentDrawStructure;
-  const classified = classifyAttribution(pairProvenance, drawStructureChanged);
+  const priorDrawStructure = islDrawStructureKeyOfFact(pair.prior);
+  const currentDrawStructure = islDrawStructureKeyOfFact(pair.current);
+  const drawStructureVerified =
+    priorDrawStructure !== null && currentDrawStructure !== null && priorDrawStructure === currentDrawStructure;
+  const classified = classifyAttribution(pairProvenance, drawStructureVerified);
   if (classified === null && inputs.kind !== 'compared') {
     return { kind: 'none', reason: 'no_honest_attribution_case' };
   }
