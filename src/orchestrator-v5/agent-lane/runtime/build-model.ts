@@ -830,10 +830,11 @@ export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel
   const heldAsOne = (r: StatedRange) => [...new Set(held.map((h) => h.label))].some((label) => holdsAt(label, r.low) && holdsAt(label, r.high));
   return [...new Map(findStatedRanges(brief).map((r) => [r.text, r] as const)).values()]
     .filter((r) => !carried.has(r.text) && !heldAsOne(r) && !inAQuestion(brief, r.high.index))
-    .map((r) => r.text).map((t) =>
-    `The brief writes "${t}" and no link in the model carries it. If it is a money size PER ONE of something the brief names `
+    // `written`, never a one-letter name: a quoted `"${t}"` reads as a currency token to the currency-vocabulary guard.
+    .map((r) => r.text).map((written) =>
+    `The brief writes "${written}" and no link in the model carries it. If it is a money size PER ONE of something the brief names `
     + '(per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the '
-    + `money goal, and size that link per one at the LOW end of "${t}" (effect_provenance "explicit"). If it is not a size `
+    + `money goal, and size that link per one at the LOW end of "${written}" (effect_provenance "explicit"). If it is not a size `
     + 'per one of anything, change nothing for it.');
 }
 
