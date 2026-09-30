@@ -19,6 +19,7 @@ import { certainOptionRows, goalCertaintyForAgent, type GoalCertaintyRead } from
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { AGENT_ADD_OPTION_CHIP_ID, AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
 import { runWithUserNamedOptions, type StatedTodayLevel } from '../../handlers/add-option-authorship-context.js';
@@ -40,6 +41,7 @@ import { identityConfirmBaseIsWritable } from '../../system-events/editable-grap
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
 import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
 /**
@@ -801,6 +803,8 @@ interface GraphRead {
     provenance?: unknown;
     /** Canonical authorship mark for an unadopted option Olumi proposed. */
     proposed_by?: unknown;
+    /** A user-approved participation decision; origin remains `proposed_by: 'olumi'`. */
+    analysis_participation?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -1003,6 +1007,8 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
               : { value_provenance: valueProvenance }),
             ...(n.provenance === undefined ? {} : { provenance: n.provenance }),
             ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
+            ...(n.kind === 'option' && (n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded')
+              ? { analysis_participation: n.analysis_participation } : {}),
           };
         }
 
@@ -1498,6 +1504,11 @@ export function createAgentCapabilities(
      * and `model_version_receipt`). Absent ⇒ unavailable.
      */
     readonly commitOptionLevels?: (input: CommitOptionLevelsInput) => Promise<CommitOptionLevelsResult>;
+    /** The narrow CAS writer for a pressed adoption of an existing Olumi suggestion. */
+    readonly commitOlumiOptionAdoption?: (input: {
+      scenario_id: string; turn_id: string; base_graph_hash: string; expected_graph_identity_hash: string;
+      option_id: string; expected_label: string; expected_interventions: Record<string, unknown>;
+    }) => Promise<{ status: 'committed' | 'stale' | 'refused' | 'unconfirmed'; model_version_receipt?: unknown; reason?: string }>;
     /**
      * ⭐ C5: whether the scenario's current analysis withholds its leader, read by the ROUTE from its own readback
      * through the wire gate's own predicate (`leaderStandingOf`) — so this capability and the gate cannot disagree.
@@ -3889,6 +3900,22 @@ export function createAgentCapabilities(
         if (withdrawnHolds.has(args.proposal_id)) return { ok: false, mutated: false, refusal: 'withdrawn', detail: 'That change was withdrawn this turn. Nothing was changed.' };
         return confirmHeld(ctx, args.proposal_id);
       }
+      // An adoption changes whose comparison includes an existing Olumi option. A model's interpretation
+      // of typed "yes" is never that approval: the currently offered card must have been pressed verbatim.
+      const pendingAdoption = proposals.get(args.proposal_id);
+      const adoptionOperation = pendingAdoption?.operations.length === 1 && pendingAdoption.operations[0]?.op === 'adopt_olumi_option'
+        ? pendingAdoption.operations[0] : undefined;
+      if (adoptionOperation !== undefined) {
+        const v = adoptionOperation.value as { approval_message?: unknown } | undefined;
+        if (ctx.typed_approval_of !== args.proposal_id || ctx.typed_approval_words !== v?.approval_message) {
+          return { ok: false, mutated: false, refusal: 'approve_on_card', proposal_id: args.proposal_id,
+            detail: 'Nothing changed. Press the displayed adoption card to include this Olumi suggestion in your comparison.' };
+        }
+        if (opts.commitOlumiOptionAdoption === undefined) {
+          return { ok: false, mutated: false, refusal: 'unavailable', proposal_id: args.proposal_id,
+            detail: 'Adoption is unavailable here, so nothing changed.' };
+        }
+      }
       const before = await readGraph(ctx.scenario_id);
       if (before === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const decision = proposals.authorise({
@@ -3917,6 +3944,56 @@ export function createAgentCapabilities(
 
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
+
+      if (ops.length === 1 && ops[0]!.op === 'adopt_olumi_option') {
+        const op = ops[0]!;
+        const v = op.value as { label?: unknown; expected_interventions?: unknown; approval_message?: unknown } | undefined;
+        const expected = v?.expected_interventions;
+        const existing = before.nodes.find((n) => n.id === op.path);
+        if (typeof v?.label !== 'string' || expected === null || typeof expected !== 'object' || Array.isArray(expected)
+          || existing?.kind !== 'option' || existing.label !== v.label || existing.proposed_by !== 'olumi'
+          || existing.analysis_participation === 'included'
+          || !isDeepStrictEqual(existing.interventions ?? {}, expected)
+          || before.graph_identity_hash === '') {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,
+            detail: 'The suggested option no longer matches the card you approved, so nothing changed. Read it again before proposing adoption.' };
+        }
+        const res = await opts.commitOlumiOptionAdoption!({
+          scenario_id: ctx.scenario_id,
+          turn_id: authorisationTurnId(decision.proposal.proposal_id),
+          base_graph_hash: before.graph_hash,
+          expected_graph_identity_hash: before.graph_identity_hash,
+          option_id: op.path,
+          expected_label: v.label,
+          expected_interventions: expected as Record<string, unknown>,
+        });
+        if (res.status === 'unconfirmed') {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: decision.proposal.proposal_id,
+            detail: 'The adoption may have been saved, but I could not confirm the current model. Read the comparison before trying again or saying what it includes.' };
+        }
+        if (res.status !== 'committed') {
+          return { ok: false, mutated: false, applied: false, refusal: res.status === 'stale' ? 'superseded' : 'not_applied',
+            proposal_id: decision.proposal.proposal_id,
+            detail: res.status === 'stale'
+              ? 'The model changed before this adoption was saved, so nothing changed. Read the suggestion again and offer a fresh card.'
+              : 'The suggestion could not be adopted. Nothing was changed; read the model before offering it again.' };
+        }
+        const after = await readGraph(ctx.scenario_id);
+        const adopted = after?.nodes.find((n) => n.id === op.path);
+        if (after === null || adopted?.kind !== 'option' || adopted.proposed_by !== 'olumi'
+          || adopted.analysis_participation !== 'included' || adopted.label !== v.label
+          || !isDeepStrictEqual(adopted.interventions ?? {}, expected) || after.graph_hash === before.graph_hash) {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_verified', proposal_id: decision.proposal.proposal_id,
+            detail: 'The adoption was sent, but the saved comparison could not be confirmed. Read the model before saying what it includes.' };
+        }
+        const receipt = receiptSummaryOf({ model_version_receipt: res.model_version_receipt });
+        const receipts = receipt.summary !== null ? [receipt.summary] : [];
+        proposals.markApplied(decision.proposal.proposal_id, receipts);
+        return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id,
+          receipts, ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
+          follow_up: `Included "${adopted.label}" in your comparison. Its Olumi origin and each level's recorded source remain unchanged. Any earlier result is now out of date; run analysis to include this option.`,
+        };
+      }
 
       /**
        * ⛔ AN OLD-SHAPE ADD-OPTION IS NEVER APPLIED (C52). It wrote the option and its links as separate system
@@ -5499,6 +5576,7 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
       type Asked = { factor_label?: unknown; direction?: unknown; level?: { value?: unknown; unit?: unknown; estimate?: unknown; basis?: unknown } | null };
       const askedOf = (xs: unknown): Asked[] => (Array.isArray(xs) ? xs.map((x) => (x ?? {}) as Asked) : []);
       /**
@@ -5509,6 +5587,136 @@ export function createAgentCapabilities(
       const askedSpecs = Array.isArray(args?.options) && args.options.length > 0
         ? (args.options as unknown[]).map((o) => ({ label: String((o as { label?: unknown } | null)?.label ?? ''), acts_on: askedOf((o as { acts_on?: unknown } | null)?.acts_on) }))
         : [{ label: String(args?.label ?? ''), acts_on: askedOf(args?.acts_on) }];
+      // A named Olumi suggestion already has an identity, links and levels. The user's request adopts its
+      // participation in place; treating it as a new option would either clash or duplicate it. This branch
+      // prepares a stored proposal only. The clicked card is checked again at authorisation.
+      if (askedSpecs.length === 1) {
+        const wanted = askedSpecs[0]!;
+        const matches = g.nodes.filter((n) => n.kind === 'option' && norm(n.label) === norm(wanted.label));
+        const suggested = matches.length === 1 && matches[0]!.proposed_by === 'olumi' ? matches[0]! : undefined;
+        if (suggested !== undefined) {
+          const namedByExactLabel = wordsTheUserWrote(suggested.label, ctx.user_turn_text);
+          const namedByUniqueFigure = (() => {
+            const words = ctx.user_turn_text;
+            if (typeof words !== 'string' || g.nodes.filter((n) => n.kind === 'option' && n.proposed_by === 'olumi'
+              && n.analysis_participation !== 'included').length !== 1) return false;
+            if (!/\b(?:your|olumi(?:['\u2019]s)?)\b/i.test(words)
+              || !wordsTheUserWrote('suggestion', words)
+              || !['add', 'include', 'use'].some((verb) => wordsTheUserWrote(verb, words))) return false;
+            return Object.values(suggested.interventions ?? {}).some((raw) => {
+              if (raw === null || typeof raw !== 'object') return false;
+              const level = raw as { raw_value?: unknown; unit?: unknown };
+              return typeof level.raw_value === 'number' && figureTheUserWrote(level.raw_value, level.unit, words);
+            });
+          })();
+          if (!namedByExactLabel && !namedByUniqueFigure) {
+            return { ok: false, mutated: false, refusal: 'option_not_requested',
+              detail: `"${suggested.label}" is Olumi's suggestion, but this turn did not name it as an option to add. Nothing was prepared.` };
+          }
+          if (suggested.analysis_participation === 'included') {
+            return { ok: false, mutated: false, refusal: 'already_participating',
+              detail: `"${suggested.label}" already participates in your comparison. Nothing was changed.` };
+          }
+          if (suggested.analysis_participation === 'retained_excluded') {
+            return { ok: false, mutated: false, refusal: 'excluded_option',
+              detail: `"${suggested.label}" is currently excluded from analysis. Nothing was prepared; review that exclusion before adding it to a comparison.` };
+          }
+          if (wanted.acts_on.length > 0 || (Array.isArray(args?.new_factors) && args.new_factors.length > 0)) {
+            return { ok: false, mutated: false, refusal: 'adoption_with_edits',
+              detail: `"${suggested.label}" is already Olumi's suggestion. Adoption keeps its existing links and levels; nothing was prepared with additional edits. Propose its participation alone, then edit its effects separately.` };
+          }
+          const expectedInterventions = structuredClone(suggested.interventions ?? {});
+          const egressScaleByFactor = buildFactorScaleMap(g.nodes);
+          // This narrow card speaks numeric levels. A category or switch is
+          // stored in `raw_value` with a numeric encoding for analysis; showing
+          // that encoding as the user's reading would approve a different idea.
+          if (Object.entries(expectedInterventions).some(([factorId, cell]) => cell !== null && typeof cell === 'object'
+            && ((Object.hasOwn(cell, 'raw_value')
+              && (typeof (cell as { raw_value?: unknown }).raw_value !== 'number'
+                || !Number.isFinite((cell as { raw_value: number }).raw_value)))
+              || resolveRawInterventionValue(cell, egressScaleByFactor.get(factorId)).codeNotMagnitude === true))) {
+            return { ok: false, mutated: false, refusal: 'non_numeric_stored_level',
+              detail: `"${suggested.label}" has a category or switch that this approval card cannot show accurately. Nothing was prepared; review that option before including it.` };
+          }
+          // A cap alone does not prove that a raw-less value is normalized.
+          // Use the Run's own egress classifier before showing a multiplied
+          // consent figure; it may correctly pass an ambiguous value through.
+          const unprovenDisplayLevel = Object.entries(expectedInterventions).some(([factorId, cell]) => {
+            if (cell === null || typeof cell !== 'object' || Object.hasOwn(cell, 'raw_value')) return false;
+            const level = cell as { value?: unknown };
+            if (typeof level.value !== 'number' || !Number.isFinite(level.value)) return false;
+            const factor = g.nodes.find((n) => n.id === factorId);
+            const frame = levelFrameOf(factor);
+            if (frame === null) return false;
+            const egress = resolveRawInterventionValue(cell, egressScaleByFactor.get(factorId));
+            const displayed = level.value * frame;
+            return egress.value === null || egress.codeNotMagnitude === true
+              || Math.abs(egress.value - displayed) > Math.max(1e-9, Math.abs(displayed) * 1e-6);
+          });
+          if (unprovenDisplayLevel) {
+            return { ok: false, mutated: false, refusal: 'unproven_display_level',
+              detail: `The level shown for "${suggested.label}" is not proven to be the level its comparison would use. Nothing was prepared; check that option's level before including it.` };
+          }
+          // The Run and canonical Agent reader use the normalized value in the
+          // factor's frame. A stale raw display value cannot be the consent
+          // reading for a different figure the Run would actually compare.
+          const conflictingLevels = Object.entries(expectedInterventions).filter(([factorId, cell]) => {
+            if (cell === null || typeof cell !== 'object') return false;
+            const level = cell as { value?: unknown; raw_value?: unknown };
+            if (typeof level.raw_value !== 'number' || !Number.isFinite(level.raw_value)) return false;
+            if (typeof level.value !== 'number' || !Number.isFinite(level.value)) return true;
+            const factor = g.nodes.find((n) => n.id === factorId);
+            const frame = levelFrameOf(factor);
+            const canonical = frame === null ? level.value : level.value * frame;
+            return Math.abs(level.raw_value - canonical) > Math.max(1e-9, Math.abs(canonical) * 1e-6);
+          });
+          if (conflictingLevels.length > 0) {
+            return { ok: false, mutated: false, refusal: 'inconsistent_stored_level',
+              detail: `The stored display level for "${suggested.label}" disagrees with the level its comparison would use. Nothing was prepared; check that option's level before including it.` };
+          }
+          const levelWords = Object.entries(expectedInterventions).map(([factorId, raw]) => {
+            const factor = g.nodes.find((n) => n.id === factorId);
+            const level = raw !== null && typeof raw === 'object' ? raw as Record<string, unknown> : { value: raw };
+            const frame = levelFrameOf(factor);
+            const storedRaw = typeof level.raw_value === 'number' && Number.isFinite(level.raw_value) ? level.raw_value : null;
+            const normalized = typeof level.value === 'number' && Number.isFinite(level.value) ? level.value : null;
+            const figure = normalized !== null && frame !== null ? Number((normalized * frame).toPrecision(12)) : normalized;
+            const unitValue = typeof level.unit === 'string' && level.unit.trim() !== ''
+              ? level.unit.trim() : factor?.observed_state?.unit;
+            const unit = (storedRaw !== null || frame !== null) && typeof unitValue === 'string' && unitValue !== ''
+              ? unitValue.replace(/(\bper\s+\w+)\s+per\s+(month|year|week|day)$/i, '$1 / $2') : '';
+            const scaleNote = storedRaw === null && frame === null && normalized !== null ? ' (normalized scale; no user-facing unit verified)' : '';
+            const source = level.source === 'cee_hypothesis' ? "Olumi's suggested estimate"
+              : level.source === 'user_specified' ? 'set by you'
+                : level.source === 'brief_extraction' ? 'from your original brief' : 'source not recorded';
+            const saidFigure = typeof figure === 'number'
+              ? (sayFigureExactly(figure, unit) ?? `${figure}${unit !== '' ? ` ${unit}` : ''}`) + scaleNote
+              : 'no level set';
+            return `${String(factor?.label ?? factorId)}: ${saidFigure} (${source})`;
+          });
+          const reading = `Add Olumi's suggestion "${suggested.label}" to your comparison with its existing levels: ${levelWords.length > 0 ? levelWords.join('; ') : 'none set'}.`;
+          const approvalMessage = `Yes, add Olumi's suggestion "${suggested.label}" to my comparison with the levels shown.`;
+          const proposal = createProposal({
+            scenario_id: ctx.scenario_id,
+            user_id: ctx.authenticated_user_id,
+            base_graph_identity_hash: g.graph_hash,
+            operations: [{ op: 'adopt_olumi_option', path: suggested.id, value: {
+              label: suggested.label, expected_interventions: expectedInterventions,
+              approval_message: approvalMessage,
+            } }],
+            // The user requested participation; the option and its levels remain Olumi-authored.
+            provenance: { authored_by: 'model_proposed', basis: String(args?.rationale ?? '') },
+            validation: { admitted: true, loss_count: 0, refusals: [] },
+            public_label: reading,
+          });
+          proposals.put(proposal);
+          return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: reading,
+            base_revision: g.graph_hash, adoption_reading: reading,
+            option: { label: suggested.label },
+            note: `Nothing has changed yet. Show this exact reading and its approval card. Pressing it includes the option in the user's comparison; its Olumi origin and each level's recorded source remain unchanged.`,
+          };
+        }
+      }
       if (askedSpecs.length > MAX_OPTIONS_PER_TRANSACTION) {
         return {
           ok: false, mutated: false, refusal: 'too_many_options',
@@ -5594,7 +5802,6 @@ export function createAgentCapabilities(
        * a bare figure beside levels stored as fractions would put one factor on two scales.
        */
       const rawNodes = ((g.raw as { nodes?: unknown }).nodes as { id: string; kind?: string; label?: string; description?: string }[] | undefined) ?? [];
-      const norm = (v: unknown): string => String(v ?? '').trim().toLowerCase();
       const outOfRange: { option: string; factor: string; value: number; range: number }[] = [];
       const unitMismatch: { option: string; factor: string; value: number; unit: string; factor_unit: string }[] = [];
       // `value` is the figure as given: a non-number the Agent sent for a new graded factor's level is said as it came (A1 £59).

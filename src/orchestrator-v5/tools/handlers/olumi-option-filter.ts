@@ -1,12 +1,12 @@
 /**
- * ⛔ AN OPTION OLUMI PROPOSED IS NOT COMPARED AS THE USER'S (DL 5887489508 / 5887510885; AIQ 5887484795; PTL root 2).
+ * ⛔ AN UNADOPTED OPTION OLUMI PROPOSED IS NOT COMPARED AS THE USER'S (DL 5887489508 / 5887510885; AIQ 5887484795; PTL root 2).
  *
  * MG's construction marks an option the drafter added, and the brief did not name, `proposed_by: 'olumi'`
  * (`isOlumiProposedOption`, the ONE predicate the analysis hash reads too). The Run decides what is compared, AFTER
  * `gateAnalysableOptions`, because only then is the true compared set known:
- *   - at least 2 DISTINCT user options survive PLoT's intervention dedup → Olumi's are left out;
- *   - fewer → Olumi's stay, the comparison is provisional, and no leader is permitted.
- * This no-schema-bump Run path carries no typed participation card.
+ *   - at least 2 DISTINCT user-participating options survive PLoT's intervention dedup → unadopted suggestions are left out;
+ *   - fewer → unadopted suggestions stay, the comparison is provisional, and no leader is permitted.
+ * Adoption retains the `proposed_by` origin and adds `analysis_participation: included` to the same option.
  */
 import { isOlumiProposedOption } from '../../context/olumi-proposed-option.js';
 import { interventionFingerprint } from './analysis-ready-core.js';
@@ -35,7 +35,10 @@ export function filterOlumiProposedOptions(input: {
   readonly graph: unknown;
 }): OlumiOptionFilterOutcome {
   const nodes = isRec(input.graph) && Array.isArray(input.graph.nodes) ? input.graph.nodes.filter(isRec) : [];
-  const proposedIds = new Set(nodes.filter(isOlumiProposedOption).map((n) => n.id).filter((id): id is string => typeof id === 'string'));
+  // `proposed_by` records origin for life. A pressed adoption retains that origin and records
+  // participation separately; the Run excludes only suggestions still awaiting that gesture.
+  const proposedIds = new Set(nodes.filter((n) => isOlumiProposedOption(n) && n.analysis_participation !== 'included')
+    .map((n) => n.id).filter((id): id is string => typeof id === 'string'));
   if (proposedIds.size === 0) return { options: input.submitted, keptOlumiProvisional: false };
   const isProposed = (o: Rec): boolean => { const id = optionIdOf(o); return id !== null && proposedIds.has(id); };
   if (!input.submitted.some(isProposed)) return { options: input.submitted, keptOlumiProvisional: false };

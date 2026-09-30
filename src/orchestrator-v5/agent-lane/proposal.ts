@@ -36,6 +36,8 @@ import { createHash } from 'node:crypto';
 export interface ProposalOperation {
   readonly op:
     | 'add_node' | 'remove_node' | 'update_node'
+    /** A clicked approval includes an existing Olumi suggestion in the user's comparison. */
+    | 'adopt_olumi_option'
     | 'add_edge' | 'remove_edge' | 'update_edge'
     /**
      * ⭐ SET A FACTOR TO A STATED ASSUMPTION.

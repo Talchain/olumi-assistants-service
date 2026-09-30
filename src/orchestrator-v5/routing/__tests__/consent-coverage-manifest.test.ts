@@ -174,6 +174,13 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     // affordance that moves cells the user did not individually name needs its
     // own answer. The mutation referee is still NOT evidence of consent.
     INTERNAL_OPTION_WRITER,
+    // Agent approval of an EXISTING Olumi suggestion's participation. This
+    // bypasses the executor's prose-consent backstop, so it is recorded here.
+    // The in-process writer is reached only from authorisation of the held
+    // `adopt_olumi_option` card; it rechecks the exact option/levels and graph
+    // identity+analysis hashes before changing only `analysis_participation`.
+    // A typed or model-generated "yes" does not itself invoke this writer.
+    'orchestrator-v5/system-events/olumi-option-adoption.ts',
     // ADMITTED — the replacement conversation layer's `applyOperations` port.
     // A BATCH writer, and therefore exactly the case the entry above says must
     // not inherit the per-cell exemption. So it is admitted on its own terms:

@@ -54,6 +54,7 @@ import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js'
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
 import { commitLimitEditInProcess, commitOptionLevelsInProcess, holdAddFactorInProcess, holdAddRiskInProcess } from '../orchestrator-v5/system-events/dispatch.js';
+import { commitOlumiOptionAdoptionInProcess } from '../orchestrator-v5/system-events/olumi-option-adoption.js';
 import { readinessSentence, readinessViewOf, stillNeededLine } from '../orchestrator-v5/agent-lane/readiness-view.js';
 import type { CallStructuredModel, ConstructionTrace } from '../orchestrator-v5/agent-lane/runtime/build-model.js';
 import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtime/transport-retry.js';
@@ -370,7 +371,7 @@ const AGENT_INSTRUCTIONS = [
   'When the user approves, agrees, or says yes, that is an instruction to call authorise_change. get_canonical_state returns `awaiting_your_approval`, newest first: if there is exactly one, authorise THAT proposal_id. If there is more than one, describe each by what it changes (never by its id) and ask which \u2014 in the same turn. NEVER reply that a change has not been approved on a turn where the user approved it.',
   'If get_canonical_state reports the model is empty, call build_model_from_brief with the user\u2019s own words before answering about the model.',
   'build_model_from_brief already returns the model it created, with its entities and its `structure` block. Do NOT call get_canonical_state again afterwards \u2014 answer from what it returned.',
-  'An option marked `proposed_by: olumi` is Olumi\u2019s suggestion, never one of the user\u2019s choices. Say Olumi suggested it. Describe whether it entered a comparison only from a current typed `option_participation` fact; otherwise make no comparison-status claim.',
+  'An option marked `proposed_by: olumi` remains Olumi-authored. If its stored `analysis_participation` is `included`, the user approved including it in the comparison; its estimated levels do not become user-authored. With no participation mark, do not claim the user approved it. Say a saved Run compared it only when the current Run confirms that fact.',
   /*
    * ⭐ OLUMI RUNS THE FIRST ANALYSIS ITSELF, ONCE (Paul, 5812069638). This replaced "After
    * build_model_from_brief, do NOT call run_analysis on the same turn", measured at 99.9 s for a
@@ -488,7 +489,7 @@ const AGENT_INSTRUCTIONS = [
    */
   'When the user gives strengths for more than one link in one message, or asks you to size links for them and then agrees to what you recommend, call propose_link_strengths ONCE with every link: one approval records the whole set, together or not at all. Never split a set into one approval per link, and never ask the user to retype strengths you recommended. Links whose band the user named in this message are recorded as theirs; every other link is recorded as Olumi\u2019s estimate, approved by them \u2014 say which is which, and never call Olumi\u2019s estimate theirs.',
   'When the user picks one of the options you suggested, or asks for one to be added, call propose_new_option with their label, the factors it would change and which way it pushes each, and the level it sets each factor to: the user\u2019s own figure, or \u2014 for an option YOU suggested \u2014 your own suggested figure, marked `estimate` with its basis, which is recorded and shown as Olumi\u2019s estimate, never as theirs; it is linked from the decision automatically. When they ask for several (up to 4), call it ONCE with all of them in `options`: that is one change they approve once, and it lands whole or not at all \u2014 never one call per option. When the user asks you to add options, add them in this turn \u2014 do not first ask what they do, unless which way it pushes a factor is unclear: link each to the factors in the model it clearly acts on, leave unset any level that is neither the user\u2019s figure nor your own marked estimate, and afterwards name what is still needed. If part of what an option does has no factor in the model, add that factor IN THE SAME CHANGE through `new_factors` and name it in the option\u2019s acts_on: say what it changes in the model (the goal, an outcome, a risk, or a factor no option sets) and which way \u2014 from the user\u2019s words, or where it is plain from the option itself (a paid add-on adds revenue); if it is unclear, ask; the preview names each direction so the user can correct it \u2014 and in the preview say it is a new factor, what it changes, that how strongly is Olumi\u2019s estimate, and that its current value is still needed. Never link an option to an unrelated factor instead. If the user would rather not add that factor, add the option against the factors it does have and say plainly which part the model does not yet represent \u2014 unless what it would set there is what the model already has today (for example keeping a price at its current level): then it could not be told apart from carrying on as now, so do not add it; say which part the model does not represent. Never merge two different options into one. Then call authorise_change once they confirm. A factor with no level is added with no level: say plainly which, and ask for the figure. Never put a placeholder (0 or any figure) where there is no level, never pass your own figure as the user\u2019s, and never guess a direction that is unclear; if you are not sure, ask.',
-  'Exception to adding an option: if CURRENT MODEL STATE marks the requested option `proposed_by: olumi`, do not call propose_new_option or claim it is already the user\'s option. Say it is Olumi\'s suggestion, not compared as theirs, and that adopting it into their comparison is not available yet. Do not imply an approval or write occurred. Never infer this mark from a label alone.',
+  'Exception to adding an option: if CURRENT MODEL STATE marks the requested option `proposed_by: olumi`, call propose_new_option with that exact existing label to prepare its adoption. The tool must show the existing option and its Olumi-estimated levels for approval; no graph change occurs until the user presses that displayed approval card. A typed or model-written “yes” is not that press. Do not add a duplicate, call it already the user\'s option, or call its levels the user\'s figures. After a pressed adoption, the old comparison is stale until the user asks for a new Run. Never infer the mark from a label alone.',
   /*
    * \u26d4 NO AUTOMATIC RUN AFTER A REVISION (Codex 5810763729, 24 Sep). This
    * instruction used to end "after it applies, run_analysis in the same turn and
@@ -1814,6 +1815,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         commitLimitEdit: async (input) => {
           writesDispatched += 1;
           return readCache.around(() => commitLimitEditInProcess(input, String(req.id)));
+        },
+        commitOlumiOptionAdoption: async (input) => {
+          writesDispatched += 1;
+          return readCache.around(() => commitOlumiOptionAdoptionInProcess(input, String(req.id)));
         },
       },
     );

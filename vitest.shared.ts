@@ -125,6 +125,9 @@ export const REQUIRED_GATE_INTEGRATION_EXCLUSIONS = [
   // required gate and a regex cannot observe a transaction boundary. Self-gated
   // on RUN_C4_CANONICAL_STATE + DATABASE_URL; skips (never errors) without them.
   "tests/integration/c4-canonical-state-restore.contract.test.ts",
+  // Olumi adoption cold-read witness needs isolated local PostgREST/Postgres.
+  // Self-gated on RUN_OLUMI_ADOPTION_LOCAL_DB and the exact local service URL.
+  "tests/integration/olumi-adoption-local-db.test.ts",
   "tests/integration/prompts.repository.test.ts",
   "tests/integration/slice-b-commit-failure.test.ts",
   "tests/integration/slice-b-concurrent-writes.test.ts",
