@@ -1831,20 +1831,21 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           'run_analysis: goal figures withheld: the user\'s own figures make the goal a product this run did not evaluate',
         );
       }
-      // ⛔ DR ROW 4 (AIQ #2371 5914730220): a target this run can't test (the verdict that capped the admission's mode at
-      // `exploratory`) has no goal chance for ANY option, as it has no leader or share. Once, and only when no earlier
-      // withhold already said its own reason.
-      const untestable = runWithheldGoalFigures(response as Record<string, unknown>) || scoredIds.length === 0 ? null
-        : targetNotTestableWarning(graphForAnalysis, targetTestabilityOf(graphForAnalysis), scoredIds, GOAL_FIGURES_TARGET_NOT_TESTABLE);
-      if (untestable !== null) {
-        response = withholdOptionGoalFigures(response, new Set(scoredIds), untestable);
+    }
+
+    // ⛔ DR ROW 4 (AIQ #2371 5914730220 / 5915342964): a target this run can't test (the verdict that capped the admission's
+    // mode at `exploratory`) has no goal chance for ANY option, as it has no leader or share. Runs after every earlier
+    // withhold, and withholds whatever options STILL show a goal figure: (S) is per option, so "something was withheld"
+    // never means "every chance is gone" (AIQ's executed run: m1 + one option's placeholder lever kept £59's 0.9929).
+    {
+      const before = response;
+      response = withholdGoalFiguresForUntestableTarget(response, graphForAnalysis);
+      if (response !== before) {
         log.info(
           {
             event: 'run_analysis.goal_figures_withheld_target_not_testable',
             request_id: invocation.requestId,
             scenario_id: args.scenario_id,
-            // Redacted: ids only.
-            goal_id: untestable.node_ids[0], option_ids: scoredIds,
           },
           'run_analysis: goal figures withheld: the goal\'s target can\'t be tested yet',
         );
@@ -3373,4 +3374,27 @@ function readOrchestratorErrorMessage(runError: unknown): string | null {
   if (orch === null || typeof orch !== 'object') return null;
   const message = (orch as Record<string, unknown>).message;
   return typeof message === 'string' && message.trim().length > 0 ? message : null;
+}
+
+/** The ids of the options whose goal figures an envelope still shows, in any option-result carrier. */
+function optionsStillShowingGoalFigures(envelope: unknown): string[] {
+  const shown = new Set<string>();
+  for (const r of readOptionResultSources(envelope as Record<string, unknown>).flat()) {
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    if (id !== undefined && id !== '' && (typeof r.probability_of_goal === 'number' || typeof r.probability_of_joint_goal === 'number')) shown.add(id);
+  }
+  return [...shown];
+}
+
+/**
+ * ⛔ DR ROW 4 IN THE RUN (AIQ #2371 5914730220 / 5915342964): when the goal's target can't be tested
+ * (`targetVerdictCapsOrdering`), every option that STILL shows a goal figure after the earlier withholds has it withheld
+ * under `GOAL_FIGURES_TARGET_NOT_TESTABLE` (the leader and shares go with it). Options an earlier withhold already took keep
+ * that withhold's own reason. Returns `response` itself when nothing is left to withhold or the target is testable. Pure.
+ */
+export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown): E {
+  const shown = optionsStillShowingGoalFigures(response);
+  if (shown.length === 0) return response;
+  const warning = targetNotTestableWarning(graph, targetTestabilityOf(graph), shown, GOAL_FIGURES_TARGET_NOT_TESTABLE);
+  return warning === null ? response : withholdOptionGoalFigures(response, new Set(shown), warning);
 }

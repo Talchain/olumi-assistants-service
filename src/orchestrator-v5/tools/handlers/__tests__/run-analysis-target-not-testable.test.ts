@@ -14,10 +14,11 @@ import { readFileSync } from 'node:fs';
 import { RunAnalysisResultSchema } from '@talchain/schemas/orchestrator';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
-import { GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES } from '../../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../../../orchestrator/context/option-result-source.js';
+import { withholdOptionGoalFigures } from '../../../../orchestrator/context/constraint-feasibility.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.js';
 import type { HandlerInvocation } from '../../registry.js';
-import { createRunAnalysisHandler } from '../run-analysis.js';
+import { createRunAnalysisHandler, withholdGoalFiguresForUntestableTarget } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 
 type Json = Record<string, any>;
@@ -27,13 +28,13 @@ const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-m1-card-yes-served-run
 const SCENARIO = 'c8108752-0000-4000-8000-000000002371';
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-async function runOn(graph: Json): Promise<Json> {
+async function runOn(graph: Json, body: Json = M1.plot_body): Promise<Json> {
   const store = {
     loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(graph), briefText: M1._provenance.brief_text })),
     loadGraph: vi.fn(async () => clone(graph)),
   };
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'req-tt-load', store as never);
-  const run = vi.fn(async () => clone(M1.plot_body) as unknown as V2RunResponseEnvelope);
+  const run = vi.fn(async () => clone(body) as unknown as V2RunResponseEnvelope);
   const handler = createRunAnalysisHandler({
     plotClient: { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient,
     scenarioReader: vi.fn(async () => snapshot),
@@ -104,5 +105,44 @@ describe('a target the Run can\'t test has no goal chance for any option (m1 aft
     const result = await runOn(g);
     expect(chances(result)['59_price']).toBeCloseTo(0.9929, 4);
     expect(warningsOf(result).some((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).toBe(false);
+  });
+});
+
+/**
+ * AIQ #2371 5915342964, executed: (S)'s placeholder withhold is PER OPTION. With one option's lever on a placeholder link,
+ * "some figure was withheld" held, the DR gate stood down, and £59 kept 0.9929 under `exploratory`. The DR gate now
+ * withholds whatever still shows, after every earlier withhold: this is AIQ's exact chain on m1's served body.
+ */
+describe('AIQ\'s chain: an earlier per-option withhold never leaves another option\'s chance showing', () => {
+  const placeholderOn54 = { code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'Not shown. A link on the way is not sized.', severity: 'warning', node_ids: ['launch_promotion'], option_ids: ['54_price'] };
+
+  it('PRECONDITION: (S) on 54_price alone counts as "the run withheld goal figures", and £59 still shows 0.9929', () => {
+    const afterS = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['54_price']), placeholderOn54);
+    expect(runWithheldGoalFigures(afterS as Json)).toBe(true);
+    expect(chances(afterS)['59_price']).toBeCloseTo(0.9929, 4);
+  });
+
+  it('RED: then the DR gate → no option\'s chance; (S) keeps its own reason, the rest say DR\'s', () => {
+    const afterS = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['54_price']), placeholderOn54);
+    const after = withholdGoalFiguresForUntestableTarget(afterS, M1.graph);
+    expect(chances(after)).toEqual({});
+    const codes = warningsOf(after).map((w) => w.code);
+    expect(codes).toContain(GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(codes).toContain(GOAL_FIGURES_TARGET_NOT_TESTABLE);
+    const dr = warningsOf(after).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
+    expect([...dr.option_ids].sort()).toEqual(['59_price', 'current_price']);
+  });
+
+  it('RED, THROUGH THE HANDLER: a run body that already withheld 54_price alone → £59 and today\'s price lose theirs too', async () => {
+    const withheldOne = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['54_price']), placeholderOn54);
+    const result = await runOn(M1.graph, withheldOne as Json);
+    expect(chances(result)).toEqual({});
+    const dr = warningsOf(result).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
+    expect(dr?.option_ids ? [...dr.option_ids].sort() : null).toEqual(['59_price', 'current_price']);
+  });
+
+  it('CONTROL: nothing left to withhold → the same object back (no second warning)', () => {
+    const allGone = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['59_price', 'current_price', '54_price']), placeholderOn54);
+    expect(withholdGoalFiguresForUntestableTarget(allGone, M1.graph)).toBe(allGone);
   });
 });
