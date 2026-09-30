@@ -45,6 +45,18 @@ function headers({ assistKey, bearer }) {
   return h;
 }
 
+/**
+ * A READ retried once on a network error (undici's "fetch failed" — measured once on a Lab host re-attach while staging
+ * answered /healthz 200). Never used for the turn: a turn is not a read.
+ */
+async function read(ctx, path, body, ms) {
+  try { return await post(ctx, path, body, ms); }
+  catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    return post(ctx, path, body, ms);
+  }
+}
+
 async function post(ctx, path, body, ms) {
   // `bearer` may be a token or an async token source (accountTokenSource), resolved per call so a long session refreshes.
   const bearer = typeof ctx.bearer === 'function' ? await ctx.bearer() : ctx.bearer;
@@ -115,8 +127,8 @@ export async function readback(opts) {
     const h = await ctx.fetchImpl(`${ctx.base}/healthz`, { signal: AbortSignal.timeout(20000) });
     cee_build = (await h.json())?.build ?? null;
   } catch { cee_build = null; }
-  const graphRead = await post(ctx, `/assist/v1/scenarios/${sid}/graph`, {}, opts.timeoutMs ?? 60000);
-  const versionsRead = await post(ctx, `/assist/v1/scenarios/${sid}/versions`, {}, opts.timeoutMs ?? 60000);
+  const graphRead = await read(ctx, `/assist/v1/scenarios/${sid}/graph`, {}, opts.timeoutMs ?? 60000);
+  const versionsRead = await read(ctx, `/assist/v1/scenarios/${sid}/versions`, {}, opts.timeoutMs ?? 60000);
   const g = graphRead.http === 200 ? graphRead.json : null;
   const { version_binding, model_version } = bindingOf({ graphRead, versionsRead, signedIn: Boolean(ctx.bearer) });
   const briefText = typeof g?.brief_text === 'string' ? g.brief_text : null;

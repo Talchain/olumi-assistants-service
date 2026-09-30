@@ -90,6 +90,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   // ── FRESH (authentic M1) — the served CEE is the host. Credentials: the assist key is read from the CEE env file
   // (never copied); the Lab account file (600-mode, outside every repo) signs in and refreshes its own token.
   type Readback = Record<string, unknown> & { version_binding: string; brief_text: string | null; graph: unknown;
+    http?: { graph?: number; versions?: number };
     graph_identity_hash: { value?: string } | null; model_version: { version_id?: string } | null; raw?: unknown };
   const seam = await import(pathToFileURL(resolve('scripts/m1-host-seam/readback.mjs')).href) as {
     readback(o: Record<string, unknown>): Promise<Readback>;
@@ -108,9 +109,32 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     : undefined;
   const host = { base: ceeBase, assistKey, bearer, fetchImpl: network };
   const fresh = new Set<string>();
+  // Build's guard (scripts/ai-experience-lab/canonical-m1-guard.mjs) is the ONE binding rule for M2 (Build 5908596263):
+  // the first M2 on a fresh model binds only the brief's construction; after a turn moved the version, the new current one.
+  const guard = await import(pathToFileURL(resolve('scripts/ai-experience-lab/canonical-m1-guard.mjs')).href) as {
+    bindCanonicalM1(o: Record<string, unknown>): { accepted: boolean; withheld_reason?: string; binding?: Record<string, unknown> };
+    settleCanonicalM2(o: Record<string, unknown>): { accepted: boolean; proposals: unknown[]; withheld_reason: string | null; receipt?: unknown };
+  };
+  const lastVersion = new Map<string, string | null>();
+  // The served CEE is the authority, not this process: after a host restart a fresh scenario re-attaches by reading it
+  // back (its owner's token decides whether it can be read at all).
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const attachFresh = async (sid: unknown): Promise<boolean> => {
+    if (typeof sid !== 'string') return false;
+    if (fresh.has(sid)) return true;
+    if (!assistKey || !UUID.test(sid) || sessions.has(sid)) return false;
+    const rb = await seam.readback({ ...host, scenarioId: sid });
+    if (rb.http?.graph !== 200 || rb.graph === null) return false;
+    fresh.add(sid); lastVersion.set(sid, rb.model_version?.version_id ?? null);
+    return true;
+  };
+  const edited = new Set<string>();
   const view = (rb: Readback) => {
     const { raw: _raw, ...rest } = rb;
-    return { ...rest, model_version_id: rb.model_version?.version_id ?? null, withheld_reason: seam.withheldReason(rb) };
+    // A fresh session's id IS its scenario id; every readback carries it (Build 5908635393: the UI rejects a readback
+    // without its session).
+    return { session_id: rb.scenario_id, ...rest, model_version_id: rb.model_version?.version_id ?? null,
+      withheld_reason: seam.withheldReason(rb) };
   };
   const readFresh = async (sid: string) => {
     const rb = await seam.readback({ ...host, scenarioId: sid });
@@ -155,7 +179,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     fresh: { host: ceeBase, available: typeof assistKey === 'string' && assistKey.length > 0, signed_in: bearer !== undefined } }));
   app.get('/lab/session/:id', async (req, reply) => {
     const sid = (req.params as { id: string }).id;
-    if (fresh.has(sid)) return { session_id: sid, mode: 'fresh', ...view(await readFresh(sid)) };
+    if (await attachFresh(sid)) return { mode: 'fresh', ...view(await readFresh(sid)) };
     if (!sessions.has(sid)) return reply.code(404).send({ error: 'Lab session not found; reset to start again.' });
     return { session_id: sid, arm: sessions.get(sid), graph: graphs.get(sid) };
   });
@@ -172,8 +196,9 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
         const turn = await seam.buildFromBrief({ ...host, brief: body.brief.trim() });
         fresh.add(turn.scenario_id);
         const rb = await readFresh(turn.scenario_id);
+        lastVersion.set(turn.scenario_id, rb.model_version?.version_id ?? null);
         const { response: _response, ...turnView } = turn;
-        return { session_id: turn.scenario_id, mode: 'fresh', ...view(rb), turn: turnView };
+        return { mode: 'fresh', ...view(rb), turn: turnView };
       } catch (error) {
         return reply.code(502).send({ error: `The CEE host could not build the model: ${error instanceof Error ? error.message : String(error)}` });
       } finally { busy = false; }
@@ -194,7 +219,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   let busy = false;
   // The opt-in M2 child reads only this session's current brief/model and the existing pinned MM-1 contract.
   // It has no session store or model-write handle. Only validated proposals may reach the browser.
-  async function callReadOnlyM2(snapshot: { session_id: string; brief: string; graph: unknown }) {
+  async function callReadOnlyM2(snapshot: { session_id: string; brief: string; graph: unknown } | { canonical_binding: Record<string, unknown> }) {
     const script = resolve('scripts/ai-experience-lab/m2-runner.mjs');
     return await new Promise<Record<string, unknown>>((done, fail) => {
       const child = spawn(process.execPath, ['--import', 'tsx', script], {
@@ -219,31 +244,43 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   app.post('/lab/widen', async (req, reply) => {
     if (!m2Enabled) return reply.code(404).send({ error: 'Live M2 is not enabled in this preview.' });
     const sid = (req.body as { session_id?: unknown })?.session_id;
-    if (typeof sid === 'string' && fresh.has(sid)) {
+    if (typeof sid === 'string' && await attachFresh(sid)) {
       if (busy) return reply.code(409).send({ error: 'Another Lab call is still running.' });
       busy = true;
       try {
-        // J1: read before, withhold unless bound, read after, withhold unless it is the SAME model.
+        // J1: read before and bind (Build's guard), M2 on the bound model only, read after and settle (same model).
         const before = await readFresh(sid);
-        if (!seam.cardsAllowed(before)) return reply.code(409).send({ error: seam.withheldReason(before), withheld_reason: seam.withheldReason(before), readback: view(before) });
-        const result = await callReadOnlyM2({ session_id: sid, brief: before.brief_text!, graph: clone(before.graph) });
+        if (!seam.cardsAllowed(before)) {
+          return reply.code(409).send({ error: seam.withheldReason(before), withheld_reason: before.version_binding, readback: view(before) });
+        }
+        const bound = guard.bindCanonicalM1({ session_id: sid, scenario_id: sid, readback: before,
+          require_construction_current: !edited.has(sid) });
+        if (!bound.accepted || !bound.binding) {
+          return reply.code(409).send({ error: 'Not shown: this model could not be tied to its saved version.',
+            withheld_reason: bound.withheld_reason, readback: view(before) });
+        }
+        const result = await callReadOnlyM2({ canonical_binding: bound.binding });
         const after = await readFresh(sid);
-        const stale = !seam.sameModel(before, after);
+        const settled = guard.settleCanonicalM2({ binding: bound.binding, readback: after, m2: result });
         if (m2Evidence && result.receipt) appendFileSync(m2Evidence, JSON.stringify({
-          timestamp: new Date().toISOString(), head, source_hash, mode: 'fresh', stale,
-          graph_identity_hash: before.graph_identity_hash?.value, model_version_id: before.model_version?.version_id, ...result.receipt as object,
+          timestamp: new Date().toISOString(), head, source_hash, mode: 'fresh', settled: settled.accepted,
+          withheld_reason: settled.withheld_reason, ...result.receipt as object,
         }) + '\n');
-        if (stale) return reply.code(409).send({ error: 'The model changed during M2; its proposals were withheld.', withheld_reason: 'model_changed_during_m2', readback: view(after) });
+        if (settled.withheld_reason === 'earlier_model') {
+          return reply.code(409).send({ error: 'The model changed during M2; its proposals were withheld.', withheld_reason: 'earlier_model', readback: view(after) });
+        }
         if (!result.receipt) return reply.code(502).send({ error: 'M2 could not finish; nothing was shown.' });
-        return { accepted: result.accepted === true, proposals: result.accepted === true ? result.proposals : [],
-          withheld_reason: result.accepted === true ? null : 'proposal_validation_or_provider_incomplete',
-          graph_identity_hash: before.graph_identity_hash?.value ?? null, model_version_id: before.model_version?.version_id ?? null,
+        const identity = bound.binding as { graph_identity_hash?: { value?: string }; model_version?: { version_id?: string } };
+        return { accepted: settled.accepted, proposals: settled.accepted ? settled.proposals : [],
+          withheld_reason: settled.accepted ? null : settled.withheld_reason,
+          graph_identity_hash: identity.graph_identity_hash?.value ?? null, model_version_id: identity.model_version?.version_id ?? null,
           version_binding: before.version_binding,
           model: (result.receipt as { model?: string }).model,
           graph_hash: (result.receipt as { graph_hash?: string }).graph_hash,
           latency_ms: (result.receipt as { latency_ms?: number }).latency_ms };
-      } catch {
-        return reply.code(502).send({ error: 'M2 could not finish; nothing was shown.' });
+      } catch (error) {
+        return reply.code(502).send({ error: 'M2 could not finish; nothing was shown.',
+          detail: error instanceof Error ? error.message : String(error) });
       } finally { busy = false; }
     }
     if (typeof sid !== 'string' || !sessions.has(sid)) return reply.code(404).send({ error: 'Start a Lab session first.' });
@@ -273,7 +310,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
   app.post('/lab/turn', async (req, reply) => {
     const body = req.body as { session_id?: string; message?: string };
     const sid = body?.session_id;
-    if (sid && fresh.has(sid)) {
+    if (sid && await attachFresh(sid)) {
       if (typeof body.message !== 'string' || !body.message.trim() || body.message.length > 12000) {
         return reply.code(400).send({ error: 'Enter a message (maximum 12,000 characters).' });
       }
@@ -282,6 +319,10 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
       try {
         const turn = await seam.sendTurn({ ...host, scenarioId: sid, message: body.message });
         const rb = await readFresh(sid);
+        // A turn that moved the current version is an approved edit: the next M2 binds the new current version.
+        const now = rb.model_version?.version_id ?? null;
+        if (lastVersion.has(sid) && now !== lastVersion.get(sid)) edited.add(sid);
+        lastVersion.set(sid, now);
         const receipt = { timestamp: new Date().toISOString(), head, source_hash, session_id: sid, mode: 'fresh',
           status: turn.http, latency_ms: Date.now() - start, message: body.message, response: turn.response };
         appendFileSync(evidence, JSON.stringify({ ...receipt, readback: rb }) + '\n');

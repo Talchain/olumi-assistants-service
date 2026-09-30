@@ -162,3 +162,25 @@ test('an async token source is resolved per call and sent as the bearer', async 
   assert.equal(rb.version_binding, 'bound');
   assert.deepEqual(seen.filter((s) => s.headers.authorization).map((s) => s.headers.authorization), ['Bearer t1', 'Bearer t2']);
 });
+
+test('a read retries once on a network error; an HTTP refusal is never retried; the turn is never retried', async () => {
+  const { sendTurn } = await import('./readback.mjs');
+  const sid = '44444444-4444-4444-8444-444444444444';
+  const counts = {};
+  let failGraphOnce = true;
+  const fetchImpl = async (url) => {
+    const path = new URL(url).pathname;
+    counts[path] = (counts[path] ?? 0) + 1;
+    if (path.endsWith('/graph') && failGraphOnce) { failGraphOnce = false; throw new TypeError('fetch failed'); }
+    if (path === '/agent/v1/turn') throw new TypeError('fetch failed');
+    const body = path === '/healthz' ? {} : path.endsWith('/graph') ? graphRead().json : { schema: 'model_versions_list.v2', versions: [], current_version_id: null };
+    const status = path.endsWith('/versions') ? 403 : 200;
+    return { status, text: async () => JSON.stringify(body), json: async () => body };
+  };
+  const rb = await readback({ base: 'https://c', assistKey: 'k', bearer: 't', scenarioId: sid, fetchImpl });
+  assert.equal(counts[`/assist/v1/scenarios/${sid}/graph`], 2);
+  assert.equal(counts[`/assist/v1/scenarios/${sid}/versions`], 1);
+  assert.equal(rb.version_binding, 'missing');
+  await assert.rejects(sendTurn({ base: 'https://c', assistKey: 'k', scenarioId: sid, message: 'm', fetchImpl }), /fetch failed/);
+  assert.equal(counts['/agent/v1/turn'], 1);
+});
