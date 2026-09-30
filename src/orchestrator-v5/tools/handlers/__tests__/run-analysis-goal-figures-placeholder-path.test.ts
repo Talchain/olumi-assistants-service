@@ -157,6 +157,14 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     expect(w.message).not.toContain('Give a figure');
   });
 
+  it('CONTROL (AIQ 5903627210): without the user\'s downtime limit, the same levelled link IS asked for — the limit alone decides', () => {
+    const g = clone(F.graph);
+    g.goal_constraints = [];
+    const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w.message).toContain('Give a figure for how ‘Migration downtime’ moves ‘Monthly cloud spend’ and Olumi will use it.');
+    expect(w.message).not.toContain('only guessed');
+  });
+
   it('CONTROL (R3 row): the status quo moves nothing, so its earned 0 stays', async () => {
     const r = await runOn(F.graph);
     const env = r.enrichment ?? r;
@@ -173,9 +181,12 @@ describe('(S) at the call site: the stored run withholds what the placeholder mo
     expect(w[0]!.message.length).toBeLessThanOrEqual(400);
     expect(w[0]!.message).toContain('Olumi hasn’t sized how ‘Monthly GCP cost saving’ and ‘Migration downtime’ move ‘Monthly cloud spend’');
     // The saving holds no level, so its size alone would add to EVERY option ("Stay on AWS" too): named, not asked.
-    // Migration downtime holds one (weeks), so that link is the one asked for.
-    expect(w[0]!.message).toContain('Give a figure for how ‘Migration downtime’ moves ‘Monthly cloud spend’ and Olumi will use it.');
-    expect(w[0]!.message).not.toContain('Give a figure for how ‘Monthly GCP cost saving’');
+    // ⛔ AIQ 5903604206 / 5903627210 (supersedes this row's earlier "Give a figure for how 'Migration downtime' moves …"):
+    // downtime is the node the user's "≤ 2 weeks" limit watches, and its link into spend is Olumi's guess. It is said as a
+    // guess and NEVER asked for a size (the answer would make Olumi's invented cause the user's); no removal is offered.
+    expect(w[0]!.message).not.toContain('Give a figure');
+    expect(w[0]!.message).toContain('Olumi only guessed that ‘Migration downtime’ changes ‘Monthly cloud spend’, so you aren’t asked to size that link.');
+    expect(w[0]!.message).not.toMatch(/take (the|it|that) link out|checked on its own|Olumi’s estimate:/);
     const chance = goalChanceWithheldForAgent({ enrichment: env });
     expect(chance).toMatchObject({ withheld: true, note: PLACEHOLDER_PATH_NOTE });
     expect(chance!.option_ids!.slice().sort()).toEqual([PHASE, SWITCH]);
