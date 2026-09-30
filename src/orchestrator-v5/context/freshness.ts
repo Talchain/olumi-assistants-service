@@ -44,6 +44,7 @@ import {
   extractAnalysedOptionIds,
 } from './option-identity.js';
 import { isAnalysisRefusalFact } from './analysis-refusal-continuity.js';
+import { normalizeRunGoalUnit } from './run-goal-unit.js';
 
 /**
  * Four-valued freshness state. Reachable from new code paths only as
@@ -843,13 +844,13 @@ function compareRunGoalUnitSnapshot(
     ? goals.length === 1 ? goals[0]?.id : undefined : graph.goal_node_id;
   const selected = goals.filter((node) => node?.id === selectedId);
   if (selected.length !== 1 || selectedId !== goalAtRun.node_id) return 'unverified';
-  // Match pickGoalThresholdTrio: persisted null/empty means no unit was sent.
   const persistedUnit = selected[0]?.goal_threshold_unit;
-  const currentUnit = persistedUnit === null || persistedUnit === '' ? undefined : persistedUnit;
+  // Refuse malformed current types before the shared sent-unit normalization.
+  if (persistedUnit !== undefined && persistedUnit !== null && typeof persistedUnit !== 'string') return 'unverified';
+  const currentUnit = normalizeRunGoalUnit(persistedUnit);
   // Both absent means no unit was asserted by either input. A removal/addition
   // is a change; an invalid supplied unit is never repaired to GBP here.
-  if ((goalAtRun.unit !== undefined && (typeof goalAtRun.unit !== 'string' || goalAtRun.unit.trim() === ''))
-    || (currentUnit !== undefined && (typeof currentUnit !== 'string' || currentUnit.trim() === ''))) return 'unverified';
+  if (goalAtRun.unit !== undefined && normalizeRunGoalUnit(goalAtRun.unit) === undefined) return 'unverified';
   return goalAtRun.unit === currentUnit ? 'match' : 'unit_changed';
 }
 

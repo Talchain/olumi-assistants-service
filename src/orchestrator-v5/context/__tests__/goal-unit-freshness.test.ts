@@ -82,15 +82,25 @@ describe('the selected Run goal unit is part of currentness', () => {
     expect(derive(noUnit)).toMatchObject({ reason: 'goal_unit_changed' });
   });
 
-  it.each([null, ''])('an omitted outbound unit becomes current after rerun from persisted %j', (unit) => {
+  it.each([null, '', 'x'.repeat(65)])('an omitted outbound unit becomes current after rerun from persisted %j', (unit) => {
     const rerun = fact({ goal: { node_id: 'mrr', label: 'Monthly revenue', target_raw: 85_000 } });
     expect(derive(graph(unit), rerun)).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match',
       graph_hash_at_run: HASH, current_graph_hash: HASH, computed_at: AT, selected_fact_index: 0 });
     expect(derive(graph(unit))).toMatchObject({ freshness: 'stale', reason: 'goal_unit_changed' });
   });
 
+  it.each(['x'.repeat(64), ' GBP/month ', ' '])('keeps valid sent unit bytes exactly: %j', (unit) => {
+    expect(derive(graph(unit), fact({ goal: { node_id: 'mrr', unit } })).freshness).toBe('fresh');
+    expect(derive(graph(unit), fact({ goal: { node_id: 'mrr' } })).reason).toBe('goal_unit_changed');
+  });
+
+  it('does not equate padded sent units with trimmed units', () => {
+    expect(derive(graph(' GBP/month '))).toMatchObject({ freshness: 'stale', reason: 'goal_unit_changed' });
+  });
+
   it.each([null, { goal: [] }, { goal: {} }, { goal: { node_id: 'mrr', unit: 0 } },
-    { goal: { node_id: 'mrr', unit: null } }, { goal: { node_id: 'mrr', unit: '' } }])(
+    { goal: { node_id: 'mrr', unit: null } }, { goal: { node_id: 'mrr', unit: '' } },
+    { goal: { node_id: 'mrr', unit: 'x'.repeat(65) } }])(
     'fails closed on a malformed present snapshot: %j', (snapshot) => {
       expect(derive(graph(), fact(snapshot))).toMatchObject({ freshness: 'stale', reason: 'goal_snapshot_unverified' });
     });
