@@ -711,6 +711,12 @@ export interface AnalysisResultHeadlineInput {
    */
   readonly constraint_unevaluated?: boolean;
   /**
+   * ⛔ The goal node holds the USER's floor (`heldGoalPointsUp`, `goal-direction.ts`): higher is better by their own
+   * words (AIQ #75 5901136155). PLoT's GOAL_DIRECTION_UNATTESTED then says only that no direction was SENT (CEE never
+   * sends `maximise`), so the headline must not say the direction was assumed. Omitted / false ⇒ today's frame.
+   */
+  readonly goal_points_up_as_held?: boolean;
+  /**
    * T1. True for the constraint verdict's `identity_unresolved` state: the
    * producer plainly evaluated constraints, but not one of the ids it returned
    * reconciles with anything the user ratified.
@@ -901,7 +907,7 @@ export function describeAnalysisHeadline(
  * separate, unchanged precondition.
  */
 export function describeGoalFrame(input: AnalysisResultHeadlineInput): GoalFrame {
-  return resolveGoalFrame(input.enrichment);
+  return resolveGoalFrame(input.enrichment, input.goal_points_up_as_held === true);
 }
 
 /**
@@ -936,8 +942,9 @@ export function describeGoalFrame(input: AnalysisResultHeadlineInput): GoalFrame
  * can still score the goal on such a run is an open question for the owner
  * (see the commit body); it is deliberately not decided here.
  */
-function resolveGoalFrame(enrichment: Record<string, unknown>): GoalFrame {
-  const directionAssumed = hasGoalDirectionUnattestedDisclosure(enrichment);
+function resolveGoalFrame(enrichment: Record<string, unknown>, goalPointsUpAsHeld = false): GoalFrame {
+  // A held floor is the user's direction: DIRECTION then means only "not sent", never "assumed" (AIQ 5901136155).
+  const directionAssumed = !goalPointsUpAsHeld && hasGoalDirectionUnattestedDisclosure(enrichment);
   const thresholdNotConvertible = hasGoalThresholdNotConvertibleDisclosure(enrichment);
   if (!directionAssumed && !thresholdNotConvertible) return 'goal_framed';
   if (!directionAssumed) return 'attainment_untested';
@@ -1130,7 +1137,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // sentence says why, the one the run's own data makes true; it rides FIRST of
   // the tails, on every emitted case, budgeted on top like its siblings. It
   // never decides a case: see `leadCap`.
-  const goalFrame = resolveGoalFrame(enrichment);
+  const goalFrame = resolveGoalFrame(enrichment, input.goal_points_up_as_held === true);
   const goalUntestable = goalFrame !== 'goal_framed';
   const goalUntestedSuffix = GOAL_FRAME_SENTENCE[goalFrame];
   const suffix = `${goalUntestedSuffix}${narrationTail}${reducedSamplesSuffix}${statusSuffix(status_kind)}`;
