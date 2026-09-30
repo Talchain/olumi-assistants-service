@@ -289,3 +289,36 @@ describe('a definitional link (money lost is money not raised) is no Olumi guess
     expect(p5(g).map((f) => f.lever)).toEqual([expect.stringMatching(/distraction/i)]);
   });
 });
+
+/**
+ * ⭐ ROW 3 — THE USER'S OWN SIZE IS NEVER OLUMI'S GUESS (MODEL GENERATION 5918011036; AIQ 5918035214; P0 PARTNER 5918060026
+ * row 3). Paul's funding: "each qualified investor conversation brings about £30,000" is written `magnitude: 'user_stated'`
+ * with a £ natural effect, and ALSO `defaulted: true` because admission projected its spread. #2389 writes `user_stated`
+ * only where the brief writes THAT link's figure, so the goal leaves `exploratory` once the user's own sizes are given.
+ */
+describe('row 3: a size construction credits to the user is no Olumi guess, even with a projected spread', () => {
+  const F = JSON.parse(readFileSync(new URL('./fixtures/r3-funding-definitional-20260930.json', import.meta.url), 'utf8')).graph as Json;
+  const MEETINGS = (e: Json) => e.from === 'investment_firm_meetings' && e.to === 'securing_funding';
+  const RISK = (e: Json) => e.from === 'funding_lost_distraction' && e.to === 'securing_funding';
+  /** R3's graph with the risk proven definitional (off the path's guesses), and the meetings link sized as `magnitude`. */
+  const sizedAs = (magnitude: string): Json => {
+    const g = structuredClone(F);
+    const risk = g.edges.find(RISK);
+    Object.assign(risk.provenance, { definitional: true });
+    risk.provenance.natural_effect.strength_mean = risk.strength.mean;
+    const e = g.edges.find(MEETINGS);
+    e.provenance = { ...e.provenance, source: 'brief_extraction', magnitude };
+    e.defaulted = true;
+    return g;
+  };
+  const p5 = (g: Json) => { const v = targetTestabilityOf(g); return v.kind === 'not_testable' ? v.failures.filter((f) => f.precondition === 'P5') : []; };
+
+  it('GREEN: `user_stated` + `defaulted` (the served shape) → no guess on the path, nobody is asked to size it', () => {
+    expect(p5(sizedAs('user_stated'))).toEqual([]);
+  });
+
+  it('CONTROL: the same link sized by Olumi (`olumi_estimate`) → still the lever asked about', () => {
+    expect(p5(sizedAs('olumi_estimate')).map((f) => f.lever)).toEqual([expect.stringMatching(/investment firm/i)]);
+  });
+});
+

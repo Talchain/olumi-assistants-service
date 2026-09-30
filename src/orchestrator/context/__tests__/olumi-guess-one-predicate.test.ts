@@ -46,9 +46,8 @@ describe('P0 PARTNER\'s row table (5918060026): one cell each, on the shared pre
     expect(olumiGuessedLink(edge({ source: 'user_specified', magnitude: 'olumi_estimate' }), unitOf)).toBe(false);
   });
 
-  it('3 · PINNED: `magnitude: user_stated` + `defaulted` → still a guess until #2389 scopes the brief check to the link', () => {
-    // MG 5918011036 / AIQ 5918035214 / P0 PARTNER 5918144110: this flips to `false` in the change that scopes `sizeWritten`.
-    expect(olumiGuessedLink(edge({ source: 'brief_extraction', magnitude: 'user_stated' }, { defaulted: true }), unitOf)).toBe(true);
+  it('3 · `magnitude: user_stated` (+ `defaulted` from a projected spread; MG 5918011036, after #2389 scoped it) → no guess', () => {
+    expect(olumiGuessedLink(edge({ source: 'brief_extraction', magnitude: 'user_stated' }, { defaulted: true }), unitOf)).toBe(false);
     expect(olumiGuessedLink(edge({ source: 'brief_extraction', magnitude: 'user_stated' }), unitOf)).toBe(false);
   });
 
