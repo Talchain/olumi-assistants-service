@@ -402,6 +402,26 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
       expect(approveChipOf(t1)).toEqual([]);
     }, 180_000);
   }
+  // ⛔ A DECIMAL IS NOT A SENTENCE END (MG SUCCESSOR #75 5918338227, measured on staging `d3d28031`): with Paul's real
+  // target, "£1.2m", the level's quote was cut at "£1." ("…need at least £1"), so the target was not in its statement and
+  // his own £0 was refused `current_level_not_bound`: no card, so the funding goal had no today's level (DR row 4 P1).
+  for (const message of [
+    'We have secured £0 so far and need at least £1.2m.',
+    'We have about £180k in the bank and spend roughly £45k a month, so about 4 months of runway. We have secured £0 so far and need at least £1.2m.',
+  ]) {
+    it(`RED: "${message.slice(-52)}" → his £0 secured rides the £1.2m target card`, async () => {
+      graphOf.set(SCENARIO, fundingSeed());
+      script = [
+        () => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 1200000, unit: '£', rationale: 'Paul stated his target.', current_level: { value: 0, unit: '£' } }),
+        () => say('Shall I record it?'),
+      ];
+      const t1 = await turn({ message });
+      const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+      expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+      expect(approveChipOf(t1)).toHaveLength(1);
+    }, 180_000);
+  }
+
   it('CONTROL: Paul\'s answer — his stated £0 secured rides the target card (the positive control)', async () => {
     graphOf.set(SCENARIO, fundingSeed());
     const t1 = await proposeFunding(0);

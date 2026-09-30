@@ -566,9 +566,14 @@ function writtenIn(text: string, raw: number): { written: string; quote: string 
     const suffix = (/(k|m|bn)$/i.exec(token)?.[1] ?? '').toLowerCase();
     const n = Number(token.replace(/[£$€,\s]/g, '').replace(/(k|m|bn)$/i, ''));
     if (!Number.isFinite(n) || Math.abs(n * (scale[suffix] ?? 1) - raw) > 1e-9 * Math.max(1, raw)) continue;
-    const start = Math.max(text.lastIndexOf('.', m.index!) + 1, text.lastIndexOf('\n', m.index!) + 1, 0);
-    const endAt = [text.indexOf('.', m.index! + token.length), text.indexOf('\n', m.index! + token.length)].filter((i) => i >= 0);
-    const quote = text.slice(start, endAt.length > 0 ? Math.min(...endAt) : text.length).trim().slice(0, 160);
+    // ⛔ A sentence ends at . ? ! followed by a space (or the text's end), or at a new line — NEVER at a decimal point
+    // (MG SUCCESSOR #75 5918338227, measured): "We have secured £0 so far and need at least £1.2m." was quoted as "…at
+    // least £1", so the target was not in the level's statement and Paul's own £0 was refused `current_level_not_bound`.
+    let start = 0;
+    for (const b of text.slice(0, m.index!).matchAll(/[.?!](?=\s)|\n/g)) start = b.index! + 1;
+    const tail = m.index! + token.length;
+    const endRel = text.slice(tail).search(/[.?!](?=\s|$)|\n/);
+    const quote = text.slice(start, endRel === -1 ? text.length : tail + endRel).trim().slice(0, 160);
     return { written: token, quote: quote === '' ? token : quote };
   }
   return null;
