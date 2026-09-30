@@ -485,6 +485,8 @@ export async function proposeGoalCurrentLevel(
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   // Carried INSIDE the goal's one op, so this stays one goal-level proposal with one write.
   const rederived = rederivedEstimatedPart(g.nodes, goal.id, raw);
+  const earlierHeld = replaces === undefined ? null
+    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, goalUnit), withUnit(replaces));
   const proposal = createProposal({
     scenario_id: ctx.scenario_id,
     user_id: ctx.authenticated_user_id,
@@ -499,7 +501,8 @@ export async function proposeGoalCurrentLevel(
       `Record the current level of "${goal.label}" as your figure: ` +
       (replaces !== undefined ? `${sayFigureRead(replaces, goalUnit ?? '')} → ${figure}` : figure) +
       ` (target ${withUnit(target)})` +
-      (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : ''),
+      (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
+      (earlierHeld !== null ? earlierHeld.label : ''),
   });
   deps.proposals.put(proposal);
   return {
@@ -524,6 +527,7 @@ export async function proposeGoalCurrentLevel(
           `${sayPartLevel(rederived.now, rederived.unit)} (was ${sayPartLevel(rederived.was, rederived.unit)}) so that ` +
           `the product gives their figure — say it stays Olumi's estimate, never the user's`
         : '') +
+      (earlierHeld !== null ? earlierHeld.note : '') +
       ', and call authorise_change with this proposal_id only once they agree.',
   };
 }
@@ -545,6 +549,56 @@ function writtenIn(text: string, raw: number): { written: string; quote: string 
     return { written: token, quote: quote === '' ? token : quote };
   }
   return null;
+}
+
+/**
+ * ⛔ THE USER'S EARLIER FIGURE STILL SITS ON OTHER NODES (R3 #75 5902892629 r1; AIQ 5902905975; DL 5902916137 (2c)).
+ * Served cut-costs on `f074916` (scenario 2d85ed7f): the brief's "£45k" was the goal's level AND "AWS monthly cost at full
+ * workload" (`brief_extraction`), which both GCP options also set at £45k. The user's "£50k, not £45k" corrected the goal
+ * alone, so the model held £50k today against £45k on the component, and the reply called that £45k "supplied by Olumi".
+ * Every non-goal node that holds the goal's earlier figure as the USER's (the same amount in the goal's unit, a source
+ * `classifyValueSource` rules `user_stated`; the unit by `unitComparisonKey`, so "GBP per month" is "£/month"), with the
+ * options that set it there. Named on the approval, never changed by it: whether that part moves too is the user's call.
+ * ⛔ A RATIFIED source (`user_confirmed`, `user_assumption`) is Olumi's number the user endorsed, never theirs (R3 CR
+ * 5903120325; AIQ 5903126944): calling it "THEIR figure" is false authorship the other way round. Pure.
+ */
+function nodesHoldingEarlierFigure(
+  g: GoalLevelRead,
+  goalId: string,
+  earlier: number,
+  goalUnit: string | undefined,
+): { label: string; options: string[]; fromBrief: boolean }[] {
+  if (goalUnit === undefined) return [];
+  const users = (source: unknown): boolean => classifyValueSource(source) === 'user_stated';
+  const rawNodes = Array.isArray((g.raw as { nodes?: unknown }).nodes) ? (g.raw as { nodes: Record<string, unknown>[] }).nodes : [];
+  const options = rawNodes.filter((n) => n?.kind === 'option');
+  return g.nodes
+    .filter((n) => n.id !== goalId && n.kind !== 'goal' && n.kind !== 'option' && n.kind !== 'decision')
+    .filter((n) => n.observed_state?.raw_value === earlier && users(n.observed_state?.source)
+      && typeof n.observed_state?.unit === 'string' && unitComparisonKey(n.observed_state.unit) === unitComparisonKey(goalUnit))
+    .map((n) => ({
+      label: n.label,
+      fromBrief: n.observed_state?.source === 'brief_extraction',
+      options: options.filter((o) => {
+        const iv = (o.interventions ?? {}) as Record<string, unknown>;
+        const set = iv[n.id] as { raw_value?: unknown } | undefined;
+        return set !== undefined && set !== null && typeof set === 'object' && set.raw_value === earlier;
+      }).map((o) => String(o.label ?? o.id)),
+    }));
+}
+
+/** The words for `nodesHoldingEarlierFigure`: one clause for the approval, one instruction for the Agent. */
+function sayEarlierFigureHeld(held: readonly { label: string; options: string[]; fromBrief: boolean }[], earlier: string): { label: string; note: string } | null {
+  if (held.length === 0) return null;
+  const names = held.map((h) => `"${h.label}"`).join(' and ');
+  const setBy = [...new Set(held.flatMap((h) => h.options))];
+  const options = setBy.length === 0 ? '' : ` (${setBy.map((o) => `"${o}"`).join(' and ')} ${setBy.length === 1 ? 'sets it' : 'set it'} there too)`;
+  return {
+    label: `. ${names} still ${held.length === 1 ? 'holds' : 'hold'} your earlier ${earlier}${options}; this does not change ${held.length === 1 ? 'it' : 'them'}`,
+    // "from the brief" only when every part's figure came from it (R3 nit 5903120325): a `user_override` was typed in chat.
+    note: `. Say plainly that ${names} still ${held.length === 1 ? 'holds' : 'hold'} their earlier ${earlier}${options}: that is THEIR figure`
+      + `${held.every((h) => h.fromBrief) ? ' from the brief' : ''}, never a value Olumi supplied, and this approval does not change it; ask whether it should change too`,
+  };
 }
 
 /** A goal declared as a product (`nonlinear_identity`) of levelled parts: their names and what they multiply to. */
@@ -640,6 +694,8 @@ function changeGoalLevel(
   // Olumi part to re-derive) still multiplies to the old figure; that is said, and the Run refuses it (ISL
   // `identity_inconsistent`) — never scored silently on the old figure.
   const product = rederived === null ? productStillGives(g.nodes, goal) : null;
+  const earlierHeld = replaces === undefined ? null
+    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, goalUnit), withUnit(replaces));
   const productSaid = product === null ? '' : `"${goal.label}" is worked out as ${product.parts}, and those figures still give ` +
     `${withUnit(product.value)}, so the Run cannot use your ${withUnit(raw)} until one of them changes`;
   const proposal = createProposal({
@@ -662,7 +718,8 @@ function changeGoalLevel(
       (replaces !== undefined ? `${sayFigureRead(replaces, goalUnit ?? '')} → ${figure}` : figure) +
       (change !== '' ? ` (your target: ${change})` : '') +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
-      (productSaid !== '' ? `. ${productSaid}` : ''),
+      (productSaid !== '' ? `. ${productSaid}` : '') +
+      (earlierHeld !== null ? earlierHeld.label : ''),
   });
   deps.proposals.put(proposal);
   return {
@@ -681,6 +738,7 @@ function changeGoalLevel(
       (rederived !== null ? `, and that Olumi's estimate of "${rederived.label}" is re-derived with it and stays Olumi's` : '') +
       (productSaid !== '' ? `. Say plainly: ${productSaid}` : '') +
       (levelReading !== null ? `. Reading "${goal.label}" as what they call it stays Olumi's reading; say so` : '') +
+      (earlierHeld !== null ? earlierHeld.note : '') +
       '. Call authorise_change with this proposal_id only once they agree.',
   };
 }
