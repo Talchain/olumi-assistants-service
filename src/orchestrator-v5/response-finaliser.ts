@@ -464,12 +464,16 @@ export function finaliseV5Response(
   // have an unparseable graph, so that a freshness-only carrier must be
   // synthesised?"* — and it is inert under supersession anyway (it requires
   // `'unknown'`; supersession requires `'none'`).
+  const exitFreshnessForStamp = exitDerivationFor(ctx);
+  const freshnessForStamp = ctx.analysisStateFreshness ?? ctx.freshness
+    ?? (exitFreshnessForStamp?.reason === 'goal_unit_changed' || exitFreshnessForStamp?.reason === 'goal_snapshot_unverified'
+      ? exitFreshnessForStamp : undefined);
   const stamped: OlumiResponse = payloadForStamp
     ? {
         ...scrubbed,
         analysis_ready: attachComputedAt(
           payloadForStamp,
-          ctx.analysisStateFreshness ?? ctx.freshness,
+          freshnessForStamp,
         ),
       }
     : { ...scrubbed };

@@ -487,10 +487,13 @@ describe('goal-unit snapshot freshness clamps Run comparisons', () => {
       expect(out.run_delta).toBeUndefined();
       const graphless = finaliseV5Response({ ...response(newest), run_delta: fresh.run_delta }, {
         scenarioId: SCENARIO_ID, priorFacts: BOUND_PAIR, mayNameLeadingOption: true,
-        graph: null, exitFreshness: stale,
+        graph: null, exitFreshness: stale, analysisReady: { options: [], status: 'ready', goal_node_id: 'goal' },
       });
       expect(graphless.analysis_state?.run_state.kind).toBe('complete_stale');
       expect(graphless.run_delta).toBeUndefined();
+      expect(graphless.analysis_ready).toMatchObject({ freshness: 'stale',
+        freshness_reason: reason === 'goal_unit_changed' ? 'your goal’s unit changed' : 'the saved goal’s unit could not be confirmed',
+        computed_at: base.computed_at, graph_hash_at_run: base.graph_hash_at_run, current_graph_hash: base.current_graph_hash });
       expect(out.blocks.some((b) => b.type === 'analysis_result')).toBe(false);
       const ordinary = finaliseV5Response(response(newest), {
         scenarioId: SCENARIO_ID, priorFacts: BOUND_PAIR, mayNameLeadingOption: true,
