@@ -47,7 +47,7 @@ function invocation(turnId: string): HandlerInvocation {
     payload: makeMessagePayload({ turn_id: turnId, scenario_id: SCENARIO,
       message: 'run analysis', turn_class: 'decide', stage: 'analyse' }),
     requestId: turnId, signal: new AbortController().signal, orientationText: '',
-  } as HandlerInvocation;
+  } as unknown as HandlerInvocation;
 }
 
 describe('approved Olumi option joins Run, stored fact and cold read', () => {

@@ -57,7 +57,7 @@ describe('pressing an Olumi option into the comparison', () => {
     expect(applied.kind, JSON.stringify(applied)).toBe('mutated');
     if (applied.kind !== 'mutated') return;
     expect(before).toEqual(snapshot);
-    const adopted = applied.graph.nodes.find((n: unknown) => (n as { id?: string }).id === 'suggested') as Record<string, unknown>;
+    const adopted = (applied.graph.nodes as unknown[]).find((n) => (n as { id?: string }).id === 'suggested') as Record<string, unknown>;
     expect(adopted).toMatchObject({ proposed_by: 'olumi', analysis_participation: 'included',
       interventions: { price: { value: 0.54, source: 'cee_hypothesis' } } });
     expect(applied.graph.edges).toEqual(before.edges);
@@ -87,7 +87,7 @@ describe('pressing an Olumi option into the comparison', () => {
     });
     expect(applied.kind, JSON.stringify(applied)).toBe('mutated');
     if (applied.kind !== 'mutated') return;
-    expect(applied.graph.nodes.find((n: unknown) => (n as { id?: string }).id === 'raise_price_to_54'))
+    expect((applied.graph.nodes as unknown[]).find((n) => (n as { id?: string }).id === 'raise_price_to_54'))
       .toMatchObject({ proposed_by: 'olumi', analysis_participation: 'included',
         interventions: option.interventions });
   });
