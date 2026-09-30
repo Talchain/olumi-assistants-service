@@ -96,10 +96,9 @@ export function qualifyOptionResultClaims(text: string, aliases: ReadonlyMap<str
       const before = answer.slice(lineStart, at);
       const after = answer.slice(at + raw.length, lineEnd);
       // A current reply may compare an earlier Run. Never apply today's level
-      // to that historical result, even when the result is listed on lines
-      // beneath a historical heading. A separate paragraph starts fresh.
-      const paragraphBefore = answer.slice(0, at).split(/\n\s*\n/).at(-1) ?? '';
-      const lastRunContext = [...paragraphBefore.matchAll(/\b(earlier|prior|previous|historical|current|latest)\s+(?:run|analysis|result)\b/gi)].at(-1);
+      // to that historical result, even beneath a Markdown heading and blank
+      // line. Only an explicit later current-Run marker supersedes it.
+      const lastRunContext = [...answer.slice(0, at).matchAll(/\b(earlier|prior|previous|historical|current|latest)\s+(?:run|analysis|result)\b/gi)].at(-1);
       if (/\b(?:brief|original(?:ly)?|you (?:said|wrote|named)|your words)\b/i.test(before)
         || (lastRunContext !== undefined && /^(?:earlier|prior|previous|historical)$/i.test(lastRunContext[1]!))) {
         at += raw.length; continue;

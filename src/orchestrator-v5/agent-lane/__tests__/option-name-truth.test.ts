@@ -52,14 +52,16 @@ describe('Agent result option names are bound to the current stored level', () =
     'Historical run — the leading option was Raise to £59.',
     'In the earlier run:\nRaise to £59: 20% of simulations.',
     'In the earlier run:\n- Raise to £59: 20% of simulations.\n- Raise to £59 led that run.',
+    'In the earlier run:\n\n- Raise to £59: 20% of simulations.',
+    '## Earlier run\n\nRaise to £59: 20% of simulations.',
   ])('does not give an earlier result the current £60 name: %s', (historical) => {
     expect(qualifyOptionResultClaims(historical, optionNameAliases(graph()))).toBe(historical);
   });
 
   it('can still name the current result after a separate historical section', () => {
-    const text = 'In the earlier run:\nRaise to £59: 20%.\n\nIn the current run:\nRaise to £59: 99%.';
+    const text = '## Earlier run\n\nRaise to £59: 20%.\n\n## Current run\n\nRaise to £59: 99%.';
     expect(qualifyOptionResultClaims(text, optionNameAliases(graph()))).toBe(
-      'In the earlier run:\nRaise to £59: 20%.\n\nIn the current run:\nRaise to £59 (set to £60/month): 99%.',
+      '## Earlier run\n\nRaise to £59: 20%.\n\n## Current run\n\nRaise to £59 (set to £60/month): 99%.',
     );
   });
 
