@@ -82,6 +82,8 @@ import {
 } from './compose/unrequested-analysis-confinement.js';
 import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ordering.js';
 import { projectGoalProbabilitiesForTransport } from './compose/goal-probability-transport.js';
+import { projectObjectiveContradictionSummary } from './coaching/objective-contradiction.js';
+import { readOptionResultSources } from '../orchestrator/context/option-result-source.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
@@ -1327,7 +1329,12 @@ function buildAnalysisResultBlockUnconfined(
     //
     // Conditional, never blanket: a leader-free summary ships byte-identical on
     // a withheld turn. See `projectAnalysisSummaryForWithheldClaim`.
-    summary: mayNameLeadingOption ? summary : projectAnalysisSummaryForWithheldClaim(summary),
+    summary: (() => {
+      const claimSafeSummary = readOptionResultSources(enrichment ?? {}).reduce(
+        (copy, records) => projectObjectiveContradictionSummary(copy, records, fact.result.goal_certainty), summary,
+      );
+      return mayNameLeadingOption ? claimSafeSummary : projectAnalysisSummaryForWithheldClaim(claimSafeSummary);
+    })(),
     // `null` is the schema's own honest value here (`leading_option_id:
     // z.string().nullable()`, boundary/blocks.ts — the key is REQUIRED, so
     // `null` is the strongest available "no leader is being put forward";
