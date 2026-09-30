@@ -75,9 +75,14 @@ const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** The goal's own limit row: the same statement as its target (DECISION-REPRESENTATION row 1). */
+/**
+ * The goal's own limit row: the target when the node carries no raw threshold. A DEADLINE on the goal ("within 18
+ * months") is DR row 3's time limit, not row 4's target: it is skipped, detected by `deadline_metadata` PRESENCE, the
+ * signal `compound-goals.ts` uses for the same split.
+ */
 function ownLimitRow(graph: Rec, goal: Rec): Rec | undefined {
   const rows = Array.isArray(graph.goal_constraints) ? graph.goal_constraints.filter(isRec) : [];
-  return rows.find((c) => c.node_id === goal.id && finite(c.value));
+  return rows.find((c) => c.node_id === goal.id && finite(c.value) && !isRec(c.deadline_metadata));
 }
 
 /** The goal's stated target figure: the node's own raw threshold, else the goal's own limit row's value. */

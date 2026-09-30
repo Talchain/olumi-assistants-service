@@ -114,35 +114,52 @@ describe('a target the Run can\'t test has no goal chance for any option (m1 aft
  * withholds whatever still shows, after every earlier withhold: this is AIQ's exact chain on m1's served body.
  */
 describe('AIQ\'s chain: an earlier per-option withhold never leaves another option\'s chance showing', () => {
-  const placeholderOn54 = { code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'Not shown. A link on the way is not sized.', severity: 'warning', node_ids: ['launch_promotion'], option_ids: ['54_price'] };
+  // The served m1 Run scores two options (£59 and today's price); (S) takes one of them.
+  const placeholderOnToday = { code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'Not shown. A link on the way is not sized.', severity: 'warning', node_ids: ['launch_promotion'], option_ids: ['current_price'] };
 
-  it('PRECONDITION: (S) on 54_price alone counts as "the run withheld goal figures", and £59 still shows 0.9929', () => {
-    const afterS = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['54_price']), placeholderOn54);
+  it('PRECONDITION: (S) on today\'s price alone counts as "the run withheld goal figures", took ITS chance, and £59 still shows 0.9929', () => {
+    const afterS = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['current_price']), placeholderOnToday);
     expect(runWithheldGoalFigures(afterS as Json)).toBe(true);
+    expect(chances(afterS)).toEqual({ '59_price': chances(M1.plot_body)['59_price'] });
     expect(chances(afterS)['59_price']).toBeCloseTo(0.9929, 4);
   });
 
   it('RED: then the DR gate → no option\'s chance; (S) keeps its own reason, the rest say DR\'s', () => {
-    const afterS = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['54_price']), placeholderOn54);
+    const afterS = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['current_price']), placeholderOnToday);
     const after = withholdGoalFiguresForUntestableTarget(afterS, M1.graph);
     expect(chances(after)).toEqual({});
     const codes = warningsOf(after).map((w) => w.code);
     expect(codes).toContain(GOAL_FIGURES_PLACEHOLDER_PATH);
     expect(codes).toContain(GOAL_FIGURES_TARGET_NOT_TESTABLE);
     const dr = warningsOf(after).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
-    expect([...dr.option_ids].sort()).toEqual(['59_price', 'current_price']);
+    expect([...dr.option_ids]).toEqual(['59_price']);
   });
 
-  it('RED, THROUGH THE HANDLER: a run body that already withheld 54_price alone → £59 and today\'s price lose theirs too', async () => {
-    const withheldOne = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['54_price']), placeholderOn54);
+  it('RED, THROUGH THE HANDLER: a run body that already withheld today\'s price alone → £59 loses its chance too', async () => {
+    const withheldOne = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['current_price']), placeholderOnToday);
     const result = await runOn(M1.graph, withheldOne as Json);
     expect(chances(result)).toEqual({});
     const dr = warningsOf(result).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
+    expect(dr?.option_ids ? [...dr.option_ids] : null).toEqual(['59_price']);
+  });
+
+  it('RED (the whole-run arm): a run that shows NO goal figure and was withheld by nothing still loses its leader and shares', () => {
+    const noFigures = clone(M1.plot_body);
+    const strip = (v: unknown): void => {
+      if (Array.isArray(v)) { v.forEach(strip); return; }
+      if (v === null || typeof v !== 'object') return;
+      const r = v as Json; delete r.probability_of_goal; delete r.probability_of_joint_goal; Object.values(r).forEach(strip);
+    };
+    strip(noFigures);
+    expect(runWithheldGoalFigures(noFigures)).toBe(false);
+    const after = withholdGoalFiguresForUntestableTarget(noFigures, M1.graph);
+    expect(after).not.toBe(noFigures);
+    const dr = warningsOf(after).find((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE);
     expect(dr?.option_ids ? [...dr.option_ids].sort() : null).toEqual(['59_price', 'current_price']);
   });
 
   it('CONTROL: nothing left to withhold → the same object back (no second warning)', () => {
-    const allGone = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['59_price', 'current_price', '54_price']), placeholderOn54);
+    const allGone = withholdOptionGoalFigures(clone(M1.plot_body), new Set(['59_price', 'current_price']), placeholderOnToday);
     expect(withholdGoalFiguresForUntestableTarget(allGone, M1.graph)).toBe(allGone);
   });
 });

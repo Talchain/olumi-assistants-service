@@ -3376,14 +3376,17 @@ function readOrchestratorErrorMessage(runError: unknown): string | null {
   return typeof message === 'string' && message.trim().length > 0 ? message : null;
 }
 
-/** The ids of the options whose goal figures an envelope still shows, in any option-result carrier. */
-function optionsStillShowingGoalFigures(envelope: unknown): string[] {
+/** The option ids an envelope scores, and those whose goal figures it still shows, in any option-result carrier. */
+function goalFigureOptions(envelope: unknown): { scored: string[]; shown: string[] } {
+  const scored = new Set<string>();
   const shown = new Set<string>();
   for (const r of readOptionResultSources(envelope as Record<string, unknown>).flat()) {
     const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
-    if (id !== undefined && id !== '' && (typeof r.probability_of_goal === 'number' || typeof r.probability_of_joint_goal === 'number')) shown.add(id);
+    if (id === undefined || id === '') continue;
+    scored.add(id);
+    if (typeof r.probability_of_goal === 'number' || typeof r.probability_of_joint_goal === 'number') shown.add(id);
   }
-  return [...shown];
+  return { scored: [...scored], shown: [...shown] };
 }
 
 /**
@@ -3393,8 +3396,11 @@ function optionsStillShowingGoalFigures(envelope: unknown): string[] {
  * that withhold's own reason. Returns `response` itself when nothing is left to withhold or the target is testable. Pure.
  */
 export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: unknown): E {
-  const shown = optionsStillShowingGoalFigures(response);
-  if (shown.length === 0) return response;
-  const warning = targetNotTestableWarning(graph, targetTestabilityOf(graph), shown, GOAL_FIGURES_TARGET_NOT_TESTABLE);
-  return warning === null ? response : withholdOptionGoalFigures(response, new Set(shown), warning);
+  const { scored, shown } = goalFigureOptions(response);
+  // A run that shows no goal figure and was withheld by nothing still names no leader and no share under `exploratory`
+  // (the whole-run arm); a run an earlier withhold already emptied keeps that withhold's reason alone.
+  const ids = shown.length > 0 ? shown : runWithheldGoalFigures(response as Record<string, unknown>) ? [] : scored;
+  if (ids.length === 0) return response;
+  const warning = targetNotTestableWarning(graph, targetTestabilityOf(graph), ids, GOAL_FIGURES_TARGET_NOT_TESTABLE);
+  return warning === null ? response : withholdOptionGoalFigures(response, new Set(ids), warning);
 }

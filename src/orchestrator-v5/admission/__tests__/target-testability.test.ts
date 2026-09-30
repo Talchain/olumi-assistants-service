@@ -92,6 +92,19 @@ describe('the verdict (0 LLM)', () => {
     delete g.goal_constraints;
     expect(targetTestabilityOf(g).kind).toBe('no_target');
   });
+
+  it('RED (CI #2371 3054228c, route-level 2.349): a DEADLINE on the goal ("within 18 months") is row 3\'s time, never row 4\'s target', () => {
+    const g = structuredClone(FIX.paul);
+    for (const n of g.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+    const goalId = g.nodes.find((n: Json) => n.kind === 'goal').id;
+    const deadline = { constraint_id: 'constraint_goal_deadline', node_id: goalId, operator: '<=', value: 18, unit: 'months', source_quote: 'within 18 months', deadline_metadata: { deadline_date: '2028-03-31' } };
+    g.goal_constraints = [deadline];
+    expect(targetTestabilityOf(g).kind).toBe('no_target');
+    // CONTRAST: the same row with no deadline marker IS the goal's own target (and Paul's still fails P1).
+    const { deadline_metadata: _dropped, ...plain } = deadline;
+    g.goal_constraints = [plain];
+    expect(targetTestabilityOf(g).kind).toBe('not_testable');
+  });
 });
 
 /**

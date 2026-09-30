@@ -242,11 +242,11 @@ describe('the claim-strength bound discriminates across real state classes', () 
    * ⭐ DR row 4 (#2371; PTL #77 5914383843 "maturity rule = YES"): a fresh draft whose goal states a target it can't
    * test yet (no today's level, a path resting only on defaulted links) is `exploratory` — no leader, no shares, no
    * goal chance — with the reason on the mode's field. The SEMANTIC floor this spec is about still publishes its own
-   * reason on its own field. Draft 1 states no target, so its mode is the floor's alone.
+   * reason on its own field. Draft 1 states no target, so its mode is the floor's alone. Draft 3's only goal row is a
+   * DEADLINE ("6 months", `deadline_metadata`): DR row 3's time, not a target, so its mode is the floor's alone too.
    */
   const CAPPED_BY_TARGET: ReadonlySet<string> = new Set([
     'acceptance-evidence/draft-speed/live-draft-2-ev-fleet.json',
-    'acceptance-evidence/draft-speed/live-draft-3-hospital-staffing.json',
   ]);
 
   it.each(FRESH_DRAFTS)(
