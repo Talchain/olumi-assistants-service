@@ -167,6 +167,8 @@ export function findStatedAmounts(text: string | null | undefined): readonly Sta
   // cross-call state, and a shared one would make this function's answer
   // depend on who called it last.
   const pattern = new RegExp(STATED_AMOUNT_PATTERN.source, STATED_AMOUNT_PATTERN.flags);
+  // The digits and the written magnitude suffix of each amount, for the range reading below.
+  const parts: { digits: number; mag: string }[] = [];
   for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {
     const groups = m.groups ?? {};
     const digits = parseAmountDigits(groups.digits);
@@ -190,8 +192,42 @@ export function findStatedAmounts(text: string | null | undefined): readonly Sta
       matchedText: m[0],
       index: m.index,
     });
+    parts.push({ digits, mag: typeof groups.mag === "string" ? groups.mag.trim() : "" });
   }
-  return out;
+  return distributeCurrencyRanges(text, out, parts);
+}
+
+/**
+ * ⭐ A CURRENCY RANGE SHARES ITS CURRENCY AND ITS MAGNITUDE WITH BOTH ENDS (R3 #75 5918453000 A4; MG 5918487838).
+ * Paul's funding brief: "investment firms that do deals between £1-2 million" was read as `£1` (currency, 1) and
+ * `2 million` (plain), so the deal size could not be the user's at either end: £1m was nowhere, and £2m was not money.
+ * Only the narrow written shape is read: a CURRENCY amount with NO magnitude of its own, joined by a dash ("-", "–",
+ * "—"), "to", or (after "between") "and" to the very next amount, which carries a magnitude and is plain or in the SAME currency
+ * ("£1-2 million", "£1–2m", "£1 to 2 million", "between £1 and £2 million"). Both ends then read as that currency at
+ * that magnitude. Anything else is left exactly as read (`£2–3m` whose first end has its own suffix already reads both).
+ */
+function distributeCurrencyRanges(
+  text: string,
+  amounts: StatedAmount[],
+  parts: readonly { digits: number; mag: string }[],
+): readonly StatedAmount[] {
+  for (let i = 0; i + 1 < amounts.length; i += 1) {
+    const low = amounts[i]!;
+    const high = amounts[i + 1]!;
+    if (low.kind !== "currency" || parts[i]!.mag !== "" || parts[i + 1]!.mag === "") continue;
+    if (!(high.kind === "plain" || (high.kind === "currency" && high.currencyCode === low.currencyCode))) continue;
+    const between = text.slice(low.index + low.matchedText.length, high.index);
+    // "and" joins a range only after "between" ("between £1 and £2 million"); "£1 and 2 million customers" is two amounts.
+    const joined = /^\s*(?:[-–—]|to)\s*$/i.test(between)
+      || (/^\s*and\s*$/i.test(between) && /\bbetween\s*$/i.test(text.slice(0, low.index)));
+    if (!joined) continue;
+    const scale = resolveMagnitude(parts[i + 1]!.mag);
+    const lowAtScale = parts[i]!.digits * scale;
+    if (!Number.isFinite(lowAtScale)) continue;
+    amounts[i] = { ...low, magnitude: lowAtScale };
+    amounts[i + 1] = { ...high, kind: "currency", ...(low.currencyCode !== undefined && { currencyCode: low.currencyCode }) };
+  }
+  return amounts;
 }
 
 /** What a graph unit string denotes, and the multiplier it implies. */
