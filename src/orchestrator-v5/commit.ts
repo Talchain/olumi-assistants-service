@@ -44,6 +44,7 @@ import type {
 } from './session/store.js';
 import { StateCommitFailedError } from './session/store.js';
 import { projectGraphForPersistence } from './persisted-graph-projection.js';
+import { assignEntityRefs } from './graph/entity-refs.js';
 import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
 import { appendCheckedGraphWrite } from './persist-graph-write.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
@@ -1224,12 +1225,14 @@ export async function commitDirectAnswer(
   // fired, freshness, the pending's re-pin and the held thread were all decided
   // against a graph we did not store. Ordering is the whole fix: project first,
   // then derive every hash-dependent decision from the projected bytes.
-  const projectedGraphForStore = projectGraphForPersistence(metadata.graph, {
+  // Stable entity refs go on the SAME projected bytes, before any hash is taken from them (`graph/entity-refs.ts`):
+  // the base's ref for a node id wins, so an edit path that dropped `ref` cannot renumber an entity.
+  const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
-  });
+  }), metadata.baseGraphForInvariants).graph;
   const atomicVersionPlan = buildAtomicCommittedModelVersion(
     projectedGraphForStore,
     metadata,
