@@ -95,11 +95,6 @@ export interface CandidateLink {
   readonly effect_per_source_change?: number | null;
   /** Who stated the size. `null`/absent falls back to the link's own `provenance`. */
   readonly effect_provenance?: string | null;
-  /**
-   * The drafter's word that this link holds BY DEFINITION (DL #75 5916504679). Never enough on its own:
-   * `definitionalLink` checks it deterministically before any edge carries the type.
-   */
-  readonly definitional?: boolean | null;
 }
 
 export interface AdmittedEdge {
@@ -112,8 +107,7 @@ export interface AdmittedEdge {
    * `magnitude` (D9): who sized it. `natural_effect`: the size it carries in natural units, with the β it was written
    * for (`strength_mean`, the staleness key). Both absent on an edge that keeps today's projection unchanged.
    */
-  /** `definitional`: the size holds by definition, checked (`definitionalLink`); absent on every other edge. */
-  provenance?: { source: string; reasoning?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; definitional?: true };
+  provenance?: { source: string; reasoning?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
 }
@@ -228,26 +222,6 @@ function magnitudeNotes(fieldPath: string, link: CandidateLink, sized: LinkSizin
  * which alone knows both ends' frames and the options' levels. A link it does not size, or sizes `unchanged`, is
  * admitted exactly as before.
  */
-/**
- * ⭐ A LINK THAT HOLDS BY DEFINITION, CHECKED, NEVER CLAIMED (DL #75 5916504679; R3 5916476294 / 5916525389).
- *
- * "Funding lost to distraction" → "securing funding" is −£1 per £1 because the exposure IS money the raise does not get,
- * not because anyone estimated it. Typed as Olumi's guess, it would make Paul's goal ask him to size a definition. The
- * drafter's word (`definitional: true`) is required and is never enough: the edge carries the type ONLY when its own
- * natural size proves it, deterministically:
- *   · the size is exactly ±1 (`|amount / per_source_change| = 1`);
- *   · both ends are read in ONE unit (`amount_unit` and `per_source_change_unit` are the same, so the two nodes' units
- *     match: a pound of the source is a pound of the target).
- * Anything else stays exactly what it was (an Olumi size or placeholder). The magnitude author is unchanged.
- */
-export function definitionalLink(link: CandidateLink, sized: LinkSizing): boolean {
-  const ne = sized.natural_effect;
-  if (link.definitional !== true || ne === undefined || sized.outcome === 'placeholder') return false;
-  if (!Number.isFinite(ne.amount) || !Number.isFinite(ne.per_source_change) || ne.per_source_change === 0) return false;
-  const unit = (u: string) => u.trim().toLowerCase();
-  return Math.abs(ne.amount / ne.per_source_change) === 1 && unit(ne.amount_unit) !== '' && unit(ne.amount_unit) === unit(ne.per_source_change_unit);
-}
-
 export function admitCandidateLinks(
   links: readonly CandidateLink[],
   sizing: ReadonlyMap<string, LinkSizing> = new Map(),
@@ -299,7 +273,6 @@ export function admitCandidateLinks(
           source: link.provenance_source ?? provenanceSourceFor(link.provenance),
           magnitude: sized.magnitude!,
           ...(sized.natural_effect !== undefined ? { natural_effect: sized.natural_effect } : {}),
-          ...(definitionalLink(link, sized) ? { definitional: true as const } : {}),
         },
       };
       projected_fields[key] = projected;
