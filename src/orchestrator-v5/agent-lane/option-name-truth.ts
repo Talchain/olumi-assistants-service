@@ -99,13 +99,15 @@ export function qualifyOptionResultClaims(text: string, aliases: ReadonlyMap<str
       if (/\b(?:brief|original(?:ly)?|you (?:said|wrote|named)|your words)\b/i.test(before)) {
         at += raw.length; continue;
       }
-      const line = answer.slice(lineStart, lineEnd);
-      const resultClaim = /\b(?:run|result|comparison|lead(?:s|ing)?|winner|rank(?:s|ed|ing)?|best|top|favou?r(?:s|ed|ing)?|probability|chance|outcome|score|likely)\b/i.test(line)
-        || /^\s*(?:[-*•]|\d+[.)])?\s*(?:\*\*)?[^:\n]+:\s*\d+(?:\.\d+)?\s*%/.test(line);
+      const closingQuote = /^["”’]/.test(after) ? 1 : 0;
+      const closingBold = after.slice(closingQuote).startsWith('**') ? 2 : 0;
+      const closingWidth = closingQuote + closingBold;
+      const afterName = after.slice(closingWidth).trimStart();
+      const resultClaim = /^:\s*(?:\*\*)?\s*(?:\d+(?:\.\d+)?\s*%|[£$€]?\s*\d)/.test(afterName)
+        || /^(?:leads?\b|is\s+(?:the\s+)?(?:leading|winner|best|top)\b)/i.test(afterName)
+        || /\b(?:leading option|winner|best option|top option|result for|outcome for|probability for|chance for)\s*(?:is|was|:)?\s*["“‘]?\s*$/i.test(before);
       if (!resultClaim) { at += raw.length; continue; }
-      const quote = after[0];
-      const closesQuote = quote === '"' || quote === '\'' || quote === '”' || quote === '’';
-      const insertAt = at + raw.length + (closesQuote ? 1 : 0);
+      const insertAt = at + raw.length + closingWidth;
       if (answer.slice(insertAt).startsWith(suffix)) { at = insertAt + suffix.length; continue; }
       answer = `${answer.slice(0, insertAt)}${suffix}${answer.slice(insertAt)}`;
       at = insertAt + suffix.length;

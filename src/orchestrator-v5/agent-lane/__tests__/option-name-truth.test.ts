@@ -38,6 +38,10 @@ describe('Agent result option names are bound to the current stored level', () =
       'Raise to £59 (set to £60/month): 99%. Raise to £59 (set to £60/month) leads this run. The leading option is Raise to £59 (set to £60/month).',
     );
     expect(qualifyOptionResultClaims('Your brief said “Raise to £59”.', aliases)).toBe('Your brief said “Raise to £59”.');
+    expect(qualifyOptionResultClaims('**Raise to £59**: 99%.', aliases))
+      .toBe('**Raise to £59** (set to £60/month): 99%.');
+    expect(qualifyOptionResultClaims('I preserved the original “Raise to £59” name from the earlier run.', aliases))
+      .toBe('I preserved the original “Raise to £59” name from the earlier run.');
     expect(g.nodes[1]!.label).toBe('Raise to £59');
   });
 
