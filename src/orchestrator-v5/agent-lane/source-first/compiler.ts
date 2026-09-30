@@ -278,6 +278,15 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
           issue(intervention.quantity_ref, 'intervention_quantity_source_mismatch', `Which stated figure belongs to "${node.label}"?`); continue;
         }
       }
+      // A wide option quote can include a separate constraint sentence. The
+      // target noun appearing there proves source binding, not that the option
+      // changes it. Without an independently typed action quantity, keep the
+      // relationship unresolved instead of making the limit controllable.
+      if (intervention.quantity_ref === null && claimsFor(intervention.entity_ref).some(({ claim }) =>
+        claim.role === 'limit' && spansOverlap(source_bindings[claim.ref], source.source))) {
+        issue(intervention.entity_ref, 'intervention_source_is_limit',
+          `Does "${node.label}" change "${target.label}", or is this only its stated limit?`); continue;
+      }
       // An option quote cannot authorise a link to an unrelated factor. Its
       // action must overlap the target's independent source and name it there.
       // The same check applies when the action has no numeric level.
