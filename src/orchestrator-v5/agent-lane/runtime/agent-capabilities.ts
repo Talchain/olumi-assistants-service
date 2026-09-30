@@ -3338,12 +3338,17 @@ export function createAgentCapabilities(
         // ONE figure written and ONE value proposed: no swap among the user's figures is possible, and the card shows the
         // one pairing. With two figures or more the strict matcher decides, as before (journey E's salaries: a swap is
         // never theirs, `revise-door-same-matcher`).
-        const soleFigure = input.length === 1 && figuresWrittenIn(ctx.user_text) === 1;
+        // ⛔ "ONE WRITTEN IN THIS MESSAGE" MEANS THIS MESSAGE (MG SUCCESSOR #75 5911974162; served #2359 row on 660befa4):
+        // counted over the session's typed words, the brief's own figures (£45k, 20%, 2 weeks) made every later revision
+        // Olumi's, and so did the user's "Yes, use 25%." (their 25% written twice). The route binds THIS turn's typed
+        // message (`user_turn_text`, never a chip's text); with none, the session's words are read exactly as before.
+        const turnWords = ctx.user_turn_text ?? ctx.user_text;
+        const soleFigure = input.length === 1 && figuresWrittenIn(turnWords) === 1;
         // And nothing BESIDE the figure names another quantity (`nearOnly`): "Keep salary spend under £400k" is the limit's,
         // "our MRR is £12,000" is MRR's, never a revised salary or price, card or not.
         const quote = readable && !writtenAbout && soleFigure && typeof existing === 'number'
-          && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text, { ...ownerScope, nearOnly: true })
-          ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, ctx.user_text) : null;
+          && figureTheUserWroteFor(Number(a.value), a?.unit ?? nodeUnit, turnWords, { ...ownerScope, nearOnly: true })
+          ? quoteOfFigure(Number(a.value), a?.unit ?? nodeUnit, turnWords) : null;
         adopted.push({
           id: node.id, label: node.label,
           value: Number(a.value), unit: String(a?.unit ?? ''), basis: String(a?.basis ?? ''),
@@ -3351,7 +3356,7 @@ export function createAgentCapabilities(
           userWrote: writtenAbout || quote !== null,
           ...(quote !== null ? { quote } : {}),
           // A 0–1 share the user wrote as a percentage ("25%" for 0.25) is shown in their units: "15% → 25%" (AIQ 5902884139).
-          ...(quote !== null && Math.abs(Number(a.value)) <= 1 && figureTheUserWrote(Number(a.value) * 100, '%', ctx.user_text) ? { asPercent: true as const } : {}),
+          ...(quote !== null && Math.abs(Number(a.value)) <= 1 && figureTheUserWrote(Number(a.value) * 100, '%', turnWords) ? { asPercent: true as const } : {}),
         });
       }
 
