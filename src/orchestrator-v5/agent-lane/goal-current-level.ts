@@ -557,7 +557,7 @@ function writtenIn(text: string, raw: number): { written: string; quote: string 
  * workload" (`brief_extraction`), which both GCP options also set at £45k. The user's "£50k, not £45k" corrected the goal
  * alone, so the model held £50k today against £45k on the component, and the reply called that £45k "supplied by Olumi".
  * Every non-goal node that holds the goal's earlier figure as the USER's (the same amount in the goal's unit, a brief or
- * user source), with the options that set it there. Named on the approval, never changed by it: whether that part moves
+ * user source; the unit by `unitComparisonKey`, so "GBP per month" is "£/month"), with the options that set it there. Named on the approval, never changed by it: whether that part moves
  * too is the user's call. Pure.
  */
 function nodesHoldingEarlierFigure(
@@ -573,7 +573,7 @@ function nodesHoldingEarlierFigure(
   return g.nodes
     .filter((n) => n.id !== goalId && n.kind !== 'goal' && n.kind !== 'option' && n.kind !== 'decision')
     .filter((n) => n.observed_state?.raw_value === earlier && users(n.observed_state?.source)
-      && typeof n.observed_state?.unit === 'string' && sameUnit(n.observed_state.unit, goalUnit))
+      && typeof n.observed_state?.unit === 'string' && unitComparisonKey(n.observed_state.unit) === unitComparisonKey(goalUnit))
     .map((n) => ({
       label: n.label,
       options: options.filter((o) => {

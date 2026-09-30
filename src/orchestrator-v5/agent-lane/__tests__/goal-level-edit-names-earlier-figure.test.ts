@@ -65,6 +65,16 @@ describe('the correction names the part still holding the user\'s earlier £45,0
     expect(r.note).not.toContain('THEIR figure from the brief');
   });
 
+  it('the goal unit spelled "GBP per month" still names the "£/month" part (one unit, two spellings)', async () => {
+    const g = clone(F.graph);
+    const goal = (g.nodes as Json[]).find((n) => n.kind === 'goal')!;
+    goal.observed_state.unit = 'GBP per month';
+    goal.goal_threshold_unit = 'GBP per month';
+    const r = await propose(g);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.public_label).toContain('"AWS monthly cost at full workload" still holds your earlier');
+  });
+
   it('CONTROL: a part in another unit is not the goal\'s figure', async () => {
     const g = clone(F.graph);
     (g.nodes as Json[]).find((n) => n.id === 'aws_monthly_cost_at_full_workload')!.observed_state.unit = 'subscribers';
