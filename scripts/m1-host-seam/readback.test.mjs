@@ -62,7 +62,7 @@ test('readback: the object the Lab consumes, with the bearer sent only when give
   };
   const seen = [];
   const secret = 'jwt-secret-value-must-not-leak';
-  const rb = await readback({ base: 'https://cee.example/', assistKey: 'k', bearer: secret, scenarioId: sid, fetchImpl: fakeFetch(routes, seen) });
+  const rb = await readback({ base: 'https://cee.example/', assistKey: 'k', bearer: secret, scenarioId: sid, withBuild: true, fetchImpl: fakeFetch(routes, seen) });
   assert.equal(rb.schema, READBACK_SCHEMA);
   assert.equal(rb.cee_build, '147c0ce');
   assert.equal(rb.brief_text, 'the brief');
@@ -78,6 +78,10 @@ test('readback: the object the Lab consumes, with the bearer sent only when give
   assert.equal(guest.version_binding, 'guest_no_version');
   assert.equal(cardsAllowed(guest), false);
   assert.equal(guestSeen.some((s) => 'authorization' in s.headers), false);
+  // ⛔ No /healthz unless asked (DL 5910624364: each call fans out into full prompt-history reads).
+  assert.equal(guestSeen.some((s) => new URL(s.url).pathname === '/healthz'), false);
+  assert.equal(guest.cee_build, null);
+  assert.equal(seen.filter((s) => new URL(s.url).pathname === '/healthz').length, 1);
 });
 
 test('sameModel: a new version or a new graph between reads is a different model', () => {

@@ -126,11 +126,15 @@ export async function readback(opts) {
   const ctx = context(opts);
   const sid = opts.scenarioId;
   if (typeof sid !== 'string' || sid.length === 0) throw new Error('scenarioId is required');
+  // ⛔ /healthz only when asked (DL #75 5910624364): each call fans out into full prompt-history reads (Supabase
+  // egress). A witness reads the build ONCE at its start; every other readback leaves `cee_build` null.
   let cee_build = null;
-  try {
-    const h = await ctx.fetchImpl(`${ctx.base}/healthz`, { signal: AbortSignal.timeout(20000) });
-    cee_build = (await h.json())?.build ?? null;
-  } catch { cee_build = null; }
+  if (opts.withBuild === true) {
+    try {
+      const h = await ctx.fetchImpl(`${ctx.base}/healthz`, { signal: AbortSignal.timeout(20000) });
+      cee_build = (await h.json())?.build ?? null;
+    } catch { cee_build = null; }
+  }
   const graphRead = await read(ctx, `/assist/v1/scenarios/${sid}/graph`, {}, opts.timeoutMs ?? 60000);
   const versionsRead = await read(ctx, `/assist/v1/scenarios/${sid}/versions`, {}, opts.timeoutMs ?? 60000);
   const g = graphRead.http === 200 ? graphRead.json : null;

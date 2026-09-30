@@ -140,8 +140,9 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
     return { session_id: rb.scenario_id, ...rest, model_version_id: rb.model_version?.version_id ?? null,
       withheld_reason: seam.withheldReason(rb) };
   };
-  const readFresh = async (sid: string) => {
-    const rb = await seam.readback({ ...host, scenarioId: sid });
+  // `withBuild` only when a fresh session is created — never per read (no /healthz polling, DL 5910624364).
+  const readFresh = async (sid: string, withBuild = false) => {
+    const rb = await seam.readback({ ...host, scenarioId: sid, withBuild });
     if (evidence) appendFileSync(evidence, JSON.stringify({ timestamp: new Date().toISOString(), head, source_hash,
       session_id: sid, mode: 'fresh', readback: rb }) + '\n');
     return rb;
@@ -201,7 +202,7 @@ it.skipIf(process.env.RUN_AI_EXPERIENCE_LAB !== '1')('hosts the disposable manua
         fresh.add(turn.scenario_id);
         // Offers come only from a reply that arrived (a failed turn leaves none live).
         recordOffered(turn.scenario_id, (turn as { http?: number }).http === 200 ? (turn as { suggested_actions?: unknown }).suggested_actions : []);
-        const rb = await readFresh(turn.scenario_id);
+        const rb = await readFresh(turn.scenario_id, true);
         const { response: _response, ...turnView } = turn;
         return { mode: 'fresh', ...view(rb), turn: turnView };
       } catch (error) {
