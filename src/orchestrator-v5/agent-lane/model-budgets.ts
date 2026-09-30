@@ -107,8 +107,12 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     model: 'gpt-6.1-sol',
     role: 'conversation',
     max_output_tokens: 3400,
-    reasoning_effort: 'high',
+    reasoning_effort: 'medium',
     evidence:
+      'Effort MEDIUM (Prompt Strike lever, DL lease #75; KEEP ruling #78 <KEEP-ID>): paired real-route gate, same ' +
+      'composite db612011, n=5 turns/arm, sent_effort verified per hop — reply-hop median 18.3 s high vs 8.2 s ' +
+      'medium, turn median 18.5 s vs 11.9 s, reasoning tokens 2,264 vs 211 over 8 hops; 0 mechanical fails both ' +
+      'arms (docs prompt-strike/p-core-1-run-20260930 real-route-gate/lever-sol-medium). ' +
       'Selected Sol-high coach v0.2 by AI Experience/DL (programme-docs #78 5915140232 / 5915156800). ' +
       'Real-route paired gate at docs 50ce5eba, n=1/row: largest Sol-high hop across 20 gate turns ' +
       'used 1140 output tokens; median 20.1 s versus Terra 8.5 s. Keep the measured 3400 cap; ' +

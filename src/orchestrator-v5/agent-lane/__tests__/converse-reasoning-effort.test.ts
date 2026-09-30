@@ -1,6 +1,6 @@
 /**
  * Selected coach request configuration: #78 5915316114 and DL #75 5916003868.
- * Populated-model conversation and Run interpretation use Sol/high/3400.
+ * Populated-model conversation and Run interpretation use Sol/medium/3400 (Prompt Strike lever, #78 <KEEP-ID>).
  * This supersedes PJ-C1 batch 5's Terra/low conversation setting; authoritative
  * empty-model turns retain Terra/low, covered by selected-coach-wiring.test.ts.
  * Construction keeps its separate Terra/medium budget. These captured requests
@@ -28,7 +28,7 @@ const GRAPH = {
 };
 const STATE = { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } };
 
-describe('selected coach: populated conversation and Run use high; construction keeps its own', () => {
+describe('selected coach: populated conversation and Run use medium; construction keeps its own', () => {
   let app: FastifyInstance;
   let modelBodies: Body[] = [];
 
@@ -63,18 +63,18 @@ describe('selected coach: populated conversation and Run use high; construction 
   });
   beforeEach(() => { modelBodies = []; });
 
-  it('⭐ RED: a populated turn’s conversation call uses selected Sol/high/3400', async () => {
+  it('⭐ RED: a populated turn’s conversation call uses selected Sol/medium/3400', async () => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: randomUUID(), message: 'What drives the result most?' } });
     expect(res.statusCode, res.body).toBe(200);
     expect(modelBodies.length).toBeGreaterThan(0);
     for (const b of modelBodies) {
       expect(b.model).toBe('gpt-6.1-sol');
-      expect(b.reasoning, JSON.stringify(b.reasoning)).toEqual({ effort: 'high' });
+      expect(b.reasoning, JSON.stringify(b.reasoning)).toEqual({ effort: 'medium' });
       expect(b.max_output_tokens).toBe(3400);
     }
   });
 
-  it('⭐ RED: the Run button’s one interpreting call (tool_choice none) uses selected Sol/high/3400', async () => {
+  it('⭐ RED: the Run button’s one interpreting call (tool_choice none) uses selected Sol/medium/3400', async () => {
     const res = await app.inject({
       method: 'POST', url: '/agent/v1/turn',
       payload: { kind: 'message', scenario_id: randomUUID(), message: 'Run the analysis please', source: 'chip_click', chip: { action_type: 'run_analysis' } },
@@ -83,7 +83,7 @@ describe('selected coach: populated conversation and Run use high; construction 
     const interpreting = modelBodies.filter((b) => b.tool_choice === 'none');
     expect(interpreting.length, 'the typed Run made its interpreting call').toBe(1);
     expect(interpreting[0]!.model).toBe('gpt-6.1-sol');
-    expect(interpreting[0]!.reasoning).toEqual({ effort: 'high' });
+    expect(interpreting[0]!.reasoning).toEqual({ effort: 'medium' });
     expect(interpreting[0]!.max_output_tokens).toBe(3400);
   });
 

@@ -64,7 +64,7 @@ const proposeLink = [{ type: 'function_call', name: 'propose_model_change', call
   arguments: JSON.stringify({ from_label: 'Price-release alignment', to_label: 'Pro conversion rate',
     direction: 'positive', strength: 'strong', rationale: 'Timing changes how the price lands.' }) }];
 
-describe('selected Sol-high coach on the actual Agent route', () => {
+describe('selected Sol coach (medium effort, Prompt Strike lever) on the actual Agent route', () => {
   let app: FastifyInstance;
   let turn = 0;
   let interpretOnlyConstraint: string;
@@ -134,7 +134,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
   };
   const selected = (body: Sent) => {
     expect(body.model).toBe('gpt-6.1-sol');
-    expect(body.reasoning?.effort).toBe('high');
+    expect(body.reasoning?.effort).toBe('medium');
     expect(body.max_output_tokens).toBe(3400);
   };
   const conversationBodies = () => sent.filter((body) => body.text?.format?.name !== 'whole_candidate');
@@ -181,7 +181,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(body.instructions).toContain(interpreterV02);
   });
 
-  it('keeps Terra-low for every hop of a known-empty construction, then uses Sol-high on the next turn', async () => {
+  it('keeps Terra-low for every hop of a known-empty construction, then uses Sol-medium on the next turn', async () => {
     readMode = 'empty';
     await sendTurn(BRIEF, [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'build-1',
       arguments: JSON.stringify({ brief: BRIEF }) }]], undefined, FIRST_SCENARIO);
