@@ -74,11 +74,19 @@ export const GOAL_FIGURES_USER_EFFECT_CLAMPED = 'GOAL_FIGURES_USER_EFFECT_CLAMPE
  */
 export const GOAL_FIGURES_PLACEHOLDER_PATH = 'GOAL_FIGURES_PLACEHOLDER_PATH';
 
+/**
+ * CEE's code for a run whose goal figures it withheld because the user's own levels make the goal a rate × count product
+ * the run did not evaluate (Gate 5, DL #75 5904272507; `agent-lane/unread-goal-product.ts`). Written by `run_analysis`,
+ * never by PLoT, for EVERY option (`option_ids`); `node_ids` names the goal and its two parts.
+ */
+export const GOAL_FIGURES_PRODUCT_NOT_READ = 'GOAL_FIGURES_PRODUCT_NOT_READ';
+
 /** Every typed code that means "the run withheld its per-option goal figures" (AIQ 5893824972: a code SET, PLoT's words). */
 export const GOAL_FIGURES_WITHHELD_CODES: ReadonlySet<string> = new Set([
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_PLACEHOLDER_PATH,
+  GOAL_FIGURES_PRODUCT_NOT_READ,
 ]);
 
 function readRecord(value: unknown): Record<string, unknown> | null {

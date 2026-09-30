@@ -45,7 +45,8 @@ import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
-import { GOAL_FIGURES_PLACEHOLDER_PATH, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import type {
   RunAnalysisArgs,
   RunAnalysisHandlerFact,
@@ -1810,6 +1811,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             withheld: goalPaths.map((p) => ({ option_id: p.option_id, links: p.links.length })),
           },
           'run_analysis: goal figures withheld for the options an unsized Olumi link moves',
+        );
+      }
+      // ⛔ GATE 5 (DL #75 5904272507): the user's own levels make the goal rate × count within 5%, and this run did not
+      // evaluate that product, so its goal figures come from a walk those figures contradict. Every option, the leader too.
+      const unread = runWithheldGoalFigures(response as Record<string, unknown>) ? null : unreadGoalProduct(graphForAnalysis);
+      if (unread !== null && scoredIds.length > 0) {
+        response = withholdOptionGoalFigures(response, new Set(scoredIds),
+          unreadGoalProductWarning(unread, scoredIds, GOAL_FIGURES_PRODUCT_NOT_READ));
+        log.info(
+          {
+            event: 'run_analysis.goal_figures_withheld_for_unread_product',
+            request_id: invocation.requestId,
+            scenario_id: args.scenario_id,
+            // Redacted: ids only.
+            goal_id: unread.goal.id, part_ids: [unread.rate.id, unread.count.id], option_ids: scoredIds,
+          },
+          'run_analysis: goal figures withheld: the user\'s own figures make the goal a product this run did not evaluate',
         );
       }
     }

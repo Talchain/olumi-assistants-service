@@ -13,6 +13,7 @@
 
 import {
   GOAL_FIGURES_PLACEHOLDER_PATH,
+  GOAL_FIGURES_PRODUCT_NOT_READ,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_WITHHELD_CODES,
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
@@ -52,6 +53,17 @@ export const PLACEHOLDER_PATH_NOTE =
   + 'you describe the run: it names the link, and asks for its size only where it does. Never ask the user to size a link `say` '
   + 'calls a guess. Other results of this run may be described as they are.';
 
+/**
+ * ⛔ GATE 5 (DL #75 5904272507): the user's own figures make the goal a product this run did not calculate, so EVERY
+ * option's goal figures and the leader are withheld. No promise of the reading: the card that offers it is its own door.
+ */
+export const PRODUCT_NOT_READ_NOTE =
+  'This run withheld, for EVERY option, the chance of reaching the goal, the option’s estimated value for the goal itself, and '
+  + 'the share of runs in which it did best: the user’s own figures make the goal the product `say` names, and this run did not '
+  + 'calculate it that way. Never state, estimate, rank or compare those figures, never name a leading option, and never say '
+  + 'Olumi will calculate it that way. Say `say` once, as written, when you describe the run. Other results of this run may be '
+  + 'described as they are.';
+
 const recordOf = (v: unknown): Record<string, unknown> | undefined =>
   (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
 
@@ -74,6 +86,13 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
     const words = typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
     return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PLACEHOLDER_PATH_NOTE, option_ids: ids('option_ids') };
+  }
+  // Gate 5 speaks alone too: CEE writes it only on a run nothing else withheld (`run-analysis.ts`).
+  if (warnings.every((w) => w.code === GOAL_FIGURES_PRODUCT_NOT_READ)) {
+    const w = warnings[0]!;
+    const words = typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
+    const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
+    return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PRODUCT_NOT_READ_NOTE, option_ids: ids('option_ids') };
   }
   // One reason per cause, identity first (unchanged when it is alone), then PLoT #422's cut link — each in PLoT's words.
   const reasonFor = (code: string): string => {
