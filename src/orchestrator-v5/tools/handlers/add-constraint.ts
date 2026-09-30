@@ -1047,7 +1047,7 @@ export function createAddConstraintHandler(): HandlerFn {
       // goal's threshold channel carries floors only ("at most stamps nothing"), and a ceiling stamped there is sent no
       // direction unless proven, so PLoT would score P(goal ≥ ceiling) under "at most" (measured, MG SUCCESSOR 30 Sep).
       const cardClearsGoalDirection = targetNode.kind === 'goal' && invocation.holdsGoalDirection === true
-        && (operator === '<=' || operator === '<');
+        && operator === '<=';
       const directionDisagrees = (cardGoalDirection !== undefined && targetNode.goal_direction !== cardGoalDirection)
         || (cardClearsGoalDirection && targetNode.goal_direction !== undefined && targetNode.goal_direction !== null);
       const rowValueUnchanged =
