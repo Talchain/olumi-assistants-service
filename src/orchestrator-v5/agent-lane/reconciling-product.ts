@@ -18,6 +18,7 @@ import type { CandidateModel } from './admit-model.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import { figureTheUserWrote, levelWrittenApartFromTarget } from './stated-by-user.js';
+import { sayFigure } from './say-figure.js';
 
 /** ISL `robustness_analyzer_v2.py` `IDENTITY_RECONCILIATION_TOLERANCE`: the same share, never a looser one. */
 export const RECONCILIATION_TOLERANCE = 0.05;
@@ -294,11 +295,14 @@ export function withoutGapResidual(candidate: CandidateModel, brief: string): { 
   };
 }
 
-/** AIQ 5904406904's condition: the drop is said, in Olumi's voice, with the card's own figures. */
+/**
+ * AIQ 5904406904's condition: the drop is said, in Olumi's voice, with the card's own figures — the card's own formatter
+ * (`sayFigure`), so a £49.99 price is never misquoted as £50 (AIQ 5904567773 follow-up 1).
+ */
 export function gapResidualLine(g: GapResidual): string {
-  const money = (v: number): string => `${symbolOf(g.code)}${Math.round(v).toLocaleString('en-GB')}`;
+  const money = (v: number): string => sayFigure(v, g.code);
   return `I had added ‘${g.label}’ of ${money(g.value)} a ${g.period} so that ‘${g.goal}’ matched your ${money(g.o)}; that was my guess, `
-    + `not something you said, so I've taken it out. Your ${money(g.levels[0])} × ${g.levels[1].toLocaleString('en-GB')} = ${money(g.levels[0] * g.levels[1])} is on the card for you to confirm.`;
+    + `not something you said, so I've taken it out. Your ${money(g.levels[0])} × ${sayFigure(g.levels[1], '')} = ${money(g.levels[0] * g.levels[1])} is on the card for you to confirm.`;
 }
 
 /** A goal product the draft declared whose units provably don't combine into the goal's: dropped, and said. */

@@ -92,6 +92,18 @@ describe('Olumi’s gap residual beside the user’s price × subscribers is tak
     expect(residualNode(after)).toBeUndefined();
   });
 
+  it('the line quotes the user\u2019s price as the card does: £49.99 is never said as £50 (AIQ 5904567773 follow-up 1)', async () => {
+    const brief = BRIEF.replace('from £49 to £59', 'from £49.99 to £59');
+    const model = m0((c) => {
+      c.factors.find((f: Json) => f.label === 'Pro plan monthly price').baseline_value = 49.99;
+      c.factors.find((f: Json) => f.label === 'Other MRR').baseline_value = 75000 - 49.99 * 1500;
+    });
+    const { graph, out } = await build(model, brief);
+    expect(residualNode(graph)).toBeUndefined();
+    expect(said(out)).toContain('Your £49.99 × 1,500 = £74,985 is on the card');
+    expect(proposeProductIdentity(graph)!.words).toContain('£49.99 × 1,500 = £74,985');
+  });
+
   it('CONTROL: an Olumi addend NOT equal to the gap stays, and there is no card', async () => {
     const { graph } = await build(m0((c) => { c.factors.find((f: Json) => f.label === 'Other MRR').baseline_value = 6000; }));
     expect(residualNode(graph)).toBeDefined();
