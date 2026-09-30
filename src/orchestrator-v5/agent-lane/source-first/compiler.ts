@@ -6,7 +6,7 @@ import type { GoalConstraintT } from '../../../schemas/assist.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../../utils/goal-threshold-cap.js';
 // A pure numeric encoding helper, not the CandidateModel admission/repair chain.
-import { defaultFrameFor } from '../admit-model.js';
+import { admitStatedGoalLevel, defaultFrameFor } from '../admit-model.js';
 import { SourceMeaningSchema, type SourceMeaning, type SourceQuantity } from './meaning.js';
 import { bindSource, readNumber, quantityProblem, unitText, compatibleUnits, type BoundSource } from './source-binding.js';
 
@@ -178,6 +178,24 @@ export function compileSourceMeaning(brief: string, input: unknown): SourceFirst
     if (currents.length === 1) {
       const { claim, value } = currents[0];
       node.observed_state = { value: value / frameOf(node), raw_value: value, unit: unitText(claim.unit), source: 'brief_extraction', extractionType: 'explicit', source_quote: claim.number.source.quote };
+      // GraphV3's analysis carrier for a stated goal level is the baseline on
+      // observed_state, read on the very same cap as the stated target. Merely
+      // retaining value/raw_value keeps the fact visible but cannot score goal
+      // attainment. Reuse the existing comparator/scale admission rule rather
+      // than making a separate source-first interpretation of the goal.
+      const target = targets.length === 1 ? targets[0] : undefined;
+      if (node.kind === 'goal' && target?.claim.role === 'target' && target.claim.frame === 'level'
+        && target.claim.comparator && target.claim.comparator !== '=' && node.goal_threshold_cap !== undefined) {
+        const admitted = admitStatedGoalLevel({
+          metric: node.label, operator: target.claim.comparator,
+          rawTarget: target.value, rawBaseline: value, cap: node.goal_threshold_cap,
+          heldComparator: node.goal_direction, targetUnit: node.goal_threshold_unit,
+        });
+        if (admitted.admitted) {
+          node.observed_state.baseline = admitted.normalised;
+          node.observed_state.cap = node.goal_threshold_cap;
+        } else issue(claim.ref, 'goal_baseline_not_admitted', admitted.reason);
+      }
       if (node.kind === 'factor') node.category = 'observable';
     } else if (currents.length > 1) issue(ref, 'multiple_current_values', `Which stated current level applies to "${node.label}"?`);
     // Exact statements remain retrievable even when no canonical numeric role exists.

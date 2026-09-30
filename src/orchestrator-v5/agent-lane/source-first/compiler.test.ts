@@ -45,6 +45,8 @@ describe('source-first compiler', () => {
     expect(result.unresolved).toEqual([]);
     const goal = result.graph.nodes.find((node) => node.kind === 'goal')!;
     expect(goal.observed_state?.raw_value).toBe(73500);
+    expect(goal.observed_state?.baseline).toBeCloseTo(73500 / goal.goal_threshold_cap!, 12);
+    expect(goal.observed_state?.cap).toBe(goal.goal_threshold_cap);
     expect(goal.goal_threshold_raw).toBe(85000);
     expect(goal.goal_direction).toBe('>');
     expect(goal.goal_horizon_months).toBe(12);
@@ -94,6 +96,16 @@ describe('source-first compiler', () => {
     const result = compileSourceMeaning(brief, meaning);
     expect(result.graph.nodes[0].observed_state).toBeUndefined();
     expect(result.unresolved[0].code).toBe('current_value_is_target_or_limit');
+  });
+
+  it('does not mint a goal-fit baseline from a target-only brief', () => {
+    const brief = 'Our target MRR is above £85k a month.';
+    const meaning = empty();
+    meaning.entities = [{ ref: 'mrr', kind: 'goal', label: 'MRR', source: source(brief) }];
+    meaning.quantities = [{ ...quantity('target_mrr', 'mrr', 'target', '£85k', '85000', brief, money()), comparator: '>' }];
+    const goal = compileSourceMeaning(brief, meaning).graph.nodes[0];
+    expect(goal.goal_threshold_raw).toBe(85000);
+    expect(goal.observed_state).toBeUndefined();
   });
 
   it('keeps an option and factor with the same label as distinct identities', () => {
