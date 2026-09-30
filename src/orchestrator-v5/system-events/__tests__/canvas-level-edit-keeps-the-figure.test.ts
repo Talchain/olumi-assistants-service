@@ -73,6 +73,15 @@ describe('a canvas level edit keeps the user\'s figure (served W4 run2: £59 →
     expect(written(served(undefined, cell(0.5, 59)), 0.285)).not.toHaveProperty('raw_value');
   });
 
+  // MG #2332 follow-up (5903381005): the FACTOR's own level must be read on the range too (£49 at 0.3, not 0.245), or no
+  // figure is minted — the range is not the one its level was normalised by.
+  it('CONTROL: a factor whose own level disagrees with its range (£49 at 0.3, not 0.245) mints no figure', () => {
+    const drifted = { cap: 200, unit: '£ per subscriber per month', value: 0.3, source: 'brief_extraction', raw_value: 49, declared_scale: 'unit_interval' };
+    const cellAfter = written(served(drifted), 0.285);
+    expect(cellAfter).toMatchObject({ value: 0.285, source: 'user_specified' });
+    expect(cellAfter).not.toHaveProperty('raw_value');
+  });
+
   it('CONTROL: with no figure on the committed cell the acknowledgement is unchanged', () => {
     expect(formatOptionEffectWriteAck({ optionLabel: 'Pilot', factorLabel: 'Coverage', committedValue: 0.3 }))
       .toBe('"Pilot" now has an effect value of 0.3 on "Coverage".');
