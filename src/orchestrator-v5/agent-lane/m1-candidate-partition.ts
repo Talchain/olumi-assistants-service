@@ -184,24 +184,20 @@ export function partitionM1Candidate(candidate: CandidateModel, brief: string): 
     });
     return { ...o, interventions, changes };
   });
-  const identities = (candidate.identities ?? []).filter((i) => {
-    if (i.provenance === 'explicit' && quantities.has(canonicalLabel(i.outcome)) && i.factors.every((label) => quantities.has(canonicalLabel(label)))) return true;
-    propose('definition', i.outcome, `identities[${i.outcome}]`, i, 'This definition was not stated by the user or depends on modelling additions outside the user model.');
-    return false;
-  });
-  const entities = new Set([...quantities, ...keptOptions.map((o) => canonicalLabel(o.label))]);
-  const links = candidate.links.flatMap((l) => {
-    const definition = identities.some((i) => canonicalLabel(i.outcome) === canonicalLabel(l.to) && i.factors.some((f) => canonicalLabel(f) === canonicalLabel(l.from)));
-    if (!entities.has(canonicalLabel(l.from)) || !entities.has(canonicalLabel(l.to)) || (l.provenance !== 'explicit' && !definition)) {
-      propose('relationship', `${l.from} → ${l.to}`, `links[${l.from}->${l.to}]`, l, 'This relationship needs adoption; no guessed mechanism is added for connectivity.');
-      return [];
-    }
-    if ((l.effect_provenance ?? l.provenance) === 'explicit') return [l];
-    if ([l.effect_amount, l.effect_per_source_change, l.strength_mean, l.strength_std, l.existence_probability].some((v) => typeof v === 'number')) {
-      propose('value', `${l.from} → ${l.to}`, `links[${l.from}->${l.to}].magnitude`, l, 'The user has not supplied this relationship size.');
-    }
-    return [{ ...l, effect_amount: null, effect_per_source_change: null, effect_provenance: null, strength_mean: undefined, strength_std: undefined, existence_probability: undefined }];
-  });
+  // A draft's `explicit` tag is not source evidence for a mathematical definition.
+  // CandidateIdentity has no relation quote or span to verify its operands and scope,
+  // so M1 must leave every such claim pending until the user adopts it.
+  const identities: NonNullable<CandidateModel['identities']> = [];
+  for (const i of candidate.identities ?? []) {
+    propose('definition', i.outcome, `identities[${i.outcome}]`, i, 'Confirm this definition and its scope before adding it to the model.');
+  }
+  // CandidateLink has no field-level quote/span. Admission already constructs
+  // option → acted-on factor edges from sourced options, so none of the draft's
+  // independent sign, size or authorship claims need to enter the graph.
+  const links: CandidateModel['links'] = [];
+  for (const l of candidate.links) {
+    propose('relationship', `${l.from} → ${l.to}`, `links[${l.from}->${l.to}]`, l, 'Confirm this relationship before adding it to the model.');
+  }
   const goal = { ...candidate.goal };
   if (!(goal.baseline_known === true && (goal.baseline_provenance ?? goal.provenance) === 'explicit')) {
     if (typeof goal.baseline_value === 'number') propose('value', goal.metric, 'goal.baseline_value', { value: goal.baseline_value, unit: goal.unit }, 'The user has not supplied this current level.');
