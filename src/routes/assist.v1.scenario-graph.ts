@@ -279,6 +279,56 @@ function detectLayout(graph: unknown): boolean {
   return false;
 }
 
+/** Most turns a reload restores; the oldest beyond it are left out (the Agent's own window is 20). */
+export const CONVERSATION_TURNS_CAP = 50;
+
+/** One restored turn: text only, as stored. */
+export interface ConversationTurnRead {
+  readonly turn_id: string;
+  readonly created_at: string;
+  readonly user_message: string | null;
+  readonly assistant_message: string | null;
+}
+
+function wantsConversationTurns(body: unknown): boolean {
+  return body !== null && typeof body === "object" && !Array.isArray(body)
+    && (body as Record<string, unknown>).include_conversation_turns === true;
+}
+
+/**
+ * The scenario's turns, OLDEST first, at most {@link CONVERSATION_TURNS_CAP}, each reduced to its id, time and the two
+ * stored texts. `readRecent` answers newest first and already leaves out claim rows; a turn with no text on either side
+ * is not a message and is left out. Never throws: a failed read is `null` and the graph read stands.
+ */
+async function readConversationTurns(
+  store: { readRecent(scenarioId: string, limit?: number): Promise<readonly { turn_id: string; created_at: string; user_message?: string | null; assistant_message?: string | null }[]> },
+  scenarioId: string,
+  requestId: string,
+): Promise<ConversationTurnRead[] | null> {
+  try {
+    const rows = await store.readRecent(scenarioId, CONVERSATION_TURNS_CAP);
+    return [...rows].reverse()
+      .map((r) => ({
+        turn_id: r.turn_id,
+        created_at: r.created_at,
+        user_message: typeof r.user_message === "string" ? r.user_message : null,
+        assistant_message: typeof r.assistant_message === "string" ? r.assistant_message : null,
+      }))
+      .filter((t) => t.user_message !== null || t.assistant_message !== null);
+  } catch (err) {
+    log.warn(
+      {
+        event: "v5.scenario_graph.conversation_turns_read_failed",
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "Scenario graph read — conversation turns read failed; answering null, the graph stands",
+    );
+    return null;
+  }
+}
+
 export default async function route(app: FastifyInstance) {
   // Tier `read`, DERIVED from RATE_BUCKET_REGISTRY (the single place the
   // route→tier assignment lives; its drift test enforces both directions).
@@ -525,6 +575,23 @@ export default async function route(app: FastifyInstance) {
         requestId,
       });
 
+      // ── 6. THE CONVERSATION, OPT-IN (DL lease #75 5907582591; Canvas 5907308286) ──
+      //
+      // "The chat survives a reload": CEE stores every turn's text in
+      // `v5_conversation_turns` but served no read of it, so a fresh browser or a
+      // second device opened on an empty chat. It rides THIS route for the reason
+      // §5 gives: the caller entitled to read the graph is exactly the caller
+      // entitled to read its conversation, and the ladder above is not written twice.
+      //
+      // OPT-IN, because the Agent reads this route internally on every turn
+      // (`turnReadCache`): without `include_conversation_turns: true` the body is
+      // byte-identical and no extra query runs. The stored `assistant_message` is the
+      // POST-WIRE text the user saw (AIQ 5907360564), served as stored — never
+      // re-derived. `null` = this leg did not answer, never "no conversation".
+      const conversationTurns = wantsConversationTurns(req.body)
+        ? await readConversationTurns(store, scenarioId, requestId)
+        : undefined;
+
       return reply.code(200).send({
         schema: SCENARIO_GRAPH_SCHEMA,
         scenario_id: scenarioId,
@@ -645,6 +712,7 @@ export default async function route(app: FastifyInstance) {
          * there is no graph to judge: "this leg did not answer", never a state.
          */
         analysis_admission: projectAnalysisAdmission(graph, graphPresent),
+        ...(conversationTurns !== undefined ? { conversation_turns: conversationTurns } : {}),
         request_id: requestId,
       });
     },
