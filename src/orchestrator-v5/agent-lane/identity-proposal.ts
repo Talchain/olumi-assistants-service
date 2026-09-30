@@ -86,7 +86,11 @@ export function proposeProductIdentity(graph: unknown): IdentityProposal | null 
 }
 
 type Rec2 = Rec;
-interface Level { readonly id: string; readonly label: string; readonly value: number; readonly unit: string }
+interface Level {
+  readonly id: string; readonly label: string; readonly value: number; readonly unit: string;
+  /** Read at TODAY's level through the user's own figure on this node's one levelled cause (`todaysOperand`): its label. */
+  readonly today?: string;
+}
 
 /** The goal's level and its non-option parents, or null when there is not exactly one goal with the user's level. */
 function goalAndParents(graph: unknown): { goal: Rec2; goalId: string; goalLabel: string; o: { value: number; unit: string }; byId: Map<string, Rec2>; parentIds: string[]; edges: Rec2[] } | null {
@@ -108,12 +112,44 @@ function goalAndParents(graph: unknown): { goal: Rec2; goalId: string; goalLabel
 /** The user's two stated factors among `ids` (each a factor with the user's level and no identity of its own), or null. */
 function usersFactors(ids: readonly string[], byId: Map<string, Rec2>): [Level, Level] | null {
   if (ids.length !== 2) return null;
-  const parts = ids.map((id) => {
-    const n = byId.get(id);
-    const level = n !== undefined ? usersLevel(n) : null;
-    return n !== undefined && n.kind === 'factor' && !carriesIdentity(n) && level !== null ? { id, label: text(n.label) ?? id, ...level } : null;
-  });
+  const parts = ids.map((id) => usersFactor(id, byId));
   return parts[0] != null && parts[1] != null ? [parts[0], parts[1]] : null;
+}
+
+/** One user-stated factor (the user's level, no identity of its own), or null. */
+function usersFactor(id: string, byId: Map<string, Rec2>): Level | null {
+  const n = byId.get(id);
+  const level = n !== undefined ? usersLevel(n) : null;
+  return n !== undefined && n.kind === 'factor' && !carriesIdentity(n) && level !== null ? { id, label: text(n.label) ?? id, ...level } : null;
+}
+
+/**
+ * ⛔ AN OPERAND WITH NO LEVEL IS READ AT TODAY'S LEVEL THROUGH THE USER'S OWN FIGURE (R3 5904253749 served `ef042ce` m1;
+ * AIQ 5904406904: "the card must name the user's TODAY 1,500, not the month-12 outcome"; DL 5904403673).
+ *
+ * m1: the drafter read MRR as ‘Pro plan price’ × ‘Paying subscribers at 12 months’, an outcome with no level whose causes
+ * are the user's 1,500 ‘Current paying subscribers’ and Olumi's churn and new-subscriber guesses. The card needs the
+ * user's levels, so there was none, and #416 withheld with nothing to press. Today that outcome IS the user's count, so
+ * the reading is checked, and said, on £49 × 1,500. Only where Olumi's own product over exactly these parents is stored
+ * (never a new reading), and only for a node with no level of its own and EXACTLY ONE cause carrying the user's level: a
+ * plain factor with no identity. Two such causes (which is today's?) or an Olumi level on the node: no card, as before.
+ */
+function todaysOperand(id: string, byId: Map<string, Rec2>, edges: readonly Rec2[]): Level | null {
+  const n = byId.get(id);
+  if (n === undefined || (n.kind !== 'outcome' && n.kind !== 'factor') || carriesIdentity(n)) return null;
+  const os = isRec(n.observed_state) ? n.observed_state : undefined;
+  if (typeof os?.raw_value === 'number') return null;
+  const causes = [...new Set(edges.filter((e) => e.to === id && typeof e.from === 'string').map((e) => e.from as string))]
+    .filter((c) => { const k = byId.get(c)?.kind; return k !== 'option' && k !== 'decision'; });
+  const levelled = causes.flatMap((c) => {
+    const f = byId.get(c);
+    const level = f !== undefined ? usersLevel(f) : null;
+    return f !== undefined && level !== null ? [{ f, level }] : [];
+  });
+  if (levelled.length !== 1) return null;
+  const { f, level } = levelled[0]!;
+  if (f.kind !== 'factor' || carriesIdentity(f)) return null;
+  return { id, label: text(n.label) ?? id, ...level, today: text(f.label) ?? String(f.id) };
 }
 
 /** The card's reading of `p` × `q` as the goal's money per period, or null when the parts do not reconcile or compose. */
@@ -126,6 +162,17 @@ function reading(goal: Rec2, goalLabel: string, o: { value: number; unit: string
   return { rate: c.rate === p.id ? p : q, count: c.rate === p.id ? q : p, code: c.code };
 }
 
+/** One of the two parents is the user's stated factor, the other an operand read at today's level (`todaysOperand`). */
+function usersFactorBesideTodaysOperand(ids: readonly string[], byId: Map<string, Rec2>, edges: readonly Rec2[]): [Level, Level] | null {
+  if (ids.length !== 2) return null;
+  for (const [a, b] of [[ids[0]!, ids[1]!], [ids[1]!, ids[0]!]] as const) {
+    const users = usersFactor(a, byId);
+    const today = todaysOperand(b, byId, edges);
+    if (users !== null && today !== null) return [users, today];
+  }
+  return null;
+}
+
 /** The goal itself: its own two user-stated parents, bare or carrying only Olumi's reading over exactly them. */
 function proposeOnGoal(graph: unknown): IdentityProposal | null {
   const g = goalAndParents(graph);
@@ -136,13 +183,15 @@ function proposeOnGoal(graph: unknown): IdentityProposal | null {
   if (parentIds.length !== 2) return null;
   // Olumi's reading must be over exactly these two parents: any other product is not this card's to confirm.
   if (own !== null && (own.length !== 2 || !own.every((f) => parentIds.includes(f)))) return null;
-  const parts = usersFactors(parentIds, byId);
+  const parts = usersFactors(parentIds, byId) ?? (own !== null ? usersFactorBesideTodaysOperand(parentIds, byId, g.edges) : null);
   if (parts === null) return null;
   const r = reading(goal, goalLabel, o, parts[0], parts[1]);
   if (r === null) return null;
   const money = (v: number): string => sayFigure(v, r.code);
+  const today = r.count.today ?? r.rate.today;
+  const figures = `${money(r.rate.value)} × ${sayFigure(r.count.value, '')}${today !== undefined ? ` (your “${today}”)` : ''}`;
   const words = `Is “${goalLabel}” your “${r.rate.label}” × “${r.count.label}”? `
-    + `${money(r.rate.value)} × ${sayFigure(r.count.value, '')} = ${money(r.rate.value * r.count.value)}, close to your ${money(o.value)}. `
+    + `${today !== undefined ? 'Today that is ' : ''}${figures} = ${money(r.rate.value * r.count.value)}, close to your ${money(o.value)}. `
     // AIQ 5888571809: the card says what "Yes" does. It does NOT run anything: an approval runs nothing (Paul's ruling,
     // #63 5812069638; enforced server-side), so the Run stays the user's own press (Runtime 5888628288 option (b)).
     + `If yes, Olumi will calculate “${goalLabel}” that way, and you can run the analysis again.`;
