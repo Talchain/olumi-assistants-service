@@ -1,0 +1,823 @@
+{
+  "_source": "Frozen pragmatic.jsonl candidate payloads only, live-evidence-25-attempts.tar.gz checkpoint; unchanged provider semantic payloads. No new provider calls.",
+  "cases": [
+    {
+      "id": "paul-mrr",
+      "brief": "Should we raise our Pro plan price from \u00a349 to \u00a359 a month? We have 1,500 paying subscribers and \u00a375k MRR. Monthly churn must stay below 5%, and we want MRR above \u00a385k within a year.",
+      "candidates": [
+        {
+          "goal": {
+            "metric": "MRR",
+            "operator": ">",
+            "target_stated": true,
+            "value": 85000,
+            "unit": "GBP/month",
+            "horizon_months": 12,
+            "provenance": "explicit",
+            "frame": "level",
+            "baseline_known": true,
+            "baseline_value": 75000,
+            "baseline_provenance": "explicit",
+            "scope": {
+              "modelled": "the Pro plan only",
+              "alternative": "MRR across all plans and revenue sources",
+              "stated_in_brief": false
+            }
+          },
+          "constraints": [
+            {
+              "metric": "Monthly churn",
+              "operator": "<",
+              "value": 5,
+              "unit": "%",
+              "provenance": "explicit",
+              "frame": "level"
+            }
+          ],
+          "options": [
+            {
+              "label": "Raise price to \u00a359/month",
+              "provenance": "explicit",
+              "changes": [],
+              "interventions": [
+                {
+                  "factor_label": "Pro plan price",
+                  "value": 59,
+                  "value_kind": "absolute",
+                  "unit": "GBP/month",
+                  "provenance": "explicit"
+                }
+              ],
+              "is_status_quo": null,
+              "brief_words": "raise our Pro plan price from \u00a349 to \u00a359 a month"
+            },
+            {
+              "label": "Keep \u00a349/month",
+              "provenance": "ai_proposed",
+              "changes": [],
+              "interventions": [],
+              "is_status_quo": true,
+              "brief_words": null
+            },
+            {
+              "label": "Raise price to \u00a354/month",
+              "provenance": "ai_proposed",
+              "changes": [],
+              "interventions": [
+                {
+                  "factor_label": "Pro plan price",
+                  "value": 54,
+                  "value_kind": "absolute",
+                  "unit": "GBP/month",
+                  "provenance": "ai_proposed"
+                }
+              ],
+              "is_status_quo": null,
+              "brief_words": null
+            }
+          ],
+          "factors": [
+            {
+              "label": "Pro plan price",
+              "role": "controllable",
+              "baseline_known": true,
+              "baseline_value": 49,
+              "unit": "GBP/month",
+              "provenance": "explicit",
+              "plausible_max": 200
+            },
+            {
+              "label": "Monthly churn",
+              "role": "observable",
+              "baseline_known": false,
+              "baseline_value": 3.5,
+              "unit": "%",
+              "provenance": "ai_proposed",
+              "plausible_max": 100
+            },
+            {
+              "label": "New paying subscribers per month",
+              "role": "observable",
+              "baseline_known": false,
+              "baseline_value": 53,
+              "unit": "subscribers/month",
+              "provenance": "ai_proposed",
+              "plausible_max": 500
+            },
+            {
+              "label": "Paying subscribers",
+              "role": "observable",
+              "baseline_known": true,
+              "baseline_value": 1500,
+              "unit": "subscribers",
+              "provenance": "explicit",
+              "plausible_max": 5000
+            }
+          ],
+          "risks": [],
+          "outcomes": [],
+          "links": [
+            {
+              "from": "Pro plan price",
+              "to": "Monthly churn",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 0.05,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Pro plan price",
+              "to": "New paying subscribers per month",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": -0.5,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Monthly churn",
+              "to": "Paying subscribers",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": -180,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "New paying subscribers per month",
+              "to": "Paying subscribers",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 12,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Pro plan price",
+              "to": "MRR",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 1500,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Paying subscribers",
+              "to": "MRR",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 50,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            }
+          ],
+          "identities": [],
+          "unknowns": [
+            "Does \u201cMRR\u201d mean Pro-plan MRR only or MRR across all plans and revenue sources? The model provisionally measures the Pro plan only.",
+            "The stated \u00a375k MRR does not exactly equal 1,500 paying subscribers at \u00a349/month (\u00a373.5k). Confirm whether this reflects other plans, add-ons, annual-plan monthly equivalents, discounts, or a different MRR scope.",
+            "Monthly churn is provisionally estimated at 3.5%; validate the current monthly churn rate before relying on the 5% constraint check.",
+            "The assumed price effects are provisional: each \u00a31 increase is estimated to add 0.05 percentage points to monthly churn and reduce new paying subscribers by 0.5 per month. Validate these elasticities from historical pricing, conversion, and retention data.",
+            "New paying subscribers are provisionally estimated at 53 per month, approximately offsetting 3.5% churn on 1,500 subscribers. Confirm current acquisition and retention cohorts.",
+            "The 12-month subscriber effects assume a one-point increase in monthly churn reduces the year-end subscriber base by 180, while one additional new subscriber per month adds 12 to the year-end base; cohort retention and growth dynamics may differ."
+          ],
+          "decision_question": "Should we raise our Pro plan price from \u00a349 to \u00a359 a month?"
+        }
+      ]
+    },
+    {
+      "id": "cloud",
+      "brief": "Should we switch our cloud provider from AWS to GCP? Monthly spend is \u00a345k; we want to cut costs by 20% without more than 2 weeks of migration downtime risk.",
+      "candidates": [
+        {
+          "goal": {
+            "metric": "costs",
+            "operator": "<=",
+            "target_stated": true,
+            "value": -20,
+            "unit": "GBP/month",
+            "horizon_months": null,
+            "provenance": "explicit",
+            "frame": "change_rel",
+            "baseline_known": true,
+            "baseline_value": 45000,
+            "baseline_provenance": "explicit",
+            "scope": null
+          },
+          "constraints": [
+            {
+              "metric": "Migration downtime",
+              "operator": "<=",
+              "value": 2,
+              "unit": "weeks",
+              "provenance": "explicit",
+              "frame": "level"
+            }
+          ],
+          "options": [
+            {
+              "label": "Continue with AWS",
+              "provenance": "ai_proposed",
+              "changes": [],
+              "interventions": [],
+              "is_status_quo": true,
+              "brief_words": null
+            },
+            {
+              "label": "Switch to GCP",
+              "provenance": "inferred",
+              "changes": [],
+              "interventions": [
+                {
+                  "factor_label": "GCP workload share",
+                  "value": 100,
+                  "value_kind": "absolute",
+                  "unit": "%",
+                  "provenance": "ai_proposed"
+                },
+                {
+                  "factor_label": "Migration safeguards",
+                  "value": 70,
+                  "value_kind": "absolute",
+                  "unit": "%",
+                  "provenance": "ai_proposed"
+                }
+              ],
+              "is_status_quo": null,
+              "brief_words": "switch our cloud provider from AWS to GCP"
+            },
+            {
+              "label": "Phased GCP migration",
+              "provenance": "ai_proposed",
+              "changes": [],
+              "interventions": [
+                {
+                  "factor_label": "GCP workload share",
+                  "value": 50,
+                  "value_kind": "absolute",
+                  "unit": "%",
+                  "provenance": "ai_proposed"
+                },
+                {
+                  "factor_label": "Migration safeguards",
+                  "value": 80,
+                  "value_kind": "absolute",
+                  "unit": "%",
+                  "provenance": "ai_proposed"
+                }
+              ],
+              "is_status_quo": null,
+              "brief_words": null
+            }
+          ],
+          "factors": [
+            {
+              "label": "GCP workload share",
+              "role": "controllable",
+              "baseline_known": false,
+              "baseline_value": 0,
+              "unit": "%",
+              "provenance": "ai_proposed",
+              "plausible_max": 100
+            },
+            {
+              "label": "Migration safeguards",
+              "role": "controllable",
+              "baseline_known": false,
+              "baseline_value": 0,
+              "unit": "%",
+              "provenance": "ai_proposed",
+              "plausible_max": 100
+            }
+          ],
+          "risks": [],
+          "outcomes": [
+            {
+              "label": "Migration downtime",
+              "provenance": "inferred"
+            }
+          ],
+          "links": [
+            {
+              "from": "GCP workload share",
+              "to": "costs",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": -67.5,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "GCP workload share",
+              "to": "Migration downtime",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 3,
+              "effect_per_source_change": 100,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Migration safeguards",
+              "to": "Migration downtime",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": -1.5,
+              "effect_per_source_change": 100,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Migration downtime",
+              "to": "costs",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 1000,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            }
+          ],
+          "identities": [],
+          "unknowns": [
+            "The estimated GCP saving is \u00a367.50 per month for each percentage point of workload migrated (15% at full migration). Confirm expected AWS-versus-GCP costs for the actual workload, including committed-use discounts, egress, support, and managed-service differences.",
+            "The estimated full-migration downtime exposure is 3 weeks before safeguards, and safeguards reduce this by up to 1.5 weeks. Confirm the migration plan, rollback capability, and the downtime measure intended by the 2-week limit.",
+            "The assumed \u00a31,000/month cost effect per week of migration downtime is provisional. Confirm whether downtime-related operational cost should be included in the monthly costs goal, or whether the goal refers only to recurring cloud provider spend.",
+            "No time horizon for achieving the 20% cost reduction was stated."
+          ],
+          "decision_question": "Should we switch our cloud provider from AWS to GCP?"
+        }
+      ]
+    },
+    {
+      "id": "E",
+      "brief": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under \u00a3400k?",
+      "candidates": [
+        {
+          "goal": {
+            "metric": "ship the new platform",
+            "operator": ">=",
+            "target_stated": false,
+            "value": null,
+            "unit": "% likelihood of shipping by Q3",
+            "horizon_months": null,
+            "provenance": "explicit",
+            "frame": "level",
+            "baseline_known": false,
+            "baseline_value": null,
+            "baseline_provenance": "explicit",
+            "scope": null
+          },
+          "constraints": [
+            {
+              "metric": "annual salary spend",
+              "operator": "<",
+              "value": 400000,
+              "unit": "\u00a3/year",
+              "provenance": "explicit",
+              "frame": "level"
+            }
+          ],
+          "options": [
+            {
+              "label": "Two senior engineers",
+              "provenance": "explicit",
+              "changes": [],
+              "interventions": [
+                {
+                  "factor_label": "Senior engineers hired",
+                  "value": 2,
+                  "value_kind": "additional",
+                  "unit": "engineers",
+                  "provenance": "explicit"
+                },
+                {
+                  "factor_label": "Junior engineers hired",
+                  "value": 0,
+                  "value_kind": "absolute",
+                  "unit": "engineers",
+                  "provenance": "inferred"
+                }
+              ],
+              "is_status_quo": null,
+              "brief_words": "hire two senior engineers"
+            },
+            {
+              "label": "Four junior engineers",
+              "provenance": "explicit",
+              "changes": [],
+              "interventions": [
+                {
+                  "factor_label": "Senior engineers hired",
+                  "value": 0,
+                  "value_kind": "absolute",
+                  "unit": "engineers",
+                  "provenance": "inferred"
+                },
+                {
+                  "factor_label": "Junior engineers hired",
+                  "value": 4,
+                  "value_kind": "additional",
+                  "unit": "engineers",
+                  "provenance": "explicit"
+                }
+              ],
+              "is_status_quo": null,
+              "brief_words": "four junior engineers"
+            },
+            {
+              "label": "One senior, two juniors",
+              "provenance": "ai_proposed",
+              "changes": [],
+              "interventions": [
+                {
+                  "factor_label": "Senior engineers hired",
+                  "value": 1,
+                  "value_kind": "additional",
+                  "unit": "engineers",
+                  "provenance": "ai_proposed"
+                },
+                {
+                  "factor_label": "Junior engineers hired",
+                  "value": 2,
+                  "value_kind": "additional",
+                  "unit": "engineers",
+                  "provenance": "ai_proposed"
+                }
+              ],
+              "is_status_quo": null,
+              "brief_words": null
+            },
+            {
+              "label": "Carry on as now",
+              "provenance": "ai_proposed",
+              "changes": [],
+              "interventions": [],
+              "is_status_quo": true,
+              "brief_words": null
+            }
+          ],
+          "factors": [
+            {
+              "label": "Senior engineers hired",
+              "role": "controllable",
+              "baseline_known": true,
+              "baseline_value": 0,
+              "unit": "engineers",
+              "provenance": "explicit",
+              "plausible_max": 10
+            },
+            {
+              "label": "Junior engineers hired",
+              "role": "controllable",
+              "baseline_known": true,
+              "baseline_value": 0,
+              "unit": "engineers",
+              "provenance": "explicit",
+              "plausible_max": 20
+            },
+            {
+              "label": "Existing delivery capacity",
+              "role": "observable",
+              "baseline_known": false,
+              "baseline_value": 2,
+              "unit": "senior-equivalent engineers",
+              "provenance": "ai_proposed",
+              "plausible_max": 20
+            },
+            {
+              "label": "Platform delivery effort",
+              "role": "external",
+              "baseline_known": false,
+              "baseline_value": 18,
+              "unit": "senior-engineer months required",
+              "provenance": "ai_proposed",
+              "plausible_max": 60
+            },
+            {
+              "label": "annual salary spend",
+              "role": "controllable",
+              "baseline_known": false,
+              "baseline_value": 0,
+              "unit": "\u00a3/year",
+              "provenance": "ai_proposed",
+              "plausible_max": 1000000
+            }
+          ],
+          "risks": [
+            {
+              "label": "Onboarding drag",
+              "provenance": "ai_proposed"
+            },
+            {
+              "label": "Budget pressure",
+              "provenance": "ai_proposed"
+            }
+          ],
+          "outcomes": [
+            {
+              "label": "Delivery capacity by Q3",
+              "provenance": "ai_proposed"
+            }
+          ],
+          "links": [
+            {
+              "from": "Senior engineers hired",
+              "to": "Delivery capacity by Q3",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 1,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Junior engineers hired",
+              "to": "Delivery capacity by Q3",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 0.5,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Existing delivery capacity",
+              "to": "Delivery capacity by Q3",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 1,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Junior engineers hired",
+              "to": "Onboarding drag",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": null,
+              "effect_per_source_change": null,
+              "effect_provenance": null
+            },
+            {
+              "from": "Onboarding drag",
+              "to": "Delivery capacity by Q3",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": null,
+              "effect_per_source_change": null,
+              "effect_provenance": null
+            },
+            {
+              "from": "Delivery capacity by Q3",
+              "to": "ship the new platform",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 20,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Platform delivery effort",
+              "to": "ship the new platform",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": -3,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Senior engineers hired",
+              "to": "annual salary spend",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 120000,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Junior engineers hired",
+              "to": "annual salary spend",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 65000,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "annual salary spend",
+              "to": "Budget pressure",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": null,
+              "effect_per_source_change": null,
+              "effect_provenance": null
+            },
+            {
+              "from": "Budget pressure",
+              "to": "ship the new platform",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": null,
+              "effect_per_source_change": null,
+              "effect_provenance": null
+            }
+          ],
+          "identities": [],
+          "unknowns": [
+            "What calendar year and exact date does \u201cby Q3\u201d mean? The provisional delivery-capacity estimates cannot be converted into a reliable delivery forecast without the time remaining.",
+            "Does \u201cannual salary spend\u201d mean salary spend for these new hires only, or total company/engineering salary spend including current staff? The provisional \u00a30 baseline assumes it is incremental spend on this hiring decision.",
+            "What are the fully loaded annual salaries for senior and junior engineers? The model provisionally uses \u00a3120k per senior and \u00a365k per junior, excluding non-salary hiring costs.",
+            "How much delivery capacity does the current team have, and how much platform work remains? The model provisionally assumes 2 senior-equivalent engineers of existing capacity and 18 senior-engineer months of remaining effort.",
+            "How much junior onboarding and supervision would reduce experienced-engineer capacity before Q3? This may materially reduce the four-junior option's effective capacity."
+          ],
+          "decision_question": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under \u00a3400k?"
+        }
+      ]
+    },
+    {
+      "id": "support",
+      "brief": "Should we move customer support from email to live chat? We have 3 agents handling about 400 tickets a week and our CSAT is 82%; we want to reach 90% within 6 months without hiring.",
+      "candidates": [
+        {
+          "goal": {
+            "metric": "CSAT",
+            "operator": ">=",
+            "target_stated": true,
+            "value": 90,
+            "unit": "%",
+            "horizon_months": 6,
+            "provenance": "explicit",
+            "frame": "level",
+            "baseline_known": true,
+            "baseline_value": 82,
+            "baseline_provenance": "explicit",
+            "scope": null
+          },
+          "constraints": [
+            {
+              "metric": "Support agents",
+              "operator": "<=",
+              "value": 3,
+              "unit": "agents",
+              "provenance": "explicit",
+              "frame": "level"
+            }
+          ],
+          "options": [
+            {
+              "label": "Continue Email Support",
+              "provenance": "ai_proposed",
+              "changes": [],
+              "interventions": [],
+              "is_status_quo": true,
+              "brief_words": null
+            },
+            {
+              "label": "Move to Live Chat",
+              "provenance": "inferred",
+              "changes": [],
+              "interventions": [
+                {
+                  "factor_label": "Live-chat ticket share",
+                  "value": 100,
+                  "value_kind": "absolute",
+                  "unit": "%",
+                  "provenance": "ai_proposed"
+                }
+              ],
+              "is_status_quo": null,
+              "brief_words": "move customer support from email to live chat"
+            },
+            {
+              "label": "Phased Chat Rollout",
+              "provenance": "ai_proposed",
+              "changes": [],
+              "interventions": [
+                {
+                  "factor_label": "Live-chat ticket share",
+                  "value": 50,
+                  "value_kind": "absolute",
+                  "unit": "%",
+                  "provenance": "ai_proposed"
+                }
+              ],
+              "is_status_quo": null,
+              "brief_words": null
+            }
+          ],
+          "factors": [
+            {
+              "label": "Live-chat ticket share",
+              "role": "controllable",
+              "baseline_known": true,
+              "baseline_value": 0,
+              "unit": "%",
+              "provenance": "inferred",
+              "plausible_max": 100
+            },
+            {
+              "label": "Support agents",
+              "role": "controllable",
+              "baseline_known": true,
+              "baseline_value": 3,
+              "unit": "agents",
+              "provenance": "explicit",
+              "plausible_max": 20
+            },
+            {
+              "label": "Weekly ticket volume",
+              "role": "observable",
+              "baseline_known": true,
+              "baseline_value": 400,
+              "unit": "tickets/week",
+              "provenance": "explicit",
+              "plausible_max": 2000
+            },
+            {
+              "label": "First-response time",
+              "role": "observable",
+              "baseline_known": false,
+              "baseline_value": 12,
+              "unit": "hours",
+              "provenance": "ai_proposed",
+              "plausible_max": 72
+            }
+          ],
+          "risks": [
+            {
+              "label": "Chat concurrency overload",
+              "provenance": "ai_proposed"
+            }
+          ],
+          "outcomes": [
+            {
+              "label": "First-response time",
+              "provenance": "ai_proposed"
+            }
+          ],
+          "links": [
+            {
+              "from": "Live-chat ticket share",
+              "to": "First-response time",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": -6,
+              "effect_per_source_change": 100,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Live-chat ticket share",
+              "to": "Chat concurrency overload",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": null,
+              "effect_per_source_change": null,
+              "effect_provenance": null
+            },
+            {
+              "from": "Support agents",
+              "to": "First-response time",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": -2,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Weekly ticket volume",
+              "to": "First-response time",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": 3,
+              "effect_per_source_change": 100,
+              "effect_provenance": "ai_proposed"
+            },
+            {
+              "from": "Chat concurrency overload",
+              "to": "First-response time",
+              "direction": "positive",
+              "provenance": "ai_proposed",
+              "effect_amount": null,
+              "effect_per_source_change": null,
+              "effect_provenance": null
+            },
+            {
+              "from": "First-response time",
+              "to": "CSAT",
+              "direction": "negative",
+              "provenance": "ai_proposed",
+              "effect_amount": -0.4,
+              "effect_per_source_change": 1,
+              "effect_provenance": "ai_proposed"
+            }
+          ],
+          "identities": [],
+          "unknowns": [
+            "First-response time is provisionally estimated at 12 hours because the current response-time distribution is not stated; provide the current median or average first-response time.",
+            "The estimated CSAT effect of a one-hour response-time increase (-0.4 percentage points) is a modelling assumption; validate it with historical support data.",
+            "The estimated six-hour reduction from moving all tickets to live chat assumes sufficient chat tooling and workflow quality; confirm expected chat availability, routing, and agent concurrency.",
+            "Chat concurrency overload may offset chat's response-time benefit at high live-chat adoption; provide expected concurrent-chat capacity per agent and peak demand.",
+            "Clarify whether the 400 weekly tickets include all support contacts that would transfer to live chat."
+          ],
+          "decision_question": "Should we move customer support from email to live chat?"
+        }
+      ]
+    }
+  ]
+}

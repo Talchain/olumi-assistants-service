@@ -1,0 +1,341 @@
+{
+  "version": 1,
+  "frozen_before_provider_output": true,
+  "source_commit": "e5021cf43443cecb966516b49da9d7f2e5a8eb1a",
+  "default_arms": [
+    "pragmatic",
+    "source_first"
+  ],
+  "provider_settings": {
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "medium",
+    "max_output_tokens": 12000
+  },
+  "evaluation_scope": "construction and admission payload; real registration, analysis, recovery and reload require separate shared-spine witness",
+  "briefs": [
+    {
+      "id": "paul-mrr",
+      "source": "MG constructor-kit README at e5021cf43443cecb966516b49da9d7f2e5a8eb1a; literal Paul MRR brief, distinct from Baseline A",
+      "text": "Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. Monthly churn must stay below 5%, and we want MRR above £85k within a year.",
+      "facts": [
+        {
+          "id": "price-current",
+          "entity": "price",
+          "role": "current",
+          "value": 49,
+          "unit": "GBP/month",
+          "quote": "Pro plan price from £49 to £59 a month",
+          "source_span": {
+            "start": 20,
+            "end": 58
+          }
+        },
+        {
+          "id": "price-proposed",
+          "entity": "price",
+          "role": "intervention",
+          "value": 59,
+          "unit": "GBP/month",
+          "quote": "Pro plan price from £49 to £59 a month",
+          "option": "59|raise|increase",
+          "source_span": {
+            "start": 20,
+            "end": 58
+          }
+        },
+        {
+          "id": "subscribers-current",
+          "entity": "subscriber|customer",
+          "role": "current",
+          "value": 1500,
+          "unit": "count:subscribers",
+          "quote": "1,500 paying subscribers",
+          "source_span": {
+            "start": 68,
+            "end": 92
+          }
+        },
+        {
+          "id": "mrr-current",
+          "entity": "MRR|monthly recurring revenue",
+          "role": "current",
+          "value": 75000,
+          "unit": "GBP/month",
+          "quote": "£75k MRR",
+          "source_span": {
+            "start": 97,
+            "end": 105
+          }
+        },
+        {
+          "id": "mrr-target",
+          "entity": "MRR|monthly recurring revenue",
+          "role": "target",
+          "value": 85000,
+          "unit": "GBP/month",
+          "quote": "MRR above £85k",
+          "operator": ">",
+          "source_span": {
+            "start": 153,
+            "end": 167
+          }
+        },
+        {
+          "id": "churn-limit",
+          "entity": "churn",
+          "role": "limit",
+          "value": 5,
+          "unit": "percent",
+          "quote": "Monthly churn must stay below 5%",
+          "operator": "<",
+          "source_span": {
+            "start": 107,
+            "end": 139
+          }
+        }
+      ],
+      "options": [
+        {
+          "id": "raise",
+          "pattern": "59|raise|increase",
+          "quote": "raise our Pro plan price from £49 to £59 a month",
+          "source_span": {
+            "start": 10,
+            "end": 58
+          }
+        }
+      ],
+      "identity": {
+        "operation": "product",
+        "target": "MRR|monthly recurring revenue",
+        "factors": [
+          "price",
+          "subscriber|customer"
+        ],
+        "conflicting_current_values": true,
+        "clarification_pattern": "73,?500|scope|reconcil|different|mismatch|inconsisten|discrepan|do.*subscribers|does.*MRR"
+      },
+      "horizon_months": 12,
+      "recovery_answer": "The £75k MRR includes other plans. All 1,500 paying subscribers are Pro subscribers at £49 per month; keep total MRR separate from Pro-plan revenue.",
+      "forbidden_user_numbers": [
+        1530.6122449,
+        73750,
+        73500,
+        30.612244897959183
+      ],
+      "source_sha256": "8a8b61432e4f799688d1d757df74632570295a0483192a8ff74fb455bb9a2911"
+    },
+    {
+      "id": "cloud",
+      "source": "23 Sep held-out fidelity (fidelity-probe.ts)",
+      "text": "Should we switch our cloud provider from AWS to GCP? Monthly spend is £45k; we want to cut costs by 20% without more than 2 weeks of migration downtime risk.",
+      "facts": [
+        {
+          "id": "spend-current",
+          "entity": "cost|spend|bill",
+          "role": "current",
+          "value": 45000,
+          "unit": "GBP/month",
+          "quote": "Monthly spend is £45k",
+          "source_span": {
+            "start": 53,
+            "end": 74
+          }
+        },
+        {
+          "id": "cost-reduction",
+          "entity": "cost|spend|bill",
+          "role": "relative_change",
+          "value": -0.2,
+          "unit": "GBP/month",
+          "quote": "cut costs by 20%",
+          "source_span": {
+            "start": 87,
+            "end": 103
+          }
+        },
+        {
+          "id": "downtime-limit",
+          "entity": "downtime|migration.*time",
+          "role": "limit",
+          "value": 2,
+          "unit": "weeks",
+          "quote": "without more than 2 weeks of migration downtime risk",
+          "operator": "<=",
+          "source_span": {
+            "start": 104,
+            "end": 156
+          }
+        }
+      ],
+      "options": [
+        {
+          "id": "gcp",
+          "pattern": "GCP|Google",
+          "quote": "switch our cloud provider from AWS to GCP",
+          "source_span": {
+            "start": 10,
+            "end": 51
+          }
+        }
+      ],
+      "identity": null,
+      "recovery_answer": "The £45k is the current monthly AWS bill. The 20% reduction is a target, and migration downtime must not exceed two weeks. We do not yet know GCP costs or migration downtime.",
+      "forbidden_user_numbers": [
+        36000
+      ],
+      "source_sha256": "d9f8d181c2cf06bff07f0612df92266e972c3ea1e85f0584a73ff3f296bdfbe3"
+    },
+    {
+      "id": "E",
+      "source": "DL contrast journey E = the eng-hiring acceptance brief (scenario ae70b48d)",
+      "text": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under £400k?",
+      "facts": [
+        {
+          "id": "senior-count",
+          "entity": "senior",
+          "role": "intervention",
+          "value": 2,
+          "unit": "count:engineers",
+          "quote": "two senior engineers",
+          "option": "senior",
+          "source_span": {
+            "start": 15,
+            "end": 35
+          }
+        },
+        {
+          "id": "junior-count",
+          "entity": "junior",
+          "role": "intervention",
+          "value": 4,
+          "unit": "count:engineers",
+          "quote": "four junior engineers",
+          "option": "junior",
+          "source_span": {
+            "start": 39,
+            "end": 60
+          }
+        },
+        {
+          "id": "salary-limit",
+          "entity": "salary|payroll|spend",
+          "role": "limit",
+          "value": 400000,
+          "unit": "GBP/year",
+          "quote": "annual salary spend under £400k",
+          "operator": "<",
+          "source_span": {
+            "start": 107,
+            "end": 138
+          }
+        }
+      ],
+      "options": [
+        {
+          "id": "senior",
+          "pattern": "senior",
+          "quote": "two senior engineers",
+          "source_span": {
+            "start": 15,
+            "end": 35
+          }
+        },
+        {
+          "id": "junior",
+          "pattern": "junior",
+          "quote": "four junior engineers",
+          "source_span": {
+            "start": 39,
+            "end": 60
+          }
+        }
+      ],
+      "identity": null,
+      "deadline_quote": "by Q3",
+      "recovery_answer": "We do not yet know senior or junior salaries or their delivery impact. Retain the two hiring options and the £400k annual cap; ask for costs before comparing them.",
+      "forbidden_user_numbers": [
+        200000,
+        240000,
+        100000,
+        60000
+      ],
+      "source_sha256": "3fa637a765cb37c0672626f838747d3047da6e88db12f8146943b5c382dd4e5c"
+    },
+    {
+      "id": "support",
+      "source": "23 Sep held-out fidelity (paul-test-20260923/construction-witness/fidelity-probe.ts)",
+      "text": "Should we move customer support from email to live chat? We have 3 agents handling about 400 tickets a week and our CSAT is 82%; we want to reach 90% within 6 months without hiring.",
+      "facts": [
+        {
+          "id": "agents-current",
+          "entity": "agent|staff|headcount",
+          "role": "current",
+          "value": 3,
+          "unit": "count:agents",
+          "quote": "3 agents",
+          "source_span": {
+            "start": 65,
+            "end": 73
+          }
+        },
+        {
+          "id": "tickets-current",
+          "entity": "ticket|support.*volume|workload",
+          "role": "current",
+          "value": 400,
+          "unit": "count:tickets/week",
+          "quote": "about 400 tickets a week",
+          "source_span": {
+            "start": 83,
+            "end": 107
+          }
+        },
+        {
+          "id": "csat-current",
+          "entity": "CSAT|satisfaction",
+          "role": "current",
+          "value": 82,
+          "unit": "percent",
+          "quote": "our CSAT is 82%",
+          "source_span": {
+            "start": 112,
+            "end": 127
+          }
+        },
+        {
+          "id": "csat-target",
+          "entity": "CSAT|satisfaction",
+          "role": "target",
+          "value": 90,
+          "unit": "percent",
+          "quote": "reach 90% within 6 months",
+          "source_span": {
+            "start": 140,
+            "end": 165
+          }
+        }
+      ],
+      "options": [
+        {
+          "id": "live-chat",
+          "pattern": "live.*chat|chat",
+          "quote": "move customer support from email to live chat",
+          "source_span": {
+            "start": 10,
+            "end": 55
+          }
+        }
+      ],
+      "identity": null,
+      "horizon_months": 6,
+      "qualitative_limits": [
+        "without hiring"
+      ],
+      "recovery_answer": "Keep the three current agents and do not add hires. The 90% CSAT is a target, not an estimate of live-chat performance; the effect of changing channel is still unknown.",
+      "forbidden_user_numbers": [],
+      "source_sha256": "c459a5fb5a661708aaa7aafcb7cc2f2d7bf1143c6e3408e04f4cb19493963e82"
+    }
+  ],
+  "control_policy": "Historical context only; control may alias pragmatic and is not independent evidence unless explicitly verified."
+}

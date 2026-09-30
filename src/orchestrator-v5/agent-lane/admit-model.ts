@@ -160,6 +160,11 @@ export interface CandidateModel {
      * BEFORE the label idioms, so a held status quo never depends on wording.
      */
     is_status_quo?: boolean | null;
+    /**
+     * The brief's own words for this option as the drafter copied them (strict output sends `null` when the brief does
+     * not list it). A claim, never evidence: `option-lineage.ts` only uses it to locate ONE list item, and quotes that item.
+     */
+    brief_words?: string | null;
   }[];
   readonly factors: readonly { label: string; role: 'controllable' | 'observable' | 'external'; baseline_known: boolean; baseline_value: number | null; unit: string | null; provenance: string; plausible_max?: number | null }[];
   readonly risks: readonly { label: string; provenance: string }[];
