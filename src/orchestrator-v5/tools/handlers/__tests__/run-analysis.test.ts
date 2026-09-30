@@ -984,11 +984,13 @@ describe('run_analysis handler — AbortSignal + budget propagation', () => {
 // ---------------------------------------------------------------------------
 
 describe('run_analysis handler — PLoT payload construction', () => {
-  const optionParticipationSnapshot = (includeSecondUser: boolean, olumiMarked = true, identicalUsers = false) => {
+  const optionParticipationSnapshot = (includeSecondUser: boolean, olumiMarked = true, identicalUsers = false, heldBaseline = false) => {
     const options = [
       { id: 'opt_a', option_id: 'opt_a', kind: 'option', label: 'Option A', interventions: { fac_price: 0.4 } },
       ...(includeSecondUser
-        ? [{ id: 'opt_b', option_id: 'opt_b', kind: 'option', label: 'Option B', interventions: { fac_price: identicalUsers ? 0.4 : 0.8 } }]
+        ? [{ id: 'opt_b', option_id: 'opt_b', kind: 'option', label: 'Option B',
+          ...(heldBaseline ? { is_baseline: true, interventions: {} } : { interventions: { fac_price: identicalUsers ? 0.4 : 0.8 } }),
+        }]
         : []),
       {
         id: 'opt_olumi', option_id: 'opt_olumi', kind: 'option', label: 'Olumi suggestion',
@@ -1000,7 +1002,11 @@ describe('run_analysis handler — PLoT payload construction', () => {
       version: '1',
       nodes: [
         { id: 'g', kind: 'goal', label: 'Goal' },
-        { id: 'fac_price', kind: 'factor', label: 'Price', category: 'controllable', observed_state: { value: 0.5, cap: 1 } },
+        { id: 'fac_price', kind: 'factor', label: 'Price', category: 'controllable',
+          observed_state: heldBaseline
+            ? { value: 0.5, cap: 1, raw_value: 0.5, declared_scale: 'unit_interval' }
+            : { value: 0.5, cap: 1 },
+        },
         ...options,
       ],
       edges: [{ id: 'e_price_goal', from: 'fac_price', to: 'g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' }],
@@ -1017,6 +1023,22 @@ describe('run_analysis handler — PLoT payload construction', () => {
     await handler(makeInvocation());
     const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect((payload.options as Array<{ option_id: string }>).map((option) => option.option_id)).toEqual(['opt_a', 'opt_b']);
+  });
+
+  it('counts a held user baseline alongside a changed user option without losing leader permission', async () => {
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(optionParticipationSnapshot(true, true, false, true)),
+    });
+    const outcome = await handler(makeInvocation());
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect((payload.options as Array<{ option_id: string }>).map((option) => option.option_id)).toEqual(['opt_a', 'opt_b']);
+    const baseline = (payload.options as Array<{ option_id: string; interventions: Record<string, unknown> }>)[1]!;
+    expect(Object.keys(baseline.interventions).length).toBeGreaterThan(0);
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(true);
   });
 
   it('keeps an Olumi suggestion provisional when fewer than two user options remain, without a permitted leader', async () => {

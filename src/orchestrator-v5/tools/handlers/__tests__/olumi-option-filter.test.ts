@@ -4,8 +4,10 @@
  * The Run's post-gate filter: Olumi's options (MG's typed mark, read on the persisted graph) leave the submission when at
  * least 2 distinct user interventions remain; otherwise they stay provisional. It can never create a refusal.
  */
+import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { filterOlumiProposedOptions } from '../olumi-option-filter.js';
+import { gateAnalysableOptions } from '../analysable-option-gate.js';
 
 type Rec = Record<string, unknown>;
 const opt = (id: string, value = 1): Rec => ({ option_id: id, label: id, interventions: { f: value } });
@@ -20,6 +22,19 @@ describe('filterOlumiProposedOptions', () => {
     });
     expect(r.options.map((o) => o.option_id)).toEqual(['raise_59', 'keep_49']);
     expect(r.keptOlumiProvisional).toBe(false);
+  });
+
+  it('the served W3 held baseline and user price change remain the submitted comparison', () => {
+    const served = JSON.parse(readFileSync(new URL(
+      '../../../agent-lane/__tests__/fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url,
+    ), 'utf8')) as { graph: { nodes: Rec[]; edges: Rec[] } };
+    const graph = served.graph;
+    const options = graph.nodes.filter((n) => n.kind === 'option');
+    const gate = gateAnalysableOptions({ options, graph, rawPersistedGraph: graph, scaleNetEnabled: true });
+    expect(gate.held.map((h) => h.option_id)).toEqual(['keep_49_price']);
+    const filtered = filterOlumiProposedOptions({ submitted: gate.options, graph });
+    expect(filtered.options.map((o) => o.option_id ?? o.id)).toEqual(['raise_to_59', 'keep_49_price']);
+    expect(filtered.keptOlumiProvisional).toBe(false);
   });
 
   it('the status quo is the user\'s option: it counts towards the 2', () => {
