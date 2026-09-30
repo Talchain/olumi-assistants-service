@@ -68,8 +68,10 @@ import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orch
 import { goalChanceLineOwed, goalChanceSayFromThisTurn } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
-import { identityCardToIssue } from '../orchestrator-v5/agent-lane/identity-card.js';
+import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { identityCardToIssue, identityCardToReoffer } from '../orchestrator-v5/agent-lane/identity-card.js';
+import { proposeProductIdentity } from '../orchestrator-v5/agent-lane/identity-proposal.js';
+import { identityConfirmBaseIsWritable } from '../orchestrator-v5/system-events/editable-graph.js';
 import { CarriedProposals, carrierForAnswerRow, offeredApproveChipOnRow, rehydrateProposals } from '../orchestrator-v5/agent-lane/durable-proposal.js';
 import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compose/derive-pending-actions.js';
@@ -297,6 +299,12 @@ function executableWaitingProposal(scenarioId: string, userId: string | null, gr
   const id = waiting[0]!.proposal_id;
   const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
   return decision.status === 'execute' ? id : undefined;
+}
+
+/** The offered actions with each id once, the FIRST kept, in order (R3 5910885689: the same card offered twice). */
+export function firstOfEachId<T extends { readonly id: string }>(offered: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return offered.filter((a) => (seen.has(a.id) ? false : (seen.add(a.id), true)));
 }
 
 /** The originally offered actions that are still valid on the CURRENT state, in their original order. */
@@ -2277,7 +2285,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // place it after everything and could stub a same-id proposal made later in the turn (adversarial review F2).
     // ⭐ The confirm card is issued here when this turn's Run says one is waiting and the Agent proposed none
     // (`identityCardToIssue`): the SAME tool, once; it writes nothing, and `approvalChipsFor` offers its button.
-    if (identityCardToIssue(result.tool_calls, result.tool_results)) {
+    // …and RE-OFFERED on a turn that asks for the reading but proposed nothing (R3 5910559613: a typed "Run the analysis."
+    // before confirming got the question and no button, `identityCardToReoffer`), read off the STORED model.
+    const reoffer = identityCardToReoffer({
+      toolCalls: result.tool_calls, mutated: result.mutated, fastPath,
+      proposalOffered: proposalsAwaitingApproval(result.tool_calls).size > 0,
+      readingWaiting: readbackGraph != null && proposeProductIdentity(readbackGraph) !== null && identityConfirmBaseIsWritable(readbackGraph),
+    });
+    if (identityCardToIssue(result.tool_calls, result.tool_results) || reoffer) {
       const issued = await dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode);
       result = {
         ...result,
@@ -2285,7 +2300,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
         tool_results: [...result.tool_results, issued],
       };
-      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal }, 'agent-lane: identity card issued by the route after the Run');
+      log.info({ scenario_id: scenarioId, ok: issued.ok === true, refusal: issued.refusal, reoffer }, reoffer
+        ? 'agent-lane: identity card re-offered by the route (the reading is unconfirmed, nothing else was proposed)'
+        : 'agent-lane: identity card issued by the route after the Run');
     }
     const results = result.tool_results;
     const chipApprovals = fastPath === 'approve'
@@ -2372,7 +2389,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         runOutcomeKind = loopOutcomes[loopOutcomes.length - 1]!.kind;
       }
     }
-    const offeredNow: OfferedAction[] = [
+    // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
+    // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
+    // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
+    const offeredNow: OfferedAction[] = firstOfEachId([
       ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
@@ -2385,7 +2405,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const chip = researchChipFor(String((r as { offered_query?: unknown } | undefined)?.offered_query ?? ''));
         return chip === null ? [] : [[chip.id, chip] as const];
       })).values()],
-    ];
+    ]);
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
     rememberResearchOffers(approveKey, offeredNow);
