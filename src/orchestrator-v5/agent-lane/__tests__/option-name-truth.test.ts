@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { optionNameAliases, qualifyOptionResultClaims } from '../option-name-truth.js';
+import { optionNameAliases } from '../option-name-truth.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 
@@ -28,41 +28,6 @@ describe('Agent result option names are bound to the current stored level', () =
     expect(optionNameAliases(graph('Raise Pro plan price from £49 to £60')).size).toBe(0);
     expect(optionNameAliases(graph('Raise Pro plan price from £49 to £59/month', 60, '£/month')).get('raise')?.display)
       .toBe('Raise Pro plan price from £49 to £59/month (set to £60/month)');
-  });
-
-  it('qualifies result rows and leader claims, without changing the quoted brief or raw graph', () => {
-    const g = graph();
-    const aliases = optionNameAliases(g);
-    const result = 'Raise to £59: 99%. Raise to £59 leads this run. The leading option is Raise to £59.';
-    expect(qualifyOptionResultClaims(result, aliases)).toBe(
-      'Raise to £59 (set to £60/month): 99%. Raise to £59 (set to £60/month) leads this run. The leading option is Raise to £59 (set to £60/month).',
-    );
-    expect(qualifyOptionResultClaims('Your brief said “Raise to £59”.', aliases)).toBe('Your brief said “Raise to £59”.');
-    expect(qualifyOptionResultClaims('**Raise to £59**: 99%.', aliases))
-      .toBe('**Raise to £59** (set to £60/month): 99%.');
-    expect(qualifyOptionResultClaims('I preserved the original “Raise to £59” name from the earlier run.', aliases))
-      .toBe('I preserved the original “Raise to £59” name from the earlier run.');
-    expect(g.nodes[1]!.label).toBe('Raise to £59');
-  });
-
-  it.each([
-    'In the earlier run, Raise to £59: 20% of simulations.',
-    'The prior analysis had Raise to £59: 20% of simulations.',
-    'Previous result: Raise to £59: 20% of simulations.',
-    'Historical run — the leading option was Raise to £59.',
-    'In the earlier run:\nRaise to £59: 20% of simulations.',
-    'In the earlier run:\n- Raise to £59: 20% of simulations.\n- Raise to £59 led that run.',
-    'In the earlier run:\n\n- Raise to £59: 20% of simulations.',
-    '## Earlier run\n\nRaise to £59: 20% of simulations.',
-  ])('does not give an earlier result the current £60 name: %s', (historical) => {
-    expect(qualifyOptionResultClaims(historical, optionNameAliases(graph()))).toBe(historical);
-  });
-
-  it('can still name the current result after a separate historical section', () => {
-    const text = '## Earlier run\n\nRaise to £59: 20%.\n\n## Current run\n\nRaise to £59: 99%.';
-    expect(qualifyOptionResultClaims(text, optionNameAliases(graph()))).toBe(
-      '## Earlier run\n\nRaise to £59: 20%.\n\n## Current run\n\nRaise to £59 (set to £60/month): 99%.',
-    );
   });
 
   it('underclaims ambiguous labels, units and inconsistent stored figures', () => {

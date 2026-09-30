@@ -81,7 +81,7 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
-import { optionNameAliases, qualifyOptionResultClaims } from '../orchestrator-v5/agent-lane/option-name-truth.js';
+import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
@@ -413,7 +413,7 @@ const AGENT_INSTRUCTIONS = [
    * readiness from `structure`, which never checks decision links, and `analysis` carried a placeholder.
    */
   'Whether the analysis can run NOW is stated ONLY by `readiness` (in get_canonical_state and the build result) or `readiness_after` (after a change). When `may_run` is false, name what stands in the way from `needs_from_user` \u2014 or, when that is empty, from `reason` \u2014 in its own plain words, and offer to help. When `may_run` is true, say it can run; if `will_run_without` names options, say the run will leave those out until their levels are set. `olumi_can_offer` items are things Olumi can help with \u2014 offer them, never present them as the user\u2019s task. When `checked` is false, say you could not check whether it can run \u2014 never that nothing is blocking. `analysis.earlier_analysis` describes a result that already exists (current or stale); it is never permission to run.',
-  'When an option has `display_label`, use that wording in analysis or result prose. Its `label` and `option_label` remain the user\u2019s exact saved words and the tool address; never silently rename them.',
+  'When a current Run gives an option `display_label`, use that wording for that Run\u2019s result. Preserve earlier Runs\u2019 wording and figures exactly. Its `label` and `option_label` remain the user\u2019s saved words and the tool address; never silently rename them.',
   'Never show the user an internal code, an id or a field name (such as `may_run` or `needs_from_user`): say what it means in plain words.',
   'The goal\u2019s `target` is the figure the user stated, in their unit \u2014 quote it as stated. `limits` are the constraints the user set. Each item in `links` says whose link it is (`source`: `user_specified` is the user\u2019s; `cee_hypothesis` or `ai_inferred` is an assumption Olumi made) and how strong it is assumed to be; `defaulted` means no one has estimated its strength yet. When a user challenges a link, say whose it is before proposing a change.',
   'When a tool tells you something was not represented, say so.',
@@ -1965,7 +1965,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * is given exactly what the user is shown — and nothing when it does not bind.
          */
         const bound = runDeltaBoundToReadback(lastRun, { scenarioId, graphHash: st.graphHash, analysisState: st.analysisState, analysisResult: st.analysisResult });
-        const current = (st.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current';
+        const current = (st.analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current'
+          && (st.analysisResult as { computed_against_hash?: unknown } | undefined)?.computed_against_hash === st.graphHash;
         const optionDisplayNames = current ? [...optionNameAliases(st.graph).values()].map((a) => a.display) : [];
         canonicalAfterRun = {
           ...(st.analysisState !== undefined ? { analysis_state: st.analysisState } : {}),
@@ -2629,16 +2630,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (provisionalView === null && givenView !== null) {
       log.warn({ scenario_id: scenarioId, analysis_on_record: standing?.analysis_on_record ?? null, withheld: standing?.withheld ?? null },
         'agent-lane: a provisional view was given but the final readback does not withhold the leader — it is not shown');
-    }
-    // Display-only repair at the final answer boundary. A current Run can quote a
-    // saved option name whose single price figure no longer matches its level.
-    // Only result/leader claims are qualified; original brief quotations and
-    // canonical labels, Run facts and exact tool addresses are untouched.
-    if (analysisResult !== undefined
-      && (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind === 'complete_current'
-      && typeof wireBody.assistant_text === 'string') {
-      const qualified = qualifyOptionResultClaims(wireBody.assistant_text, optionNameAliases(readbackGraph));
-      if (qualified !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: qualified };
     }
     /**
      * ⭐ HEADLINE FIRST ON AN ANALYSIS REPLY — see `withAnalysisAnswerShape`. HERE, and nowhere earlier:

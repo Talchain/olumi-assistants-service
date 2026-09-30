@@ -3,18 +3,19 @@ import Fastify, { type FastifyInstance } from 'fastify';
 
 const SCENARIO = '7d18dd9a-5929-4b6e-8ca4-462a11489257';
 const HASH = 'aaaacccc00001111';
+const HUMAN_LABEL = 'Raise Pro plan price from £49 to £59';
 const graph = { nodes: [
   { id: 'goal', kind: 'goal', label: 'MRR' },
   { id: 'price', kind: 'factor', label: 'Pro plan price', observed_state: { cap: 200, unit: '£ per subscriber per month', value: 0.245, raw_value: 49 } },
-  { id: 'raise', kind: 'option', label: 'Raise Pro plan price from £49 to £59', interventions: { price: { value: 0.3, raw_value: 60, unit: '£ per subscriber per month' } } },
+  { id: 'raise', kind: 'option', label: HUMAN_LABEL, interventions: { price: { value: 0.3, raw_value: 60, unit: '£ per subscriber per month' } } },
 ], edges: [] };
 const result = { type: 'analysis_result', computed_against_hash: HASH, leading_option_id: 'raise', summary: 'Synthetic result',
-  enrichment: { option_comparison: [{ option_id: 'raise', option_label: 'Raise Pro plan price from £49 to £59', win_probability: 0.99 }] } };
+  enrichment: { option_comparison: [{ option_id: 'raise', option_label: HUMAN_LABEL, win_probability: 0.99 }] } };
 const state = { run_state: { kind: 'complete_current', computed_at: '2026-09-30T09:00:00.000Z', graph_hash_at_run: HASH },
   leader_claim: { permitted: true, separation: 'separated' } };
 const writes: string[] = [];
 const modelRequests: unknown[] = [];
-let modelText = 'Raise Pro plan price from £49 to £59: 99% in this model.';
+let modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
 const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null }>();
 const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
@@ -53,40 +54,55 @@ describe('Agent Run result names a changed option level without renaming the gra
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
 
-  it('qualifies the actual reply before durable answer write; Run fact and graph keep the raw label', async () => {
+  it('gives the model the current Run display name and persists its typed-context reply, without renaming facts', async () => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
       chip: { action_type: 'run_analysis' }, turn_id: '4382b44d-7672-4c9d-9f2b-2b76a2662328',
     } });
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     const body = r.json() as { assistant_text: string; blocks: { enrichment?: { option_comparison?: { option_label: string }[] } }[] };
-    expect(body.assistant_text).toContain('Raise Pro plan price from £49 to £59 (set to £60/month): 99%');
-    expect(JSON.stringify(modelRequests)).toContain('Raise Pro plan price from £49 to £59 (set to £60/month)');
-    expect(writes.at(-1)).toContain('Raise Pro plan price from £49 to £59 (set to £60/month): 99%');
-    expect(body.blocks[0]?.enrichment?.option_comparison?.[0]?.option_label).toBe('Raise Pro plan price from £49 to £59');
-    expect(graph.nodes[2]!.label).toBe('Raise Pro plan price from £49 to £59');
+    expect(body.assistant_text).toContain(`${HUMAN_LABEL} (set to £60/month): 99%`);
+    expect(JSON.stringify(modelRequests)).toContain('option_display_names');
+    expect(JSON.stringify(modelRequests)).toContain(`${HUMAN_LABEL} (set to £60/month)`);
+    expect(writes.at(-1)).toContain(`${HUMAN_LABEL} (set to £60/month): 99%`);
+    expect(body.blocks[0]?.enrichment?.option_comparison?.[0]?.option_label).toBe(HUMAN_LABEL);
+    expect(graph.nodes[2]!.label).toBe(HUMAN_LABEL);
   });
 
-  it('keeps an earlier Run result historical even when this reply also has a current Run', async () => {
-    modelText = '## Earlier run\n\nRaise Pro plan price from £49 to £59: 20% of simulations.';
-    try {
-      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-        kind: 'message', scenario_id: SCENARIO, message: 'Run and compare with the earlier result.', source: 'chip_click',
-        chip: { action_type: 'run_analysis' }, turn_id: '4382b44d-7672-4c9d-9f2b-2b76a2662330',
-      } });
-      expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
-      const body = r.json() as { assistant_text: string };
-      expect(body.assistant_text).toContain('## Earlier run\n\nRaise Pro plan price from £49 to £59: 20%');
-      expect(body.assistant_text).not.toContain('(set to £60/month)');
-      expect(writes.at(-1)).not.toContain('(set to £60/month)');
-    } finally {
-      modelText = 'Raise Pro plan price from £49 to £59: 99% in this model.';
-    }
-  });
+  const historicalClaims = [
+    `Earlier runs: ${HUMAN_LABEL}: 20% of simulations.`,
+    `Before your edit, ${HUMAN_LABEL}: 20% of simulations.`,
+    `In Run 1, ${HUMAN_LABEL}: 20% of simulations.`,
+    `Earlier, ${HUMAN_LABEL}: 20% of simulations. Now it is higher.`,
+    `### Earlier run\n\n- ${HUMAN_LABEL}: 20% of simulations.`,
+    `Last time, ${HUMAN_LABEL} led.`,
+    `The first run gave ${HUMAN_LABEL}: 20% of simulations.`,
+    `At the old price, ${HUMAN_LABEL}: 20% of simulations.`,
+    `The earlier two runs gave ${HUMAN_LABEL}: 20% of simulations.`,
+  ];
+  for (const [index, historical] of historicalClaims.entries()) {
+    it(`leaves K${index + 1} historical result wording untouched despite a current Run`, async () => {
+      modelText = historical;
+      try {
+        const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+          kind: 'message', scenario_id: SCENARIO, message: 'Run and compare with the earlier result.', source: 'chip_click',
+          chip: { action_type: 'run_analysis' }, turn_id: `4382b44d-7672-4c9d-9f2b-2b76a266${String(2330 + index).padStart(4, '0')}`,
+        } });
+        expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+        const body = r.json() as { assistant_text: string };
+        expect(body.assistant_text).toContain(historical);
+        expect(body.assistant_text).not.toContain('(set to £60/month)');
+        expect(writes.at(-1)).toContain(historical);
+        expect(writes.at(-1)).not.toContain('(set to £60/month)');
+      } finally {
+        modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
+      }
+    });
+  }
 
   it('does not bind the edited level to the earlier Run on a stale follow-up', async () => {
     state.run_state.kind = 'complete_stale';
-    modelText = 'In the earlier analysis, Raise Pro plan price from £49 to £59: 99%.';
+    modelText = `In the earlier analysis, ${HUMAN_LABEL}: 99%.`;
     const priorRequests = modelRequests.length;
     try {
       const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -100,7 +116,7 @@ describe('Agent Run result names a changed option level without renaming the gra
       expect(writes.at(-1)).not.toContain('(set to £60/month)');
     } finally {
       state.run_state.kind = 'complete_current';
-      modelText = 'Raise Pro plan price from £49 to £59: 99% in this model.';
+      modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
     }
   });
 });
