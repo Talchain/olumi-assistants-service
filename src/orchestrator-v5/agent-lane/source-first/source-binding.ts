@@ -62,13 +62,17 @@ export function quantityProblem(quantity: SourceQuantity, context: string): stri
   const at = quote.indexOf(quantity.number.literal);
   const before = quote.slice(0, at).toLowerCase();
   if (quantity.role === 'current') {
-    // "target for current MRR" names the metric being targeted; it does not
-    // state today's MRR. The later word "current" must not outrank "target".
-    if (/\b(?:target|goal|aim|limit|ceiling|budget)\s+for\s+(?:(?:our|the|my)\s+)?current\b/.test(before))
-      return 'current_value_is_target_or_limit';
     const statedCurrent = [...before.matchAll(/\b(current(?:ly)?|today|now|have|has|from)\b/g)].at(-1)?.index ?? -1;
     const prospective = [...before.matchAll(/\b(target|want|goal|aim|must|under|below|above|limit|ceiling|budget|to)\b/g)].at(-1)?.index ?? -1;
     if (prospective > statedCurrent) return 'current_value_is_target_or_limit';
+    if (prospective >= 0 && statedCurrent > prospective) {
+      const between = before.slice(prospective, statedCurrent);
+      // A prospective cue still governs "current MRR" in "target of current
+      // MRR is £75k". Only a completed preceding clause can release it.
+      const separateSentence = /[.!?;]\s+/.test(between);
+      const completedConjoinedClause = /\b(?:is|are|was|were)\b[^.!?;]*\d[^.!?;]*(?:,\s*)?\b(?:and|but|whereas|while)\s+$/.test(before.slice(0, statedCurrent));
+      if (!separateSentence && !completedConjoinedClause) return 'current_value_is_target_or_limit';
+    }
   }
   if (quantity.frame !== 'level' && quantity.direction === 'decrease' && !/\b(reduc\w*|cut\w*|decreas\w*|lower\w*|less|drop\w*|save\w*)\b/i.test(quote)) return 'change_direction_not_grounded';
   if (quantity.frame !== 'level' && quantity.direction === 'increase' && !/\b(increas\w*|rais\w*|grow\w*|growth|more|add\w*|improv\w*)\b/i.test(quote)) return 'change_direction_not_grounded';

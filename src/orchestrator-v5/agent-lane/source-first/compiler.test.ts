@@ -98,8 +98,8 @@ describe('source-first compiler', () => {
     expect(result.unresolved[0].code).toBe('current_value_is_target_or_limit');
   });
 
-  it('does not promote a target for the current metric into its goal baseline', () => {
-    const targetForMetric = 'The target for current MRR is £75k per month.';
+  it.each(['for', 'of'])('does not promote a target %s the current metric into its goal baseline', (preposition) => {
+    const targetForMetric = `The target ${preposition} current MRR is £75k per month.`;
     const target = 'Our target MRR is above £85k per month.';
     const meaning = empty();
     meaning.entities = [{ ref: 'mrr', kind: 'goal', label: 'MRR', source: source(targetForMetric) }];
