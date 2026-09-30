@@ -35,6 +35,8 @@ interface FactSpec {
   readonly computedAt?: string;
   readonly builds?: Record<string, string | null> | null;
   readonly entitled?: boolean;
+  /** PLoT's recorded ISL request (`_meta.payloads.isl_request`) — what C1's draw-structure gate reads (#2410). */
+  readonly islRequest?: Record<string, unknown>;
 }
 
 /**
@@ -62,7 +64,7 @@ function fact(spec: FactSpec): HandlerFact {
     })),
     meta,
     ...(spec.builds !== undefined && spec.builds !== null
-      ? { _meta: { builds: spec.builds } }
+      ? { _meta: { builds: spec.builds, ...(spec.islRequest !== undefined ? { payloads: { isl_request: spec.islRequest } } : {}) } }
       : {}),
   };
 
@@ -89,6 +91,17 @@ const OPTIONS_CURRENT = [
   { id: 'opt-a', label: 'Offshore', win: 0.45 },
   { id: 'opt-b', label: 'Onshore', win: 0.55 },
 ] as const;
+
+/**
+ * One recorded PLoT→ISL request, the SAME draw structure on both Runs of a C1 pair: C1 needs both Runs' recorded
+ * requests to show the draws line up (#2410; R3 #75 5920859011). An edit to `std` keeps it; one to
+ * `exists_probability` would not (ISL draws the strength only when the edge exists).
+ */
+const RECORDED_ISL_REQUEST = {
+  graph: { nodes: [{ id: 'fac_cost', kind: 'factor', epsilon_std: 0 }], edges: [{ from: 'fac_cost', to: 'goal', exists_probability: 1, strength: { mean: 0.4, std: 0.1 } }] },
+  options: [{ id: 'opt-a', interventions: { fac_cost: 0.6 } }, { id: 'opt-b', interventions: { fac_cost: 0.4 } }],
+  parameter_uncertainties: [{ node_id: 'fac_cost', distribution: 'normal', std: 0.05 }],
+} as const;
 
 /** Newest first, which is how the turn loader delivers `prior_facts`. */
 function pair(prior: HandlerFact, current: HandlerFact): HandlerFact[] {
@@ -193,11 +206,12 @@ describe('buildRunDelta — attribution is named only from an OBSERVED divergenc
    * edit moves the hash and leaves the seed alone. With the builds echo riding,
    * that pair is genuinely C1. This test pins that, so a future lane cannot
    * "simplify" C1 away as dead code.
+   * #2410: C1 also needs both Runs' RECORDED ISL requests to show the same draw structure (a `std` edit keeps it).
    */
   it('an uncertainty-only edit WITH the builds echo present classifies C1_attributable', () => {
     const builds = { ui: null, cee: null, plot: 'plot-1', isl: 'isl-1' };
-    const prior = fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, computedAt: '2026-06-06T00:00:00.000Z' });
-    const current = fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, computedAt: '2026-06-07T00:00:00.000Z' });
+    const prior = fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, islRequest: RECORDED_ISL_REQUEST, computedAt: '2026-06-06T00:00:00.000Z' });
+    const current = fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, islRequest: RECORDED_ISL_REQUEST, computedAt: '2026-06-07T00:00:00.000Z' });
     const built = build(pair(prior, current));
     expect(built.kind).toBe('ok');
     if (built.kind !== 'ok') return;
@@ -473,10 +487,10 @@ describe('buildRunDelta — the contract polices the producer', () => {
         fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds: { ...builds, plot: 'plot-1' }, computedAt: '2026-06-06T00:00:00.000Z' }),
         fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-a', builds: { ...builds, plot: 'plot-2' }, computedAt: '2026-06-07T00:00:00.000Z' }),
       )),
-      // C1_attributable (uncertainty-only edit, builds echo riding).
+      // C1_attributable (a std-only edit, builds echo riding, the same recorded ISL draw structure).
       build(pair(
-        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, computedAt: '2026-06-06T00:00:00.000Z' }),
-        fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, computedAt: '2026-06-07T00:00:00.000Z' }),
+        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, islRequest: RECORDED_ISL_REQUEST, computedAt: '2026-06-06T00:00:00.000Z' }),
+        fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, islRequest: RECORDED_ISL_REQUEST, computedAt: '2026-06-07T00:00:00.000Z' }),
       )),
       // C0_identical.
       build(pair(
