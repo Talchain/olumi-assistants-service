@@ -132,6 +132,19 @@ const ADDITIVE = {
 
 type Graph = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
 
+/**
+ * …and with NO stated target, so DECISION-REPRESENTATION row 4 (#2371) has no subject: these served product graphs rest
+ * on Olumi's defaulted churn link, which caps the real graph at `exploratory` and withholds the chance before any leader
+ * is chosen (`target-testability.test.ts`, R3's m1 rows). Only the goal's raw target and its own limit row go.
+ */
+function withoutTarget<G>(graph: G): G {
+  const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
+  const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
+  for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
+  return c as unknown as G;
+}
+
 async function build(wire: Record<string, unknown>): Promise<Graph> {
   let registered: unknown = null;
   const call = (async () => ({ text: JSON.stringify(wire) })) as unknown as CallStructuredModel;
@@ -144,7 +157,7 @@ async function build(wire: Record<string, unknown>): Promise<Graph> {
   };
   const out = await buildModelFromBrief(SCENARIO, BRIEF, dispatch, call);
   expect(out.ok, JSON.stringify(out)).toBe(true);
-  return sizedForC46(registered as Graph);
+  return withoutTarget(sizedForC46(registered as Graph));
 }
 
 /**

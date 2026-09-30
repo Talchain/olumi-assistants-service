@@ -39,6 +39,21 @@ const W3_SERVED: Served = {
   graph: W3.graph,
   plot_body: { ...W3.analysis_result.enrichment, analysis_status: 'computed' },
 };
+/**
+ * …and with NO stated target, so DECISION-REPRESENTATION row 4 (#2371) has no subject: these served graphs rest on Olumi's
+ * defaulted links, which cap the real graph at `exploratory` and withhold the chance before Gate 5 is reached (`target-testability.test.ts`, R3's m1 rows). Only the goal's raw target and its own limit row go.
+ */
+function withoutTarget<G>(graph: G): G {
+  const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
+  const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
+  for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
+  return c as unknown as G;
+}
+
+// Gate 5 is this spec's subject; DR row 4 (#2371) is held off on every served graph (see `withoutTarget`).
+for (const k of ['mrr_m0', 'cut_costs_15f48f0b', 'mrr_m6_graph', 'mrr_m1_graph', 'mrr_m8_graph'] as const) (F as Record<string, { graph: Json }>)[k]!.graph = withoutTarget(F[k].graph);
+W3_SERVED.graph = withoutTarget(W3_SERVED.graph);
 const M0 = F.mrr_m0;
 const CUT = F.cut_costs_15f48f0b;
 const SCENARIO = 'c8108752-0000-4000-8000-000000000005';
