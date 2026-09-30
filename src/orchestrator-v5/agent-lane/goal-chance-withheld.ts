@@ -116,6 +116,12 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
  * pass inside a build — and a later run that did not withhold owes nothing.
  */
 export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: string): string | null {
+  const say = goalChanceSayFromThisTurn(toolResults);
+  return say !== null && !sameWordsIn(replyText, say) ? say : null;
+}
+
+/** The latest Run this turn's typed sentence; a later Run without a warning clears an earlier one. */
+export function goalChanceSayFromThisTurn(toolResults: readonly unknown[]): string | null {
   let say: string | undefined;
   for (const r of toolResults) {
     const rec = recordOf(r);
@@ -124,7 +130,7 @@ export function goalChanceLineOwed(toolResults: readonly unknown[], replyText: s
     if (chance?.withheld === true && typeof chance.say === 'string' && chance.say.trim() !== '') say = chance.say;
     else if (rec?.ran === true || firstPass?.ran === true) say = undefined;
   }
-  return say !== undefined && !sameWordsIn(replyText, say) ? say : null;
+  return say ?? null;
 }
 
 /**
@@ -138,4 +144,3 @@ function sameWordsIn(text: string, sentence: string): boolean {
     .replace(/\s+/g, ' ').trim();
   return plain(text).includes(plain(sentence));
 }
-
