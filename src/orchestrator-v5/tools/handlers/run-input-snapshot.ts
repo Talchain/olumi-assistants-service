@@ -22,6 +22,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { InterventionRangeSchema } from '@talchain/schemas';
 import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
 
@@ -125,11 +126,16 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
   // An option PLoT was sent with no id cannot be diffed against another Run: record no snapshot rather than invent an
   // id (`option_0` would read as a real option, and a reorder would diff as a change).
   if (input.submittedOptions.some((opt) => optionIdOf(opt) === undefined)) return null;
+  // A stated range that was SENT but whose author cannot be shown (0.68 requires `source`): no snapshot, rather than a
+  // setting that silently drops the range and lets a range-only change read "complete".
+  let unrecordableRange = false;
   const options = input.submittedOptions.map((opt, i) => {
     const optionId = optionIdOf(opt)!;
     const wire = input.wirePerOption[i] ?? {};
     const raws = input.rawObjectsPerOption[i] ?? {};
     const held = input.heldFactorIdsByOptionId.get(optionId);
+    // TEMPORAL 0.66 `options[].intervention_ranges`: what PLoT received for this option, keyed by factor id.
+    const sentRanges = isRec(opt.intervention_ranges) ? opt.intervention_ranges : {};
     const settings = Object.keys(wire)
       .sort()
       .flatMap((factorId) => {
@@ -138,6 +144,19 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
         const obj = raws[factorId];
         const o = isRec(obj) ? obj : {};
         const raw = finite(o.raw_value) ?? text(o.display_value) ?? (typeof o.value === 'boolean' ? o.value : undefined);
+        // The range AS SENT ({low, high, meaning}), carrying its author from the option's own stated range object.
+        const sentRange = sentRanges[factorId];
+        let range: ReturnType<typeof InterventionRangeSchema.parse> | undefined;
+        if (sentRange !== undefined) {
+          const authored = isRec(o.range) ? o.range : {};
+          const parsed = InterventionRangeSchema.safeParse({
+            ...(isRec(sentRange) ? sentRange : {}),
+            source: authored.source,
+            ...(authored.source_quote !== undefined ? { source_quote: authored.source_quote } : {}),
+          });
+          if (parsed.success) range = parsed.data;
+          else unrecordableRange = true;
+        }
         return [{
           factor_id: factorId,
           ...(label(nodeById.get(factorId)?.label) !== undefined ? { label: label(nodeById.get(factorId)?.label) } : {}),
@@ -145,6 +164,7 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
           ...(text(o.unit, 64) !== undefined ? { unit: text(o.unit, 64) } : {}),
           encoded,
           ...(held?.has(factorId) ? { held: true as const } : {}),
+          ...(range !== undefined ? { range } : {}),
         }];
       });
     return {
@@ -154,6 +174,7 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
       settings,
     };
   });
+  if (unrecordableRange) return null;
 
   // ── factor values ──────────────────────────────────────────────────────
   const factors = nodes.flatMap((n) => {

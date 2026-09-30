@@ -1,6 +1,6 @@
 /**
  * SC-24 — "previous Run vs this Run" carries what differed in the inputs between the two Runs, in the authored units
- * (schemas 0.67.0). A row has NO author — an input can differ because the user edited it or because an Olumi proposal
+ * (schemas 0.68.0). A row has NO author — an input can differ because the user edited it or because an Olumi proposal
  * was approved — so no reader may render it as "you changed" (AIQ binding rule, schemas #76 5916401270).
  *
  * Design SC-24 v2 (programme-docs #84 5914416431); lease DL #75 5914474485; one Run-unit carrier AIQ 5912905493 /
@@ -25,7 +25,8 @@
  *   L  a link's spread / existence probability that changed with no row kind → `partial`, never "complete, nothing
  *      changed"; an identical pair stays `complete` with [] (control).
  *   M  (AIQ 5918134795) a link's β is the engine's number, never a row figure: a β-only change → no row, `partial`;
- *      a link added / removed → a presence row with no figure; the £59 → £60 option row stays `complete` (controls).
+ *      a link added / removed → a presence row with no figure; the £59 → £60 option row stays `complete` (controls). *   N  (UNDO 5918366712 · AIQ 5918201688) a stated range that moved (5–20 → 5–30) has no row kind → `partial`, []; an
+ *      author-only difference and identical ranges stay `complete` (controls).
  */
 import { describe, expect, it } from 'vitest';
 import { RunDeltaSchema } from '@talchain/schemas/boundary';
@@ -336,5 +337,25 @@ describe('SC-24 · diffRunInputSnapshots', () => {
     expect([option?.input_coverage, option?.input_changes?.map((r) => [r.entity_kind, r.before, r.after])])
       .toEqual(['complete', [['option_setting', { raw: 59, unit: 'GBP' }, { raw: 60, unit: 'GBP' }]]]);
     expect(RunDeltaSchema.safeParse(added).success && RunDeltaSchema.safeParse(beta).success).toBe(true);
+  });
+
+  it('N: a stated range that moved → partial, no row; author-only and identical ranges stay complete', () => {
+    const withRange = (high: number, source = 'user_stated') => snap({
+      options: [
+        { option_id: 'opt-a', label: 'Raise price', settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: 10, unit: 'days', encoded: 10,
+          range: { low: 5, high, meaning: 'likely_range', source } }] },
+        { option_id: 'opt-b', label: 'Hold', is_baseline: true, settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: 49, unit: 'GBP', encoded: 49, held: true }] },
+      ],
+    });
+    const pair = (a: RunInputSnapshot, b: RunInputSnapshot) => {
+      const out = buildRunDelta({ priorFacts: [
+        fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: b }),
+        fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: a }),
+      ], mayNameLeadingOption: true });
+      return out.kind === 'ok' ? [out.delta.input_coverage, out.delta.input_changes] : out;
+    };
+    expect(pair(withRange(20), withRange(30))).toEqual(['partial', []]);
+    expect(pair(withRange(20), withRange(20, 'brief_extraction'))).toEqual(['complete', []]);
+    expect(pair(withRange(20), withRange(20))).toEqual(['complete', []]);
   });
 });

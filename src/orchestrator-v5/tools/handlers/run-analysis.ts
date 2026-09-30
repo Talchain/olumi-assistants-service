@@ -1172,7 +1172,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
 
     // --- 3.9. SC-24: record what this Run is SENT, and its execution identity ----------------------------------
     // Captured here — after the last write to `plotPayload` and before dispatch — from the request's own values, so
-    // a later "what changed between two Runs" diffs two real inputs (schemas 0.67.0 `input_snapshot`, `run_id`).
+    // a later "what changed between two Runs" diffs two real inputs (schemas 0.68.0 `input_snapshot`, `run_id`).
     // `input_snapshot.goal` is the ONE Run-attested goal unit P0 SHARED DATA's currentness gate reads.
     // A snapshot the contract refuses is dropped, never allowed to fail the Run: its delta says `not_recorded`.
     const runId = runIdFor({
@@ -2671,7 +2671,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
         ...(goalCertainty.recorded ? { goal_certainty: goalCertainty.decisions } : {}),
         computed_at: runComputedAt,
-        // SC-24 (schemas 0.67.0): the Run's execution identity and the input it was sent (3.9 above).
+        // SC-24 (schemas 0.68.0): the Run's execution identity and the input it was sent (3.9 above).
         run_id: runId,
         ...(inputSnapshot !== null ? { input_snapshot: inputSnapshot } : {}),
         // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT

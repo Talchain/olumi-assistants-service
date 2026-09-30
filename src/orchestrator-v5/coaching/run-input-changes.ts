@@ -1,6 +1,6 @@
 /**
  * SC-24 — WHAT DIFFERED IN THE INPUTS between two Runs, diffed from their recorded `input_snapshot`s
- * (`@talchain/schemas` 0.67.0 `RunDeltaInputChangeSchema`).
+ * (`@talchain/schemas` 0.68.0 `RunDeltaInputChangeSchema`).
  *
  * ⭐ INDEPENDENT OF ATTRIBUTION. This says what the two Runs were SENT differently; `attribution_case` says whether
  * the pair licenses a causal reading of the outcome. A C2 pair still had £59 → £60 as its input.
@@ -17,6 +17,8 @@
  *     INCOMPLETE, and the delta says `input_coverage: 'partial'` — never "complete" over a change it could not show.
  *   - A label-only difference is never a row; a unit difference is. (0.68 carries no `kind` on a Run setting or row.)
  *   - Equal authored figures whose SENT number differs (£59 both ends, 0.4 → 0.5 dispatched) is unexpressed → partial.
+ *   - A stated RANGE (TEMPORAL, 0.68 `range`) that differs between the Runs — added, removed or moved — has no row kind:
+ *     it is unexpressed → partial (UNDO 5918366712, AIQ 5918201688).
  *   - A status-quo setting CEE HELD at the factor's current value on BOTH Runs is not an option edit — the factor-value
  *     row already says what moved.
  *   - Nothing here computes a delta: rows carry both ends, and a consumer shows before → after.
@@ -106,6 +108,9 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     for (const factorId of unionIds(pSet, cSet)) {
       const ps = pSet.get(factorId);
       const cs = cSet.get(factorId);
+      // The range's VALUE (low, high, meaning); its author alone differing is not an input change (as a factor's `source`).
+      const rangeOf = (x: typeof ps) => (x?.range === undefined ? null : [x.range.low, x.range.high, x.range.meaning]);
+      if (ps !== undefined && cs !== undefined && JSON.stringify(rangeOf(ps)) !== JSON.stringify(rangeOf(cs))) complete = false;
       if (ps?.held === true && cs?.held === true) continue;
       pushPair(
         { entity_kind: 'option_setting', entity_id: factorId, option_id: optionId, field: 'value', ...labels(ps?.label, cs?.label) },

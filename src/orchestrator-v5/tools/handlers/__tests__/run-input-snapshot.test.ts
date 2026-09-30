@@ -1,5 +1,5 @@
 /**
- * SC-24 — the input a Run was SENT, captured from the request (schemas 0.67.0 `input_snapshot`).
+ * SC-24 — the input a Run was SENT, captured from the request (schemas 0.68.0 `input_snapshot`).
  * P0 SHARED DATA 5914750268: the goal unit is the SAME authored unit as the goal's `goal_threshold_unit`; a missing
  * unit stays absent (never GBP). AIQ 5914731075: fields copy what the Run was sent — nothing inferred.
  */
@@ -149,5 +149,28 @@ describe('runIdFor — one id per turn that ran, the same on a replay', () => {
     expect(buildRunInputSnapshot(input({ plotPayload: noGoal }))?.goal).toBeNull();
     // Control: a real goal id still records its goal.
     expect(buildRunInputSnapshot(input())?.goal?.node_id).toBe('goal_mrr');
+  });
+
+  // UNDO 5918366712 / AIQ 5918201688: TEMPORAL's stated range is recorded AS SENT (the wire's {low, high, meaning}),
+  // carrying the author from the option's own range object; a sent range with no provable author → no snapshot.
+  it('R: a stated range is recorded as sent, with its author; none sent → none recorded; unauthored → no snapshot', () => {
+    const ranged = (authored: Record<string, unknown> | undefined) => input({
+      submittedOptions: [
+        { option_id: 'opt_raise', label: 'Raise to £60', intervention_ranges: { fac_price: { low: 55, high: 65, meaning: 'likely_range' } } },
+        { option_id: 'opt_hold', label: 'Hold', is_baseline: true },
+      ],
+      rawObjectsPerOption: [
+        { fac_price: { value: 60, raw_value: 60, unit: 'GBP', source: 'user_override', ...(authored !== undefined ? { range: authored } : {}) } },
+        { fac_price: { value: 49, raw_value: 49, unit: 'GBP', source: 'cee_default' } },
+      ],
+    });
+    const snap = buildRunInputSnapshot(ranged({ low: 55, high: 65, meaning: 'likely_range', source: 'user_stated' }))!;
+    expect(snap.options.find((o) => o.option_id === 'opt_raise')!.settings[0]!.range)
+      .toEqual({ low: 55, high: 65, meaning: 'likely_range', source: 'user_stated' });
+    expect(snap.options.find((o) => o.option_id === 'opt_hold')!.settings[0]).not.toHaveProperty('range');
+    // Control: nothing sent → nothing recorded.
+    expect(buildRunInputSnapshot(input())!.options[0]!.settings[0]).not.toHaveProperty('range');
+    // A range PLoT received whose author the option does not carry: no snapshot (never a silently dropped range).
+    expect(buildRunInputSnapshot(ranged(undefined))).toBeNull();
   });
 });

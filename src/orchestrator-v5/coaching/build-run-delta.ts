@@ -441,7 +441,7 @@ function identityBoundWinProbabilities(
 }
 
 /**
- * SC-24 (schemas 0.67.0) — the pair's endpoints and its exact input changes, read off the two facts' own
+ * SC-24 (schemas 0.68.0) — the pair's endpoints and its exact input changes, read off the two facts' own
  * `run_id` / `input_snapshot` (what each Run was SENT; `run-analysis.ts` §3.9).
  *   - `compared`: both Runs recorded their inputs → the diff (possibly `[]`), `input_coverage: 'complete'` — or
  *     `'partial'` when a sent input changed that no authored row can state (`run-input-changes.ts` RULES).
