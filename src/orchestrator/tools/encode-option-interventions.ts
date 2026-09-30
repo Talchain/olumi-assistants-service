@@ -345,9 +345,9 @@ function deriveValue(rec: RawIntervention, factor: Dict | undefined): number | u
  *   value_confidence             — confidence in the OLD value. A user-specified
  *                                  number does not inherit a prior estimate's
  *                                  confidence.
- *   source_quote                 — words supporting the OLD figure. A brief
- *                                  quote saying £59 cannot warrant a later
- *                                  user-authored £60 intervention.
+ *   source_quote                 — words supporting the OLD figure. Re-supplied
+ *                                  below only when the encoded figure is the
+ *                                  same; £59 cannot warrant a later £60.
  */
 /**
  * ⚠ `reasoning` IS ON THIS LIST DELIBERATELY, AND I HAD IT WRONG FIRST.
@@ -378,6 +378,8 @@ const VALUE_DERIVED_OR_OWNED_KEYS: ReadonlySet<string> = new Set([
   // The range the OLD figure was read against: it travels with `raw_value`, so a new number never inherits it.
   'cap',
 ]);
+
+const QUOTED_FIGURE_KEYS = ['value', 'raw_value', 'unit', 'cap', 'value_type', 'encoding_map'] as const;
 
 /**
  * Construct a canonical InterventionV3, preserving an existing top-level entry's
@@ -447,6 +449,10 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   // copies of both, so these are re-supplied from the NEW record or not at all.
   if (rec.value_confidence !== undefined) iv.value_confidence = rec.value_confidence;
   if (rec.reasoning !== undefined) iv.reasoning = rec.reasoning;
+  if (isPlainObject(existing) && typeof existing.source_quote === 'string'
+    && QUOTED_FIGURE_KEYS.every((key) => isDeepStrictEqual(existing[key], iv[key]))) {
+    iv.source_quote = existing.source_quote;
+  }
   return iv;
 }
 

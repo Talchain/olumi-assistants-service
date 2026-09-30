@@ -218,6 +218,30 @@ describe('encodeOptionInterventionsForEdit (add-option encoding)', () => {
   });
 });
 
+describe('a data-path edit retains only a quote for the figure that survives encoding', () => {
+  const quote = 'Support cost is £60,000';
+  const original = { value: 0.4, raw_value: 60000, unit: '£', cap: 150000,
+    source: 'brief_extraction', source_quote: quote,
+    target_match: { node_id: 'fac_annual_cost', match_type: 'exact_id', confidence: 'high' } };
+
+  it.each([
+    { name: 'same figure', next: { value: 0.4, raw_value: 60000, unit: '£', cap: 150000 }, expected: quote },
+    { name: 'changed value', next: { value: 0.5, raw_value: 75000, unit: '£', cap: 150000 }, expected: undefined },
+    { name: 'changed native figure at same level', next: { value: 0.4, raw_value: 80000, unit: '£', cap: 200000 }, expected: undefined },
+    { name: 'changed unit', next: { value: 0.4, raw_value: 60000, unit: 'USD', cap: 150000 }, expected: undefined },
+  ])('$name', ({ next, expected }) => {
+    const g = { nodes: [goal(), cappedFactor(), { id: 'opt_quote', kind: 'option', label: 'Quote',
+      interventions: { fac_annual_cost: original },
+      data: { interventions: { fac_annual_cost: next } } }],
+    edges: [edge('opt_quote', 'fac_annual_cost')] };
+    const { graph, unresolvedOptionIds } = encodeOptionInterventionsForEdit(g, new Set(['opt_quote']));
+    expect(unresolvedOptionIds).toEqual([]);
+    const saved = iv(optionOf(graph as { nodes: Dict[] }, 'opt_quote'), 'fac_annual_cost');
+    expect(saved.value).toBe(next.value);
+    expect(saved.source_quote).toBe(expected);
+  });
+});
+
 describe('optionIdsAddedWithInterventionIntent (intent-scoped add detection)', () => {
   it('flags an add whose payload carried data.interventions intent', () => {
     const ops = [{ op: 'add_node', value: { id: 'opt_a', kind: 'option', data: { interventions: { fac_annual_cost: { unit: '£', raw_value: 120000 } } } } }];

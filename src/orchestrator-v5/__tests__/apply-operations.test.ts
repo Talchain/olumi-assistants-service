@@ -234,6 +234,22 @@ beforeEach(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('applyOperations — the accept path writes what was consented to', () => {
+  it('a same-figure data-path rewrite keeps its valid quote through commit and cold read', async () => {
+    const before = baseGraph();
+    const option = before.nodes.find((node) => node.id === OPTION_ID)!;
+    option.interventions![QUALITY_ID]!.source_quote = 'Quality effect is 0.2';
+    const h = harness({ initial: before });
+    const outcome = await port(h)(input({
+      modelRevision: modelRevisionOf(before)!,
+      operations: proposalOperations([{ op: 'update_node', path: `/nodes/${OPTION_ID}/data/interventions/${QUALITY_ID}`,
+        value: { value: 0.2 }, old_value: null, impact: 'low', rationale: 'Confirm the existing level.' }]),
+    }));
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    const cold = GraphV3.parse(await h.store.loadGraph(SCENARIO));
+    expect(cold.nodes.find((node) => node.id === OPTION_ID)?.interventions?.[QUALITY_ID]?.source_quote)
+      .toBe('Quality effect is 0.2');
+  });
+
   it.each([
     { name: 'copied old quote', value: 0.3, quote: 'Set quality effect to 0.2', expectedQuote: undefined },
     { name: 'new quote', value: 0.3, quote: 'Set quality effect to 0.3', expectedQuote: 'Set quality effect to 0.3' },
