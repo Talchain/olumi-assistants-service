@@ -2,6 +2,10 @@
 
 Local manual-test foothold for draft CEE #2290. Real Agent route, tools and OpenAI calls; a frozen model and conversation are copied into process-only storage. This is **TESTED / PROTOTYPE-ONLY / NOT INTEGRATED / NOT SERVED**. It is not the production UI or the full Differentiated Lab loop.
 
+## Illustrative second-view layout
+
+**Show illustrative second-view layout** displays two example views and only the agreement, difference and evidence-next wording explicitly supplied with that example. The text was written for the Lab; it is **not** an independently verified model run, a DISAGREE-Q1 result, or a quality winner. It is separate from the current model. **Simulate a change** withdraws both views and their comparison until the example snapshot is restored. This prototype makes no provider call, semantic comparison, model write or currentness claim about a live scenario. Focused check: `pnpm exec vitest run scripts/ai-experience-lab/challenger-display.test.mjs`.
+
 ## Recorded reasoning walkthrough
 
 The **Open recorded reasoning walkthrough** button reuses this preview's article UI for one actual archived scenario. It consumes SCI-EVIDENCE `ef108360f1c50f1e4af1add589bfb318b1e2928b` through `card_from_served` and `still_current`, with no copied scientific implementation. This £20k-MRR case is separate from the live comparison's £100k-MRR case.

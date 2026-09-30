@@ -135,3 +135,76 @@ export function mountFrozenRegions({ add, call }) {
     finally { toggle.disabled = false; }
   };
 }
+
+/** Layout-only example. These words were written for the Lab, not returned by two models. */
+export const ILLUSTRATIVE_SECOND_VIEW = Object.freeze({
+  kind: 'illustrative_layout_only',
+  input_identity: 'illustrative-pricing-model-v1',
+  primary: {
+    input_identity: 'illustrative-pricing-model-v1',
+    text: 'One possible view: if a subscription price changes, customer retention may be the most useful uncertainty to test first.',
+  },
+  second: {
+    input_identity: 'illustrative-pricing-model-v1',
+    text: 'A different possible view: the feature release may change acquisition as well as retention, so the team should examine both mechanisms.',
+  },
+  supplied_comparison: {
+    agreement: 'Both example views treat customer response as unknown.',
+    disagreement: 'They put different emphasis on retention and acquisition. Neither establishes which matters more.',
+    evidence_next: 'Compare retention and acquisition by cohort, separating any price change from the feature release.',
+  },
+});
+
+/** Projects only explicitly supplied words tied to one example input; it infers no agreement. */
+export function projectSecondView(bundle, activeIdentity) {
+  if (bundle?.kind !== 'illustrative_layout_only' ||
+      typeof bundle.input_identity !== 'string' || !bundle.input_identity ||
+      activeIdentity !== bundle.input_identity ||
+      bundle.primary?.input_identity !== bundle.input_identity ||
+      bundle.second?.input_identity !== bundle.input_identity ||
+      typeof bundle.primary?.text !== 'string' || !bundle.primary.text.trim() ||
+      typeof bundle.second?.text !== 'string' || !bundle.second.text.trim()) {
+    return { state: 'withheld', primary: null, second: null, comparison: [] };
+  }
+  const labels = {
+    agreement: 'Agreement',
+    disagreement: 'Difference in emphasis',
+    evidence_next: 'Evidence to examine next',
+  };
+  const comparison = Object.entries(labels).flatMap(([key, label]) => {
+    const text = bundle.supplied_comparison?.[key];
+    return typeof text === 'string' && text.trim() ? [{ label, text }] : [];
+  });
+  return { state: 'illustrative', primary: bundle.primary.text, second: bundle.second.text, comparison };
+}
+
+/** Reuses the Lab's article style and never contacts a provider or changes a model. */
+export function mountSecondViewIllustration({ add }) {
+  const root = document.getElementById('challenger-example');
+  const toggle = document.getElementById('challenger-toggle');
+  let activeIdentity = ILLUSTRATIVE_SECOND_VIEW.input_identity;
+  function button(label, action) {
+    const node = document.createElement('button');
+    node.type = 'button'; node.textContent = label; node.onclick = action;
+    root.append(node);
+  }
+  function render() {
+    root.replaceChildren();
+    add('assistant', 'ILLUSTRATIVE SECOND-VIEW LAYOUT\nThis is example wording written for the Lab. No independent model run, live comparison, probability or recommendation is claimed. It is separate from your current model.', root);
+    const view = projectSecondView(ILLUSTRATIVE_SECOND_VIEW, activeIdentity);
+    if (view.state === 'withheld') {
+      add('assistant', 'The example model identity changed. Both earlier views and their comparison are withheld.', root);
+      button('Restore example snapshot', () => { activeIdentity = ILLUSTRATIVE_SECOND_VIEW.input_identity; render(); });
+      return;
+    }
+    add('assistant', 'FIRST EXAMPLE VIEW\n' + view.primary, root);
+    add('assistant', 'SECOND EXAMPLE VIEW\n' + view.second, root);
+    for (const row of view.comparison) add('assistant', row.label.toUpperCase() + '\n' + row.text, root);
+    button('Simulate a change to this example', () => { activeIdentity = 'illustrative-pricing-model-v2'; render(); });
+  }
+  toggle.onclick = () => {
+    root.hidden = !root.hidden;
+    toggle.textContent = root.hidden ? 'Show illustrative second-view layout' : 'Hide illustrative second-view layout';
+    if (!root.hidden) render();
+  };
+}
