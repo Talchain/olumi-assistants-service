@@ -50,6 +50,8 @@ import { registrationTurnId } from '../graph-registration/registration-identity.
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
 import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
+import { sayGoalChange } from './limit-frame.js';
+import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -383,17 +385,15 @@ export async function proposeGoalCurrentLevel(
   const node = goal as typeof goal & { goal_threshold_raw?: unknown; goal_threshold_cap?: unknown; goal_threshold_frame?: unknown; goal_threshold_unit?: unknown };
   const target = node.goal_threshold_raw;
   const cap = node.goal_threshold_cap;
-  // ⛔ R1 S4-core: a target stated as a CHANGE from today ("cut by 15%") HAS a target — the old sentence below said it
-  // had none. Recording its current level here would also need the change's scale written beside it; until that slice,
-  // this says the true reason and prepares nothing. (A brief that states today's level gets its base at construction.)
-  if (node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs') {
-    return refuse(
-      'goal_is_a_change',
-      `"${goal.label}" is a goal to change by a stated amount from today, and a current level for a goal stated that way ` +
-      'cannot be recorded here yet. Nothing was prepared. Tell the user plainly; never offer a level target instead.',
-    );
+  // ⭐ R1 S4-core, the change slice (DL #75 5902318219: journey 2's first failing boundary, "Actually our monthly cloud
+  // spend is £50k, not £45k" refused 3/3): a target stated as a CHANGE from today ("cut by 20%") HAS a target, and it
+  // is the user's own — it stays exactly as stated, now measured from their corrected level. Below, after the same
+  // guards as a level goal (their figure, in their words, in the goal's unit), `changeGoalLevel` writes today's level.
+  const isChange = node.goal_threshold_frame === 'change_rel' || node.goal_threshold_frame === 'change_abs';
+  if (isChange && !num(target)) {
+    return refuse('no_target', `"${goal.label}" has no stated change to measure its current level against. Nothing was prepared.`);
   }
-  if (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level') {
+  if (!isChange && (!num(target) || !num(cap) || cap <= 0 || node.goal_threshold_frame !== 'level')) {
     return refuse(
       'no_target',
       `"${goal.label}" has no stated target to measure its current level against, so there is no chance of reaching ` +
@@ -438,6 +438,10 @@ export async function proposeGoalCurrentLevel(
       (unitPhraseFamily(goalUnit) === 'percent' ? ' A percentage is passed as the user wrote it: 3% is 3, never 0.03.' : ''),
     );
   }
+
+  if (isChange) return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit);
+  // (Checked above for a level goal; restated so the level path below reads them as numbers.)
+  if (!num(target) || !num(cap)) return refuse('no_target', `"${goal.label}" has no stated target to measure its current level against. Nothing was prepared.`);
 
   // ── HOW THE USER PUT THE TARGET (not persisted: stated by the Agent from the user's words, never defaulted).
   const operator = typeof args?.goal_is === 'string' ? OPERATOR_OF[args.goal_is] : undefined;
@@ -525,6 +529,163 @@ export async function proposeGoalCurrentLevel(
 }
 
 /**
+ * The amount the user wrote for `raw` in their message ("£50k"), with the sentence it sits in (≤160 characters, the
+ * reading's `quote` bound), or null when no written amount reads as `raw`. A k/m/bn suffix scales as the M-rung does.
+ */
+function writtenIn(text: string, raw: number): { written: string; quote: string } | null {
+  const scale: Record<string, number> = { k: 1e3, m: 1e6, bn: 1e9 };
+  for (const m of text.matchAll(/[£$€]?\s?\d[\d,]*(?:\.\d+)?\s?(?:k|m|bn)?\b/gi)) {
+    const token = m[0].trim();
+    const suffix = (/(k|m|bn)$/i.exec(token)?.[1] ?? '').toLowerCase();
+    const n = Number(token.replace(/[£$€,\s]/g, '').replace(/(k|m|bn)$/i, ''));
+    if (!Number.isFinite(n) || Math.abs(n * (scale[suffix] ?? 1) - raw) > 1e-9 * Math.max(1, raw)) continue;
+    const start = Math.max(text.lastIndexOf('.', m.index!) + 1, text.lastIndexOf('\n', m.index!) + 1, 0);
+    const endAt = [text.indexOf('.', m.index! + token.length), text.indexOf('\n', m.index! + token.length)].filter((i) => i >= 0);
+    const quote = text.slice(start, endAt.length > 0 ? Math.min(...endAt) : text.length).trim().slice(0, 160);
+    return { written: token, quote: quote === '' ? token : quote };
+  }
+  return null;
+}
+
+/** A goal declared as a product (`nonlinear_identity`) of levelled parts: their names and what they multiply to. */
+function productStillGives(nodes: GoalLevelRead['nodes'], goal: GoalLevelRead['nodes'][number]): { parts: string; value: number } | null {
+  const identity = goal.nonlinear_identity as { operation?: unknown; factor_ids?: unknown } | undefined;
+  if (identity === null || typeof identity !== 'object' || identity.operation !== 'product' || !Array.isArray(identity.factor_ids)) return null;
+  const parts = identity.factor_ids.map((id) => nodes.find((n) => n.id === id));
+  if (parts.length < 2 || parts.some((p) => p === undefined || !num(p.observed_state?.raw_value))) return null;
+  return {
+    parts: parts.map((p) => `"${p!.label}"`).join(' × '),
+    value: parts.reduce((product, p) => product * (p!.observed_state!.raw_value as number), 1),
+  };
+}
+
+/**
+ * ⭐ TODAY'S LEVEL OF A GOAL STATED AS A CHANGE (DL #75 5902318219; journey 2 on `1f9d769`). The caller has already
+ * checked that the figure is the user's, in their words and the goal's unit. The change itself ("down 20% from today")
+ * is the user's and is never touched: measured from their corrected level. The frame the level is read on:
+ *  · a `change_rel` goal whose cap was derived from today's level (`target_derived_headroom`) gets it re-derived by the
+ *    one rule (`resolveGoalThresholdCapWithProvenance`: level × 1.25), carried in the op and written with the level;
+ *  · any other cap is kept (a `change_abs` target is stored against it), and a level outside it is refused by name.
+ * Olumi's reading of the brief's figure (`goal_level_reading`) is dropped on apply: the user has corrected it.
+ */
+function changeGoalLevel(
+  deps: { readonly proposals: ProposalStore },
+  ctx: AgentToolContext,
+  g: GoalLevelRead,
+  goal: GoalLevelRead['nodes'][number],
+  node: Record<string, unknown>,
+  raw: number,
+  value: number,
+  statedUnit: string,
+  normalised: UnitNormalised | undefined,
+  goalUnit: string | undefined,
+): ToolResult {
+  const cap = node.goal_threshold_cap;
+  // Construction's own rule for a change goal (`admit-model.ts`, the brief's level): the frame holds both today's level
+  // and the target it implies, so an increase is framed on its target, a cut on today's level.
+  const stored = node.goal_threshold_raw as number;
+  const reframed = node.goal_threshold_frame === 'change_rel' && node.goal_threshold_cap_provenance === 'target_derived_headroom'
+    ? resolveGoalThresholdCapWithProvenance(undefined, Math.max(raw, raw * (1 + stored)), goalUnit, undefined)
+    : null;
+  const frameCap = reframed?.cap ?? (num(cap) && cap > 0 ? cap : undefined);
+  const withUnit = (x: number) => sayFigureExactly(x, goalUnit ?? '') ?? `${x}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`;
+  if (frameCap === undefined) {
+    return refuse('no_target', `"${goal.label}" has no range to read its current level on, so nothing was prepared.`);
+  }
+  if (raw < 0 || raw > frameCap) {
+    return refuse(
+      'level_above_frame',
+      `${withUnit(raw)} is outside the range 0 to ${withUnit(frameCap)} the model reads "${goal.label}" on, and that range ` +
+      'was not taken from today\'s level, so it is not redrawn here. Nothing was prepared. Tell the user plainly.',
+    );
+  }
+  const existing = goal.observed_state;
+  const existingRaw = num(existing?.raw_value) ? existing!.raw_value as number : undefined;
+  if (existingRaw === raw && existing?.source === USER_EDIT_SOURCE) {
+    return refuse('already_recorded', `${withUnit(raw)} is already recorded as the user’s current level of "${goal.label}". Nothing to change.`);
+  }
+  const observed: GoalObservedState = {
+    value: raw / frameCap,
+    baseline: raw / frameCap,
+    ...(goalUnit !== undefined ? { unit: goalUnit } : {}),
+    source: USER_EDIT_SOURCE,
+    raw_value: raw,
+    cap: frameCap,
+    ...(normalised !== undefined ? { provenance_unit_normalised: normalised } : {}),
+  };
+  const change = sayGoalChange(node.goal_threshold_frame, node.goal_threshold_raw as number, goalUnit, (x) => withUnit(x),
+    (goal as { goal_direction?: unknown }).goal_direction) ?? '';
+  const asStated = sayFigureExactly(value, statedUnit) ?? `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
+  const figure = normalised !== undefined ? `${asStated}, which is ${withUnit(raw)}` : asStated;
+  const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
+  const rederived = rederivedEstimatedPart(g.nodes, goal.id, raw);
+  /**
+   * ⭐ AIQ 5902364862: the NUMBER is now the user's; the JOIN is not. Where Olumi read the brief's figure as this goal's
+   * level (a `goal_level_reading`: the goal's words differ from the user's, the r0 "costs" shape), the reading is
+   * REFRESHED from the user's own words — the same lead construction writes — never dropped, or Olumi's reading of the
+   * subject would become the user's silently. With no reading (the goal is the user's own words), none is added.
+   */
+  const prior = (goal as { goal_level_reading?: unknown }).goal_level_reading as { bound?: unknown; level_unit?: unknown } | undefined;
+  const words = writtenIn(ctx.user_text ?? '', raw);
+  const levelReading = prior !== undefined && prior !== null && typeof prior === 'object' && words !== null
+    ? {
+      level: raw,
+      level_unit: typeof prior.level_unit === 'string' ? prior.level_unit : (goalUnit ?? ''),
+      quote: words.quote,
+      lead: `Olumi reads your ‘${words.written}’ (‘${words.quote}’) as today's level of ‘${goal.label}’`,
+      ...(prior.bound === '<=' || prior.bound === '<' || prior.bound === '>=' || prior.bound === '>' ? { bound: prior.bound } : {}),
+    }
+    : null;
+  // R3 5902346957 row (2): a goal worked out as a product whose parts cannot follow the new level (not exactly one
+  // Olumi part to re-derive) still multiplies to the old figure; that is said, and the Run refuses it (ISL
+  // `identity_inconsistent`) — never scored silently on the old figure.
+  const product = rederived === null ? productStillGives(g.nodes, goal) : null;
+  const productSaid = product === null ? '' : `"${goal.label}" is worked out as ${product.parts}, and those figures still give ` +
+    `${withUnit(product.value)}, so the Run cannot use your ${withUnit(raw)} until one of them changes`;
+  const proposal = createProposal({
+    scenario_id: ctx.scenario_id,
+    user_id: ctx.authenticated_user_id,
+    base_graph_identity_hash: g.graph_hash,
+    operations: [{
+      op: GOAL_CURRENT_LEVEL_OP, path: goal.id,
+      value: {
+        goal_current_level: observed, against: targetOf(node),
+        ...(reframed !== null && reframed.cap !== cap ? { reframed_cap: reframed.cap } : {}),
+        ...(prior !== undefined ? { level_reading: levelReading } : {}),
+        ...(rederived !== null ? { rederived_part: rederived } : {}),
+      },
+    }],
+    provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
+    validation: { admitted: true, loss_count: 0, refusals: [] },
+    public_label:
+      `Record today's level of "${goal.label}" as your figure: ` +
+      (replaces !== undefined ? `${sayFigureRead(replaces, goalUnit ?? '')} → ${figure}` : figure) +
+      (change !== '' ? ` (your target: ${change})` : '') +
+      (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
+      (productSaid !== '' ? `. ${productSaid}` : ''),
+  });
+  deps.proposals.put(proposal);
+  return {
+    ok: true, mutated: false,
+    proposal_id: proposal.proposal_id,
+    public_label: proposal.public_label,
+    base_revision: g.graph_hash,
+    goal: goal.label,
+    current_level: { value: raw, ...(goalUnit !== undefined ? { unit: goalUnit } : {}) },
+    as_stated: { value, ...(statedUnit !== '' ? { unit: statedUnit } : {}) },
+    target: { change },
+    ...(replaces !== undefined ? { replaces } : {}),
+    note:
+      'Nothing has changed. Show the user the figure as they gave it, that it will be recorded as THEIR level of the goal ' +
+      `today, and that their target stays as they stated it (${change}), now measured from this level` +
+      (rederived !== null ? `, and that Olumi's estimate of "${rederived.label}" is re-derived with it and stays Olumi's` : '') +
+      (productSaid !== '' ? `. Say plainly: ${productSaid}` : '') +
+      (levelReading !== null ? `. Reading "${goal.label}" as what they call it stays Olumi's reading; say so` : '') +
+      '. Call authorise_change with this proposal_id only once they agree.',
+  };
+}
+
+/**
  * Apply an APPROVED goal-current-level proposal: ONE registration of the approved read with the goal's
  * `observed_state` set, CAS-gated on the revision the user approved (`expected_graph_hash`, the analysis
  * space the proposal is bound to) AND the identity of the same read (`expected_graph_identity_hash`) — the
@@ -550,7 +711,8 @@ export async function applyGoalCurrentLevel(
   // ⛔ RE-VALIDATED AT APPLY TIME: the level frame, and the same unit, figure and cap the proposal was prepared against.
   const against = (op.value as { against?: GoalTarget } | undefined)?.against;
   const now = targetOf(goal);
-  if (against === undefined || now.goal_threshold_frame !== 'level' || !sameTarget(against, now)) {
+  const changeFrame = now.goal_threshold_frame === 'change_rel' || now.goal_threshold_frame === 'change_abs';
+  if (against === undefined || (now.goal_threshold_frame !== 'level' && !changeFrame) || !sameTarget(against, now)) {
     return {
       ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'superseded',
       detail: `The target of "${goal.label}" changed after this was prepared, so nothing was written. Read the model again and propose afresh.`,
@@ -572,9 +734,20 @@ export async function applyGoalCurrentLevel(
   const operationId = deps.operationId(`${proposal.proposal_id}#goal_current_level`);
   // A rescale stamp describes the figure it came with: a new figure without one never inherits the previous one's.
   const { provenance_unit_normalised: _previousStamp, ...kept } = (goal.observed_state ?? {}) as Record<string, unknown>;
-  const nodes = approved.nodes.map((n) => (n.id === op.path
-    ? { ...n, observed_state: { ...kept, ...os } }
-    : part !== null && n.id === part.node_id ? { ...n, observed_state: part.observed_state } : n));
+  // A change goal (`changeGoalLevel`): the re-derived cap travels with the level, and Olumi's reading of the brief's
+  // figure goes, since the user has corrected it.
+  const carriedOp = op.value as { reframed_cap?: unknown; level_reading?: unknown } | undefined;
+  const reframedCap = num(carriedOp?.reframed_cap) ? carriedOp!.reframed_cap as number : undefined;
+  const nodes = approved.nodes.map((n) => {
+    if (n.id !== op.path) return part !== null && n.id === part.node_id ? { ...n, observed_state: part.observed_state } : n;
+    const written: Record<string, unknown> = { ...n, observed_state: { ...kept, ...os }, ...(reframedCap !== undefined ? { goal_threshold_cap: reframedCap } : {}) };
+    // Olumi's reading of the replaced figure is refreshed from the user's words, or goes when they could not be read.
+    if (carriedOp !== undefined && 'level_reading' in carriedOp) {
+      if (carriedOp.level_reading === null) delete written.goal_level_reading;
+      else written.goal_level_reading = carriedOp.level_reading;
+    }
+    return written;
+  });
   const reg = await deps.dispatch(`/assist/v1/scenarios/${ctx.scenario_id}/graph/register`, {
     graph: { ...approved.raw, nodes },
     ...(approved.graph_hash !== '' ? { expected_graph_hash: approved.graph_hash } : {}),
@@ -601,7 +774,8 @@ export async function applyGoalCurrentLevel(
   const after = await deps.readGraph(ctx.scenario_id);
   const held = after?.nodes.find((n) => n.id === op.path)?.observed_state;
   const partHeld = part === null ? undefined : after?.nodes.find((n) => n.id === part.node_id)?.observed_state;
-  const landed = held !== undefined && held.raw_value === os.raw_value && held.baseline === os.baseline && held.source === os.source &&
+  const capHeld = reframedCap === undefined || (after?.nodes.find((n) => n.id === op.path) as { goal_threshold_cap?: unknown } | undefined)?.goal_threshold_cap === reframedCap;
+  const landed = held !== undefined && held.raw_value === os.raw_value && held.baseline === os.baseline && held.source === os.source && capHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {
