@@ -72,7 +72,7 @@ function harness() {
       // PLoT's canonical meta also records the ISL request it sent (`_meta.payloads.isl_request`). This double mirrors
       // only the draw-bearing shape: an observed factor → normal; a prior-only factor → uniform (PLoT's second pass).
       const g = body.graph as Rec;
-      const uncertainties = (g.nodes as Rec[]).flatMap((n) => {
+      const uncertainties = (g.nodes as Rec[]).flatMap((n): Rec[] => {
         if (n.kind !== 'factor') return [];
         if (typeof n.observed_state?.value === 'number') return [{ node_id: n.id, distribution: 'normal', std: 0.05 }];
         if (n.prior && typeof n.prior.range_min === 'number') return [{ node_id: n.id, distribution: 'uniform', range_min: n.prior.range_min, range_max: n.prior.range_max }];
