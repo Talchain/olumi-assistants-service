@@ -843,7 +843,9 @@ function compareRunGoalUnitSnapshot(
     ? goals.length === 1 ? goals[0]?.id : undefined : graph.goal_node_id;
   const selected = goals.filter((node) => node?.id === selectedId);
   if (selected.length !== 1 || selectedId !== goalAtRun.node_id) return 'unverified';
-  const currentUnit = selected[0]?.goal_threshold_unit;
+  // Match pickGoalThresholdTrio: persisted null/empty means no unit was sent.
+  const persistedUnit = selected[0]?.goal_threshold_unit;
+  const currentUnit = persistedUnit === null || persistedUnit === '' ? undefined : persistedUnit;
   // Both absent means no unit was asserted by either input. A removal/addition
   // is a change; an invalid supplied unit is never repaired to GBP here.
   if ((goalAtRun.unit !== undefined && (typeof goalAtRun.unit !== 'string' || goalAtRun.unit.trim() === ''))
