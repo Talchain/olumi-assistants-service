@@ -45,6 +45,15 @@ describe('Agent result option names are bound to the current stored level', () =
     expect(g.nodes[1]!.label).toBe('Raise to £59');
   });
 
+  it.each([
+    'In the earlier run, Raise to £59: 20% of simulations.',
+    'The prior analysis had Raise to £59: 20% of simulations.',
+    'Previous result: Raise to £59: 20% of simulations.',
+    'Historical run — the leading option was Raise to £59.',
+  ])('does not give an earlier result the current £60 name: %s', (historical) => {
+    expect(qualifyOptionResultClaims(historical, optionNameAliases(graph()))).toBe(historical);
+  });
+
   it('underclaims ambiguous labels, units and inconsistent stored figures', () => {
     expect(optionNameAliases(graph('Raise £59 or £69')).size).toBe(0);
     expect(optionNameAliases(graph('Raise £59 in 2027')).size).toBe(0);

@@ -95,8 +95,10 @@ export function qualifyOptionResultClaims(text: string, aliases: ReadonlyMap<str
       const lineEnd = lineEndAt < 0 ? answer.length : lineEndAt;
       const before = answer.slice(lineStart, at);
       const after = answer.slice(at + raw.length, lineEnd);
-      // Original wording is historical evidence, not a result name.
-      if (/\b(?:brief|original(?:ly)?|you (?:said|wrote|named)|your words)\b/i.test(before)) {
+      // A current reply may compare an earlier Run. Never apply today's level
+      // to that historical result, even when the line looks like a result row.
+      if (/\b(?:brief|original(?:ly)?|you (?:said|wrote|named)|your words)\b/i.test(before)
+        || /\b(?:earlier|prior|previous|historical)\s+(?:run|analysis|result)\b/i.test(before)) {
         at += raw.length; continue;
       }
       const closingQuote = /^["”’]/.test(after) ? 1 : 0;

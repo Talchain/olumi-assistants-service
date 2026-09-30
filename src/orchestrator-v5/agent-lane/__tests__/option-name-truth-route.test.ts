@@ -67,6 +67,23 @@ describe('Agent Run result names a changed option level without renaming the gra
     expect(graph.nodes[2]!.label).toBe('Raise Pro plan price from £49 to £59');
   });
 
+  it('keeps an earlier Run result historical even when this reply also has a current Run', async () => {
+    modelText = 'In the earlier run, Raise Pro plan price from £49 to £59: 20% of simulations.';
+    try {
+      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        kind: 'message', scenario_id: SCENARIO, message: 'Run and compare with the earlier result.', source: 'chip_click',
+        chip: { action_type: 'run_analysis' }, turn_id: '4382b44d-7672-4c9d-9f2b-2b76a2662330',
+      } });
+      expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+      const body = r.json() as { assistant_text: string };
+      expect(body.assistant_text).toContain('In the earlier run, Raise Pro plan price from £49 to £59: 20%');
+      expect(body.assistant_text).not.toContain('(set to £60/month)');
+      expect(writes.at(-1)).not.toContain('(set to £60/month)');
+    } finally {
+      modelText = 'Raise Pro plan price from £49 to £59: 99% in this model.';
+    }
+  });
+
   it('does not bind the edited level to the earlier Run on a stale follow-up', async () => {
     state.run_state.kind = 'complete_stale';
     modelText = 'In the earlier analysis, Raise Pro plan price from £49 to £59: 99%.';
