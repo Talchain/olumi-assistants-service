@@ -10,7 +10,8 @@
  *
  * THE RULE: the goal's level o and two factor levels a, b on its paths are all the user's (`brief_extraction` / `user*`),
  * |o − a·b| ≤ 5% of |o| (ISL's tolerance, `RECONCILIATION_TOLERANCE`), and the units compose as a rate × its count in the
- * goal's currency and period (`unitsCompose`, not `no`), yet no node on the goal's path declares a product over a and b.
+ * goal's currency and period (`unitsCompose`, not `no`), yet no node on the goal's path declares a product whose two
+ * factors are a and b, or are derived from them (a month-12 count from today's).
  * Then every option's goal figures, win shares and the leader are withheld (`withholdOptionGoalFigures`) with one typed
  * code. A DECLARED product is read either way: evaluated, or PLoT withheld the run itself (#416, `identity on the goal's
  * path not evaluated`) and this never runs. A level of ±1 is no reading (anything × 1 is itself). Pure.
@@ -64,11 +65,27 @@ export function unreadGoalProduct(graph: unknown): UnreadGoalProduct | null {
       if (onPath.has(e.to) && !onPath.has(e.from) && k !== undefined && k !== 'option' && k !== 'decision') { onPath.add(e.from); grew = true; }
     }
   }
-  // READ: a product over both parts declared on the goal's path (the goal's own, or a part-total's).
+  const parentsOf = new Map<unknown, unknown[]>();
+  for (const e of edges) parentsOf.set(e.to, [...(parentsOf.get(e.to) ?? []), e.from]);
+  /** `part` is `f` itself or one of its ancestors: a factor derived from it carries it (a month-12 count from today's). */
+  const carries = (f: unknown, part: string): boolean => {
+    const seen = new Set<unknown>([f]);
+    const walk = [f];
+    while (walk.length > 0) {
+      const at = walk.pop();
+      if (at === part) return true;
+      for (const p of parentsOf.get(at) ?? []) if (!seen.has(p)) { seen.add(p); walk.push(p); }
+    }
+    return false;
+  };
+  // READ: a product declared on the goal's path (the goal's own, or a part-total's) whose two factors carry the two parts,
+  // each directly or derived from it (P0 partner #2340 5904465928: served m1/m8 read `price × subscribers at month 12`,
+  // derived from today's count — after the user's Yes that IS the product, projected).
   const read = (a: string, b: string): boolean => nodes.some((n) => {
     const id = isRec(n.nonlinear_identity) ? n.nonlinear_identity : undefined;
-    return id !== undefined && id.operation === 'product' && onPath.has(n.id)
-      && Array.isArray(id.factor_ids) && id.factor_ids.includes(a) && id.factor_ids.includes(b);
+    if (id === undefined || id.operation !== 'product' || !onPath.has(n.id) || !Array.isArray(id.factor_ids)) return false;
+    const fs = id.factor_ids as unknown[];
+    return fs.some((fa) => carries(fa, a) && fs.some((fb) => fb !== fa && carries(fb, b)));
   });
   const parts = nodes.filter((n) => n.kind === 'factor' && typeof n.id === 'string' && onPath.has(n.id))
     .flatMap((n) => { const l = userLevel(n); return l === undefined ? [] : [{ id: n.id as string, label: text(n.label) ?? (n.id as string), ...l }]; });

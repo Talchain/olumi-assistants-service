@@ -31,7 +31,7 @@ import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 type Json = Record<string, any>;
 type Served = { _provenance: { brief_text: string | null }; graph: Json; plot_body: Json };
 const F = JSON.parse(readFileSync(new URL('./fixtures/served-gate5-mrr-m0-and-cut-costs-15f48f0b.json', import.meta.url), 'utf8')) as {
-  mrr_m0: Served; cut_costs_15f48f0b: Served; mrr_m6_graph: { graph: Json };
+  mrr_m0: Served; cut_costs_15f48f0b: Served; mrr_m6_graph: { graph: Json }; mrr_m1_graph: { graph: Json }; mrr_m8_graph: { graph: Json };
 };
 const W3 = JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url), 'utf8')) as Json;
 const W3_SERVED: Served = {
@@ -189,6 +189,24 @@ describe('CONTROLS — figures kept where the user\'s figures make no unread pro
   it('CONTROL (m6, the drafter declared the product): unchanged — a declared product is read or #416 withholds it', () => {
     expect((F.mrr_m6_graph.graph.nodes as Json[]).some((n) => n.nonlinear_identity?.operation === 'product')).toBe(true);
     expect(unreadGoalProduct(F.mrr_m6_graph.graph)).toBeNull();
+  });
+
+  // P0 partner 5904465928: m1/m8 declare `price × subscribers at month 12`, a count derived from today's. After the user's
+  // Yes that product is evaluated (#416 gone) and IS the reading — Gate 5 must not say it was not read.
+  for (const m of ['m1', 'm8'] as const) {
+    it(`CONTROL (${m} after Yes): a product over a count DERIVED from the user's today count is the reading — no Gate 5`, () => {
+      const g = clone(F[`mrr_${m}_graph`].graph);
+      const holder = (g.nodes as Json[]).find((n) => n.nonlinear_identity?.operation === 'product')!;
+      holder.nonlinear_identity.stated_in_brief = true;
+      expect(unreadGoalProduct(g)).toBeNull();
+    });
+  }
+
+  it('CONTROL (m8, the product\'s count NOT derived from today\'s): the reading is not made, so Gate 5 fires', () => {
+    const g = clone(F.mrr_m8_graph.graph);
+    g.edges = (g.edges as Json[]).filter((e) => !(e.from === 'current_paying_subscribers' && e.to === 'month_12_paying_subscribers'));
+    g.edges.push({ ...(g.edges as Json[])[0], from: 'current_paying_subscribers', to: 'pro_plan_mrr' });
+    expect(unreadGoalProduct(g)).not.toBeNull();
   });
 
   it('CONTROL (cut-costs 15f48f0b): the brief\'s levels make no rate × count for spend, so 33%, the earned 0 and the leader stand', async () => {
