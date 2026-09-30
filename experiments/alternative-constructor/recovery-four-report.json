@@ -1,15 +1,18 @@
 {
-  "version": 1,
+  "version": 2,
   "basis": "saved_initial_outputs_only",
   "manifest_sha256": "049bc23afa483076c6bbef1391cc957b0dd083e3efdac89dff5e6417aa71e636",
-  "scorer_sha256": "eff816d45b93b454d0422588e320590d9931dbe7c97b9e0afc8cdad7d8f50d50",
+  "scorer_sha256": "0b5c3b270e8760b3b7608a4175074f7d1f90bde22cd3b5ed069b3397e583cc1e",
   "evaluation_provider_attempts": 0,
   "recovery_continuation_exercised": false,
   "limits": [
     "Frozen four saved captures only; these are not current deployed outputs or fresh provider runs.",
     "Scores use separate fidelity, truthful withholding and minimal clarification denominators; an honest abstention can still lose fidelity or clarification points.",
+    "Rubric v2 adds one source/semantic-integrity check per case: fidelity 30, truthful withholding 8 and minimal clarification 8 for every four-case arm; v1 used 26/8/8.",
     "Questions are judged with bounded case-specific patterns and contrasting controls, not a general natural-language judge.",
     "None of these four briefs states a numeric causal effect; action and identity carrier edges are excluded from effect scoring.",
+    "Identity carrier exemption requires independently verified target, resolved scope, exact source and compatible operand/target units; none of these four initial briefs qualifies.",
+    "The newer f7c8c86 control is saved injected-candidate evidence, previously compared with same-base 950177 flag-off; this report makes no fresh-provider, serving or architectural verdict.",
     "Sealed recovery answers are never consumed as constructor replies; no continuation, analysis readiness, registration, persistence or browser claim is made."
   ],
   "arms": [
@@ -26,8 +29,8 @@
       "aggregate": {
         "dimensions": {
           "fidelity": {
-            "passed": 22,
-            "total": 26
+            "passed": 25,
+            "total": 30
           },
           "truthful_withholding": {
             "passed": 5,
@@ -39,8 +42,8 @@
           }
         },
         "score": {
-          "passed": 28,
-          "possible": 42
+          "passed": 31,
+          "possible": 46
         },
         "correct_initial_responses": 0,
         "cases": 4
@@ -59,8 +62,8 @@
           },
           "dimensions": {
             "fidelity": {
-              "passed": 8,
-              "total": 8,
+              "passed": 9,
+              "total": 9,
               "failed_checks": []
             },
             "truthful_withholding": {
@@ -77,8 +80,8 @@
             }
           },
           "score": {
-            "passed": 11,
-            "possible": 12
+            "passed": 12,
+            "possible": 13
           },
           "correct_initial_response": false,
           "withholding_status": "truthful_missing_evidence_exposed",
@@ -108,10 +111,11 @@
           "dimensions": {
             "fidelity": {
               "passed": 3,
-              "total": 5,
+              "total": 6,
               "failed_checks": [
                 "fact:cost-reduction",
-                "current_and_relative_goal_same_source_metric"
+                "current_and_relative_goal_same_source_metric",
+                "source_semantic_integrity"
               ]
             },
             "truthful_withholding": {
@@ -132,7 +136,7 @@
           },
           "score": {
             "passed": 4,
-            "possible": 9
+            "possible": 10
           },
           "correct_initial_response": false,
           "withholding_status": "truthful_but_missing_evidence_not_exposed",
@@ -167,65 +171,10 @@
           },
           "dimensions": {
             "fidelity": {
-              "passed": 5,
-              "total": 6,
-              "failed_checks": [
-                "stated_deadline"
-              ]
-            },
-            "truthful_withholding": {
-              "passed": 1,
-              "total": 2,
-              "failed_checks": [
-                "missing_evidence_surfaced"
-              ]
-            },
-            "smallest_useful_clarification": {
-              "passed": 0,
-              "total": 2,
-              "failed_checks": [
-                "asks_for_decisive_missing_input",
-                "one_nonredundant_question"
-              ]
-            }
-          },
-          "score": {
-            "passed": 6,
-            "possible": 10
-          },
-          "correct_initial_response": false,
-          "withholding_status": "truthful_but_missing_evidence_not_exposed",
-          "questions": {
-            "count": 1,
-            "redundant": []
-          },
-          "unsupported_claims": {
-            "pro_scope": false,
-            "numeric": false,
-            "sized_causal_edges": 0
-          },
-          "fidelity_findings_by_kind": {
-            "deadline_lost": 1
-          },
-          "continuation_verified": false
-        },
-        {
-          "brief": "support",
-          "evidence_level": "frozen_meaning_compiler_payload_replay_only",
-          "fidelity": {
-            "facts_retained": 4,
-            "facts_total": 4,
-            "source_bound": 4,
-            "user_options_retained": 1,
-            "user_options_total": 1,
-            "user_options_source_bound": 1
-          },
-          "dimensions": {
-            "fidelity": {
               "passed": 6,
               "total": 7,
               "failed_checks": [
-                "qualitative_limit:without hiring"
+                "stated_deadline"
               ]
             },
             "truthful_withholding": {
@@ -260,6 +209,61 @@
             "sized_causal_edges": 0
           },
           "fidelity_findings_by_kind": {
+            "deadline_lost": 1
+          },
+          "continuation_verified": false
+        },
+        {
+          "brief": "support",
+          "evidence_level": "frozen_meaning_compiler_payload_replay_only",
+          "fidelity": {
+            "facts_retained": 4,
+            "facts_total": 4,
+            "source_bound": 4,
+            "user_options_retained": 1,
+            "user_options_total": 1,
+            "user_options_source_bound": 1
+          },
+          "dimensions": {
+            "fidelity": {
+              "passed": 7,
+              "total": 8,
+              "failed_checks": [
+                "qualitative_limit:without hiring"
+              ]
+            },
+            "truthful_withholding": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "missing_evidence_surfaced"
+              ]
+            },
+            "smallest_useful_clarification": {
+              "passed": 0,
+              "total": 2,
+              "failed_checks": [
+                "asks_for_decisive_missing_input",
+                "one_nonredundant_question"
+              ]
+            }
+          },
+          "score": {
+            "passed": 8,
+            "possible": 12
+          },
+          "correct_initial_response": false,
+          "withholding_status": "truthful_but_missing_evidence_not_exposed",
+          "questions": {
+            "count": 1,
+            "redundant": []
+          },
+          "unsupported_claims": {
+            "pro_scope": false,
+            "numeric": false,
+            "sized_causal_edges": 0
+          },
+          "fidelity_findings_by_kind": {
             "qualitative_limit_lost": 1
           },
           "continuation_verified": false
@@ -280,7 +284,7 @@
         "dimensions": {
           "fidelity": {
             "passed": 3,
-            "total": 26
+            "total": 30
           },
           "truthful_withholding": {
             "passed": 4,
@@ -293,7 +297,7 @@
         },
         "score": {
           "passed": 11,
-          "possible": 42
+          "possible": 46
         },
         "correct_initial_responses": 0,
         "cases": 4
@@ -313,7 +317,7 @@
           "dimensions": {
             "fidelity": {
               "passed": 1,
-              "total": 8,
+              "total": 9,
               "failed_checks": [
                 "fact:price-current",
                 "fact:price-proposed",
@@ -321,7 +325,8 @@
                 "fact:mrr-current",
                 "fact:mrr-target",
                 "fact:churn-limit",
-                "option:raise"
+                "option:raise",
+                "source_semantic_integrity"
               ]
             },
             "truthful_withholding": {
@@ -341,7 +346,7 @@
           },
           "score": {
             "passed": 3,
-            "possible": 12
+            "possible": 13
           },
           "correct_initial_response": false,
           "withholding_status": "unsupported_claims_present",
@@ -352,13 +357,13 @@
           "unsupported_claims": {
             "pro_scope": true,
             "numeric": true,
-            "sized_causal_edges": 4
+            "sized_causal_edges": 6
           },
           "fidelity_findings_by_kind": {
             "source_unbound": 6,
             "option_source_unbound": 1,
             "unstated_canonical_number": 3,
-            "unstated_canonical_entity": 1,
+            "unstated_canonical_entity": 2,
             "unstated_canonical_option": 1,
             "proposal_in_canonical_model": 1,
             "identity_applied_before_scope_resolved": 1
@@ -379,13 +384,14 @@
           "dimensions": {
             "fidelity": {
               "passed": 0,
-              "total": 5,
+              "total": 6,
               "failed_checks": [
                 "fact:spend-current",
                 "fact:cost-reduction",
                 "fact:downtime-limit",
                 "option:gcp",
-                "current_and_relative_goal_same_source_metric"
+                "current_and_relative_goal_same_source_metric",
+                "source_semantic_integrity"
               ]
             },
             "truthful_withholding": {
@@ -405,7 +411,7 @@
           },
           "score": {
             "passed": 2,
-            "possible": 9
+            "possible": 10
           },
           "correct_initial_response": false,
           "withholding_status": "unsupported_claims_present",
@@ -420,9 +426,10 @@
           },
           "fidelity_findings_by_kind": {
             "source_unbound": 3,
+            "misattributed_stated_fact": 1,
             "user_option_lost_or_reclassified": 1,
             "unstated_canonical_number": 6,
-            "unstated_canonical_entity": 2,
+            "unstated_canonical_entity": 3,
             "unstated_canonical_option": 1,
             "proposal_in_canonical_model": 1
           },
@@ -442,77 +449,14 @@
           "dimensions": {
             "fidelity": {
               "passed": 1,
-              "total": 6,
+              "total": 7,
               "failed_checks": [
                 "fact:senior-count",
                 "fact:junior-count",
                 "fact:salary-limit",
                 "option:senior",
-                "option:junior"
-              ]
-            },
-            "truthful_withholding": {
-              "passed": 1,
-              "total": 2,
-              "failed_checks": [
-                "no_unstated_scope_or_causal_claim"
-              ]
-            },
-            "smallest_useful_clarification": {
-              "passed": 1,
-              "total": 2,
-              "failed_checks": [
-                "one_nonredundant_question"
-              ]
-            }
-          },
-          "score": {
-            "passed": 3,
-            "possible": 10
-          },
-          "correct_initial_response": false,
-          "withholding_status": "unsupported_claims_present",
-          "questions": {
-            "count": 9,
-            "redundant": []
-          },
-          "unsupported_claims": {
-            "pro_scope": false,
-            "numeric": true,
-            "sized_causal_edges": 11
-          },
-          "fidelity_findings_by_kind": {
-            "source_unbound": 3,
-            "option_source_unbound": 2,
-            "unstated_canonical_number": 9,
-            "unstated_canonical_entity": 5,
-            "unstated_canonical_option": 1,
-            "proposal_in_canonical_model": 1
-          },
-          "continuation_verified": false
-        },
-        {
-          "brief": "support",
-          "evidence_level": "frozen_candidate_admission_payload_replay_only",
-          "fidelity": {
-            "facts_retained": 4,
-            "facts_total": 4,
-            "source_bound": 0,
-            "user_options_retained": 0,
-            "user_options_total": 1,
-            "user_options_source_bound": 0
-          },
-          "dimensions": {
-            "fidelity": {
-              "passed": 1,
-              "total": 7,
-              "failed_checks": [
-                "fact:agents-current",
-                "fact:tickets-current",
-                "fact:csat-current",
-                "fact:csat-target",
-                "option:live-chat",
-                "qualitative_limit:without hiring"
+                "option:junior",
+                "source_semantic_integrity"
               ]
             },
             "truthful_withholding": {
@@ -537,6 +481,71 @@
           "correct_initial_response": false,
           "withholding_status": "unsupported_claims_present",
           "questions": {
+            "count": 9,
+            "redundant": []
+          },
+          "unsupported_claims": {
+            "pro_scope": false,
+            "numeric": true,
+            "sized_causal_edges": 11
+          },
+          "fidelity_findings_by_kind": {
+            "source_unbound": 3,
+            "option_source_unbound": 2,
+            "unstated_canonical_number": 9,
+            "unstated_canonical_entity": 6,
+            "unstated_canonical_option": 1,
+            "proposal_in_canonical_model": 1
+          },
+          "continuation_verified": false
+        },
+        {
+          "brief": "support",
+          "evidence_level": "frozen_candidate_admission_payload_replay_only",
+          "fidelity": {
+            "facts_retained": 4,
+            "facts_total": 4,
+            "source_bound": 0,
+            "user_options_retained": 0,
+            "user_options_total": 1,
+            "user_options_source_bound": 0
+          },
+          "dimensions": {
+            "fidelity": {
+              "passed": 1,
+              "total": 8,
+              "failed_checks": [
+                "fact:agents-current",
+                "fact:tickets-current",
+                "fact:csat-current",
+                "fact:csat-target",
+                "option:live-chat",
+                "qualitative_limit:without hiring",
+                "source_semantic_integrity"
+              ]
+            },
+            "truthful_withholding": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "no_unstated_scope_or_causal_claim"
+              ]
+            },
+            "smallest_useful_clarification": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "one_nonredundant_question"
+              ]
+            }
+          },
+          "score": {
+            "passed": 3,
+            "possible": 12
+          },
+          "correct_initial_response": false,
+          "withholding_status": "unsupported_claims_present",
+          "questions": {
             "count": 6,
             "redundant": []
           },
@@ -551,7 +560,305 @@
             "user_option_lost_or_reclassified": 1,
             "invented_or_misassigned_user_number": 1,
             "unstated_canonical_number": 4,
+            "unstated_canonical_entity": 4,
+            "unstated_canonical_option": 1,
+            "proposal_in_canonical_model": 1
+          },
+          "continuation_verified": false
+        }
+      ]
+    },
+    {
+      "arm": "current_best_control",
+      "capture_label": "newer saved diagnostic control; injected candidate only",
+      "saved_source_heads": [
+        "f7c8c86a08df6c4a09cb7cce80e6bab909cf809a"
+      ],
+      "fixture": {
+        "file": "fixtures/b-current-best-f7c8c86-four-replay.jsonl",
+        "sha256": "3fc7fb1506931a45ddea6d39cfa1df141a55d870490b5df18fd9542a1d76e09f"
+      },
+      "aggregate": {
+        "dimensions": {
+          "fidelity": {
+            "passed": 3,
+            "total": 30
+          },
+          "truthful_withholding": {
+            "passed": 4,
+            "total": 8
+          },
+          "smallest_useful_clarification": {
+            "passed": 4,
+            "total": 8
+          }
+        },
+        "score": {
+          "passed": 11,
+          "possible": 46
+        },
+        "correct_initial_responses": 0,
+        "cases": 4
+      },
+      "cases": [
+        {
+          "brief": "paul-mrr",
+          "evidence_level": "frozen_candidate_admission_payload_replay_only",
+          "fidelity": {
+            "facts_retained": 6,
+            "facts_total": 6,
+            "source_bound": 0,
+            "user_options_retained": 1,
+            "user_options_total": 1,
+            "user_options_source_bound": 0
+          },
+          "dimensions": {
+            "fidelity": {
+              "passed": 1,
+              "total": 9,
+              "failed_checks": [
+                "fact:price-current",
+                "fact:price-proposed",
+                "fact:subscribers-current",
+                "fact:mrr-current",
+                "fact:mrr-target",
+                "fact:churn-limit",
+                "option:raise",
+                "source_semantic_integrity"
+              ]
+            },
+            "truthful_withholding": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "no_unstated_scope_or_causal_claim"
+              ]
+            },
+            "smallest_useful_clarification": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "one_nonredundant_question"
+              ]
+            }
+          },
+          "score": {
+            "passed": 3,
+            "possible": 13
+          },
+          "correct_initial_response": false,
+          "withholding_status": "unsupported_claims_present",
+          "questions": {
+            "count": 14,
+            "redundant": []
+          },
+          "unsupported_claims": {
+            "pro_scope": true,
+            "numeric": true,
+            "sized_causal_edges": 6
+          },
+          "fidelity_findings_by_kind": {
+            "source_unbound": 6,
+            "option_source_unbound": 1,
+            "unstated_canonical_number": 3,
+            "unstated_canonical_entity": 2,
+            "unstated_canonical_option": 1,
+            "proposal_in_canonical_model": 1,
+            "identity_applied_before_scope_resolved": 1
+          },
+          "continuation_verified": false
+        },
+        {
+          "brief": "cloud",
+          "evidence_level": "frozen_candidate_admission_payload_replay_only",
+          "fidelity": {
+            "facts_retained": 3,
+            "facts_total": 3,
+            "source_bound": 0,
+            "user_options_retained": 0,
+            "user_options_total": 1,
+            "user_options_source_bound": 0
+          },
+          "dimensions": {
+            "fidelity": {
+              "passed": 0,
+              "total": 6,
+              "failed_checks": [
+                "fact:spend-current",
+                "fact:cost-reduction",
+                "fact:downtime-limit",
+                "option:gcp",
+                "current_and_relative_goal_same_source_metric",
+                "source_semantic_integrity"
+              ]
+            },
+            "truthful_withholding": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "no_unstated_scope_or_causal_claim"
+              ]
+            },
+            "smallest_useful_clarification": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "one_nonredundant_question"
+              ]
+            }
+          },
+          "score": {
+            "passed": 2,
+            "possible": 10
+          },
+          "correct_initial_response": false,
+          "withholding_status": "unsupported_claims_present",
+          "questions": {
+            "count": 5,
+            "redundant": []
+          },
+          "unsupported_claims": {
+            "pro_scope": false,
+            "numeric": true,
+            "sized_causal_edges": 3
+          },
+          "fidelity_findings_by_kind": {
+            "source_unbound": 3,
+            "misattributed_stated_fact": 1,
+            "user_option_lost_or_reclassified": 1,
+            "unstated_canonical_number": 6,
             "unstated_canonical_entity": 3,
+            "unstated_canonical_option": 1,
+            "proposal_in_canonical_model": 1
+          },
+          "continuation_verified": false
+        },
+        {
+          "brief": "E",
+          "evidence_level": "frozen_candidate_admission_payload_replay_only",
+          "fidelity": {
+            "facts_retained": 3,
+            "facts_total": 3,
+            "source_bound": 0,
+            "user_options_retained": 2,
+            "user_options_total": 2,
+            "user_options_source_bound": 0
+          },
+          "dimensions": {
+            "fidelity": {
+              "passed": 1,
+              "total": 7,
+              "failed_checks": [
+                "fact:senior-count",
+                "fact:junior-count",
+                "fact:salary-limit",
+                "option:senior",
+                "option:junior",
+                "source_semantic_integrity"
+              ]
+            },
+            "truthful_withholding": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "no_unstated_scope_or_causal_claim"
+              ]
+            },
+            "smallest_useful_clarification": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "one_nonredundant_question"
+              ]
+            }
+          },
+          "score": {
+            "passed": 3,
+            "possible": 11
+          },
+          "correct_initial_response": false,
+          "withholding_status": "unsupported_claims_present",
+          "questions": {
+            "count": 9,
+            "redundant": []
+          },
+          "unsupported_claims": {
+            "pro_scope": false,
+            "numeric": true,
+            "sized_causal_edges": 11
+          },
+          "fidelity_findings_by_kind": {
+            "source_unbound": 3,
+            "option_source_unbound": 2,
+            "unstated_canonical_number": 9,
+            "unstated_canonical_entity": 6,
+            "unstated_canonical_option": 1,
+            "proposal_in_canonical_model": 1
+          },
+          "continuation_verified": false
+        },
+        {
+          "brief": "support",
+          "evidence_level": "frozen_candidate_admission_payload_replay_only",
+          "fidelity": {
+            "facts_retained": 4,
+            "facts_total": 4,
+            "source_bound": 0,
+            "user_options_retained": 0,
+            "user_options_total": 1,
+            "user_options_source_bound": 0
+          },
+          "dimensions": {
+            "fidelity": {
+              "passed": 1,
+              "total": 8,
+              "failed_checks": [
+                "fact:agents-current",
+                "fact:tickets-current",
+                "fact:csat-current",
+                "fact:csat-target",
+                "option:live-chat",
+                "qualitative_limit:without hiring",
+                "source_semantic_integrity"
+              ]
+            },
+            "truthful_withholding": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "no_unstated_scope_or_causal_claim"
+              ]
+            },
+            "smallest_useful_clarification": {
+              "passed": 1,
+              "total": 2,
+              "failed_checks": [
+                "one_nonredundant_question"
+              ]
+            }
+          },
+          "score": {
+            "passed": 3,
+            "possible": 12
+          },
+          "correct_initial_response": false,
+          "withholding_status": "unsupported_claims_present",
+          "questions": {
+            "count": 6,
+            "redundant": []
+          },
+          "unsupported_claims": {
+            "pro_scope": false,
+            "numeric": true,
+            "sized_causal_edges": 6
+          },
+          "fidelity_findings_by_kind": {
+            "source_unbound": 4,
+            "qualitative_limit_lost": 1,
+            "user_option_lost_or_reclassified": 1,
+            "invented_or_misassigned_user_number": 1,
+            "unstated_canonical_number": 4,
+            "unstated_canonical_entity": 4,
             "unstated_canonical_option": 1,
             "proposal_in_canonical_model": 1
           },

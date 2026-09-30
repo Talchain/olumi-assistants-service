@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { manifest, scoreRecord } from './score.mjs';
+import { manifest, rubricVersion, scoreRecord } from './score.mjs';
 
 const load = (file) => readFileSync(new URL(`./fixtures/${file}`, import.meta.url), 'utf8').trim().split('\n').map(JSON.parse);
 const sourceFirst = load('b-source-first-e031d96-four-final-replay.jsonl');
 const currentBest = load('b-current-best-f95ea20-four-replay.jsonl');
+const newerControl = load('b-current-best-f7c8c86-four-replay.jsonl');
 const saved = (brief, rows = sourceFirst) => structuredClone(rows.find((row) => row.brief === brief));
 const recovery = (record) => scoreRecord(record).recovery.initial_response_score;
 const check = (score, dimension, id) => score.dimensions[dimension].checks.find((item) => item.id === id).passed;
@@ -110,4 +111,91 @@ test('sealed recovery answers are not consumed or credited as a processed contin
   assert.deepEqual(scoreRecord(record, changedGold), scoreRecord(record));
   record.recovery_answer = manifest.briefs.find((brief) => brief.id === record.brief).recovery_answer;
   assert.equal(scoreRecord(record).recovery.continuation_verified, false);
+});
+
+// A hand-authored positive control isolates integrity; it is not a recovered provider output.
+const faithfulHiringControl = () => {
+  const record = askOnly(saved('E'), 'What are the fully loaded annual salaries for senior and junior engineers?');
+  record.graph.nodes.find((node) => node.label === 'Ship the new platform').goal_deadline_as_stated = 'by Q3';
+  assert.equal(recovery(record).correct_initial_response, true);
+  return record;
+};
+
+test('a stolen quote cannot make an invented user option a perfect initial response', () => {
+  const record = faithfulHiringControl();
+  record.graph.nodes.push({ id: 'fire_engineers', kind: 'option', label: 'Fire all engineers',
+    provenance: 'user_specified', source_quote: 'two senior engineers' });
+  const score = scoreRecord(record);
+  assert.ok(score.fidelity.failures.some((finding) => finding.kind === 'invented_user_option'));
+  assert.equal(check(score.recovery.initial_response_score, 'fidelity', 'source_semantic_integrity'), false);
+  assert.equal(score.recovery.initial_response_score.correct_initial_response, false);
+});
+
+test('invented nonnumeric claims are rejected across canonical node kinds even with stolen quotes', () => {
+  for (const kind of ['goal', 'decision', 'factor', 'risk', 'outcome']) {
+    const record = faithfulHiringControl();
+    record.graph.nodes.push({ id: `fire_${kind}`, kind, label: 'Fire all engineers',
+      provenance: 'user_specified', source_quote: 'two senior engineers' });
+    const score = recovery(record);
+    assert.equal(check(score, 'fidelity', 'source_semantic_integrity'), false, kind);
+    assert.equal(score.correct_initial_response, false, kind);
+  }
+});
+
+test('reclassifying a stated quantity as Olumi-owned loses semantic integrity', () => {
+  const record = faithfulHiringControl();
+  const option = record.graph.nodes.find((node) => /Hire two senior engineers/.test(node.label));
+  Object.values(option.interventions)[0].source = 'olumi_estimate';
+  assert.equal(check(recovery(record), 'fidelity', 'source_semantic_integrity'), false);
+  assert.equal(recovery(record).correct_initial_response, false);
+});
+
+test('current and target split across MRR references cannot win despite retaining both facts', () => {
+  const record = askOnly(saved('paul-mrr'), 'Does the stated MRR have the same Pro-plan revenue scope and subscriber population?');
+  const current = record.graph.nodes.find((node) => node.kind === 'goal' && node.observed_state?.raw_value === 75000);
+  const target = structuredClone(current);
+  target.id = 'mrr_other_scope';
+  delete target.observed_state;
+  delete current.goal_threshold_raw;
+  delete current.goal_threshold;
+  record.graph.nodes.push(target);
+  const score = scoreRecord(record);
+  assert.equal(score.fidelity.facts_retained, score.fidelity.facts_total);
+  assert.ok(score.fidelity.failures.some((finding) => finding.kind === 'current_target_different_quantity'));
+  assert.equal(check(score.recovery.initial_response_score, 'fidelity', 'source_semantic_integrity'), false);
+  assert.equal(score.recovery.initial_response_score.correct_initial_response, false);
+});
+
+test('swapping current and target values cannot win by preserving the same two numbers', () => {
+  const record = askOnly(saved('paul-mrr'), 'Does the stated MRR have the same Pro-plan revenue scope and subscriber population?');
+  const goal = record.graph.nodes.find((node) => node.kind === 'goal' && node.observed_state?.raw_value === 75000);
+  goal.observed_state.raw_value = 85000;
+  goal.goal_threshold_raw = 75000;
+  assert.equal(check(recovery(record), 'fidelity', 'source_semantic_integrity'), false);
+  assert.equal(recovery(record).correct_initial_response, false);
+});
+
+test('unsupported identities cannot exempt invented effects, including effects originating from options', () => {
+  const record = faithfulHiringControl();
+  const goal = record.graph.nodes.find((node) => node.label === 'Ship the new platform');
+  const factors = record.graph.nodes.filter((node) => node.kind === 'factor');
+  goal.nonlinear_identity = { operation: 'product', factor_ids: factors.map((node) => node.id), stated_in_brief: false };
+  for (const from of [factors[0].id, record.graph.nodes.find((node) => node.kind === 'option').id]) {
+    const mutant = structuredClone(record);
+    mutant.graph.edges.push({ from, to: goal.id, strength: { mean: 0.5, std: 0.1 },
+      provenance: { source: 'cee_hypothesis', natural_effect: { amount: 120000 } } });
+    const score = recovery(mutant);
+    assert.equal(score.unsupported_sized_causal_edges, 1);
+    assert.equal(check(score, 'fidelity', 'source_semantic_integrity'), false);
+    assert.equal(score.correct_initial_response, false);
+  }
+});
+
+test('v2 applies the same separate dimension denominators to every frozen arm', () => {
+  assert.equal(rubricVersion, 2);
+  for (const rows of [sourceFirst, currentBest, newerControl]) {
+    const totals = { fidelity: 0, truthful_withholding: 0, smallest_useful_clarification: 0 };
+    for (const record of rows) for (const [dimension, part] of Object.entries(recovery(record).dimensions)) totals[dimension] += part.total;
+    assert.deepEqual(totals, { fidelity: 30, truthful_withholding: 8, smallest_useful_clarification: 8 });
+  }
 });
