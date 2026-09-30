@@ -117,9 +117,9 @@ export function readGoalLabel(graph: unknown, goalNodeId: unknown): string | nul
 }
 
 /**
- * The comparator the USER stated for the goal's target, as construction held it on the goal node
- * (`goal_direction`, written only by `holdStatedGoalAttributes`), or `null` when none is held. A value outside the
- * stored four is not a held comparator.
+ * The comparator the USER stated for the goal's target, as held on the goal node (`goal_direction`: written by
+ * construction's `holdStatedGoalAttributes`, and by the user's approved goal target card, DR row 1), or `null` when
+ * none is held. A value outside the stored four is not a held comparator.
  */
 export function readHeldGoalComparator(graph: unknown, goalNodeId: unknown): HeldComparator | null {
   if (typeof goalNodeId !== 'string' || goalNodeId === '') return null;

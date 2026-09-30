@@ -2841,6 +2841,10 @@ export async function runTurnExecutor(
     // synthesise this before the routeWithToolUse call. Wider type so the
     // guard below the pre-route block can compare against undefined.
     let routingResult: RoutingResult | undefined;
+    // DR row 1: the deterministic typed-chip route (the Canvas success-target control, a user click on a displayed
+    // chip) is a user statement, so `add_constraint` holds the goal's direction exactly as the approved goal card does
+    // (`goal-target-edit.ts`); the load-bearing parity test binds the two doors field by field.
+    let routedByTypedChip = false;
     // O-1 batch lifecycle — remaining APPROVED parts of a COMPOUND value
     // update. When the deterministic pre-route detects "Set A to 0.6 and B to
     // 0.8", the batch preflight vets EVERY part, the first approved part is
@@ -6964,6 +6968,7 @@ export async function runTurnExecutor(
             droppedActions: [],
           };
           routingResult = synthesisedTypedChipRouting;
+          routedByTypedChip = true;
           llmCallsUsed = 0;
           sonnetTextForLog = '';
           stagesCompleted.push('orient');
@@ -12190,6 +12195,7 @@ export async function runTurnExecutor(
           orientationText: routingResult.orientationText,
           proposal: action,
           confirmedConstraintValueFrame: readConfirmedConstraintValueFrame(consumedPendingAction, action),
+          ...(routedByTypedChip ? { holdsGoalDirection: true as const } : {}),
           // ⭐ BASELINE-ANSWER AUTHORITY — threaded ONLY when this turn is a
           // reply to a live baseline question that named its own subject. The
           // handler preserves the existing limit unless this also carries a

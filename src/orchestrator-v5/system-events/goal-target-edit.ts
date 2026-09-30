@@ -240,6 +240,8 @@ export async function applyGoalTargetEdit(
     // the handler writes it onto the row (and it is the same constant the
     // handler stamps as `goal_threshold_frame`).
     confirmedConstraintValueFrame: CEE_GOAL_THRESHOLD_FRAME,
+    // DR row 1: the user approved THIS card, so its comparator is the goal's direction (the limit door never sets it).
+    holdsGoalDirection: true,
     eventName: 'goal_target_edit',
     logBase,
   });
@@ -266,13 +268,15 @@ export async function applyConstraintEditThroughAddConstraint(params: {
   readonly confirmedConstraintValueFrame?: HandlerInvocation['confirmedConstraintValueFrame'];
   /** A2 follow-up: a comparator the user STATED on this edit, typed (`limit-edit.ts`); absent keeps the row's own. */
   readonly statedConstraintOperator?: HandlerInvocation['statedConstraintOperator'];
+  /** DR row 1: only the approved goal target card sets it (see `HandlerInvocation.holdsGoalDirection`). */
+  readonly holdsGoalDirection?: HandlerInvocation['holdsGoalDirection'];
   /** The writer's name in its logs (`goal_target_edit`, `limit_edit`). */
   readonly eventName: string;
   readonly logBase: Readonly<Record<string, unknown>>;
 }): Promise<GoalTargetEditResult> {
   const {
     payload, requestId, persistedGraph, graph, priorFacts, targetId, constraintType, rawValue, unit, label,
-    confirmedConstraintValueFrame, statedConstraintOperator, eventName, logBase,
+    confirmedConstraintValueFrame, statedConstraintOperator, holdsGoalDirection, eventName, logBase,
   } = params;
   // ── 4. the SAME proposal the typed chip builds ───────────────────────────
   const built = buildTypedChipMutationProposal(
@@ -373,6 +377,7 @@ export async function applyConstraintEditThroughAddConstraint(params: {
     // A comparator the user stated on this edit (typed), relayed through the handler's side-band the same way; absent,
     // the handler keeps the row's own `operator_as_stated`.
     ...(statedConstraintOperator !== undefined ? { statedConstraintOperator } : {}),
+    ...(holdsGoalDirection === true ? { holdsGoalDirection } : {}),
   };
 
   let outcome;
