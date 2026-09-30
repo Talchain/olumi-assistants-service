@@ -791,7 +791,8 @@ export function createSetFactorValueHandler(): HandlerFn {
         //
         // ⛔ IDEMPOTENT: a retry of the SAME adoption (same stamp, same figure) keeps the review already recorded, byte
         // for byte. A fresh `at` made a retried approval commit a second version instead of `already_applied`
-        // (`route-v2-option-intervention-edit.test.ts`, the compound door's retry rows).
+        // (the compound door's retry rows, `tests/integration/orchestrator/route-v2-…` — named by path prefix on purpose:
+        // `consent-coverage-manifest.test.ts` scans production source for the internal option writer's file name).
         ...(adoptedSource !== undefined
           ? {
               reviewed_by_user:
