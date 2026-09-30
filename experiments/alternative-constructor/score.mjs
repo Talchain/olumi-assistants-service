@@ -113,7 +113,9 @@ export function scoreRecord(record, cases = manifest.briefs) {
   const optionRows = brief.options.map((expected) => {
     const found = options.filter((o) => matchesExpectedOption(o, expected) && USER.has(o.provenance) && o.proposed_by !== 'olumi' && o.ownership !== 'proposed');
     if (!found.length) failures.push({ kind: 'user_option_lost_or_reclassified', option: expected.id });
-    return { id: expected.id, retained: found.length > 0, label_retained: options.some((o) => matches(expected.pattern, label(o))), source_bound: found.some((o) => sourceResult([o], expected, brief).bound) };
+    const sourceBound = found.some((o) => sourceResult([o], expected, brief).bound);
+    if (found.length && !sourceBound) failures.push({ kind: 'option_source_unbound', option: expected.id });
+    return { id: expected.id, retained: found.length > 0, label_retained: options.some((o) => matches(expected.pattern, label(o))), source_bound: sourceBound };
   });
   // An invented numeric claim is a failure even when its number appears elsewhere in the brief.
   for (const o of obs.filter((o) => o.user)) {
@@ -179,7 +181,7 @@ export function scoreRecord(record, cases = manifest.briefs) {
   return {
     arm: record.arm ?? record.label, brief: brief.id, rep: record.rep, evidence_level: record.evidence_level ?? 'admitted_registration_payload_only',
     model_present: modelPresent, facts, options: optionRows, identity, authority,
-    fidelity: { facts_retained: facts.filter((f) => f.retained).length, facts_total: facts.length, source_bound: facts.filter((f) => f.source_bound).length, user_options_retained: optionRows.filter((o) => o.retained).length, user_options_total: optionRows.length, negative_findings: failures.length, false_user_claims: failures.filter((f) => ['invented_or_misassigned_user_number', 'invented_user_option', 'inferred_identity_stamped_user'].includes(f.kind)).length, unstated_canonical_content: failures.filter((f) => f.kind.startsWith('unstated_canonical_')).length, source_binding_failures: failures.filter((f) => f.kind === 'source_unbound').length, failures },
+    fidelity: { facts_retained: facts.filter((f) => f.retained).length, facts_total: facts.length, source_bound: facts.filter((f) => f.source_bound).length, user_options_retained: optionRows.filter((o) => o.retained).length, user_options_total: optionRows.length, user_options_source_bound: optionRows.filter((o) => o.source_bound).length, negative_findings: failures.length, false_user_claims: failures.filter((f) => ['invented_or_misassigned_user_number', 'invented_user_option', 'inferred_identity_stamped_user'].includes(f.kind)).length, unstated_canonical_content: failures.filter((f) => f.kind.startsWith('unstated_canonical_')).length, source_binding_failures: failures.filter((f) => ['source_unbound', 'option_source_unbound'].includes(f.kind)).length, failures },
     scientific_usability: { verified_analysis: record.evidence_level === 'shared_spine_journey' && record.analysis_verified === true, inferred_sized_edges: sizedWithoutUserEvidence.length, identity, unsupported_relationships: record.constructor_diagnostics?.unknown_relationships ?? null },
     complexity: { nodes: graph.nodes?.length ?? 0, edges: graph.edges?.length ?? 0, provider_attempts: record.provider_calls?.length ?? record.structured_raw?.length ?? null, transforms: record.constructor_diagnostics?.transforms ?? null },
     recovery: { pending_evidence_available: Array.isArray(pending), facts: pendingFacts, retained_pending_only: pendingFacts.filter((f) => f.retained_pending && !f.canonical_retained).length, continuation_verified: record.recovery_verified === true },
