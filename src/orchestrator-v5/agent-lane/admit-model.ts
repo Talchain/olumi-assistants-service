@@ -17,6 +17,7 @@
  */
 
 import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type QuantityFrameType } from '@talchain/schemas';
+import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from './product-goal-extra-parent.js';
 import { oneRoutePerEffect } from './one-route-per-effect.js';
 import { isChangeFrame } from './limit-frame.js';
 import {
@@ -2890,7 +2891,10 @@ function admitOnce(
   targetFigureWrittenAgain: (value: number, unit: unknown) => boolean,
   goalLevelFromBrief: (candidate: CandidateModel) => BriefGoalLevel | null,
 ): AdmittedModel {
-  const { model, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
+  const { model: restatedModel, restated: restatedChanges } = restateSignedPercentChanges(candidateModel);
+  // ⛔ A goal read as a two-part product gets no third direct parent: re-pointed through the volume operand, or a double
+  // route taken out (`product-goal-extra-parent.ts`, R3 5902616543).
+  const { model, found: extraParentsOfProductGoal } = rerouteExtraParentsOfProductGoal(restatedModel);
 
   /**
    * The scale frame for each factor, keyed by LABEL because it must be known
@@ -3415,6 +3419,15 @@ function admitOnce(
         `"${w.label}" was given a range of 0 to ${w.stated}, but "${w.option}" sets it to ${w.value}, so the range ` +
         `is now 0 to ${w.frame} and every figure for it is read against that one range. A range is a unit of ` +
         'measurement, not a forecast or a limit; no figure was changed.',
+      severity: 'warn',
+    } as RepairEntry);
+  }
+  for (const f of extraParentsOfProductGoal) {
+    loss.push({
+      field_path: `nodes[${ids.get(f.goal) ?? f.goal}].extra_parent.${ids.get(f.from) ?? f.from}`,
+      before: f.from,
+      after: f.kind === 'rerouted' ? f.volume : null,
+      reason: sayExtraParentOfProductGoal(f),
       severity: 'warn',
     } as RepairEntry);
   }
