@@ -653,11 +653,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const olumiFilter = filterOlumiProposedOptions({
       submitted: gate.options as ReadonlyArray<Record<string, unknown>>,
       graph: snapshot.rawPersistedGraph ?? snapshot.graph,
-      excluded: gate.excluded,
     });
-    const keptOlumiProvisional = olumiFilter.participation.some(
-      (entry) => entry.state === 'kept_olumi_provisional',
-    );
+    const keptOlumiProvisional = olumiFilter.keptOlumiProvisional;
 
     // --- 2.6. Load-time intercept guard (Track S 0.13c-1) -----------------
     // Legacy persisted graphs (drafted before #263 / Track S 0.13a) can carry

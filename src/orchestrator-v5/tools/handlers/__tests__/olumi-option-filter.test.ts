@@ -2,94 +2,83 @@
  * ⛔ AN OPTION OLUMI PROPOSED IS NOT COMPARED AS THE USER'S (DL 5887510885; `olumi-option-filter.ts`).
  *
  * The Run's post-gate filter: Olumi's options (MG's typed mark, read on the persisted graph) leave the submission when at
- * least 2 of the user's remain; otherwise they stay, typed `kept_olumi_provisional`. It can never create a refusal.
+ * least 2 distinct user interventions remain; otherwise they stay provisional. It can never create a refusal.
  */
 import { describe, it, expect } from 'vitest';
 import { filterOlumiProposedOptions } from '../olumi-option-filter.js';
-import type { ExcludedOptionRecord } from '../analysable-option-gate.js';
 
 type Rec = Record<string, unknown>;
-const opt = (id: string): Rec => ({ option_id: id, label: id, interventions: { f: 1 } });
+const opt = (id: string, value = 1): Rec => ({ option_id: id, label: id, interventions: { f: value } });
 const node = (id: string, proposed = false): Rec => ({ id, kind: 'option', label: id, ...(proposed ? { proposed_by: 'olumi' } : {}) });
 const graphOf = (...nodes: Rec[]): Rec => ({ nodes: [{ id: 'dec', kind: 'decision' }, ...nodes], edges: [] });
-const excludedOf = (...ids: string[]): ExcludedOptionRecord[] => ids.map((option_id) => ({ option_id, label: option_id, reason: 'no_interventions' }));
 
 describe('filterOlumiProposedOptions', () => {
-  it('≥2 of the user\'s options remain → Olumi\'s leave the submission, typed excluded_olumi_proposed (no ids)', () => {
+  it('≥2 distinct user options remain → Olumi leaves the submission', () => {
     const r = filterOlumiProposedOptions({
-      submitted: [opt('raise_59'), opt('keep_49'), opt('phased')],
+      submitted: [opt('raise_59'), opt('keep_49', 2), opt('phased', 3)],
       graph: graphOf(node('raise_59'), node('keep_49'), node('phased', true)),
-      excluded: [],
     });
     expect(r.options.map((o) => o.option_id)).toEqual(['raise_59', 'keep_49']);
-    expect(r.participation).toEqual([{ option_id: 'phased', state: 'excluded_olumi_proposed' }]);
+    expect(r.keptOlumiProvisional).toBe(false);
   });
 
   it('the status quo is the user\'s option: it counts towards the 2', () => {
     const r = filterOlumiProposedOptions({
-      submitted: [opt('status_quo'), opt('raise_59'), opt('phased')],
+      submitted: [opt('status_quo'), opt('raise_59', 2), opt('phased', 3)],
       graph: graphOf({ ...node('status_quo'), is_status_quo: true }, node('raise_59'), node('phased', true)),
-      excluded: [],
     });
     expect(r.options.map((o) => o.option_id)).toEqual(['status_quo', 'raise_59']);
   });
 
-  it('<2 user options because the gate excluded one → Olumi\'s STAY, provisional, naming the unanalysable user option', () => {
+  it('<2 submitted user options → Olumi stays provisional', () => {
     const submitted = [opt('raise_59'), opt('phased')];
     const r = filterOlumiProposedOptions({
       submitted,
       graph: graphOf(node('raise_59'), node('keep_49'), node('phased', true)),
-      excluded: excludedOf('keep_49'),
     });
     expect(r.options).toBe(submitted);
-    expect(r.participation).toEqual([{ option_id: 'phased', state: 'kept_olumi_provisional', unanalysable_user_option_ids: ['keep_49'] }]);
+    expect(r.keptOlumiProvisional).toBe(true);
   });
 
-  it('<2 user options because the brief named only one → Olumi\'s stay, with NO ids (there is no unanalysable option to name)', () => {
+  it('two user labels with one PLoT-equivalent intervention map do not evict a distinct Olumi comparison', () => {
+    const submitted = [opt('user_a', 1), opt('user_b', 1), opt('olumi_c', 2)];
+    const r = filterOlumiProposedOptions({
+      submitted,
+      graph: graphOf(node('user_a'), node('user_b'), node('olumi_c', true)),
+    });
+    expect(r.options).toBe(submitted);
+    expect(r.keptOlumiProvisional).toBe(true);
+  });
+
+  it('<2 user options because the brief named only one → Olumi stays provisional', () => {
     const r = filterOlumiProposedOptions({
       submitted: [opt('raise_59'), opt('phased'), opt('tiered')],
       graph: graphOf(node('raise_59'), node('phased', true), node('tiered', true)),
-      excluded: [],
     });
     expect(r.options.map((o) => o.option_id)).toEqual(['raise_59', 'phased', 'tiered']);
-    expect(r.participation).toEqual([
-      { option_id: 'phased', state: 'kept_olumi_provisional' },
-      { option_id: 'tiered', state: 'kept_olumi_provisional' },
-    ]);
+    expect(r.keptOlumiProvisional).toBe(true);
   });
 
-  it('an EXCLUDED Olumi option is never named as the user\'s unanalysable option', () => {
+  it('a marked option absent from the submission does not affect the submitted pair', () => {
     const r = filterOlumiProposedOptions({
-      submitted: [opt('raise_59'), opt('phased')],
-      graph: graphOf(node('raise_59'), node('phased', true), node('tiered', true)),
-      excluded: excludedOf('tiered'),
+      submitted: [opt('raise_59'), opt('keep_49', 2)],
+      graph: graphOf(node('raise_59'), node('keep_49'), node('tiered', true)),
     });
-    expect(r.participation).toEqual([{ option_id: 'phased', state: 'kept_olumi_provisional' }]);
+    expect(r.options.map((o) => o.option_id)).toEqual(['raise_59', 'keep_49']);
+    expect(r.keptOlumiProvisional).toBe(false);
   });
 
-  it('no mark anywhere → the submission is returned unchanged and nothing is typed', () => {
+  it('no mark anywhere → the submission is returned unchanged', () => {
     const submitted = [opt('raise_59'), opt('keep_49')];
-    const r = filterOlumiProposedOptions({ submitted, graph: graphOf(node('raise_59'), node('keep_49')), excluded: [] });
+    const r = filterOlumiProposedOptions({ submitted, graph: graphOf(node('raise_59'), node('keep_49')) });
     expect(r.options).toBe(submitted);
-    expect(r.participation).toEqual([]);
-  });
-
-  it('a marked option the gate did not submit is not typed (only the compared set is decided here)', () => {
-    const submitted = [opt('raise_59'), opt('keep_49')];
-    const r = filterOlumiProposedOptions({
-      submitted,
-      graph: graphOf(node('raise_59'), node('keep_49'), node('phased', true)),
-      excluded: excludedOf('phased'),
-    });
-    expect(r.options).toBe(submitted);
-    expect(r.participation).toEqual([]);
+    expect(r.keptOlumiProvisional).toBe(false);
   });
 
   it('the submission\'s `id` spelling is read as well as `option_id`', () => {
     const r = filterOlumiProposedOptions({
-      submitted: [{ id: 'a' }, { id: 'b' }, { id: 'phased' }],
+      submitted: [{ id: 'a', interventions: { f: 1 } }, { id: 'b', interventions: { f: 2 } }, { id: 'phased', interventions: { f: 3 } }],
       graph: graphOf(node('a'), node('b'), node('phased', true)),
-      excluded: [],
     });
     expect(r.options.map((o) => o.id)).toEqual(['a', 'b']);
   });

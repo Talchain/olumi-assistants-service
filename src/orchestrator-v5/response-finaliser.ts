@@ -103,7 +103,7 @@ import { projectEvidenceAssessment } from './compose/project-evidence-assessment
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.js';
 import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './context/freshness.js';
-import { deriveEveryOptionLimitVerdict, readRatifiedConstraints } from '../orchestrator/context/constraint-feasibility.js';
+import { deriveEveryOptionLimitVerdict, leaderWithheldWithoutConstraintCause, readRatifiedConstraints } from '../orchestrator/context/constraint-feasibility.js';
 import { nodesUnderANonlinearIdentity } from './agent-lane/admit-model.js';
 
 /**
@@ -634,6 +634,12 @@ function attachAnalysisState(
     withheldBecauseUnrequested: ctx.leaderWithheldBecauseUnrequested === true,
     // C46 (H2): stated by the same caller, on the same terms — never derived here.
     withheldBecauseNonlinearIdentity: ctx.leaderWithheldBecauseNonlinearIdentity === true,
+    // Only the selected, claim-bearing persisted fact can establish that no
+    // constraint verdict applied. A different hot-window fact cannot explain
+    // this turn's refusal.
+    withheldWithoutConstraintCause: hasRunToBind && selectedRun !== null && ctx.priorFacts !== undefined
+      && selectClaimBearingRunAnalysisFact(ctx.priorFacts)?.fact === selectedRun.fact
+      && leaderWithheldWithoutConstraintCause(selectedRun.fact.result),
     // F-LIMIT: every option breaks the same limit on the run fact this claim BINDS — and only when that is ALSO the
     // fact the entitlement is read from (`selectClaimBearingRunAnalysisFact`, which counts a partial run). When the two
     // differ (#1876: a newer partial run carries the refusal), this finaliser cannot know the cause, so today's stands.

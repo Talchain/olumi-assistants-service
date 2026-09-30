@@ -52,7 +52,7 @@ const SCENARIO = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const GRAPH = { nodes: [{ id: 'goal', kind: 'goal', label: 'Goal', goal_threshold: 0.7 }], edges: [] };
 const HASH = computeAnalysisAffectingGraphHash(GRAPH as never)!;
 
-function runFact(opts: { at: string; mayName: boolean; auto: boolean; status: 'completed' | 'partial' }) {
+function runFact(opts: { at: string; mayName: boolean; auto: boolean; status: 'completed' | 'partial'; state?: 'not_applicable' }) {
   return RunAnalysisHandlerFactSchema.parse({
     fact_type: 'run_analysis', fact_version: 1, noop: false,
     result: {
@@ -61,7 +61,7 @@ function runFact(opts: { at: string; mayName: boolean; auto: boolean; status: 'c
       win_probabilities: { 'option-a': 0.65, 'option-b': 0.35 },
       constraint_verdict: {
         may_name_leading_option: opts.mayName,
-        constraint_verdict_state: opts.mayName ? 'evaluated_feasible' : 'evaluated_infeasible',
+        constraint_verdict_state: opts.state ?? (opts.mayName ? 'evaluated_feasible' : 'evaluated_infeasible'),
       },
       enrichment: {
         analysis_status: opts.status,
@@ -108,6 +108,14 @@ describe('the finaliser binds a withheld leader\'s cause to the refusal, never t
     const out = finalise([A, B], verdict.may_name_leading_option);
     expect(out.analysis_state?.leader_claim.permitted).toBe(false);
     expect(out.analysis_state?.leader_claim.withheld_reason).toBe('constraint_verdict_withheld');
+  });
+
+  it('a selected no-limit Run is withheld without claiming a limit, while a different older fact cannot supply its cause', () => {
+    const B = runFact({ at: '2026-09-25T02:00:00.000Z', mayName: false, auto: false, status: 'completed', state: 'not_applicable' });
+    const out = finalise([A, B], false);
+    expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'analysis_leader_withheld' });
+    const unbound = finalise([A], false);
+    expect(unbound.analysis_state?.leader_claim.withheld_reason).not.toBe('analysis_leader_withheld');
   });
 
   it('RED B — this turn\'s own run refused, but the finaliser was handed the pre-handler window [A]', () => {

@@ -45,6 +45,7 @@ vi.mock('../../utils/telemetry.js', () => ({
 import { readScenarioAnalysis } from '../scenario-graph-analysis-read.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import type { GraphStateIngress } from '../../orchestrator-v5/boundary/request-extensions.js';
+import { agentNoLeaderSentence } from '../../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 
 const SCENARIO = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const GRAPH: GraphStateIngress = { nodes: [{ id: 'goal', kind: 'goal', label: 'Synthetic goal', goal_threshold: 0.7 }], edges: [] };
@@ -53,7 +54,7 @@ const RUN_AT = '2026-09-24T17:00:00.000Z';
 const RUN_ROW = 'run-fact-row';
 
 
-function runFact(opts: { mayName: boolean; auto: boolean }) {
+function runFact(opts: { mayName: boolean; auto: boolean; state?: 'not_applicable' | 'evaluated_infeasible' }) {
   return RunAnalysisHandlerFactSchema.parse({
     fact_type: 'run_analysis', fact_version: 1, noop: false,
     result: {
@@ -62,7 +63,7 @@ function runFact(opts: { mayName: boolean; auto: boolean }) {
       win_probabilities: { 'option-a': 0.65, 'option-b': 0.35 },
       constraint_verdict: {
         may_name_leading_option: opts.mayName,
-        constraint_verdict_state: opts.mayName ? 'evaluated_feasible' : 'evaluated_infeasible',
+        constraint_verdict_state: opts.state ?? (opts.mayName ? 'evaluated_feasible' : 'evaluated_infeasible'),
       },
       enrichment: {
         analysis_status: 'completed',
@@ -101,6 +102,14 @@ describe('the reload names the cause of a withheld leader that it can prove', ()
     const result = await reloadWith(runFact({ mayName: false, auto: false }), 'w-req-withheld');
     expect(result.analysis_state?.leader_claim.permitted).toBe(false);
     expect(result.analysis_state?.leader_claim.withheld_reason).toBe('constraint_verdict_withheld');
+  });
+
+  it('a current no-limit Run withheld by a non-constraint gate gives a cause-free reason on cold read', async () => {
+    const result = await reloadWith(runFact({ mayName: false, auto: false, state: 'not_applicable' }), 'w-no-limit');
+    expect(result.analysis_state?.run_state.kind).toBe('complete_current');
+    expect(result.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'analysis_leader_withheld' });
+    const said = agentNoLeaderSentence(result.analysis_state?.leader_claim.withheld_reason, undefined);
+    expect(said).not.toMatch(/limit|run the analysis again/i);
   });
 
   it('CONTROL: an automatic run whose constraint verdict ALSO withholds names the real limit', async () => {

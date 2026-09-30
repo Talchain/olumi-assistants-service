@@ -200,6 +200,8 @@ export const REFUSAL_REASON_UNSPECIFIED = 'analysis_refused_unspecified';
 
 /** `withheld_reason` codes. Producer-owned; a consumer maps them to its copy. */
 export const WITHHELD_CONSTRAINT_VERDICT = 'constraint_verdict_withheld';
+/** A selected Run withheld its leader while its constraint verdict was not applicable. No cause is asserted. */
+export const WITHHELD_LEADER_CAUSE_UNRECORDED = 'analysis_leader_withheld';
 export const WITHHELD_NEAR_TIE = 'options_do_not_separate';
 export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
 export const WITHHELD_RUN_IDENTITY_UNCONFIRMED = 'analysis_run_identity_unconfirmed';
@@ -320,6 +322,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   Record<string, Exclude<LeaderClaimReasonKind, 'unknown'>>
 > = {
   [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
+  [WITHHELD_LEADER_CAUSE_UNRECORDED]: 'withheld',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
   [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'withheld',
   [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'withheld',
@@ -537,6 +540,8 @@ export interface AnalysisStateComposeInput {
    * changes; `withheldBecauseUnrequested` outranks it (see WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN).
    */
   readonly withheldBecauseNonlinearIdentity?: boolean;
+  /** The selected Run withheld its leader with no applicable constraint verdict; the cause remains unrecorded. */
+  readonly withheldWithoutConstraintCause?: boolean;
   /**
    * OPTIONAL CAUSE (F-LIMIT): what EVERY option does against one limit on the BOUND run fact
    * (`deriveEveryOptionLimitVerdict`, constraint-feasibility.ts), decided by the caller that holds that fact — this
@@ -989,6 +994,8 @@ function composeLeaderClaim(input: AnalysisStateComposeInput, runState: Analysis
           // P1-d: an out-of-date run is not "withheld for a limit" (see WITHHELD_RUN_OUT_OF_DATE).
           : runState.kind === 'complete_stale'
             ? WITHHELD_RUN_OUT_OF_DATE
+            : input.withheldWithoutConstraintCause === true
+              ? WITHHELD_LEADER_CAUSE_UNRECORDED
             : WITHHELD_CONSTRAINT_VERDICT
       : separationWithholdFromRobustness(raw)!;
   }

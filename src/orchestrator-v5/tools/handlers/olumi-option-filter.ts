@@ -4,34 +4,19 @@
  * MG's construction marks an option the drafter added, and the brief did not name, `proposed_by: 'olumi'`
  * (`isOlumiProposedOption`, the ONE predicate the analysis hash reads too). The Run decides what is compared, AFTER
  * `gateAnalysableOptions`, because only then is the true compared set known:
- *   - at least 2 of the USER's options would be analysed → Olumi's are left out of the submission, typed
- *     `excluded_olumi_proposed`;
- *   - fewer → leaving them out would leave no comparison, so they STAY, typed `kept_olumi_provisional`, naming the user's
- *     option(s) the Run could not analyse. The comparison is then Olumi's, provisional; the unqualified leader claim is
- *     withheld (Canonical's intake, #2293, fails closed on an analysed Olumi option).
- * A filter that can never create a refusal: it only removes options when at least 2 of the user's remain.
- * The current no-schema-bump delivery uses this verdict for computation; the UI's typed participation card
- * needs a separate selected-Run carrier. An absent carrier must not be presented as a recorded verdict.
- *
- * Only options OUTSIDE the ordinary comparison appear in `participation`; a Run with none gives `[]`.
+ *   - at least 2 DISTINCT user options survive PLoT's intervention dedup → Olumi's are left out;
+ *   - fewer → Olumi's stay, the comparison is provisional, and no leader is permitted.
+ * This no-schema-bump Run path carries no typed participation card.
  */
 import { isOlumiProposedOption } from '../../context/olumi-proposed-option.js';
-import type { ExcludedOptionRecord } from './analysable-option-gate.js';
+import { interventionFingerprint } from './analysis-ready-core.js';
 
 type Rec = Record<string, unknown>;
-
-/** One option outside the user's ordinary comparison, and why. */
-export interface OptionParticipationEntry {
-  readonly option_id: string;
-  readonly state: 'excluded_olumi_proposed' | 'kept_olumi_provisional';
-  /** `kept_olumi_provisional` only, when there are any: the user's options the Run could not analyse. */
-  readonly unanalysable_user_option_ids?: readonly string[];
-}
 
 export interface OlumiOptionFilterOutcome {
   /** The set to SUBMIT: the gate's submission, less Olumi's options when at least 2 of the user's remain. */
   readonly options: ReadonlyArray<Rec>;
-  readonly participation: readonly OptionParticipationEntry[];
+  readonly keptOlumiProvisional: boolean;
 }
 
 /** The fewest options a comparison needs (PLoT's `/v2/run` requires 2). */
@@ -43,32 +28,27 @@ const optionIdOf = (o: Rec): string | null =>
 
 /**
  * The Run filter. `graph` is the persisted graph the Run read (its option nodes carry the mark); `submitted` is the
- * gate's submission; `excluded` the gate's exclusions (options with nothing set).
+ * gate's submission.
  */
 export function filterOlumiProposedOptions(input: {
   readonly submitted: ReadonlyArray<Rec>;
   readonly graph: unknown;
-  readonly excluded: readonly ExcludedOptionRecord[];
 }): OlumiOptionFilterOutcome {
   const nodes = isRec(input.graph) && Array.isArray(input.graph.nodes) ? input.graph.nodes.filter(isRec) : [];
   const proposedIds = new Set(nodes.filter(isOlumiProposedOption).map((n) => n.id).filter((id): id is string => typeof id === 'string'));
-  if (proposedIds.size === 0) return { options: input.submitted, participation: [] };
+  if (proposedIds.size === 0) return { options: input.submitted, keptOlumiProvisional: false };
   const isProposed = (o: Rec): boolean => { const id = optionIdOf(o); return id !== null && proposedIds.has(id); };
-  const proposed = input.submitted.filter(isProposed);
-  if (proposed.length === 0) return { options: input.submitted, participation: [] };
+  if (!input.submitted.some(isProposed)) return { options: input.submitted, keptOlumiProvisional: false };
   const users = input.submitted.filter((o) => !isProposed(o));
-  if (users.length >= MIN_COMPARED) {
-    return {
-      options: users,
-      participation: proposed.map((o) => ({ option_id: optionIdOf(o)!, state: 'excluded_olumi_proposed' as const })),
-    };
+  // The engine deduplicates identical intervention maps. Two user-labelled
+  // submissions count only when two distinct comparisons would survive.
+  const distinctUserMaps = new Set(users.map((o) => {
+    const interventions = isRec(o.interventions) ? o.interventions : null;
+    return interventions !== null && Object.keys(interventions).length > 0
+      ? interventionFingerprint(interventions) : null;
+  }).filter((fingerprint): fingerprint is string => fingerprint !== null));
+  if (distinctUserMaps.size >= MIN_COMPARED) {
+    return { options: users, keptOlumiProvisional: false };
   }
-  const unanalysable = input.excluded.map((e) => e.option_id).filter((id) => !proposedIds.has(id));
-  return {
-    options: input.submitted,
-    participation: proposed.map((o) => ({
-      option_id: optionIdOf(o)!, state: 'kept_olumi_provisional' as const,
-      ...(unanalysable.length > 0 ? { unanalysable_user_option_ids: unanalysable } : {}),
-    })),
-  };
+  return { options: input.submitted, keptOlumiProvisional: true };
 }

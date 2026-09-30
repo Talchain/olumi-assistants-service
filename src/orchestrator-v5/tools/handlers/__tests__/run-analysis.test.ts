@@ -984,11 +984,11 @@ describe('run_analysis handler — AbortSignal + budget propagation', () => {
 // ---------------------------------------------------------------------------
 
 describe('run_analysis handler — PLoT payload construction', () => {
-  const optionParticipationSnapshot = (includeSecondUser: boolean, olumiMarked = true) => {
+  const optionParticipationSnapshot = (includeSecondUser: boolean, olumiMarked = true, identicalUsers = false) => {
     const options = [
       { id: 'opt_a', option_id: 'opt_a', kind: 'option', label: 'Option A', interventions: { fac_price: 0.4 } },
       ...(includeSecondUser
-        ? [{ id: 'opt_b', option_id: 'opt_b', kind: 'option', label: 'Option B', interventions: { fac_price: 0.8 } }]
+        ? [{ id: 'opt_b', option_id: 'opt_b', kind: 'option', label: 'Option B', interventions: { fac_price: identicalUsers ? 0.4 : 0.8 } }]
         : []),
       {
         id: 'opt_olumi', option_id: 'opt_olumi', kind: 'option', label: 'Olumi suggestion',
@@ -1031,6 +1031,7 @@ describe('run_analysis handler — PLoT payload construction', () => {
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(false);
+    expect(fact.result.constraint_verdict?.constraint_verdict_state).toBe('not_applicable');
     const canonical = {
       status: 'complete', freshness: 'fresh', computed_at: fact.result.computed_at,
       selected_fact_index: 0, usableForProse: true, usableForChips: true,
@@ -1051,6 +1052,21 @@ describe('run_analysis handler — PLoT payload construction', () => {
     expect(claimPermissionsFrom(state, {
       analysis_admission: { permitted_analysis_mode: 'comparative_leader' },
     }, { requested: true }).leader_may_be_named).toBe(false);
+  });
+
+  it('keeps distinct Olumi C when user A/B have identical interventions and would collapse to one at PLoT', async () => {
+    const plotClient = makePlotClient(happyFixture as unknown as V2RunResponseEnvelope);
+    const handler = createRunAnalysisHandler({
+      plotClient,
+      scenarioReader: makeScenarioReader(optionParticipationSnapshot(true, true, true)),
+    });
+    const outcome = await handler(makeInvocation());
+    const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect((payload.options as Array<{ option_id: string }>).map((option) => option.option_id))
+      .toEqual(['opt_a', 'opt_b', 'opt_olumi']);
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(false);
   });
 
   it('continues to submit an unmarked third option as an ordinary user option', async () => {
