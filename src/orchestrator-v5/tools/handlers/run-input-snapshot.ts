@@ -23,6 +23,7 @@
 
 import { createHash } from 'node:crypto';
 import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
 
 type Rec = Record<string, unknown>;
 
@@ -94,8 +95,14 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
   }
 
   // ── goal ────────────────────────────────────────────────────────────────
-  const goalId = text(input.plotPayload.goal_node_id);
+  // A Run sent no goal (`goal_node_id` absent or null) is goal-free: `goal: null`. An EXPLICIT goal id that is not a
+  // usable id, or names no node PLoT was sent, is malformed: record NO snapshot rather than relabel the Run goal-free
+  // (#2377's currentness gate would then read it fresh — P0 SHARED DATA 5917660267).
+  const sentGoalId = input.plotPayload.goal_node_id;
+  const goalId = sentGoalId === undefined || sentGoalId === null ? undefined : text(sentGoalId);
+  if (sentGoalId !== undefined && sentGoalId !== null && (goalId === undefined || !nodeById.has(goalId))) return null;
   const goalNode = goalId !== undefined ? nodeById.get(goalId) : undefined;
+  const goalUnit = normalizeRunGoalUnit(goalNode?.goal_threshold_unit);
   const goal =
     goalId === undefined
       ? null
@@ -103,7 +110,8 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
           node_id: goalId,
           ...(label(goalNode?.label) !== undefined ? { label: label(goalNode?.label) } : {}),
           ...(finite(goalNode?.goal_threshold_raw) !== undefined ? { target_raw: finite(goalNode?.goal_threshold_raw) } : {}),
-          ...(text(goalNode?.goal_threshold_unit, 64) !== undefined ? { unit: text(goalNode?.goal_threshold_unit, 64) } : {}),
+          // The ONE Run-goal-unit rule #2377's currentness gate compares with (bytes kept; absent/over 64 → absent).
+          ...(goalUnit !== undefined ? { unit: goalUnit } : {}),
           ...(typeof goalNode?.goal_direction === 'string' && COMPARATORS.has(goalNode.goal_direction)
             ? { operator: goalNode.goal_direction }
             : {}),

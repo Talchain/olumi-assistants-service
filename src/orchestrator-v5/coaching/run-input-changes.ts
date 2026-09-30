@@ -9,8 +9,12 @@
  * options added to / dropped from the comparison, factor values, the goal, limits, links. Within a kind: by id.
  *
  * RULES
- *   - Compare the AUTHORED figure (`raw` + `unit`) when both ends recorded one, else the number PLoT received
- *     (`encoded`). A label-only difference is never a row; a unit or kind difference is.
+ *   - A row carries AUTHORED figures only (`raw` + `unit`, the user's units). A consumer prints `raw` verbatim as the
+ *     user's figure, so the number PLoT received (`encoded`) never enters a row (AIQ + P0 SHARED DATA on #2378).
+ *   - A sent input that changed but cannot be stated that way (an end with no authored figure, a link's spread or
+ *     existence probability, a goal/limit frame, a baseline flag, a limit's node) is NOT a row: it makes the diff
+ *     INCOMPLETE, and the delta says `input_coverage: 'partial'` — never "complete" over a change it could not show.
+ *   - A label-only difference is never a row; a unit or kind difference is.
  *   - A status-quo setting CEE HELD at the factor's current value on BOTH Runs is not an option edit — the factor-value
  *     row already says what moved.
  *   - Nothing here computes a delta: rows carry both ends, and a consumer shows before → after.
@@ -22,21 +26,26 @@ import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
 type Value = { raw: number | string | boolean; unit?: string };
 type Row = RunDeltaInputChange;
 
-const valueOf = (raw: number | string | boolean | undefined, encoded: number | undefined, unit: string | undefined): Value | null => {
-  if (raw !== undefined) return unit !== undefined ? { raw, unit } : { raw };
-  if (encoded !== undefined) return { raw: encoded };
-  return null;
-};
+const valueOf = (raw: number | string | boolean | undefined, unit: string | undefined): Value | null =>
+  raw === undefined ? null : unit !== undefined ? { raw, unit } : { raw };
 
-/** Both ends on the same basis: authored when both recorded it, else what PLoT received. */
-function pairValues(
-  a: { raw?: number | string | boolean; unit?: string; encoded?: number } | undefined,
-  b: { raw?: number | string | boolean; unit?: string; encoded?: number } | undefined,
-): [Value | null, Value | null] {
-  const authored = a?.raw !== undefined && b?.raw !== undefined;
-  const pick = (x: typeof a): Value | null =>
-    x === undefined ? null : authored ? valueOf(x.raw, undefined, x.unit) : valueOf(undefined, x.encoded, undefined) ?? valueOf(x.raw, undefined, x.unit);
-  return [pick(a), pick(b)];
+type Sent = { raw?: number | string | boolean; unit?: string; encoded?: number; kind?: string };
+const sameSent = (a: Sent, b: Sent): boolean =>
+  a.raw === b.raw && a.unit === b.unit && a.encoded === b.encoded && a.kind === b.kind;
+
+/**
+ * The two ends as AUTHORED values, or `'unexpressed'` when the ends differ in what was sent but at least one end has
+ * no authored figure to show (so no honest row exists).
+ */
+function authoredPair(a: Sent | undefined, b: Sent | undefined): [Value | null, Value | null] | 'unexpressed' {
+  if (a !== undefined && b !== undefined) {
+    if (a.raw !== undefined && b.raw !== undefined) return [valueOf(a.raw, a.unit), valueOf(b.raw, b.unit)];
+    return sameSent(a, b) ? [null, null] : 'unexpressed';
+  }
+  const one = a ?? b;
+  if (one === undefined) return [null, null];
+  if (one.raw === undefined) return 'unexpressed';
+  return a !== undefined ? [valueOf(a.raw, a.unit), null] : [null, valueOf(b!.raw, b!.unit)];
 }
 
 const same = (a: Value | null, b: Value | null): boolean =>
@@ -65,10 +74,21 @@ const labels = (a?: string, b?: string) => ({
   ...(b !== undefined ? { label_after: b } : {}),
 });
 
+/** The rows only — see {@link diffRunInputs} for whether they are the whole difference. */
 export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInputSnapshot): Row[] {
+  return diffRunInputs(prior, current).rows;
+}
+
+/** The rows, and `complete: false` when a sent input changed that no row states. */
+export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot): { rows: Row[]; complete: boolean } {
   const rows: Row[] = [];
+  let complete = true;
   const push = (r: Row | null) => {
     if (r !== null) rows.push(r);
+  };
+  const pushPair = (base: Omit<Row, 'before' | 'after' | 'change'>, pair: ReturnType<typeof authoredPair>, kinds?: { before?: string; after?: string }) => {
+    if (pair === 'unexpressed') { complete = false; return; }
+    push(changeRow(base, pair[0], pair[1], kinds));
   };
 
   // ── option settings, for options on both Runs ─────────────────────────────
@@ -84,14 +104,13 @@ export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInput
       const ps = pSet.get(factorId);
       const cs = cSet.get(factorId);
       if (ps?.held === true && cs?.held === true) continue;
-      const [before, after] = pairValues(ps, cs);
-      push(changeRow(
+      pushPair(
         { entity_kind: 'option_setting', entity_id: factorId, option_id: optionId, field: 'value', ...labels(ps?.label, cs?.label) },
-        before,
-        after,
+        authoredPair(ps, cs),
         { before: ps?.kind, after: cs?.kind },
-      ));
+      );
     }
+    if ((p.is_baseline === true) !== (c.is_baseline === true)) complete = false;
   }
 
   // ── options entering / leaving the comparison ─────────────────────────────
@@ -112,8 +131,7 @@ export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInput
   for (const factorId of unionIds(pF, cF)) {
     const pf = pF.get(factorId);
     const cf = cF.get(factorId);
-    const [before, after] = pairValues(pf, cf);
-    push(changeRow({ entity_kind: 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, before, after));
+    pushPair({ entity_kind: 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, authoredPair(pf, cf));
   }
 
   // ── the goal ──────────────────────────────────────────────────────────────
@@ -123,8 +141,9 @@ export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInput
     if (pg !== null && cg !== null && pg.node_id === cg.node_id) {
       const base = { entity_kind: 'goal' as const, entity_id: cg.node_id, ...labels(pg.label, cg.label) };
       const v = (raw: number | string | undefined): Value | null => (raw === undefined ? null : { raw });
-      push(changeRow({ ...base, field: 'target' }, pg.target_raw !== undefined ? valueOf(pg.target_raw, undefined, pg.unit) : null,
-        cg.target_raw !== undefined ? valueOf(cg.target_raw, undefined, cg.unit) : null));
+      push(changeRow({ ...base, field: 'target' }, pg.target_raw !== undefined ? valueOf(pg.target_raw, pg.unit) : null,
+        cg.target_raw !== undefined ? valueOf(cg.target_raw, cg.unit) : null));
+      if (pg.frame !== cg.frame) complete = false;
       // A unit-only edit (AIQ 5912905493) is its own row even when the target number is unchanged.
       push(changeRow({ ...base, field: 'unit' }, v(pg.unit), v(cg.unit)));
       push(changeRow({ ...base, field: 'operator' }, v(pg.operator), v(cg.operator)));
@@ -143,9 +162,10 @@ export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInput
     const pc = pC.get(id);
     const cc = cC.get(id);
     const base = { entity_kind: 'constraint' as const, entity_id: id, ...labels(pc?.label, cc?.label) };
-    push(changeRow({ ...base, field: 'target' }, pc ? valueOf(pc.raw, undefined, pc.unit) : null, cc ? valueOf(cc.raw, undefined, cc.unit) : null));
+    push(changeRow({ ...base, field: 'target' }, pc ? valueOf(pc.raw, pc.unit) : null, cc ? valueOf(cc.raw, cc.unit) : null));
     if (pc !== undefined && cc !== undefined) {
       push(changeRow({ ...base, field: 'operator' }, { raw: pc.operator }, { raw: cc.operator }));
+      if (pc.node_id !== cc.node_id || pc.frame !== cc.frame) complete = false;
     }
   }
 
@@ -162,7 +182,9 @@ export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInput
       pl ? { raw: pl.mean } : null,
       cl ? { raw: cl.mean } : null,
     ));
+    // A link's spread or existence probability has no row kind yet (AIQ owns that wording): the pair is partial.
+    if (pl !== undefined && cl !== undefined && (pl.std !== cl.std || pl.exists_probability !== cl.exists_probability)) complete = false;
   }
 
-  return rows;
+  return { rows, complete };
 }

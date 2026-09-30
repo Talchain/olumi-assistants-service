@@ -1,4 +1,4 @@
-import type { AnalysisStateV1, OlumiResponse } from '@talchain/schemas/boundary';
+import type { AnalysisStateV1, OlumiResponse, RunDelta } from '@talchain/schemas/boundary';
 import type { FreshnessDerivation } from '../orchestrator-v5/context/freshness.js';
 import type { SelectedRunFigure } from './selected-run-figures.js';
 import type { AnalysisReadyPayload } from '../orchestrator-v5/compose/analysis-ready-emit.js';
@@ -27,13 +27,19 @@ export interface CurrentReadProjection {
   readonly result: ResultBlock | null;
   /** Measures attested by that same selected Run, never by a historical copy. */
   readonly figures: readonly SelectedRunFigure[];
+  /**
+   * SC-24: this selected Run's comparison with the Run before it — the turn's own producer (`buildRunDelta`). It
+   * carries per-option shares, which are figures, so it rides HERE under the same currentness gate (CURRENT-READ-v1
+   * row 1): only when the selected Run is `complete_current`. ABSENT = no delta for this Run — never "nothing changed".
+   */
+  readonly run_delta?: RunDelta;
 }
 
 export type CurrentReadInput =
   | { readonly analysisState: null; readonly derivation?: null; readonly analysisResult?: null }
   | { readonly analysisState: AnalysisStateV1; readonly derivation: RunHashes; readonly analysisResult: ResultBlock | null;
       readonly analysisReady?: AnalysisReadyPayload;
-      readonly figures?: readonly SelectedRunFigure[] };
+      readonly figures?: readonly SelectedRunFigure[]; readonly runDelta?: RunDelta };
 
 export function projectCurrentRead(input: CurrentReadInput): CurrentReadProjection {
   if (input.analysisState === null) {
@@ -51,5 +57,7 @@ export function projectCurrentRead(input: CurrentReadInput): CurrentReadProjecti
     result: input.analysisState.run_state.kind === 'complete_current' ? input.analysisResult : null,
     figures: input.analysisState.run_state.kind === 'complete_current' && input.analysisResult !== null
       ? input.figures ?? [] : [],
+    ...(input.analysisState.run_state.kind === 'complete_current' && input.analysisResult !== null
+      && input.runDelta !== undefined ? { run_delta: input.runDelta } : {}),
   };
 }

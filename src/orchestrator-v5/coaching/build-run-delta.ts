@@ -71,7 +71,7 @@ import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.
 // noise?" would be free to drift, and the prose one would drift silently
 // (CLAUDE.md trap #12). Behaviour here is unchanged by the move.
 import { noiseVerdictForProportions } from './win-probability-noise-band.js';
-import { diffRunInputSnapshots } from './run-input-changes.js';
+import { diffRunInputs } from './run-input-changes.js';
 
 /**
  * Why no delta was produced. A DISCRIMINATED reason rather than a bare `null`,
@@ -443,7 +443,8 @@ function identityBoundWinProbabilities(
 /**
  * SC-24 (schemas 0.67.0) — the pair's endpoints and its exact input changes, read off the two facts' own
  * `run_id` / `input_snapshot` (what each Run was SENT; `run-analysis.ts` §3.9).
- *   - `compared`: both Runs recorded their inputs → `input_coverage: 'complete'` + the diff (possibly `[]`).
+ *   - `compared`: both Runs recorded their inputs → the diff (possibly `[]`), `input_coverage: 'complete'` — or
+ *     `'partial'` when a sent input changed that no authored row can state (`run-input-changes.ts` RULES).
  *   - `not_recorded`: an end predates snapshots → the coverage says so and NO list travels (never an empty diff).
  *   - `same_run`: both ends are one Run re-delivered → no delta at all.
  */
@@ -471,7 +472,10 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
   if (p.snapshot !== null && c.snapshot !== null && 'endpoints' in endpoints) {
     return {
       kind: 'compared',
-      members: { ...endpoints, input_coverage: 'complete', input_changes: diffRunInputSnapshots(p.snapshot, c.snapshot) },
+      members: (() => {
+        const diff = diffRunInputs(p.snapshot, c.snapshot);
+        return { ...endpoints, input_coverage: diff.complete ? 'complete' as const : 'partial' as const, input_changes: diff.rows };
+      })(),
     };
   }
   return { kind: 'not_recorded', members: { ...endpoints, input_coverage: 'not_recorded' } };

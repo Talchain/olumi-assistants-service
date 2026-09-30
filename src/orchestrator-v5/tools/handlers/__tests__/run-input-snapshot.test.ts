@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildRunInputSnapshot, runIdFor, sentDigest } from '../run-input-snapshot.js';
+import { normalizeRunGoalUnit } from '../../../context/run-goal-unit.js';
 
 const graph = {
   nodes: [
@@ -120,5 +121,33 @@ describe('runIdFor — one id per turn that ran, the same on a replay', () => {
     const snap = buildRunInputSnapshot(input({ submittedOptions: [{ label: 'Unnamed' }, { option_id: 'opt_hold', label: 'Hold', is_baseline: true }] }));
     expect(snap).toBeNull();
   });
-});
 
+  // P0 SHARED DATA 5917660267 / AIQ 5917724983: the goal unit goes through #2377's ONE normaliser, byte for byte, so the
+  // currentness gate never reads a just-computed Run as stale; a malformed EXPLICIT goal id is refused, not goal-free.
+  it('the goal unit is normalised by the shared Run-goal-unit rule: bytes kept, over 64 or empty → absent', () => {
+    const withUnit = (unit: unknown) => {
+      const g = { ...graph, nodes: graph.nodes.map((n) => (n.id === 'goal_mrr' ? { ...n, goal_threshold_unit: unit } : n)) };
+      return buildRunInputSnapshot(input({ wireGraph: g, plotPayload: payload({ graph: g }) }))?.goal;
+    };
+    for (const unit of ['GBP/month', ' GBP/month ', 'x'.repeat(64), 'x'.repeat(65), '', 42, null]) {
+      const expected = normalizeRunGoalUnit(unit);
+      const goal = withUnit(unit);
+      if (expected === undefined) expect(goal, JSON.stringify(unit)).not.toHaveProperty('unit');
+      else expect(goal?.unit, JSON.stringify(unit)).toBe(expected);
+    }
+    // Bytes, not a trimmed copy: the gate compares the graph's own string.
+    expect(withUnit(' GBP/month ')?.unit).toBe(' GBP/month ');
+    expect(withUnit('x'.repeat(65))).not.toHaveProperty('unit');
+  });
+
+  it('a malformed EXPLICIT goal id records NO snapshot; absent or null stays goal-free', () => {
+    expect(buildRunInputSnapshot(input({ plotPayload: payload({ goal_node_id: 42 }) }))).toBeNull();
+    expect(buildRunInputSnapshot(input({ plotPayload: payload({ goal_node_id: '' }) }))).toBeNull();
+    expect(buildRunInputSnapshot(input({ plotPayload: payload({ goal_node_id: 'no_such_node' }) }))).toBeNull();
+    expect(buildRunInputSnapshot(input({ plotPayload: payload({ goal_node_id: null }) }))?.goal).toBeNull();
+    const { goal_node_id: _g, ...noGoal } = payload();
+    expect(buildRunInputSnapshot(input({ plotPayload: noGoal }))?.goal).toBeNull();
+    // Control: a real goal id still records its goal.
+    expect(buildRunInputSnapshot(input())?.goal?.node_id).toBe('goal_mrr');
+  });
+});

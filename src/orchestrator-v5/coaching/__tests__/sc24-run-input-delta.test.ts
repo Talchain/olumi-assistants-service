@@ -17,6 +17,13 @@
  *   G  a label-only rename is not an input change.
  *   H  (AIQ F1 on #2378) a Run whose leader claim is withheld ships NO win shares on the pair — they would name the
  *      withheld leader by arithmetic; a pair entitled on both ends keeps them (control).
+ *   I  (P0 PARTNER 5917596263 open 2) vary-and-diff: with the current Run's leader withheld, varying every stored share
+ *      and the goal chance leaves `run_delta` byte-identical; on an entitled pair the same variation moves it (control).
+ *   J  (open 3) a C5_unattributed pair carries rows and ids only — no causal wording anywhere in the block.
+ *   K  (P0 SHARED DATA 5917660267 · AIQ 5917724983) an ENCODED-only change never becomes an authored `raw`: no row, and
+ *      the pair is `partial`; the authored £59 → £60 row stays (control).
+ *   L  a link's spread / existence probability that changed with no row kind → `partial`, never "complete, nothing
+ *      changed"; an identical pair stays `complete` with [] (control).
  */
 import { describe, expect, it } from 'vitest';
 import { RunDeltaSchema } from '@talchain/schemas/boundary';
@@ -44,7 +51,7 @@ const snap = (over: Partial<RunInputSnapshot> = {}, price = 59): RunInputSnapsho
 
 function fact(opts: {
   seed: string; hash: string; at: string; builds?: Record<string, string> | null;
-  runId?: string; snapshot?: RunInputSnapshot; wins?: [number, number];
+  runId?: string; snapshot?: RunInputSnapshot; wins?: [number, number]; mayName?: boolean; pGoal?: number;
 }): HandlerFact {
   const [a, b] = opts.wins ?? [0.45, 0.55];
   return {
@@ -58,11 +65,12 @@ function fact(opts: {
           { option_id: 'opt-b', option_label: 'Hold', win_probability: b },
         ],
         meta: { seed_used: opts.seed, n_samples: 10_000 },
+        ...(opts.pGoal !== undefined ? { probability_of_goal: opts.pGoal } : {}),
         ...(opts.builds === null ? {} : { _meta: { builds: opts.builds ?? { plot: 'p1', isl: 'i1' } } }),
       },
       computed_at: opts.at,
       graph_hash_at_run: opts.hash,
-      constraint_verdict: { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' },
+      constraint_verdict: { may_name_leading_option: opts.mayName ?? true, constraint_verdict_state: 'evaluated_feasible' },
       ...(opts.runId !== undefined ? { run_id: opts.runId } : {}),
       ...(opts.snapshot !== undefined ? { input_snapshot: opts.snapshot } : {}),
     },
@@ -205,5 +213,76 @@ describe('SC-24 · diffRunInputSnapshots', () => {
     const control = buildRunDelta({ priorFacts: PRESENT_PAIR, mayNameLeadingOption: true });
     expect(control.kind === 'ok' ? control.delta.win_probabilities.map((w) => [w.option_id, w.prior, w.current]) : null)
       .toEqual([['opt-a', 0.62, 0.45], ['opt-b', 0.38, 0.55]]);
+  });
+
+  it('I: vary-and-diff — a withheld current leader: shares and goal chance move, run_delta does not; entitled control moves', () => {
+    const pair = (wins: [number, number], pGoal: number, mayName: boolean) => [
+      fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: snap({}, 60), wins, pGoal, mayName }),
+      // The prior Run is entitled and held FIXED: only what the current Run withheld varies.
+      fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: snap({}, 59), wins: [0.62, 0.38], pGoal: 0.5 }),
+    ];
+    const deltaOf = (wins: [number, number], pGoal: number, mayName: boolean) => {
+      const out = buildRunDelta({ priorFacts: pair(wins, pGoal, mayName), mayNameLeadingOption: true });
+      expect(out.kind).toBe('ok');
+      return out.kind === 'ok' ? JSON.stringify(out.delta) : '';
+    };
+    // Withheld: nothing the Run withheld can move the block.
+    expect(deltaOf([0.45, 0.55], 0.2, false)).toBe(deltaOf([0.9, 0.1], 0.97, false));
+    expect(deltaOf([0.45, 0.55], 0.2, false)).not.toMatch(/0\.45|0\.55|0\.9|0\.97/);
+    // Control: entitled on both ends, the same variation is visible.
+    expect(deltaOf([0.45, 0.55], 0.2, true)).not.toBe(deltaOf([0.9, 0.1], 0.97, true));
+  });
+
+  it('J: a C5_unattributed pair carries rows and ids only — no causal wording', () => {
+    const facts = [
+      fact({ seed: '7', hash: 'h-b', at: T2, builds: null, runId: 'run-b', snapshot: snap({}, 60) }),
+      fact({ seed: '7', hash: 'h-a', at: T1, builds: null, runId: 'run-a', snapshot: snap({}, 59) }),
+    ];
+    const out = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: true });
+    expect(out.kind === 'ok' && out.delta.attribution_case).toBe('C5_unattributed');
+    const body = JSON.stringify(out.kind === 'ok' ? out.delta : null);
+    expect(body).not.toMatch(/because|caus|due to|drove|driv|led to|explain|so that|therefore|result(s|ed)? (of|in|from)/i);
+    // Positive control: the lexicon catches a causal phrase when one is present.
+    expect(body.replace('Pro price', 'Pro price drove churn')).toMatch(/drove/);
+  });
+
+  it('K: an encoded-only change is never shown as the user\'s figure — no row, coverage partial; authored control stays', () => {
+    const encodedOnly = (encoded: number) => snap({
+      options: [
+        { option_id: 'opt-a', label: 'Raise price', settings: [{ factor_id: 'fac_price', label: 'Pro price', encoded }] },
+        { option_id: 'opt-b', label: 'Hold', is_baseline: true, settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: 49, unit: 'GBP', encoded: 49, held: true }] },
+      ],
+    });
+    const out = buildRunDelta({ priorFacts: [
+      fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: encodedOnly(0.5) }),
+      fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: encodedOnly(0.4) }),
+    ], mayNameLeadingOption: true });
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.delta.input_coverage).toBe('partial');
+    expect(out.delta.input_changes).toEqual([]);
+    expect(JSON.stringify(out.delta)).not.toMatch(/"raw":0\.[45]\b/);
+    expect(RunDeltaSchema.safeParse(out.delta).success).toBe(true);
+    // Control: authored on both ends → the £59 → £60 row, complete.
+    const authored = buildRunDelta({ priorFacts: [
+      fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: snap({}, 60) }),
+      fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: snap({}, 59) }),
+    ], mayNameLeadingOption: true });
+    expect(authored.kind === 'ok' && [authored.delta.input_coverage, authored.delta.input_changes?.[0]?.before, authored.delta.input_changes?.[0]?.after])
+      .toEqual(['complete', { raw: 59, unit: 'GBP' }, { raw: 60, unit: 'GBP' }]);
+  });
+
+  it('L: a link\'s spread or existence probability changed → partial, not "complete, nothing changed"; identical stays complete', () => {
+    const withLink = (std: number, p: number) => snap({ links: [{ from: 'fac_price', to: 'fac_churn', mean: 0.4, std, exists_probability: p }] });
+    const coverage = (a: RunInputSnapshot, b: RunInputSnapshot) => {
+      const out = buildRunDelta({ priorFacts: [
+        fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: b }),
+        fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: a }),
+      ], mayNameLeadingOption: true });
+      return out.kind === 'ok' ? [out.delta.input_coverage, out.delta.input_changes] : out;
+    };
+    expect(coverage(withLink(0.1, 0.8), withLink(0.9, 0.8))).toEqual(['partial', []]);
+    expect(coverage(withLink(0.1, 0.8), withLink(0.1, 0.2))).toEqual(['partial', []]);
+    expect(coverage(withLink(0.1, 0.8), withLink(0.1, 0.8))).toEqual(['complete', []]);
   });
 });

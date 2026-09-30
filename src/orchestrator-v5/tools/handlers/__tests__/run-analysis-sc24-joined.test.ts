@@ -133,8 +133,15 @@ describe('SC-24 · Run A → £59 → £60 → Run B → the delta and the cold 
     // ── the cold reload: the same pair and rows, from the one producer ──
     const reload = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: structuredClone(graph), requestId: 'cold-reload' });
     expect(reload.analysis_state?.run_state.kind).toBe('complete_current');
-    const d = (reload as Rec2).run_delta;
-    expect(d, 'the reload serves run_delta').toBeDefined();
+    // CURRENT-READ-v1 row 1: the comparison rides inside `current_read`, under its currentness gate — never top-level.
+    expect((reload as Rec2).run_delta, 'no top-level run_delta on the read').toBeUndefined();
+    const d = (reload as Rec2).current_read.run_delta;
+    expect(d, 'the reload serves current_read.run_delta').toBeDefined();
+    // P0 PARTNER open 1: the facts reach this read OLDEST-first (A then B). The displayed Run and the pair's newer end
+    // come from ONE ordering (`orderSuccessfulRunAnalysisFactsNewestFirst`), so the delta is always the displayed Run's.
+    expect(facts[0]).toBe(a);
+    expect(d.endpoints.current.run_id).toBe(b.result.run_id);
+    expect((reload as Rec2).current_read.computed_against_hash).toBe(b.result.graph_hash_at_run);
     expect({ c: d.attribution_case, e: d.endpoints, cov: d.input_coverage, rows: d.input_changes }).toEqual({
       c: turnDelta.delta.attribution_case, e: turnDelta.delta.endpoints,
       cov: turnDelta.delta.input_coverage, rows: turnDelta.delta.input_changes,
