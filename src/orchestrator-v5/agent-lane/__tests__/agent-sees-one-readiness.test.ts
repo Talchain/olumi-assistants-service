@@ -64,6 +64,21 @@ describe('(B) get_canonical_state carries the ONE readiness verdict, in plain wo
     expect(r.readiness?.may_run).toBe(false);
   });
 
+  it('C2: a newer degraded Run leaves no false-current cue in the cold Agent handoff', async () => {
+    const state = {
+      run_state: { kind: 'complete_current', computed_at: '2026-09-29T13:07:48.159Z' },
+      requires_rerun: true,
+      contradictions: ['fact_status_success_but_degraded_newer'],
+    };
+    const r = await capsOver(paulGraph, state).getCanonicalState(ctx) as {
+      analysis?: { earlier_analysis?: string; run_state?: unknown; requires_rerun?: boolean };
+    };
+    expect(r.analysis?.earlier_analysis).toBe('superseded_by_newer_degraded_run');
+    expect(r.analysis?.requires_rerun).toBe(true);
+    expect(r.analysis).not.toHaveProperty('run_state');
+    expect(JSON.stringify(r.analysis)).not.toContain('complete_current');
+  });
+
   it('RED (C33): the stored goal target reaches the Agent as the user stated it — £20,000 MRR, not a normalised 0.8', async () => {
     const r = await capsOver(paulGraph).getCanonicalState(ctx) as { goal?: { label?: string; target?: { value?: number; unit?: string } } };
     expect(r.goal?.label).toBe('MRR');

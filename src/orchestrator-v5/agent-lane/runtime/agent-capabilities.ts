@@ -1233,6 +1233,14 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
 function earlierAnalysisOf(state: unknown): { analysis: Record<string, unknown> } | undefined {
   if (state === null || typeof state !== 'object') return undefined;
   const { readiness: _placeholder, ...rest } = state as Record<string, unknown>;
+  // The read retains the older successful Run's lifecycle when a newer
+  // degraded Run supersedes it. Do not echo `complete_current` to the Agent:
+  // the old result is absent and the canonical verdict requires a rerun.
+  if (Array.isArray(rest.contradictions)
+    && rest.contradictions.includes('fact_status_success_but_degraded_newer')) {
+    const { run_state: _olderRun, ...withoutOlderRun } = rest;
+    return { analysis: { earlier_analysis: 'superseded_by_newer_degraded_run', ...withoutOlderRun } };
+  }
   const kind = (rest.run_state as { kind?: unknown } | undefined)?.kind;
   return { analysis: { ...(typeof kind === 'string' ? { earlier_analysis: kind } : {}), ...rest } };
 }
