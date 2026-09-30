@@ -167,8 +167,10 @@ export interface CandidateModel {
    * `unit` + `plausible_max`, nullable. Without them no size into or out of the node can be read (`resolveMagnitudeFrame`
    * has nothing to read), so a goal fed by an outcome or a risk could never be sized in its own unit. Optional here: the
    * banked contract has neither field.
+   * `analysis_participation` is never the drafter's (the strict schema has no such key): only
+   * `rerouteExtraParentsOfProductGoal` writes it, on Olumi's risk whose effect the model already carries (DL 5916217417).
    */
-  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
+  readonly risks: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null; analysis_participation?: 'retained_excluded' }[];
   readonly outcomes: readonly { label: string; provenance: string; unit?: string | null; plausible_max?: number | null }[];
   readonly links: readonly CandidateLink[];
   /**
@@ -3231,7 +3233,15 @@ function admitOnce(
     })),
     // The factor path's own carrier for a range with no level (`scale_frame`, above): a quantity outcome, or a risk
     // drafted as its exposure, is framed exactly as a factor with no baseline is. No new frame type (DL 5916155976).
-    ...model.risks.map((r) => ({ label: r.label, kind: 'risk' as const, provenance: r.provenance, ...framedByRange(r) })),
+    // ⛔ STRUCTURE IS NEVER REMOVED TO SATISFY A FIGURE RULE (DL 5916217417): a risk kept out of the calculation keeps its
+    // node, its words and its link; the run guard hands PLoT the model without it, and says so. One `node` for both.
+    ...model.risks.map((r) => {
+      const node = {
+        ...((framedByRange(r) as { node?: Partial<AdmittedNode> }).node ?? {}),
+        ...(r.analysis_participation === 'retained_excluded' ? { analysis_participation: 'retained_excluded' as const } : {}),
+      };
+      return { label: r.label, kind: 'risk' as const, provenance: r.provenance, ...(Object.keys(node).length > 0 ? { node } : {}) };
+    }),
     ...model.outcomes.map((o) => ({ label: o.label, kind: 'outcome' as const, provenance: o.provenance, ...framedByRange(o) })),
     ...(widened.proposed_options ?? []).map((o) => ({ label: o.label, kind: 'option' as const, provenance: 'ai_proposed' })),
     ...(widened.proposed_factors ?? []).map((f) => ({ label: f.label, kind: 'factor' as const, provenance: 'ai_proposed' })),
