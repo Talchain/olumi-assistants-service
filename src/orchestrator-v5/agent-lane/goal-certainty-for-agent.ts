@@ -97,7 +97,10 @@ export function goalCertaintyForAgent(runResult: unknown, run: RunOfResult, read
     const label = o.option_label ?? o.label;
     options.push({
       option: typeof label === 'string' ? label : String(o.option_id), option_id: String(o.option_id),
-      probability_of_goal: o.probability_of_goal, earned: d.earned, ...(d.earned === false ? { say: d.say } : {}),
+      // An unearned extreme is a producer diagnostic, not a chance the Agent may repeat. Its stored sentence
+      // carries the honest meaning, even when this option also has a separately recorded outcome range.
+      ...(d.earned === true ? { probability_of_goal: o.probability_of_goal } : {}),
+      earned: d.earned, ...(d.earned === false ? { say: d.say } : {}),
     });
   }
   return { options, note: GOAL_CERTAINTY_NOTE };

@@ -43,6 +43,9 @@ const SWITCH_NOTE = 'These factors are switches: Olumi takes each as off today a
 const served = JSON.parse(readFileSync(new URL('./served-pj-a02-run.json', import.meta.url), 'utf8')) as {
   analysis_result: unknown; analysis_ready: { status?: string; blockers?: unknown[]; options?: unknown[] }; analysis_state: unknown; assistant_text: string;
 };
+const SCENARIO_ID = 'fixture-a02';
+const runState = (served.analysis_state as { run_state: { computed_at: string } }).run_state;
+const runBlock = served.analysis_result as { computed_against_hash: string };
 export const RUN_RESULT = {
   ok: true, mutated: false, ran: true,
   status: served.analysis_ready.status ?? 'unknown',
@@ -50,11 +53,12 @@ export const RUN_RESULT = {
   blockers: served.analysis_ready.blockers ?? [],
   options: served.analysis_ready.options ?? [],
   result: analysisResultForAgent(served.analysis_result),
+  run_identity: { scenario_id: SCENARIO_ID, graph_hash_at_run: runBlock.computed_against_hash, computed_at: runState.computed_at },
   claim_permissions: claimPermissionsFrom(served.analysis_state, served.analysis_ready, { requested: true }),
 };
 
 /** The served run's own A02 verdict and result — the readback of a model nobody has changed since that run. */
-export const SERVED_READBACK = { analysisState: served.analysis_state, analysisResult: served.analysis_result, analysisReady: served.analysis_ready } as const;
+export const SERVED_READBACK = { scenarioId: SCENARIO_ID, analysisState: served.analysis_state, analysisResult: served.analysis_result, analysisReady: served.analysis_ready } as const;
 
 /**
  * THE SERVED RUN, PERMITTED. A02 withheld its leader for ONE reason (`nonlinear_identity_sign_unproven`) on a
