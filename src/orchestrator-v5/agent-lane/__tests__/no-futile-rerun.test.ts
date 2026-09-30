@@ -107,6 +107,25 @@ describe('the no-leader sentence never asks for a rerun that cannot help', () =>
     expect(second.response.assistant_text).toBe(first.response.assistant_text);
   });
 
+  it('does not use an old Run’s goal-figure warning as the cause after a model edit', () => {
+    const analysisReady = { analysis_admission: { permitted_analysis_mode: 'comparative_leader', reasons: [] } };
+    const graph = { nodes: [{ id: 'saving', label: 'Saving' }, { id: 'costs', label: 'Costs' }], edges: [{ from: 'saving', to: 'costs' }] };
+    for (const code of ['GOAL_FIGURES_PRODUCT_NOT_READ', 'GOAL_FIGURES_PLACEHOLDER_PATH']) {
+      const blocks = [{ type: 'analysis_result', enrichment: { inference_warnings: [{ code, node_ids: ['saving', 'costs'], message: 'Give a figure for that link and Olumi will use it.' }] } }];
+      const out = enforceAgentLaneLeaderClaimsAtWire({
+        assistant_text: 'Switch to GCP is the front-runner. Model caveats remain.', blocks, suggested_actions: [],
+        analysis_state: { leader_claim: { permitted: false, withheld_reason: 'analysis_out_of_date' } },
+      } as unknown as OlumiResponse, {
+        requestId: 't', exitPath: 'agent_lane_v1', mayNameLeadingOption: false,
+        leaderClaimWithheldReason: 'analysis_out_of_date', graph, analysisReady,
+      } as never);
+      expect(out.response.assistant_text, code).toContain('worked out before your latest change');
+      expect(out.response.assistant_text, code).toContain('run the analysis again');
+      expect(out.response.assistant_text, code).not.toContain('Olumi has not sized how');
+      expect(out.response.assistant_text, code).not.toContain('Olumi has not read your goal');
+    }
+  });
+
   it('RED at the wire: the enforcer reads the typed cause from the response’s own blocks', () => {
     const out = enforceAgentLaneLeaderClaimsAtWire(
       {

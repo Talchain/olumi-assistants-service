@@ -1207,12 +1207,16 @@ function singleCauseClause(
   limitAskIds?: ReadonlySet<string>, goalFigureCoHold?: GoalFigureCoHold,
 ): string {
   const admission = admissionClause(analysisReady);
-  if (admission !== undefined && goalFigureCoHold !== undefined) {
+  // A warning in an old Run is not a current blocker after the model changes. Only the claim's generic
+  // separation/unrecorded states can be explained by this Run's goal-figure warning.
+  const goalWarningExplainsClaim = withheldReason === undefined || withheldReason === WITHHELD_SEPARATION_UNAVAILABLE
+    || withheldReason === WITHHELD_LEADER_CAUSE_UNRECORDED;
+  if (admission !== undefined && goalFigureCoHold !== undefined && goalWarningExplainsClaim) {
     const why = admission.split(';')[0]!.trim();
     return `${why}, and ${goalFigureCoHold.why}${goalFigureCoHold.action === undefined ? '' : `; ${goalFigureCoHold.action}`}`;
   }
   if (admission !== undefined) return admission;
-  if (goalFigureCoHold !== undefined) {
+  if (goalFigureCoHold !== undefined && goalWarningExplainsClaim) {
     return `because ${goalFigureCoHold.why}${goalFigureCoHold.action === undefined ? '' : `; ${goalFigureCoHold.action}`}`;
   }
   if (withheldReason === WITHHELD_CONSTRAINT_VERDICT) {
