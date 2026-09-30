@@ -159,11 +159,13 @@ export function withoutCantRunOpening(reason: string): string {
 export function readinessSentence(view: ReadinessView): string {
   if (!view.checked) return 'I could not check whether the analysis can run yet.';
   if (view.may_run === true) {
-    // A run that proceeds over a target it can't test says so in the same breath (DR row 4): never "can run" alone.
-    const target = view.target_not_testable !== undefined ? ` ${view.target_not_testable}` : '';
-    if (view.will_run_without.length === 0) return `The analysis can run now.${target}`;
     const one = view.will_run_without.length === 1;
-    return `The analysis can run now; it will leave out ${one ? `"${view.will_run_without[0]}"` : listOf(view.will_run_without)} until ${one ? 'its levels are' : 'their levels are'} set.${target}`;
+    const leaveOut = view.will_run_without.length === 0 ? ''
+      : `leave out ${one ? `"${view.will_run_without[0]}"` : listOf(view.will_run_without)} until ${one ? 'its levels are' : 'their levels are'} set.`;
+    // ⛔ A run that proceeds over a target it can't test never reads "can run" and then shows nothing (AIQ 5914209776):
+    // the lead is DR row 4's own sentence.
+    if (view.target_not_testable !== undefined) return leaveOut === '' ? view.target_not_testable : `${view.target_not_testable} The run will ${leaveOut}`;
+    return leaveOut === '' ? 'The analysis can run now.' : `The analysis can run now; it will ${leaveOut}`;
   }
   const why = view.needs_from_user.slice(0, 2).map((i) => i.message.replace(/\s+$/, '')).join(' ');
   if (why !== '') return `The analysis can't run yet. ${why}`;

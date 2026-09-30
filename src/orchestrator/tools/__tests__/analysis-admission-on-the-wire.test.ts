@@ -51,6 +51,18 @@ function capture(): Graph {
  */
 const PAUL_DRAFT = 'src/orchestrator-v5/coaching/__tests__/fixtures/cbd15f83-bdd43f4-paul.draft-graph.json';
 
+/**
+ * The same graph with NO stated target, so DECISION-REPRESENTATION row 4's verdict has no subject (#2371): these rows
+ * keep testing their own axis. Only the goal's raw target and its own limit row go; nothing else about the capture moves.
+ */
+function withoutTarget<G>(graph: G): G {
+  const c = structuredClone(graph) as unknown as { nodes: Record<string, unknown>[]; goal_constraints?: { node_id?: unknown }[] };
+  const goals = new Set(c.nodes.filter((n) => n.kind === 'goal').map((n) => n.id));
+  for (const n of c.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
+  if (Array.isArray(c.goal_constraints)) c.goal_constraints = c.goal_constraints.filter((r) => !goals.has(r.node_id));
+  return c as unknown as G;
+}
+
 function paulDraft(): Graph {
   const parsed = JSON.parse(readFileSync(PAUL_DRAFT, 'utf8')) as { graph: Record<string, unknown> };
   return JSON.parse(JSON.stringify(parsed.graph)) as Graph;
@@ -226,6 +238,17 @@ describe('the claim-strength bound discriminates across real state classes', () 
     'acceptance-evidence/draft-speed/live-draft-3-hospital-staffing.json',
   ] as const;
 
+  /**
+   * ⭐ DR row 4 (#2371; PTL #77 5914383843 "maturity rule = YES"): a fresh draft whose goal states a target it can't
+   * test yet (no today's level, a path resting only on defaulted links) is `exploratory` — no leader, no shares, no
+   * goal chance — with the reason on the mode's field. The SEMANTIC floor this spec is about still publishes its own
+   * reason on its own field. Draft 1 states no target, so its mode is the floor's alone.
+   */
+  const CAPPED_BY_TARGET: ReadonlySet<string> = new Set([
+    'acceptance-evidence/draft-speed/live-draft-2-ev-fleet.json',
+    'acceptance-evidence/draft-speed/live-draft-3-hospital-staffing.json',
+  ]);
+
   it.each(FRESH_DRAFTS)(
     'FRESH DRAFT %s — admissible, and may NOT name a leader',
     (file) => {
@@ -241,17 +264,21 @@ describe('the claim-strength bound discriminates across real state classes', () 
       // ⭐ THE 3 SEP P0 AS AN ASSERTION: executable is not the same question as
       // claimable, and on a fresh draft the two answers differ.
       expect(verdict.semantic_quality_sufficient).toBe(false);
-      expect(verdict.permitted_analysis_mode).toBe('quantified_provisional');
+      const capped = CAPPED_BY_TARGET.has(file);
+      expect(verdict.permitted_analysis_mode).toBe(capped ? 'exploratory' : 'quantified_provisional');
 
       // The withholding is not silent — it names the field and what would change it.
       const mode = verdict.reasons.find((r) => r.field === 'permitted_analysis_mode');
-      expect(mode?.code).toBe('CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED');
+      expect(mode?.code).toBe(capped ? 'TARGET_NOT_TESTABLE' : 'CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED');
       expect(mode?.message.length).toBeGreaterThan(0);
+      expect(verdict.reasons.find((r) => r.field === 'semantic_quality_sufficient')?.code).toBe('CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED');
     },
   );
 
   it('WORKED SESSION — a user-stated baseline lifts the same graph to comparative_leader', () => {
-    const graph = paulDraft();
+    // The semantic lift, with DR row 4 held off: his draft's target can't be tested yet (#2371), which caps the real
+    // draft at `exploratory` (`target-testability.test.ts`).
+    const graph = withoutTarget(paulDraft());
     const verdict = analysisAdmissionFrom(resolveRunAdmission(graph), graph);
 
     expect(verdict.structurally_analysable).toBe(true);
@@ -266,8 +293,8 @@ describe('the claim-strength bound discriminates across real state classes', () 
   it('and REMOVING that one stamp drops the same graph back to quantified_provisional', () => {
     // The discriminating mutation, in-test: same graph, one field changed. This
     // is what proves the verdict is bound to the provenance stamp and not to
-    // something else about the capture.
-    const graph = paulDraft();
+    // something else about the capture. (DR row 4 held off, as above.)
+    const graph = withoutTarget(paulDraft());
     const stamped = graph.nodes.filter(
       (n) => (n as { observed_state?: { source?: string } }).observed_state?.source
         === 'brief_extraction',

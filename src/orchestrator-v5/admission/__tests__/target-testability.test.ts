@@ -23,9 +23,13 @@ const RAW = JSON.parse(readFileSync(new URL('./fixtures/target-testability-20260
 const confirmed = (g: Json): Json => { const c = structuredClone(g); for (const n of c.nodes) if (n.kind === 'goal' && n.nonlinear_identity) n.nonlinear_identity.stated_in_brief = true; return c; };
 /** Paul's graph after MODEL GENERATION's G6: his stated "£0 secured so far" is today's level (5913925033). */
 const withToday = (g: Json): Json => { const c = structuredClone(g); for (const n of c.nodes) if (n.kind === 'goal') n.observed_state = { value: 0, baseline: 0, raw_value: 0, unit: '£', cap: n.goal_threshold_cap, source: 'user_stated' }; return c; };
-/** …and every link into the goal sized (Olumi-sized counts, AIQ 5914055238). */
-const sizedInto = (g: Json): Json => { const c = structuredClone(g); const goal = c.nodes.find((n: Json) => n.kind === 'goal').id; for (const e of c.edges) if (e.to === goal) e.provenance = { ...(e.provenance ?? {}), magnitude: 'olumi_estimate' }; return c; };
-const FIX = { paul: RAW.paul, n1: RAW.n1, cc: RAW.cc, mrr: confirmed(RAW.mrr), mrrPreCard: RAW.mrr };
+/** Every Olumi-sized link made the user's own size (as the user's answer to the one question would). */
+const userSized = (g: Json): Json => { const c = structuredClone(g); for (const e of c.edges) if (typeof e.provenance?.magnitude === 'string' && e.provenance.magnitude.startsWith('olumi_')) e.provenance = { ...e.provenance, source: 'user_specified' }; return c; };
+/** …and every link into the goal given a £ size per unit of its source (R3 5914500931's £-sized form). */
+const poundsInto = (g: Json): Json => { const c = userSized(g); const goal = c.nodes.find((n: Json) => n.kind === 'goal'); for (const e of c.edges) if (e.to === goal.id) e.provenance = { ...(e.provenance ?? {}), source: 'user_specified', natural_effect: { amount: 50000, amount_unit: goal.goal_threshold_unit, per_source_change: 1, per_source_change_unit: 'unit' } }; return c; };
+/** R3's control: the user's qualitative "strong" on every link into the goal — theirs, but unitless. */
+const strongInto = (g: Json): Json => { const c = userSized(g); const goal = c.nodes.find((n: Json) => n.kind === 'goal').id; for (const e of c.edges) if (e.to === goal) { e.provenance = { source: 'user_specified' }; e.strength = { mean: 0.55, std: 0.1 }; } return c; };
+const FIX = { paul: RAW.paul, n1: RAW.n1, cc: RAW.cc, mrr: userSized(confirmed(RAW.mrr)), mrrPreCard: RAW.mrr };
 const reasonOf = (a: { reasons: readonly { field: string; code: string; message: string }[] }) => a.reasons.find((r) => r.field === 'permitted_analysis_mode')!;
 /** An entitled, SEPARATED run: the population Paul's "caveat, not withhold" ruling permits under `quantified_provisional`. */
 const separatedClaim = { leader_claim: { permitted: true, separation: 'separated' } };
@@ -48,8 +52,13 @@ describe('the verdict (0 LLM)', () => {
     expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_unsized']);
   });
 
-  it('CONTROL: £0 today AND every link into the goal sized → testable', () => {
-    expect(targetTestabilityOf(sizedInto(withToday(FIX.paul)))).toEqual({ kind: 'testable', goal_id: 'securing_funding' });
+  it('CONTROL: £0 today AND every link into the goal sized IN £ by the user → testable', () => {
+    expect(targetTestabilityOf(poundsInto(withToday(FIX.paul)))).toEqual({ kind: 'testable', goal_id: 'securing_funding' });
+  });
+
+  it('RED (R3 5914500931): his "strong" on every link into the goal is his belief, but unitless → still (c)', () => {
+    const v = targetTestabilityOf(strongInto(withToday(FIX.paul)));
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_unsized']);
   });
 
   it('N1: (a), (b) and (c) all named; the question is (a)\'s ((b) is never asked)', () => {
@@ -79,6 +88,28 @@ describe('the verdict (0 LLM)', () => {
     for (const n of g.nodes) if (n.kind === 'goal') delete n.goal_threshold_raw;
     delete g.goal_constraints;
     expect(targetTestabilityOf(g).kind).toBe('no_target');
+  });
+});
+
+/**
+ * R3's m1 (5914230653, corrected 5914418154; AIQ 5914435183): the served MRR Run after the identity card's Yes has its
+ * chance on the goal's own scale (identity evaluated, P 0.9929), but it rests on Olumi's price → churn guess (0.07 pp per
+ * £1, `olumi_estimate`), consequential over the year: `exploratory` until the user sizes that link. Then testable.
+ */
+describe('R3\'s m1: after the identity card\'s Yes, Olumi\'s price → churn guess still caps it; the user\'s own size lifts it', () => {
+  const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-mrr-m1-card-yes-20260930.json', import.meta.url), 'utf8')).graph as Json;
+  it('RED: m1 as served → not testable, (c), naming the price', () => {
+    const v = targetTestabilityOf(M1);
+    expect(v.kind === 'not_testable' && v.failures).toEqual([{ precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: expect.stringMatching(/price/i) }]);
+    expect(resolveAnalysisAdmission(M1).permitted_analysis_mode).toBe('exploratory');
+  });
+
+  it('GREEN: the same graph once the user sizes price → churn themselves → not refused; the admission keeps its own mode', () => {
+    const sized = userSized(M1);
+    expect(targetTestabilityOf(sized).kind).toBe('unchecked');
+    const a = resolveAnalysisAdmission(sized);
+    expect(a.permitted_analysis_mode).not.toBe('exploratory');
+    expect(reasonOf(a).code).not.toBe('TARGET_NOT_TESTABLE');
   });
 });
 
@@ -143,8 +174,9 @@ describe('the Agent reads it before any Run, and the post-write line says it', (
 
   it('RED: after a write on Paul\'s graph, "can run now" never stands alone', () => {
     const line = postWriteReadinessLine(FIX.paul, { status: 'ready', may_run: true })!;
-    expect(line.startsWith('The analysis can run now.')).toBe(true);
-    expect(line).toContain("can't yet test them against your target (at least £1,200,000)");
+    // AIQ 5914209776: the lead, never "can run" followed by nothing.
+    expect(line).toBe(notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul)));
+    expect(line).not.toContain('can run now');
   });
 
   it('CONTROL: MRR (today\'s level stated) — no such field, and the line is unchanged', () => {

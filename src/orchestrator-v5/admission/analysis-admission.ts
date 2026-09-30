@@ -172,7 +172,7 @@ import {
   type ObligationClass,
   type StructureProvenance,
 } from '../../cee/graph-readiness/obligation-provenance.js';
-import { targetTestabilityOf, notTargetTestableSentence } from './target-testability.js';
+import { targetTestabilityOf, notTargetTestableSentence, targetVerdictCapsOrdering } from './target-testability.js';
 
 // ============================================================================
 // Vocabulary
@@ -1266,7 +1266,7 @@ export function analysisAdmissionFrom(
   // reads the mode withholds them, and the reason says why before any Run. Only ever LOWERS the mode.
   const target = targetTestabilityOf(graph);
   const derived = deriveMode(admission, semanticSufficient);
-  const targetCapped = admission.willProceed && target.kind === 'not_testable' && modePermitsAtLeast(derived, 'quantified_provisional');
+  const targetCapped = admission.willProceed && targetVerdictCapsOrdering(target) && modePermitsAtLeast(derived, 'quantified_provisional');
   const mode: PermittedAnalysisMode = targetCapped ? 'exploratory' : derived;
 
   // ⚠ `assessment.blockingIssues`, NOT `strict.issues`. `strict.issues` is the

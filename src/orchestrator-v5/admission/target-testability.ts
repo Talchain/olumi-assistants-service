@@ -26,7 +26,7 @@ export interface TargetTestabilityFailure {
   readonly precondition: TargetPrecondition;
   readonly case: TargetCase;
   readonly code: 'missing_goal_baseline' | 'threshold_off_scale' | 'comparator_unscorable' | 'threshold_unit_mismatch'
-    | 'goal_path_unsized' | 'identity_unconfirmed';
+    | 'goal_path_placeholder' | 'goal_path_unsized' | 'identity_unconfirmed';
   /** For P5: the label of the first node whose link into the goal nobody sized (the lever case (c) names). */
   readonly lever?: string;
 }
@@ -43,18 +43,26 @@ export type TargetTestability =
   | { readonly kind: 'testable'; readonly goal_id: string };
 
 /**
- * P5 ≡ P6, one check (R3 #75 5914028957; AIQ 5914055238): the goal's chance answers "how often does this option reach
- * the user's target" only if the goal's samples arrive in its own unit, i.e. its identity is evaluated, or every link
- * into the goal on an option's path is sized. Otherwise it is P(score ≥ threshold) on Olumi's default ruler, whatever
- * the cap's provenance. A link is sized when the user sized it or the sizer gave it a magnitude other than its
- * placeholder: an Olumi-sized link counts (its chance is provisional and names the guess). A structural link nobody
- * sized (no magnitude) is not. A confirmed identity passes here; ISL's own identity rules are checked by the Run, so it
- * stays listed as unchecked.
+ * P5 ≡ P6, one check, LEVEL goals only (R3 #75 5914028957 / 5914084339 / 5914418154 / 5914500931; AIQ 5914055238 /
+ * 5914435183; under PTL #77 5914383843 P2). The goal's chance answers "how often does this option reach the user's
+ * target" only when the goal's samples arrive in its own unit, AND the path there does not rest on Olumi's guesses:
+ * - (1) INTO the goal: every link from a node an option moves carries a `natural_effect` whose `amount_unit` is the
+ *   goal's unit (R3 5914500931: "strong" is unitless, so it converts nothing), OR the goal's identity is confirmed
+ *   (its operands are exact);
+ * - (2) ON the path: no link is sized only by Olumi (an `olumi_*` magnitude the user did not state). Served m1 after
+ *   the identity card's Yes rested on Olumi's price → churn guess (AIQ 5914435183: `exploratory` until the user sizes
+ *   it). A structural link nobody sized carries no guess and is not a failure here.
+ * A confirmed identity's ISL rules are checked by the Run, so that pass stays listed as unchecked.
  */
-const PLACEHOLDER = 'olumi_placeholder';
-function linkSized(e: Rec): boolean {
+const OLUMI_SIZED = /^olumi_/;
+function olumiGuess(e: Rec): boolean {
   const p = isRec(e.provenance) ? e.provenance : undefined;
-  return p?.source === 'user_specified' || (typeof p?.magnitude === 'string' && p.magnitude !== PLACEHOLDER);
+  return p?.source !== 'user_specified' && typeof p?.magnitude === 'string' && OLUMI_SIZED.test(p.magnitude);
+}
+function sizedInGoalUnit(e: Rec, goalUnit: string | undefined): boolean {
+  const p = isRec(e.provenance) ? e.provenance : undefined;
+  const ne = isRec(p?.natural_effect) ? p!.natural_effect as Rec : undefined;
+  return goalUnit !== undefined && typeof ne?.amount_unit === 'string' && finite(ne.amount) && sameUnit(ne.amount_unit, goalUnit);
 }
 
 type Rec = Record<string, unknown>;
@@ -75,6 +83,23 @@ function statedTarget(graph: Rec, goal: Rec): number | null {
 }
 
 const PRECONDITION_ORDER: readonly TargetPrecondition[] = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
+
+/**
+ * ⭐ WHICH FAILURES ALSO WITHHOLD THE LEADER AND THE SHARES, not only the goal chance: all of them.
+ * - AIQ #75 5914209776: an unconfirmed product and a placeholder link into the goal (YES in meaning).
+ * - PTL #77 5914383843 ("maturity rule = YES"): no today's level, or a consequential goal path resting only on
+ *   defaulted/unsized links, is `exploratory` too: no leader, no win shares, no goal chance, and the one blocking question.
+ * One set, so a later ruling is one line.
+ */
+export const CAPS_THE_ORDERING: ReadonlySet<TargetTestabilityFailure['code']> = new Set([
+  'missing_goal_baseline', 'threshold_off_scale', 'comparator_unscorable', 'threshold_unit_mismatch',
+  'goal_path_placeholder', 'goal_path_unsized', 'identity_unconfirmed',
+]);
+
+/** True when a verdict caps the claim at `exploratory` (see {@link CAPS_THE_ORDERING}). */
+export function targetVerdictCapsOrdering(verdict: TargetTestability): boolean {
+  return verdict.kind === 'not_testable' && verdict.failures.some((f) => CAPS_THE_ORDERING.has(f.code));
+}
 
 export function targetTestabilityOf(graph: unknown): TargetTestability {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return { kind: 'no_goal' };
@@ -100,7 +125,7 @@ export function targetTestabilityOf(graph: unknown): TargetTestability {
   const identity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
   const identityForwarded = identity !== undefined && identity.stated_in_brief !== false;
   const levelFrame = (goal.goal_threshold_frame ?? 'level') === 'level';
-  if (levelFrame && !identityForwarded) {
+  if (levelFrame) {
     const nodes = (graph.nodes as unknown[]).filter(isRec);
     const kindOf = new Map(nodes.map((n) => [n.id, n.kind] as const));
     const labelOf = new Map(nodes.map((n) => [n.id, typeof n.label === 'string' && n.label.trim() !== '' ? n.label.trim() : String(n.id)] as const));
@@ -113,11 +138,18 @@ export function targetTestabilityOf(graph: unknown): TargetTestability {
         if (reached.has(e.from) && !reached.has(e.to) && kindOf.get(e.to) !== 'option' && kindOf.get(e.to) !== 'decision') { reached.add(e.to); grew = true; }
       }
     }
+    const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : today !== undefined && typeof today.unit === 'string' ? today.unit : undefined;
+    // (2) a link on an option's path sized only by Olumi (options' own set-edges are not causal links).
+    const guess = edges.find((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && olumiGuess(e));
+    // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
-    const unsized = into.find((e) => !linkSized(e));
-    if (into.length === 0 || unsized !== undefined) {
-      failures.push({ precondition: 'P5', case: 'c', code: identity !== undefined ? 'identity_unconfirmed' : 'goal_path_unsized',
-        ...(unsized !== undefined ? { lever: labelOf.get(unsized.from) ?? String(unsized.from) } : {}) });
+    const unconverted = identityForwarded ? undefined : into.find((e) => !sizedInGoalUnit(e, goalUnit));
+    const failing = unconverted ?? guess;
+    if ((!identityForwarded && into.length === 0) || failing !== undefined) {
+      const placeholderLink = failing !== undefined && isRec(failing.provenance) && failing.provenance.magnitude === 'olumi_placeholder';
+      failures.push({ precondition: 'P5', case: 'c',
+        code: identity !== undefined && !identityForwarded ? 'identity_unconfirmed' : placeholderLink ? 'goal_path_placeholder' : 'goal_path_unsized',
+        ...(failing !== undefined ? { lever: labelOf.get(failing.from) ?? String(failing.from) } : {}) });
     }
   }
   // P4 — the target's unit is the goal level's own (currency AND period).
