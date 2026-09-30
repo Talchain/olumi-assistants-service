@@ -802,6 +802,11 @@ interface GraphRead {
     defaulted?: unknown;
   }[];
   readonly analysis_state: unknown;
+  /**
+   * The read's own `analysis_admission` (top level on the graph read, which carries no `analysis_ready`): its
+   * `permitted_analysis_mode` is the mode half of the selected Run's leader permission (`claimPermissionsFrom`).
+   */
+  readonly analysis_admission?: unknown;
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
   /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
@@ -1192,6 +1197,12 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
   const current = rec(rec(g.analysis_state)?.run_state)?.kind === 'complete_current';
   const goalChance = current ? withGoalChance(g.analysis_result).goal_chance : undefined;
+  // W3 (DL #75 5902916137, AIQ 5902905975): a current Run that may name its leader carries each option's recorded
+  // model chance, as the Run chip's own result does. The retained history no longer holds that result (#2322), so
+  // without it the Agent said "not confirmed" beside a Goal panel showing 25%. A withheld leader keeps AI Quality's
+  // standing drop of per-option chances; an exact 0 or 1 travels only through its earned `goal_certainty` decision.
+  const chancePermitted = current && goalChance === undefined
+    && claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
   const byId = new Map(decisions.flatMap((value) => {
@@ -1207,6 +1218,8 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
     return [{ option_id: id,
       ...(typeof label === 'string' ? { option_label: label } : {}),
       ...(goalChance === undefined && rec(row?.outcome) !== undefined ? { outcome: row!.outcome } : {}),
+      ...(chancePermitted && typeof row?.probability_of_goal === 'number' && row.probability_of_goal > 0 && row.probability_of_goal < 1
+        ? { probability_of_goal: row.probability_of_goal } : {}),
       ...(decision !== undefined ? { goal_certainty: decision } : {}),
     }];
   }) : [];
@@ -1561,6 +1574,7 @@ export function createAgentCapabilities(
       nodes: (g.nodes as GraphRead['nodes']) ?? [],
       edges: (g.edges as GraphRead['edges']) ?? [],
       analysis_state: r.json.analysis_state,
+      ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
