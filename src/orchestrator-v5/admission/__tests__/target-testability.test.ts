@@ -18,33 +18,60 @@ import { readinessViewOf } from '../../agent-lane/readiness-view.js';
 import { postWriteReadinessLine } from '../../../routes/agent-v1-turn.js';
 
 type Json = Record<string, any>;
-const FIX = JSON.parse(readFileSync(new URL('./fixtures/target-testability-20260930.json', import.meta.url), 'utf8')) as { paul: Json; mrr: Json; n1: Json };
+const RAW = JSON.parse(readFileSync(new URL('./fixtures/target-testability-20260930.json', import.meta.url), 'utf8')) as { paul: Json; mrr: Json; n1: Json; cc: Json };
+/** MRR after the identity card's Yes (#2292 makes the product the user's: `stated_in_brief: true`). */
+const confirmed = (g: Json): Json => { const c = structuredClone(g); for (const n of c.nodes) if (n.kind === 'goal' && n.nonlinear_identity) n.nonlinear_identity.stated_in_brief = true; return c; };
+/** Paul's graph after MODEL GENERATION's G6: his stated "£0 secured so far" is today's level (5913925033). */
+const withToday = (g: Json): Json => { const c = structuredClone(g); for (const n of c.nodes) if (n.kind === 'goal') n.observed_state = { value: 0, baseline: 0, raw_value: 0, unit: '£', cap: n.goal_threshold_cap, source: 'user_stated' }; return c; };
+/** …and every link into the goal sized (Olumi-sized counts, AIQ 5914055238). */
+const sizedInto = (g: Json): Json => { const c = structuredClone(g); const goal = c.nodes.find((n: Json) => n.kind === 'goal').id; for (const e of c.edges) if (e.to === goal) e.provenance = { ...(e.provenance ?? {}), magnitude: 'olumi_estimate' }; return c; };
+const FIX = { paul: RAW.paul, n1: RAW.n1, cc: RAW.cc, mrr: confirmed(RAW.mrr), mrrPreCard: RAW.mrr };
 const reasonOf = (a: { reasons: readonly { field: string; code: string; message: string }[] }) => a.reasons.find((r) => r.field === 'permitted_analysis_mode')!;
 /** An entitled, SEPARATED run: the population Paul's "caveat, not withhold" ruling permits under `quantified_provisional`. */
 const separatedClaim = { leader_claim: { permitted: true, separation: 'separated' } };
 
 describe('the verdict (0 LLM)', () => {
-  it('Paul: his target has no today\'s level → not testable, (a) only; P5/P6 are unchecked, never claimed', () => {
-    const v = targetTestabilityOf(FIX.paul);
-    expect(v).toEqual({ kind: 'not_testable', goal_id: 'securing_funding', failures: [{ precondition: 'P1', case: 'a', code: 'missing_goal_baseline' }] });
+  it('Paul: no today\'s level (a) AND his goal is reached only through links nobody sized (c)', () => {
+    expect(targetTestabilityOf(FIX.paul)).toEqual({ kind: 'not_testable', goal_id: 'securing_funding', failures: [
+      { precondition: 'P1', case: 'a', code: 'missing_goal_baseline' },
+      { precondition: 'P5', case: 'c', code: 'goal_path_unsized', lever: 'Investment firm meetings' },
+    ] });
   });
 
-  it('Paul: AIQ\'s words — the target in his terms, the reason, then the one question', () => {
+  it('Paul: AIQ\'s words — the target in his terms, EVERY failing reason, then the first question there is', () => {
     expect(notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul))).toBe(
-      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding. What is securing funding today?");
+      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and the model doesn't yet say how Investment firm meetings turns into securing funding. What is securing funding today?");
   });
 
-  it('N1: no today\'s level AND a `<` target → both reasons named; the question is (a)\'s ((b) is never asked)', () => {
+  it('RED (MODEL GENERATION 5913996539): after G6 writes his £0, the target is STILL not testable — the £ path is missing', () => {
+    const v = targetTestabilityOf(withToday(FIX.paul));
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.code)).toEqual(['goal_path_unsized']);
+  });
+
+  it('CONTROL: £0 today AND every link into the goal sized → testable', () => {
+    expect(targetTestabilityOf(sizedInto(withToday(FIX.paul)))).toEqual({ kind: 'testable', goal_id: 'securing_funding' });
+  });
+
+  it('N1: (a), (b) and (c) all named; the question is (a)\'s ((b) is never asked)', () => {
     const v = targetTestabilityOf(FIX.n1);
-    expect(v.kind).toBe('not_testable');
-    expect(v.kind === 'not_testable' && v.failures.map((f) => f.case)).toEqual(['a', 'b']);
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.case)).toEqual(['a', 'b', 'c']);
     const said = notTargetTestableSentence(FIX.n1, v)!;
-    expect(said).toContain("because it needs today's level of median first-response time and it can't yet test a '<");
+    expect(said).toContain("because it needs today's level of median first-response time, it can't yet test a '<");
     expect(said.endsWith('What is median first-response time today?')).toBe(true);
   });
 
-  it('CONTROL: MRR states today\'s level → no failure; still `unchecked` (P5/P6), never "testable"', () => {
-    expect(targetTestabilityOf(FIX.mrr)).toEqual({ kind: 'unchecked', goal_id: expect.any(String), unchecked: ['P5', 'P6'] });
+  it('MRR before the identity card: an unconfirmed product → (c), and no second question (the card is the way on)', () => {
+    const v = targetTestabilityOf(FIX.mrrPreCard);
+    expect(v.kind === 'not_testable' && v.failures).toEqual([expect.objectContaining({ precondition: 'P5', case: 'c', code: 'identity_unconfirmed' })]);
+    expect(notTargetTestableSentence(FIX.mrrPreCard, v)!.endsWith('?')).toBe(false);
+  });
+
+  it('CONTROL: MRR after the card (identity confirmed) → no failure; its ISL identity rules are the Run\'s (`unchecked`)', () => {
+    expect(targetTestabilityOf(FIX.mrr)).toEqual({ kind: 'unchecked', goal_id: expect.any(String), unchecked: ['P5'] });
+  });
+
+  it('CONTROL (R3 5914084339): a change-frame goal ("cut costs by 20%") is left as it was', () => {
+    expect(targetTestabilityOf(FIX.cc).kind).toBe('unchecked');
   });
 
   it('CONTROL: a goal with no stated target is not this verdict\'s subject', () => {
