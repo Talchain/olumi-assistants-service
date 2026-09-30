@@ -119,13 +119,13 @@ describe('the reload names the cause of a withheld leader that it can prove', ()
     expect(agentNoLeaderSentence(result.analysis_state?.leader_claim.withheld_reason, undefined)).not.toMatch(/limit|run the analysis again/i);
   });
 
-  it('a newer partial limit-withheld Run cannot borrow an older no-limit cause', async () => {
+  it('a newer partial Run with a limit verdict withholds without assigning a cause to the older displayed result', async () => {
     const older = runFact({ mayName: false, auto: false, state: 'not_applicable' });
     const newer = runFact({ mayName: false, auto: false, state: 'evaluated_infeasible', status: 'partial', at: '2026-09-24T18:00:00.000Z' });
     const result = await reloadWith([newer, older], 'w-newer-limit');
     expect(result.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
     expect(result.analysis_result).toBeNull();
-    expect(result.analysis_state?.leader_claim.withheld_reason).toBe('constraint_verdict_withheld');
+    expect(result.analysis_state?.leader_claim.withheld_reason).toBe('analysis_leader_withheld');
   });
 
   it('a newer partial no-limit Run keeps its own generic cause even when the older displayed Run had a limit', async () => {

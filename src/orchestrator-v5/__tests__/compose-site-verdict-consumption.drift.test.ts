@@ -1790,7 +1790,8 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // void — so the exact expression is pinned, not paraphrased.
     // C46 stage 1: the headline is ALSO withheld when the leader's sign on a multiplied goal is not proven —
     // still "withheld-able headline, else a locked template".
-    expect(RUN_ANALYSIS).toContain('const headline = nonlinearIdentityWithhold !== null ? null : buildAnalysisResultHeadline(headlineInput);');
+    // An unadopted Olumi suggestion retained provisionally also cannot produce a leader headline.
+    expect(RUN_ANALYSIS).toContain('const headline = nonlinearIdentityWithhold !== null || keptOlumiProvisional\n      ? null : buildAnalysisResultHeadline(headlineInput);');
     // ROADMAP 2.579 added a THIRD disclosure slot, appended after the
     // constraint-gap one. The `gated` stance is unaffected and the pin is
     // updated rather than loosened: `summary` is still "withheld-able headline,
@@ -1892,7 +1893,11 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // C46 stage 1 (#70 5841833807): a THIRD remove-only conjunct, outermost — the leader's sign on a product the
     // analysis adds up. It leaves `constraint_verdict_state` untouched, like the intake half.
     expect(RUN_ANALYSIS).toContain(
-      'constraint_verdict: applyNonlinearIdentityToLeaderPermission(\n          applyIntakeToLeaderPermission(',
+      'const leaderPermission = applyNonlinearIdentityToLeaderPermission(\n      applyIntakeToLeaderPermission(',
+    );
+    // The provisional Olumi-option gate can only remove that permission.
+    expect(RUN_ANALYSIS).toContain(
+      'constraint_verdict: keptOlumiProvisional\n          ? { ...leaderPermission, may_name_leading_option: false }\n          : leaderPermission,',
     );
   });
 

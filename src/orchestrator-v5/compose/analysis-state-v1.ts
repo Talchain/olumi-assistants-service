@@ -940,7 +940,17 @@ export function separationWithholdFromRobustness(
   return raw !== null ? WITHHELD_NEAR_TIE : WITHHELD_SEPARATION_UNAVAILABLE;
 }
 
-function composeLeaderClaim(input: AnalysisStateComposeInput, runState: AnalysisRunState): AnalysisLeaderClaim {
+function composeLeaderClaim(
+  input: AnalysisStateComposeInput,
+  runState: AnalysisRunState,
+  newerDegradedRun: boolean,
+): AnalysisLeaderClaim {
+  // A newer partial/refused Run supersedes the older success's claim, but
+  // supplies no usable robustness verdict for the displayed older figures.
+  // This is a known withhold, not an unperformed separation check.
+  if (newerDegradedRun) {
+    return { permitted: false, withheld_reason: WITHHELD_LEADER_CAUSE_UNRECORDED };
+  }
   /**
    * ⛔ F-LIMIT × BF9 (DL #72 5863859943; owner Canonical 5863888216) — AN F-LIMIT TIER REFUSES THE CLAIM, not only names
    * the reason. The persisted leader verdict entitles any leader above rule 4's infeasibility floor (P ≤ 0.05), so on
@@ -1068,7 +1078,8 @@ export function composeAnalysisStateV1(
   // the freshness selector still holds that older Run for historical prose.
   // Its robustness belongs to the suppressed result block, not to the
   // current claim on this turn or cold read.
-  const claimInput = canonical.contradictions.includes('fact_status_success_but_degraded_newer')
+  const newerDegradedRun = canonical.contradictions.includes('fact_status_success_but_degraded_newer');
+  const claimInput = newerDegradedRun
     ? { ...input, rawRobustness: null }
     : input;
   return {
@@ -1079,7 +1090,7 @@ export function composeAnalysisStateV1(
       // nothing is blocking. It is distinct from `analysis_state` being absent.
       blockers: wireBlockers(input.readiness, readinessStatus),
     },
-    leader_claim: composeLeaderClaim(claimInput, runState),
+    leader_claim: composeLeaderClaim(claimInput, runState, newerDegradedRun),
     robustness: composeRobustness(claimInput),
     // The five predicates are COPIED from the canonical verdict, never
     // recomputed: a consumer that re-derives them re-opens the divergence this
@@ -1111,7 +1122,11 @@ export function projectAnalysisBlocksForRunBinding(
     || state.contradictions.includes('fact_status_success_but_degraded_newer')) {
     return blocks.filter((block) => block.type !== 'analysis_result');
   }
-  if (state.leader_claim.permitted !== false && reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;
+  // Keep ordinary result blocks intact: the verdict may withhold a current
+  // recommendation while the computed analysis and its disclosure are still
+  // valid (for example a filtered constraint). The identity-unconfirmed case
+  // alone needs the designation scrubbed from a block whose binding is unproven.
+  if (reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;
   return blocks.map((block) => {
     if (block.type !== 'analysis_result') return block;
     // A transport block carrying only enrichment has no leader claim to

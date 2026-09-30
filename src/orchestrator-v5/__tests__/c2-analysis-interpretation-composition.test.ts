@@ -78,6 +78,7 @@ describe('C2 binding at the reached finaliser/composer seam', () => {
     const out = finalise([fact()]);
     expect(out.analysis_state?.run_state).toEqual({ kind: 'complete_current', computed_at: FIRST_TIME });
     expect(out.analysis_state?.leader_claim.permitted).toBe(true);
+    expect(out.analysis_state?.leader_claim.withheld_reason).toBeUndefined();
     expect(out.blocks[0]).toMatchObject({ leading_option_id: 'option-a', win_probabilities: { 'option-a': 0.65 } });
   });
 
@@ -195,6 +196,7 @@ describe('C2 binding at the reached finaliser/composer seam', () => {
     });
     expect(OlumiResponseSchema.safeParse(out).success).toBe(true);
     expect(out.analysis_state?.leader_claim.permitted).toBe(false);
+    expect(out.analysis_state?.leader_claim.withheld_reason).toBe('analysis_leader_withheld');
     expect(out.analysis_state?.requires_rerun).toBe(true);
     expect(out.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
     expect(out.analysis_state?.robustness).toEqual({});
@@ -214,6 +216,7 @@ describe('C2 binding at the reached finaliser/composer seam', () => {
       claimConstraintVerdictState: 'evaluated_feasible',
     });
     expect(out.analysis_state?.contradictions).toContain('fact_status_success_but_degraded_newer');
+    expect(out.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'analysis_leader_withheld' });
     expect(out.analysis_state?.robustness).toEqual({});
     expect(out.blocks).toEqual([]);
     expect(out.run_delta).toBeUndefined();

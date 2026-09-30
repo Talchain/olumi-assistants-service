@@ -399,6 +399,8 @@ describe('one persisted Run, three served consumers: do they present one analysi
     // The control must show all three POPULATED with the Run, not three agreeing blanks.
     expect(v.read_route).toMatchObject({ kind: 'complete_current', computed_at: RUN_AT, permitted: true, readiness_status: 'ready' });
     expect(v.turn_payload).toMatchObject({ kind: 'complete_current', computed_at: RUN_AT, permitted: true });
+    expect(v.read_route.withheld_reason).toBeNull();
+    expect(v.turn_payload.withheld_reason).toBeNull();
     expect(v.context_pack).toMatchObject({ freshness: 'fresh', display_analysis_present: true, leader_permitted: true });
     expect(fixture.durableReads, 'the durable port was consulted').toBeGreaterThan(0);
     assertParity(v);
@@ -456,6 +458,8 @@ describe('one persisted Run, three served consumers: do they present one analysi
     const claimBearingAt = (selectClaimBearingRunAnalysisFact(facts)?.fact.result as { computed_at?: string } | undefined)?.computed_at ?? null;
     expect(claimBearingAt).toBe(REFUSED_AT);
     expect(v.read_route.permitted, 'a newer claim that withheld the leader is never overridden by an older permitted one').toBe(false);
+    expect(v.read_route.withheld_reason, 'the newer partial Run withdrew the claim, not the separation measurement').toBe('analysis_leader_withheld');
+    expect(v.turn_payload.withheld_reason).toBe('analysis_leader_withheld');
     assertParity(v);
     expect(fetchGuard).not.toHaveBeenCalled();
   });
