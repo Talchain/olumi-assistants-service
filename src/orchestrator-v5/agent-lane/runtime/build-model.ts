@@ -771,7 +771,7 @@ export function prepareProvisionalCandidate(drafted: CandidateModel): {
  */
 /**
  * ⭐ A4 ON THE SERVED DRAFT — A MONEY RANGE THE BRIEF WRITES THAT NO LINK CARRIES (R3 5921213011; diagnosis 5921266982).
- * Served `5479e15e`: Paul's "deals between £1-2 million" reached no link, because the drafter drew the route as an effort
+ * Served `5479e15e`: Paul's "deals between £1-2m" reached no link, because the drafter drew the route as an effort
  * lever with no countable, and the per-one rule (#2409) had nothing to size. Each written money range that no admitted
  * link carries as the user's own size (`natural_effect.stated_range`, bound to its span by #2409) is one construction
  * issue for the EXISTING repair retry. The retry is adopted only when it CARRIES more ranges (`carriedRanges`), so a
@@ -791,6 +791,16 @@ function numbersHeldBy(value: unknown, out: number[] = []): number[] {
 }
 
 /**
+ * A range written inside a QUESTION ("Should we focus on firms that do deals between £1-2m?") is not asked of the
+ * retry (CODEX CEE BUDDY 5921351458): a question states no size. Its sentence ends at the next . ! ? before a space or
+ * the end, or a new line (a decimal point never ends it); a "?" there makes it a question.
+ */
+function inAQuestion(text: string, at: number): boolean {
+  const end = text.slice(at).search(/[.?!](?=\s|$)|\n/);
+  return end !== -1 && text.charAt(at + end) === '?';
+}
+
+/**
  * Only a range the draft holds NOWHERE is asked: a price range whose ends are the options' levels ("£49–£59") is
  * represented already, and asking it would cost every such brief a retry that can change nothing. An end counts as
  * held at face value, or in the draft's scaled units (thousands, millions) when the drafted number is 10 or more.
@@ -801,7 +811,7 @@ export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel
   // A scaled match counts only for a drafted number of 10 or more: 1 and 2 are every draft's counts and horizons.
   const holds = (x: number) => [1, 1e3, 1e6].some((k) => held.some((h) => (k === 1 || h >= 10) && Math.abs(h - x / k) <= 1e-9 * Math.max(1, x / k)));
   return [...new Map(findStatedRanges(brief).map((r) => [r.text, r] as const)).values()]
-    .filter((r) => !carried.has(r.text) && !holds(r.low.magnitude) && !holds(r.high.magnitude))
+    .filter((r) => !carried.has(r.text) && !holds(r.low.magnitude) && !holds(r.high.magnitude) && !inAQuestion(brief, r.high.index))
     .map((r) => r.text).map((t) =>
     `The brief writes "${t}" and no link in the model carries it. If it is a money size PER ONE of something the brief names `
     + '(per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the '

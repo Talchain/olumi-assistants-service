@@ -130,3 +130,68 @@ describe('A4 guarantee: a written money range no link carries is asked of the re
     expect(inputs).toHaveLength(1);
   });
 });
+
+/**
+ * ⛔ THE NEGATIVE CLASSES (CODEX CEE BUDDY 5921351458): a range about something else, in another currency, in a question,
+ * two separate figures, a money source, and a retry that costs the user anything. Each keeps the first draft (or makes no
+ * retry at all): the retry is adopted only when a link CARRIES the range as the user's, through the door's own span.
+ */
+describe('A4 guarantee: every other shape keeps the first draft', () => {
+  const SINGLE = BRIEF.replace('that do deals between £1-2 million', 'that do deals');
+  const kept = (graph: Graph) => expect(dealLink(graph)).toBeUndefined();
+
+  it('a range about ANOTHER quantity (an outreach budget) is asked, but a deal link sized from it is never adopted', async () => {
+    const { graph, inputs } = await build([servedFirstDraft(), repairedDraft()], `${SINGLE} Angel investor outreach budgets range between £1-2 million.`);
+    expect(inputs).toHaveLength(2);
+    kept(graph);
+  });
+
+  it('the range PER ANOTHER countable ("£1-2 million per fund") never becomes the deal size', async () => {
+    const { graph } = await build([servedFirstDraft(), repairedDraft()], `${SINGLE} The funds we speak to manage between £1-2 million per fund.`);
+    kept(graph);
+  });
+
+  it('a range in ANOTHER currency ("€1-2 million" against a £ goal) is never the user\'s £ size', async () => {
+    const { graph } = await build([servedFirstDraft(), repairedDraft()], BRIEF.replace('£1-2 million', '€1-2 million'));
+    kept(graph);
+  });
+
+  it('a range written in a QUESTION is not asked: ONE call, no retry', async () => {
+    const q = BRIEF.replace("We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK.",
+      'Should we focus on investment firms that do deals between £1-2 million?');
+    const { inputs, graph } = await build([servedFirstDraft(), repairedDraft()], q);
+    expect(inputs).toHaveLength(1);
+    kept(graph);
+  });
+
+  it('two SEPARATE figures are no range: no range issue, no retry', async () => {
+    const { inputs } = await build([servedFirstDraft()], BRIEF.replace('between £1-2 million', 'of £1 million. Some reach £2 million'));
+    expect(inputs).toHaveLength(1);
+  });
+
+  it('a MONEY source (a budget in £) sized with the range is no per-one size: not adopted', async () => {
+    const retry = servedFirstDraft() as Record<string, any>;
+    retry.factors = [...retry.factors, { label: 'Deal budget', role: 'observable', baseline_known: false, baseline_value: null, unit: '£', provenance: 'inferred', plausible_max: 5000000 }];
+    retry.links = [...retry.links, link('Deal budget', 'securing funding', { amount: 1000000, per: 1, by: 'explicit' })];
+    const { graph } = await build([servedFirstDraft(), retry]);
+    expect(graph.edges.some((e) => e.provenance?.natural_effect?.stated_range !== undefined)).toBe(false);
+  });
+
+  it('a retry that carries the range but DROPS an option the first draft registered is not adopted', async () => {
+    const retry = repairedDraft() as Record<string, any>;
+    retry.options = retry.options.filter((o: { label: string }) => o.label !== 'Angel Outreach Pilot');
+    const { graph } = await build([servedFirstDraft(), retry]);
+    kept(graph);
+    expect(graph.nodes.some((n) => n.kind === 'option' && n.label.startsWith('Angel Outreach'))).toBe(true);
+  });
+
+  it('a retry that carries the range but DROPS a risk the first draft held is not adopted', async () => {
+    const withRisk = (d: Record<string, any>) => ({
+      ...d,
+      risks: [{ label: 'Fundraising distraction', provenance: 'inferred', unit: null, plausible_max: null }],
+      links: [...d.links, link('Hours per week on angel outreach', 'Fundraising distraction'), link('Fundraising distraction', 'securing funding', undefined, 'negative')],
+    });
+    const { graph } = await build([withRisk(servedFirstDraft()), repairedDraft()]);
+    kept(graph);
+  });
+});
