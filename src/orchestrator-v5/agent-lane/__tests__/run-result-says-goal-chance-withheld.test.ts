@@ -71,14 +71,24 @@ describe('run_analysis carries the run\'s withheld goal chance, with the sentenc
     const computed_at = '2026-09-29T13:07:48.159Z';
     const run = { ...r, result: { ...r.result, computed_against_hash: stamp },
       run_identity: { scenario_id: ctx.scenario_id, graph_hash_at_run: stamp, computed_at } };
+    const selectedRaw = { type: 'analysis_result', summary: 's', computed_against_hash: stamp,
+      enrichment: { option_comparison: WITHHELD_ROWS, inference_warnings: [WITHHELD_WARNING] } };
     const history = [
       { type: 'function_call', call_id: 'c1', name: 'run_analysis', arguments: '{}' },
       { type: 'function_call_output', call_id: 'c1', output: JSON.stringify(run) },
     ];
     const output = (items: readonly unknown[]) => JSON.parse((items[1] as { output: string }).output) as Json;
-    const current = pruneSupersededToolOutputs(history, [], { scenarioId: ctx.scenario_id,
-      analysisState: { run_state: { kind: 'complete_current', computed_at } }, analysisResult: run.result });
+    const selected = { scenarioId: ctx.scenario_id,
+      analysisState: { run_state: { kind: 'complete_current', computed_at },
+        leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
+      analysisReady: { status: 'ready' }, analysisResult: selectedRaw, graph: GRAPH };
+    const current = pruneSupersededToolOutputs(history, [], selected);
     expect(output(current).goal_chance).toEqual(r.goal_chance);
+    const changedVerdict = pruneSupersededToolOutputs(history, [], { ...selected,
+      analysisState: { ...selected.analysisState,
+        leader_claim: { permitted: false, withheld_reason: 'olumi_option_provisional' } } });
+    expect(output(changedVerdict).stale).toBe(true);
+    expect(output(changedVerdict).goal_chance).toBeUndefined();
     const unconfirmed = pruneSupersededToolOutputs(history);
     expect(output(unconfirmed).stale).toBe(true);
     expect(output(unconfirmed).goal_chance).toBeUndefined();

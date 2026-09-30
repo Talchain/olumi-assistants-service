@@ -72,7 +72,7 @@ describe('the kept run is marked stale in the request after a change, and not wi
         graph_hash: `raw${held.length}`,
         ...(!ran.has(id) ? {}
           : moved ? { analysis_state: { ...served.analysis_state, run_state: { kind: 'complete_stale', computed_at: '2026-09-27T18:20:03.050Z', cause: 'graph_changed' }, requires_rerun: true } }
-            : { analysis_state: served.analysis_state, analysis_result: served.analysis_result }),
+            : { analysis_state: served.analysis_state, analysis_result: served.analysis_result, analysis_ready: served.analysis_ready }),
       };
     });
     app.post('/orchestrate/v2/turn', async (req) => {

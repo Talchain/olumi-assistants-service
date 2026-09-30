@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { pruneSupersededToolOutputs } from '../history-store.js';
+import { claimPermissionsFrom } from '../first-analysis.js';
+import { goalCertaintyForAgent } from '../goal-certainty-for-agent.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440079';
 const HASH = '7b53bf0ada890991';
@@ -76,19 +78,21 @@ describe('saved Run reaches later Agent context without inventing certainty', ()
   });
 
   it('a withheld Run kept for a follow-up retains current outcomes and only earned certainty', () => {
-    const goal_certainty = { options: [
-      { option_id: 'hold', probability_of_goal: 0, earned: true },
-      { option_id: 'raise', probability_of_goal: 0, earned: false, say: decisions[1]!.say },
-    ] };
-    const run = { ok: true, ran: true, result, claim_permissions: { leader_may_be_named: false }, goal_certainty,
+    const analysisState = { run_state: { kind: 'complete_current', computed_at: COMPUTED_AT }, leader_claim: { permitted: false } };
+    const goal_certainty = goalCertaintyForAgent(result, { scenario_id: SCENARIO, analysis_state: analysisState },
+      { raw: graph, analysis_state: analysisState, analysis_result: result, goal_certainty: decisions });
+    const run = { ok: true, ran: true, result,
+      claim_permissions: claimPermissionsFrom(analysisState, undefined, { requested: true }), goal_certainty,
       run_identity: { scenario_id: SCENARIO, graph_hash_at_run: HASH, computed_at: COMPUTED_AT } };
-    const kept = pruneSupersededToolOutputs([
+    const history = [
       { type: 'function_call', call_id: 'run-1', name: 'run_analysis', arguments: '{}' },
       { type: 'function_call_output', call_id: 'run-1', output: JSON.stringify(run) },
-    ], [], { scenarioId: SCENARIO, analysisState: { run_state: { kind: 'complete_current', computed_at: COMPUTED_AT } }, analysisResult: result });
+    ];
+    const selected = { scenarioId: SCENARIO, analysisState, analysisResult: result, goalCertainty: decisions };
+    const kept = pruneSupersededToolOutputs(history, [], selected);
     const output = JSON.parse((kept[1] as { output: string }).output);
     expect(output.stale).toBeUndefined();
-    expect(output.goal_certainty.options).toEqual([
+    expect(output.goal_certainty.options).toMatchObject([
       { option_id: 'hold', probability_of_goal: 0, earned: true },
       { option_id: 'raise', earned: false, say: decisions[1]!.say },
     ]);
@@ -101,5 +105,10 @@ describe('saved Run reaches later Agent context without inventing certainty', ()
     expect(output.result.option_comparison[3]).not.toHaveProperty('outcome');
     expect(JSON.stringify(output)).not.toContain('win_probability');
     expect(output.goal_certainty.options[1]).not.toHaveProperty('probability_of_goal');
+    const unrecorded = pruneSupersededToolOutputs(history, [], { ...selected, goalCertainty: undefined });
+    const withheld = JSON.parse((unrecorded[1] as { output: string }).output);
+    expect(withheld.stale).toBe(true);
+    expect(withheld.goal_certainty).toBeUndefined();
+    expect(withheld.result).toEqual({ computed_against_hash: HASH });
   });
 });

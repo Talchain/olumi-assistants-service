@@ -27,20 +27,29 @@ const ROW3 = [
   { option_id: 'keep_49', option_label: 'Keep £49', win_probability: 0.1, probability_of_goal: 0, probability_of_joint_goal: 0.9 },
 ];
 const BRIEF = { analysis_summary: { goal_fit: 0.7591, headline: 'x' } };
+const rawResult = (enrichment: Json) => ({ type: 'analysis_result', summary: 's',
+  computed_against_hash: 'a'.repeat(16), enrichment });
+const selectedRawByRun = new WeakMap<Json, Json>();
 
 function world(enrichment: Json, state: Json = STATE) {
   const d: InternalDispatch = async (path) => {
     if (path.endsWith('/graph')) return { status: 200, json: { graph: GRAPH, graph_hash: 'h1', analysis_state: state } };
     if (path === '/orchestrate/v2/turn') {
       return { status: 200, json: { assistant_text: '', analysis_state: state, analysis_ready: READY_NAMED,
-        blocks: [{ type: 'analysis_result', summary: 's', computed_against_hash: 'a'.repeat(16), enrichment }] } };
+        blocks: [rawResult(enrichment)] } };
     }
     throw new Error(`unexpected dispatch ${path}`);
   };
   return createAgentCapabilities(d, new ProposalStore());
 }
-const runOf = async (enrichment: Json, state?: Json): Promise<Json> => await world(enrichment, state).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
-const keptOf = (output: Json): Json => {
+const runOf = async (enrichment: Json, state?: Json): Promise<Json> => {
+  const output = await world(enrichment, state).runAnalysis(ctx, { reason: 'Run it.' }) as Json;
+  selectedRawByRun.set(output, rawResult(enrichment));
+  return output;
+};
+const keptOf = (output: Json, selectedOverride?: Json): Json => {
+  const selected = selectedOverride ?? selectedRawByRun.get(output);
+  expect(selected, 'the graph read selects the independent raw result, not the Agent projection').toBeDefined();
   const kept = pruneSupersededToolOutputs([
     { type: 'function_call', call_id: 'c1', name: 'run_analysis', arguments: '{}' },
     { type: 'function_call_output', call_id: 'c1', output: JSON.stringify(output) },
@@ -49,7 +58,9 @@ const keptOf = (output: Json): Json => {
     // history projection must treat its figures as unconfirmed and omit them.
     scenarioId: ctx.scenario_id,
     analysisState: STATE,
-    analysisResult: { computed_against_hash: output.result.computed_against_hash },
+    analysisReady: READY_NAMED,
+    analysisResult: selected,
+    graph: GRAPH,
   }) as Array<{ type: string; output?: string }>;
   return JSON.parse(kept.find((x) => x.type === 'function_call_output')!.output!) as Json;
 };
@@ -65,11 +76,17 @@ describe('served row 3 (joint 0.7591 > P(goal) 0.57): the live result and the ke
   });
 
   it('LATER TURNS: the kept copy of that permitted Run keeps the rename and the note — never the raw joint', async () => {
-    const kept = keptOf(await runOf({ option_comparison: ROW3, decision_brief: BRIEF }));
+    const live = await runOf({ option_comparison: ROW3, decision_brief: BRIEF });
+    expect(selectedRawByRun.get(live)?.enrichment.option_comparison[0].probability_of_joint_goal).toBe(0.7591);
+    const kept = keptOf(live);
     const rows = kept.result.enrichment.option_comparison as Json[];
     expect(rows[0].all_limits_hold_probability).toBe(0.7591);
     expect(JSON.stringify(kept)).not.toMatch(/probability_of_joint_goal|"goal_fit"/);
     expect(kept.result.limits_note).toBe(ALL_LIMITS_HOLD_NOTE);
+    const conflicted = keptOf(live, { ...selectedRawByRun.get(live), summary: 'A different saved result.' });
+    expect(conflicted.stale).toBe(true);
+    expect(conflicted.result).toEqual({ type: 'analysis_result', computed_against_hash: 'a'.repeat(16) });
+    expect(conflicted.claim_permissions).toBeUndefined();
   });
 
   it('a REAL ZERO: P(goal) 0 is present and stays the goal figure (0), beside its limits figure', async () => {
