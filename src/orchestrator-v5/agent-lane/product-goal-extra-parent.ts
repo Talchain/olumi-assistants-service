@@ -27,13 +27,15 @@ interface ModelShape {
   readonly goal: { readonly metric: string; readonly unit?: string | null };
   readonly factors: readonly { readonly label: string; readonly unit: string | null; readonly baseline_known: boolean; readonly baseline_value: number | null }[];
   readonly links: readonly Link[];
+  readonly risks?: readonly { readonly label: string }[];
   readonly identities?: readonly { readonly outcome: string; readonly operation: string; readonly factors: readonly string[] }[];
 }
 
 export type ExtraParentOfProductGoal =
   | { readonly kind: 'rerouted'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string;
       readonly amount: number; readonly per: number; readonly converted: number; readonly rateLevel: number;
-      readonly goalUnit: string; readonly fromUnit: string; readonly volumeUnit: string; readonly rateUnit: string };
+      readonly goalUnit: string; readonly fromUnit: string; readonly volumeUnit: string; readonly rateUnit: string }
+  | { readonly kind: 'rerouted_unsized'; readonly from: string; readonly goal: string; readonly rate: string; readonly volume: string };
 
 const key = (s: string): string => s.trim().toLowerCase();
 const CODES = new Set(Object.values(CURRENCY_SYMBOL_TO_CODE).map((c) => c.toUpperCase()));
@@ -80,6 +82,21 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
     // mechanisms, not one counted twice, so it is left exactly as drafted. So is a money parent (an addend in the goal's
     // own terms) and anything that is not a factor (a risk): only a non-money factor's link is re-pointed.
     const from = factor(l.from);
+    // ⛔ AIQ 5906371639 (R3 share-build `b3d11a92`): Olumi's RISK straight into a goal read as rate × count ("Customer
+    // backlash" → MRR, beside MRR = price × subscribers) contradicts the identity. The price is the user's lever, so a risk
+    // that is a REACTION to it (every cause of the risk is the rate operand) can only move MRR through the count: its UNSIZED
+    // link is re-pointed there, still Olumi's and unsized, and said. A risk with any other cause (served journey C's "Budget
+    // overrun risk" ← "Total initiative spend": no demand channel), a sized link, one that already reaches an operand, or
+    // one the user stated is left exactly as drafted.
+    const risk = from === undefined && (model.risks ?? []).some((r) => key(r.label) === key(l.from));
+    const causes = model.links.filter((c) => key(c.to) === key(l.from)).map((c) => key(c.from));
+    const reactsToRate = rate !== undefined && causes.length > 0 && causes.every((c) => c === key(rate.label));
+    if (risk && reactsToRate && reaches(l.from, l) === undefined && l.effect_provenance == null && !finite(l.effect_amount)
+      && rate !== undefined && volume !== undefined && !isMoney(volume.unit)) {
+      links.push({ ...l, to: volume.label });
+      found.push({ kind: 'rerouted_unsized', from: l.from, goal: model.goal.metric, rate: rate.label, volume: volume.label });
+      continue;
+    }
     if (reaches(l.from, l) !== undefined || from === undefined || isMoney(from.unit)) { links.push(l); continue; }
     const sized = l.effect_provenance != null && finite(l.effect_amount) && finite(l.effect_per_source_change) && l.effect_per_source_change !== 0;
     if (!sized || rate === undefined || volume === undefined || isMoney(volume.unit) || !rate.baseline_known || !finite(rate.baseline_value) || rate.baseline_value <= 0) {
@@ -109,6 +126,10 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
 
 /** The one sentence each finding is said with (`not_represented`). */
 export function sayExtraParentOfProductGoal(f: ExtraParentOfProductGoal): string {
+  // AIQ 5906371639's words: the move is said; nothing is sized.
+  if (f.kind === 'rerouted_unsized') {
+    return `I had ‘${f.from}’ moving ‘${f.goal}’ directly; with ‘${f.goal}’ read as ‘${f.rate}’ × ‘${f.volume}’ it now moves ‘${f.volume}’.`;
+  }
   return `"${f.from}" was linked straight to "${f.goal}", beside "${f.goal}" = "${f.rate}" × "${f.volume}", so it now acts through "${f.volume}": `
     + `${sayFigureRead(f.amount, f.goalUnit)} per ${sayFigureRead(f.per, f.fromUnit)} of "${f.from}" is ${sayFigureRead(f.converted, f.volumeUnit)} `
     + `at today's ${sayFigureRead(f.rateLevel, f.rateUnit)}. That size is still my estimate.`;
