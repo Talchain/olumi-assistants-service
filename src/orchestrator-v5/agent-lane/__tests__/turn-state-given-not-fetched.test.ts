@@ -513,7 +513,10 @@ describe('the kept run is compacted by its own permission, and marked stale once
         expect(k.stale_note).toMatch(/could not confirm/);
       }
       // Re-derived each turn, never sticky: stale after the edit, current again once the readback selects it again.
-      expect(keptRun(prune(prune(afterRun(run), EDITED), selectedFor(run))).stale).toBeUndefined();
+      const restored = keptRun(prune(prune(afterRun(run), EDITED), selectedFor(run)));
+      expect(restored.stale).toBeUndefined();
+      expect(restored.claim_permissions).toEqual(run.claim_permissions);
+      if (run.claim_permissions.leader_may_be_named) expect(restored.result.win_probabilities).toEqual(RAW.win_probabilities);
     }
   });
 

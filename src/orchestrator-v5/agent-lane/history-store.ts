@@ -412,19 +412,21 @@ function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec 
     && !isDeepStrictEqual(keptGoalCertainty(run.goal_certainty), keptGoalCertainty(selectedCertainty))) {
     return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
   }
-  const permitted = recordOf(run.claim_permissions)?.leader_may_be_named === true;
+  const ownPermission = recordOf(run.claim_permissions);
+  const selectedPermission = claimPermissionsFrom(readback.analysisState, readback.analysisReady, { requested: true });
+  // The selected verdict also owns the withheld reason; an old reason is not a current explanation.
+  if (ownPermission !== undefined && !isDeepStrictEqual(ownPermission, selectedPermission)) {
+    return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
+  }
+  // A prior stale projection has no claims left to compare. If this read selects the same fact again, restore only
+  // from the selected persisted result and permission, never from an old tool payload.
+  const identityOnly = run.stale === true && ownPermission === undefined
+    && Object.keys(result).every((key) => key === 'type' || key === 'computed_against_hash');
+  const permitted = selectedPermission.leader_may_be_named === true;
   let kept: Rec;
   if (permitted) {
-    const ownPermission = recordOf(run.claim_permissions);
-    const selectedPermission = claimPermissionsFrom(readback.analysisState, readback.analysisReady, { requested: true });
-    if (selectedPermission.leader_may_be_named !== true
-      || ownPermission?.withheld_reason !== selectedPermission.withheld_reason
-      || ownPermission?.permitted_analysis_mode !== selectedPermission.permitted_analysis_mode
-      || ownPermission?.provisional !== selectedPermission.provisional) {
-      return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
-    }
     const selectedKeptResult = permittedResult(selectedResult, selectedCertainty);
-    if (!isDeepStrictEqual(permittedResult(result, selectedCertainty), selectedKeptResult)) {
+    if (!identityOnly && !isDeepStrictEqual(permittedResult(result, selectedCertainty), selectedKeptResult)) {
       return identityOnlyRun(run, result, SELECTED_RUN_CONFLICT_NOTE);
     }
     const { stale: _s, stale_note: _n, canonical_state: canonical, goal_certainty: _c, ...rest } = run;
@@ -438,7 +440,9 @@ function keptRunOf(output: unknown, readback: KeptRunReadback | undefined): Rec 
     };
     kept = withoutKeys(kept, namesConstraintProbability) as Rec;
   } else {
-    kept = withoutKeys({ ...pick(run, KEPT_WHEN_WITHHELD), result: withheldResult(selectedResult, readback?.analysisResult, selectedCertainty, true) },
+    const { claim_permissions: _old, run_identity: _identity, ...body } = pick(run, KEPT_WHEN_WITHHELD);
+    kept = withoutKeys({ ...body, result: withheldResult(selectedResult, readback?.analysisResult, selectedCertainty, true),
+      claim_permissions: selectedPermission, ...pick(run, ['run_identity']) },
       (k) => (RE_RANKING_KEY.test(k) || RE_RANKING_NAMED.has(k) || namesConstraintProbability(k))) as Rec;
   }
   if (selectedCertainty !== undefined) kept.goal_certainty = keptGoalCertainty(selectedCertainty);

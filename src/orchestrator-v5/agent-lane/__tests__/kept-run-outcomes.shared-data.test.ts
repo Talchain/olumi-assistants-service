@@ -29,13 +29,13 @@ const goal_certainty = { options: [
 ], note: GOAL_CERTAINTY_NOTE };
 const run = {
   ok: true, ran: true, result,
-  claim_permissions: { leader_may_be_named: false, withheld_reason: 'constraint_verdict_withheld' },
+  claim_permissions: { leader_may_be_named: false, withheld_reason: 'constraint_verdict_withheld', permitted_analysis_mode: null },
   goal_certainty,
   run_identity: { scenario_id: SCENARIO, graph_hash_at_run: HASH, computed_at: RUN_AT },
 };
 const readback = (computed_at = RUN_AT, kind = 'complete_current' as 'complete_current' | 'complete_stale') => ({
   scenarioId: SCENARIO,
-  analysisState: { run_state: { kind, computed_at } },
+  analysisState: { run_state: { kind, computed_at }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
   analysisResult: kind === 'complete_current' ? result : undefined,
   goalCertainty: kind === 'complete_current' ? goal_certainty.options.map(({ option: _label, ...decision }) => decision) : undefined,
 });
@@ -72,6 +72,32 @@ describe('AIQ #72: one selected Run, outcome ranges without a leader', () => {
     expect(kept.result).toEqual({ computed_against_hash: HASH });
     expect(kept.claim_permissions).toBeUndefined();
     expect(kept.goal_certainty).toBeUndefined();
+  });
+
+  it('same-Run identity does not repeat an earlier withheld reason after the selected verdict changes', () => {
+    const current = projected(run, readback());
+    expect(current.claim_permissions.withheld_reason).toBe('constraint_verdict_withheld');
+    expect(current.result.option_comparison).toHaveLength(3);
+
+    const selected = readback();
+    const conflicted = projected(run, {
+      ...selected,
+      analysisState: { ...selected.analysisState,
+        leader_claim: { permitted: false, withheld_reason: 'olumi_option_provisional' } },
+    });
+    expect(conflicted.stale).toBe(true);
+    expect(conflicted.stale_note).toMatch(/selected saved run does not confirm/);
+    expect(conflicted.result).toEqual({ computed_against_hash: HASH });
+    expect(conflicted.claim_permissions).toBeUndefined();
+    expect(conflicted.goal_certainty).toBeUndefined();
+  });
+
+  it('an older tool copy with no permission uses the selected withheld reason and stays byte-identical on re-prune', () => {
+    const withoutOldPermission = { ...run, claim_permissions: undefined };
+    const current = projected(withoutOldPermission, readback());
+    expect(current.claim_permissions.withheld_reason).toBe('constraint_verdict_withheld');
+    expect(current.stale).toBeUndefined();
+    expect(JSON.stringify(projected(current, readback()))).toBe(JSON.stringify(current));
   });
 
   it('R4 absent stays absent on an otherwise current Run', () => {
