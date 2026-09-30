@@ -15,6 +15,7 @@
  */
 import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
 import { sayFigureRead } from './say-figure.js';
+import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 
 interface Link {
   readonly from: string; readonly to: string; readonly direction?: string; readonly provenance?: string;
@@ -41,6 +42,9 @@ const isMoney = (unit: string | null | undefined): boolean => {
   return head !== '' && (CODES.has(head.toUpperCase()) || Object.prototype.hasOwnProperty.call(CURRENCY_SYMBOL_TO_CODE, head[0]!));
 };
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/** A money unit written in whole units: its currency token without the magnitude ("£k/month" → "£/month"). */
+const wholeUnit = (unit: string, display: string | undefined): string =>
+  display === undefined ? unit : unit.replace(/[^\s/]+/, (t) => (t.toLowerCase().startsWith(display.toLowerCase()) ? display : t));
 
 export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M): { model: M; found: ExtraParentOfProductGoal[] } {
   const goal = key(model.goal.metric);
@@ -80,11 +84,23 @@ export function rerouteExtraParentsOfProductGoal<M extends ModelShape>(model: M)
       links.push(l);
       continue;
     }
-    const converted = (l.effect_amount as number) / rate.baseline_value;
+    // ⛔ BOTH SIDES IN WHOLE UNITS OF ONE CURRENCY (MG CR 5902882621): an MRR goal drafted in "£k/month" carries −0.735
+    // for −£735, and the rate is £49 per subscriber — unscaled, that is −0.015 subscribers a point, the churn penalty
+    // erased. A goal or rate not read as money, or two currencies, is left exactly as drafted.
+    const goalU = readCurrencyUnitWithQualifiers(model.goal.unit);
+    const rateU = readCurrencyUnitWithQualifiers(rate.unit);
+    if (goalU.kind !== 'currency' || rateU.kind !== 'currency' || goalU.currencyCode === undefined || goalU.currencyCode !== rateU.currencyCode) {
+      links.push(l);
+      continue;
+    }
+    const amount = (l.effect_amount as number) * goalU.multiplier;
+    const rateLevel = rate.baseline_value * rateU.multiplier;
+    const converted = amount / rateLevel;
     links.push({ ...l, to: volume.label, effect_amount: converted });
     found.push({ kind: 'rerouted', from: l.from, goal: model.goal.metric, rate: rate.label, volume: volume.label,
-      amount: l.effect_amount as number, per: l.effect_per_source_change as number, converted, rateLevel: rate.baseline_value,
-      goalUnit: model.goal.unit ?? '', fromUnit: factor(l.from)?.unit ?? '', volumeUnit: volume.unit ?? '', rateUnit: rate.unit ?? '' });
+      amount, per: l.effect_per_source_change as number, converted, rateLevel,
+      goalUnit: wholeUnit(model.goal.unit ?? '', goalU.currencyDisplay), fromUnit: factor(l.from)?.unit ?? '', volumeUnit: volume.unit ?? '',
+      rateUnit: wholeUnit(rate.unit ?? '', rateU.currencyDisplay) });
   }
   return found.length === 0 ? { model, found } : { model: { ...model, links } as M, found };
 }

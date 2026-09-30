@@ -17,6 +17,7 @@ import type { CandidateModel } from '../admit-model.js';
 import { buildCandidateSchema, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { proposeProductIdentity } from '../identity-proposal.js';
+import { rerouteExtraParentsOfProductGoal } from '../product-goal-extra-parent.js';
 
 type Json = Record<string, any>;
 const BRIEF = 'Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. '
@@ -119,6 +120,31 @@ describe('a goal read as price × subscribers gets no third direct parent', () =
     const { graph } = await build(draft((c) => { (c.links[3] as { provenance?: string }).provenance = 'explicit'; }));
     expect(edge(graph, 'Monthly churn', 'GOAL')).toBeDefined();
     expect(edge(graph, 'Monthly churn', 'Paying subscribers')).toBeUndefined();
+  });
+
+  it('ROW (MG CR 5902882621): a goal drafted in "£k/month" (−0.735 per point) still acts through subscribers at −15 per point, said in whole pounds', async () => {
+    const { graph, out } = await build(draft((c) => {
+      Object.assign(c.goal, { unit: '£k/month', value: 85, baseline_value: 75 });
+      c.links[3].effect_amount = -0.735;
+    }));
+    expect(edge(graph, 'Monthly churn', 'GOAL')).toBeUndefined();
+    expect(edge(graph, 'Monthly churn', 'Paying subscribers')?.provenance?.natural_effect?.amount).toBeCloseTo(-15, 6);
+    const said = ((out.not_represented ?? []) as string[]).find((l) => l.includes('"Monthly churn"') && l.includes('"Paying subscribers"'));
+    expect(said, JSON.stringify(out.not_represented)).toMatch(/735/);
+    expect(said).not.toMatch(/0\.73/);
+  });
+
+  it('CONTROL (MG CR 5902882621): a GBP goal against a USD rate is left exactly as drafted', async () => {
+    const { graph } = await build(draft((c) => { c.factors[0].unit = 'USD per subscriber per month'; }));
+    expect(edge(graph, 'Monthly churn', 'GOAL')).toBeDefined();
+    expect(edge(graph, 'Monthly churn', 'Paying subscribers')).toBeUndefined();
+  });
+
+  it('CONTROL (MG CR 5902882621, the function itself): a GBP goal against a USD rate is not converted — nothing found, links as drafted', () => {
+    const c = draft((m) => { m.factors[0].unit = 'USD per subscriber per month'; }) as unknown as Parameters<typeof rerouteExtraParentsOfProductGoal>[0];
+    const r = rerouteExtraParentsOfProductGoal(c);
+    expect(r.found).toEqual([]);
+    expect(r.model.links).toBe(c.links);
   });
 
   it('CONTROL (the user stated the churn → MRR size): nothing is re-pointed', async () => {
