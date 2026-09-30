@@ -133,9 +133,12 @@ import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { log } from '../utils/telemetry.js';
+import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
 
 /** The additive half of the scenario-graph read's 200 body. */
 export interface ScenarioAnalysisRead {
+  /** Internal joined projection; not published by the graph route yet. */
+  readonly current_read: CurrentReadProjection;
   /**
    * The composed verdict, or `null` when this leg could not say. `null` is NOT
    * a state: it means "not answered", and a consumer must leave whatever it
@@ -214,6 +217,7 @@ export function identityRunUseWire(facts: readonly unknown[]): IdentityRunUseWir
 }
 
 const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
+  current_read: projectCurrentRead({ analysisState: null }),
   analysis_state: null,
   analysis_result: null,
 });
@@ -461,6 +465,9 @@ export async function readScenarioAnalysis(
       ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState)[0] ?? null
       : analysisResult;
     return {
+      current_read: analysisState === null
+        ? projectCurrentRead({ analysisState: null })
+        : projectCurrentRead({ analysisState, derivation, analysisResult: boundResult }),
       analysis_state: analysisState,
       analysis_result: boundResult,
       // R3-9: every answered read carries it, from the same facts as the writer; never gated on freshness.
