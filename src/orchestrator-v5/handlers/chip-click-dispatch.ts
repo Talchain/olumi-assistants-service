@@ -791,7 +791,10 @@ function deriveChipClickFreshness(
     config.cee.optionIdentityFreshnessGuard
       ? extractGraphOptionIds(cachedSnapshot?.rawPersistedGraph ?? null)
       : undefined,
-    priorFactsReadOk === undefined ? undefined : { priorFactsReadOk },
+    {
+      currentGraph: cachedSnapshot?.rawPersistedGraph,
+      ...(priorFactsReadOk === undefined ? {} : { priorFactsReadOk }),
+    },
   );
 }
 

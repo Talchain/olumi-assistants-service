@@ -125,13 +125,14 @@ import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
 function deriveWriteReplyFreshness(
   read: WriteReplyAnalysisInputs,
   persistedAnalysisGraphHash: string | null,
+  currentGraph: unknown,
 ): FreshnessDerivation {
   const durableAuthority = isScenarioAnalysisReasoningAuthority(read.factSet);
   const derived = deriveAnalysisFreshness(
     durableAuthority ? read.factSet.facts : read.hotWindow.facts,
     persistedAnalysisGraphHash,
     undefined,
-    { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt },
+    { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt, currentGraph },
   );
   // ⛔ AN UNREAD RESTORE MARKER NEVER BECOMES A POSITIVE `fresh`. The marker can
   // only turn a hash MATCH from fresh to stale, so when it could not be read a
@@ -140,7 +141,7 @@ function deriveWriteReplyFreshness(
   // (no fact-bound hashes: `unknown` only where data is genuinely missing, its
   // invariant 3). Independent pre-review 5828334202 on #1892.
   if (!read.analysisInvalidatedAtReadOk && derived.freshness === 'fresh') {
-    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false });
+    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false, currentGraph });
   }
   return derived;
 }
@@ -623,7 +624,7 @@ function replyForAttemptThatWroteNothing(args: {
   }
   // The shared rule, against the SNAPSHOT's hash: the durable record when it is
   // authority, the restore marker, and `unknown` when the marker is unread.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash, persistedGraphBytes);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -1774,7 +1775,7 @@ async function dispatchEdgeStrengthEdit(
   // Fact history is observational only: it never authorises or blocks the
   // write. A healthy empty read means canonical `none`; a degraded read must
   // not fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -2250,7 +2251,7 @@ async function dispatchStructuralDelete(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -2629,6 +2630,7 @@ async function dispatchFactorValueEdit(
   const freshness: FreshnessDerivation = deriveWriteReplyFreshness(
     { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt, analysisInvalidatedAtReadOk },
     persistedAnalysisGraphHash,
+    persistedGraphBytes,
   );
   emitFreshnessTelemetry(
     freshness,
@@ -2774,9 +2776,10 @@ async function dispatchOptionInterventionEdit(
 function preWriteRefereeFreshness(
   priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>,
   baseGraphHash: string,
+  currentGraph: unknown,
 ): FrameFreshness {
   return priorFactsRead.status === 'ok'
-    ? deriveAnalysisFreshness(priorFactsRead.facts, baseGraphHash).freshness
+    ? deriveAnalysisFreshness(priorFactsRead.facts, baseGraphHash, undefined, { currentGraph }).freshness
     : 'unknown';
 }
 
@@ -2830,7 +2833,9 @@ export async function dispatchOptionLevelsBatch(
     return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
   }
 
-  const freshness: FrameFreshness = preWriteRefereeFreshness(priorFactsRead, batch.base_graph_hash);
+  // The atomic writer owns the base-graph read; a client hash alone cannot prove
+  // a saved Run's goal unit before that read. Snapshot-bearing Runs fail closed.
+  const freshness: FrameFreshness = preWriteRefereeFreshness(priorFactsRead, batch.base_graph_hash, undefined);
   const hasExistingAnalysis =
     priorFactsRead.status === 'ok' && priorFactsRead.facts.some(isSuccessfulRunAnalysisFact);
 
@@ -2906,7 +2911,7 @@ export async function dispatchOptionLevelsBatch(
     // prior facts are re-projected against the committed hash.
     const freshnessAfterCommit: FreshnessDerivation =
       priorFactsRead.status === 'ok'
-        ? deriveAnalysisFreshness(priorFactsRead.facts, outcome.analysisGraphHash)
+        ? deriveAnalysisFreshness(priorFactsRead.facts, outcome.analysisGraphHash, undefined, { currentGraph: outcome.graph })
         : {
             freshness: 'unknown',
             reason: 'derivation_failed',
@@ -3339,7 +3344,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
   // Freshness for the referee's frame gate, exactly as the option-level door reads it (a failed read is 'unknown').
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash);
+    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash, persistedGraph);
   } catch {
     freshness = 'unknown';
   }
@@ -3462,7 +3467,7 @@ export async function holdAddFactorInProcess(input: HoldAddFactorInput, requestI
 
   let freshness: FrameFreshness = 'unknown';
   try {
-    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash);
+    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash, persistedGraph);
   } catch {
     freshness = 'unknown';
   }
@@ -3950,7 +3955,7 @@ async function dispatchStructuralRename(
     },
     'V5 structural_rename committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
   );
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -4314,7 +4319,7 @@ async function dispatchStructuralAdd(
   // Fact history is observational only: it never authorises or blocks the write.
   // A healthy empty read means canonical `none`; a degraded read must not
   // fabricate that conclusion and therefore emits honest `unknown`.
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -4658,7 +4663,7 @@ async function dispatchStructuralAddEdge(
     draft_graph: buildAppliedGraphWireField(graphForReadiness),
   };
 
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
   emitFreshnessTelemetry(
     freshness,
     {
@@ -4936,7 +4941,7 @@ async function dispatchAddConstraintEdit(
       ? { draft_graph: buildAppliedGraphWireField(committedParse.data) }
       : {}),
   };
-  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash);
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
   emitFreshnessTelemetry(freshness, {
     request_id: requestId,
     scenario_id: payload.scenario_id,

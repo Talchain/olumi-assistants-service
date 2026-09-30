@@ -4226,9 +4226,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // surrounding catch below never fires and `prior_facts` is `[]`.
             // Without this flag that empty reads as "never analysed" and feeds
             // `dispatchAddOptionTransaction`'s gate.
-            turnContext.prior_facts_read_ok === undefined
-              ? undefined
-              : { priorFactsReadOk: turnContext.prior_facts_read_ok },
+            {
+              currentGraph: addOptionFrameGraph,
+              ...(turnContext.prior_facts_read_ok === undefined
+                ? {}
+                : { priorFactsReadOk: turnContext.prior_facts_read_ok }),
+            },
           ).freshness;
         } catch (err) {
           log.warn(
@@ -7905,9 +7908,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             undefined,
             // Same degraded-read threading as the chip arm: an empty fact list
             // from a THROWN read must not read as "never analysed".
-            turnContext.prior_facts_read_ok === undefined
-              ? undefined
-              : { priorFactsReadOk: turnContext.prior_facts_read_ok },
+            {
+              currentGraph: textFrameGraph,
+              ...(turnContext.prior_facts_read_ok === undefined
+                ? {}
+                : { priorFactsReadOk: turnContext.prior_facts_read_ok }),
+            },
           ).freshness;
           textFrameRead = true;
         } catch (err) {

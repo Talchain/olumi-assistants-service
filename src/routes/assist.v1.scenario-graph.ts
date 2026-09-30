@@ -705,6 +705,7 @@ export default async function route(app: FastifyInstance) {
         // told it about (the H4 seam — the two authorities answer different
         // questions).
         analysis_state: analysis.analysis_state,
+        ...(analysis.analysis_ready !== undefined ? { analysis_ready: analysis.analysis_ready } : {}),
         analysis_result: analysis.analysis_result,
         // CURRENT-READ-v1: one selected Run's canonical freshness and typed
         // figures. The raw graph_hash above remains the edit/CAS token; the

@@ -1304,6 +1304,7 @@ export function buildEvidenceBlocks(
  */
 export function buildStaleRerunCoachingBlock(
   ctx: BlockBuildCtx,
+  title?: string,
 ): CoachingBlock | null {
   // Source-fact graph_hash carries the stale ID — the block's
   // `graph_hash_at_generation` is the SAME stale hash so the wire-side
@@ -1312,7 +1313,7 @@ export function buildStaleRerunCoachingBlock(
     ...commonMetadata('coach:stale_rerun', '', { ...ctx, freshness: 'stale' as const }),
     type: 'coaching' as const,
     coaching_kind: 'orientation' as const,
-    title: truncate('The graph has changed since the last analysis', TITLE_MAX),
+    title: truncate(title ?? 'The graph has changed since the last analysis', TITLE_MAX),
     body: truncate(
       'Re-run analysis to refresh the insights and explore the updated decision.',
       BODY_MAX,
