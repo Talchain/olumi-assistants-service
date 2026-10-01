@@ -36,6 +36,8 @@ import { buildRunDelta } from '../build-run-delta.js';
 import { diffRunInputs, diffRunInputSnapshots } from '../run-input-changes.js';
 import { olumiSpreadForMean } from '../../../cee/magnitude/olumi-spread.js';
 import { PRESENT_PAIR, runAnalysisFact } from '../../context/__tests__/run-delta-fixtures.js';
+import { withholdOptionGoalFigures } from '../../../orchestrator/context/constraint-feasibility.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_WITHHELD_CODES } from '../../../orchestrator/context/option-result-source.js';
 
 // 0.71.0: every hand-built snapshot carries the SAME residual by default — "everything this snapshot does not record was
 // unchanged" — so these rows test the recorded fields. The residual's own rows (absent / different → partial) are below.
@@ -558,6 +560,84 @@ describe('0.70.0 · win_probabilities_unavailable', () => {
     ])).toEqual([0, undefined]);
     expect(reason(PRESENT_PAIR, false)).toEqual([0, undefined]);
     expect(reason(PRESENT_PAIR)).toEqual([2, undefined]);
+  });
+});
+
+/**
+ * ⭐ R3 GAP (a) (journey-8, #85 5942780839; DL lease 5942826631): the earlier Run's shares were taken by its OWN typed
+ * goal-figure withhold (an unsized Olumi link on the way → `GOAL_FIGURES_PLACEHOLDER_PATH`) while it stayed entitled, so
+ * the served pair carried `[]` and NO reason: "No option has figures from both runs" after the Accept that made the
+ * options comparable. A recorded withhold code on the prior's own envelope is a recorded cause (P1-3 holds: no record →
+ * no reason). Each prior goes through the REAL withholder (`withholdOptionGoalFigures`), never a hand-stripped envelope.
+ */
+describe('R3 gap (a) · prior_withheld from the earlier Run\'s own recorded goal-figure withhold', () => {
+  const at = (d: string) => `2026-06-0${d}T00:00:00.000Z`;
+  const reason = (facts: readonly HandlerFact[]) => {
+    const out = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: true });
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(RunDeltaSchema.safeParse(out.delta).success).toBe(true);
+    return [out.delta.win_probabilities.length, out.delta.win_probabilities_unavailable];
+  };
+  const CURRENT = () => runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', at('7'), true);
+  /** An entitled prior, its figures withheld by the real withholder under `code`. */
+  const withheldPrior = (code: string) => {
+    const f = structuredClone(runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), true)) as { result: Record<string, any> };
+    f.result.enrichment = withholdOptionGoalFigures(f.result.enrichment, new Set(['opt-a']),
+      { code, message: 'withheld', severity: 'warning', node_ids: [], option_ids: ['opt-a'] });
+    return f as unknown as HandlerFact;
+  };
+
+  it.each([...GOAL_FIGURES_WITHHELD_CODES])('RED: an entitled prior whose own envelope records %s, 0 shares → prior_withheld', (code) => {
+    const prior = withheldPrior(code);
+    expect((prior as unknown as { result: { enrichment: { inference_warnings: Array<{ code: string }> } } }).result.enrichment.inference_warnings.map((w) => w.code),
+      'precondition: the withholder recorded its code').toContain(code);
+    expect(reason([CURRENT(), prior])).toEqual([0, 'prior_withheld']);
+  });
+
+  it('CONTROL (P1-3): the same 0 shares with NO withhold recorded → no reason', () => {
+    const f = structuredClone(runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), true)) as { result: Record<string, any> };
+    for (const r of f.result.enrichment.results) delete r.win_probability;
+    expect(reason([CURRENT(), f as unknown as HandlerFact])).toEqual([0, undefined]);
+  });
+
+  it('CONTROL: a warning that is NOT a goal-figure withhold (served beside it: GOAL_DIRECTION_UNATTESTED), 0 shares → no reason', () => {
+    const f = structuredClone(runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), true)) as { result: Record<string, any> };
+    for (const r of f.result.enrichment.results) delete r.win_probability;
+    f.result.enrichment.inference_warnings = [{ code: 'GOAL_DIRECTION_UNATTESTED', message: 'm', severity: 'warning' }];
+    expect(reason([CURRENT(), f as unknown as HandlerFact])).toEqual([0, undefined]);
+  });
+
+  it('CONTROL: a withhold code while the prior STILL HAS shares (no option on both sides) → no_matched_option, never prior_withheld', () => {
+    const f = structuredClone(runAnalysisFact([], '111', 'hash-a', at('6'), true)) as { result: Record<string, any> };
+    f.result.enrichment.option_comparison = [{ option_id: 'opt-c', win_probability: 0.6 }, { option_id: 'opt-d', win_probability: 0.4 }];
+    f.result.enrichment.inference_warnings = [{ code: GOAL_FIGURES_PLACEHOLDER_PATH, message: 'm', severity: 'warning' }];
+    expect(reason([CURRENT(), f as unknown as HandlerFact])).toEqual([0, 'no_matched_option']);
+  });
+
+  it('CONTROL: THIS Run withheld too → no reason (nothing can be compared yet)', () => {
+    const current = withheldPrior(GOAL_FIGURES_PLACEHOLDER_PATH) as unknown as { result: Record<string, any> };
+    current.result.computed_at = at('7'); current.result.graph_hash_at_run = 'hash-b'; current.result.enrichment.meta.seed_used = '222';
+    expect(reason([current as unknown as HandlerFact, withheldPrior(GOAL_FIGURES_PLACEHOLDER_PATH)])).toEqual([0, undefined]);
+  });
+
+  it('SERVED BYTES (guest a58f1537 @ CEE 41105c78): s4 (after Apply #1) → crn s2 (after both Accepts) → prior_withheld', async () => {
+    const { readFileSync } = await import('node:fs');
+    const fx = JSON.parse(readFileSync(new URL('./fixtures/served-a58f1537-withheld-prior.json', import.meta.url), 'utf8')) as
+      { prior_enrichment: Record<string, unknown>; current_enrichment: Record<string, unknown> };
+    // The turn block omits the stored-only echo members; the stored fact carries them (seed, sample count, builds).
+    const stored = (enrichment: Record<string, unknown>, seed: string, hash: string, when: string) => ({
+      fact_type: 'run_analysis', noop: false,
+      result: {
+        enrichment: { ...enrichment, meta: { seed_used: seed, n_samples: 10_000 }, _meta: { builds: { plot: 'p1', isl: 'i1' } } },
+        computed_at: when, graph_hash_at_run: hash,
+        constraint_verdict: { may_name_leading_option: true, constraint_verdict_state: 'evaluated_feasible' },
+      },
+    }) as unknown as HandlerFact;
+    const out = buildRunDelta({ priorFacts: [stored(fx.current_enrichment, '7', 'hash-b', at('7')), stored(fx.prior_enrichment, '7', 'hash-a', at('6'))], mayNameLeadingOption: true });
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(RunDeltaSchema.safeParse(out.delta).success).toBe(true);
+    expect([out.delta.win_probabilities.length, out.delta.win_probabilities_unavailable]).toEqual([0, 'prior_withheld']);
+    expect(out.delta.leader.current_leading_option_id).toBe('ai_reporting_module_sprint');
   });
 });
 

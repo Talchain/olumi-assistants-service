@@ -59,6 +59,7 @@ import {
 
 import {
   isUsableWinProbability,
+  runWithheldGoalFigures,
   winnerOptionResultSource,
 } from '../../orchestrator/context/option-result-source.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
@@ -656,17 +657,23 @@ export function buildRunDelta(input: {
   //   - `no_matched_option`: both Runs show shares, and no option has one on both sides.
   // Any other empty list (this Run's own shares withheld, a Run with no shares recorded) carries no reason: the
   // consumer keeps its cause-neutral words, never a reason it cannot back.
-  // ⛔ `prior_withheld` is a CAUSE CLAIM, so it needs the earlier Run's OWN recorded withhold verdict (its typed
-  // `constraint_verdict` says it may not name a leader) — never the absence of a stamp. A historical Run with no
-  // verdict recorded is "not entitled" here (fail closed) but its cause is unknown, so no reason travels
-  // (DL ruling #2482 r3 P1-3; CODEX reproduced the cause claim from missing evidence).
-  const priorWithholdRecorded = (() => {
+  // ⛔ `prior_withheld` is a CAUSE CLAIM, so it needs the earlier Run's OWN RECORDED withhold — never the absence of a
+  // stamp (DL ruling #2482 r3 P1-3; CODEX reproduced the cause claim from missing evidence). Two records qualify:
+  //   (a) its typed `constraint_verdict` says it may not name a leader (the Run is then not entitled here);
+  //   (b) it has NO shares and its own envelope carries a typed goal-figure withhold (`GOAL_FIGURES_WITHHELD_CODES`,
+  //       the code decides, never the words). The Run stays entitled, but the withholder took every share with the
+  //       figures (R3 journey-8 5942780839: an unsized Olumi link on the way → `GOAL_FIGURES_PLACEHOLDER_PATH`; after
+  //       the Accept, "No option has figures from both runs" was shown where the options can now be compared).
+  // A historical Run with neither record is "not entitled" (fail closed) or share-less, but its cause is unknown,
+  // so no reason travels.
+  const priorVerdictWithheld = (() => {
     const verdict = pair.prior.fact_type === 'run_analysis' ? (pair.prior.result as { constraint_verdict?: unknown }).constraint_verdict : undefined;
     return verdict !== null && typeof verdict === 'object' && !Array.isArray(verdict)
       && (verdict as { may_name_leading_option?: unknown }).may_name_leading_option === false;
   })();
+  const priorFiguresWithheld = priorWins.size === 0 && runWithheldGoalFigures(priorEchoes.enrichment);
   const winProbabilitiesUnavailable: RunDeltaWinProbabilitiesUnavailableLiteral | undefined = winProbabilities.length > 0 ? undefined
-    : currentEntitled && currentWins.size > 0 && !priorEntitled && priorWithholdRecorded ? 'prior_withheld'
+    : currentEntitled && currentWins.size > 0 && ((!priorEntitled && priorVerdictWithheld) || priorFiguresWithheld) ? 'prior_withheld'
       : priorEntitled && currentEntitled && priorWins.size > 0 && currentWins.size > 0 ? 'no_matched_option'
         : undefined;
 
