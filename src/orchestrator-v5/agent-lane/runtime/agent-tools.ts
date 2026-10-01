@@ -240,7 +240,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'you may do ONLY when the user has just asked for that factor to be changed and named the ' +
       'number themselves. Never set it to replace someone\u2019s figure with one of your own. ' +
       // PTL decision #78 5921683490 (AIQ ruling #75 5921113788): the Agent once scripted "Set Warm introductions to 2 per
-      // month" for the user to type — stored `user_override`, shown "Set by you", laundering Olumi's figure.
+      // month" for the user to type — stored as the user's own override and shown "Set by you", laundering Olumi's figure.
       'When the user asks to revise an existing value without supplying a replacement figure, ask what figure they ' +
       'would use; never supply a number or an instruction for them to repeat as their own.',
     parameters: obj({
