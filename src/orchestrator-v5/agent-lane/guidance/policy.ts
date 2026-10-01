@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ a00cb9c817f5938f0cb5c79b4f196c2ef779ed83.
+// programme-docs @ 41b36299ff754a41f0e8a4685342eb069dc865c3.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -401,7 +401,7 @@ export const POLICY = {
       },
       "short_copy": {
         "S1": "The comparison rests on a link nobody has sized yet.",
-        "S2": "{factor_label} is Olumi's estimate, and the answer is sensitive to it.",
+        "S2": "The answer is sensitive to {factor_label}, Olumi's estimate.",
         "S3L": "The effect of {from_label} is Olumi's guess.",
         "S3V": "{factor_label} is Olumi's estimate, not yours."
       },
@@ -692,7 +692,8 @@ export const POLICY = {
       "Olumi's suggestion"
     ],
     "response_shape": "One-line insight, then at most 3 bullets, then one action or question; details collapsed (Grammar §3).",
-    "label_case": "Option labels ({option_label}, {plan_label}, {leader_label}) are quoted in single curly quotes and keep their case: 'Imagine ‘Switch to GCP’ has failed.' Other mid-sentence labels lower-case their first letter unless the first word is an acronym or proper noun (second letter upper-case, e.g. 'GCP', 'AI'). A label that opens the sentence keeps its capital."
+    "label_case": "Option labels ({option_label}, {plan_label}, {leader_label}) are quoted in single curly quotes and keep their case: 'Imagine ‘Switch to GCP’ has failed.' Other mid-sentence labels lower-case their first letter unless the first word is an acronym or proper noun (second letter upper-case, e.g. 'GCP', 'AI'). A label that opens the sentence keeps its capital.",
+    "served_label_scan": "RC 1 Oct 19:2xZ: every row variant rendered by the real renderCopy over 292 served graphs (CEE staging fixtures), 19,366 renders: 0 throws; only S2 short_copy overflowed (96 > 90 with a 40-char label) -> rewritten with 46 fixed chars. Fixed chars + 40 per label must stay within max_chars."
   },
   "method_turns": {
     "purpose": "What a method must produce when pressed. Every post_check is a DETERMINISTIC text rule with an id (Ticket 1 implements all of them in checkMethodTurn). Rules that need structured output are listed under structured_checks; they are AI HARNESS's (method-turn output format) and are NOT part of the text checker. The runtime checks the draft BEFORE it is sent (shared.runtime); if any check fails, it sends the deterministic fallback instead.",
@@ -756,6 +757,13 @@ export const POLICY = {
           }
         ],
         "owner": "SCIENCE/DSK owns applicability and the badge; RC owns the method shape, checks and fallback; AI HARNESS composes (PTL 5933036532 owner split)."
+      },
+      "label_masking": {
+        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked: case-insensitive, curly quotes folded, longest label first, WHOLE TOKENS ONLY (a label is blanked only where no letter, digit or '_' touches either end; label matching is whole-token too). The mask set is model_labels (EVERY node label in the current model: goal, options, factors, risks, outcomes) plus the method's own labels: RC-PREMORTEM supplied_items + plan_label + current_option_labels; RERUN-EXPLANATION change_labels + current_option_labels; RC-WHAT-CHANGES factor_label; RC-STRENGTHEN-ITEM item_labels; RC-COACH-EDITS edited_labels.",
+        "why": "A label the user wrote is grounding, not a claim. Served D1 (the investor decision) has the factor 'Enterprise prospect signing likelihood': without masking every grounded pre-mortem failed PM-NO-PROB and fell back (SCIENCE/DSK 5938372911). RC served-label scan (CEE staging fixtures, 1,440 labels / 305 graphs): goal labels with '%' ('Cut Burn Rate by 30%'), factor labels with 'leads' ('Qualified leads per month'), risk labels with '%' ('Churn above 4%'): none of them supplied items, so the mask set is every model label.",
+        "never": "Mask Olumi's own words: only labels the inputs supply, and only as whole tokens (option 'A' must never blank the 'a' in 'probability'; HARNESS #2478 P1).",
+        "reference": "tools/check_method_turn.py masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM, MT-RERUN-MODEL-LABEL-GOOD / -BAD-LEADER, MT-PREMORTEM-SHORT-LABEL-GOOD / -BAD",
+        "input": "model_labels: string[] = every node label of the current model (the caller has the graph)."
       }
     },
     "RC-PREMORTEM": {
@@ -782,11 +790,11 @@ export const POLICY = {
         },
         {
           "id": "PM-NO-PROB",
-          "rule": "no '%' and no /\\b(likely|likelihood|chance|probability|probable|odds)\\b/i anywhere"
+          "rule": "no '%' and no /\\b(likely|likelihood|chance|probability|probable|odds)\\b/i anywhere (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "PM-NO-PREDICTION",
-          "rule": "no /\\b(will|is going to|are going to) fail\\b/i"
+          "rule": "no /\\b(will|is going to|are going to) fail\\b/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "PM-PLAN-ONLY",
@@ -893,11 +901,11 @@ export const POLICY = {
         },
         {
           "id": "WC-NO-NOTHING",
-          "rule": "no /nothing would change|no single (assumption|factor)/i"
+          "rule": "no /nothing would change|no single (assumption|factor)/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "WC-BANNED",
-          "rule": "no /\\b(EVPI|EVPPI|sensitivity score|elasticity)\\b/i and no '%'"
+          "rule": "no /\\b(EVPI|EVPPI|sensitivity score|elasticity)\\b/i and no '%' (on the label-masked reply, shared.label_masking)"
         }
       ],
       "fallback": "Deterministic: the row's reasoning_question with the 'Give your estimate' action.",
@@ -936,7 +944,7 @@ export const POLICY = {
         },
         {
           "id": "ST-BANNED",
-          "rule": "no /\\b(placeholder|edge|node|default strength)\\b/i"
+          "rule": "no /\\b(placeholder|edge|node|default strength)\\b/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "ST-NO-NEW-FIGURES",
@@ -981,7 +989,7 @@ export const POLICY = {
         },
         {
           "id": "CE-NO-RESULT-CLAIM",
-          "rule": "no /\\b(the result (has )?changed|now leads|is now ahead|the answer is now)\\b/i"
+          "rule": "no /\\b(the result (has )?changed|now leads|is now ahead|the answer is now)\\b/i (on the label-masked reply, shared.label_masking)"
         }
       ],
       "fallback": "Deterministic: 'You changed {edit list}. That changes {assumption}. ' + the stale line when stale.",
@@ -1014,19 +1022,19 @@ export const POLICY = {
         },
         {
           "id": "RX-NO-CAUSE-UNPAIRED",
-          "rule": "if attribution_case != C1_attributable: no /\\b(because (you|of your)|caused|due to your|as a result of your|led to)\\b/i"
+          "rule": "if attribution_case != C1_attributable: no /\\b(because (you|of your)|caused|due to your|as a result of your|led to)\\b/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "RX-NO-LEADER-UNLICENSED",
-          "rule": "if run.leader_licensed is false: no current option label appears together with /\\b(leads|ahead|best|wins|now first)\\b/i in the same sentence"
+          "rule": "if run.leader_licensed is false: no current option label appears together with /\\b(leads|ahead|best|wins|now first)\\b/i in the same sentence (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "RX-NOISE",
-          "rule": "if leader.noise_verdict is not_noise_qualified: no /\\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\\b/i"
+          "rule": "if leader.noise_verdict is not_noise_qualified: no /\\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\\b/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "RX-NO-MOVEMENT-WITHOUT-PRIOR",
-          "rule": "if prior_withheld OR no_matched_figures: no /\\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\\b/i"
+          "rule": "if prior_withheld OR no_matched_figures: no /\\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\\b/i (on the label-masked reply, shared.label_masking)"
         }
       ],
       "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD: 'That was what held the comparison back, so Olumi can now compare the options.' | C2: 'This run also used a new draw, so the difference can't be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
@@ -1051,9 +1059,17 @@ export const POLICY = {
           "why": "'Edit the strength' writes both rows (sizing placeholder → user, band moved); two bullets for one edit reads as two edits."
         }
       },
-      "investor_moment": "M2 on the ruled seed (eeeff8b4): Accept both unsized links → Run → the comparison appears for the first time (R3 5936720411: provisional leader + win shares). This is the UNWITHHELD transition."
+      "investor_moment": "M2 on the ruled seed (eeeff8b4): Accept both unsized links → Run → the comparison appears for the first time (R3 5936720411: provisional leader + win shares). This is the UNWITHHELD transition.",
+      "change_labels_reading": "change_labels (RX-NAMES-CHANGES) = the RENDERED change_label_templates sentence per change (a link row has no label of its own; sizing + strength on one link = ONE sentence; a non-link row = \"You changed {label}: {before} → {after}.\"). The Agent is handed these exact sentences; a reply that does not carry each one falls back. Agreed with MG 5939033153.",
+      "attribution_case_mapping": "Wire C3/C4/C5 (other differences, e.g. engine drift) are checked as C2_unpaired (no cause allowed).",
+      "fallback_variants": {
+        "sentences": "When change_labels are sentences, {changes} = those sentences joined, then the case line (never 'You changed You accepted…').",
+        "C2_unpaired": "This run also used a new draw, so the difference can't be put down to your edit alone.",
+        "C3_C4_C5": "Other things also differed between these two runs, so the difference can't be put down to your edit alone.",
+        "why": "'a new draw' is false for engine drift (MG 5939033153)."
+      }
     }
   }
 } as const;
 
-export const SPEC_SHA = "a00cb9c817f5938f0cb5c79b4f196c2ef779ed83";
+export const SPEC_SHA = "41b36299ff754a41f0e8a4685342eb069dc865c3";
