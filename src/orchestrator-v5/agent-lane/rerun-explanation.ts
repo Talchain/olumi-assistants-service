@@ -1,21 +1,22 @@
 /**
- * ⭐ M2 — THE RERUN'S EXPLANATION NAMES WHAT THE USER CHANGED, FROM run_delta's TYPED ROWS, AND NEVER CLAIMS A MOVEMENT
- * THE PAIR CANNOT SHOW (RC contract `RERUN-EXPLANATION` @a00cb9c8, policy.ts; DL assignment to MG; lease #85 5939005849).
+ * ⭐ M2 — WHAT CHANGED BETWEEN TWO RUNS IS OLUMI'S OWN LINE, RENDERED FROM run_delta's TYPED ROWS; THE MODEL ONLY SAYS WHY
+ * (RC contract `RERUN-EXPLANATION`, policy.ts; DL assignment to MG; lease #85 5939005849; DL ruling 5940472067: the
+ * input-change claim is CODE-OWNED, MG mechanics 5940496939).
  *
  * The investor moment (R3 5938917543, final seed `eeeff8b4`): Accept Olumi's estimate → Run. No figure changes; the
- * comparison appears for the first time. The explanation must say what the user did ("You accepted Olumi's estimate for
- * how much A changes B.") and, when the earlier Run held its figures back (`win_probabilities_unavailable:
- * 'prior_withheld'`, schemas 0.70.0), that THIS is what held the comparison back — never that anything rose or fell.
+ * comparison appears for the first time. Olumi's line says what the user did ("You accepted Olumi's estimate for how much
+ * A changes B.") and, when the earlier Run held its figures back (`win_probabilities_unavailable: 'prior_withheld'`,
+ * schemas 0.70.0), that THIS is what held the comparison back — never that anything rose or fell.
  *
  * Pure. Read from the TYPED run_delta only (never words; never an inference from an empty array):
- *   · the change sentences — RC's `change_label_templates`, rendered with the graph's labels for the link's node ids
- *     (a `sizing` and a `strength` row on one link are ONE change); a non-link row says its own label, before → after;
- *   · the `MethodInputs` RC's `checkMethodTurn('RERUN-EXPLANATION')` judges the reply on;
- *   · an instruction handing the model those exact sentences, and RC's deterministic fallback for a reply that fails.
- * The CHECK is the control; the instruction only makes a passing reply likely.
- *
- * Inert by construction: no run_delta, or no change rows (a pre-0.70 Accept pair carries none) → no plan, and the
- * route's explanation is exactly what it was.
+ *   · the CODE LINE: rows → RC's `change_label_templates` with the graph's labels for the link's node ids (a `sizing` and a
+ *     `strength` row on one link are ONE change) + the case line; `complete` coverage with no rows → "Nothing you entered
+ *     changed."; anything else → "Olumi can't say what changed between these two runs.";
+ *   · the `MethodInputs` RC's `checkMethodTurn('RERUN-EXPLANATION')` judges on;
+ *   · an instruction handing the model that line, told never to restate whether inputs changed.
+ * The sent text is the code line, then the model's sentences that pass RC's checker beside it (a hit drops that sentence
+ * only: the line above already carries the fact, so a false positive costs a sentence and a false negative can't
+ * contradict the record). No delta (a first Run) → no plan, and the route's explanation is exactly what it was.
  */
 import { checkMethodTurn, type MethodInputs } from './guidance/index.js';
 
@@ -43,14 +44,23 @@ export const RERUN_FALLBACK_LINES = {
   C0: 'Nothing else changed.',
 } as const;
 
+/** Olumi's line when no change row can be named: the record says nothing changed, or it can't say. */
+export const RERUN_NO_CHANGE_LINES = {
+  nothing: 'Nothing you entered changed.',
+  unknown: 'Olumi can’t say what changed between these two runs.',
+  unwithheld: 'Olumi can now compare the options.',
+} as const;
+
 export interface RerunExplanationPlan {
   /** What RC's check judges the reply on. */
   readonly inputs: MethodInputs;
   /** The change sentences, in the producer's order, at most `MAX_NAMED_CHANGES`. */
   readonly changes: readonly string[];
+  /** Olumi's own line from the typed rows: what changed (or that nothing the user entered did, or that it can't say). */
+  readonly codeLine: string;
   /** Appended to the explanation request's instructions. */
   readonly instruction: string;
-  /** RC's deterministic fallback, said when the reply fails the check. */
+  /** Said when the model gives nothing usable: the code line alone. */
   readonly fallback: string;
 }
 
@@ -64,15 +74,20 @@ const value = (v: unknown): string | undefined => {
   return unit === undefined ? shown : `${shown} ${unit}`;
 };
 
-/** The change sentences: one per link (its sizing + strength rows together), one per other row. */
-function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string | undefined): string[] {
+/**
+ * The change sentences: one per link (its sizing + strength rows together), one per other row. `skipped` counts rows no
+ * template can name (unknown link ends, a link `presence` row, a row with no label): those changes happened but go unsaid,
+ * so the line never says "Nothing else changed" beside them (Codex pre-review e1c7c788 P2).
+ */
+function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string | undefined): { sentences: string[]; skipped: number } {
+  let skipped = 0;
   const out: string[] = [];
   const links = new Map<string, { from: string; to: string; sizing?: Rec; strength?: Rec }>();
   for (const row of rows) {
     const link = rec(row.link);
     if (row.entity_kind === 'link' && link !== undefined && (row.field === 'sizing' || row.field === 'strength')) {
       const from = labelOf(String(link.from)); const to = labelOf(String(link.to));
-      if (from === undefined || to === undefined) continue;
+      if (from === undefined || to === undefined) { skipped += 1; continue; }
       const key = `${String(link.from)}->${String(link.to)}`;
       const at = links.get(key) ?? { from, to };
       if (!links.has(key)) { links.set(key, at); out.push(key); }
@@ -81,10 +96,10 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
     }
     const label = text(row.label_after) ?? text(row.label_before);
     const before = value(row.before); const after = value(row.after);
-    if (label === undefined) continue;
+    if (label === undefined) { skipped += 1; continue; }
     out.push(before !== undefined && after !== undefined ? `You changed ${label}: ${before} → ${after}.` : `You changed ${label}.`);
   }
-  return out.map((s) => {
+  const sentences = out.map((s) => {
     const l = links.get(s);
     if (l === undefined) return s;
     const sizedTo = text(rec(l.sizing?.after)?.raw);
@@ -98,8 +113,10 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
         ? `You accepted Olumi's estimate for how much ${l.from} changes ${l.to}: ${band.before} → ${band.after}.` : acceptedEstimate(l.from, l.to);
     }
     if (band?.before !== undefined && band.after !== undefined) return strengthMoved(l.from, l.to, band.before, band.after);
+    skipped += 1;
     return undefined;
-  }).filter((s): s is string => s !== undefined).slice(0, MAX_NAMED_CHANGES);
+  }).filter((s): s is string => s !== undefined);
+  return { sentences: sentences.slice(0, MAX_NAMED_CHANGES), skipped };
 }
 
 type CheckCase = 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
@@ -107,10 +124,10 @@ type CheckCase = 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
 const checkCase = (c: unknown): CheckCase => (c === 'C0_identical' || c === 'C1_attributable' ? c : 'C2_unpaired');
 
 /**
- * The plan for a RERUN's explanation, or `null` when there is nothing typed to name (no delta, no change rows).
+ * The plan for a RERUN's explanation, or `null` when there is no delta (a first Run).
  * `labelOf`: a node id → its label in the graph the Run used; `optionLabels`: the current options' labels;
- * `modelLabels`: EVERY node label, masked before RC's text bans run (#2478: a label like "Qualified leads per month" must
- * never read as the reply saying an option "leads").
+ * `modelLabels`: EVERY node label, masked before RC's text bans run (#2478/#2485: a label like "Qualified leads per month"
+ * must never read as the reply saying an option "leads").
  */
 export function rerunExplanationPlan(
   runDelta: unknown,
@@ -122,11 +139,11 @@ export function rerunExplanationPlan(
   const d = rec(runDelta);
   if (d === undefined) return null;
   const rows = Array.isArray(d.input_changes) ? d.input_changes.map(rec).filter((r): r is Rec => r !== undefined) : [];
-  const changes = changeSentences(rows, labelOf);
-  if (changes.length === 0) return null;
+  const { sentences: changes, skipped } = changeSentences(rows, labelOf);
   // ⛔ Partial or unrecorded coverage never licenses "same inputs" or a cause (CODEX CEE BUDDY preflight 5939219187): other
-  // inputs may have differed unseen, so the pair is judged as unpaired and said as "other things also differed".
-  const coverageComplete = d.input_coverage === 'complete';
+  // inputs may have differed unseen, so the pair is judged as unpaired and said as "other things also differed". A recorded
+  // change no template can name is the same: it differed, unsaid.
+  const coverageComplete = d.input_coverage === 'complete' && skipped === 0;
   const wireCase = coverageComplete ? d.attribution_case : 'coverage_incomplete';
   const priorWithheld = d.win_probabilities_unavailable === 'prior_withheld';
   const noMatched = !priorWithheld && Array.isArray(d.win_probabilities) && d.win_probabilities.length === 0;
@@ -141,27 +158,66 @@ export function rerunExplanationPlan(
     current_option_labels: optionLabels,
     model_labels: modelLabels,
   };
-  const caseLine = priorWithheld ? RERUN_FALLBACK_LINES.unwithheld
-    : wireCase === 'C0_identical' ? RERUN_FALLBACK_LINES.C0
-      : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.C1
-        : wireCase === 'C2_unpaired' ? RERUN_FALLBACK_LINES.C2 : RERUN_FALLBACK_LINES.other;
+  // "Nothing you entered changed" ONLY on a typed, complete, empty record; rows the graph can't name → "can't say".
+  const recordedNothing = coverageComplete && Array.isArray(d.input_changes) && rows.length === 0;
+  const codeLine = changes.length > 0
+    ? `${changes.join(' ')} ${priorWithheld ? RERUN_FALLBACK_LINES.unwithheld
+      : wireCase === 'C0_identical' ? RERUN_FALLBACK_LINES.C0
+        : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.C1
+          : wireCase === 'C2_unpaired' ? RERUN_FALLBACK_LINES.C2 : RERUN_FALLBACK_LINES.other}`
+    : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;
   const instruction = [
-    'This Run follows the user’s change. Start by naming each change in exactly these words, one line each:',
-    ...changes.map((c) => `- ${c}`),
-    'Never say the inputs were the same or that nothing changed: the user changed what is named above.',
+    'Olumi has already told the user, in its own words from the run record, what changed between the two Runs:',
+    `"${codeLine}"`,
+    'Do not repeat that line, and never say whether the inputs changed or stayed the same: that line is the record. Say what this Run shows.',
     priorWithheld
-      ? `Then say: "${RERUN_FALLBACK_LINES.unwithheld}" The earlier Run had no figures, so never say anything rose, fell, moved or changed in value.`
+      ? 'The earlier Run had no figures, so never say anything rose, fell, moved or changed in value.'
       : noMatched
         ? 'No option has figures in both Runs, so never say anything rose, fell or moved; say only what this Run shows.'
         : inputs.attribution_case === 'C1_attributable'
-          ? 'Then say what moved in the comparison.'
+          ? 'You may say what moved in the comparison.'
           : 'Other things also differed between the two Runs, so never say the change caused the difference.',
   ].join('\n');
-  return { inputs, changes, instruction, fallback: `${changes.join(' ')} ${caseLine}` };
+  return { inputs, changes, codeLine, instruction, fallback: codeLine };
 }
 
-/** The reply as sent: the model's when it passes RC's ONE checker (incl. RX-UNWITHHELD-LINE, RX-NO-CONTRARY-SAME, #2483), else RC's fallback. */
-export function guardRerunExplanation(reply: string, plan: RerunExplanationPlan): { readonly text: string; readonly passed: boolean; readonly failed: readonly string[] } {
-  const verdict = checkMethodTurn('RERUN-EXPLANATION', reply, plan.inputs);
-  return verdict.failed.length === 0 ? { text: reply, passed: true, failed: [] } : { text: plan.fallback, passed: false, failed: verdict.failed };
+const SENTENCE_BREAK = /(?<=[.!?])\s+/u;
+const normal = (t: string) => t.replace(/[‘’]/gu, "'").replace(/\s+/gu, ' ').trim().toLowerCase();
+
+/**
+ * The text as sent: Olumi's code line, then each model sentence that passes RC's ONE checker beside it (checked as
+ * `code line + sentence`, so a hit is that sentence's own). A failing sentence is dropped, never the record; a sentence
+ * that only repeats the code line is dropped too. Nothing left → the code line alone.
+ */
+export function composeRerunExplanation(reply: string, plan: RerunExplanationPlan): {
+  readonly text: string; readonly dropped: readonly string[]; readonly failed: readonly string[];
+} {
+  const dropped: string[] = [];
+  const failed = new Set<string>();
+  const own = normal(plan.codeLine);
+  const kept = reply.split(/\r?\n/u).map((line) => line.split(SENTENCE_BREAK).filter((sentence) => {
+    if (sentence.trim() === '' || own.includes(normal(sentence))) return false;
+    const verdict = checkMethodTurn('RERUN-EXPLANATION', `${plan.codeLine}\n${sentence}`, plan.inputs);
+    if (verdict.failed.length === 0) return true;
+    dropped.push(sentence);
+    for (const id of verdict.failed) failed.add(id);
+    return false;
+  }).join(' ')).filter((line) => line.trim() !== '').join('\n').trim();
+  return { text: kept === '' ? plan.codeLine : `${plan.codeLine}\n\n${kept}`, dropped, failed: [...failed] };
+}
+
+/**
+ * The typed provisional view (C5b) is the model's words too (Codex pre-review e1c7c788 P1: "Its chance rose from 40% to
+ * 57%." rode `provisional_view.reasoning` past the check). Each field passes the same bans beside the code line, except the
+ * leader ban: the view IS the labelled provisional leaning the withheld standing permits. Any other hit → not shown.
+ */
+export function rerunViewFailures(view: object, plan: RerunExplanationPlan): string[] {
+  const failed = new Set<string>();
+  for (const field of Object.values(view as Record<string, unknown>)) {
+    if (typeof field !== 'string' || field.trim() === '') continue;
+    for (const id of checkMethodTurn('RERUN-EXPLANATION', `${plan.codeLine}\n${field}`, plan.inputs).failed) {
+      if (id !== 'RX-NO-LEADER-UNLICENSED') failed.add(id);
+    }
+  }
+  return [...failed];
 }

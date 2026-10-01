@@ -3,16 +3,17 @@
  * wire/history/replay"). Request 2 of a result-first Run, with the selected Run's `current_read.run_delta` carrying the
  * final seed's two Accepts and `prior_withheld`. The model is stubbed; the store double reads rows back as the real store
  * does (the `result-first-replay.route` harness).
- *   · a reply claiming a movement → the wire says RC's fallback, no stored row holds the claim, and a replay re-serves the
- *     fallback (never the claim);
- *   · CONTROL: a reply that passes RC's check is sent as written.
+ *   · a reply claiming a movement → the wire says Olumi's code line, no stored row holds the claim, and a replay re-serves
+ *     it (never the claim);
+ *   · CONTROL: a clean model sentence is sent after the code line;
+ *   · the typed provisional view (C5b) with a movement claim is not shown; CONTROL: a clean view is (Codex pre-review P1).
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
-import { rerunExplanationPlan, RERUN_FALLBACK_LINES } from '../rerun-explanation.js';
+import { rerunExplanationPlan } from '../rerun-explanation.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
   analysis_state: Record<string, unknown>;
@@ -35,7 +36,8 @@ const RUN_DELTA = {
 };
 const SAID = "You accepted Olumi's estimate for how much Sprint capacity for AI reporting changes AI reporting module availability.";
 const MOVED = `${SAID}\nAI Reporting Sprint's chance rose to 57%.`;
-const GOOD = `${SAID}\n${RERUN_FALLBACK_LINES.unwithheld}`;
+const WHY = 'The model now shows a provisional comparison of the options.';
+const VIEW = { view: 'I would lean towards AI Reporting Sprint for now.', reasoning: 'It needs the least new capacity.', confirm_step: 'Size the sprint capacity link.' };
 const labels = new Map(GRAPH.nodes.map((n) => [n.id, n.label] as const));
 const FALLBACK = rerunExplanationPlan(RUN_DELTA, (id) => labels.get(id), ['AI Reporting Sprint'], false)!.fallback;
 
@@ -62,7 +64,7 @@ let modelText = MOVED;
 let modelCalls = 0;
 const state = () => ({ ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: '2026-10-01T09:48:47.190Z' } });
 
-type Body = { assistant_text: string; suggested_actions: { id: string }[]; _agent: { session_id: string } };
+type Body = { assistant_text: string; suggested_actions: { id: string }[]; _agent: { session_id: string; provisional_view?: unknown } };
 
 describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches the wire, the stored rows or a replay', () => {
   let app: FastifyInstance;
@@ -112,10 +114,22 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     expect(replay.assistant_text).not.toMatch(/\brose\b/);
   });
 
-  it('CONTROL: a reply that passes RC\'s check (names the Accept, the UNWITHHELD line, no movement) is sent as written', async () => {
-    modelText = GOOD;
+  it('CONTROL: a clean model sentence is sent after Olumi\'s code line', async () => {
+    modelText = WHY;
     const first = (await runTurn(randomUUID())).json() as Body;
     const explained = (await explainTurn(randomUUID(), first)).json() as Body;
-    expect(explained.assistant_text).toContain(GOOD);
+    expect(explained.assistant_text).toContain(`${FALLBACK}\n\n${WHY}`);
+  });
+
+  it.each([
+    ['RED: a movement claim in the typed view\'s reasoning → no provisional view on the wire', { ...VIEW, reasoning: 'Its chance rose from 40% to 57%.' }, false],
+    ['CONTROL: a clean typed view → shown', VIEW, true],
+  ])('%s', async (_n, view, shown) => {
+    modelText = JSON.stringify({ answer: WHY, provisional_view: view });
+    const first = (await runTurn(randomUUID())).json() as Body;
+    const explained = (await explainTurn(randomUUID(), first)).json() as Body;
+    expect(explained.assistant_text).toContain(FALLBACK);
+    expect(explained._agent.provisional_view !== undefined, JSON.stringify(explained._agent.provisional_view ?? null)).toBe(shown);
+    expect(JSON.stringify(explained)).not.toMatch(/\brose\b/);
   });
 });

@@ -1,7 +1,7 @@
 /**
- * ⭐ M2 RERUN-EXPLANATION — the rerun's explanation names the user's change from run_delta's TYPED rows and never claims
- * a movement the pair cannot show (RC contract `RERUN-EXPLANATION` @a00cb9c8 → 6c2c8d7a; DL assignment; lease #85
- * 5939005849). The check is RC's own `checkMethodTurn`, on the label-masked reply (#2478).
+ * ⭐ M2 RERUN-EXPLANATION — what changed between two Runs is Olumi's CODE LINE from run_delta's TYPED rows; the model only
+ * says why, and each of its sentences passes RC's `checkMethodTurn` beside that line or is dropped (DL ruling 5940472067;
+ * MG mechanics 5940496939; RC contract `RERUN-EXPLANATION`; lease #85 5939005849).
  *
  * Fixture: the FINAL investor seed `eeeff8b4` as served (R3 journey-2 `seed-readback.json`, guest 4e53dfa5): its two
  * placeholder links, which the journey's two Accepts turn into accepted estimates (52f8cd 5938955871: exactly two `sizing`
@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { checkMethodTurn } from '../guidance/index.js';
-import { guardRerunExplanation, rerunExplanationPlan, RERUN_FALLBACK_LINES } from '../rerun-explanation.js';
+import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures, RERUN_FALLBACK_LINES, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 
 const LABELS: Record<string, string> = {
   quarterly_revenue: 'Quarterly revenue',
@@ -45,29 +45,53 @@ const UNWITHHELD = {
 };
 const plan = (delta: unknown, licensed = false) => rerunExplanationPlan(delta, labelOf, OPTIONS, licensed, MODEL_LABELS);
 
-describe('the plan: change sentences from the typed rows, the check inputs, the fallback', () => {
-  it('RED (the investor moment): two Accepts → two of RC\'s sentences with the graph\'s labels; prior_withheld is typed', () => {
+const LINE = `${SAID_AI} ${SAID_FIX} ${RERUN_FALLBACK_LINES.unwithheld}`;
+const PAIRED = { ...UNWITHHELD, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] };
+
+describe('the plan: Olumi\'s code line from the typed rows, the check inputs', () => {
+  it('RED (the investor moment): two Accepts → RC\'s two sentences with the graph\'s labels + the UNWITHHELD line; prior_withheld is typed', () => {
     const p = plan(UNWITHHELD)!;
     expect(p.changes).toEqual([SAID_AI, SAID_FIX]);
     expect(p.inputs).toMatchObject({ change_labels: [SAID_AI, SAID_FIX], prior_withheld: true, no_matched_figures: false,
       attribution_case: 'C1_attributable', leader_licensed: false, model_labels: MODEL_LABELS });
-    expect(p.instruction).toContain(SAID_AI);
-    expect(p.instruction).toContain(RERUN_FALLBACK_LINES.unwithheld);
-    expect(p.fallback).toBe(`${SAID_AI} ${SAID_FIX} ${RERUN_FALLBACK_LINES.unwithheld}`);
+    expect(p.codeLine).toBe(LINE);
+    expect(p.fallback).toBe(LINE);
+    expect(p.instruction).toContain(LINE);
+    expect(p.instruction).toContain('never say whether the inputs changed or stayed the same');
+  });
+
+  it('INERT: no run_delta (a first Run) → no plan (the explanation path is exactly as before)', () => {
+    expect(plan(undefined)).toBeNull();
   });
 
   it.each([
-    ['no run_delta (a first Run)', undefined],
-    ['a pre-0.70 Accept pair: no change rows', { attribution_case: 'C1_attributable', input_coverage: 'complete', input_changes: [], win_probabilities: [] }],
-    ['rows whose link ends the graph does not hold', { attribution_case: 'C1_attributable', input_changes: [accept('gone_a', 'gone_b')], win_probabilities: [] }],
-  ])('INERT: %s → no plan (the explanation path is exactly as before)', (_n, delta) => {
-    expect(plan(delta)).toBeNull();
+    ['a typed, COMPLETE, empty record', { attribution_case: 'C0_identical', input_coverage: 'complete', input_changes: [], win_probabilities: [{ option_id: 'x' }] }, RERUN_NO_CHANGE_LINES.nothing],
+    ['… with prior_withheld', { attribution_case: 'C0_identical', input_coverage: 'complete', input_changes: [], win_probabilities: [], win_probabilities_unavailable: 'prior_withheld' }, `${RERUN_NO_CHANGE_LINES.nothing} ${RERUN_NO_CHANGE_LINES.unwithheld}`],
+    ['a PARTIAL empty record (served 6b today)', { attribution_case: 'C2_unpaired', input_coverage: 'partial', input_changes: [], win_probabilities: [] }, RERUN_NO_CHANGE_LINES.unknown],
+    ['a pre-0.70 delta: no input_changes at all', { attribution_case: 'C1_attributable', input_coverage: 'complete', win_probabilities: [] }, RERUN_NO_CHANGE_LINES.unknown],
+    ['rows whose link ends the graph does not hold', { attribution_case: 'C1_attributable', input_coverage: 'complete', input_changes: [accept('gone_a', 'gone_b')], win_probabilities: [] }, RERUN_NO_CHANGE_LINES.unknown],
+  ])('no nameable change: %s → "%s"', (_n, delta, line) => {
+    const p = plan(delta)!;
+    expect(p.codeLine).toBe(line);
+    expect(p.changes).toEqual([]);
+  });
+
+  it('"Nothing you entered changed" ONLY on a complete empty record — a row the graph cannot name is never "nothing"', () => {
+    expect(plan({ ...UNWITHHELD, input_changes: [accept('gone_a', 'gone_b')] })!.codeLine).not.toContain(RERUN_NO_CHANGE_LINES.nothing);
+  });
+
+  it('a change no template can name (a link presence row) beside a named Accept: never "Nothing else changed", checked as unpaired (Codex pre-review P2)', () => {
+    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'qualified_leads', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
+    const p = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: [AI, presence] })!;
+    expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
+    expect(p.codeLine).not.toContain(RERUN_FALLBACK_LINES.C0);
+    expect(p.inputs.attribution_case).toBe('C2_unpaired');
   });
 
   it('prior_withheld is never inferred from an empty array: empty win shares WITHOUT the typed reason → no_matched_figures, not UNWITHHELD', () => {
     const p = plan({ ...UNWITHHELD, win_probabilities_unavailable: undefined })!;
     expect(p.inputs).toMatchObject({ prior_withheld: false, no_matched_figures: true });
-    expect(p.fallback).toBe(`${SAID_AI} ${SAID_FIX} ${RERUN_FALLBACK_LINES.C1}`);
+    expect(p.codeLine).toBe(`${SAID_AI} ${SAID_FIX} ${RERUN_FALLBACK_LINES.C1}`);
   });
 
   it('one sentence per link: a sizing (→ user) and a strength row on ONE link are one change', () => {
@@ -75,6 +99,13 @@ describe('the plan: change sentences from the typed rows, the check inputs, the 
     const band = { ...AI, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' } };
     expect(plan({ ...UNWITHHELD, input_changes: [own, band] })!.changes).toEqual([
       'You gave your own estimate for how much Sprint capacity for AI reporting changes AI reporting module availability: moderate → strong.',
+    ]);
+  });
+
+  it('the Accept is never folded away: sizing → olumi_accepted + a band move on ONE link keeps "You accepted"', () => {
+    const band = { ...AI, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' } };
+    expect(plan({ ...UNWITHHELD, input_changes: [AI, band] })!.changes).toEqual([
+      "You accepted Olumi's estimate for how much Sprint capacity for AI reporting changes AI reporting module availability: moderate → strong.",
     ]);
   });
 
@@ -91,103 +122,110 @@ describe('the plan: change sentences from the typed rows, the check inputs, the 
     ['C3_engine_drift', RERUN_FALLBACK_LINES.other],
     ['C5_unattributed', RERUN_FALLBACK_LINES.other],
   ])('the case line for %s (C3–C5 are checked as C2 and never say "a new draw")', (c, line) => {
-    const p = plan({ ...UNWITHHELD, attribution_case: c, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] })!;
-    expect(p.fallback.endsWith(line)).toBe(true);
+    const p = plan({ ...PAIRED, attribution_case: c })!;
+    expect(p.codeLine.endsWith(line)).toBe(true);
     expect(p.inputs.attribution_case).toBe(c === 'C0_identical' ? 'C0_identical' : 'C2_unpaired');
+  });
+
+  it.each(['partial', 'not_recorded', undefined])('coverage %s never licenses "same inputs" or a cause: checked as unpaired, said as "other things also differed"', (coverage) => {
+    const p2 = plan({ ...PAIRED, attribution_case: 'C0_identical', input_coverage: coverage })!;
+    expect(p2.inputs.attribution_case).toBe('C2_unpaired');
+    expect(p2.codeLine.endsWith(RERUN_FALLBACK_LINES.other)).toBe(true);
+    expect(p2.codeLine).not.toContain(RERUN_FALLBACK_LINES.C0);
   });
 
   it.each([
     ['UNWITHHELD', UNWITHHELD],
-    ['C0', { ...UNWITHHELD, attribution_case: 'C0_identical', win_probabilities_unavailable: undefined }],
-    ['C2', { ...UNWITHHELD, attribution_case: 'C2_unpaired', win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] }],
-    ['C3', { ...UNWITHHELD, attribution_case: 'C3_engine_drift', win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] }],
-  ])('the FALLBACK itself passes RC\'s check (%s)', (_n, delta) => {
+    ['C0', { ...PAIRED, attribution_case: 'C0_identical' }],
+    ['C2', { ...PAIRED, attribution_case: 'C2_unpaired' }],
+    ['C3', { ...PAIRED, attribution_case: 'C3_engine_drift' }],
+    ['nothing', { attribution_case: 'C0_identical', input_coverage: 'complete', input_changes: [], win_probabilities: [{ option_id: 'x' }] }],
+    ['nothing + withheld', { attribution_case: 'C0_identical', input_coverage: 'complete', input_changes: [], win_probabilities: [], win_probabilities_unavailable: 'prior_withheld' }],
+    ['unknown', { attribution_case: 'C2_unpaired', input_coverage: 'partial', input_changes: [], win_probabilities: [] }],
+    ['unknown + withheld', { attribution_case: 'C2_unpaired', input_coverage: 'partial', input_changes: [], win_probabilities: [], win_probabilities_unavailable: 'prior_withheld' }],
+  ])('the CODE LINE alone passes RC\'s check (%s) — so a sentence beside it is judged on its own words', (_n, delta) => {
     const p = plan(delta)!;
-    expect(checkMethodTurn('RERUN-EXPLANATION', p.fallback, p.inputs)).toMatchObject({ pass: true, failed: [] });
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 });
 
-describe('the guard: RC\'s check before send, RC\'s fallback on a fail', () => {
+describe('the composer: the code line first, then the model\'s sentences that pass RC\'s checker beside it', () => {
   const p = plan(UNWITHHELD)!;
-  const GOOD = `${SAID_AI}\n${SAID_FIX}\n${RERUN_FALLBACK_LINES.unwithheld} The model now shows a provisional comparison of the four options.`;
+  const WHY = 'The model now shows a provisional comparison of the four options.';
 
-  it('CONTROL: a reply naming both changes with the UNWITHHELD line and no movement → sent as written', () => {
-    expect(guardRerunExplanation(GOOD, p)).toEqual({ text: GOOD, passed: true, failed: [] });
+  it('CONTROL: a clean model paragraph is sent after the code line, as written', () => {
+    expect(composeRerunExplanation(WHY, p)).toEqual({ text: `${LINE}\n\n${WHY}`, dropped: [], failed: [] });
   });
 
-  it('RED (RX-NO-MOVEMENT-WITHOUT-PRIOR): "rose" with no prior figures → RC\'s fallback, never the claim', () => {
-    const r = guardRerunExplanation(`${GOOD} AI Reporting Module Sprint's chance rose to 57%.`, p);
-    expect(r).toMatchObject({ passed: false, text: p.fallback });
+  it('a model sentence that only repeats the code line is dropped silently (the record is said once)', () => {
+    expect(composeRerunExplanation(`${SAID_AI}\n${RERUN_FALLBACK_LINES.unwithheld} ${WHY}`, p)).toEqual({ text: `${LINE}\n\n${WHY}`, dropped: [], failed: [] });
+  });
+
+  it('RED (RX-NO-MOVEMENT-WITHOUT-PRIOR): the "rose" sentence is dropped, the honest one kept — never the claim', () => {
+    const r = composeRerunExplanation(`${WHY} AI Reporting Module Sprint's chance rose to 57%.`, p);
+    expect(r.text).toBe(`${LINE}\n\n${WHY}`);
     expect(r.failed).toContain('RX-NO-MOVEMENT-WITHOUT-PRIOR');
+    expect(r.dropped).toEqual(["AI Reporting Module Sprint's chance rose to 57%."]);
   });
 
-  it('RED (RX-NAMES-CHANGES): a reply that leaves out one Accept → fallback', () => {
-    const r = guardRerunExplanation(`${SAID_AI}\n${RERUN_FALLBACK_LINES.unwithheld}`, p);
-    expect(r.failed).toContain('RX-NAMES-CHANGES');
-    expect(r.text).toBe(p.fallback);
+  it('every model sentence fails → the code line alone', () => {
+    expect(composeRerunExplanation("AI Reporting Module Sprint's chance rose to 57%.", p).text).toBe(LINE);
   });
 
-  it('RED (RX-NO-LEADER-UNLICENSED): an unlicensed option said to lead → fallback', () => {
-    const r = guardRerunExplanation(`${GOOD} AI Reporting Module Sprint leads the comparison.`, p);
+  it('RED (RX-NO-LEADER-UNLICENSED): an unlicensed option said to lead is dropped', () => {
+    const r = composeRerunExplanation(`${WHY} AI Reporting Module Sprint leads the comparison.`, p);
     expect(r.failed).toContain('RX-NO-LEADER-UNLICENSED');
+    expect(r.text).toBe(`${LINE}\n\n${WHY}`);
   });
 
-  it('CONTROL (RC MT-RERUN-MODEL-LABEL-GOOD): a MODEL label containing "leads", beside an option, is masked — not a leader claim', () => {
+  it('CONTROL (RC MT-RERUN-MODEL-LABEL-GOOD): a MODEL label containing "leads", beside an option, is masked — kept', () => {
     // Without the mask this sentence holds an option label AND "leads", so RX-NO-LEADER-UNLICENSED would fire.
-    const reply = `${GOOD} Continue Current Plan keeps Qualified leads per month where it was.`;
-    expect(guardRerunExplanation(reply, p)).toMatchObject({ passed: true, text: reply });
+    const reply = 'Continue Current Plan keeps Qualified leads per month where it was.';
+    expect(composeRerunExplanation(reply, p)).toMatchObject({ text: `${LINE}\n\n${reply}`, dropped: [] });
     const unmasked = rerunExplanationPlan(UNWITHHELD, labelOf, OPTIONS, false, []);
-    expect(guardRerunExplanation(reply, unmasked!).failed, 'the contrast: without model_labels it reads as a leader claim').toContain('RX-NO-LEADER-UNLICENSED');
+    expect(composeRerunExplanation(reply, unmasked!).failed, 'the contrast: without model_labels it reads as a leader claim').toContain('RX-NO-LEADER-UNLICENSED');
   });
 
-  // ⛔ CODEX CEE BUDDY draft CR 5939351197 P1: model-reply bypasses RC's text bans did not reject.
+  // ⛔ DL ruling 5940472067: no phrase list is the control — the CODE LINE leads every sent text, so no model sentence can
+  // replace the record. HARNESS's 7 outside lines (5940373987) + Codex's (pre-review e1c7c788) + the 2 honest ones.
   it.each([
-    ['a partial Accept delta + "The same input values were used."', { ...UNWITHHELD, input_coverage: 'partial', win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] }, 'The same input values were used.'],
-    ['a complete Accept + "Nothing in your model changed."', UNWITHHELD, `${RERUN_FALLBACK_LINES.unwithheld} Nothing in your model changed.`],
-  ])('RED (RX-NO-CONTRARY-SAME): %s → fallback', (_n, delta, extra) => {
-    const p3 = plan(delta)!;
-    const r = guardRerunExplanation(`${SAID_AI}\n${SAID_FIX}\n${extra}`, p3);
+    'Nothing changed.', 'It used the same inputs.', 'The inputs were unchanged.', 'No inputs were changed.', 'This didn’t change anything.',
+    'Nothing in your model has changed.', 'Nothing in your model was changed.', 'None of your inputs changed.', 'Your model is unchanged.',
+    'Your model hasn’t changed.', 'The inputs stayed the same.', 'The other inputs were unchanged.', 'Everything else used the same inputs.',
+  ])('whatever the model says ("%s"), the sent text opens on the code line', (line) => {
+    const r = composeRerunExplanation(`${WHY} ${line}`, p);
+    expect(r.text.startsWith(`${LINE}\n\n${WHY}`)).toBe(true);
+  });
+
+  it.each(['You ran it with the same input values.', 'Nothing in your model changed.'])('RED (RX-NO-CONTRARY-SAME, on staging today): "%s" is dropped', (line) => {
+    const r = composeRerunExplanation(`${WHY} ${line}`, p);
     expect(r.failed).toContain('RX-NO-CONTRARY-SAME');
-    expect(r.text).toBe(p3.fallback);
+    expect(r.text).toBe(`${LINE}\n\n${WHY}`);
   });
 
-  it('CONTROL: RC\'s own C0 line "Nothing else changed." is not a contrary claim', () => {
-    const c0 = plan({ ...UNWITHHELD, attribution_case: 'C0_identical', win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] })!;
-    expect(guardRerunExplanation(c0.fallback, c0)).toMatchObject({ passed: true });
-  });
-
-  it('RED (RX-UNWITHHELD-LINE): with prior_withheld, the change sentences alone are not enough → fallback', () => {
-    const r = guardRerunExplanation(`${SAID_AI}\n${SAID_FIX}`, p);
-    expect(r.failed).toEqual(['RX-UNWITHHELD-LINE']);
-    expect(r.text).toBe(p.fallback);
-  });
-
-  it('the Accept is never folded away: sizing → olumi_accepted + a band move on ONE link keeps "You accepted"', () => {
-    const band = { ...AI, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' } };
-    expect(plan({ ...UNWITHHELD, input_changes: [AI, band] })!.changes).toEqual([
-      "You accepted Olumi's estimate for how much Sprint capacity for AI reporting changes AI reporting module availability: moderate → strong.",
-    ]);
-  });
-
-  it('CONTROL (buddy preflight 5939219187): a PAIRED, licensed C1 rerun with win shares on both sides MAY say what moved', () => {
-    const paired = plan({ ...UNWITHHELD, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'ai_reporting_module_sprint' }] }, true)!;
+  it('CONTROL (buddy preflight 5939219187): a PAIRED, licensed C1 rerun MAY say what moved', () => {
+    const paired = plan(PAIRED, true)!;
     expect(paired.inputs).toMatchObject({ prior_withheld: false, no_matched_figures: false, leader_licensed: true });
-    const moved = `${SAID_AI}\n${SAID_FIX}\nAI Reporting Module Sprint's chance rose to 57% and it leads the comparison.`;
-    expect(guardRerunExplanation(moved, paired)).toMatchObject({ passed: true, text: moved });
+    const moved = "AI Reporting Module Sprint's chance rose to 57% and it leads the comparison.";
+    expect(composeRerunExplanation(moved, paired)).toMatchObject({ dropped: [], text: `${paired.codeLine}\n\n${moved}` });
   });
 
-  it.each(['partial', 'not_recorded', undefined])('coverage %s never licenses "same inputs" or a cause: checked as unpaired, said as "other things also differed"', (coverage) => {
-    const p2 = plan({ ...UNWITHHELD, attribution_case: 'C0_identical', input_coverage: coverage, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] })!;
-    expect(p2.inputs.attribution_case).toBe('C2_unpaired');
-    expect(p2.fallback.endsWith(RERUN_FALLBACK_LINES.other)).toBe(true);
-    expect(p2.fallback).not.toContain(RERUN_FALLBACK_LINES.C0);
+  it('a C2 pair: a causal sentence is dropped (RX-NO-CAUSE-UNPAIRED); a C1 pair may state the cause', () => {
+    const causal = 'The shift happened because of your change.';
+    expect(composeRerunExplanation(causal, plan({ ...PAIRED, attribution_case: 'C2_unpaired' })!).failed).toContain('RX-NO-CAUSE-UNPAIRED');
+    expect(composeRerunExplanation(causal, plan(PAIRED)!).dropped).toEqual([]);
+  });
+});
+
+describe('the typed provisional view is the model\'s words too (Codex pre-review e1c7c788 P1)', () => {
+  const p = plan(UNWITHHELD)!;
+  const view = { view: 'For now, AI Reporting Module Sprint leads my provisional view.', reasoning: 'It needs the least new capacity.', confirm_step: 'Size the integration fix link.' };
+
+  it('RED: "Its chance rose from 40% to 57%." in reasoning, with no prior figures → fails RX-NO-MOVEMENT-WITHOUT-PRIOR', () => {
+    expect(rerunViewFailures({ ...view, reasoning: 'Its chance rose from 40% to 57%.' }, p)).toEqual(['RX-NO-MOVEMENT-WITHOUT-PRIOR']);
   });
 
-  it('a C2 pair: a causal word is refused (RX-NO-CAUSE-UNPAIRED); a C1 pair may state the cause', () => {
-    const c2 = plan({ ...UNWITHHELD, attribution_case: 'C2_unpaired', win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] })!;
-    const causal = `${SAID_AI}\n${SAID_FIX}\nThe shift happened because of your change.`;
-    expect(guardRerunExplanation(causal, c2).failed).toContain('RX-NO-CAUSE-UNPAIRED');
-    const c1 = plan({ ...UNWITHHELD, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] })!;
-    expect(guardRerunExplanation(causal, c1).failed).not.toContain('RX-NO-CAUSE-UNPAIRED');
+  it('CONTROL: a labelled provisional leaning (leader words) passes — the view IS the permitted provisional leaning', () => {
+    expect(rerunViewFailures(view, p)).toEqual([]);
   });
 });
