@@ -16,17 +16,17 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
 };
 
 describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
-  it('imports all 35 cases and all 22 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(22);
+  it('imports all 35 cases and all 24 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(24);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('9c8943188b4b2f6053e7fa80fd94760923ac7829');
+    expect(SPEC_SHA).toBe('aeefbb3d2fe392d31e77977b321c5ab255ede9b7');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('7bdd7234741cbd0a4bf0a0567b421e0a7289de9c608cfa53474bdc5077720064');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('a2de52986b35518eb1e232341cb90d160fe81b647ff43e8c628dc578c4249b19');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('a23e827cf4f5298c126126f6527a420a5cb410512980f049ae4358c94e73e6a8');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('08a978c3160cdeb6ded7a2bc4366608271634e6f420846c7d34bb8d2814c0dce');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });
@@ -246,6 +246,19 @@ describe('all deterministic text post-check ids, including methods without vendo
     expect(checkMethodTurn('RERUN-EXPLANATION', '\u2018Raise price\u2019 now leads.', lead).failed).toContain('RX-NO-LEADER-UNLICENSED');
     // Control: the whole label is still masked.
     expect(checkMethodTurn('RERUN-EXPLANATION', '\u2018Raise price\u2019 changes Lead.', lead).failed).not.toContain('RX-NO-LEADER-UNLICENSED');
+  });
+  it('masking is PER BAN: a label is blanked only for a ban it trips itself, never when it is only banned words (#2480 CR P1 #4)', () => {
+    // The CR probe: an unrelated label 'Will' must not hide Olumi's prediction.
+    expect(checkMethodTurn('RC-PREMORTEM', 'This plan will fail.', { model_labels: ['Will'] }).failed).toContain('PM-NO-PREDICTION');
+    // A label that IS the banned word fails closed; 'Odd' never matches inside 'odds'.
+    expect(checkMethodTurn('RC-PREMORTEM', 'The odds are poor.', { model_labels: ['Odds'] }).failed).toContain('PM-NO-PROB');
+    expect(checkMethodTurn('RC-PREMORTEM', 'The odds are poor.', { model_labels: ['Odd'] }).failed).toContain('PM-NO-PROB');
+    expect(checkMethodTurn('RERUN-EXPLANATION', '\u2018Raise price\u2019 now leads.', { current_option_labels: ['Raise price'], model_labels: ['Leads', 'Raise price'], leader_licensed: false }).failed).toContain('RX-NO-LEADER-UNLICENSED');
+    // Controls: a longer label carrying the ban is still the user's word.
+    expect(checkMethodTurn('RC-PREMORTEM', 'Enterprise prospect signing likelihood stayed flat.', { model_labels: ['Will', 'Enterprise prospect signing likelihood'] }).failed).not.toContain('PM-NO-PROB');
+    expect(checkMethodTurn('RC-PREMORTEM', 'Cut Burn Rate by 30% slipped.', { model_labels: ['Cut Burn Rate by 30%'] }).failed).not.toContain('PM-NO-PROB');
+    expect(checkMethodTurn('RC-WHAT-CHANGES', 'Price elasticity of demand decides it.', { factor_label: 'Price elasticity of demand' }).failed).not.toContain('WC-BANNED');
+    expect(checkMethodTurn('RC-WHAT-CHANGES', 'Price elasticity of demand decides it; elasticity is high.', { factor_label: 'Price elasticity of demand' }).failed).toContain('WC-BANNED');
   });
   it('Coach edits requires the stale line only for a stale run', () => {
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);
