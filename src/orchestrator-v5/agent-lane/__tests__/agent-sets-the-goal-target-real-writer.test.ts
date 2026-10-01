@@ -445,6 +445,25 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     // ≤1 ask (AIQ CR 5924479737): the whole host paragraph is the line — no ask beside the card.
     expect(t1.assistant_text.split('\n\n').find((para) => para.startsWith('Not included in this proposal: "')), 'the whole host paragraph').toBe(LINE);
   }, 180_000);
+  it('CODEX 5924466561: the served E1 card writes NOTHING before approval, and a cold replay of the same turn returns the same card and line', async () => {
+    graphOf.set(SCENARIO, servedSiblingsSeed());
+    const before = JSON.stringify(graphNow());
+    const turnId = randomUUID();
+    script = [
+      () => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 1000000, unit: '£', rationale: 'Paul stated his target.', current_level: { value: 0, unit: '£' } }),
+      () => say('Shall I record it?'),
+    ];
+    const t1 = await turn({ message: PAUL, turn_id: turnId });
+    expect(approveChipOf(t1)).toHaveLength(1);
+    expect(systemEvents(), 'a proposal writes nothing').toEqual([]);
+    expect(registrations, 'no level write').toEqual([]);
+    expect(JSON.stringify(graphNow()), 'the stored model is untouched').toBe(before);
+    const callsBefore = openAiCalls;
+    const replay = await turn({ message: PAUL, turn_id: turnId });
+    expect(openAiCalls - callsBefore, 'a replay makes no model call').toBe(0);
+    expect(replay.assistant_text, 'the same words, the not-included line included').toBe(t1.assistant_text);
+    expect(approveChipOf(replay).map((c) => c.id), 'the same card').toEqual(approveChipOf(t1).map((c) => c.id));
+  }, 180_000);
   it('CONTROL: the same answer on a draft with NO sibling "…secured" labels binds his £0 to the card, and no "not recorded" line', async () => {
     graphOf.set(SCENARIO, { ...fundingSeed(), nodes: fundingSeed().nodes.map((n) => (n.id === 'goal_mrr' ? { ...n, label: 'Funding secured' } : n)) });
     const t1 = await proposeFunding(0);
