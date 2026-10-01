@@ -100,6 +100,7 @@ import {
 import { ADD_CONSTRAINT_USER_GUIDANCE,
   SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
 } from './d1-shared/user-guidance.js';
+import { retireNormalisingGoalFrame } from '../../agent-lane/normalising-goal-frame.js';
 
 /**
  * Parameter Zod schema. The brief originally listed
@@ -1503,6 +1504,10 @@ export function createAddConstraintHandler(): HandlerFn {
             };
           }
         }
+        // ⭐ F4 (R3 #75 5922368144): a target or level landing on a goal read on a normalising frame retires that frame
+        // and re-derives the user's own sizes into it, so the analysis is the same as a build with this target present.
+        const retired = retireNormalisingGoalFrame(clone);
+        if (retired !== clone) { clone.nodes = retired.nodes; clone.edges = retired.edges; }
         return {
           // ⛔ ON A CORRECTION `before` IS THE SOURCE ROW (Codex CX-195). It
           // was `null` because `existing` is undefined by construction on a
