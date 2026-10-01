@@ -488,6 +488,7 @@ describe('tryClarificationResume — kind classification regression', () => {
     // quantity onto an option->factor cell, so it fails closed as mutating for
     // the same reason its model-unit sibling does.
     elicit_option_native_quantity: 'mutating',
+    elicit_link_size: 'mutating',
     // Reserved graph-mutating kinds (depend on graph_hash per the
     // PendingAction docstring). Classifying as `mutating` now means
     // they fail closed when wired, rather than slipping through the

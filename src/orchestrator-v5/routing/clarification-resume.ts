@@ -288,6 +288,9 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // skip the divergence guard, and because the cell's identity can be
   // invalidated by a rename or removal between the ask and the answer.
   elicit_option_native_quantity: 'mutating',
+  // The Agent lane's link-size ask: answering it ends in a user_stated link size, and either end can be renamed or
+  // removed between the ask and the answer — fail-closed MUTATING, as its siblings.
+  elicit_link_size: 'mutating',
   // ROADMAP 2.1353 — the two value-ask exits' offered cells. Not resumed by
   // this module today, and classified MUTATING for exactly 2.1352's reasoning:
   // answering "which of these does your 0.12 belong to?" WRITES an

@@ -94,6 +94,27 @@ export interface ElicitTargetBaselineFields {
  * Fields are derived from `deriveMissingEffectPairs` (the estate's ONE owner of
  * "which effect value is outstanding"), never re-stated at the emit site.
  */
+/**
+ * ⭐ THE LINK-SIZE ASK, RECORDED (R3 #75 5926021003 (a); DL 5926075678; MG lease 5926052489). The host asked "How much
+ * does one more <source> add to <target>, in £?"; the answer row records WHAT it asked, so the very next user turn's
+ * bare "About £20,000" can be read against THIS question: the per-one, both ends and the direction come from here,
+ * never re-parsed from reply prose. Agent lane only, one turn long (the next answer row does not carry it).
+ */
+export interface ElicitLinkSizeFields {
+  readonly from_id: string;
+  readonly to_id: string;
+  readonly source_label: string;
+  readonly target_label: string;
+  /** What one more of the source is: its count noun ("conversations") or its own unit. */
+  readonly per_unit: string;
+  /** The unit the answer is asked in (the target's): "£". */
+  readonly amount_unit: string;
+  /** The link's stored direction: the answer's sign must agree. */
+  readonly direction: 1 | -1;
+  /** The analysis revision the ask was put against: a moved model never binds an old answer. */
+  readonly graph_hash: string;
+}
+
 export interface ElicitOptionEffectFields {
   readonly option_id: string;
   readonly option_label: string;
@@ -585,7 +606,15 @@ export type PendingActionAction =
       /** Stable public copy captured at emit time. */
       readonly public_label: string;
       readonly public_message: string;
-    };
+    }
+  | ({
+      /**
+       * The Agent lane's link-size ask (see {@link ElicitLinkSizeFields}). Server-only, no wire `action_type`, no
+       * migration. NOT a recorded ask (no 12-turn / 30-minute widening: it answers only the very next turn) and it
+       * claims no bare number for route-v2's elliptical carry — the Agent lane's own door reads it.
+       */
+      readonly kind: 'elicit_link_size';
+    } & ElicitLinkSizeFields);
 
 export type PendingActionKind = PendingActionAction['kind'];
 
@@ -633,6 +662,9 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   // Deliberately ABSENT from the short-confirm resumer's local
   // RESUMABLE_KINDS: a bare "yes" answers no "give me a number" question.
   'elicit_option_effect',
+  // MANDATORY for the same reason: `parsePendingAction` reads only these kinds back. Read by the Agent lane's
+  // link-size door on the very next turn (R3 5926021003 (a)).
+  'elicit_link_size',
   // Answering it WRITES a native quantity onto the named cell, so it resumes
   // for the same reason its model-unit sibling does.
   'elicit_option_native_quantity',
@@ -907,6 +939,7 @@ export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = 
   // "What does <option> cost, in <unit>?" — a recorded question awaiting the
   // user's own figure, which is the defining case for the longer ask window.
   elicit_option_native_quantity: true,
+  elicit_link_size: false, // one turn only; read by the Agent lane's door, never route-v2's carry
   elicit_effect_target: true, // "which of these does your number belong to?"
   elicit_edit_target: true, // "which factor, edge, option or value?"
   elicit_goal_target: true, // "what value counts as success for <goal>?"
@@ -1258,6 +1291,7 @@ export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean>
   // returns `other_question`, so a native amount can never be written into a
   // [0,1] slot by that path. Fail-safe by construction.
   elicit_option_native_quantity: true,
+  elicit_link_size: false, // one turn only; read by the Agent lane's door, never route-v2's carry
   elicit_target_baseline: true, // "Roughly what percentage is X at right now?"
   elicit_option_effect: true, // "give me a number from 0 to 1"
   elicit_effect_target: true, // "which of these does your number belong to?"
@@ -1611,6 +1645,14 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     // reaches a composer that then renders it.
     if (a.attempt !== undefined
       && (typeof a.attempt !== 'number' || !Number.isInteger(a.attempt) || a.attempt < 1)) return null;
+  }
+  if (a.kind === 'elicit_link_size') {
+    // EVERY field REQUIRED: the bare answer takes its per-one, both ends, its unit and its direction from this record
+    // alone (R3 5926021003 (a), condition 1). A row missing any of them cannot say what was asked, so it binds nothing.
+    for (const k of ['from_id', 'to_id', 'source_label', 'target_label', 'per_unit', 'amount_unit', 'graph_hash'] as const) {
+      if (typeof a[k] !== 'string' || (a[k] as string).length === 0) return null;
+    }
+    if (a.direction !== 1 && a.direction !== -1) return null;
   }
   if (a.kind === 'elicit_effect_target') {
     // ROADMAP 2.1353 — all three fields REQUIRED, and `candidates` NON-EMPTY.
