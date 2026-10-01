@@ -26,6 +26,16 @@ describe('the strict door reads a shared word by the rivals\' own qualifiers', (
     expect(figureTheUserWroteFor(0, '£', ANSWER, { target: ['Investment-firm funding secured'], others: others('Investment-firm funding secured', LABELS_0341Z), strict: true })).toBe(false);
   });
 
+  it('R3 5924889786: "Total funding secured" only GENERALISES "Funding secured" — a duplicate total, so his unqualified £0 ties and is refused', () => {
+    const labels = ['Funding secured', 'Total funding secured'];
+    expect(figureTheUserWroteFor(0, '£', ANSWER, { target: ['Funding secured'], others: others('Funding secured', labels), strict: true })).toBe(false);
+  });
+
+  it('…control: a rival whose extra words NARROW as well ("Total angel funding secured") still loses the unqualified £0 to the goal', () => {
+    const labels = ['Funding secured', 'Total angel funding secured'];
+    expect(figureTheUserWroteFor(0, '£', ANSWER, { target: ['Funding secured'], others: others('Funding secured', labels), strict: true })).toBe(true);
+  });
+
   it('control: "secured £0 from angels" is the angel outcome\'s, not the goal\'s (the qualifier is written)', () => {
     const t = 'We have secured £0 from angels so far.';
     expect(figureTheUserWroteFor(0, '£', t, { target: ['Angel funding secured'], others: others('Angel funding secured', LABELS_0341Z), strict: true })).toBe(true);

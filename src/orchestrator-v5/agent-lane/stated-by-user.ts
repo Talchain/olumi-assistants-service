@@ -496,6 +496,9 @@ export function writtenRangeFor(
  * caller says which (`EntityScope.rivals`). `EntityScope.strict` reads rate owners and conjunctions, and refuses rule 4
  * among two figures or more. Every miss fails toward under-claiming: the figure is left unset or recorded as Olumi's, and said.
  */
+/** Words that widen a label to the same whole rather than narrowing it (R3 #75 5924889786). */
+const GENERALISERS = ['total', 'overall', 'combined', 'all'];
+
 export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
   const family = unitPhraseFamily(unit);
@@ -561,7 +564,9 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
         const tOwn = t.filter((x) => !r.some((y) => sameWord(x, y)));
         const rOwn = r.filter((y) => !t.some((x) => sameWord(x, y)));
         const tIn = inClause(tOwn); const rIn = inClause(rOwn);
-        return (tIn && !rIn) || (!tIn && !rIn && tOwn.length === 0 && rOwn.length > 0);
+        // R3 5924889786: the target wins on GENERALITY only over a rival that NARROWS it (a source, segment or kind:
+        // "angel", "investment-firm", "monthly"). "Total"/"overall"/"combined"/"all" name the same whole: a duplicate total, a tie.
+        return (tIn && !rIn) || (!tIn && !rIn && tOwn.length === 0 && rOwn.some((y) => !GENERALISERS.some((g) => sameWord(g, y))));
       }));
     };
     const firstMention = (ws: readonly string[]): 'target' | 'other' | null => {
