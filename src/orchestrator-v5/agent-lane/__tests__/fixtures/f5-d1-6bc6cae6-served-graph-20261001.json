@@ -1,0 +1,656 @@
+{
+ "edges": [
+  {
+   "to": "build_ai_reporting",
+   "from": "how_should_i_approach_this_trade_off",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "fix_integration_bug",
+   "from": "how_should_i_approach_this_trade_off",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "split_sprint",
+   "from": "how_should_i_approach_this_trade_off",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "carry_on_as_now",
+   "from": "how_should_i_approach_this_trade_off",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "sprint_capacity_for_ai_reporting",
+   "from": "build_ai_reporting",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "sprint_capacity_for_integration_bug_fix",
+   "from": "build_ai_reporting",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "sprint_capacity_for_ai_reporting",
+   "from": "fix_integration_bug",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "sprint_capacity_for_integration_bug_fix",
+   "from": "fix_integration_bug",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "sprint_capacity_for_ai_reporting",
+   "from": "split_sprint",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "sprint_capacity_for_integration_bug_fix",
+   "from": "split_sprint",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "sprint_capacity_for_ai_reporting",
+   "from": "carry_on_as_now",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "sprint_capacity_for_integration_bug_fix",
+   "from": "carry_on_as_now",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "ai_reporting_module_readiness",
+   "from": "sprint_capacity_for_ai_reporting",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.25
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_placeholder",
+    "natural_effect": {
+     "amount": 25,
+     "amount_unit": "percentage points",
+     "strength_mean": 0.25,
+     "per_source_change": 100,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "% of upcoming sprint"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "profile_setup_abandonment_rate",
+   "from": "sprint_capacity_for_integration_bug_fix",
+   "strength": {
+    "std": 0.01875,
+    "mean": -0.0375
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_placeholder",
+    "natural_effect": {
+     "amount": -3.75,
+     "amount_unit": "percentage points",
+     "strength_mean": -0.0375,
+     "per_source_change": 100,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "% of upcoming sprint"
+    }
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "enterprise_deal_loss_from_missed_ai_deadline",
+   "from": "ai_reporting_module_readiness",
+   "strength": {
+    "std": 0.5,
+    "mean": -1
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": -1,
+     "amount_unit": "percentage points",
+     "strength_mean": -1,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "%"
+    }
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "enterprise_deal_closed",
+   "from": "enterprise_deal_loss_from_missed_ai_deadline",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "trial_profiles_completed",
+   "from": "profile_setup_abandonment_rate",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "trial_profiles_completed",
+   "from": "trial_signup_flow_entrants",
+   "strength": {
+    "std": 0.425,
+    "mean": 0.85
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": 0.85,
+     "amount_unit": "profiles/quarter",
+     "strength_mean": 0.85,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "trial signups/quarter"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "enterprise_deal_revenue",
+   "from": "enterprise_deal_closed",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "enterprise_deal_revenue",
+   "from": "enterprise_deal_value",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "trial_flow_revenue",
+   "from": "trial_profiles_completed",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "trial_flow_revenue",
+   "from": "revenue_per_completed_trial_profile",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "quarterly_revenue",
+   "from": "enterprise_deal_revenue",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "quarterly_revenue",
+   "from": "trial_flow_revenue",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  }
+ ],
+ "nodes": [
+  {
+   "id": "how_should_i_approach_this_trade_off",
+   "ref": "D1",
+   "kind": "decision",
+   "label": "How should I approach this trade-off?",
+   "provenance": "from_brief"
+  },
+  {
+   "id": "quarterly_revenue",
+   "ref": "G1",
+   "kind": "goal",
+   "label": "quarterly revenue",
+   "provenance": "ai_inferred",
+   "goal_threshold_unit": "currency/quarter",
+   "goal_threshold_frame": "level"
+  },
+  {
+   "id": "build_ai_reporting",
+   "ref": "O1",
+   "kind": "option",
+   "label": "Build AI Reporting",
+   "provenance": "ai_inferred",
+   "interventions": {
+    "sprint_capacity_for_ai_reporting": {
+     "unit": "% of upcoming sprint",
+     "value": 1,
+     "source": "cee_hypothesis",
+     "raw_value": 100,
+     "target_match": {
+      "node_id": "sprint_capacity_for_ai_reporting",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    },
+    "sprint_capacity_for_integration_bug_fix": {
+     "unit": "% of upcoming sprint",
+     "value": 0,
+     "source": "cee_hypothesis",
+     "raw_value": 0,
+     "target_match": {
+      "node_id": "sprint_capacity_for_integration_bug_fix",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "fix_integration_bug",
+   "ref": "O2",
+   "kind": "option",
+   "label": "Fix Integration Bug",
+   "provenance": "ai_inferred",
+   "interventions": {
+    "sprint_capacity_for_ai_reporting": {
+     "unit": "% of upcoming sprint",
+     "value": 0,
+     "source": "cee_hypothesis",
+     "raw_value": 0,
+     "target_match": {
+      "node_id": "sprint_capacity_for_ai_reporting",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    },
+    "sprint_capacity_for_integration_bug_fix": {
+     "unit": "% of upcoming sprint",
+     "value": 1,
+     "source": "cee_hypothesis",
+     "raw_value": 100,
+     "target_match": {
+      "node_id": "sprint_capacity_for_integration_bug_fix",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "split_sprint",
+   "ref": "O3",
+   "kind": "option",
+   "label": "Split Sprint",
+   "provenance": "ai_inferred",
+   "proposed_by": "olumi",
+   "interventions": {
+    "sprint_capacity_for_ai_reporting": {
+     "unit": "% of upcoming sprint",
+     "value": 0.5,
+     "source": "cee_hypothesis",
+     "raw_value": 50,
+     "target_match": {
+      "node_id": "sprint_capacity_for_ai_reporting",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    },
+    "sprint_capacity_for_integration_bug_fix": {
+     "unit": "% of upcoming sprint",
+     "value": 0.5,
+     "source": "cee_hypothesis",
+     "raw_value": 50,
+     "target_match": {
+      "node_id": "sprint_capacity_for_integration_bug_fix",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "carry_on_as_now",
+   "ref": "O4",
+   "kind": "option",
+   "label": "Carry On As Now",
+   "provenance": "ai_inferred",
+   "is_baseline": true
+  },
+  {
+   "id": "sprint_capacity_for_ai_reporting",
+   "ref": "F1",
+   "kind": "factor",
+   "label": "Sprint capacity for AI reporting",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "% of upcoming sprint",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "sprint_capacity_for_integration_bug_fix",
+   "ref": "F2",
+   "kind": "factor",
+   "label": "Sprint capacity for integration bug fix",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "% of upcoming sprint",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "ai_reporting_module_readiness",
+   "ref": "F3",
+   "kind": "factor",
+   "label": "AI reporting module readiness",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100,
+   "observed_state": {
+    "unit": "%",
+    "value": 0,
+    "source": "cee_inference",
+    "raw_value": 0,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "profile_setup_abandonment_rate",
+   "ref": "F4",
+   "kind": "factor",
+   "label": "Profile setup abandonment rate",
+   "category": "observable",
+   "provenance": "from_brief",
+   "observed_state": {
+    "cap": 100,
+    "unit": "%",
+    "value": 0.15,
+    "source": "brief_extraction",
+    "raw_value": 15,
+    "declared_scale": "unit_interval"
+   }
+  },
+  {
+   "id": "trial_signup_flow_entrants",
+   "ref": "F5",
+   "kind": "factor",
+   "label": "Trial signup flow entrants",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 100000
+  },
+  {
+   "id": "enterprise_deal_value",
+   "ref": "F6",
+   "kind": "factor",
+   "label": "Enterprise deal value",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 1000000,
+   "observed_state": {
+    "unit": "currency per deal per quarter",
+    "value": 0.25,
+    "source": "cee_inference",
+    "raw_value": 250000,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "revenue_per_completed_trial_profile",
+   "ref": "F7",
+   "kind": "factor",
+   "label": "Revenue per completed trial profile",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 10000,
+   "observed_state": {
+    "unit": "currency per profile per quarter",
+    "value": 0.005,
+    "source": "cee_inference",
+    "raw_value": 50,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "enterprise_deal_loss_from_missed_ai_deadline",
+   "ref": "R1",
+   "kind": "risk",
+   "label": "Enterprise deal loss from missed AI deadline",
+   "provenance": "ai_inferred",
+   "scale_frame": 100
+  },
+  {
+   "id": "enterprise_deal_closed",
+   "ref": "OC1",
+   "kind": "outcome",
+   "label": "Enterprise deal closed",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "trial_profiles_completed",
+   "ref": "OC2",
+   "kind": "outcome",
+   "label": "Trial profiles completed",
+   "provenance": "ai_inferred",
+   "scale_frame": 100000
+  },
+  {
+   "id": "enterprise_deal_revenue",
+   "ref": "OC3",
+   "kind": "outcome",
+   "label": "Enterprise deal revenue",
+   "provenance": "ai_inferred",
+   "scale_frame": 1000000,
+   "nonlinear_identity": {
+    "operation": "product",
+    "factor_ids": [
+     "enterprise_deal_closed",
+     "enterprise_deal_value"
+    ],
+    "stated_in_brief": false
+   }
+  },
+  {
+   "id": "trial_flow_revenue",
+   "ref": "OC4",
+   "kind": "outcome",
+   "label": "Trial flow revenue",
+   "provenance": "ai_inferred",
+   "scale_frame": 1000000,
+   "nonlinear_identity": {
+    "operation": "product",
+    "factor_ids": [
+     "trial_profiles_completed",
+     "revenue_per_completed_trial_profile"
+    ],
+    "stated_in_brief": false
+   }
+  }
+ ],
+ "ref_high_water": {
+  "D": 1,
+  "F": 7,
+  "G": 1,
+  "O": 4,
+  "R": 1,
+  "OC": 4
+ }
+}
