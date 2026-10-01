@@ -202,8 +202,10 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // 5926783007: the unit may name the count with the SOURCE's own words ("investor conversation" on "Angel investor
   // conversations", as Paul's card words it) — its last word the count noun, every other word a word of the source label
   // or "extra/additional/more/new", which count nothing ("seed conversation" names another kind: refused).
-  const perWords = effect.per_source_change_unit.toLowerCase().split(/[^\p{L}]+/u).filter((w) => w !== '');
-  const sourceWords = sourceNode.label.toLowerCase().split(/[^\p{L}]+/u).filter((w) => w !== '');
+  // ⛔ AIQ 5927288860: a NUMBER in the unit is a word too ("100 conversations" is never "per conversation"): split on letters
+  // AND digits, so the number is a word the label lacks and the unit is refused, never read as a far stronger link.
+  const perWords = effect.per_source_change_unit.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w !== '');
+  const sourceWords = sourceNode.label.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w !== '');
   const perCount = countNoun !== undefined && perWords.length > 0
     && [countNoun, countNoun.slice(0, -1)].includes(perWords[perWords.length - 1]!)
     && perWords.slice(0, -1).every((w) => sourceWords.includes(w) || /^(?:extra|additional|more|new)$/.test(w));

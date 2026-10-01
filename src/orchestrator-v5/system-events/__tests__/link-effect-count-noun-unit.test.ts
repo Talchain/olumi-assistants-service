@@ -73,6 +73,22 @@ describe('the step-2 unit wall: a unitless count outcome is counted in its plura
       if (r.kind === 'mutated') expect(edgeOf(r.mutatedGraph).provenance.natural_effect.per_source_change_unit).toBe(unit); // stored as proposed (CODEX 5926859038)
     });
   }
+  // ⛔ AIQ 5927288860: "Every 100 conversations bring in about £20,000" is £200 per conversation. A number in the unit is
+  // never dropped: per 1 "100 conversations" would store the £20,000-per-conversation strength (100× too strong) as theirs.
+  for (const unit of ['100 conversations', '100 investor conversations', 'a hundred conversations', '2 conversations']) {
+    it(`AIQ hostile: per 1 "${unit}" (a number in the unit) is refused, never read as per conversation`, () => {
+      expect(applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change: 1, per_source_change_unit: unit }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+    });
+  }
+  it('AIQ control: per 100 "conversations" (the right reading) is written, 100× weaker than per 1', () => {
+    const per100 = applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change: 100, per_source_change_unit: 'conversations' }));
+    const per1 = applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change: 1, per_source_change_unit: 'conversations' }));
+    expect(per100.kind).toBe('mutated');
+    expect(per1.kind).toBe('mutated');
+    if (per100.kind === 'mutated' && per1.kind === 'mutated') {
+      expect(edgeOf(per100.mutatedGraph).strength.mean * 100).toBeCloseTo(edgeOf(per1.mutatedGraph).strength.mean, 9);
+    }
+  });
   for (const unit of ['seed conversation', 'investor meeting', 'conversation investor']) {
     it(`R3 hostile: "per ${unit}" names another kind (or no count last) → refused`, () => {
       expect(applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change_unit: unit }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
