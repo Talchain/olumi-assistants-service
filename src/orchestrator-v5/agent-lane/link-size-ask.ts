@@ -16,6 +16,8 @@
  * Words with no unit to say them in are never improvised: no ask.
  */
 
+import { randomUUID } from 'node:crypto';
+import type { PendingAction } from '../session/pending-action.js';
 import { sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { unitOf } from '../../cee/magnitude/link-effect.js';
 import { CURRENCY_SYMBOL_TO_CODE, isCurrencyUnit } from '../../utils/currency-alphabet.js';
@@ -127,6 +129,23 @@ const COUNT_NOUN = (w: string): boolean => /^[a-z]{3,}s$/i.test(w) && !/(?:ss|us
  * only when that door binds a bare amount answering THIS ask (MG/R3's door, HIGH).
  */
 export function linkSizeAsk(graph: unknown, ctx: LinkSizeAskContext): string | null {
+  return linkSizeAskRecord(graph, ctx)?.text ?? null;
+}
+
+/**
+ * ⭐ WHAT THE ASK ASKED, AS A RECORD (R3 #75 5926021003 (a), condition 1; MG lease 5926052489). The same ask as
+ * {@link linkSizeAsk}, plus the structure the very next turn's bare answer is read against: both ends, what one more of
+ * the source is, the unit the answer is asked in, and the link's direction. `record` is null when the ask has no
+ * answer unit to bind (the words still go out).
+ */
+export interface LinkSizeAskRecord {
+  readonly text: string;
+  readonly record: {
+    readonly from_id: string; readonly to_id: string; readonly source_label: string; readonly target_label: string;
+    readonly per_unit: string; readonly amount_unit: string; readonly direction: 1 | -1;
+  } | null;
+}
+export function linkSizeAskRecord(graph: unknown, ctx: LinkSizeAskContext): LinkSizeAskRecord | null {
   if (ctx.awaitingApproval || /\?/.test(ctx.restingText)) return null;
   const link = namedLink(graph, ctx.message);
   if (link === null) return null;
@@ -145,9 +164,39 @@ export function linkSizeAsk(graph: unknown, ctx: LinkSizeAskContext): string | n
     const inWords = targetUnit === undefined ? null : targetUnitWords(targetUnit);
     if (inWords === null) return null;
     const verb = direction === 1 && moneyUnit(targetUnit!) !== null ? 'add to' : 'change';
-    return `How much does one more ${quoted(s)} ${verb} ${quoted(t)}, in ${inWords}?`;
+    const ends = { from_id: String(edge.from), to_id: String(edge.to), source_label: s, target_label: t, direction };
+    return {
+      text: `How much does one more ${quoted(s)} ${verb} ${quoted(t)}, in ${inWords}?`,
+      record: { ...ends, per_unit: (sourceUnit ?? lastWord).trim().toLowerCase(), amount_unit: targetUnit!.trim() },
+    };
   }
   const one = sourceUnit === undefined ? null : oneSourceUnit(sourceUnit);
   if (one === null) return null;
-  return `How much does ${quoted(t)} change when ${quoted(s)} goes up by one ${one}?`;
+  const text = `How much does ${quoted(t)} change when ${quoted(s)} goes up by one ${one}?`;
+  return {
+    text,
+    record: targetUnit === undefined ? null : {
+      from_id: String(edge.from), to_id: String(edge.to), source_label: s, target_label: t, direction,
+      per_unit: sourceUnit!.trim(), amount_unit: targetUnit.trim(),
+    },
+  };
+}
+
+/** The answer row's record of the ask (`elicit_link_size`): ONE turn, never widened — the very next answer only. */
+export const LINK_SIZE_ASK_WALL_TTL_MS = 30 * 60 * 1000;
+export function linkSizeAskPendingAction(
+  record: NonNullable<LinkSizeAskRecord['record']>,
+  ctx: { readonly scenario_id: string; readonly emitted_at_iso: string; readonly graph_hash: string },
+): PendingAction {
+  const emitted = Date.parse(ctx.emitted_at_iso);
+  return {
+    id: randomUUID(),
+    scenario_id: ctx.scenario_id,
+    chip_id: `link_size_ask:${record.from_id}->${record.to_id}`,
+    action: { kind: 'elicit_link_size', ...record, graph_hash: ctx.graph_hash },
+    preconditions: { graph_hash: ctx.graph_hash },
+    expires_at_turn_count: 1,
+    expires_at_iso: new Date((Number.isFinite(emitted) ? emitted : Date.now()) + LINK_SIZE_ASK_WALL_TTL_MS).toISOString(),
+    emitted_at_iso: ctx.emitted_at_iso,
+  };
 }
