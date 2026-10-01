@@ -262,11 +262,21 @@ describe('A4f cascade: chains, diamonds and rollback (0 LLM)', () => {
 
   it('a diamond into one goal: the goal is widened ONCE, to fit both branches', () => {
     const before = { nodes: [n('s', 'outcome', 10), n('x', 'outcome', 1000), n('y', 'outcome', 1000), n('z', 'outcome', 1000), n('g', 'goal', 1000)],
-      edges: [e('s', 'x', 3, true), e('x', 'y', 0.5), e('x', 'z', 0.4), e('y', 'g', 0.6), e('z', 'g', 0.6)] };
+      // z → g is cut first and less (1.2) than y → g (3.0): the goal's one widen must fit the LARGEST cut into it.
+      edges: [e('s', 'x', 3, true), e('x', 'y', 0.5), e('x', 'z', 0.4), e('z', 'g', 0.6), e('y', 'g', 0.6)] };
     const r = refitFramesForStatedEffects(before);
     expect(r.refused).toEqual([]);
     expect(r.refits.filter((x: Rec) => x.node === 'g')).toHaveLength(1);
     for (const x of r.graph.edges) expect(Math.abs(x.strength.mean)).toBeLessThanOrEqual(1 + 1e-9);
+  });
+
+  it('bounded: a node a later branch would need to widen a SECOND time is refused, and the whole chain rolls back (R3 (2))', () => {
+    const before = { nodes: [n('s', 'outcome', 10), n('x', 'outcome', 1000), n('y', 'outcome', 1000), n('z', 'outcome', 1000), n('w', 'outcome', 1000), n('g', 'goal', 1000)],
+      edges: [e('s', 'x', 3, true), e('x', 'y', 0.5), e('x', 'z', 0.5), e('y', 'g', 0.3), e('z', 'w', 0.5), e('w', 'g', 0.9)] };
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refused).toEqual([{ link: 's→x', reason: 'new_cut', detail: 'w→g' }]);
+    expect(r.refits).toEqual([]);
+    expect(r.graph).toBe(before);
   });
 
   it('control: a FACTOR mid-chain refuses, and the whole chain rolls back — the graph returned as it came, no refit recorded', () => {
