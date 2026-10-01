@@ -76,8 +76,11 @@ describe('the step-2 unit wall: a unitless count outcome is counted in its plura
   it('R3: "Investment-firm deals closed" + "per deal" → written, per deals (the participle is dropped)', () => {
     expect(applyLinkEffectEdit(params(served('Investment-firm deals closed'), { ...EFFECT, per_source_change_unit: 'deal' })).kind).toBe('mutated');
   });
-  it('a time word is never a count ("Hours of founder time" → none)', () => {
-    expect(applyLinkEffectEdit(params(served('Weekly founder hours'), { ...EFFECT, per_source_change_unit: 'hour' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+  it('a time word is never a count ("Founder minutes" → none)', () => {
+    expect(applyLinkEffectEdit(params(served('Founder minutes'), { ...EFFECT, per_source_change_unit: 'minute' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+  });
+  it('a money word is never a count ("Pro plan prices" → none)', () => {
+    expect(applyLinkEffectEdit(params(served('Pro plan prices'), { ...EFFECT, per_source_change_unit: 'price' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });
 
   // AIQ 5926286558 / R3 5926308694: a RATE label's unit is the head PER PERIOD — never one count. Under-claim.
