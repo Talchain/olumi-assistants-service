@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync } from 'node:fs';
-import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest } from '../decision-input-ask.js';
+import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest, withA7AfterGate } from '../decision-input-ask.js';
 import { narrateWriteOutcome, openQuestionsForReply, withWriteOutcome } from '../write-outcome.js';
 
 type Rec = Record<string, unknown>;
@@ -127,6 +127,7 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     expect(src).toContain('const composedWithout = withWriteOutcome(withDisclosures(narration.text, owed), statusText);');
     expect(src).toContain('restingText: textAtRest(composedWithout),');
+    expect(src).toContain('...decisionTurn,');
     expect(src).toContain('questionsToggle: textAtRest(composedWithout) !== composedWithout,');
     expect(src).toContain('withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)');
   });
@@ -160,6 +161,63 @@ describe('≤160 words on screen (DL 5923219186 · AIQ 5923963470): over the bou
   });
   it('over the bound with the target stated → A7 alone still folds (nothing at rest from these lines)', () => {
     expect(decisionInputLines(graphWith(FX.goal_after_target), { ...base, restingText: prose(150), questionsToggle: true })).toEqual([]);
+  });
+});
+
+describe('A7 is folded on the reply the user SEES — after the leader gate (R3 #75 5924618869; served 5ab41dda 5924604707)', () => {
+  const SV = JSON.parse(readFileSync(new URL('./fixtures/served-a7-folded-5ab41dda.json', import.meta.url), 'utf8')) as {
+    served_assistant_text: string; status_text: string; goal: Rec;
+  };
+  const g = { nodes: [SV.goal], edges: [] };
+  const turnCtx = { awaitingApproval: false, builtOrRan: true };
+  const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
+
+  it('the served precondition: 116 words at rest after the gate, A7 owed (2-month horizon, no limit) and absent', () => {
+    expect(words(textAtRest(SV.served_assistant_text))).toBe(116);
+    expect(SV.served_assistant_text).not.toContain(A7);
+    expect(SV.goal.goal_horizon_months).toBe(2);
+  });
+
+  it('RED (served): A7 returns once, at rest, before the status line — and nothing else moves', () => {
+    const out = withA7AfterGate(SV.served_assistant_text, g, turnCtx, SV.status_text);
+    expect(out.split(A7).length - 1).toBe(1);
+    expect(textAtRest(out)).toContain(A7);
+    expect(out.indexOf(A7)).toBeLessThan(out.indexOf('The model was saved.'));
+    expect(out.replace(`\n\n${A7}`, '')).toBe(SV.served_assistant_text);
+    expect(words(textAtRest(out)) + 8).toBeLessThanOrEqual(160);
+  });
+
+  it('CONTROL: still over the bound after the gate → unchanged (A7 stays behind the toggle)', () => {
+    const long = `${'word '.repeat(40)}${SV.served_assistant_text}`;
+    expect(withA7AfterGate(long, g, turnCtx, SV.status_text)).toBe(long);
+  });
+
+  it('CONTROL: A7 already said, no horizon, a duration limit, or a turn that neither built nor ran → unchanged', () => {
+    const said = SV.served_assistant_text.replace('\n\nThe model was saved.', `\n\n${A7}\n\nThe model was saved.`);
+    expect(withA7AfterGate(said, g, turnCtx, SV.status_text)).toBe(said);
+    const { goal_horizon_months: _h, ...noHorizon } = SV.goal;
+    expect(withA7AfterGate(SV.served_assistant_text, { nodes: [noHorizon], edges: [] }, turnCtx, SV.status_text)).toBe(SV.served_assistant_text);
+    const limited = { ...g, goal_constraints: [{ unit: 'months', operator: '<=', value: 2 }] };
+    expect(withA7AfterGate(SV.served_assistant_text, limited, turnCtx, SV.status_text)).toBe(SV.served_assistant_text);
+    expect(withA7AfterGate(SV.served_assistant_text, g, { ...turnCtx, builtOrRan: false }, SV.status_text)).toBe(SV.served_assistant_text);
+  });
+
+  it('the ask was said → A7 goes right before it (where it was composed); no status found and no ask → unchanged', () => {
+    const t = `Model words.\n\n${ASK}\n\nThe model was saved.`;
+    expect(withA7AfterGate(t, g, turnCtx, 'The model was saved.')).toBe(`Model words.\n\n${A7}\n\n${ASK}\n\nThe model was saved.`);
+    expect(withA7AfterGate('Model words.', g, turnCtx, 'The model was saved.')).toBe('Model words.');
+  });
+
+  it('route source pin: AFTER the leader gate and every later prose rewrite (break-even), BEFORE the shape and the answer row', () => {
+    const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    const call = src.indexOf('withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText)');
+    expect(call).toBeGreaterThan(src.indexOf('enforceAgentLaneLeaderClaimsAtWire(wireBody'));
+    expect(call).toBeGreaterThan(src.indexOf('withBreakEvenAnswer(wireBody.assistant_text'));
+    expect(call).toBeLessThan(src.indexOf('wireBody = withAnalysisAnswerShape(wireBody'));
+    expect(call).toBeLessThan(src.indexOf('assistantMessage: String(wireBody.assistant_text'));
+    // The ONLY assistant_text rewrites after it are the shape (built from this prose) — none appends prose.
+    const after = src.slice(call, src.indexOf('assistantMessage: String(wireBody.assistant_text'));
+    expect(after.match(/assistant_text: with(?!A7)/g) ?? []).toEqual([]);
   });
 });
 

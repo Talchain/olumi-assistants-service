@@ -118,3 +118,29 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
 export function decisionInputAsk(graph: unknown, ctx: DecisionInputAskContext): string | null {
   return decisionInputLines(graph, ctx).find((l) => l.endsWith('as your target.')) ?? null;
 }
+
+/**
+ * ⭐ A7 IS FOLDED ON WHAT THE USER SEES, NOT ON A DRAFT OF IT (R3 #75 5924618869; served `5ab41dda`, PROMPT STRIKE
+ * 5924604707): the lines are composed before the withheld-leader gate, which can then drop a ranking sentence the model
+ * wrote. Served: the composed reply was over the bound, so A7 folded behind the toggle, and the gate then left 116 words
+ * at rest, where A7 fitted. Called after the gate: when A7 is owed, absent, and now fits the bound, it returns where it
+ * would have sat — before the ask if the ask was said, else before the status line. Nothing else is added or moved.
+ */
+export function withA7AfterGate(
+  text: string,
+  graph: unknown,
+  ctx: Pick<DecisionInputAskContext, 'awaitingApproval' | 'builtOrRan'>,
+  statusText: string | null,
+): string {
+  // Unfolded: the lines owed with nothing at rest yet; only A7 is ever inserted here.
+  const owedLines = decisionInputLines(graph, { ...ctx, restingText: '', questionsToggle: false });
+  const a7 = owedLines.find((l) => !l.endsWith('as your target.'));
+  if (a7 === undefined || text.includes(a7)) return text;
+  const rest = textAtRest(text);
+  if (rest !== text && words(rest) + TOGGLE_LABEL_WORDS + words(a7) > AT_REST_WORD_BOUND) return text;
+  const ask = owedLines.find((l) => l.endsWith('as your target.'));
+  if (ask !== undefined && text.split(ask).length === 2) return text.replace(ask, `${a7}\n\n${ask}`);
+  if (statusText === null) return text;
+  const at = text.lastIndexOf(`\n\n${statusText}`);
+  return at < 0 ? text : `${text.slice(0, at)}\n\n${a7}${text.slice(at)}`;
+}
