@@ -98,6 +98,7 @@ import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
+import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
@@ -315,6 +316,17 @@ function executableWaitingProposal(scenarioId: string, userId: string | null, gr
   const id = waiting[0]!.proposal_id;
   const decision = proposals.authorise({ proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash });
   return decision.status === 'execute' ? id : undefined;
+}
+
+/**
+ * EVERY proposal still waiting for its yes that would execute on this graph, however many (`executableWaitingProposal`
+ * wants exactly one, for the chip it re-offers). Any of them makes the turn a decision point for guidance (T2).
+ */
+function executableWaitingProposalIds(scenarioId: string, userId: string | null, graphHash: string | undefined): string[] {
+  if (graphHash === undefined) return [];
+  return proposals.outstanding(scenarioId, userId).map((p) => p.proposal_id).filter((id) => proposals.authorise({
+    proposal_id: id, scenario_id: scenarioId, authenticated_user_id: userId, current_graph_identity_hash: graphHash,
+  }).status === 'execute');
 }
 
 /** The offered actions with each id once, the FIRST kept, in order (R3 5910885689: the same card offered twice). */
@@ -2805,6 +2817,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
     });
+    /**
+     * ⭐ T2 — THE GUIDANCE ROW (M1; `turn-context/guidance-wire.ts`): at most one coaching row (+ one edits row) from this
+     * same final readback, as root `guidance: {slot1?, slot2?}` with `item_ref` by id (PANEL `readGuidanceRow`). Added
+     * BEFORE the final egress so the fail-closed walk covers it; never on the answer row (a replay carries none).
+     */
+    {
+      // Any proposal that would still execute waits for its yes: that card is the step, re-offered or not (`offeredNow`).
+      const waiting = executableWaitingProposalIds(scenarioId, userId, graphHash).map((id) => ({ id: approvalChipIdFor(id) }));
+      const guidance = turnGuidanceFor({
+        request: guidanceRequestOf(fastPath, (body['chip'] as { id?: unknown } | null | undefined)?.id, NEXT_STEP_CHIP_IDS),
+        offeredSpecific: firstOfEachId([...offeredSpecific, ...waiting]),
+        assistantText: wireBody.assistant_text,
+        licence: leaderLicenceFromState(analysisState, analysisReady),
+        ...(narrationKey !== undefined ? { runKey: narrationKey } : {}),
+        state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
+      });
+      if (guidance !== undefined) wireBody = { ...wireBody, guidance };
+    }
     /**
      * ⛔ THE FAIL-CLOSED FINAL EGRESS (AI HARNESS PR-L1, `leader-final-egress.ts`): on EVERY turn, on the body exactly as
      * it ships — after the leader gate, break-even, A7 and the answer shape, before the answer row so a replay is the
