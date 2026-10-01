@@ -119,7 +119,7 @@ describe('what still cannot reach the goal is KEPT and named', () => {
     // the nodes it deletes are the widener's — the strategic richness this lane
     // is judged on — and the analysis stayed blocked on scale regardless.
     expect(labels(a.nodes)).toEqual([
-      'Churn constraint breach', 'Decision: Monthly recurring…', 'Hold £49 through release',
+      'Churn constraint breach', 'Decision: Monthly recurring revenue', 'Hold £49 through release',
       'MRR target miss', 'Monthly recurring revenue', 'Next Pro feature release',
       'Price-change timing', 'Pro plan price', 'Raise at next release',
     ]);

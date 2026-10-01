@@ -128,9 +128,9 @@ describe('the decision node carries the brief\'s own question', () => {
     const { decision } = await registeredDecision(pricing(QUESTION));
     // The full question, first letter upper-cased and nothing else changed, is the node's text and identity.
     expect(decision.description).toBe(TITLE);
-    // The label is that text under the estate's 33-character label budget.
+    // The label is that text under the estate's 80-character label budget.
     expect(decision.label).toBe(shortLabel(TITLE));
-    expect(decision.label).toBe('Should we increase the Pro plan…');
+    expect(decision.label).toBe('Should we increase the Pro plan price from £49 to £59 per month with the next…');
     expect(decision.label).not.toBe(FALLBACK);
     // Provenance by the estate's rule (row 2.1205): a value-free decision whose words are the user's is from_brief.
     expect(decision.provenance).toBe('from_brief');
@@ -138,7 +138,9 @@ describe('the decision node carries the brief\'s own question', () => {
 
   it('RED (PJ-A2 row 5): a verbatim span that is not a question sentence is taken the same way (the mid-market brief)', async () => {
     const { decision } = await registeredDecision(midmarket(MIDMARKET_QUESTION), MIDMARKET_BRIEF);
-    expect(decision.description).toBe('How to expand our product into the mid-market segment within 12 months');
+    // Within the 80-character label budget, the brief's own words ARE the label, whole (52f8cd) — nothing to carry on description.
+    expect(decision.label).toBe('How to expand our product into the mid-market segment within 12 months');
+    expect(decision.description).toBeUndefined();
     expect(decision.provenance).toBe('from_brief');
   });
 
