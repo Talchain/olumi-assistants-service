@@ -126,7 +126,7 @@ describe('⛔ a Run with no result says the engine’s typed outcome, never a re
   it('CONTROL (readiness stopped it): explained as before — the one interpreting call, and the next-step chip', async () => {
     mode = 'readiness';
     const b = await run();
-    expect(modelCalls, 'the readiness refusal is still interpreted').toBe(1);
+    expect(modelCalls, 'readiness refusal is deterministic; nothing is narrated').toBe(0);
     expect(b.suggested_actions.map((a) => a.id)).toContain('agent-suggest-what-it-needs');
   });
 

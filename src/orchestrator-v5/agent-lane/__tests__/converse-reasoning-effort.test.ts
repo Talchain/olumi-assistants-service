@@ -1,3 +1,4 @@
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * Selected coach request configuration: #78 5915316114 and DL #75 5916003868.
  * Populated-model conversation and Run interpretation use Sol/high/3400.
@@ -26,7 +27,7 @@ const GRAPH = {
   nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }],
   edges: [{ from: 'f', to: 'g' }],
 };
-const STATE = { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } };
+const STATE = { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } };
 
 describe('selected coach: populated conversation and Run use high; construction keeps its own', () => {
   let app: FastifyInstance;
@@ -51,7 +52,7 @@ describe('selected coach: populated conversation and Run use high; construction 
       response_version: 2, assistant_text: 'Done.', suggested_actions: [], insights: [], graph_hash: 'h1', analysis_state: STATE,
       blocks: [{ type: 'analysis_result', data: { marker: 'synthetic' } }], analysis_ready: { status: 'ready', options: [], blockers: [] },
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: 'h1', analysis_state: STATE }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: 'h1', analysis_state: STATE, analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } } }));
     await app.register(route.agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -75,10 +76,11 @@ describe('selected coach: populated conversation and Run use high; construction 
   });
 
   it('⭐ RED: the Run button’s one interpreting call (tool_choice none) uses selected Sol/high/3400', async () => {
-    const res = await app.inject({
+    const scenarioId = randomUUID();
+    const res = await explainRun(app, scenarioId, await app.inject({
       method: 'POST', url: '/agent/v1/turn',
-      payload: { kind: 'message', scenario_id: randomUUID(), message: 'Run the analysis please', source: 'chip_click', chip: { action_type: 'run_analysis' } },
-    });
+      payload: { kind: 'message', scenario_id: scenarioId, message: 'Run the analysis please', source: 'chip_click', chip: { action_type: 'run_analysis' } },
+    }));
     expect(res.statusCode, res.body).toBe(200);
     const interpreting = modelBodies.filter((b) => b.tool_choice === 'none');
     expect(interpreting.length, 'the typed Run made its interpreting call').toBe(1);

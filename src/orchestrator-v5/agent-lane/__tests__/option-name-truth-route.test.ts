@@ -1,3 +1,4 @@
+import { explainRun, explanationContext } from './fixtures/run-explanation-follow-up.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { repairedOptionNameRead } from './fixtures/repaired-option-name.js';
@@ -17,9 +18,7 @@ const state = { run_state: { kind: 'complete_current', computed_at: '2026-09-30T
 const writes: string[] = [];
 const modelRequests: unknown[] = [];
 const latestRunContext = (): Record<string, unknown> | undefined => {
-  const request = modelRequests.at(-1) as { input?: { type?: string; output?: string }[] } | undefined;
-  const output = request?.input?.filter((item) => item.type === 'function_call_output').at(-1)?.output;
-  return output === undefined ? undefined : JSON.parse(output) as Record<string, unknown>;
+  return explanationContext((modelRequests.at(-1) as { input?: unknown } | undefined)?.input);
 };
 let modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
 let readBody: Record<string, unknown> = { graph, graph_hash: HASH, analysis_result: result,
@@ -62,13 +61,13 @@ describe('Agent Run result names a changed option level without renaming the gra
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
 
   it('gives the model the current Run display name and persists its typed-context reply, without renaming facts', async () => {
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    const r = await explainRun(app, SCENARIO, await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
       chip: { action_type: 'run_analysis' }, turn_id: '4382b44d-7672-4c9d-9f2b-2b76a2662328',
-    } });
+    } }));
     expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     const body = r.json() as { assistant_text: string; blocks: { enrichment?: { option_comparison?: { option_label: string }[] } }[] };
-    expect(body.assistant_text).toContain(`${HUMAN_LABEL} (set to £60/month): 99%`);
+    expect(body.assistant_text, JSON.stringify(r.json())).toContain(`${HUMAN_LABEL} (set to £60/month): 99%`);
     expect(JSON.stringify(modelRequests)).toContain('option_display_names');
     expect(JSON.stringify(modelRequests)).toContain(`${HUMAN_LABEL} (set to £60/month)`);
     expect(writes.at(-1)).toContain(`${HUMAN_LABEL} (set to £60/month): 99%`);
@@ -84,10 +83,10 @@ describe('Agent Run result names a changed option level without renaming the gra
     modelText = 'Spend £110,000 (set to £120,000): current model result.';
     try {
       expect(repaired.graphHash).not.toBe(repaired.runHash);
-      const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      const r = await explainRun(app, SCENARIO, await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
         kind: 'message', scenario_id: SCENARIO, message: 'Run analysis.', source: 'chip_click',
         chip: { action_type: 'run_analysis' }, turn_id: '4382b44d-7672-4c9d-9f2b-2b76a2662340',
-      } });
+      } }));
       expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
       expect(modelRequests.length).toBeGreaterThan(before);
       expect(latestRunContext()?.canonical_state).toMatchObject({
@@ -115,8 +114,8 @@ describe('Agent Run result names a changed option level without renaming the gra
         chip: { action_type: 'run_analysis' }, turn_id: `4382b44d-7672-4c9d-9f2b-2b76a266${kind === 'complete_stale' ? '2341' : '2342'}`,
       } });
       expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
-      expect(modelRequests.length).toBeGreaterThan(before);
-      expect(latestRunContext()?.canonical_state).not.toHaveProperty('option_display_names');
+      expect(modelRequests).toHaveLength(before);
+      expect(r.json().suggested_actions.some((c: { id: string }) => c.id.startsWith('agent-explain-run:'))).toBe(false);
     } finally {
       readBody = { graph, graph_hash: HASH, analysis_result: result, analysis_state: state,
         analysis_ready: { status: 'ready', options: [], blockers: [] } };
@@ -139,10 +138,10 @@ describe('Agent Run result names a changed option level without renaming the gra
     it(`leaves K${index + 1} historical result wording untouched despite a current Run`, async () => {
       modelText = historical;
       try {
-        const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+        const r = await explainRun(app, SCENARIO, await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
           kind: 'message', scenario_id: SCENARIO, message: 'Run and compare with the earlier result.', source: 'chip_click',
           chip: { action_type: 'run_analysis' }, turn_id: `4382b44d-7672-4c9d-9f2b-2b76a266${String(2330 + index).padStart(4, '0')}`,
-        } });
+        } }));
         expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
         const body = r.json() as { assistant_text: string };
         expect(body.assistant_text).toContain(historical);

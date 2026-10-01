@@ -1,3 +1,4 @@
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ D1 + A7 (DL #75 5923918068; lease 5923944336; AIQ words 5923963470): on the brief and Run turns, at rest — A7 a TRUE line
  * (the deadline is held but nothing answers it), then D1 ONE ask (the least the goal must reach) while no target is stated.
@@ -250,7 +251,8 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: graphWith(goal), graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true },
-      analysis_state: { run_state: { kind: 'complete_current' }, usable_for_chips: true },
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, usable_for_chips: true },
+      analysis_result: blocked ? undefined : { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } },
     }));
     app.post('/orchestrate/v2/turn', async () => (blocked
       ? { assistant_text: 'Set a level for Hours first.', blocks: [], analysis_ready: { status: 'blocked', may_run: false } }
@@ -260,10 +262,14 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; n += 1; });
-  const runTurn = async (turnId?: string) => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-    ...(turnId !== undefined ? { turn_id: turnId } : {}), kind: 'message', scenario_id: `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`, message: 'Run analysis.', source: 'chip',
+  const runTurn = async (turnId?: string, explain = false) => {
+    const scenarioId = `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
+    const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    ...(turnId !== undefined ? { turn_id: turnId } : {}), kind: 'message', scenario_id: scenarioId, message: 'Run analysis.', source: 'chip',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
-  } })).json() as { assistant_text: string };
+  } });
+    return (explain ? await explainRun(app, scenarioId, first) : first).json() as { assistant_text: string };
+  };
 
   it('RED: the Run turn on the no-target goal says the A7 line then the ask, once each, before any questions marker', async () => {
     const turnId = '5c0d7e1f-2a3b-4c5d-8e6f-7a8b9c0d1e2f';
@@ -293,7 +299,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
 
   it('CONTROL: the model asked its own question → the host adds no ask (one "?" in the turn)', async () => {
     modelSays = 'Which option matters most to you?';
-    const text = (await runTurn()).assistant_text;
+    const text = (await runTurn(undefined, true)).assistant_text;
     expect(text).not.toContain('as your target');
     expect(text.match(/\?/g) ?? []).toHaveLength(1);
   });

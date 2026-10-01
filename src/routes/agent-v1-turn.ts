@@ -109,6 +109,7 @@ import {
 } from '../orchestrator-v5/agent-lane/provisional-view.js';
 import {
   bindRunBlocksToReadback,
+  claimPermissionsFrom,
   firstAnalysisDeadline,
   firstAnalysisSentence,
   runFirstAnalysisAfterConstruction,
@@ -1897,6 +1898,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined && isRunExplanationChip(explanationId)) {
       const fastStartedAt = Date.now();
       const st = await readBackState(readingDispatch, scenarioId);
+      // This is the same cached canonical read, carrying the producer's selected-Run delta.
+      // Never recover a delta from an earlier tool output or calculate one in the narration layer.
+      const selectedRead = await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+      const currentRead = selectedRead.status === 200
+        ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
       const matches = message === RUN_EXPLANATION_MESSAGE && !typedRunOf(body)
         && runExplanationMatches(explanationId, scenarioId, st);
       const priorAndRun = [
@@ -1907,10 +1913,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const canonicalAfterRun = {
         analysis_state: st.analysisState,
         analysis_ready: st.analysisReady,
+        ...(currentRead?.run_delta !== undefined ? { run_delta: currentRead.run_delta } : {}),
         option_display_names: [...optionNameAliases(st.graph).values()].map((a) => a.display),
       };
       // AI HARNESS PR-L1 owns the licensed projection at this seam.
-      const runForInterpreter = { result: analysisResultForAgent(st.analysisResult), canonical_state: canonicalAfterRun };
+      const runForInterpreter = { result: analysisResultForAgent(st.analysisResult),
+        claim_permissions: claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true }),
+        canonical_state: canonicalAfterRun };
       const explanationInput = [...recentRunExplanationConversation(history ?? []), { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
         request: RUN_EXPLANATION_MESSAGE, ...runForInterpreter,
       }) }] }];

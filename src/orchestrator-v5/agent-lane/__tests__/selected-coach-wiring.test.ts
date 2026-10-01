@@ -1,3 +1,4 @@
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /** Selected coaching reaches the real Agent route on every conversation path. No provider is called. */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -132,7 +133,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
       ...(chip ? { chip } : {}),
     } });
     expect(response.statusCode, response.body.slice(0, 300)).toBe(200);
-    expect(scripted, 'each scripted model hop was consumed').toEqual([]);
+    if (chip?.action_type !== 'run_analysis') expect(scripted, 'each scripted model hop was consumed').toEqual([]);
     return response.json() as { _diagnostic_trace?: { fast_path?: string } };
   };
   const selected = (body: Sent) => {
@@ -171,6 +172,9 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     const response = await sendTurn('Run analysis.', [say('The Run is provisional.')],
       { id: 'agent-run-analysis', action_type: 'run_analysis' });
     expect(response._diagnostic_trace?.fast_path).toBe('run');
+    expect(sent).toHaveLength(0);
+    await explainRun(app, SCENARIO, { statusCode: 200, json: () => response });
+    expect(scripted, 'the separate narration consumed the answer').toEqual([]);
     expect(sent).toHaveLength(1);
     const body = sent[0]!;
     selected(body);
