@@ -36,6 +36,7 @@ describe('R3 5925568501: a distributive word + the source names a change of one'
     ['We get about £20,000 of funding per quarter from investment-firm conversations', 'AIQ (1): "per" governs quarter'],
     ['One more round of conversations brings in £20,000 of funding', 'AIQ (2): the unit is a round'],
     ['Each extra new conversation adds about £20,000 to funding', 'two modifiers: the word no longer governs the noun'],
+    ['Each phone conversation adds about £20,000 to funding', 'an unknown modifier names a KIND of conversation, not the source: under-claim'],
     ['Every week a conversation adds about £20,000 to funding', '"every week" counts weeks, not conversations: only extra/more/new or the source\'s own words may stand between'],
     ['Each extra conversation brings down funding by about £20,000', 'a bare "brings" is no direction (never read as money in)'],
   ] as const) {
