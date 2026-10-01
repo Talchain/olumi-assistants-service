@@ -247,6 +247,19 @@ export interface DispatchSystemEventResult {
   /** Olumi's own links a committed value/range re-sized to fit the new level (P1-a): ids only, never a graph diff. */
   readonly linksResized?: readonly { readonly from: string; readonly to: string }[];
   /**
+   * ⭐ THE OPTION-STATUS WRITER'S OWN ACCOUNT OF THIS ATTEMPT (MG F1 T6, #2471; CODEX overflow 5937013605 + DL). Set by
+   * `dispatchOptionStatusEdit` only, and never put on the wire (`OlumiResponseSchema` is strict): the Agent reads it
+   * in-process (`commitOptionStatusInProcess`). Display bytes cannot stand in for it — a no-write replay also carries
+   * `draft_graph` (`replyForAttemptThatWroteNothing`).
+   *   · `attempt_wrote`: THIS turn's commit wrote the status, or this is a replay whose stored receipt proves this same
+   *     turn wrote it and the change is still visible (`earlierWriteByThisTurnProven && visible`).
+   *   · `version_minted`: the COMMIT says it minted a model version (`CommitResult.modelVersionReceipt !== null`); the
+   *     response's receipt then rides UNPARSED, for the Agent's one parser (`receiptSummaryOf`), and must name this turn —
+   *     a minted version whose receipt is missing is never "applied" (CODEX overflow 5937013605 P2).
+   * Absent ⇒ no typed evidence ⇒ the Agent says UNCONFIRMED, never "not changed".
+   */
+  readonly writeOutcome?: { readonly attempt_wrote: boolean; readonly version_minted: boolean; readonly model_version_receipt: unknown };
+  /**
    * V5 finaliser contract — system event readiness, by event kind:
    *
    *   undo / redo / selection_change / chip_click / patch_dismissed
@@ -4013,6 +4026,8 @@ async function dispatchOptionStatusEdit(
   event: OptionStatusEditEvent,
   requestId: string,
   startedAt: number,
+  // B8 (#2456, DL): the in-process port lets the turn fence's refusal reach `runFencedInProcessWrite` (never swallowed).
+  opts: { readonly fenceRefusalReachesCaller?: boolean } = {},
 ): Promise<DispatchSystemEventResult> {
   let persistedGraph: unknown;
   let priorPendingActions: Awaited<
@@ -4110,6 +4125,7 @@ async function dispatchOptionStatusEdit(
         coaching_state: null,
       });
     } catch (err) {
+      if (opts.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
       log.error(
         {
           request_id: requestId,
@@ -4141,6 +4157,8 @@ async function dispatchOptionStatusEdit(
   let persistedGraphBytes: unknown = null;
   let graphPersisted = false;
   let thisAttemptWrote: boolean | null = null;
+  // The commit's own typed account of the version mint (`CommitResult.modelVersionReceipt`: null = no version minted).
+  let versionMinted = false;
   let committedResponse: OlumiResponse = result.response;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
@@ -4173,8 +4191,10 @@ async function dispatchOptionStatusEdit(
     persistedGraphBytes = commitResult.persistedGraph;
     graphPersisted = commitResult.graphPersisted;
     thisAttemptWrote = commitResult.thisAttemptWrote;
+    versionMinted = commitResult.modelVersionReceipt !== null;
     committedResponse = commitResult.response;
   } catch (err) {
+    if (opts.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
     if (err instanceof GraphStaleWriteError) {
       log.warn(
         {
@@ -4220,7 +4240,7 @@ async function dispatchOptionStatusEdit(
   }
 
   if (thisAttemptWrote === false) {
-    return replyForAttemptThatWroteNothing({
+    const replay = replyForAttemptThatWroteNothing({
       writer: 'option_status_edit',
       payload,
       requestId,
@@ -4231,6 +4251,15 @@ async function dispatchOptionStatusEdit(
       requestedChangeVisibleIn: (snapshot) => optionStatusHolds(snapshot, result.optionId, result.status),
       logFields: { requested_option_id: result.optionId, requested_status: result.status },
     });
+    // A replay is THIS operation's write only when the stored receipt names this turn AND the change is still visible —
+    // the replay reply's own attribution rule. Otherwise it attests nothing (a reused-id conflict, another writer).
+    const earlierWriteByThisTurnProven = committedResponse.model_version_receipt?.source_turn_id === payload.turn_id
+      && optionStatusHolds(persistedGraphBytes, result.optionId, result.status);
+    return {
+      ...replay,
+      writeOutcome: { attempt_wrote: earlierWriteByThisTurnProven, version_minted: versionMinted,
+        model_version_receipt: committedResponse.model_version_receipt },
+    };
   }
 
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
@@ -4295,7 +4324,47 @@ async function dispatchOptionStatusEdit(
     graph: graphForEgress,
     analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForEgress),
     freshness,
+    // This attempt wrote, and the committed bytes hold the status (verified above). A signed-in write minted a version.
+    writeOutcome: { attempt_wrote: true, version_minted: versionMinted,
+      model_version_receipt: committedResponse.model_version_receipt },
   };
+}
+
+/** The Agent's option-status door, in-process (MG F1 T6 fix-forward #2471; the `commitLimitEdit` pattern). */
+export interface CommitOptionStatusInput {
+  readonly scenario_id: string;
+  readonly turn_id: string;
+  readonly option_node_id: string;
+  readonly expected_status: OptionStatusEditEvent['status'];
+  readonly status: OptionStatusEditEvent['status'];
+  readonly base_graph_hash: string;
+}
+
+/**
+ * What the writer itself says happened — the ONLY evidence the Agent may call "applied" on (CODEX overflow 5937013605 +
+ * DL: never inferred from display bytes, never from a missing receipt).
+ *   · `written`: the writer's `writeOutcome.attempt_wrote` (this turn wrote, or a replay proven to be this turn's own
+ *     write). `version_minted` + the unparsed receipt let the Agent require a receipt naming this turn when one was minted.
+ *   · `stale`: the CAS / expected-status conflict, or the turn fence's superseded/stopped verdict — nothing written.
+ *   · `refused`: the turn fence refused before any write (unclaimed / unavailable; set by the route's wrapper).
+ *   · `unconfirmed`: no typed evidence either way (a refusal reply, an unproven replay, a commit that could not be verified).
+ */
+export type CommitOptionStatusResult =
+  | { readonly status: 'written'; readonly version_minted: boolean; readonly model_version_receipt: unknown }
+  | { readonly status: 'stale' }
+  | { readonly status: 'refused'; readonly reason: string }
+  | { readonly status: 'unconfirmed' };
+
+export async function commitOptionStatusInProcess(input: CommitOptionStatusInput, requestId: string): Promise<CommitOptionStatusResult> {
+  const event = {
+    kind: 'option_status_edit' as const, option_node_id: input.option_node_id, expected_status: input.expected_status,
+    status: input.status, base_graph_hash: input.base_graph_hash,
+  } as OptionStatusEditEvent;
+  const payload = { kind: 'system_event', turn_id: input.turn_id, scenario_id: input.scenario_id, stage: 'frame', event } as SystemEventTurnPayload;
+  const r = await dispatchOptionStatusEdit(payload, event, requestId, Date.now(), { fenceRefusalReachesCaller: true });
+  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.writeOutcome?.attempt_wrote !== true) return { status: 'unconfirmed' };
+  return { status: 'written', version_minted: r.writeOutcome.version_minted, model_version_receipt: r.writeOutcome.model_version_receipt };
 }
 
 /**

@@ -60,15 +60,16 @@ describe('the read cache sees every write the Agent turn can make', () => {
     const inCode = calls.filter((i) => !defs.some(([a, b]) => i >= a && i < b));
     expect(inCode.length, 'control: the doors are called here').toBeGreaterThanOrEqual(4);
     for (const i of inCode) {
-      // The door is called directly inside readCache.around, or through the turn-fence wrapper inside it (F1b B8).
+      // The door is called directly inside readCache.around, or through the turn-fence wrapper inside it (F1b B8) — and
+      // the option-status door also inside the Agent sub-turn mark, as the HTTP dispatch it replaced was (MG #2471, DL P2).
       const before = ROUTE.slice(ROUTE.lastIndexOf('\n', i) + 1, i);
-      expect(before, ROUTE.slice(i, i + 60)).toMatch(/readCache\.around\(\(\) => (?:runFencedInProcessWrite\([^()]*, \(\) => )?$/);
+      expect(before, ROUTE.slice(i, i + 60)).toMatch(/readCache\.around\(\(\) => (?:runAsAgentSubturn\(input\.scenario_id, \(\) => )?(?:runFencedInProcessWrite\([^()]*, \(\) => )?$/);
     }
   });
 
   it('F1b B8: every in-process door that commits a graph write claims the turn fence first', () => {
     const commits = [...ROUTE.matchAll(/\b(commit\w+InProcess)\(input/g)];
-    expect(commits.map((m) => m[1]).sort(), 'control: the three committing doors').toEqual(['commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess', 'commitOptionLevelsInProcess']);
+    expect(commits.map((m) => m[1]).sort(), 'control: the four committing doors').toEqual(['commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess', 'commitOptionLevelsInProcess', 'commitOptionStatusInProcess']);
     for (const m of commits) {
       const line = ROUTE.slice(ROUTE.lastIndexOf('\n', m.index!) + 1, m.index!);
       expect(line, m[1]).toMatch(/runFencedInProcessWrite\(input\.scenario_id, input\.turn_id, \(\) => $/);
