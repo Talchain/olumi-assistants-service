@@ -1058,7 +1058,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
 
 
-  const callModelFor = (budget: CallBudget): CallModel => async (req) => onceMoreOnTransportFailure('conversation', async () => {
+  /**
+   * ⛔ A CALLER-SET DEADLINE IS THE CALL'S WHOLE BUDGET (CODEX_CLI_OVERFLOW P2 on #2470): such a call is made ONCE. The
+   * transport retry re-runs a `fetch failed` with a FRESH deadline, so a deadlined call could take two. Every other call
+   * keeps its one transport retry.
+   */
+  const withTransportRetry = <T>(req: unknown, call: () => Promise<T>): Promise<T> => {
+    const deadline = (req as { deadline_ms?: unknown } | null | undefined)?.deadline_ms;
+    return typeof deadline === 'number' && deadline > 0 ? call() : onceMoreOnTransportFailure('conversation', call);
+  };
+  const callModelFor = (budget: CallBudget): CallModel => async (req) => withTransportRetry(req, async () => {
     /**
      * ⭐ THE HANDLE IS KEPT SO CACHING CAN BE MEASURED AT ALL.
      *
@@ -1111,7 +1120,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         'content-type': 'application/json',
       },
       body: JSON.stringify(sentBody),
-      // 2a: a caller-set deadline aborts the call; `onceMoreOnTransportFailure` does not retry an abort.
+      // 2a: a caller-set deadline aborts the call, and such a call is never retried (`withTransportRetry`).
       ...(typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
     });
     if (!r.ok) {
@@ -1529,6 +1538,37 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
     const replayed = async (prior: CommittedTurnRecord) => {
       const state = await readBackState(dispatch, scenarioId);
+      /**
+       * ⭐ RESULT-FIRST REPLAY (#2470; CODEX_CLI_OVERFLOW P1 + P2 5936280278). A retried turn of the two-request Run is
+       * rebuilt from the canonical readback, never from what the first attempt had in memory:
+       * - request 2 (the explanation) returns its stored words ONLY while its bound key still names the CURRENT Run.
+       *   Explain Run A, complete Run B, retry A's turn: `stale` with the honest line, never A's words beside B;
+       * - request 1 (the Run) whose response was lost returns the CURRENT result, its narration metadata and the bound
+       *   Explain control, so the retry is the same Run experience, across a restart too.
+       * Which request it was is read from the request itself (the typed chips), and whether the Run made a result from
+       * the stored reply being Olumi's own fixed line, never from the user's words.
+       */
+      const replayChip = runExplanationChip(scenarioId, state);
+      const unavailableExplanation = new Set([interpretationUnavailableText({ ok: true, ran: true }), RUN_EXPLANATION_UNAVAILABLE_TEXT]);
+      let replayText = prior.assistant_message ?? 'That request was already completed.';
+      let replayNarration: { status: 'pending' | 'ready' | 'unavailable' | 'stale'; run_key: string } | undefined;
+      const boundControl: OfferedAction[] = [];
+      if (approvedProposal === undefined && isRunExplanationChip(explanationId)) {
+        const runKey = explanationId.slice(RUN_EXPLANATION_PREFIX.length);
+        if (!runExplanationMatches(explanationId, scenarioId, state)) {
+          replayText = RUN_EXPLANATION_UNAVAILABLE_TEXT;
+          replayNarration = { status: 'stale', run_key: runKey };
+        } else if (unavailableExplanation.has(replayText)) {
+          replayNarration = { status: 'unavailable', run_key: runKey };
+          if (replayChip !== null) boundControl.push(replayChip);
+        } else {
+          replayNarration = { status: 'ready', run_key: runKey };
+        }
+      } else if (approvedProposal === undefined && typedRunOf(body) && replayChip !== null && replayText.startsWith(RUN_RESULT_READY_TEXT)) {
+        replayNarration = { status: 'pending', run_key: replayChip.id.slice(RUN_EXPLANATION_PREFIX.length) };
+        boundControl.push(replayChip);
+      }
+      const resultFirstReplay = replayNarration !== undefined;
       const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
       // The durable carrier: this exact row's persisted Run offer, still within its lifetime.
       const durableRun = (prior.pending_actions ?? []).some((pa) =>
@@ -1545,11 +1585,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...remembered,
         ...(durableRun && !remembered.some((a) => a.id === RUN_OFFER_CHIP.id) ? [RUN_OFFER_CHIP] : []),
       ];
-      const composedReplay = composeDirectAnswerResponse({
-        assistant_text: prior.assistant_message ?? 'That request was already completed.',
-        stage: 'frame',
-        answerKind: 'substantive',
-        suggested_actions: stillValidOffers(offered, {
+      const stillValid = stillValidOffers(offered, {
           outstandingProposalIds: new Set([
             ...((id) => (id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
             ...(await liveHeldRefs(scenarioId)),
@@ -1558,10 +1594,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           analysisState: state.analysisState,
           // `draft_graph` is read back only when the graph has content.
           modelExists: state.draftGraph !== undefined,
-        }),
+        });
+      const composedReplay = composeDirectAnswerResponse({
+        assistant_text: replayText,
+        stage: 'frame',
+        answerKind: 'substantive',
+        // The bound Explain control is re-derived from the canonical readback above, so it is valid by construction.
+        suggested_actions: firstOfEachId([...stillValid, ...boundControl]),
       });
       const replayBody = {
         ...finaliseV5Response(composedReplay, { scenarioId, runDeltaBoundByCaller: true }),
+        ...(replayNarration !== undefined ? { narration: replayNarration } : {}),
+        // The CURRENT result as the live turn carries it: the readback's bound block and its sidecars, same fact.
+        ...(resultFirstReplay && state.analysisResult !== undefined ? { blocks: [state.analysisResult] } : {}),
+        ...(resultFirstReplay && state.limitVerdicts !== undefined ? { limit_verdicts: state.limitVerdicts } : {}),
+        ...(resultFirstReplay && state.goalCertainty !== undefined ? { goal_certainty: state.goalCertainty } : {}),
+        ...(resultFirstReplay && state.optionParticipation !== undefined ? { option_participation: state.optionParticipation } : {}),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
         ...(state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
         ...(state.analysisState !== undefined ? { analysis_state: state.analysisState } : {}),
@@ -2382,6 +2430,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
       ...runOutcomeChips,
       ...(fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
+        ? (() => { const chip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }); return chip === null ? [] : [chip]; })() : []),
+      // The explanation failed on a Run that is still current: the SAME bound control is offered again (the fallback;
+      // CODEX_CLI_OVERFLOW P2 on #2470). A stale Run offers none.
+      ...(fastPath === 'explain' && narrationStatus === 'unavailable' && runExplanationMatches(explanationId, scenarioId, { graphHash, analysisState, analysisResult })
         ? (() => { const chip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }); return chip === null ? [] : [chip]; })() : []),
       // The run is refused and Olumi can fill the gap: the one specific next step replaces the general one.
       ...(startingAssumptions.length > 0 ? startingAssumptions
