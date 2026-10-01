@@ -614,14 +614,17 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       unit: { type: 'string', description: 'The unit the user stated, if any (e.g. GBP).' },
       goal_is: {
         type: 'string', enum: ['at_least', 'above', 'at_most', 'below'],
-        description: 'How the user put the goal’s target: reach at least it, get strictly above it, stay at most it, or stay strictly below it. If they have not said, ask them; never guess.',
+        description: 'ONLY when the user has said how the goal’s target is put: reach at least it, get strictly above it, stay at most it, or stay strictly below it. Otherwise leave it out: today’s level is a fact about today and is recorded on its own, with or without a target, and you never ask for a target first. Never guess it.',
       },
       user_stated: {
         type: 'boolean',
         description: 'true ONLY when the USER gave this figure as the goal’s current level. Never set it for a figure you estimated.',
       },
       whole_request: WHOLE_REQUEST,
-    }, ['goal_label', 'value', 'unit', 'goal_is', 'user_stated']),
+    // ⭐ R3 F5 I1.1 (#85 5933250962, CEE `fe8c9ab0`): #2450 made the door take a level with NO comparator and NO target, but this
+    // schema still REQUIRED `goal_is` and said "ask them", so "Our quarterly revenue is £100,000." got no card, only a
+    // question asking for a target. `goal_is` is optional, as the door already reads it.
+    }, ['goal_label', 'value', 'unit', 'user_stated']),
   },
   {
     type: 'function',
@@ -811,7 +814,7 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
   proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
-    goal_label: string; value: number; unit: string; goal_is: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
+    goal_label: string; value: number; unit: string; goal_is?: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
   }): Promise<ToolResult>;
   /** The user confirms Olumi's reading of their goal as a product (`../identity-card.ts`). Optional: absent ⇒ refused plainly. */
   proposeIdentity?(ctx: AgentToolContext): Promise<ToolResult>;
