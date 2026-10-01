@@ -53,6 +53,25 @@ describe('it is said again whenever it carries news (AIQ: "again only when the p
     expect(withCaveatOncePerRun(naming, turn())).toBe(naming);
   });
 
+  it('DL 5926719387: the ENFORCER\'s own detector decides — a partial label, an ordinal, a pronoun claim all KEEP it', () => {
+    for (const claim of [
+      'Angel outreach looks stronger on these figures.', // a partial label ("Angel investor outreach" / "Angel outreach pilot")
+      'The first option comes out ahead.', // an ordinal
+      'That one wins on these estimates.', // a pronoun after a label said earlier
+      'The first option is better.', // the enforcer reads this as no ranking: kept by the option-cue + comparison safe keep
+    ]) {
+      resetCaveatRecordForTests();
+      withCaveatOncePerRun(RUN_REPLY, turn({ ranThisTurn: true }));
+      const reply = `${PROVISIONAL_FIGURES_CAVEAT}\n\n${claim}`;
+      expect(withCaveatOncePerRun(reply, turn()), claim).toBe(reply);
+    }
+  });
+
+  it('CONTROL: a turn that RAN keeps it even on the same Run with no option named', () => {
+    withCaveatOncePerRun(LATER, turn({ ranThisTurn: true }));
+    expect(withCaveatOncePerRun(LATER, turn({ ranThisTurn: true }))).toBe(LATER);
+  });
+
   it('CONTROL: a NEW Run (another computed_at) → said again, and the new Run is recorded', () => {
     withCaveatOncePerRun(RUN_REPLY, turn({ ranThisTurn: true }));
     const later = turn({ at: '2026-10-01T05:49:42.000Z' });

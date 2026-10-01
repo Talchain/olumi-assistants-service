@@ -693,7 +693,7 @@ const RUN_SHARE_CUE = { test: (t: string): boolean => RUN_SHARE_EXPLICIT.test(t)
 const FACTOR_ATTRIBUTION = /\b(?:variance|variation|sensitivit(?:y|ies)|uncertainty|spread|explain(?:s|ed)?|drivers?|comes?\s+from|attributable|due\s+to)\b/i;
 
 /** An option-shaped noun or gerund (a split's per-percentage cue). */
-const OPTION_CUE = /\b(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios|raising|keeping|holding|hiring|launching|building|buying|phasing|staying|expanding|bootstrapping|deferring|piloting)\b/i;
+export const OPTION_CUE = /\b(?:path|paths|option|options|choice|choices|route|routes|alternative|alternatives|scenario|scenarios|raising|keeping|holding|hiring|launching|building|buying|phasing|staying|expanding|bootstrapping|deferring|piloting)\b/i;
 
 /** Ranking codes present in text that has ALREADY been normalised and blanked. */
 function rankingCodesInBlanked(blanked: string): string[] {

@@ -10,12 +10,14 @@
  * Dropped here, on the Agent route only, and only when ALL hold:
  *   · this turn did not run the analysis (the reply reporting a Run always carries it);
  *   · this scenario already showed the SAME caveat string (so the same cause) for the SAME Run (`run_state.computed_at`);
- *   · the reply names no option of the model (a reply comparing or naming options keeps its qualifier).
+ *   · the reply cannot be claiming a leader (`mayClaimALeader`: the enforcer's own ranking detector, plus two safe keeps).
  * The record is in-process, per scenario (like the Agent's own `HistoryStore`): no new database read. After a restart or on
- * another instance it is said once more — today's behaviour, the safe direction.
+ * another Render instance it is said once more — today's behaviour, the safe direction (DL 5926719387).
  */
 
 import { PROVISIONAL_FIGURES_CAVEATS } from '../compose/leading-option-wire-enforcement.js';
+import { splitIntoRedactableUnits } from '../compose/redactable-units.js';
+import { dropRankingSentences, OPTION_CUE, rankingLabelContext } from './withheld-leader-fail-closed.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -45,10 +47,21 @@ function optionLabels(graph: unknown): string[] {
     : [];
 }
 
-/** The reply names one of the model's options (whole words, quotes and case ignored). */
-function namesAnOption(text: string, graph: unknown): boolean {
+/** Comparison words that, beside a reference to an option, make a sentence read as a claim about which leads. */
+const COMPARATIVE = /\b(?:better|best|stronger|strongest|weaker|weakest|worse|worst|ahead|behind|wins?|winning|winner|leads?|leading|favou?r(?:s|ed|ite)?|prefer(?:s|red|able)?|outperforms?|beats?|top|edges?)\b/i;
+
+/**
+ * ⛔ DL 5926719387: whether the reply may claim a leader is decided by the ENFORCER'S OWN detector — `dropRankingSentences`,
+ * the gate that removes ranking sentences — never by an exact-label match. A partial label ("investment firms look
+ * stronger"), an ordinal ("the first option comes out ahead") and a pronoun ("that one wins") all trip it. Two more keeps,
+ * both in the safe direction: a reply that names one of the model's options, and a sentence that refers to an option (the
+ * enforcer's own `OPTION_CUE`) beside a comparison word — the detector reads "The first option is better." as no ranking.
+ */
+function mayClaimALeader(text: string, graph: unknown, analysisReady: unknown): boolean {
+  if (dropRankingSentences(text, rankingLabelContext(graph, analysisReady)).droppedSentences > 0) return true;
   const t = fold(text);
-  return optionLabels(graph).some((l) => new RegExp(`(?:^|[^a-z0-9])${escape(fold(l))}(?:$|[^a-z0-9])`).test(t));
+  if (optionLabels(graph).some((l) => new RegExp(`(?:^|[^a-z0-9])${escape(fold(l))}(?:$|[^a-z0-9])`).test(t))) return true;
+  return splitIntoRedactableUnits(text).some((u) => OPTION_CUE.test(u) && COMPARATIVE.test(u));
 }
 
 export interface CaveatTurn {
@@ -59,6 +72,8 @@ export interface CaveatTurn {
   readonly analysisState: unknown;
   /** The readback graph (its options' labels). */
   readonly graph: unknown;
+  /** The readback's `analysis_ready` (the enforcer reads option labels from it too). */
+  readonly analysisReady?: unknown;
 }
 
 /**
@@ -72,7 +87,7 @@ export function withCaveatOncePerRun(text: string, turn: CaveatTurn): string {
   const rest = text.slice(caveat.length).replace(/^\s+/, '');
   const prior = shown.get(turn.scenarioId);
   const repeat = !turn.ranThisTurn && runAt !== null && prior !== undefined && prior.caveat === caveat && prior.runAt === runAt;
-  if (repeat && rest.length > 0 && !namesAnOption(rest, turn.graph)) return rest;
+  if (repeat && rest.length > 0 && !mayClaimALeader(rest, turn.graph, turn.analysisReady)) return rest;
   if (runAt !== null) {
     shown.delete(turn.scenarioId);
     shown.set(turn.scenarioId, { caveat, runAt });

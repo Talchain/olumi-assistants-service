@@ -2660,7 +2660,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ The provisional caveat once per Run (AIQ 5925678816 A; `caveat-once.ts`): LAST, on the reply exactly as it will be
     // stored and sent, so the answer row and a replay carry the same words.
     if (typeof wireBody.assistant_text === 'string') {
-      const once = withCaveatOncePerRun(wireBody.assistant_text, { scenarioId, ranThisTurn: ranAnalysisThisTurn, analysisState, graph: readbackGraph });
+      const once = withCaveatOncePerRun(wireBody.assistant_text, { scenarioId, ranThisTurn: ranAnalysisThisTurn, analysisState, graph: readbackGraph, analysisReady });
       if (once !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: once };
     }
 
