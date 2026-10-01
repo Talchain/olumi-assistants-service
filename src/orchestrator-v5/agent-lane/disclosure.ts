@@ -26,16 +26,9 @@ export interface DisclosableOutcome {
   /** The written strength was a placeholder, not a stated one. */
   readonly placeholder_strength?: boolean;
   /** A goal-target card that left out today's level the user wrote but that could not be bound to the goal (E1). */
-  readonly current_level_left_out?: { readonly users_figure?: unknown; readonly goal?: unknown };
+  readonly current_level_left_out?: { readonly host_line?: unknown };
 }
 
-/**
- * ⭐ E1/E3 (DL #75 5924370309; AIQ's plain words): a figure the user wrote, sent as the goal's level today, was left out of
- * the target card because it could not be bound to the goal. Said, never dropped silently, never promised — and never
- * called "today's" figure: the Agent may have read the wrong amount (the bank balance), so it names what was NOT done.
- */
-export const levelNotRecordedLine = (figure: string, goal: string): string =>
-  `I haven't recorded ${figure} as today's level of "${goal}"; tell me if you want it set.`;
 
 export const PLACEHOLDER_STRENGTH_DISCLOSURE =
   'Note: you set the direction of that link, not its strength. The model needs a number to ' +
@@ -49,11 +42,9 @@ export function disclosuresFor(outcomes: readonly DisclosableOutcome[]): readonl
     owed.push(PLACEHOLDER_STRENGTH_DISCLOSURE);
   }
   for (const o of outcomes) {
-    const figure = o?.current_level_left_out?.users_figure;
-    const goal = o?.current_level_left_out?.goal;
-    if (typeof figure !== 'string' || figure === '' || typeof goal !== 'string' || goal === '') continue;
-    const line = levelNotRecordedLine(figure, goal);
-    if (!owed.includes(line)) owed.push(line);
+    // ⭐ E1 (DL #75 5924370309; AIQ words 5924376899): the user's own level, left out of the target card, is said — once.
+    const line = o?.current_level_left_out?.host_line;
+    if (typeof line === 'string' && line !== '' && !owed.includes(line)) owed.push(line);
   }
   return owed;
 }
