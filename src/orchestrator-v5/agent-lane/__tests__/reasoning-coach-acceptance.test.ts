@@ -163,6 +163,21 @@ describe('discriminating controls for selector and rendering', () => {
     const state = stateOf('A-PREMORTEM-LICENSED');
     expect(rowsOf({ ...state, 'model.non_sq_option_ids': [...state['model.non_sq_option_ids']!].reverse() }).selection).toEqual(rowsOf(state).selection);
   });
+  it('a null goal label (as #2465 types it) is "no label": silent copy, never a throw', () => {
+    const state = { ...stateOf('A-PREMORTEM-LICENSED'), 'model.goal_label': null };
+    expect(() => rowsOf(state)).not.toThrow();
+    expect(() => renderCopy({ policy_id: 'RC-WIDEN', variant: 'W6' }, state)).not.toThrow();
+    for (const row of rowsOf(state).rows) for (const field of Object.values(row.copy)) expect(field ?? '').not.toMatch(/\{|null/u);
+  });
+  it('a user label is inserted verbatim: braces in it neither blank the copy nor pull in another field', () => {
+    const state = stateOf('A-PREMORTEM-LICENSED');
+    const plan = state['run.leader_option_id']!;
+    const braces = renderCopy({ policy_id: 'RC-PREMORTEM' }, { ...state, 'model.option_labels': { ...state['model.option_labels'], [plan]: 'Sprint capacity {AI}' } });
+    expect(braces.title).toContain('‘Sprint capacity {AI}’');
+    const injected = renderCopy({ policy_id: 'RC-PREMORTEM' }, { ...state, 'model.option_labels': { ...state['model.option_labels'], [plan]: 'Plan {goal_label}' } });
+    expect(injected.title).toContain('‘Plan {goal_label}’');
+    expect(injected.title).not.toContain(state['model.goal_label']!);
+  });
   it('copy handles one-month/deadline horizons, curly quotes, acronyms and Unicode truncation', () => {
     const state = stateOf('A-PREMORTEM-LICENSED');
     expect(renderCopy({ policy_id: 'RC-PREMORTEM' }, { ...state, 'model.goal_horizon': { months: 1 } }).question).toContain('a month from now');
