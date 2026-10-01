@@ -421,6 +421,35 @@ export function hasGoalDirectionUnattestedDisclosure(
 }
 
 /**
+ * ⭐ A9 RESIDUAL (R3 accept-paul A9; MG lease #75 5923478493): a goal the user HELD as a floor points up by their own
+ * words (`heldGoalPointsUp`, `goal-direction.ts`), so PLoT's GOAL_DIRECTION_UNATTESTED is false there: its message says
+ * no objective sense was stated and the ranking "is an assumption, not the team's stated aim", while the run ranked by
+ * the largest goal value, which IS the user's sense. Served R3 train-2255Z (`09-cold-reload`): the goal held ">=", the
+ * code rode `inference_warnings[]` and `decision_brief.warning_codes[]`, and the UI said the model "does not say which
+ * way your goal should go". This takes that ONE code off every carrier the run stores, only when the caller has
+ * established the held floor; every other code, and every run without a held floor, is returned as it came (the
+ * headline already ignores the code on a held floor, `resolveGoalFrame`). PURE: the response itself when nothing moves.
+ */
+export function withoutDirectionUnattestedOnHeldFloor<T>(response: T, goalPointsUpAsHeld: boolean): T {
+  if (!goalPointsUpAsHeld || response === null || typeof response !== 'object') return response;
+  const r = response as Record<string, unknown>;
+  const isCode = (entry: unknown): boolean => DIRECTION_UNATTESTED_WARNING_CODES.has(String(entry))
+    || (entry !== null && typeof entry === 'object' && DIRECTION_UNATTESTED_WARNING_CODES.has(String((entry as Record<string, unknown>).code)));
+  const without = (arr: unknown): unknown => (Array.isArray(arr) && arr.some(isCode) ? arr.filter((x) => !isCode(x)) : arr);
+  const brief = r.decision_brief !== null && typeof r.decision_brief === 'object' ? r.decision_brief as Record<string, unknown> : undefined;
+  const next: Record<string, unknown> = { ...r, inference_warnings: without(r.inference_warnings) };
+  if (!('inference_warnings' in r)) delete next.inference_warnings;
+  if (brief !== undefined) {
+    next.decision_brief = { ...brief, warning_codes: without(brief.warning_codes), warnings: without(brief.warnings) };
+    for (const k of ['warning_codes', 'warnings'] as const) if (!(k in brief)) delete (next.decision_brief as Record<string, unknown>)[k];
+  }
+  const moved = next.inference_warnings !== r.inference_warnings
+    || (brief !== undefined && ((next.decision_brief as Record<string, unknown>).warning_codes !== brief.warning_codes
+      || (next.decision_brief as Record<string, unknown>).warnings !== brief.warnings));
+  return moved ? next as T : response;
+}
+
+/**
  * Did PLoT say the stated goal LEVEL could not be converted into the samples'
  * frame (GOAL_THRESHOLD_NOT_CONVERTIBLE)? Then no option was tested against the
  * level, so "could not test whether any option reaches your goal" is true
