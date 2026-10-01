@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ 0fd12a9fe502ce8aa0c37ea1bfeaa61f43e6a0c1.
+// programme-docs @ d18ddf35d0c9290ba342c0ffaa264f095026baa1.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -401,7 +401,7 @@ export const POLICY = {
       },
       "short_copy": {
         "S1": "The comparison rests on a link nobody has sized yet.",
-        "S2": "{factor_label} is Olumi's estimate, and the answer is sensitive to it.",
+        "S2": "The answer is sensitive to {factor_label}, Olumi's estimate.",
         "S3L": "The effect of {from_label} is Olumi's guess.",
         "S3V": "{factor_label} is Olumi's estimate, not yours."
       },
@@ -692,7 +692,8 @@ export const POLICY = {
       "Olumi's suggestion"
     ],
     "response_shape": "One-line insight, then at most 3 bullets, then one action or question; details collapsed (Grammar §3).",
-    "label_case": "Option labels ({option_label}, {plan_label}, {leader_label}) are quoted in single curly quotes and keep their case: 'Imagine ‘Switch to GCP’ has failed.' Other mid-sentence labels lower-case their first letter unless the first word is an acronym or proper noun (second letter upper-case, e.g. 'GCP', 'AI'). A label that opens the sentence keeps its capital."
+    "label_case": "Option labels ({option_label}, {plan_label}, {leader_label}) are quoted in single curly quotes and keep their case: 'Imagine ‘Switch to GCP’ has failed.' Other mid-sentence labels lower-case their first letter unless the first word is an acronym or proper noun (second letter upper-case, e.g. 'GCP', 'AI'). A label that opens the sentence keeps its capital.",
+    "served_label_scan": "RC 1 Oct 19:2xZ: every row variant rendered by the real renderCopy over 292 served graphs (CEE staging fixtures), 19,366 renders: 0 throws; only S2 short_copy overflowed (96 > 90 with a 40-char label) -> rewritten with 46 fixed chars. Fixed chars + 40 per label must stay within max_chars."
   },
   "method_turns": {
     "purpose": "What a method must produce when pressed. Every post_check is a DETERMINISTIC text rule with an id (Ticket 1 implements all of them in checkMethodTurn). Rules that need structured output are listed under structured_checks; they are AI HARNESS's (method-turn output format) and are NOT part of the text checker. The runtime checks the draft BEFORE it is sent (shared.runtime); if any check fails, it sends the deterministic fallback instead.",
@@ -1063,4 +1064,4 @@ export const POLICY = {
   }
 } as const;
 
-export const SPEC_SHA = "0fd12a9fe502ce8aa0c37ea1bfeaa61f43e6a0c1";
+export const SPEC_SHA = "d18ddf35d0c9290ba342c0ffaa264f095026baa1";
