@@ -55,7 +55,11 @@ function world(extra: Partial<Record<string, Record<string, unknown>>> = {}) {
       g = { ...g, nodes: g.nodes.map((n) => (n.id === ev['option_node_id']
         ? { ...n, option_status: status, analysis_participation: PARTICIPATION_FOR_STATUS[status] } : n)) };
       rev += 1;
-      return { status: 200, json: { assistant_text: 'ok', graph_hash: `h${rev}`, model_version_receipt: receiptFor(String((body as { turn_id?: unknown }).turn_id), rev) } };
+      // The real writer's success body (`dispatch.ts` option_status_edit): the committed bytes as `draft_graph`, plus a
+      // receipt ONLY when a version was minted (a guest's write mints none: R3 5936732295, served b213138f).
+      return { status: 200, json: { assistant_text: 'ok', graph_hash: `h${rev}`,
+        draft_graph: { nodes: g.nodes, edges: g.edges, node_count: g.nodes.length, edge_count: g.edges.length },
+        model_version_receipt: receiptFor(String((body as { turn_id?: unknown }).turn_id), rev) } };
     }
     throw new Error(`unexpected dispatch ${path}`);
   };
@@ -135,7 +139,7 @@ describe('the Agent takes an option out of the comparison through option_status_
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: false, applied: false, refusal: 'superseded' }));
   });
 
-  it('RED (CODEX P2): a 200 with NO receipt for this operation is never "applied", even when the model holds the status', async () => {
+  it('RED (CODEX P2): an honest refusal committed as a 200 (no committed bytes, no receipt) is never "applied", even when the model holds the status', async () => {
     const w = world({ opt_carry_on: { option_status: 'removed', analysis_participation: 'retained_excluded' } });
     const store = new ProposalStore();
     const p = await createAgentCapabilities(w.d, store).proposeOptionStatus!(ctxOf('Put it back.'), { option_label: 'Continue Current Plan', status: 'feasible', rationale: 'x' });
@@ -151,22 +155,54 @@ describe('the Agent takes an option out of the comparison through option_status_
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, applied: false, refusal: 'not_confirmed' }));
   });
 
-  // ⛔ CODEX overflow #2467 delta P2-1 (DL: BLOCKS): with model versions OFF (`CEE_MODEL_VERSIONS_ENABLED=false`, supported on
-  // staging) a commit SAVES the graph and returns no receipt. Missing evidence is "could not be confirmed", never "did not change".
-  it('RED (CODEX delta P2-1): a SUCCESSFUL commit with no receipt (model versions off) → "could not be confirmed", never "did not change the option"', async () => {
+  // ⛔ SERVED FALSE "could not be confirmed" (R3 #85 5936732295, CEE b213138f: 4 of 4 presses; requests 19397165 / 7d52d5da /
+  // 3cd0d805 / 08368bc1). A guest's write mints no model version, so the writer's 200 carries NO receipt, and #2467 read
+  // that as "unconfirmed" on every press. The operation-bound evidence the writer DOES send on every committed write is its
+  // own committed bytes (`draft_graph`), which a refusal never carries (`dispatch.ts`: a refusal answers the bare refusal +
+  // graph_hash). Missing evidence is still never "did not change" (CODEX delta P2-1).
+  it('RED (R3 5936732295): a guest\'s SUCCESSFUL commit (no receipt, the committed bytes hold the status) → APPLIED, with the writer\'s sentence', async () => {
     const w = world();
     const store = new ProposalStore();
     const p = await createAgentCapabilities(w.d, store).proposeOptionStatus!(ctxOf(SAID), { option_label: 'Continue Current Plan', status: 'infeasible', rationale: SAID });
-    const versionsOff: InternalDispatch = async (path, body) => {
+    const guest: InternalDispatch = async (path, body) => {
       const r = await w.d(path, body);
       if (path.endsWith('/graph')) return r;
-      const { model_version_receipt: _dropped, ...json } = r.json as Record<string, unknown>;
+      const { model_version_receipt: _none, ...json } = r.json as Record<string, unknown>;
       return { status: r.status, json };
     };
-    const r = await createAgentCapabilities(versionsOff, store).authoriseChange(ctxOf('Yes.', [SAID]), { proposal_id: String(p.proposal_id) });
+    const r = await createAgentCapabilities(guest, store).authoriseChange(ctxOf('Yes.', [SAID]), { proposal_id: String(p.proposal_id) });
     expect(w.graph().nodes.find((n) => n.id === 'opt_carry_on'), 'precondition: the write DID land').toMatchObject({ option_status: 'infeasible' });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true, receipts: [] }));
+    expect(String(r.follow_up)).toMatch(/Continue Current Plan/);
+  });
+
+  it('CONTROL: a 200 whose committed bytes do NOT hold the status (no receipt) → "could not be confirmed", never "did not change"', async () => {
+    const w = world();
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeOptionStatus!(ctxOf(SAID), { option_label: 'Continue Current Plan', status: 'infeasible', rationale: SAID });
+    const staleBytes: InternalDispatch = async (path, body) => {
+      if (path.endsWith('/graph')) return w.d(path, body);
+      const before = w.graph();
+      const r = await w.d(path, body);
+      const { model_version_receipt: _none, ...json } = r.json as Record<string, unknown>;
+      return { status: r.status, json: { ...json, draft_graph: { nodes: before.nodes, edges: before.edges, node_count: before.nodes.length, edge_count: 0 } } };
+    };
+    const r = await createAgentCapabilities(staleBytes, store).authoriseChange(ctxOf('Yes.', [SAID]), { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' }));
     expect(String(r.detail)).not.toMatch(/did not change|not changed|nothing changed/i);
+  });
+
+  it('CONTROL: a receipt naming ANOTHER turn is not this operation\'s write, even with bytes that hold the status', async () => {
+    const w = world();
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeOptionStatus!(ctxOf(SAID), { option_label: 'Continue Current Plan', status: 'infeasible', rationale: SAID });
+    const otherTurn: InternalDispatch = async (path, body) => {
+      const r = await w.d(path, body);
+      if (path.endsWith('/graph')) return r;
+      return { status: r.status, json: { ...r.json, model_version_receipt: receiptFor('another-turn', 99) } };
+    };
+    const r = await createAgentCapabilities(otherTurn, store).authoriseChange(ctxOf('Yes.', [SAID]), { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, applied: false, refusal: 'not_confirmed' }));
   });
 
   // ⛔ CODEX P2 #2: the success branch never marked the proposal applied, so it stayed on offer and a retry read "superseded".

@@ -4534,11 +4534,19 @@ export function createAgentCapabilities(
          * of the same approval replays that receipt, so it recovers the original result instead of reading "superseded".
          */
         const receipt = receiptSummaryOf(res.json);
-        const thisOperationWrote = res.status === 200 && receipt.summary !== null && receipt.summary.source_turn_id === operationId;
-        // ⛔ A MISSING RECEIPT IS NOT EVIDENCE OF NO WRITE (CODEX overflow #2467 delta, P2-1; DL ruling). With model versions
-        // off (`CEE_MODEL_VERSIONS_ENABLED=false`) a commit saves the graph and returns no receipt, so "nothing changed" would be
-        // false on Paul's own "take it out". Without operation-bound evidence the outcome is UNCONFIRMED; "not changed" is said
-        // only on typed no-write evidence (the 409 conflict and the 4xx refusals above).
+        /**
+         * ⛔ A GUEST'S WRITE MINTS NO VERSION, SO IT HAS NO RECEIPT (R3 #85 5936732295, served b213138f: "could not be
+         * confirmed" on 4 of 4 presses that landed). The writer's OWN operation-bound evidence is the committed bytes it
+         * answers THIS request with (`draft_graph`, `dispatch.ts` option_status_edit): a refusal answers without them, and a
+         * replay answers with the stored bytes of this same turn id. So: the response's committed bytes hold the status, and a
+         * receipt, when one came, names THIS operation's turn (a receipt naming another turn is someone else's write).
+         */
+        const committedBytesHold = optionStatusHolds((res.json as { draft_graph?: unknown }).draft_graph, op.path, status);
+        const thisOperationWrote = res.status === 200 && committedBytesHold && !receipt.unreadable
+          && (receipt.summary === null || receipt.summary.source_turn_id === operationId);
+        // ⛔ A MISSING RECEIPT IS NOT EVIDENCE OF NO WRITE (CODEX overflow #2467 delta, P2-1; DL ruling). Without
+        // operation-bound evidence the outcome is UNCONFIRMED; "not changed" is said only on typed no-write evidence (the 409
+        // conflict and the 4xx refusals above).
         const after = await readGraph(ctx.scenario_id);
         const landed = thisOperationWrote && after !== null && optionStatusHolds(after.raw, op.path, status);
         if (!landed) {
