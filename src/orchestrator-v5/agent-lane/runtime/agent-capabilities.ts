@@ -184,6 +184,8 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
+import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
+import type { NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -720,6 +722,33 @@ const ADOPTED_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumpt
  * value TO the user, never the reverse. An op without the field — a carrier persisted before it
  * existed — takes the proposal's author.
  */
+/**
+ * ⛔ A VALUE THAT WAS NOT SAVED SAYS WHAT STILL STANDS (AIQ 5924015300; 52f8cd 5923996794, served `7686dc0` guest
+ * `61a8c07c`). "Record your figure" → "Not saved: the starting value." left Paul believing his 3 a month was in the
+ * model while the analysis still used Olumi's 5. Per value: the figure not saved and whose it is, and the figure the
+ * model still holds with ITS owner, read from the stored node (the refused write changed nothing). The words are
+ * `write-outcome.ts`'s.
+ */
+function valuesNotSaved(valueOps: readonly ProposalOperation[], parent: StructuredProposal, read: GraphRead): NotSavedValue[] {
+  return valueOps.map((o) => {
+    const v = (o.value ?? {}) as { value?: unknown; unit?: unknown };
+    const node = read.nodes.find((n) => n.id === o.path);
+    const os = (node?.observed_state ?? undefined) as Record<string, unknown> | undefined;
+    const unit = typeof os?.unit === 'string' ? os.unit : '';
+    // The figure in the user's units: `raw_value` when stored; a bare 0–1 share of a % factor is said as a percentage.
+    const held = typeof os?.raw_value === 'number' ? os.raw_value
+      : typeof os?.value === 'number' ? (unit === '%' && Math.abs(os.value) <= 1 ? os.value * 100 : os.value) : undefined;
+    const owner: NonNullable<NotSavedValue['still']>['owner'] | undefined = os === undefined ? undefined
+      : isAcceptedOlumiEstimate(os) ? 'olumi_accepted'
+        : observedValueAuthorship(os)?.provenance === 'user_set' ? 'yours' : 'olumi';
+    return {
+      label: node?.label ?? o.path, value: Number(v.value), unit: typeof v.unit === 'string' ? v.unit : '',
+      yours: valueOpAuthor(o, parent) === 'user_stated',
+      ...(held !== undefined && owner !== undefined ? { still: { value: held, unit, owner } } : {}),
+    };
+  });
+}
+
 function valueOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'model_proposed' | 'user_stated' {
   if (proposal.provenance.authored_by === 'user_stated') return 'user_stated';
   const own = ((op.value ?? {}) as { authored_by?: unknown }).authored_by;
@@ -2098,6 +2127,7 @@ export function createAgentCapabilities(
     // none committed. The link a level needs is written first INSIDE that commit, so no level lands on an unlinked factor.
     let levelsRecorded = 0;
     let levelStop: string | null = null;
+    let stopReason: string | undefined;
     const linksAdded: string[] = [];
     let linksResized: ResizedLinksGroup[] = [];
     const labelOf = (id: string): string => approvedRead.nodes.find((n) => n.id === id)?.label ?? id;
@@ -2128,6 +2158,7 @@ export function createAgentCapabilities(
           : res.value !== undefined ? `the value for ${labelOf(res.value.factor_id)}`
             : res.frame !== undefined ? `the range for ${labelOf(res.frame.factor_id)}` : 'part of this change';
         levelStop = `${what} was refused, so nothing in this change was written`;
+        stopReason = res.reason;
       } else {
         if (res.receipt !== null) receipts.push({ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' });
         carried = res.graph_hash;
@@ -2156,7 +2187,8 @@ export function createAgentCapabilities(
     const all = levelStop === null && levelsRecorded === levelOps.length;
     if (all) proposals.markApplied(parent.proposal_id, receipts);
     const parts = [
-      ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length }] : []),
+      ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length,
+        ...(valuesLanded ? {} : { ...(stopReason !== undefined ? { reason: stopReason } : {}), not_saved: valuesNotSaved(valueOps, parent, approvedRead) }) }] : []),
       ...(linkOps.length > 0 ? [{ part: 'links', ok: linksAdded.length === linkOps.length, recorded_count: linksAdded.length, requested_count: linkOps.length }] : []),
       ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),
     ];
@@ -3283,6 +3315,19 @@ export function createAgentCapabilities(
       const input = Array.isArray(args?.assumptions) ? args.assumptions : [];
       if (input.length === 0) {
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No assumptions were given.' };
+      }
+      /**
+       * ⛔ NO YES THAT CANNOT BE WRITTEN (DL 5924061304; the identity card's precedent above). The value door refuses
+       * EVERY write on a base that fails the writer's own check (`executeOptionInterventionBatch` →
+       * `canonical_graph_unavailable`): served `61a8c07c` stored a link at mean 1.67, offered "Record your figure", and the
+       * press read "Not saved". The SAME predicate the door applies, so the card is withheld exactly when the write
+       * would be refused, and offered on every base it would accept.
+       */
+      if (!identityConfirmBaseIsWritable(g.raw)) {
+        return { ok: false, mutated: false, refusal: 'values_not_writable',
+          detail: 'This model holds a size Olumi cannot record changes on yet (a link larger than the model\u2019s scale), so no '
+            + 'figure can be saved on it now and nothing was proposed. Say that plainly and name the figure the model still uses; '
+            + 'never offer a card, and never say a figure was recorded or will be.' };
       }
 
       /**
