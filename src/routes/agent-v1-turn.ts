@@ -685,6 +685,68 @@ export function withheldToolsOf(body: Record<string, unknown>): readonly string[
 }
 
 /**
+ * ⭐ FAST PATH 4 — A WEBMCP SITE TOOL (EXPERIMENT ONLY, olumi-programme-docs#76; branch experiment/webmcp-fast-path).
+ *
+ * ChatGPT Desktop drives the Olumi page through WebMCP site tools; the page sends ONE typed chip
+ * `webmcp-tool:<capability>` with its arguments in the wire's existing `chip.parameters`. The route runs that
+ * capability through the SAME `dispatchTool` the Agent uses — no Agent planning, no model routing — and the turn then
+ * ends through the SAME machinery as every other fast path (durable carrier, approve chip, readback), so the user
+ * approves on Olumi's own card.
+ *
+ * ⛔ WHAT IT CAN NEVER DO:
+ *   · run anything off the allowlist — `authorise_change`, `withdraw_proposal` and every other name are refused
+ *     before any dispatch (approval stays a human click on Olumi's card: fast path 2);
+ *   · take identity, ownership or approval from its arguments — the tool context is built here from the request's
+ *     verified identity, with no typed approval and NO user words (`user_text`/`user_turn_text` are empty), so a
+ *     figure the site tool supplies can never read as the user's own (it is stored as Olumi's estimate);
+ *   · report a proposal that is not a typed hold — a proposing capability that answers ok without a `gmh_`/`prop_`
+ *     id is refused as not prepared.
+ */
+export const WEBMCP_TOOL_CHIP_PREFIX = 'webmcp-tool:';
+export const WEBMCP_ALLOWED_TOOLS: readonly string[] = Object.freeze([
+  'propose_new_option', 'propose_assumptions', 'build_model_from_brief', 'get_canonical_state',
+]);
+const WEBMCP_PROPOSAL_TOOLS: ReadonlySet<string> = new Set(['propose_new_option', 'propose_assumptions']);
+/** Never forwarded from a site tool's arguments: identity, ownership, approval and authorship are the server's. */
+export const WEBMCP_STRIPPED_ARG_KEYS: ReadonlySet<string> = new Set([
+  'scenario_id', 'user_id', 'authenticated_user_id', 'request_id', 'typed_approval_of', 'typed_approval_words',
+  'user_text', 'user_turn_text', 'proposal_id', 'authored_by', 'provenance', 'stated_by', 'your_figure',
+]);
+export interface WebMcpToolRequest { readonly name: string; readonly allowed: boolean; readonly args: Record<string, unknown> }
+export function webMcpToolOf(body: Record<string, unknown>): WebMcpToolRequest | undefined {
+  if (body['kind'] !== undefined && body['kind'] !== 'message') return undefined;
+  const chip = body['chip'] as { id?: unknown; parameters?: unknown } | null | undefined;
+  const id = typeof chip?.id === 'string' ? chip.id : '';
+  if (!id.startsWith(WEBMCP_TOOL_CHIP_PREFIX)) return undefined;
+  const name = id.slice(WEBMCP_TOOL_CHIP_PREFIX.length);
+  const raw = chip?.parameters;
+  const params = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const args = Object.fromEntries(Object.entries(params).filter(([k]) => !WEBMCP_STRIPPED_ARG_KEYS.has(k)));
+  return { name, allowed: WEBMCP_ALLOWED_TOOLS.includes(name), args };
+}
+/** A proposing capability's answer counts only as a typed hold Olumi's own card can approve. */
+export function isTypedHold(r: { ok?: unknown; proposal_id?: unknown }): boolean {
+  return r.ok === true && typeof r.proposal_id === 'string' && /^(gmh_|prop_)[0-9a-f]+$/.test(r.proposal_id);
+}
+/** What the user reads in Olumi's conversation for a site-tool turn: server text only, never a model's. */
+export function webMcpReplyText(name: string, r: { ok?: unknown; mutated?: unknown; public_label?: unknown; refusal?: unknown }): string {
+  if (!WEBMCP_ALLOWED_TOOLS.includes(name)) return 'That action is not available to connected assistants. Nothing was changed.';
+  if (WEBMCP_PROPOSAL_TOOLS.has(name)) {
+    if (r.ok === true) {
+      const label = typeof r.public_label === 'string' && r.public_label.trim() !== '' ? ` ${r.public_label.trim()}` : '';
+      return `A suggested change is ready for your review.${label} Nothing in your model changes unless you approve it.`;
+    }
+    return 'That suggestion could not be prepared, so nothing was changed.';
+  }
+  if (name === 'build_model_from_brief') {
+    return r.ok === true && r.mutated === true
+      ? 'Olumi has built a first model from the brief. It is a provisional first pass for you to check.'
+      : 'Olumi could not build a model from that brief, so nothing was changed.';
+  }
+  return '';
+}
+
+/**
  * C6 (measurement before optimisation, #70 5857659587): one internal dispatch, timed. Every call the turn makes goes
  * through the route's single `dispatch`: its readbacks, and each tool's reads and writes. So the ledger says which calls
  * took the non-model seconds (an approve spends 4.3–5.2 s with no model call; ~2.2 s of every turn is outside the loop).
@@ -1759,7 +1821,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * status the user reads is composed from the result (`write-outcome`). Zero model
      * calls, no implicit analysis. Words alone never take this path.
      */
-    let fastPath: 'approve' | 'run' | 'research' | undefined;
+    let fastPath: 'approve' | 'run' | 'research' | 'webmcp' | undefined;
+    /** Provider calls fast path 4 made, from the route's own provider ledger (0 for a proposal, 1 for a build). */
+    let webmcpProviderCalls = 0;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
     /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
@@ -1961,6 +2025,43 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: 1,
         stopped_reason: 'answered',
         timing: { total_ms: ms, provider_ms: runInterpreted ? providerMs : 0, tool_ms: Math.max(0, ms - (runInterpreted ? providerMs : 0)), overhead_ms: 0, tool_provider_ms: 0, provider_calls: runInterpreted ? 1 : 0, tool_calls: 1, hops: 1 },
+      };
+    }
+    /** FAST PATH 4 — a WebMCP site tool (EXPERIMENT, #76): see `webMcpToolOf`. */
+    const webmcp = result === undefined && approvedProposal === undefined && !typedRunOf(body) ? webMcpToolOf(body) : undefined;
+    if (webmcp !== undefined) {
+      const fastStartedAt = Date.now();
+      const ledgerBefore = recordedProviderCalls().length;
+      const siteCtx: AgentToolContext = { scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: '', user_text: '' };
+      let out: Record<string, unknown> & { ok: boolean; mutated: boolean } = { ok: false, mutated: false, refusal: 'not_available_to_site_tools' };
+      if (webmcp.allowed) {
+        out = await dispatchTool(webmcp.name, JSON.stringify(webmcp.args), siteCtx, capabilities, mode);
+        if (WEBMCP_PROPOSAL_TOOLS.has(webmcp.name) && out.ok === true && !isTypedHold(out)) {
+          log.warn({ scenario_id: scenarioId, tool: webmcp.name }, 'agent-lane: site-tool proposal was not a typed hold — refused');
+          out = { ok: false, mutated: false, refusal: 'not_a_typed_hold' };
+        }
+      }
+      webmcpProviderCalls = recordedProviderCalls().length - ledgerBefore;
+      fastPath = 'webmcp';
+      const text = webMcpReplyText(webmcp.name, out);
+      const ms = Date.now() - fastStartedAt;
+      result = {
+        assistant_text: text,
+        items: [
+          ...(history ?? []),
+          { role: 'user', content: [{ type: 'input_text', text: message }] },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] },
+        ],
+        tool_calls: [{
+          name: webmcp.name, ok: out.ok === true, mutated: out.mutated === true,
+          ...(typeof out.proposal_id === 'string' ? { proposal_id: out.proposal_id } : {}),
+          ...(typeof out.refusal === 'string' ? { refusal: out.refusal } : {}),
+        }],
+        tool_results: [out],
+        mutated: out.mutated === true,
+        hops: 0,
+        stopped_reason: 'answered',
+        timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: webmcpProviderCalls, tool_calls: 1, hops: 0 },
       };
     }
     /**
@@ -2601,7 +2702,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_id: null,
           request_hash: requestHash,
           response_emitted: true,
-          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'run' ? (runInterpreted ? 1 : 0) : result.hops + 1,
+          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'run' ? (runInterpreted ? 1 : 0) : fastPath === 'webmcp' ? webmcpProviderCalls : result.hops + 1,
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
           userMessage: message,
