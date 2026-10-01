@@ -10,7 +10,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import served from './fixtures/m1-s1-served-graphs.json';
 import { strengthenCardFor, STRENGTHEN_PRESS_CHIP_ID } from '../strengthen-press.js';
-import { NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
+import { chipOperationOf, NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
 import { linkStrengthCardFor } from '../approval-chips.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
@@ -187,6 +187,40 @@ describe('the real route: the press → ONE held card, 0 model calls', () => {
     const again = r.json() as Body;
     expect(approveOf(again)?.id).toBe(approveOf(first)?.id);
     expect(approveOf(again)?.detail).toBe(CARD);
+  });
+
+  /** DL P2 on #2481: the press and the same words typed are DIFFERENT requests, so a reused turn_id refuses both ways. */
+  const typed = (turn_id: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
+    payload: { kind: 'message', scenario_id: SCENARIO, message: NEXT_STEP_CHIPS.find((c) => c.id === STRENGTHEN_PRESS_CHIP_ID)!.message, turn_id } });
+  it('RED (DL P2): press, then the same words TYPED under the same turn_id → TURN_ID_REUSED, never the card replayed', async () => {
+    const turn_id = randomUUID();
+    await press({ turn_id });
+    const r = await typed(turn_id);
+    expect(r.statusCode, r.body).toBe(409);
+    expect((r.json() as { error?: string }).error).toBe('TURN_ID_REUSED');
+  });
+  it('RED (DL P2): typed first, then the PRESS under the same turn_id → TURN_ID_REUSED, never the typed answer replayed', async () => {
+    const turn_id = randomUUID();
+    expect((await typed(turn_id)).statusCode).toBe(200);
+    const chip = NEXT_STEP_CHIPS.find((c) => c.id === STRENGTHEN_PRESS_CHIP_ID)!;
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: chip.message, source: 'chip', chip: { id: chip.id }, turn_id } });
+    expect(r.statusCode, r.body).toBe(409);
+    expect((r.json() as { error?: string }).error).toBe('TURN_ID_REUSED');
+  });
+  it('CONTROL: the typed words retried under the same turn_id still replay (an ordinary message hashes as before)', async () => {
+    const turn_id = randomUUID();
+    const first = await typed(turn_id);
+    const again = await typed(turn_id);
+    expect(again.statusCode, again.body).toBe(200);
+    expect((again.json() as Body).assistant_text).toBe((first.json() as Body).assistant_text);
+  });
+  it('the chip operation: none without a chip; the same chip → the same; another id or action → another', () => {
+    expect(chipOperationOf({ message: 'x' })).toBeUndefined();
+    expect(chipOperationOf({ chip: null })).toBeUndefined();
+    expect(chipOperationOf({ chip: { id: 'agent-next-strengthen' } })).toBe(chipOperationOf({ chip: { id: 'agent-next-strengthen' } }));
+    expect(chipOperationOf({ chip: { id: 'agent-next-strengthen' } })).not.toBe(chipOperationOf({ chip: { id: 'agent-next-pre-mortem' } }));
+    expect(chipOperationOf({ chip: { id: 'a', action_type: 'run_analysis' } })).not.toBe(chipOperationOf({ chip: { id: 'a' } }));
+    expect(chipOperationOf({ chip: {} })).toBeDefined();
   });
 
   it('CONTROL: the same press on a STALE Run → today\'s answer (the model is called, no card)', async () => {

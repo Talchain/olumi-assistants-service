@@ -1024,6 +1024,21 @@ export function agentTurnRequestHash(scenarioId: string, userId: string | null, 
   return `agent_turn:${digest}`;
 }
 
+/**
+ * ⛔ THE CHIP IS PART OF WHAT WAS ASKED, TOO (DL P2 on #2481; the class, not the one chip). The same words do different
+ * things with and without a chip, and with different chips: every chip turn withholds `authorise_change` and
+ * `run_analysis` (`withheldToolsOf`), and the Run, research, Strengthen and starting-assumptions chips each take their
+ * own path. So a reused turn_id carrying the same words with another chip, or none, is another request: it meets
+ * `TURN_ID_REUSED`, never the other's recorded answer. A retry of the same press carries the same chip and still replays.
+ * The approve and explanation chips keep their own operations (`approve:<id>`, the explanation id) unchanged.
+ */
+export function chipOperationOf(body: Record<string, unknown>): string | undefined {
+  const chip = body['chip'];
+  if (chip === null || typeof chip !== 'object') return undefined;
+  const { id, action_type: actionType } = chip as { id?: unknown; action_type?: unknown };
+  return `chip:${JSON.stringify([typeof id === 'string' ? id : null, typeof actionType === 'string' ? actionType : null])}`;
+}
+
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   if (config.proxy.agentLaneEnabled !== true) return;
 
@@ -1537,7 +1552,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const approvedProposal = typedApprovalOf(body);
     const explanationId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
     const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}`
-      : isRunExplanationChip(explanationId) ? explanationId : undefined);
+      : isRunExplanationChip(explanationId) ? explanationId : chipOperationOf(body));
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
     /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
     const liveHeldRefs = async (sid: string): Promise<string[]> => {
