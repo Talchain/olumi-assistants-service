@@ -829,6 +829,15 @@ export function holdsABandWord(words: unknown): boolean {
 const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
 const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'less than', 'maximum', 'under', 'below', 'cap']);
 
+/**
+ * Whether `turnText` holds ANY comparator word at all — said, asked, denied or both ways. When it holds none, the user's
+ * words are SILENT on the direction, and the target card is a decision (DL 380e54 on #2447); when it holds some but
+ * `comparatorTheUserWrote` reads null (asked, denied, both ways), the Agent asks.
+ */
+export function comparatorWordsIn(turnText: string | null | undefined): boolean {
+  return typeof turnText === 'string' && [...turnText.matchAll(COMPARATOR_WORDS)].length > 0;
+}
+
 /** At least / at most, as the user said it in `turnText`; null when not said, asked, denied, or said both ways. */
 export function comparatorTheUserWrote(turnText: string | null | undefined): 'at_least' | 'at_most' | null {
   if (typeof turnText !== 'string') return null;
