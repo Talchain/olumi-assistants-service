@@ -3458,7 +3458,7 @@ export function createAgentCapabilities(
           const held = nativeStartingValue(os as never);
           const owner = heldFigureOwner(node);
           if (typeof held !== 'number' || owner !== 'olumi') {
-            notKeepable.push({ label: node.label, why: typeof held !== 'number' || owner === undefined ? 'no_figure'
+            notKeepable.push({ label: node.label, why: typeof held !== 'number' || owner === undefined || owner === 'olumi' ? 'no_figure'
               : owner === 'olumi_accepted' ? 'already_accepted' : owner });
             continue;
           }
