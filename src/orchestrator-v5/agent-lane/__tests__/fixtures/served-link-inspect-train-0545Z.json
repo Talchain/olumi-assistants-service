@@ -1,0 +1,518 @@
+{
+ "_source": "R3 accept-paul/train-0545Z (CEE 3b0537c1): 04-cold-after-run1.json graph + 05-inspect.json reply; R3 5925627855 L1",
+ "cee_build": [
+  "3b0537c11e72d84f4046304e5af3c1e1fdc79395"
+ ],
+ "message": "Tell me about the link from \"Qualified angel investor conversations\" to \"securing funding\".",
+ "served_assistant_text": "These figures are provisional: every estimate behind them is machine-authored and unconfirmed. A share of runs in which an option fitted your goal better than the others is not the chance of reaching your target.\n\nIt is an **Olumi-inferred positive link**: more qualified angel investor conversations are assumed to increase funding secured.\n\nThe canvas labels it **strong**, but that is a default placeholder—not a strength you supplied or anyone has estimated yet.\n\nIt jumps directly from conversations to funding, without separate steps for investor commitments, deal completion or time-to-cash. So it does not establish how much money arrives, or whether it arrives within two months.\n\nThe useful test is whether those conversations reliably become **cash received before your deadline**, rather than expressions of interest.",
+ "model_text": "It is an **Olumi-inferred positive link**: more qualified angel investor conversations are assumed to increase funding secured.\n\nThe canvas labels it **strong**, but that is a default placeholder—not a strength you supplied or anyone has estimated yet.\n\nIt jumps directly from conversations to funding, without separate steps for investor commitments, deal completion or time-to-cash. So it does not establish how much money arrives, or whether it arrives within two months.\n\nThe useful test is whether those conversations reliably become **cash received before your deadline**, rather than expressions of interest.",
+ "graph": {
+  "nodes": [
+   {
+    "id": "decision_securing_funding",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "Decision: securing funding",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "securing_funding",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "securing funding",
+    "provenance": "from_brief",
+    "scale_frame": 50000000,
+    "unit_reading": {
+     "unit": "GBP",
+     "source": "olumi_reading",
+     "source_quote": "We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK"
+    },
+    "goal_horizon_months": 2,
+    "goal_threshold_unit": "GBP",
+    "goal_threshold_frame": "level"
+   },
+   {
+    "id": "continue_current_outreach",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Continue current outreach",
+    "provenance": "from_brief",
+    "is_baseline": true
+   },
+   {
+    "id": "angel_investor_outreach",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Angel investor outreach",
+    "provenance": "ai_inferred",
+    "interventions": {
+     "hours_per_week_on_angel_outreach": {
+      "unit": "hours/week",
+      "value": 0.2,
+      "source": "cee_hypothesis",
+      "raw_value": 8,
+      "target_match": {
+       "node_id": "hours_per_week_on_angel_outreach",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "angel_outreach_pilot",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Angel outreach pilot",
+    "provenance": "ai_inferred",
+    "proposed_by": "olumi",
+    "interventions": {
+     "hours_per_week_on_angel_outreach": {
+      "unit": "hours/week",
+      "value": 0.1,
+      "source": "cee_hypothesis",
+      "raw_value": 4,
+      "target_match": {
+       "node_id": "hours_per_week_on_angel_outreach",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "hours_per_week_on_investment_firm_cold_emails",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "Hours per week on investment-firm cold emails",
+    "category": "external",
+    "provenance": "ai_inferred",
+    "scale_frame": 40,
+    "observed_state": {
+     "unit": "hours/week",
+     "value": 0.2,
+     "source": "cee_inference",
+     "raw_value": 8,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "hours_per_week_finding_warm_connections",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Hours per week finding warm connections",
+    "category": "external",
+    "provenance": "ai_inferred",
+    "scale_frame": 40,
+    "observed_state": {
+     "unit": "hours/week",
+     "value": 0.1,
+     "source": "cee_inference",
+     "raw_value": 4,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "hours_per_week_on_angel_outreach",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Hours per week on angel outreach",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 40,
+    "observed_state": {
+     "unit": "hours/week",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "investment_firm_responsiveness",
+    "ref": "F4",
+    "kind": "factor",
+    "label": "Investment-firm responsiveness",
+    "category": "external",
+    "provenance": "ai_inferred",
+    "scale_frame": 100,
+    "observed_state": {
+     "unit": "%",
+     "value": 0.05,
+     "source": "cee_inference",
+     "raw_value": 5,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "angel_investor_responsiveness",
+    "ref": "F5",
+    "kind": "factor",
+    "label": "Angel investor responsiveness",
+    "category": "external",
+    "provenance": "ai_inferred",
+    "scale_frame": 100,
+    "observed_state": {
+     "unit": "%",
+     "value": 0.1,
+     "source": "cee_inference",
+     "raw_value": 10,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "distraction_from_investment_firm_fundraising",
+    "ref": "R1",
+    "kind": "risk",
+    "label": "Distraction from investment-firm fundraising",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "qualified_investment_firm_conversations",
+    "ref": "OC1",
+    "kind": "outcome",
+    "label": "Qualified investment-firm conversations",
+    "provenance": "ai_inferred",
+    "scale_frame": 100
+   },
+   {
+    "id": "investment_firm_deals_closed",
+    "ref": "OC2",
+    "kind": "outcome",
+    "label": "Investment-firm deals closed",
+    "provenance": "ai_inferred",
+    "scale_frame": 20
+   },
+   {
+    "id": "qualified_angel_investor_conversations",
+    "ref": "OC3",
+    "kind": "outcome",
+    "label": "Qualified angel investor conversations",
+    "provenance": "ai_inferred",
+    "scale_frame": 100
+   },
+   {
+    "id": "angel_fundraising_admin_time",
+    "ref": "OC4",
+    "kind": "outcome",
+    "label": "Angel fundraising admin time",
+    "provenance": "ai_inferred",
+    "scale_frame": 40
+   }
+  ],
+  "edges": [
+   {
+    "to": "continue_current_outreach",
+    "from": "decision_securing_funding",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "angel_investor_outreach",
+    "from": "decision_securing_funding",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "angel_outreach_pilot",
+    "from": "decision_securing_funding",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "hours_per_week_on_angel_outreach",
+    "from": "angel_investor_outreach",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "hours_per_week_on_angel_outreach",
+    "from": "angel_outreach_pilot",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "hours_per_week_on_angel_outreach",
+    "from": "continue_current_outreach",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "qualified_investment_firm_conversations",
+    "from": "hours_per_week_on_investment_firm_cold_emails",
+    "strength": {
+     "std": 0.049999999999999996,
+     "mean": 0.09999999999999999
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.25,
+      "amount_unit": "conversations in 2 months",
+      "strength_mean": 0.09999999999999999,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "hours/week"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "qualified_investment_firm_conversations",
+    "from": "hours_per_week_finding_warm_connections",
+    "strength": {
+     "std": 0.09999999999999999,
+     "mean": 0.19999999999999998
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.5,
+      "amount_unit": "conversations in 2 months",
+      "strength_mean": 0.19999999999999998,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "hours/week"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "qualified_investment_firm_conversations",
+    "from": "investment_firm_responsiveness",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.2
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.2,
+      "amount_unit": "conversations in 2 months",
+      "strength_mean": 0.2,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "investment_firm_deals_closed",
+    "from": "qualified_investment_firm_conversations",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.1,
+      "amount_unit": "deals in 2 months",
+      "strength_mean": 0.5,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "conversations in 2 months"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "securing_funding",
+    "from": "investment_firm_deals_closed",
+    "strength": {
+     "std": 0.19999999999999998,
+     "mean": 0.39999999999999997
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "brief_extraction",
+     "magnitude": "user_stated",
+     "natural_effect": {
+      "amount": 1000000,
+      "amount_unit": "GBP",
+      "stated_range": {
+       "end": "low",
+       "low": 1000000,
+       "high": 2000000,
+       "text": "£1-2 million"
+      },
+      "strength_mean": 0.39999999999999997,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "deals in 2 months"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "qualified_angel_investor_conversations",
+    "from": "hours_per_week_on_angel_outreach",
+    "strength": {
+     "std": 0.06999999999999999,
+     "mean": 0.13999999999999999
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.35,
+      "amount_unit": "conversations in 2 months",
+      "strength_mean": 0.13999999999999999,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "hours/week"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "qualified_angel_investor_conversations",
+    "from": "angel_investor_responsiveness",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.2
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.2,
+      "amount_unit": "conversations in 2 months",
+      "strength_mean": 0.2,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "securing_funding",
+    "from": "qualified_angel_investor_conversations",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "angel_fundraising_admin_time",
+    "from": "hours_per_week_on_angel_outreach",
+    "strength": {
+     "std": 0.15,
+     "mean": 0.3
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.3,
+      "amount_unit": "hours/week",
+      "strength_mean": 0.3,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "hours/week"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "distraction_from_investment_firm_fundraising",
+    "from": "angel_fundraising_admin_time",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "securing_funding",
+    "from": "distraction_from_investment_firm_fundraising",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   }
+  ]
+ }
+}

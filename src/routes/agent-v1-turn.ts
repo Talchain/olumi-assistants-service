@@ -67,6 +67,7 @@ import { budgetFor, conversationBudgetFor, type CallBudget } from '../orchestrat
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, textAtRest, withA7AfterGate } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -2494,6 +2495,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       restingText: textAtRest(composedWithout),
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
     });
+    // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
+    // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
+    const linkAsk = decisionLines.some((l) => l.endsWith('as your target.')) ? null : linkSizeAsk(readbackGraph, {
+      message, restingText: textAtRest(composedWithout), awaitingApproval: decisionTurn.awaitingApproval,
+    });
+    if (linkAsk !== null) decisionLines.push(linkAsk);
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
       // types (display-ids.ts). Applied here, before the answer row is written, so a
