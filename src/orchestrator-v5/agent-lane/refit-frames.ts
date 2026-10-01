@@ -126,7 +126,9 @@ const clampedFrom = (e: Rec): number | undefined => (num(e?.provenance?.clamped_
  * (`placeholder-parts`) read a clamped link as not analysed at the user's size, which is true.
  */
 export function clampForPersist<G>(graph: G): G {
-  const over = (e: Rec): boolean => num(e?.strength?.mean) && Math.abs(e.strength.mean) > 1 + TOL;
+  // ⛔ THE EXACT INGRESS BOUND (CODEX 5925312387): `assertIngressGraphNumericBounds` refuses ANY |mean| > 1, so ±1.0000000005
+  // is clamped too. Within rounding noise (≤ 1 + TOL) it is simply ±1 — nothing was cut, so no marker.
+  const over = (e: Rec): boolean => num(e?.strength?.mean) && Math.abs(e.strength.mean) > 1;
   const edges = (graph as Rec | null)?.edges;
   if (!Array.isArray(edges) || !edges.some(over)) return graph;
   const g = structuredClone(graph) as Rec;
@@ -134,7 +136,7 @@ export function clampForPersist<G>(graph: G): G {
     if (!over(e)) continue;
     const full = e.strength.mean as number;
     e.strength = { ...e.strength, mean: Math.sign(full), ...(num(e.strength.std) ? { std: e.strength.std / Math.abs(full) } : {}) };
-    e.provenance = { ...(e.provenance ?? {}), clamped_from: full };
+    if (Math.abs(full) > 1 + TOL) e.provenance = { ...(e.provenance ?? {}), clamped_from: full };
   }
   return g as G;
 }
@@ -157,7 +159,9 @@ export function withStatedStrengths<G>(graph: G): G {
     // later write of the strength or of the size (an edge edit, a link-effect answer) leaves it stale: the edit stands.
     const ne = e.provenance?.natural_effect;
     const stillTheClamp = num(e.strength?.mean) && Math.abs(Math.abs(e.strength.mean) - 1) <= TOL && Math.sign(e.strength.mean) === Math.sign(full)
-      && (!num(ne?.strength_mean) || Math.abs(ne.strength_mean - full) <= TOL * Math.max(1, Math.abs(full)));
+      // CODEX 5925312387: the clamp always writes the marker beside the user's natural size, and every real write of the
+      // strength or the size drops or replaces that size (adjust_edge_strength, link-effect-edit). No natural size = stale.
+      && num(ne?.strength_mean) && Math.abs(ne.strength_mean - full) <= TOL * Math.max(1, Math.abs(full));
     if (!stillTheClamp) continue;
     e.strength = { ...e.strength, mean: full, ...(num(e.strength?.std) ? { std: e.strength.std * Math.abs(full) } : {}) };
   }
