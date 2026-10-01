@@ -2039,7 +2039,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         (id) => { const n = graphNodes.find((x) => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; },
         [...new Set([...graphNodes.filter((n) => n.kind === 'option' && typeof n.label === 'string').map((n) => n.label as string),
           ...[...optionNameAliases(st.graph).values()].map((a) => a.display)])],
-        runToolOutputLicensesLeader(selectedRun));
+        runToolOutputLicensesLeader(selectedRun),
+        graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''));
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;

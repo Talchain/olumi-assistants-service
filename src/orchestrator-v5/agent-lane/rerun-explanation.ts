@@ -104,13 +104,16 @@ const checkCase = (c: unknown): CheckCase => (c === 'C0_identical' || c === 'C1_
 
 /**
  * The plan for a RERUN's explanation, or `null` when there is nothing typed to name (no delta, no change rows).
- * `labelOf`: a node id → its label in the graph the Run used; `optionLabels`: the current options' labels.
+ * `labelOf`: a node id → its label in the graph the Run used; `optionLabels`: the current options' labels;
+ * `modelLabels`: EVERY node label, masked before RC's text bans run (#2478: a label like "Qualified leads per month" must
+ * never read as the reply saying an option "leads").
  */
 export function rerunExplanationPlan(
   runDelta: unknown,
   labelOf: (id: string) => string | undefined,
   optionLabels: readonly string[],
   leaderLicensed: boolean,
+  modelLabels: readonly string[] = [],
 ): RerunExplanationPlan | null {
   const d = rec(runDelta);
   if (d === undefined) return null;
@@ -129,6 +132,7 @@ export function rerunExplanationPlan(
     prior_withheld: priorWithheld,
     no_matched_figures: noMatched,
     current_option_labels: optionLabels,
+    model_labels: modelLabels,
   };
   const caseLine = priorWithheld ? RERUN_FALLBACK_LINES.unwithheld
     : wireCase === 'C0_identical' ? RERUN_FALLBACK_LINES.C0
