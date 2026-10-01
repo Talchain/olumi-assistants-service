@@ -982,9 +982,14 @@ function distributiveOneAt(q: string, ends: { readonly source: string; readonly 
     const from = /^(?:each|every|per)$/.test(w) ? i + 1 : w === 'one' && next === 'more' ? i + 2
       : (w === 'a' || w === 'an') && next !== undefined && /^(?:extra|single|additional)$/.test(next) ? i + 2 : -1;
     if (from < 0) continue;
+    // AIQ 5925612672: the distributive word must GOVERN the source noun — at most ONE modifier between ("each extra
+    // conversation"), plus the source's own label words; "per quarter from … conversations" and "one more round of
+    // conversations" count something else.
+    let fillers = 0;
     for (let j = from; j < tokens.length && (ONE_FILLER.test(tokens[j]!.w) || isLabel(tokens[j]!.w)); j += 1) {
       if (/[,;:()\u2013\u2014]/.test(q.slice(tokens[i]!.at, tokens[j]!.at))) break;
       if (own.some((x) => sameWord(x, tokens[j]!.w))) return j;
+      if (!isLabel(tokens[j]!.w) && (fillers += 1) > 1) break;
     }
   }
   return -1;
