@@ -245,6 +245,25 @@ describe('F4: a later target retires the normalising frame — path independent'
     expect((out as unknown as { goal_constraints: { node_id: string; value: number }[] }).goal_constraints.find((c) => c.node_id === g.id)?.value).toBe(TARGET);
   });
 
+  // CODEX 5922688399: after the card the plain placeholder reads 0.125, not 0.5. A build WITH the target reads the same:
+  // construction's own refit widens the goal for the user's £1m/deal and rescales every link into it, placeholders
+  // included (refit-frames). The retirement keeps the placeholder's β; the shared refit then moves both paths alike.
+  it('PATH INDEPENDENCE: a PURE placeholder into the goal after the card equals a build with the target (mean and spread)', async () => {
+    const { applyGoalTargetEdit } = await import('../../system-events/goal-target-edit.js');
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const pure = (d: Record<string, any>) => ({ ...d, links: d.links.map((l: Record<string, unknown>) => (l.from === 'Qualified angel conversations'
+      ? { ...l, effect_amount: null, effect_per_source_change: null, effect_provenance: null } : l)) });
+    const built = await build(pure(draft()));
+    const event = { kind: 'goal_target_edit', goal_node_id: goalOf(built).id, constraint_type: 'at_least', raw_value: TARGET, unit: '£',
+      base_graph_hash: computeAnalysisAffectingGraphHash(built as never) };
+    const r = await applyGoalTargetEdit({
+      payload: { kind: 'system_event', scenario_id: 'f4f4f4f4-0000-4f4f-8f4f-f4f4f4f4f4f5', turn_id: 'turn-f4p', stage: 'frame', event } as never,
+      event: event as never, requestId: 'req-f4p', persistedGraph: built as never, priorFacts: [],
+    }) as { kind: string; mutatedGraph?: Graph };
+    const b = await build(pure(draft({ target: TARGET })), `${PAUL} We need to raise at least £1m.`);
+    expect(edge(r.mutatedGraph!, 'qualified_angel_conversations')!.strength).toEqual(edge(b, 'qualified_angel_conversations')!.strength);
+  });
+
   it('CONTROL: a goal with no normalising frame is returned untouched (same reference)', async () => {
     const { retireNormalisingGoalFrame } = await import('../normalising-goal-frame.js');
     const g = await build(draft({ target: TARGET }), `${PAUL} We need to raise at least £1m.`);
