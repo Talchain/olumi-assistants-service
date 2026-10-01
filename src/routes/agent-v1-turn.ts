@@ -65,7 +65,7 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, conversationBudgetFor, type CallBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, textAtRest } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, textAtRest, withA7AfterGate } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -2476,15 +2476,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // but cannot answer, said as a fact; and, while the goal has no stated target, ONE ask for it (`decision-input-ask.ts`).
     const statusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine].filter((x): x is string => x !== null && x !== '').join(' ') || null;
     const composedWithout = withWriteOutcome(withDisclosures(narration.text, owed), statusText);
-    const decisionLines = decisionInputLines(readbackGraph, {
-      restingText: textAtRest(composedWithout),
-      questionsToggle: textAtRest(composedWithout) !== composedWithout,
+    const decisionTurn = {
       awaitingApproval: offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
         || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined,
       // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
       builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
         || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)
           || (c.name === 'run_analysis' && (result.tool_results[i] as { ran?: unknown } | undefined)?.ran === true)),
+    };
+    const decisionLines = decisionInputLines(readbackGraph, {
+      ...decisionTurn,
+      restingText: textAtRest(composedWithout),
+      questionsToggle: textAtRest(composedWithout) !== composedWithout,
     });
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
@@ -2571,6 +2574,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const { _answer_shape: _dropped, ...withoutShape } = enforced.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (enforced.editedFields.includes('assistant_text') ? withoutShape : enforced.response) as OlumiResponse & Record<string, unknown>;
       }
+    }
+    // ⭐ A7's fold, measured on the reply the user sees: the gate above may have dropped a ranking sentence (`withA7AfterGate`).
+    if (typeof wireBody.assistant_text === 'string') {
+      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
+      if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
     }
     /**
      * ⭐ AX1 — WHEN THE ANALYSIS CANNOT RANK A PRICE × VOLUME GOAL, THE ARITHMETIC STILL ANSWERS (DL #70 5850280205;

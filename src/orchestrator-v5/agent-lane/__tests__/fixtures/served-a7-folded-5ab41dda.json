@@ -1,0 +1,21 @@
+{
+ "_source": "served CEE 5ab41dda, guest 3b0bc3e3 (PROMPT STRIKE #75 5924604707): Paul's brief turn; leader_claim_enforced; A7 folded on a pre-gate count",
+ "served_assistant_text": "I’ve mapped three paths: continue current investment-firm outreach; add angel bridge outreach; or test a focused angel pilot (an Olumi-suggested option). Carrying on as now holds today’s values.\n\nThe first pass is provisional: its figures for angel conversion, cheque size, outreach time and distraction are Olumi estimates, not evidence from you.\n\nThis run doesn’t show how often each option reaches the goal’s target. ‘Angel investments closed’ depends on Qualified angel investor conversations × Angel investment conversion rate (and 1 more), but this run couldn't calculate it that way, so the figures for each option would be wrong.\n\nWhat minimum bridge amount would prevent you running out of money within the two months?\n\nThe model was saved. Questions this model does not answer yet: The brief does not say whether your \"Funding secured\" goal covers funding secured from angel investors and UK investment firms over the next 2 months or funding secured from all possible sources, so the model measures it for funding secured from angel investors and UK investment firms over the next 2 months. Which did you mean? Does \"Funding secured\" get there within 2 months? The model holds the deadline; no result answers that yet. (2 of 11 shown.)",
+ "status_text": "The model was saved. Questions this model does not answer yet: The brief does not say whether your \"Funding secured\" goal covers funding secured from angel investors and UK investment firms over the next 2 months or funding secured from all possible sources, so the model measures it for funding secured from angel investors and UK investment firms over the next 2 months. Which did you mean? Does \"Funding secured\" get there within 2 months? The model holds the deadline; no result answers that yet. (2 of 11 shown.)",
+ "goal": {
+  "id": "funding_secured",
+  "ref": "G1",
+  "kind": "goal",
+  "label": "Funding secured",
+  "provenance": "from_brief",
+  "scale_frame": 10000000,
+  "unit_reading": {
+   "unit": "GBP",
+   "source": "olumi_reading",
+   "source_quote": "We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK"
+  },
+  "goal_horizon_months": 2,
+  "goal_threshold_unit": "£",
+  "goal_threshold_frame": "level"
+ }
+}
