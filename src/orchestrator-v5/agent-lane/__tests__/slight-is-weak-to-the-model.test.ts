@@ -90,7 +90,8 @@ describe('what the user READS about a link says "slight", never the enum\'s `wea
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
     const r = p as unknown as { public_label: string; note: string; link: { was: { band: string }; becomes: { band: string } } };
     // The public label is what the approval's "Recorded …" receipt is made from.
-    expect(r.public_label).toContain('as slight (0.1 on Olumi');
+    expect(r.public_label).toContain('as slight, as your own estimate');
+    expect(r.public_label, 'band words only (AIQ 5923931082)').not.toMatch(/0\.1|0–1/);
     expect(r.note).toContain('recorded as slight');
     expect(r.link.becomes.band).toBe('slight');
     expect(r.link.was.band).toBe('strong');
@@ -108,6 +109,6 @@ describe('what the user READS about a link says "slight", never the enum\'s `wea
   it('CONTRAST: the other bands read exactly as before', async () => {
     const p = await createAgentCapabilities(d, new ProposalStore()).proposeLinkStrength!(
       said('The link from Monthly Pro plan price to Price-driven churn is very strong.'), { ...LINK, strength: 'very strong' as const });
-    expect(String((p as { public_label?: unknown }).public_label)).toContain('as very strong (');
+    expect(String((p as { public_label?: unknown }).public_label)).toContain('as very strong, as your own estimate');
   });
 });

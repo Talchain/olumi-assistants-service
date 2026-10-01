@@ -108,7 +108,9 @@ describe('⛔ propose_model_change records a link\'s strength only as the band t
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(w.sent, 'a proposal writes nothing').toEqual([]);
     expect(String(p.public_label)).toBe('Connect "Pro plan price" to "Monthly churn" (positive) as strong, your own estimate');
-    expect(String(p.note)).toMatch(/strong, which Olumi stores as 0\.55 on its 0–1 strength scale, as their own estimate/);
+    expect(String(p.note)).toMatch(/recorded as strong, as their own estimate/);
+    expect(String(p.note), 'band words only (AIQ 5923931082)').toContain('never a number or a scale');
+    expect(String(p.note)).not.toMatch(/0\.55|0–1 strength scale/);
     const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
     expect(w.sent).toHaveLength(1);

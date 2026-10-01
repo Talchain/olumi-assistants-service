@@ -107,11 +107,15 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     const p = await caps.proposeLinkStrength!(c, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', rationale: 'x' });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     const label = String(p.public_label);
-    expect(label).toContain("as slight, as your own estimate (strength kept at 0.05 on Olumi's 0\u20131 scale)");
+    expect(label).toContain('as slight, as your own estimate (its strength stays as it is)');
+    expect(label, 'band words only (AIQ 5923931082): no number at all, noisy or rounded').not.toMatch(/\d\.\d|0\u20131/);
     expect(label).not.toMatch(/0\.0499|9999/);
-    const link = (p as unknown as { link: { was: { strength: number }; becomes: { strength: number } } }).link;
-    expect(link.was.strength).toBe(0.05);
-    expect(link.becomes.strength).toBe(0.05);
+    // The result the model reads carries the band only (AIQ 5923931082): it can never quote a number, noisy or clean.
+    const link = (p as unknown as { link: { was: Record<string, unknown>; becomes: Record<string, unknown> } }).link;
+    expect(link.was).toEqual(expect.objectContaining({ band: 'slight' }));
+    expect(link.becomes).toEqual(expect.objectContaining({ band: 'slight' }));
+    expect(link.was).not.toHaveProperty('strength');
+    expect(link.becomes).not.toHaveProperty('strength');
     // The WRITE keeps the exact stored figure: a confirm must match what the model holds.
     await caps.authoriseChange(c, { proposal_id: String(p.proposal_id) });
     expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ intent: 'confirm_current', magnitude: 0.049999999999999996 }));
@@ -334,5 +338,36 @@ describe('⛔ a band is recorded as the user\'s only when the user named it (AI 
     expect(bandTheUserWrote('weak', 'It is not slight.')).toBe(false);
     expect(bandTheUserWrote('weak', 'Is it slight?')).toBe(false);
     expect(bandTheUserWrote('moderate', 'Make that link slight.')).toBe(false);
+  });
+});
+
+// ⭐ AIQ #75 5923931082 (served `train-0258Z/05-adopt-propose`: "Moderate (0.3)", "down from strong (0.5)", "Numbers are
+// internal 0–1 strengths"): a strength reaches the user — and the model that writes to them — as its band word only.
+describe('a link strength is said as its band word, never as Olumi\'s internal number (AIQ 5923931082)', () => {
+  it('RED (the set Olumi sizes): the card, the result and the note carry no number and no scale', async () => {
+    const w = world(graphWith(0.5));
+    const caps = createAgentCapabilities(w.d, new ProposalStore());
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ from_label: 'Pro plan price', to_label: 'MRR', strength: 'moderate' }], rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(String(p.public_label)).toContain('"Pro plan price" → "MRR" as moderate, Olumi’s estimate');
+    expect(String(p.public_label)).not.toMatch(/\d|0–1|scale/);
+    const links = (p as unknown as { links: { was: Record<string, unknown>; becomes: Record<string, unknown> }[] }).links;
+    expect(links[0]!.was).toEqual({ band: 'strong' });
+    expect(links[0]!.becomes).toEqual({ band: 'moderate' });
+    expect(String(p.note)).toContain('never a number or a scale');
+    expect(JSON.stringify(p)).not.toMatch(/"strength":\s*\d|0\.3\b|0–1/);
+  });
+
+  it('an empty starting point tells the Agent never to describe the call or its refusal', async () => {
+    const w = world(graphWith(0.5));
+    const caps = createAgentCapabilities(w.d, new ProposalStore());
+    const r = await caps.proposeStartingPoint!(ctx, { assumptions: [], option_levels: [] });
+    expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'empty_proposal' }));
+    expect(String(r.detail)).toContain('Never tell the user about this call or that it was refused');
+  });
+
+  it('source pin: no link-strength wording in the Agent\'s capabilities speaks the internal scale', () => {
+    const src = readFileSync(new URL('../runtime/agent-capabilities.ts', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/0\\u20131 scale|Olumi stores as|0\\u20131 strength scale|strength: quotable\(/);
   });
 });

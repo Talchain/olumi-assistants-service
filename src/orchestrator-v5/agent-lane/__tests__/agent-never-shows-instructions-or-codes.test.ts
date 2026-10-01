@@ -156,7 +156,8 @@ describe('a link-strength approval through the REAL route: the user reads what w
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(AGENT_DIRECTED);
     expect(t2.assistant_text, t2.assistant_text).not.toMatch(SNAKE);
     // What was recorded is still said, to the user, once.
-    expect(t2.assistant_text, t2.assistant_text).toMatch(/"Pro plan price" → "MRR" as strong \(0\.55 on Olumi's 0–1 scale\), as your own estimate/);
+    expect(t2.assistant_text, t2.assistant_text).toMatch(/"Pro plan price" → "MRR" as strong, as your own estimate/);
+    expect(t2.assistant_text, 'band words only (AIQ 5923931082)').not.toMatch(/0\.55|0–1 scale/);
     expect(t2.assistant_text.match(/own estimate/g), 'said once, not twice').toHaveLength(1);
   }, 120_000);
 
@@ -166,7 +167,7 @@ describe('a link-strength approval through the REAL route: the user reads what w
    * approved, stamped as theirs, yet `landed` also demanded that the two revisions be EQUAL, so the user read "Not
    * saved: none of it was applied." and the approval was left unapplied.
    */
-  const RECORDED = 'Recorded "Pro plan price" → "MRR" as strong (0.55 on Olumi\'s 0–1 scale), as your own estimate.';
+  const RECORDED = 'Recorded "Pro plan price" → "MRR" as strong, as your own estimate.';
   it('[f2-race] RED: the link write lands, another writer then moves the model, and the link holds exactly the approved strength and source → Saved, the recorded link said, the approval applied', async () => {
     const { approve } = await proposeStrong();
     afterWrite = () => { rev += 1; };
