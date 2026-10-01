@@ -130,6 +130,24 @@ describe('A4/A4b root: a £ goal with no target, no level and no frame is read o
     expect(risk?.provenance?.natural_effect).toBeUndefined();
   });
 
+  // ⛔ CODEX CEE BUDDY 5922482284: the frame reads the SAME earned door as sizing. An unwritten size tagged `explicit`
+  // once set it (£5m → £5bn) and shrank the user's own £1m/deal β from 0.6 to 0.0006.
+  it('RED (CODEX twin): an UNWRITTEN £100m per conversation tagged `explicit` never sets the frame — £5m, the user\'s β stays 0.6', async () => {
+    const d = draft() as Record<string, any>;
+    d.links = d.links.map((l: Record<string, unknown>) => (l.from === 'Qualified angel conversations' ? { ...l, effect_amount: 100000000, effect_provenance: 'explicit' } : l));
+    const g = await build(d);
+    expect(goalOf(g).scale_frame).toBe(5000000);
+    expect(edge(g, 'investment_firm_deals_closed')!.strength!.mean).toBeCloseTo(0.6, 9);
+    expect(edge(g, 'qualified_angel_conversations')?.provenance?.natural_effect).toBeUndefined();
+  });
+
+  it('RED (CODEX twin): a claimed definition that is not ±1 (−£0.5 per £1) on a £100m-range risk never sets the frame — £5m', async () => {
+    const d = draft() as Record<string, any>;
+    d.risks = d.risks.map((r: Record<string, unknown>) => ({ ...r, plausible_max: 100000000 }));
+    d.links = d.links.map((l: Record<string, unknown>) => (l.from === 'Funding lost to fundraising distraction' ? { ...l, effect_amount: -0.5 } : l));
+    expect(goalOf(await build(d)).scale_frame).toBe(5000000);
+  });
+
   it('F1: the frame is never a level or a target: no goal threshold, cap or level is written', async () => {
     const goal = goalOf(await build(draft()));
     expect(goal.goal_threshold_raw).toBeUndefined();

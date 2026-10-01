@@ -3669,6 +3669,28 @@ function admitOnce(
   // it stay exactly as they were). It is the smallest {1, 2, 5}·10^k at or above the largest money the brief writes and
   // every such link's reach over 0.8 (F3: |β| ≤ 0.8, so no user size is ever cut), and it persists as the goal's
   // `scale_frame` so the stored β keeps its meaning across reload, and a later target is read on the same units.
+  // Every quantity a stated size could be about (options and the decision name none): the size door's rivals.
+  const quantityLabels = nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => n.label);
+  const nodeOf = new Map(nodes.map((n) => [n.id, n] as const));
+  /**
+   * D9: a user's own edit (`user_specified`) always wins; otherwise the size is the user's only when stated as theirs
+   * AND the brief writes it, in the target's own unit (AIQ #2383 5916497454; the G6 door): a figure the drafter tagged
+   * `explicit` that no sentence carries is Olumi's estimate, never the user's. ONE predicate, read by the normalising
+   * frame below AND by link sizing (CODEX CEE BUDDY 5922482284: an unwritten £100m tagged `explicit` once set the frame).
+   */
+  const userSizeEarned = (l: CandidateLink): boolean => {
+    if (l.provenance_source === 'user_specified') return true;
+    const source = nodeOf.get(l.from);
+    const target = nodeOf.get(l.to);
+    if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
+    // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
+    const levelUnit = target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit;
+    return typeof l.effect_amount === 'number' && Number.isFinite(l.effect_amount)
+      && sizeWritten(Math.abs(l.effect_amount), levelUnit, {
+        target: [source.label, target.label],
+        others: quantityLabels.filter((q) => q !== source.label && q !== target.label),
+      });
+  };
   const normalisingFrameGoalId = ((): string | undefined => {
     const goal = nodes.find((n) => n.kind === 'goal');
     if (goal === undefined || goal.goal_threshold_raw !== undefined || goal.observed_state?.raw_value !== undefined) return undefined;
@@ -3681,11 +3703,21 @@ function admitOnce(
       option_levels: optionLevelsById.get(n.id) ?? [],
     });
     if (resolveMagnitudeFrame(asNode(goal)) !== undefined) return undefined;
+    // A definition counts only when it is deterministically ±1 between two amounts in the goal's own currency (the check
+    // `definitionalLink` makes on the sized edge, made here on the statement): a claimed −£0.5 per £1 never sets a frame.
+    const definitionHolds = (l: CandidateLink): boolean => {
+      if (l.definitional !== true || typeof l.effect_amount !== 'number' || typeof l.effect_per_source_change !== 'number'
+        || l.effect_per_source_change === 0 || Math.abs(l.effect_amount / l.effect_per_source_change) !== 1) return false;
+      const sourceUnit = unitById.get(l.from);
+      const s2 = typeof sourceUnit === 'string' ? readCurrencyUnitWithQualifiers(sourceUnit) : undefined;
+      return s2 !== undefined && s2.kind === 'currency' && s2.multiplier === reading.multiplier
+        && (s2.currencyCode === undefined || reading.currencyCode === undefined || s2.currencyCode === reading.currencyCode);
+    };
     const written = findStatedAmounts(brief ?? '')
       .filter((a) => a.kind === 'currency' && (a.currencyCode === undefined || reading.currencyCode === undefined || a.currencyCode === reading.currencyCode))
       .map((a) => Math.abs(a.magnitude) / reading.multiplier);
     const reach = resolvable
-      .filter((l) => l.to === goal.id && ((l.effect_provenance ?? l.provenance) === 'explicit' || l.provenance_source === 'user_specified' || l.definitional === true))
+      .filter((l) => l.to === goal.id && (userSizeEarned(l) || definitionHolds(l)))
       .map((l) => {
         const source = nodes.find((n) => n.id === l.from);
         const fs = source === undefined ? undefined : resolveMagnitudeFrame(asNode(source));
@@ -3712,25 +3744,13 @@ function admitOnce(
     ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
   }]));
   const sizing = new Map<string, LinkSizing>();
-  // Every quantity a stated size could be about (options and the decision name none): the size door's rivals.
-  const quantityLabels = nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => n.label);
   for (const l of resolvable) {
     if (l.direction === 'unknown' || typeof l.strength_mean === 'number') continue;
     const source = magnitudeNodeById.get(l.from);
     const target = magnitudeNodeById.get(l.to);
     if (source === undefined || target === undefined) continue;
-    // D9: a user's own edit (`user_specified`) always wins; otherwise the size is the user's only when stated as theirs
-    // AND the brief writes it, in the target's own unit (AIQ #2383 5916497454; the G6 door): a figure the drafter tagged
-    // `explicit` that no sentence carries is Olumi's estimate, never the user's.
-    const taggedTheirs = (l.effect_provenance ?? l.provenance) === 'explicit';
-    // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
     const levelUnit = target.observed_state?.unit ?? target.unit ?? target.goal_threshold_unit;
-    const written = typeof l.effect_amount === 'number' && Number.isFinite(l.effect_amount)
-      && sizeWritten(Math.abs(l.effect_amount), levelUnit, {
-        target: [source.label, target.label],
-        others: quantityLabels.filter((q) => q !== source.label && q !== target.label),
-      });
-    const user_stated = l.provenance_source === 'user_specified' || (taggedTheirs && written);
+    const user_stated = userSizeEarned(l);
     // A4: a size the brief writes only as one END of a range is said with that range (a user's own edit never is).
     const range = user_stated && l.provenance_source !== 'user_specified'
       ? sizeRangeEnd(Math.abs(l.effect_amount as number), levelUnit, {
