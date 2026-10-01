@@ -12,6 +12,7 @@
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
 import { sendableQuery } from './public-research.js';
+import type { OpenLinkSizeAsk } from '../stated-by-user.js';
 
 /**
  * ⭐ THE CANVAS'S WORD FOR THE LOWEST BAND IS "Slight" (Canvas #70 5847910497). The `strength` enum keeps the wire value
@@ -108,6 +109,11 @@ export interface AgentToolContext {
   readonly typed_approval_of?: string;
   /** That chip's words, bound only when a card for the proposal is on offer: a link-effect card's words carry its reading. */
   readonly typed_approval_words?: string;
+  /**
+   * ⭐ The link-size question Olumi asked on the PREVIOUS answer (R3 #75 5926021003 (a)), bound by the route from its record
+   * (`elicit_link_size`) only for the very next typed turn — never model output. A bare reply binds to it (`answerToLinkSizeAsk`).
+   */
+  readonly link_size_ask?: OpenLinkSizeAsk;
 }
 
 export interface ToolDefinition {

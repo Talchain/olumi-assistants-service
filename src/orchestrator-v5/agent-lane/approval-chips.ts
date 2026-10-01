@@ -23,6 +23,7 @@ import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
+import { isCurrencyUnit } from '../../utils/currency-alphabet.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -271,8 +272,31 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
   if (e === undefined || typeof op?.quote !== 'string' || typeof labels.from !== 'string' || typeof labels.to !== 'string'
     || typeof e.amount !== 'number' || typeof e.per_source_change !== 'number' || typeof e.amount_unit !== 'string' || typeof e.per_source_change_unit !== 'string') return undefined;
   const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`}`;
+  const asked = answeredAskReadingOf(op as { effect: { amount: number; amount_unit: string; per_source_change_unit: string; answer_to_ask?: unknown }; figure_words?: unknown }, labels.from, labels.to);
+  if (asked !== null) return asked;
   return `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}" `
     + `\u2014 from your words: "${op.quote}"`;
+}
+
+/**
+ * ⭐ THE CARD FOR AN ANSWER TO OLUMI'S OWN QUESTION (AIQ words 5926045839; R3 #75 5926021003 (a), condition 5): the user wrote
+ * the amount only, so the card says the per-one is the question's — never "you said each extra…". The amount is quoted as
+ * the user wrote it ("about £20,000"). "adds … to" for a positive link into money; otherwise "changes … by".
+ */
+export function answeredAskReadingOf(
+  op: { readonly effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change_unit: string; readonly answer_to_ask?: unknown }; readonly figure_words?: unknown },
+  from: string, to: string,
+): string | null {
+  const ask = op.effect.answer_to_ask as { ask_id?: unknown } | undefined;
+  if (typeof ask?.ask_id !== 'string' || typeof op.figure_words !== 'string' || op.figure_words.trim() === '') return null;
+  const [head = '', per] = op.effect.per_source_change_unit.trim().split(/\s*(?:\/|\bper\b)\s*/i);
+  const one = head.replace(/([a-z]{2})s$/i, (w, stem: string) => (/ss$/i.test(w) ? w : stem));
+  const unit = per === undefined ? one : `${one} per ${per}`;
+  const figure = op.figure_words.trim();
+  const how = op.effect.amount > 0 && isCurrencyUnit(op.effect.amount_unit.trim().split(/[\s/]/)[0] ?? '')
+    ? `adds ${figure} to "${to}"`
+    : `changes "${to}" by ${op.effect.amount < 0 ? figure.replace(/(?=[^\p{L}\s])/u, '\u2212') : figure}`;
+  return `Record your figure: each extra ${unit} of "${from}" ${how} (your answer to Olumi\u2019s question).`;
 }
 
 /**
@@ -284,7 +308,8 @@ const LINK_EFFECT_APPROVE_PREFIX = 'Yes \u2014 ';
 export const linkEffectApproveMessage = (reading: string): string => `${LINK_EFFECT_APPROVE_PREFIX}${reading}`;
 /** The reading a link-effect card's words carry, or `undefined` for any other words. */
 export function readingOfLinkEffectApproval(message: unknown): string | undefined {
-  return typeof message === 'string' && message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+  return typeof message === 'string' && (message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record: `)
+    || message.startsWith(`${LINK_EFFECT_APPROVE_PREFIX}Record your figure: `))
     ? message.slice(LINK_EFFECT_APPROVE_PREFIX.length) : undefined;
 }
 

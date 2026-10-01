@@ -17,7 +17,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { PendingAction } from '../session/pending-action.js';
+import { isPendingActionExpired, type PendingAction } from '../session/pending-action.js';
+import type { OpenLinkSizeAsk } from './stated-by-user.js';
 import { sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { unitOf } from '../../cee/magnitude/link-effect.js';
 import { CURRENCY_SYMBOL_TO_CODE, isCurrencyUnit } from '../../utils/currency-alphabet.js';
@@ -199,4 +200,33 @@ export function linkSizeAskPendingAction(
     expires_at_iso: new Date((Number.isFinite(emitted) ? emitted : Date.now()) + LINK_SIZE_ASK_WALL_TTL_MS).toISOString(),
     emitted_at_iso: ctx.emitted_at_iso,
   };
+}
+
+/**
+ * ⭐ THE OPEN QUESTION THE NEXT TURN MAY ANSWER (R3 #75 5926021003 (a), condition 2): from the previous answer row's pending
+ * actions, the ONE live `elicit_link_size` record, as the binding `answerToLinkSizeAsk` reads; none, or more than one
+ * (ambiguous), binds nothing.
+ */
+export function openLinkSizeAskOnRow(pendings: readonly PendingAction[], nowMs: number): OpenLinkSizeAsk | undefined {
+  const open = pendings.filter((pa) => pa.action.kind === 'elicit_link_size' && !isPendingActionExpired(pa, nowMs));
+  if (open.length !== 1) return undefined;
+  const pa = open[0]!;
+  const a = pa.action as Extract<PendingAction['action'], { kind: 'elicit_link_size' }>;
+  return { ask_id: pa.id, from_id: a.from_id, to_id: a.to_id, source_label: a.source_label, target_label: a.target_label,
+    per_unit: a.per_unit, amount_unit: a.amount_unit, direction: a.direction, graph_hash: a.graph_hash };
+}
+
+/**
+ * The question THIS process asked, per scenario and user: held from the answer that asked it and TAKEN by the very next turn
+ * (so a second turn never sees it). After a restart the answer row is read instead (`openLinkSizeAskOnRow`).
+ */
+export class OpenLinkSizeAsks {
+  private readonly held = new Map<string, PendingAction>();
+  hold(key: string, pa: PendingAction): void { this.held.set(key, pa); }
+  take(key: string, nowMs: number): OpenLinkSizeAsk | undefined {
+    const pa = this.held.get(key);
+    this.held.delete(key);
+    return pa === undefined ? undefined : openLinkSizeAskOnRow([pa], nowMs);
+  }
+  has(key: string): boolean { return this.held.has(key); }
 }
