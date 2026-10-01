@@ -173,17 +173,21 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
      * and v1 refused it, so the user's size stayed cut. A new cut on a widened node's out-link is fitted by widening ITS
      * target the same way, by the same guards (`widenRefusal`); accepted only when no new cut is left.
      */
+    // Monotone and bounded (R3 5923709789 (2)): frames only grow, each node is widened at most ONCE per chain, to fit every
+    // new cut into it at that moment; a cut that would need a second widen, or any refusal, rolls the whole chain back.
     let newCut: Rec | undefined;
-    for (let i = 0; i <= (g.nodes as Rec[]).length; i++) {
-      newCut = cuts(next).find((x) => !cuts(g).some((y) => key(y) === key(x)));
-      if (newCut === undefined || !chain.some((c) => c.node === newCut!.from)) break;
+    for (;;) {
+      const fresh = cuts(next).filter((x) => !cuts(g).some((y) => key(y) === key(x)));
+      newCut = fresh[0];
+      if (newCut === undefined) break;
       const down = (next.nodes as Rec[]).find((n) => n.id === newCut!.to);
       const Fd = frameOf(down);
-      if (down === undefined || Fd === undefined) break;
-      const Fn = niceFrameAtLeast(Math.abs(newCut.strength.mean) * Fd);
+      if (down === undefined || Fd === undefined || chain.some((c) => c.node === down.id) || !chain.some((c) => c.node === newCut!.from)) break;
+      const into = fresh.filter((x) => x.to === down.id);
+      const Fn = niceFrameAtLeast(Math.max(...into.map((x) => Math.abs(x.strength.mean))) * Fd);
       if (widenRefusal(next, down, Fd, Fn, opts) !== undefined) break;
       next = reframed(next, down.id, Fn);
-      chain.push({ node: down.id, from: Fd, to: Fn, for_link: key(newCut) });
+      chain.push({ node: down.id, from: Fd, to: Fn, for_link: key(into[0]!) });
     }
     if (newCut !== undefined) { refused.push({ link: key(e), reason: 'new_cut', detail: key(newCut) }); continue; }
     g = next;

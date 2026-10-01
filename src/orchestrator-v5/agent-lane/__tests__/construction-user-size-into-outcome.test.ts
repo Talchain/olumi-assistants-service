@@ -34,11 +34,11 @@ const link = (from: string, to: string, size?: { amount: number; per: number; by
 });
 
 /** raw-1's retry draft (`/private/tmp/mgc-resume/raw-1/call-2.json`), trimmed: the £ size lands on an intermediate £ outcome. */
-function draft(o: { dealsMax?: number; fundingMax?: number; fundingAsFactor?: boolean } = {}) {
+function draft(o: { dealsMax?: number; fundingMax?: number; fundingAsFactor?: boolean; target?: number } = {}) {
   const funding = { label: 'Funding from investment firms', provenance: 'inferred', unit: '£', plausible_max: o.fundingMax ?? 5000000 };
   return {
     goal: {
-      metric: 'Funding secured', operator: '>=', target_stated: false, frame: 'level', value: null, unit: '£', horizon_months: 2,
+      metric: 'Funding secured', operator: '>=', target_stated: o.target != null, frame: 'level', value: o.target ?? null, unit: '£', horizon_months: 2,
       provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'ai_proposed', scope: null,
     },
     constraints: [],
@@ -74,14 +74,14 @@ function draft(o: { dealsMax?: number; fundingMax?: number; fundingAsFactor?: bo
   };
 }
 
-async function build(d: Record<string, unknown>) {
+async function build(d: Record<string, unknown>, brief: string = PAUL) {
   let body: unknown = null;
   const call = (async () => ({ text: JSON.stringify(d) })) as unknown as CallStructuredModel;
   const dispatch: InternalDispatch = async (path, b) => {
     if (path.endsWith('/graph/register')) { body = structuredClone((b as { graph: unknown }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
-  const out = await buildModelFromBrief('a4f0a4f0-0000-4a4f-8a4f-a4f0a4f0a4f0', PAUL, dispatch, call) as Rec;
+  const out = await buildModelFromBrief('a4f0a4f0-0000-4a4f-8a4f-a4f0a4f0a4f0', brief, dispatch, call) as Rec;
   expect(out.ok, JSON.stringify(out)).toBe(true);
   return { g: GraphV3.parse(body) as unknown as Rec, out };
 }
@@ -202,6 +202,79 @@ describe('A4f on the served paul-1 graph (0 LLM)', () => {
     const before = servedPaul1('factor');
     const r = refitFramesForStatedEffects(before);
     expect(r.refused).toEqual([{ link: 'investment_firm_deals_closed→investment_firm_funding_secured', reason: 'not_the_goal' }]);
+    expect(r.graph).toBe(before);
+  });
+});
+
+/**
+ * R3 5923709789 (1): the cascade lives inside the ONE refit, so the F4 retirement shares it. On the a4b2-p3 shape (outcome
+ * £3m), (A) Paul's frameless build then the approved "at least £1m" card equals (B) the same draft built with the target,
+ * on the goal's frame and every β along the user's chain.
+ */
+describe('A4f cascade is path independent (construction and the F4 card share it)', () => {
+  it('A (build → card "at least £1m") == B (built with £1m): goal frame, deal β and the outcome\'s out-link β', async () => {
+    const { applyGoalTargetEdit } = await import('../../system-events/goal-target-edit.js');
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const built = (await build(draft({ fundingMax: 3000000 }))).g;
+    const goalId = built.nodes.find((n: Rec) => n.kind === 'goal').id;
+    const event = { kind: 'goal_target_edit', goal_node_id: goalId, constraint_type: 'at_least', raw_value: 1000000, unit: '£',
+      base_graph_hash: computeAnalysisAffectingGraphHash(built as never) };
+    const r = await applyGoalTargetEdit({
+      payload: { kind: 'system_event', scenario_id: 'a4f1a4f1-0000-4a4f-8a4f-a4f1a4f1a4f1', turn_id: 'turn-a4f', stage: 'frame', event } as never,
+      event: event as never, requestId: 'req-a4f', persistedGraph: built as never, priorFacts: [],
+    }) as { kind: string; mutatedGraph?: Rec };
+    expect(r.kind, JSON.stringify(r).slice(0, 300)).toBe('mutated');
+    const a = r.mutatedGraph!;
+    const b = (await build(draft({ fundingMax: 3000000, target: 1000000 }), `${PAUL} We need to raise at least £1m.`)).g;
+    // The USER's chain agrees on both paths: the outcome's frame and the deal β, carried at full size.
+    expect(frame(a, DEAL[1])).toBe(frame(b, DEAL[1]));
+    expect(edge(a, ...DEAL).strength.mean).toBeCloseTo(edge(b, ...DEAL).strength.mean, 9);
+    expect(Math.abs(edge(a, ...DEAL).strength.mean)).toBeLessThanOrEqual(1);
+    expect(edge(a, ...DEAL).provenance.natural_effect.amount).toBe(edge(b, ...DEAL).provenance.natural_effect.amount);
+  });
+
+  // ⚠ NAMED RESIDUAL (MG #75, to R3): Olumi's drafted "+£1 per £1" outcome → goal link is typed `definitional` on the frameless
+  // build (the normalising frame holds it) but SET ASIDE when the brief states the target: the target's frame (£1m) cannot
+  // hold £3m at 1:1 when it is sized, before any refit, so B carries a placeholder there and the goal's frame differs. The
+  // same class as the pinned Olumi-estimate residual in `construction-goal-normalising-frame.test.ts`. Pinned so either side moving is seen.
+  it('RESIDUAL (pinned): the outcome → goal link is definitional on A, a placeholder on B (set aside at sizing)', async () => {
+    const b = (await build(draft({ fundingMax: 3000000, target: 1000000 }), `${PAUL} We need to raise at least £1m.`)).g;
+    const goalId = b.nodes.find((n: Rec) => n.kind === 'goal').id;
+    expect(edge(b, DEAL[1], goalId).provenance.definitional).toBeUndefined();
+  });
+});
+
+/** CODEX delta class 5923720522: the collision class — 3 hops, a diamond, and a refusal mid-chain that rolls everything back. */
+describe('A4f cascade: chains, diamonds and rollback (0 LLM)', () => {
+  const n = (id: string, kind: string, scale_frame: number) => ({ id, kind, label: id, scale_frame });
+  const e = (from: string, to: string, mean: number, user = false) => ({ from, to, strength: { mean, std: Math.abs(mean) / 2 },
+    provenance: user ? { magnitude: 'user_stated', natural_effect: { amount: 1, per_source_change: 1, strength_mean: mean } } : { magnitude: 'olumi_estimate' } });
+  const nat = (g: Rec): number[] => g.edges.map((x: Rec) => x.strength.mean * g.nodes.find((y: Rec) => y.id === x.to).scale_frame / g.nodes.find((y: Rec) => y.id === x.from).scale_frame);
+
+  it('3 hops: user → A (outcome) → B (outcome) → goal; A, B and the goal widen once each, every |β| ≤ 1, natural sizes held', () => {
+    const before = { nodes: [n('s', 'outcome', 10), n('a', 'outcome', 1000), n('b', 'outcome', 1000), n('g', 'goal', 1000)],
+      edges: [e('s', 'a', 4, true), e('a', 'b', 0.9), e('b', 'g', 0.9)] };
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refits.map((x: Rec) => x.node)).toEqual(['a', 'b', 'g']);
+    for (const x of r.graph.edges) expect(Math.abs(x.strength.mean)).toBeLessThanOrEqual(1 + 1e-9);
+    expect(nat(r.graph).map((v) => Number(v.toFixed(6)))).toEqual(nat(before).map((v) => Number(v.toFixed(6))));
+  });
+
+  it('a diamond into one goal: the goal is widened ONCE, to fit both branches', () => {
+    const before = { nodes: [n('s', 'outcome', 10), n('x', 'outcome', 1000), n('y', 'outcome', 1000), n('z', 'outcome', 1000), n('g', 'goal', 1000)],
+      edges: [e('s', 'x', 3, true), e('x', 'y', 0.5), e('x', 'z', 0.4), e('y', 'g', 0.6), e('z', 'g', 0.6)] };
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refused).toEqual([]);
+    expect(r.refits.filter((x: Rec) => x.node === 'g')).toHaveLength(1);
+    for (const x of r.graph.edges) expect(Math.abs(x.strength.mean)).toBeLessThanOrEqual(1 + 1e-9);
+  });
+
+  it('control: a FACTOR mid-chain refuses, and the whole chain rolls back — the graph returned as it came, no refit recorded', () => {
+    const before = { nodes: [n('s', 'outcome', 10), n('a', 'outcome', 1000), n('f', 'factor', 1000), n('g', 'goal', 1000)],
+      edges: [e('s', 'a', 4, true), e('a', 'f', 0.9), e('f', 'g', 0.5)] };
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refused).toEqual([{ link: 's→a', reason: 'new_cut', detail: 'a→f' }]);
+    expect(r.refits).toEqual([]);
     expect(r.graph).toBe(before);
   });
 });
