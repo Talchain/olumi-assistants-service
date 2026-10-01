@@ -173,7 +173,11 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(response._diagnostic_trace?.fast_path).toBe('run');
     expect(sent).toHaveLength(1);
     const body = sent[0]!;
-    selected(body);
+    // AI HARNESS 2a: the interpreting call keeps the selected model, prompt and cap, at the interpret role's measured
+    // effort (low; `model-budgets.ts` evidence). The ordinary conversation above stays high.
+    expect(body.model).toBe('gpt-6.1-sol');
+    expect(body.reasoning?.effort).toBe('low');
+    expect(body.max_output_tokens).toBe(3400);
     expect(body.tool_choice).toBe('none');
     expect(body.tools).toEqual([]);
     // A withheld Run inserts its view instruction before the interpret-only constraint.
