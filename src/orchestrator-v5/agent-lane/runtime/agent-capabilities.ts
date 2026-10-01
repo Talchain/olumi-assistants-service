@@ -236,6 +236,16 @@ function levelNotIncludedLine(
   return `${opener} It could belong to more than one figure in this model${rivals.length > 0 ? ` (${rivals.map((r) => `"${r}"`).join(', ')})` : ''}, ${close}`;
 }
 
+/**
+ * ⭐ A STRENGTH IS SAID AS ITS BAND WORD, NEVER AS OLUMI'S INTERNAL NUMBER (AIQ #75 5923931082; DL 5923941128 — served
+ * `train-0258Z/05-adopt-propose`: "Moderate (0.3)", "down from strong (0.5)", "Numbers are internal 0–1 strengths").
+ * A model-scale number means nothing to the user and invites "0.3 = 30%". The link-strength cards, results and notes
+ * carry the band only; the stored number is the writer's business. A tool note is prompt, so the note says so.
+ */
+const BAND_WORDS_ONLY = 'Say each strength as its band word only (such as "moderate"), never a number or a scale.';
+/** An empty proposal is the Agent's own call: the user is told what the model holds, never about the call (AIQ 5923931082). */
+const EMPTY_PROPOSAL_WORDS = ' Never tell the user about this call or that it was refused; say plainly what the model already holds.';
+
 function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, ...target: string[]): EntityScope {
   const others = g.nodes
     .filter((n) => n.kind !== 'option' && n.kind !== 'decision')
@@ -2811,8 +2821,8 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
-          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate (strength kept at ${quotable(Math.abs(mean))} on Olumi's 0\u20131 scale)`
-          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords} (${magnitude} on Olumi's 0\u20131 scale), as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`,
+          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate (its strength stays as it is)`
+          : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`,
         ...(interpretation === undefined ? {} : { interpretation }),
       });
       proposals.put(proposal);
@@ -2821,12 +2831,12 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), strength: quotable(Math.abs(mean)), direction: current },
-          becomes: { band: linkBandWord(band), strength: quotable(magnitude), direction: wanted }, keeps_current_strength: confirm },
+        link: { from: from.label, to: to.label, was: { band: linkBandWord(currentBand), direction: current },
+          becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
-          ? 'Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree.'
-          : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree.`),
+          ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
+          : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },
 
@@ -2995,7 +3005,7 @@ export function createAgentCapabilities(
       const namedByTheUser = (band: InfluenceBand, words: unknown, fromLabel: string, toLabel: string): boolean =>
         typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
         && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
-      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; wasStrength: number };
+      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand };
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
       const already: string[] = [];
@@ -3063,7 +3073,7 @@ export function createAgentCapabilities(
           const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
           ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
             expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, wasStrength: Math.abs(mean) });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand });
           continue;
         }
         // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
@@ -3075,9 +3085,9 @@ export function createAgentCapabilities(
             + 'NEXT CALL: the same links without this one \u2014 unless the user names its band in their own words.');
         }
         const magnitude = bandMidpoint(band);
-        if (Math.abs(mean) === magnitude) { already.push(`${pair} already holds ${quotable(magnitude)}, Olumi\u2019s figure for ${linkBandWord(band)}`); continue; }
+        if (Math.abs(mean) === magnitude) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
         ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
-        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps: false, was: currentBand, wasStrength: Math.abs(mean) });
+        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps: false, was: currentBand });
       }
       if (ops.length === 0) {
         if (definitional.length > 0) {
@@ -3088,8 +3098,8 @@ export function createAgentCapabilities(
           detail: 'Every link already holds what was asked, so nothing was prepared. Say so plainly.' };
       }
       const whose = (x: Shown): string => x.yours
-        ? (x.keeps ? `reviewed by you, kept at ${quotable(x.magnitude)} (the figure stays as it was)` : `your estimate (${quotable(x.magnitude)})`)
-        : `Olumi\u2019s estimate (${quotable(x.magnitude)})`;
+        ? (x.keeps ? 'reviewed by you, kept as it is' : 'your estimate')
+        : 'Olumi\u2019s estimate';
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -3097,7 +3107,7 @@ export function createAgentCapabilities(
         operations: ops,
         provenance: { authored_by: shown.every((x) => x.yours) ? 'user_stated' : 'model_proposed', basis: String(args?.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}, on Olumi\u2019s 0\u20131 scale: `
+        public_label: `Record ${shown.length === 1 ? 'this link strength' : `these ${shown.length} link strengths`}: `
           + shown.map((x) => `"${x.from}" \u2192 "${x.to}" as ${linkBandWord(x.band)}, ${whose(x)}`).join('; '),
       });
       proposals.put(proposal);
@@ -3107,8 +3117,8 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), strength: quotable(x.wasStrength) },
-          becomes: { band: linkBandWord(x.band), strength: quotable(x.magnitude) }, whose: x.yours ? 'yours' : 'Olumi\u2019s estimate', keeps_current_strength: x.keeps })),
+        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was) },
+          becomes: { band: linkBandWord(x.band) }, whose: x.yours ? 'yours' : 'Olumi\u2019s estimate', keeps_current_strength: x.keeps })),
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
         note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
@@ -3116,7 +3126,7 @@ export function createAgentCapabilities(
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
             : '')
-          + 'Tell the user what each link will hold, never the id, and call authorise_change with this proposal_id once they agree.',
+          + `Tell the user what each link will hold, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`,
       };
     },
 
@@ -3345,9 +3355,9 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, direction: args.direction, band, strength: magnitude },
+        link: { from: from.label, to: to.label, direction: args.direction, band },
         ...(interpretation === undefined ? {} : { interpretation }),
-        note: `${interpretation === undefined ? '' : readingNote(interpretation)}Nothing has changed. Tell the user the link will be recorded as ${linkBandWord(band)}, which Olumi stores as ${magnitude} on its 0\u20131 strength scale, as their own estimate — never the id — and ask them to approve it before calling authorise_change.`,
+        note: `${interpretation === undefined ? '' : readingNote(interpretation)}Nothing has changed. Tell the user the link will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and ask them to approve it before calling authorise_change. ${BAND_WORDS_ONLY}`,
       };
     },
 
@@ -3376,7 +3386,7 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const input = Array.isArray(args?.assumptions) ? args.assumptions : [];
       if (input.length === 0) {
-        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No assumptions were given.' };
+        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: `No assumptions were given.${EMPTY_PROPOSAL_WORDS}` };
       }
       /**
        * ⛔ NO YES THAT CANNOT BE WRITTEN (DL 5924061304; the identity card's precedent above). The value door refuses
@@ -3670,7 +3680,7 @@ export function createAgentCapabilities(
       const assumptions = Array.isArray(args?.assumptions) ? args.assumptions : [];
       const levels = Array.isArray(args?.option_levels) ? args.option_levels : [];
       if (assumptions.length === 0 && levels.length === 0) {
-        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'Nothing was proposed.' };
+        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: `Nothing was proposed.${EMPTY_PROPOSAL_WORDS}` };
       }
       const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
       // What THIS starting point would make each factor's starting value — read off the stored
@@ -3770,7 +3780,7 @@ export function createAgentCapabilities(
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       const input = Array.isArray(args?.interventions) ? args.interventions : [];
       if (input.length === 0) {
-        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'No interventions were given.' };
+        return { ok: false, mutated: false, refusal: 'empty_proposal', detail: `No interventions were given.${EMPTY_PROPOSAL_WORDS}` };
       }
       // Resolved within the kind first (a label on a node of another kind never shadows the
       // right one), then by `resolveNamed`: an id is identity, a label beats a description,
