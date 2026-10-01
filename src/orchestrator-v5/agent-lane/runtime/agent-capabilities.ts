@@ -152,6 +152,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 }
 
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
+import { directionChoices, pressedDirection } from '../refusal-choices.js';
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
@@ -6883,7 +6884,6 @@ export function createAgentCapabilities(
       const direction = (d: unknown): 'positive' | 'negative' | null => (d === 'positive' || d === 'negative' ? d : null);
       for (const a of affects as { target_label?: unknown; direction?: unknown }[]) {
         const asked = String(a?.target_label ?? '');
-        const dir = direction(a?.direction);
         const res = resolveNamed(g, asked, (n) => n.kind === 'goal' || n.kind === 'outcome');
         if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
         if (res.kind === 'other' && res.node.kind === 'factor') {
@@ -6898,24 +6898,32 @@ export function createAgentCapabilities(
               ? `The model has nothing called "${asked}", so nothing was prepared. ${RISK_LINKS_RULE}`
               : `"${asked}" is not the goal or an outcome, so nothing was prepared. ${RISK_LINKS_RULE}` };
         }
+        // ⭐ Paul's order #4: the user's PRESS for this very link (re-derived: this tool, this node) wins over a guess.
+        const dir = pressedDirection(ctx.chosen, 'propose_new_risk', 'affects', res.node.id) ?? direction(a?.direction);
         if (dir === null) {
           return { ok: false, mutated: false, refusal: 'direction_not_stated',
-            detail: `Nothing was prepared: say whether "${label}" would raise or lower "${res.node.label}", from the user’s words; if it is unclear, ask.` };
+            choices: directionChoices('propose_new_risk', 'affects', res.node.id,
+              { negative: `It would lower "${res.node.label}"`, positive: `It would raise "${res.node.label}"` }),
+            detail: `Nothing was prepared: say whether "${label}" would raise or lower "${res.node.label}", from the user’s words; if it is unclear, ask. `
+              + 'The user can also press one of the choices.' };
         }
         links.push({ to_id: res.node.id, effect_direction: dir });
       }
       for (const c of causedBy as { factor_label?: unknown; direction?: unknown }[]) {
         const asked = String(c?.factor_label ?? '');
-        const dir = direction(c?.direction);
         const res = resolveNamed(g, asked, (n) => n.kind === 'factor');
         if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
         if (res.kind !== 'one') {
           return { ok: false, mutated: false, refusal: 'cause_not_a_factor',
             detail: `"${asked}" is not a factor in the model, so nothing was prepared. What drives a risk must be one of the model’s factors; leave caused_by out if none does.` };
         }
+        const dir = pressedDirection(ctx.chosen, 'propose_new_risk', 'caused_by', res.node.id) ?? direction(c?.direction);
         if (dir === null) {
           return { ok: false, mutated: false, refusal: 'direction_not_stated',
-            detail: `Nothing was prepared: say whether raising "${res.node.label}" makes "${label}" more or less likely, from the user’s words; if it is unclear, ask.` };
+            choices: directionChoices('propose_new_risk', 'caused_by', res.node.id,
+              { positive: `More "${res.node.label}" makes it more likely`, negative: `More "${res.node.label}" makes it less likely` }),
+            detail: `Nothing was prepared: say whether raising "${res.node.label}" makes "${label}" more or less likely, from the user’s words; if it is unclear, ask. `
+              + 'The user can also press one of the choices.' };
         }
         links.push({ from_id: res.node.id, effect_direction: dir });
       }
@@ -7059,10 +7067,14 @@ export function createAgentCapabilities(
               ? `The model has nothing called "${asked}", so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets).`
               : `"${asked}" is ${res.node.kind === 'option' ? 'an option' : `a ${res.node.kind}`}, so nothing was prepared. A new factor drives an outcome or a non-lever factor (one no option sets) — never the goal, a risk, an option or a decision.` };
         }
-        const direction = f.direction === 'positive' || f.direction === 'negative' ? f.direction : null;
+        const direction = pressedDirection(ctx.chosen, 'propose_new_factor', 'affects', res.node.id)
+          ?? (f.direction === 'positive' || f.direction === 'negative' ? f.direction : null);
         if (direction === null) {
           return { ok: false, mutated: false, refusal: 'direction_not_stated',
-            detail: `Nothing was prepared: say whether more "${label}" raises or lowers "${res.node.label}", from the user’s words; if it is unclear, ask.` };
+            choices: directionChoices('propose_new_factor', 'affects', res.node.id,
+              { positive: `More "${label}" raises "${res.node.label}"`, negative: `More "${label}" lowers "${res.node.label}"` }),
+            detail: `Nothing was prepared: say whether more "${label}" raises or lowers "${res.node.label}", from the user’s words; if it is unclear, ask. `
+              + 'The user can also press one of the choices.' };
         }
         const t = recordOf(f.today);
         const todayUnit = typeof t.unit === 'string' && t.unit.trim() !== '' ? t.unit.trim() : unit;

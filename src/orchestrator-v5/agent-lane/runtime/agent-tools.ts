@@ -11,6 +11,7 @@
  * turn's own verified identity before any tool runs. That is why this is a
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
+import type { ChosenAnswer } from '../refusal-choices.js';
 import { sendableQuery } from './public-research.js';
 
 /**
@@ -108,6 +109,12 @@ export interface AgentToolContext {
   readonly typed_approval_of?: string;
   /** That chip's words, bound only when a card for the proposal is on offer: a link-effect card's words carry its reading. */
   readonly typed_approval_words?: string;
+  /**
+   * ⭐ The refusal choice the user PRESSED this turn (`refusal-choices.ts`), parsed by the route from the chip id only —
+   * never model output, never words. A tool takes it as the user's answer only for its own field, and only when the value
+   * is one it would offer now.
+   */
+  readonly chosen?: ChosenAnswer;
 }
 
 export interface ToolDefinition {
