@@ -362,9 +362,17 @@ export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.j
  * host then appends 63–115 words of receipt and disclosure (#75 5922398757). So the sentence budgets the MODEL's words to
  * the pre-v0.2 size, which keeps the whole reply inside AIQ's ≤180 / ≤150 / ≤130. It never trades away a truth sentence.
  * Appended after the host contract: no existing rule is restated, moved or dropped.
+ *
+ * ⭐ K2 (DL #75 5925649954 item 5; R3 5925627855; lease 5925667650): "about" read as a target, and the model kept its own ask
+ * beside the host's. R3's 06:00Z acceptance: run1 157 model words with "The useful next step is to state the minimum funding…"
+ * right above the host's D1 ask (the same ask twice), examine 2 asks. Now the budgets are LIMITS, one question at most, last,
+ * and on a build or Run turn the goal's target is never asked by the model: the host's D1 asks it, in AIQ's direction words
+ * (`decision-input-ask.ts`). Real-route A/B, ONLY this sentence swapped, interleaved, request identity equal apart from it
+ * (R3 train-0545Z captures; 16 calls): Run turn with the brief in history 101/97 → 89/90 model words, the model's own target
+ * ask 2/2 → 0/2 (D1 then asks once), every truth point kept; examine asks 2,1 → 1,1; inspect 84/88 → 86/81.
  */
 export const REPLY_LENGTH_INSTRUCTION =
-  'Length: your words are only part of what the user reads, because Olumi adds its own status, disclosure and receipt lines after them. Keep your words to about 110 on the turn that builds the model from a brief, about 100 when you explain an analysis result, and about 90 otherwise. To fit, cut restated model contents, process narration and extra questions first; never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure.';
+  'Length: your words are only part of what the user reads, because Olumi adds its own status, disclosure and receipt lines after them. Stay under 110 words on the turn that builds the model from a brief, under 100 when you explain an analysis result, and under 90 otherwise: these are limits, not targets. Ask at most one question, as your last sentence. On a turn that builds the model or runs the analysis, never ask for the goal\'s target or name it as the next step: Olumi asks for it after your words. To fit, cut restated model contents, process narration and extra questions first; never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure.';
 
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
   '{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION].join(' '),

@@ -10,9 +10,10 @@ const sha256 = (text: string | Buffer) => createHash('sha256').update(text).dige
 const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c9ed66d';
 const HOST_SHA = '325bb61e58059ba4a10dc5d38472dbfa64b7b2e4080706a0c6a35a9067562ab6';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
+// + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // Derived from the request the real route SENT (harness raw body), never computed by hand; the template + host shas above are unchanged.
-const RENDERED_SHA = '6b94d6f4ef052640b6dfccf2b1692eadd2c1670261769479dcbf9f234940404c';
-const RENDERED_BYTES = 27_324;
+const RENDERED_SHA = 'c9881d92e4230323acd2f278be86ec8255ceb8ffe5b99f3dbffc2933ab4a332f';
+const RENDERED_BYTES = 27_547;
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';
