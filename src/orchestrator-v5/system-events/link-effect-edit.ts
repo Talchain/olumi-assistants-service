@@ -196,7 +196,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   if (sizing.outcome !== 'user_stated' || sizing.natural_effect === undefined) return refuse('unconvertible');
 
   const before = { from, to, strength: { ...strength }, effect_direction: edge.effect_direction, provenance: { ...provenance } };
-  const { reasoning: _olumisWhy, natural_effect: _oldSize, ...keptProvenance } = provenance;
+  const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
   edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: sizing.natural_effect };

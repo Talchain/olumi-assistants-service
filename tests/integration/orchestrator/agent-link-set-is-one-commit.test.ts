@@ -243,7 +243,8 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const p = await caps.proposeLinkStrengths!(ctx, { links: links as never, rationale: 'the user named the bands' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
     expect(String(p.public_label)).not.toContain('your estimate');
-    expect(String(p.public_label)).toContain('reviewed by you, kept at 0.5');
+    expect(String(p.public_label)).toContain('reviewed by you, kept as it is');
+    expect(String(p.public_label), 'band words only (AIQ 5923931082)').not.toMatch(/\d\.\d|0–1|scale/);
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     // The in-band "strong" picks are REVIEW (#2257): figure, source and default flag unchanged; the review is recorded.

@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { filterOlumiProposedOptions } from '../olumi-option-filter.js';
 import { gateAnalysableOptions } from '../analysable-option-gate.js';
+import { readStoredOptionParticipation } from '../option-participation.js';
 
 type Rec = Record<string, unknown>;
 const opt = (id: string, value = 1): Rec => ({ option_id: id, label: id, interventions: { f: value } });
@@ -121,5 +122,43 @@ describe('filterOlumiProposedOptions', () => {
       graph: graphOf(node('a'), node('b'), node('phased', true)),
     });
     expect(r.options.map((o) => o.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('the Run RECORDS each Olumi option outside the ordinary comparison (52f8cd; DL 5924731600)', () => {
+  const contractOk = (participation: unknown) => readStoredOptionParticipation(participation);
+
+  it('RED: left out → `excluded_olumi_proposed`, contract-valid; a user option never appears', () => {
+    const r = filterOlumiProposedOptions({
+      submitted: [opt('raise_59'), opt('keep_49', 2), opt('phased', 3)],
+      graph: graphOf(node('raise_59'), node('keep_49'), node('phased', true)),
+    });
+    expect(r.participation).toEqual([{ option_id: 'phased', state: 'excluded_olumi_proposed' }]);
+    expect(contractOk(r.participation)).toEqual(r.participation);
+  });
+
+  it('kept because the user named fewer than two → `kept_olumi_provisional` with NO unanalysable ids', () => {
+    const r = filterOlumiProposedOptions({
+      submitted: [opt('raise_59'), opt('phased')],
+      graph: graphOf(node('raise_59'), node('phased', true)),
+    });
+    expect(r.participation).toEqual([{ option_id: 'phased', state: 'kept_olumi_provisional' }]);
+    expect(contractOk(r.participation)).toEqual(r.participation);
+  });
+
+  it('kept because the gate could not analyse the user\'s own option → it is NAMED; an Olumi id never is', () => {
+    const r = filterOlumiProposedOptions({
+      submitted: [opt('raise_59'), opt('phased')],
+      graph: graphOf(node('raise_59'), node('keep_49'), node('phased', true), node('tiered', true)),
+      unanalysableOptionIds: ['keep_49', 'tiered'],
+    });
+    expect(r.participation).toEqual([{ option_id: 'phased', state: 'kept_olumi_provisional', unanalysable_user_option_ids: ['keep_49'] }]);
+    expect(contractOk(r.participation)).toEqual(r.participation);
+  });
+
+  it('CONTROL: no Olumi suggestion submitted (none marked, or an adopted one included) → nothing recorded', () => {
+    expect(filterOlumiProposedOptions({ submitted: [opt('a'), opt('b', 2)], graph: graphOf(node('a'), node('b')) }).participation).toEqual([]);
+    const adopted = graphOf(node('a'), node('b'), { ...node('c', true), analysis_participation: 'included' });
+    expect(filterOlumiProposedOptions({ submitted: [opt('a'), opt('b', 2), opt('c', 3)], graph: adopted }).participation).toEqual([]);
   });
 });

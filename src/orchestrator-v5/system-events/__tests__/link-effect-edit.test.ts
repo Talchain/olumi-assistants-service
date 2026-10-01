@@ -96,6 +96,15 @@ describe('link effect writer — a stated effect sizes the link exactly, as the 
     expect(reloaded).toEqual(written);
   });
 
+  it('CODEX 5925312387: a stated size takes a clamp marker with the old size (it spoke for that size only)', () => {
+    const base = storedGraph();
+    const e0 = base.edges.find((e: Rec) => e.from === 'price' && e.to === 'subs');
+    e0.provenance = { ...(e0.provenance ?? {}), clamped_from: 3 };
+    const r = applyLinkEffectEdit(params({}, base));
+    if (r.kind !== 'mutated') throw new Error(JSON.stringify(r));
+    expect(edgeOf(r.mutatedGraph).provenance).not.toHaveProperty('clamped_from');
+  });
+
   it('touches only the stated link', () => {
     const base = storedGraph();
     const r = applyLinkEffectEdit(params({}, base));

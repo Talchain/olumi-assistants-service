@@ -127,9 +127,10 @@ describe('A4f: the user\'s £ size into an intermediate £ outcome fits that out
     expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(false);
   });
 
-  it('control: the same size into a FACTOR is never widened — it stays cut and the question is still asked', async () => {
+  it('control: the same size into a FACTOR is never widened — stored clamped at ±1 (its full β marked), and still asked', async () => {
     const { g, out } = await build(draft({ fundingAsFactor: true }));
-    expect(Math.abs(edge(g, ...DEAL).strength.mean)).toBeGreaterThan(1);
+    expect(Math.abs(edge(g, ...DEAL).strength.mean)).toBe(1);
+    expect(Math.abs(edge(g, ...DEAL).provenance.clamped_from)).toBeGreaterThan(1);
     expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(true);
   });
 });
@@ -357,6 +358,7 @@ describe('persist invariant: construction stores no |mean| > 1', () => {
   it.each([
     ['raw-1 shape', {}], ['deals max 100 (cascade)', { dealsMax: 100 }], ['outcome £3m (p3)', { fundingMax: 3000000 }],
     ['with a stated target', { fundingMax: 3000000, target: 1000000 }],
+    ['a factor target (refused → clamped at persist, DL 5924108406)', { fundingAsFactor: true }],
   ] as const)('%s → every stored |mean| ≤ 1, and the model is writable', async (_label, o) => {
     const { isEditableGraph } = await import('../../system-events/editable-graph.js');
     const { g } = await build(draft(o as never));
@@ -364,11 +366,6 @@ describe('persist invariant: construction stores no |mean| > 1', () => {
     expect(isEditableGraph(g)).toBe(true);
   });
 
-  it('RESIDUAL (pinned): a user size into a FACTOR is refused by the refit — stored as stated (> 1) and asked', async () => {
-    const { g, out } = await build(draft({ fundingAsFactor: true }));
-    expect(Math.abs(edge(g, ...DEAL).strength.mean)).toBeGreaterThan(1);
-    expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(true);
-  });
 
   it('REPLAY 52f8cd (guest 61a8c07c, served): the stored 1.667 makes the model unwritable; the refit this PR runs makes it writable', async () => {
     const { isEditableGraph } = await import('../../system-events/editable-graph.js');

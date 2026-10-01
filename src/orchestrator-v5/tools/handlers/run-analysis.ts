@@ -187,6 +187,7 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
+import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -656,6 +657,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     const olumiFilter = filterOlumiProposedOptions({
       submitted: gate.options as ReadonlyArray<Record<string, unknown>>,
       graph: snapshot.rawPersistedGraph ?? snapshot.graph,
+      unanalysableOptionIds: gate.excluded.map((s) => s.option_id),
     });
     const keptOlumiProvisional = olumiFilter.keptOlumiProvisional;
 
@@ -1030,8 +1032,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis carried Olumi\'s unconfirmed goal product on the wire copy of a graph with no identity (ids only)',
       );
     }
+    // ⭐ CLAMP AT PERSIST (DL 5924108406): a link stored at ±1 with its full β marked is sent at that full β, on this wire
+    // copy only, so PLoT clamps, marks (`clamped_from`) and withholds exactly as it did when the full β was stored.
+    const statedWireGraph = withStatedStrengths(wireGraph);
+    if (statedWireGraph !== wireGraph) {
+      log.info(
+        { event: 'run_analysis.clamped_links_sent_at_full_size', request_id: invocation.requestId, scenario_id: args.scenario_id },
+        'run_analysis sent stored clamps at their full size (wire copy only; ids only)',
+      );
+    }
     const plotPayload: Record<string, unknown> = {
-      graph: wireGraph,
+      graph: statedWireGraph,
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).
@@ -2674,6 +2685,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // rather than emitting an empty string.
         ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
         ...(goalCertainty.recorded ? { goal_certainty: goalCertainty.decisions } : {}),
+        // ⭐ 52f8cd (DL 5924731600): the Olumi options this Run left out of the ordinary comparison, and why — stored with
+        // the facts so the read and the turn carry the SAME record (`option-participation.ts`). ALWAYS written on a
+        // completed Run, `[]` included (schemas 0.65; CODEX 5924967500): absent strictly means an older Run, not recorded.
+        option_participation: [...olumiFilter.participation],
         computed_at: runComputedAt,
         // SC-24 (schemas 0.68.0): the Run's execution identity and the input it was sent (3.9 above).
         run_id: runId,

@@ -135,6 +135,7 @@ import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional
 import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
+import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
@@ -190,6 +191,12 @@ export interface ScenarioAnalysisRead {
    * no surface may then present a raw 0 or 1 as an earned certainty.
    */
   readonly analysis_goal_certainty?: StoredGoalCertainty;
+  /**
+   * 52f8cd (DL 5924731600): the SELECTED fact's own `option_participation` — the Olumi options its Run left out of the
+   * ordinary comparison, and why — under the SAME gates as `analysis_goal_certainty`. `[]` = recorded, nothing left out.
+   * ABSENT when the fact records none (an older Run): a consumer then may not infer a cause from the node.
+   */
+  readonly analysis_option_participation?: StoredOptionParticipation;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the SELECTED fact's engine evaluated (`identity_evaluations`,
    * `evaluated: true`, read by `evaluatedIdentityNodeIds` off the fact's own `enrichment`) under the SAME gates as
@@ -521,6 +528,11 @@ export async function readScenarioAnalysis(
             ...(() => {
               const certainty = readStoredGoalCertainty(fact.result.goal_certainty);
               return certainty === undefined ? {} : { analysis_goal_certainty: certainty };
+            })(),
+            // 52f8cd: the Olumi options the selected Run left out, and why — the ONE reader both legs use.
+            ...(() => {
+              const participation = readStoredOptionParticipation((fact.result as { option_participation?: unknown }).option_participation);
+              return participation === undefined ? {} : { analysis_option_participation: participation };
             })(),
             ...(Array.isArray((fact.result.enrichment as { identity_evaluations?: unknown } | undefined)?.identity_evaluations)
               ? { analysis_identity_evaluated_node_ids: [...evaluatedIdentityNodeIds(fact.result.enrichment)] }
