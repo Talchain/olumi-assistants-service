@@ -208,7 +208,7 @@ import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { approvalSizes, isAcceptedOlumiSize } from '../../../cee/magnitude/link-sizing.js';
+import { approvalSizes, isAcceptedOlumiSize, linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
@@ -1272,7 +1272,13 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
       ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
       ...(num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
-      ...(e.defaulted === true ? { defaulted: true } : {}),
+      /**
+       * ⭐ WHO SIZED IT, by F1b's ONE rule (`linkSizing`; AI HARNESS, DL 5936996041 on R3 DEFECT 2 5936673643). `defaulted`
+       * is NOT a sizing mark: construction sets it on Olumi's estimates too (a projected spread or existence), and the
+       * Agent read it as "no one has estimated its strength yet", so "fix them all" re-sized two estimates and left the
+       * two real placeholders. It is no longer projected; a link that holds by definition is arithmetic and carries none.
+       */
+      ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? {} : { sizing: linkSizing(e) }),
       ...(str(e.origin) ? { origin: e.origin } : {}),
     };
   });
@@ -3079,7 +3085,7 @@ export function createAgentCapabilities(
       const namedByTheUser = (band: InfluenceBand, words: unknown, fromLabel: string, toLabel: string): boolean =>
         typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
         && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
-      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand };
+      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; sizedBefore: LinkSizing };
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
       const already: string[] = [];
@@ -3154,7 +3160,7 @@ export function createAgentCapabilities(
           const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
           ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
             expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
           continue;
         }
         // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
@@ -3175,7 +3181,7 @@ export function createAgentCapabilities(
         if (keeps && !approvalSizes(edge) && isAcceptedOlumiSize(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
         // Kept at its value it is a REVIEW of Olumi's band (`confirm_current`): the writer refuses a `set` that changes nothing.
         ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
-        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand });
+        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
       }
       if (ops.length === 0) {
         if (definitional.length > 0) {
@@ -3200,12 +3206,14 @@ export function createAgentCapabilities(
       });
       proposals.put(proposal);
       const olumis = shown.filter((x) => !x.yours).length;
+      // A link Olumi had ALREADY estimated is re-sized, not sized: the Agent says so, never "your placeholders" (R3 DEFECT 2).
+      const reEstimated = shown.filter((x) => !x.yours && !x.keeps && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted'));
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was) },
+        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), sizing: x.sizedBefore },
           becomes: { band: linkBandWord(x.band) }, whose: x.yours ? 'yours' : 'Olumi\u2019s estimate', keeps_current_strength: x.keeps })),
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
@@ -3213,6 +3221,9 @@ export function createAgentCapabilities(
           + (definitional.length > 0 ? 'Some links were left out because a calculation the model declares defines them (`left_out_definitional`): say so in those words, and never offer to change them. ' : '')
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
+            : '')
+          + (reEstimated.length > 0
+            ? `${reEstimated.length === shown.length ? 'Every link here' : `${reEstimated.length} of these links`} already held Olumi\u2019s estimate (\`was.sizing\`), so this REPLACES an earlier estimate; it does not size a placeholder: never call ${reEstimated.length === 1 ? 'it a placeholder' : 'them placeholders'}. The links nobody has sized are the ones whose \`sizing\` is \`placeholder\` in the model state. `
             : '')
           + `Tell the user what each link will hold, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`,
       };
