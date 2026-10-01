@@ -67,8 +67,11 @@ describe('the strict door reads a shared word by the rivals\' own qualifiers', (
     expect(figureTheUserWroteFor(1000000, '£', ANSWER, { target: ['Funding secured'], others: others('Funding secured', labels), strict: true })).toBe(true);
   });
 
-  it('control: NON-strict callers read exactly as before (the rule is strict-only)', () => {
-    expect(figureTheUserWroteFor(0, '£', ANSWER, { target: ['Funding secured'], others: others('Funding secured', LABELS_0341Z) }))
-      .toBe(figureTheUserWroteFor(0, '£', ANSWER, { target: ['Funding secured'], others: others('Funding secured', LABELS_0341Z) }));
+  it('control: the rule is STRICT-only — a non-strict caller reads exactly as before', () => {
+    const t = 'We have secured £0 so far for the outreach budget.';
+    const labels = ['Funding secured', 'Angel funding secured', 'Angel outreach hours'];
+    expect(figureTheUserWroteFor(0, '£', t, { target: ['Funding secured'], others: ['Angel funding secured', 'Angel outreach hours'], strict: true })).toBe(true);
+    expect(figureTheUserWroteFor(0, '£', t, { target: ['Funding secured'], others: ['Angel funding secured', 'Angel outreach hours'] })).toBe(false);
+    void labels;
   });
 });

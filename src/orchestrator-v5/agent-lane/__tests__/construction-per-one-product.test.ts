@@ -98,6 +98,13 @@ describe('A4u: a count × a constant £-per-one is read as the per-one link', ()
     expect(isEditableGraph(g)).toBe(true);
   });
 
+  it('authorship travels with the figure: the same £1,000,000 tagged as Olumi\'s (ai_proposed) stays Olumi\'s estimate', async () => {
+    const d = draft() as Rec;
+    d.factors = d.factors.map((f: Rec) => (f.label === 'Typical investment-firm funding per deal' ? { ...f, provenance: 'ai_proposed' } : f));
+    const deal = edge(await build(d), 'investment_firm_deals_closed', 'funding_from_investment_firms');
+    expect(deal?.provenance?.magnitude).not.toBe('user_stated');
+  });
+
   it('Olumi\'s own £100,000 per angel deal becomes Olumi\'s sized link — never the user\'s', async () => {
     const g = await build(draft());
     const angel = edge(g, 'angel_deals_closed', 'funding_from_angel_investors');
