@@ -75,7 +75,9 @@ describe('the step-2 unit wall: a unitless count outcome is counted in its plura
   }
   // ⛔ AIQ 5927288860: "Every 100 conversations bring in about £20,000" is £200 per conversation. A number in the unit is
   // never dropped: per 1 "100 conversations" would store the £20,000-per-conversation strength (100× too strong) as theirs.
-  for (const unit of ['100 conversations', '100 investor conversations', 'a hundred conversations', '2 conversations']) {
+  // CODEX 5927360189: multipliers, decimals and signed quantities in the unit are refused the same way.
+  for (const unit of ['100 conversations', '100 investor conversations', 'a hundred conversations', '2 conversations',
+    '1.5 conversations', '-1 conversation', '+2 conversations', 'dozen conversations', '10k conversations']) {
     it(`AIQ hostile: per 1 "${unit}" (a number in the unit) is refused, never read as per conversation`, () => {
       expect(applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change: 1, per_source_change_unit: unit }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
     });
