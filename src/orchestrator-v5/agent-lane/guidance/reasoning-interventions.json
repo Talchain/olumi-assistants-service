@@ -1169,10 +1169,10 @@
         "owner": "SCIENCE/DSK owns applicability and the badge; RC owns the method shape, checks and fallback; AI HARNESS composes (PTL 5933036532 owner split)."
       },
       "label_masking": {
-        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked: case-insensitive, curly quotes folded, longest label first. The mask set is model_labels (EVERY node label in the current model: goal, options, factors, risks, outcomes) plus the method's own labels: RC-PREMORTEM supplied_items + plan_label + current_option_labels; RERUN-EXPLANATION change_labels + current_option_labels; RC-WHAT-CHANGES factor_label; RC-STRENGTHEN-ITEM item_labels; RC-COACH-EDITS edited_labels.",
+        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked: case-insensitive, curly quotes folded, longest label first, WHOLE TOKENS ONLY (a label is blanked only where no letter, digit or '_' touches either end; label matching is whole-token too). The mask set is model_labels (EVERY node label in the current model: goal, options, factors, risks, outcomes) plus the method's own labels: RC-PREMORTEM supplied_items + plan_label + current_option_labels; RERUN-EXPLANATION change_labels + current_option_labels; RC-WHAT-CHANGES factor_label; RC-STRENGTHEN-ITEM item_labels; RC-COACH-EDITS edited_labels.",
         "why": "A label the user wrote is grounding, not a claim. Served D1 (the investor decision) has the factor 'Enterprise prospect signing likelihood': without masking every grounded pre-mortem failed PM-NO-PROB and fell back (SCIENCE/DSK 5938372911). RC served-label scan (CEE staging fixtures, 1,440 labels / 305 graphs): goal labels with '%' ('Cut Burn Rate by 30%'), factor labels with 'leads' ('Qualified leads per month'), risk labels with '%' ('Churn above 4%'): none of them supplied items, so the mask set is every model label.",
-        "never": "Mask Olumi's own words: only labels the inputs supply.",
-        "reference": "tools/check_method_turn.py masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM, MT-RERUN-MODEL-LABEL-GOOD / -BAD-LEADER",
+        "never": "Mask Olumi's own words: only labels the inputs supply, and only as whole tokens (option 'A' must never blank the 'a' in 'probability'; HARNESS #2478 P1).",
+        "reference": "tools/check_method_turn.py masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM, MT-RERUN-MODEL-LABEL-GOOD / -BAD-LEADER, MT-PREMORTEM-SHORT-LABEL-GOOD / -BAD",
         "input": "model_labels: string[] = every node label of the current model (the caller has the graph)."
       }
     },
@@ -1469,7 +1469,15 @@
           "why": "'Edit the strength' writes both rows (sizing placeholder → user, band moved); two bullets for one edit reads as two edits."
         }
       },
-      "investor_moment": "M2 on the ruled seed (eeeff8b4): Accept both unsized links → Run → the comparison appears for the first time (R3 5936720411: provisional leader + win shares). This is the UNWITHHELD transition."
+      "investor_moment": "M2 on the ruled seed (eeeff8b4): Accept both unsized links → Run → the comparison appears for the first time (R3 5936720411: provisional leader + win shares). This is the UNWITHHELD transition.",
+      "change_labels_reading": "change_labels (RX-NAMES-CHANGES) = the RENDERED change_label_templates sentence per change (a link row has no label of its own; sizing + strength on one link = ONE sentence; a non-link row = \"You changed {label}: {before} → {after}.\"). The Agent is handed these exact sentences; a reply that does not carry each one falls back. Agreed with MG 5939033153.",
+      "attribution_case_mapping": "Wire C3/C4/C5 (other differences, e.g. engine drift) are checked as C2_unpaired (no cause allowed).",
+      "fallback_variants": {
+        "sentences": "When change_labels are sentences, {changes} = those sentences joined, then the case line (never 'You changed You accepted…').",
+        "C2_unpaired": "This run also used a new draw, so the difference can't be put down to your edit alone.",
+        "C3_C4_C5": "Other things also differed between these two runs, so the difference can't be put down to your edit alone.",
+        "why": "'a new draw' is false for engine drift (MG 5939033153)."
+      }
     }
   },
   "ui_trigger_map": {

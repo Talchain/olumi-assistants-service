@@ -15,12 +15,14 @@ function masked(reply: string, labels: readonly (string | undefined)[]): string 
   const own = [...new Set(labels.filter((l): l is string => typeof l === 'string' && l.trim() !== '').map(foldQuotes))]
     .sort((a, b) => b.length - a.length);
   let out = foldQuotes(reply);
-  for (const label of own) out = out.replace(new RegExp(label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'giu'), ' ');
+  // Whole tokens only: option 'A' must never blank the 'a' in 'probability' (HARNESS #2478 P1).
+  for (const label of own) out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![\\p{L}\\p{N}_])`, 'giu'), ' ');
   return out;
 }
+/** WHOLE-TOKEN match after normalise(): label 'B' never matches inside another word (HARNESS #2478 P1). */
 function labelMatches(text: string, labels: readonly string[]): boolean {
-  const normal = normalise(text);
-  return labels.some(label => normalise(label) !== '' && normal.includes(normalise(label)));
+  const normal = ` ${normalise(text)} `;
+  return labels.some(label => normalise(label) !== '' && normal.includes(` ${normalise(label)} `));
 }
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 /** A supplied item grounds a story by its ref as a whole word, or by EVERY label (a link needs both ends). */
