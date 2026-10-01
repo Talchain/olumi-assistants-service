@@ -35,6 +35,24 @@ describe('the card for a press (pure)', () => {
       'How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it.',
     ]);
   });
+  it('an option the Run took out never supplies the link, even one nearer the goal (the comparison\'s options only)', () => {
+    type G = { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+    const g = structuredClone(D1.graph) as unknown as G;
+    const goal = g.nodes.find((x) => x.kind === 'goal')!.id as string;
+    const template = g.nodes.find((x) => x.id === 'ai_reporting_module_sprint')!;
+    g.nodes.push({ ...structuredClone(template), id: 'taken_out_option', label: 'Taken-out option', interventions: { taken_out_lever: 1 } },
+      { id: 'taken_out_lever', kind: 'factor', label: 'Taken-out lever' });
+    g.edges.push({ from: 'taken_out_option', to: 'taken_out_lever', strength: { mean: 1 } },
+      { from: 'taken_out_lever', to: goal, strength: { mean: 0.25 }, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } });
+    const taken = [...PARTICIPATION, { option_id: 'taken_out_option', state: 'excluded_olumi_proposed' }];
+    const pick = (participation: unknown) => {
+      const c = strengthenCardFor({ graph: structuredClone(g), analysisState: CURRENT, optionParticipation: participation });
+      return c === null ? null : `${c.target.from_id}->${c.target.to_id}`;
+    };
+    expect(pick(taken)).toBe(`${AI.from}->${AI.to}`);
+    // Control: the same option IN the comparison supplies its nearer link.
+    expect(pick(PARTICIPATION)).toBe(`taken_out_lever->${goal}`);
+  });
   it('CONTROL: the same graph on a STALE Run → null (the press keeps today\'s answer)', () => {
     expect(strengthenCardFor({ graph: structuredClone(D1.graph), analysisState: STALE, optionParticipation: PARTICIPATION })).toBeNull();
   });
@@ -108,7 +126,8 @@ describe('the real route: the press → ONE held card, 0 model calls', () => {
   it('RED: the press on a current Run → RC\'s S1 copy, ONE propose_link_strengths held for approval, its approve + amend chips, 0 model calls', async () => {
     const b = await press();
     expect(modelCalls).toBe(0);
-    expect(b.assistant_text.startsWith('The comparison rests on a link nobody has sized yet.')).toBe(true);
+    // RC's fixed copy, exactly: nothing narrated around it.
+    expect(b.assistant_text).toBe('The comparison rests on a link nobody has sized yet.\n\nHow much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it.');
     expect(b._agent?.tool_calls?.map((c) => c.name)).toEqual(['propose_link_strengths']);
     const proposalId = b._agent!.tool_calls![0]!.proposal_id;
     expect(typeof proposalId).toBe('string');
