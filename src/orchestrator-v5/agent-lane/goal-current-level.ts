@@ -691,7 +691,12 @@ export async function proposeGoalCurrentLevel(
   const withUnit = (x: number) => sayFigureExactly(x, goalUnit ?? '') ?? `${x}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`;
   // ⛔ THE USER'S OWN FIGURE AND UNIT, as they gave it — never relabelled in the goal's unit — plus, when a stated
   // suffix was scaled, what it is recorded as. The target and a replaced record are the goal's own, in its unit.
-  const asStated = sayFigureExactly(value, statedUnit) ?? `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
+  // ⭐ THE CARD SHOWS THE PERIOD IT RECORDS (DL 380e54 ruling on #2468): a bare "£" on a goal per quarter is RECORDED per
+  // quarter, so the card says "£100,000 per quarter" — the user sees the reading before confirming. That confirm is the
+  // structural control for a figure the user meant monthly (never read from their words: a word read is banned).
+  const shownUnit = statedUnit !== '' && ratePeriodOf(statedUnit) === null && ratePeriodOf(goalUnit) !== null
+    ? `${statedUnit} per ${ratePeriodOf(goalUnit)}` : statedUnit;
+  const asStated = sayFigureExactly(value, shownUnit) ?? `${value}${shownUnit !== '' ? ` ${shownUnit}` : ''}`;
   const figure = stated.normalised !== undefined ? `${asStated}, which is ${withUnit(raw)}` : asStated;
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   // Carried INSIDE the goal's one op, so this stays one goal-level proposal with one write.
@@ -900,7 +905,12 @@ function changeGoalLevel(
   };
   const change = sayGoalChange(node.goal_threshold_frame, node.goal_threshold_raw as number, goalUnit, (x) => withUnit(x),
     (goal as { goal_direction?: unknown }).goal_direction) ?? '';
-  const asStated = sayFigureExactly(value, statedUnit) ?? `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
+  // ⭐ THE CARD SHOWS THE PERIOD IT RECORDS (DL 380e54 ruling on #2468): a bare "£" on a goal per quarter is RECORDED per
+  // quarter, so the card says "£100,000 per quarter" — the user sees the reading before confirming. That confirm is the
+  // structural control for a figure the user meant monthly (never read from their words: a word read is banned).
+  const shownUnit = statedUnit !== '' && ratePeriodOf(statedUnit) === null && ratePeriodOf(goalUnit) !== null
+    ? `${statedUnit} per ${ratePeriodOf(goalUnit)}` : statedUnit;
+  const asStated = sayFigureExactly(value, shownUnit) ?? `${value}${shownUnit !== '' ? ` ${shownUnit}` : ''}`;
   const figure = normalised !== undefined ? `${asStated}, which is ${withUnit(raw)}` : asStated;
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   const withStoredUnit = (x: number) => sayFigureExactly(x, storedUnit ?? '') ?? `${x}${storedUnit !== undefined ? ` ${storedUnit}` : ''}`;

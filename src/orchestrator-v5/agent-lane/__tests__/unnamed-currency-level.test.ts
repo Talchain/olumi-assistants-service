@@ -104,7 +104,7 @@ describe('RED: Paul\'s exact sentence on the served goal → ONE card naming £ 
     expect(s.registers, 'held: nothing written before the approval').toEqual([]);
     // The card's words name the currency, the figure as the user wrote it, and the unit the goal is then measured in.
     expect(proposed.public_label).toBe(
-      'Record today\'s level of "quarterly revenue" as your figure: £100,000, and measure "quarterly revenue" in £/quarter '
+      'Record today\'s level of "quarterly revenue" as your figure: £100,000 per quarter, and measure "quarterly revenue" in £/quarter '
       + '(no currency was set for it before)');
     expect(proposed.current_level).toStrictEqual({ value: 100000, unit: ADOPTED });
     expect(proposed.as_stated).toStrictEqual({ value: 100000, unit: '£' });

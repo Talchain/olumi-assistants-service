@@ -176,7 +176,8 @@ describe('(i) Paul\'s (1): "Our quarterly revenue is £100,000." on a goal with 
     const { s, proposed } = await levelCarded(built);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(proposed.mutated).toBe(false);
-    expect(proposed.public_label).toBe('Record today\'s level of "Quarterly revenue" as your figure: £100,000');
+    // DL 380e54 ruling on #2468: the card shows the period it records, so a bare "£" reads "per quarter" before the Yes.
+    expect(proposed.public_label).toBe('Record today\'s level of "Quarterly revenue" as your figure: £100,000 per quarter');
     expect(proposed.public_label).not.toMatch(/target/i);
     expect(proposed).not.toHaveProperty('target');
     expect(s.registers, 'held: nothing written before the approval').toEqual([]);
@@ -478,11 +479,22 @@ describe('(vi-b) a figure stated per MONTH is never recorded as the per-QUARTER 
   });
 
   /**
-   * ⛔ KNOWN GAP, DECISION PENDING (MG / DL 380e54): with the period untyped (unit "£"), the door takes the goal's own period,
-   * so a monthly £100,000 is carded as £100,000 per quarter. No typed evidence tells "monthly" from "quarterly" here: the
-   * Agent's "£" is silent, the goal's label and unit are the goal's, and the written-about door reads entities, not periods.
-   * `it.fails` pins it RED: whoever closes it flips this to `it`.
+   * ⛔ KNOWN LIMITATION (DL 380e54 ruling on #2468): with the period untyped (unit "£"), the door takes the goal's own period,
+   * so a monthly £100,000 is carded as £100,000 per quarter. No typed evidence tells "monthly" from "quarterly" here, and
+   * reading "monthly" from the user's words is banned; refusing every bare "£" would break Paul's own quarterly sentence.
+   * The STRUCTURAL CONTROL is the card: it says "per quarter" before the Yes (the row below), so the reading is the user's
+   * to confirm or correct. `it.fails` keeps the gap visible: whoever closes it with typed evidence flips this to `it`.
    */
+  it('CONTROL (the DL condition): the same monthly sentence → the card SAYS "£100,000 per quarter" before the Yes; nothing written yet', async () => {
+    const built = await build(draft(), BRIEF);
+    const s = setup(built, MONTHLY);
+    const proposed = await s.call(TOOL, { goal_label: 'Quarterly revenue', value: 100000, unit: '£', user_stated: true }) as Rec;
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(proposed.mutated).toBe(false);
+    expect(String(proposed.public_label)).toContain('£100,000 per quarter');
+    expect(s.registers).toEqual([]);
+  });
+
   it.fails('KNOWN GAP (the period untyped): unit "£" for "Our monthly revenue is £100,000." → never a card recording £100,000 per quarter', async () => {
     const built = await build(draft(), BRIEF);
     await levelRefused(built, D1_GOAL_ID, MONTHLY, { goal_label: 'Quarterly revenue', value: 100000, unit: '£' });
