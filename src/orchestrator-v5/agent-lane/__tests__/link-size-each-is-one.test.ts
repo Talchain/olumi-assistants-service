@@ -33,6 +33,7 @@ describe('R3 5925568501: a distributive word + the source names a change of one'
   for (const [s, why] of [
     ['Each, extra conversation adds about £20,000 to funding', 'punctuation inside the phrase'],
     ['Each angel conversation adds about £20,000 to funding', 'another quantity\'s word stands between'],
+    ['Every week a conversation adds about £20,000 to funding', '"every week" counts weeks, not conversations: only extra/more/new or the source\'s own words may stand between'],
     ['Each extra conversation brings down funding by about £20,000', 'a bare "brings" is no direction (never read as money in)'],
   ] as const) {
     it(`refused (${why}): "${s}"`, () => expect(door(s)).not.toBeNull());
