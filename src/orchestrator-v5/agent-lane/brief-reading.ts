@@ -115,8 +115,8 @@ export type CallBriefReading = (req: {
 }) => Promise<string>;
 
 /**
- * Read the brief. NEVER THROWS and never delays the turn: the route starts it without awaiting, and any failure,
- * refusal or timeout is simply no reading.
+ * Read the brief. NEVER THROWS: any failure, refusal or timeout is simply no reading. The frame never waits for it;
+ * only a first brief's routing does, and only for `BRIEF_ROUTE_WAIT_MS` (`readingWithin`).
  */
 export async function readBrief(message: string, call: CallBriefReading): Promise<BriefReading | null> {
   if (message.trim().length === 0) return null;
@@ -125,5 +125,22 @@ export async function readBrief(message: string, call: CallBriefReading): Promis
     return gateBriefReading(message, text);
   } catch {
     return null;
+  }
+}
+
+/**
+ * ⭐ T1 (a): how long a first brief's ROUTING waits for the reading. The call it replaces (the Agent's discovery call)
+ * took 3.9–4.4 s served; the reading's p50 is 1.3 s. Past this the Agent decides, exactly as before, and the frame may
+ * still follow.
+ */
+export const BRIEF_ROUTE_WAIT_MS = 4_000;
+
+/** The reading if it lands within `ms`, else null. Never throws; the reading itself keeps running for the frame. */
+export async function readingWithin(reading: Promise<BriefReading | null>, ms: number): Promise<BriefReading | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([reading, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), ms); })]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }

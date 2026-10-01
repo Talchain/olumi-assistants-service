@@ -93,7 +93,7 @@ import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-refer
 import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
-import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
+import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -1157,6 +1157,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // A pressed chip that names its tool (`firstCallTool`, the loop's first call only): sent only when that tool is
       // among the tools this call declares, so a forced call can never name a tool the turn does not carry.
       ...(forcedToolOf(req) !== undefined ? { tool_choice: { type: 'function', name: forcedToolOf(req) } } : {}),
+      // T1 (b): one scenario's calls route to where their static prefix is cached (`AgentTurnInput.promptCacheKey`).
+      ...(typeof req.prompt_cache_key === 'string' ? { prompt_cache_key: req.prompt_cache_key } : {}),
       // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
       ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
       // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
@@ -1165,7 +1167,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
     const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
       model: budget.model,
-      purpose: 'conversation',
+      // T1 (b): the cache prewarm is a real call, on the ledger as itself (`PREWARM_OUTPUT_TOKENS`).
+      purpose: req.purpose === 'prewarm' ? 'prewarm' : 'conversation',
       ...agentRequestIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), sentBody),
     });
     const deadlineMs = (req as { deadline_ms?: unknown }).deadline_ms;
@@ -2303,6 +2306,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * no packet: the tool stays offered, exactly as before.
        */
       let canonicalContext: Parameters<typeof runAgentTurn>[0]['canonicalContext'];
+      let hostFirstCall: Parameters<typeof runAgentTurn>[0]['hostFirstCall'];
       try {
         const st = await capabilities.getCanonicalState(toolCtx);
         // Select once from the initial host read; registration later in this turn cannot switch the model.
@@ -2338,14 +2342,31 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * Display-only: nothing is persisted, and nothing reaches the Agent or the COMPLETE body.
          */
         const emitStage = currentStageEmitter();
-        if (emitStage !== undefined && st.ok === true && (st as { empty?: unknown }).empty === true) {
+        const knownEmpty = st.ok === true && (st as { empty?: unknown }).empty === true;
+        /**
+         * ⭐ T1 (a) — A FIRST BRIEF GOES STRAIGHT TO THE CONSTRUCTOR (DL 5942371176; served map 5942431674). On a known-empty
+         * model, on the conversation's FIRST user message, with no chip and no method press, the first model call only ever
+         * decided to call `build_model_from_brief` with the user's words (13.6–14k input tokens, ~4 s). The SAME brief
+         * reading the stream shows decides it instead, from typed spans of the user's own message (`gateBriefReading`:
+         * exact substrings, never a wording rule): a goal or at least one option → the host makes that call
+         * (`hostFirstCall`) with the message verbatim, and one call answers from its result. No reading within
+         * `BRIEF_ROUTE_WAIT_MS`, or neither → the Agent decides, exactly as before. A brief spread over earlier messages
+         * is never routed: only the Agent sees those words to combine them.
+         */
+        const mayRouteBrief = knownEmpty && needsDurableSeed(history) && (body['chip'] === undefined || body['chip'] === null) && methodTurn === null;
+        const reading = knownEmpty && (emitStage !== undefined || mayRouteBrief) ? readBrief(message, callBriefReading) : undefined;
+        if (emitStage !== undefined && knownEmpty && reading !== undefined) {
           briefReadingOpen = true;
-          void readBrief(message, callBriefReading).then((reading) => {
-            if (!briefReadingOpen || reading === null || graphPreviewEmitted()) return;
+          void reading.then((r) => {
+            if (!briefReadingOpen || r === null || graphPreviewEmitted()) return;
             try {
-              emitStage({ kind: 'BRIEF_READ', goal: reading.goal, options: reading.options, limits: reading.limits, elapsed_ms: Date.now() - startedAt });
+              emitStage({ kind: 'BRIEF_READ', goal: r.goal, options: r.options, limits: r.limits, elapsed_ms: Date.now() - startedAt });
             } catch { /* display work never costs the turn */ }
           });
+        }
+        if (mayRouteBrief && reading !== undefined) {
+          const r = await readingWithin(reading, BRIEF_ROUTE_WAIT_MS);
+          if (r !== null && (r.goal !== null || r.options.length > 0)) hostFirstCall = { name: 'build_model_from_brief', args: { brief: message } };
         }
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
@@ -2362,6 +2383,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           withheldTools: methodTurn?.kind === 'run' ? toolsFor(mode).map((t) => t.name) : withheldToolsOf(body),
           ...(methodTurn?.kind === 'run' ? { maxHops: 1 } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
+          ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
+          // T1 (b): a per-scenario key, hashed (no internal id leaves for the provider).
+          promptCacheKey: `agent:${createHash('sha256').update(scenarioId).digest('hex').slice(0, 32)}`,
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
           composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
           // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
