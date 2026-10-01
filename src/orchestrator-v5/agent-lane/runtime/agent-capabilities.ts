@@ -4535,12 +4535,10 @@ export function createAgentCapabilities(
          */
         const receipt = receiptSummaryOf(res.json);
         const thisOperationWrote = res.status === 200 && receipt.summary !== null && receipt.summary.source_turn_id === operationId;
-        if (res.status === 200 && !thisOperationWrote && !receipt.unreadable) {
-          const said = String((res.json as { assistant_text?: unknown } | null)?.assistant_text ?? '').trim();
-          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
-            detail: (said !== '' ? `This approval did not change the option. Olumi said: "${said}" ` : 'This approval did not change the option. ')
-              + 'Tell the user plainly, and offer to prepare it again from what the model holds now.' };
-        }
+        // ⛔ A MISSING RECEIPT IS NOT EVIDENCE OF NO WRITE (CODEX overflow #2467 delta, P2-1; DL ruling). With model versions
+        // off (`CEE_MODEL_VERSIONS_ENABLED=false`) a commit saves the graph and returns no receipt, so "nothing changed" would be
+        // false on Paul's own "take it out". Without operation-bound evidence the outcome is UNCONFIRMED; "not changed" is said
+        // only on typed no-write evidence (the 409 conflict and the 4xx refusals above).
         const after = await readGraph(ctx.scenario_id);
         const landed = thisOperationWrote && after !== null && optionStatusHolds(after.raw, op.path, status);
         if (!landed) {

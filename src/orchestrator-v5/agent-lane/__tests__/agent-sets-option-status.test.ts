@@ -147,7 +147,26 @@ describe('the Agent takes an option out of the comparison through option_status_
       return { status: 200, json: { assistant_text: '"Continue Current Plan" is already in the comparison, so there was nothing to change.' } };
     };
     const r = await createAgentCapabilities(refusedButHolds, store).authoriseChange(ctxOf('Yes.', ['Put it back.']), { proposal_id: String(p.proposal_id) });
-    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: false, applied: false, refusal: 'not_applied' }));
+    // Unconfirmed, never "applied" — and never "nothing changed" either: a 200 without a receipt proves neither (P2-1 below).
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, applied: false, refusal: 'not_confirmed' }));
+  });
+
+  // ⛔ CODEX overflow #2467 delta P2-1 (DL: BLOCKS): with model versions OFF (`CEE_MODEL_VERSIONS_ENABLED=false`, supported on
+  // staging) a commit SAVES the graph and returns no receipt. Missing evidence is "could not be confirmed", never "did not change".
+  it('RED (CODEX delta P2-1): a SUCCESSFUL commit with no receipt (model versions off) → "could not be confirmed", never "did not change the option"', async () => {
+    const w = world();
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeOptionStatus!(ctxOf(SAID), { option_label: 'Continue Current Plan', status: 'infeasible', rationale: SAID });
+    const versionsOff: InternalDispatch = async (path, body) => {
+      const r = await w.d(path, body);
+      if (path.endsWith('/graph')) return r;
+      const { model_version_receipt: _dropped, ...json } = r.json as Record<string, unknown>;
+      return { status: r.status, json };
+    };
+    const r = await createAgentCapabilities(versionsOff, store).authoriseChange(ctxOf('Yes.', [SAID]), { proposal_id: String(p.proposal_id) });
+    expect(w.graph().nodes.find((n) => n.id === 'opt_carry_on'), 'precondition: the write DID land').toMatchObject({ option_status: 'infeasible' });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' }));
+    expect(String(r.detail)).not.toMatch(/did not change|not changed|nothing changed/i);
   });
 
   // ⛔ CODEX P2 #2: the success branch never marked the proposal applied, so it stayed on offer and a retry read "superseded".
