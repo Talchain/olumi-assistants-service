@@ -87,6 +87,16 @@ describe('it is said again whenever it carries news (AIQ: "again only when the p
     expect(withCaveatOncePerRun(LATER, turn())).toBe('It is an Olumi-inferred positive link; its strength is a placeholder.');
   });
 
+  it('DL 5926719387: rankings ONLY the enforcer\'s detector sees (a place in an order, a share split — no comparison word, no label) KEEP it', () => {
+    for (const ranking of ['The pilot path trails at 41% of runs.', 'Raising gets 55% of runs. Holding gets 45%.',
+      'The pilot path comes second at 41%.', 'One option fits the goal in 59% of runs, the other in 41%.']) {
+      resetCaveatRecordForTests();
+      withCaveatOncePerRun(RUN_REPLY, turn({ ranThisTurn: true }));
+      const reply = `${PROVISIONAL_FIGURES_CAVEAT}\n\n${ranking}`;
+      expect(withCaveatOncePerRun(reply, turn()), ranking).toBe(reply);
+    }
+  });
+
   it('CONTROL: a turn that RAN keeps it even on the same Run with no option named', () => {
     withCaveatOncePerRun(LATER, turn({ ranThisTurn: true }));
     expect(withCaveatOncePerRun(LATER, turn({ ranThisTurn: true }))).toBe(LATER);
