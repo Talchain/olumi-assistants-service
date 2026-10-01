@@ -121,14 +121,13 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
   });
 
   let doorCalls = 0;
-  const agent = (userTurnText: string) => {
-    const store = new ProposalStore();
+  const agent = (userTurnText: string, store = new ProposalStore()) => {
     const d = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash() } });
     doorCalls = 0;
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
       commitOptionLevels: (input) => { doorCalls += 1; return commitOptionLevelsInProcess(input, 'req-agent'); },
     });
-    return { caps, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText } };
+    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: userTurnText, user_turn_text: userTurnText } };
   };
 
   it('RED (Paul\'s delegated set: "I\'m aligned with these. Please make these updates."): ONE proposal, ONE commit, each link Olumi\'s estimate — never his', async () => {
@@ -227,6 +226,91 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
     expect(JSON.stringify(edge('workloadHours')), 'the user\'s own link is untouched').toBe(before);
     expect(edge('capacityOverhead').strength.mean, 'control: the other link in the set did land').toBe(0.3);
+  });
+
+  /**
+   * ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): "no-change confirm = byte-equal" held only for Olumi's own
+   * confirm. The user NAMING the band a link already sits in ("Keep Delegable routine workload strong", `from_words`)
+   * took the user-stated door, and its approval moved σ 0.3 → 0.0866 and staled the Run. Every door, every author.
+   */
+  const sizedEstimate = () => {
+    const e = edge('workloadHours') as Edge & Record<string, unknown>;
+    e.strength = { mean: 0.6, std: 0.3 };
+    e.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate',
+      natural_effect: { amount: 60, amount_unit: 'percentage points', strength_mean: 0.6, per_source_change: 1, strength_mean_frame: 'edge_strength', per_source_change_unit: 'switch' } } as never;
+    e.defaulted = true;
+    e.effect_direction = 'positive';
+    return JSON.parse(JSON.stringify(e)) as Record<string, unknown>;
+  };
+  const NAMED = 'Keep Delegable routine workload strong';
+  const named = [{ from_label: L.workloadHours[0], to_label: L.workloadHours[1], strength: 'strong', from_words: NAMED }];
+  const expectHeldByteEqual = (before: Record<string, unknown>, hashBefore: string) => {
+    const after = edge('workloadHours') as Edge & Record<string, unknown>;
+    expect(after.strength, 'μ and σ held exactly (σ was once the band\'s spread, 0.0866)').toEqual(before.strength);
+    const { reviewed_by_user: review, ...provenanceRest } = (after.provenance ?? {}) as Record<string, unknown>;
+    expect(provenanceRest, 'Olumi\'s authorship and natural_effect held byte-equal').toEqual(before.provenance);
+    expect(review, 'the review records the band the user named').toMatchObject({ intent: 'confirm', band: 'strong' });
+    const { provenance: _a, ...restAfter } = after;
+    const { provenance: _b, ...restBefore } = before;
+    expect(restAfter, 'nothing else on the link moved').toEqual(restBefore);
+    expect(currentHash(), 'the analysis hash did not move: the Run is not staled').toBe(hashBefore);
+  };
+
+  it('RED (#2473 P1, chat words): the user NAMES the band a sized estimate already sits in — approval holds it byte-equal', async () => {
+    const before = sizedEstimate();
+    const hashBefore = currentHash();
+    const { caps, ctx } = agent(NAMED);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: named as never, rationale: 'the user named the band it already sits in' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    // The approval both the chip and a typed "yes" reach (`authorise_change`).
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expectHeldByteEqual(before, hashBefore);
+  });
+
+  it('RED (#2473 P1, restored proposal): the same named-band approval, restored into a fresh process, holds it byte-equal', async () => {
+    const { proposalPendingAction, rehydrateProposals } = await import('../../../src/orchestrator-v5/agent-lane/durable-proposal.js');
+    const before = sizedEstimate();
+    const hashBefore = currentHash();
+    const first = agent(NAMED);
+    const p = await first.caps.proposeLinkStrengths!(first.ctx, { links: named as never, rationale: 'x' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const offered = first.store.get(String(p.proposal_id))!;
+    const pending = proposalPendingAction(offered, { id: 'agent-approve-proposal:x', label: 'Approve', message: 'Approve' } as never,
+      { scenario_id: SCENARIO_ID, emitted_at_iso: new Date().toISOString() });
+    const second = agent(NAMED);
+    expect(second.store.get(String(p.proposal_id)), 'precondition: the fresh process does not hold it').toBeUndefined();
+    expect(rehydrateProposals([pending], second.store, { scenario_id: SCENARIO_ID, user_id: 'user-a' }), 'restored').toBe(1);
+    const out = await second.caps.authoriseChange(second.ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expectHeldByteEqual(before, hashBefore);
+  });
+
+  it('CONTRAST (#2473 P1, chat words): the USER\'s own link, named in the band it sits in, is "already" — nothing written', async () => {
+    const e = edge('workloadHours') as Edge & Record<string, unknown>;
+    e.strength = { mean: 0.6, std: 0.3 };
+    e.provenance = { source: 'user_specified' } as never;
+    delete e.defaulted;
+    e.provenance_display = 'user_set';
+    const before = JSON.stringify(e);
+    const { caps, ctx } = agent(NAMED);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [...named, ...setOf(['capacityOverhead'])] as never, rationale: 'x' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(p.already, JSON.stringify(p)).toEqual(expect.arrayContaining([expect.stringContaining('is already strong, as the user set it')]));
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    expect(JSON.stringify(edge('workloadHours')), 'the user\'s own link is untouched').toBe(before);
+    expect(edge('capacityOverhead').strength.mean, 'control: the other link in the set did land').toBe(0.3);
+  });
+
+  it('CONTROL (#2473): a named band that MOVES the link still writes it — the user\'s band, its spread', async () => {
+    sizedEstimate();
+    const words = 'Make Delegable routine workload very strong';
+    const { caps, ctx } = agent(words);
+    const p = await caps.proposeLinkStrengths!(ctx, { links: [{ ...named[0], strength: 'very strong', from_words: words }] as never, rationale: 'x' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    expect(Math.abs(edge('workloadHours').strength.mean), 'moved to the very-strong band').toBeGreaterThanOrEqual(0.7);
+    expect(edge('workloadHours').strength.std, 'a band that moves the link stores its spread').not.toBe(0.3);
   });
 
   it('R11 × P1-a (Canonical 5874263009, DL 5874274221): the band the user agreed to is their settled view — the magnitude contract never re-sizes it', async () => {

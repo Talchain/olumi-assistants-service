@@ -1320,8 +1320,11 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
      */
     // R11: the band's spread is still stored (A6e) and the band recorded in the review; every authorship byte is KEPT.
     // Before R11 this row pinned `user_specified`, `defaulted` → `exists_defaulted`, and the reasoning dropped.
-    it('⭐ A6e × R11: the Agent\'s band confirm keeps the mean, stores the band\'s spread, keeps every authorship byte — and the post-commit receipt guard admits it', async () => {
+    // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): this row used to pin the Agent's band confirm storing the
+    // band's spread. A no-change confirm keeps the whole strength byte-equal; the band is recorded in the review only.
+    it('⭐ A6e × R11 × #2473: the Agent\'s band confirm keeps the WHOLE strength, keeps every authorship byte, records the band — and the post-commit receipt guard admits it', async () => {
       persisted = withDefaultedEdges();
+      const strengthBefore = structuredClone(edgeOf(persisted, 'f-demand', 'g-growth')!.strength);
       const response = await runWithStatedLinkBand(
         { scenarioId: SCENARIO_ID, proposalId: 'p-route-a6e', from: 'f-demand', to: 'g-growth', band: 'strong' },
         // ⚠ AWAITED INSIDE the scope, as production's `dispatchFor` does: `app.inject()` returns a lazy thenable
@@ -1342,8 +1345,10 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(response.statusCode, response.body).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
       expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(committedEdge()?.strength).toStrictEqual(strengthBefore);
+      expect((committedEdge()?.strength as { std: number }).std).not.toBe(edgeBandStd('strong'));
       expect(committedEdge()).toMatchObject({
-        strength: { mean: -0.4, std: edgeBandStd('strong') },
+        strength: { mean: -0.4 },
         effect_direction: 'negative',
         exists_probability: 0.9,
         defaulted: true,
@@ -1354,7 +1359,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
         },
       });
       expect(committedEdge()).not.toHaveProperty('exists_defaulted');
-      expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).toMatchObject({ defaulted: true, strength: { std: edgeBandStd('strong') } });
+      expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).toMatchObject({ defaulted: true, strength: strengthBefore });
       // R11: flags kept exactly — none was present, none is added.
       expect(committedEdge()).not.toHaveProperty('std_defaulted');
     });
@@ -1620,8 +1625,12 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(JSON.parse(response.body)).not.toHaveProperty('draft_graph');
     });
 
-    it('⭐ a band CONFIRM: mean kept, std becomes the band’s, the analysis hash moves, and the receipt guard admits it', async () => {
+    // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): the canvas pill's typed band on a confirm used to move std
+    // to the band's spread and the analysis hash with it. A no-change confirm is byte-equal through every door.
+    it('⭐ #2473: a band CONFIRM keeps the whole strength, the analysis hash does NOT move, and the receipt guard admits it', async () => {
       const beforeHash = computeAnalysisAffectingGraphHash(persisted as never);
+      const strengthBefore = structuredClone(((persisted as { edges: Array<Record<string, unknown>> }).edges
+        .find((e) => e.from === 'f-demand' && e.to === 'g-growth')!).strength);
       const response = await app.inject({
         method: 'POST',
         url: '/orchestrate/v2/turn',
@@ -1634,9 +1643,10 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(response.statusCode, response.body).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
       expect(body.assistant_text).toContain('Confirmed the current strength');
-      expect(committedEdge()).toMatchObject({ strength: { mean: -0.4, std: edgeBandStd('strong') }, effect_direction: 'negative' });
+      expect(committedEdge()?.strength).toStrictEqual(strengthBefore);
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.4 }, effect_direction: 'negative' });
       expect(committedEdge()).not.toHaveProperty('std_defaulted');
-      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).not.toBe(beforeHash);
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
     });
   });
 

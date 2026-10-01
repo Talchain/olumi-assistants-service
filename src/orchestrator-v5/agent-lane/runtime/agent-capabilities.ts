@@ -3139,6 +3139,13 @@ export function createAgentCapabilities(
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)
           // and never credits. Only a band that MOVES the link is theirs.
           const keeps = currentBand === band;
+          // #2473 CR (CODEX_CLI_OVERFLOW 5937437431): the user's OWN strength, named in the band it already sits in, is
+          // "already" — nothing to approve. Any other kept link is a review whose figure the writer holds byte-equal.
+          if (keeps && (edge.provenance as { source?: unknown } | undefined)?.source === 'user_specified'
+            && (edge as { defaulted?: unknown }).defaulted !== true) {
+            already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`);
+            continue;
+          }
           const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
           ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
             expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
