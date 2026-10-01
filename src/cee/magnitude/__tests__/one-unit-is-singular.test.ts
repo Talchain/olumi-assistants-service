@@ -42,7 +42,7 @@ describe('a change of exactly one is said in the singular', () => {
     expect(asked(1, counted('Status', 'status'))).toContain('by 1 status raises');
   });
 
-  it('CONTRAST: a unit with no plural is unchanged ("by 1 GBP per month")', () => {
-    expect(asked(1, counted('Pro plan price', 'GBP per month'))).toContain('by 1 GBP per month raises');
+  it('CONTRAST: a money unit is said as money, not pluralised ("by £1 per month"; AIQ 5923220559)', () => {
+    expect(asked(1, counted('Pro plan price', 'GBP per month'))).toContain('by £1 per month raises');
   });
 });
