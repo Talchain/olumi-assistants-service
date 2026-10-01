@@ -165,7 +165,7 @@ describe('the analysis hash across a clamp\'s life', () => {
     edges: [{ from: 's', to: 'g', strength: { mean: beta, std: Math.abs(beta) / 2 }, provenance: { magnitude: 'user_stated', natural_effect: { amount: beta * goalFrame / 10, amount_unit: '£', per_source_change: 1, strength_mean: beta } } }],
     goal_constraints: [{ node_id: 'g', operator: '>=', value: 500 }],
   });
-  const hash = async (g: Rec): Promise<string> => (await import('../../context/graph-hash.js')).computeAnalysisAffectingGraphHash(g as never);
+  const hash = async (g: Rec): Promise<string | null> => (await import('../../context/graph-hash.js')).computeAnalysisAffectingGraphHash(g as never);
 
   it('set: two refused sizes both stored at 1 hash alike (PLoT computes both at 1 and withholds both)', async () => {
     const a = clampForPersist(refitFramesForStatedEffects(g0(3)).graph);
