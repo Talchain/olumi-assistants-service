@@ -230,11 +230,27 @@ function leftOutLine(r: ToolResult): string {
   return ` To keep it readable, I left out: ${shown}${more}. Ask me to add any of them back.`;
 }
 
-/** Factors held as context because no option changes them — stated, so the user can say which option should. */
+/** The factors the build held as context because no option changes them. */
+function contextFactorsOf(r: ToolResult | undefined): string[] {
+  return Array.isArray(r?.treated_as_context) ? (r.treated_as_context as unknown[]).map((l) => String(l).trim()).filter((l) => l !== '') : [];
+}
+
+/**
+ * Factors held as context because no option changes them — the fact, stated once, at rest (DL #75 5923219186: a brief
+ * turn's total ≤160 words; AIQ words 5923232439: "Held fixed (no option changes them): <full labels>.", no dash).
+ * It comes BEFORE the open-questions marker, so DGAI's split (`serverOpenQuestions.ts`) leaves it on screen; its ask
+ * moves behind the questions toggle as one more open question (`contextAskOf`).
+ */
 function contextFactorsLine(r: ToolResult): string {
-  const labels = Array.isArray(r.treated_as_context) ? (r.treated_as_context as unknown[]).map((l) => String(l).trim()).filter((l) => l !== '') : [];
+  const labels = contextFactorsOf(r);
   if (labels.length === 0) return '';
-  return ` No option changes ${labels.join(' or ')}, so I held ${labels.length === 1 ? 'it' : 'them'} as fixed context rather than ${labels.length === 1 ? 'a lever' : 'levers'} \u2014 tell me if one of the options should change ${labels.length === 1 ? 'it' : 'them'}.`;
+  return ` Held fixed (no option changes ${labels.length === 1 ? 'it' : 'them'}): ${labels.join('; ')}.`;
+}
+
+/** The held-fixed factors' ask, as an open question the user can take up behind the toggle; null when none was held. */
+function contextAskOf(r: ToolResult | undefined): string | null {
+  const labels = contextFactorsOf(r);
+  return labels.length === 0 ? null : `Should one of the options change ${labels.join(' or ')}?`;
 }
 
 /**
@@ -248,7 +264,7 @@ const OPEN_QUESTIONS_SHOWN = 2;
 
 /** The questions the build parked instead of modelling — what to examine next, not answers. */
 function openQuestionsLine(r: ToolResult): string {
-  const qs = openQuestionsOf(r);
+  const qs = openQuestionsForReply(r);
   if (qs.length === 0) return '';
   // Each question kept whole, so it still reads as a question the team can take up.
   const shown = qs.slice(0, OPEN_QUESTIONS_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
@@ -259,9 +275,15 @@ function openQuestionsLine(r: ToolResult): string {
   return ` Questions this model does not answer yet: ${shown}${more}`;
 }
 
-/** Every question a build parked, in the producer's order — the complete list, for the wire. */
+/** Every question a build parked, in the producer's order. */
 export function openQuestionsOf(r: ToolResult | undefined): string[] {
   return Array.isArray(r?.open_questions) ? (r.open_questions as unknown[]).map((q) => String(q).trim()).filter((q) => q !== '') : [];
+}
+
+/** What the reply's questions toggle holds — the build's questions, then the held-fixed ask — the complete list, for the wire. */
+export function openQuestionsForReply(r: ToolResult | undefined): string[] {
+  const ask = contextAskOf(r);
+  return [...openQuestionsOf(r), ...(ask === null ? [] : [ask])];
 }
 
 /**
@@ -307,7 +329,7 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
           // F3 (DL 5851710093): the goal clause outranks this line, so it says the same two truths in fewer words.
           ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
           : 'What I proposed above is not made until you approve it.'}`;
-      return `${saved}${leftOutLine(r)}${openQuestionsLine(r)}${contextFactorsLine(r)}`;
+      return `${saved}${leftOutLine(r)}${contextFactorsLine(r)}${openQuestionsLine(r)}`;
     }
     const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
     if (unconfirmed !== undefined) return unconfirmed;

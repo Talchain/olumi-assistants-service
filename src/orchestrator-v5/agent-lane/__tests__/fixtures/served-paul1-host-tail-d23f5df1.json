@@ -1,0 +1,19 @@
+{
+  "source": "MG A4 witness on served CEE d23f5df1 (guest 86178df3, paul-1 brief turn, 1 Oct 01:5xZ): _agent.open_questions verbatim + the held-fixed labels as served (cut by construction, MG-owned)",
+  "open_questions": [
+    "Does \"securing funding\" get there within 2 months? The model holds the deadline; no result answers that yet.",
+    "You wrote \"£1-2 million\"; its low end says raising \"Investment-firm deals closed\" by 1 deal raises \"Investment-firm funding secured\" by 1000000 £, which is more than the analysis can represent on the ranges these two are measured on: it would be cut short. It is kept exactly as you said it. Is that the size you meant?",
+    "Olumi estimated that raising \"Qualified angel conversations\" by 1 conversation/month raises \"Angel funding secured\" by 20000 £, which is more than the analysis can represent on the ranges these two are measured on, so it was not used: a placeholder stands in for it. How much does \"Qualified angel conversations\" change \"Angel funding secured\"?",
+    "The current amount of funding already secured is not stated, so the goal baseline is intentionally left unknown.",
+    "The assumed current outreach levels (20 cold emails and 2 warm connections per week) are provisional modelling estimates, not reported activity levels.",
+    "The assumed 5% conversion from a qualified investment-firm conversation to a closed deal needs validation.",
+    "The £1,000,000 per investment-firm deal uses the low end of the stated £1–2 million deal range; the probability and timing of closing within two months are unknown.",
+    "The amount of available runway, and the amount of funding needed to buy time, are not stated.",
+    "The size of any funding loss caused by reduced product delivery capacity is unknown."
+  ],
+  "treated_as_context": [
+    "Cold emails to investment firms",
+    "Warm connections to investment…"
+  ],
+  "served_assistant_text": "I’ve mapped three routes: continue current investment-firm outreach, an **Angel Outreach Pilot**, and an **Angel Outreach Sprint**. Carrying on as now holds the current outreach assumptions unchanged.\n\nThe provisional first pass cannot compare their chances of securing funding: the £1–2m deal size is larger than the model can represent on its current scale, and angel conversion/timing remain unvalidated. Treat this as a draft to challenge, not an answer.\n\nThe key decision is whether angels provide enough near-term runway to justify the admin and reduced delivery capacity. The most useful next move is to state the minimum funding amount needed within two months, plus current secured funding/runway.\n\nThis run doesn’t show how often each option reaches the goal’s target. Your size for how ‘Investment-firm deals closed’ moves ‘Investment-firm funding secured’ is bigger than this model's scale can hold, so the run couldn't use it at full size, and the figures that depend on it would be wrong.\n\nThe model was saved. Questions this model does not answer yet: Does \"securing funding\" get there within 2 months? The model holds the deadline; no result answers that yet. You wrote \"£1-2 million\"; its low end says raising \"Investment-firm deals closed\" by 1 deal raises \"Investment-firm funding secured\" by 1000000 £, which is more than the analysis can represent on the ranges these two are measured on: it would be cut short. It is kept exactly as you said it. Is that the size you meant? (2 of 9 shown.) No option changes Cold emails to investment firms or Warm connections to investment…, so I held them as fixed context rather than levers — tell me if one of the options should change them."
+}

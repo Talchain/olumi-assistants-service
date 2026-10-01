@@ -64,7 +64,7 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, conversationBudgetFor, type CallBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
-import { narrateWriteOutcome, notAdoptedLine, openQuestionsOf, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -2789,7 +2789,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ AX2: the reply shows two of the build's open questions; the whole list, in the producer's order, is here.
         ...(() => {
           const at = result.tool_calls.findIndex((c) => c.name === 'build_model_from_brief');
-          const qs = at >= 0 ? openQuestionsOf(result.tool_results[at] as Parameters<typeof openQuestionsOf>[0]) : [];
+          const qs = at >= 0 ? openQuestionsForReply(result.tool_results[at] as Parameters<typeof openQuestionsForReply>[0]) : [];
           return qs.length > 0 ? { open_questions: qs } : {};
         })(),
         /**
