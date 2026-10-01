@@ -37,7 +37,7 @@ const SERVED_RUN = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fix
 const RESULT_BLOCK = SERVED_RUN.turns.t2.analysis_result;
 const GRAPH_HASH = RESULT_BLOCK.computed_against_hash;
 
-const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { ...FX.state.analysis_state.run_state, computed_at: '2026-10-01T12:00:00.000Z' } };
+const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { ...(FX.state.analysis_state.run_state as Record<string, unknown>), computed_at: '2026-10-01T12:00:00.000Z' } };
 const PERMITTED_STATE = { ...WITHHELD_STATE, leader_claim: { permitted: true, separation: 'separated' } };
 
 /** First sentence, 4 bullets (one ranks, which is lawful on a PERMITTED turn), a closing line — 833 chars. */

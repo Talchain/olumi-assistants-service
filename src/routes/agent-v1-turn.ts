@@ -1935,10 +1935,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(currentRead?.run_delta !== undefined ? { run_delta: currentRead.run_delta } : {}),
         option_display_names: [...optionNameAliases(st.graph).values()].map((a) => a.display),
       };
-      // AI HARNESS PR-L1 owns the licensed projection at this seam.
-      const runForInterpreter = { result: analysisResultForAgent(st.analysisResult),
-        claim_permissions: claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true }),
-        canonical_state: canonicalAfterRun };
+      // The interpreter reads the LICENSED run (`licensed-run-view.ts`, PR-L1), exactly as the Agent loop's model does.
+      const selectedRun = { result: analysisResultForAgent(st.analysisResult),
+        claim_permissions: claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true }) };
+      const runForInterpreter = runToolOutputLicensesLeader(selectedRun)
+        ? { ...selectedRun, canonical_state: canonicalAfterRun }
+        : { ...modelFacingToolResult('run_analysis', selectedRun), canonical_state: withoutLeaderDesignations(canonicalAfterRun) };
       const explanationInput = [...recentRunExplanationConversation(history ?? []), { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
         request: RUN_EXPLANATION_MESSAGE, ...runForInterpreter,
       }) }] }];

@@ -86,7 +86,7 @@ describe('two-request Run through the real handler and canonical analysis reader
     const chip = first.suggested_actions.find((c: { id: string }) => isRunExplanationChip(c.id));
     expect(chip, JSON.stringify(first)).toBeDefined();
     return app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { turn_id: randomUUID(), scenario_id: SCENARIO,
-      agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip.id }, ...extra } });
+      agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id }, ...extra } });
   };
 
   it('returns the saved current result with zero narration calls; the follow-up only explains that Run', async () => {
