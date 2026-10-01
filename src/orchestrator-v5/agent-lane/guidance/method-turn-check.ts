@@ -11,7 +11,7 @@ const foldQuotes = (text: string) => text.replace(/[‘’]/gu, "'").replace(/[�
  * Every text BAN runs on this: a label the user wrote is grounding, not a claim (served D1's factor "Enterprise prospect
  * signing likelihood" failed PM-NO-PROB on every grounded story, SCIENCE/DSK 5938372911). Only supplied labels are masked.
  */
-export function masked(reply: string, labels: readonly (string | undefined)[]): string {
+function masked(reply: string, labels: readonly (string | undefined)[]): string {
   const own = [...new Set(labels.filter((l): l is string => typeof l === 'string' && l.trim() !== '').map(foldQuotes))]
     .sort((a, b) => b.length - a.length);
   let out = foldQuotes(reply);
@@ -31,7 +31,7 @@ function banned(text: string, ban: RegExp, labels: readonly (string | undefined)
   return ban.test(masked(text, own));
 }
 /** WHOLE-TOKEN match after normalise(): label 'B' never matches inside another word (HARNESS #2478 P1). */
-export function labelMatches(text: string, labels: readonly string[]): boolean {
+function labelMatches(text: string, labels: readonly string[]): boolean {
   const normal = ` ${normalise(text)} `;
   return labels.some(label => normalise(label) !== '' && normal.includes(` ${normalise(label)} `));
 }
