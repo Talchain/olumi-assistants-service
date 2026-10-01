@@ -126,6 +126,13 @@ export type RunDeltaDisclosureReason =
   | RunDeltaRefusal
   /** `ctx.priorFacts` was undefined — the exit carried no facts at all. */
   | 'prior_facts_absent'
+  /**
+   * The CALLER binds the run delta itself, so this exit does not produce one (`ctx.runDeltaBoundByCaller`). The Agent
+   * lane takes the Run's OWN delta from the captured route-v2 response (whose finaliser emitted the true outcome) and
+   * binds it to the post-turn readback (`runDeltaBoundToReadback`). Before this member, every Agent turn reported
+   * `prior_facts_absent` here: a false "no facts" on a turn that may well ship a delta (AI HARNESS; F5 I3.1).
+   */
+  | 'caller_binds_run_delta'
   /** The composer could not confirm the two runs are the same subject. */
   | 'run_identity_unconfirmed'
   /** The composer found the two runs are demonstrably different subjects. */
@@ -389,6 +396,12 @@ export interface FinaliserContext {
    * response contradicts itself).
    */
   readonly priorFacts?: readonly HandlerFact[];
+  /**
+   * The caller binds `run_delta` itself (the Agent lane: `runDeltaBoundToReadback` over the captured Run), so this
+   * exit builds none and reports `caller_binds_run_delta` instead of the false `prior_facts_absent`. The identity and
+   * freshness skips above it still run first: they are true statements about this turn's state.
+   */
+  readonly runDeltaBoundByCaller?: true;
 }
 
 // ─── The finaliser ────────────────────────────────────────────────────────
@@ -888,6 +901,7 @@ function attachRunDelta(
     const { run_delta: _shadowedDelta, ...withoutDelta } = response;
     return disclose('skipped', 'newer_run_degraded', withoutDelta as OlumiResponse);
   }
+  if (ctx.runDeltaBoundByCaller === true) return disclose('skipped', 'caller_binds_run_delta', response);
   if (ctx.priorFacts === undefined) return disclose('skipped', 'prior_facts_absent', response);
   const built = buildRunDelta({
     priorFacts: ctx.priorFacts,
