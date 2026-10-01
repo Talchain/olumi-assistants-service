@@ -138,6 +138,8 @@ describe('a malformed graph is no model, never zero options (CODEX_CLI_OVERFLOW 
     ['an edge with no ends', { ...good, edges: [...good.edges, {}] }],
     ['an edge to a node that does not exist', { ...good, edges: [...good.edges, { from: 'f', to: 'ghost' }] }],
     ['an option with no kind', { ...good, nodes: [...good.nodes.slice(0, 2), { id: 'o1', label: 'Raise price', interventions: { f: 1 } }] }],
+    ['the only option with an empty kind', { ...good, nodes: [...good.nodes.slice(0, 2), { id: 'o1', kind: '', label: 'Raise price', interventions: { f: 1 } }] }],
+    ['the only option with a misspelt kind', { ...good, nodes: [...good.nodes.slice(0, 2), { id: 'o1', kind: 'optoin', label: 'Raise price', interventions: { f: 1 } }] }],
     ['a duplicated node id', { ...good, nodes: [...good.nodes, { id: 'o1', kind: 'factor', label: 'Dup' }] }],
   ];
   for (const [what, graph] of broken) {

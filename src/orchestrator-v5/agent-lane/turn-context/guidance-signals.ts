@@ -23,6 +23,7 @@ import { placeholderGoalPaths } from '../goal-certainty.js';
 import { decisionSensitivityOf } from '../decision-sensitivity.js';
 import { readStoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { computeResponseHash } from '../../../utils/response-hash.js';
+import { NodeKindV3 } from '../../../schemas/cee-v3.js';
 
 export type GuidanceRequest = 'run_result' | 'narration' | 'turn' | 'method';
 export type ValueAuthorship = 'yours' | 'olumi_estimate' | 'olumi_accepted' | 'unknown';
@@ -154,7 +155,8 @@ function asLeverGraph(nodes: readonly Rec[]): never {
 }
 
 /**
- * The model, only if it is readable WHOLE: every node a record with a non-empty string id and a string kind, ids unique,
+ * The model, only if it is readable WHOLE: every node a record with a non-empty string id and a kind the persisted graph
+ * allows (`NodeKindV3`; an empty or misspelt kind once read as "no options", CODEX_CLI_OVERFLOW 5936832918), ids unique,
  * every edge a record whose ends are nodes of this graph. Anything else is null (no model), never a partial model:
  * dropping the bad parts can leave a goal with no options, which reads as "you have no options" (RC-WIDEN W2Z).
  * A graph with no `edges` member has no links yet; an `edges` member that is not an array is unreadable.
@@ -167,7 +169,7 @@ function readableModel(graph: unknown): { readonly nodes: Rec[]; readonly edges:
   const ids = new Set<string>();
   for (const raw of g.nodes as unknown[]) {
     const n = rec(raw);
-    if (n === undefined || typeof n.id !== 'string' || n.id === '' || typeof n.kind !== 'string' || ids.has(n.id)) return null;
+    if (n === undefined || typeof n.id !== 'string' || n.id === '' || !NodeKindV3.safeParse(n.kind).success || ids.has(n.id)) return null;
     ids.add(n.id);
     nodes.push(n);
   }
