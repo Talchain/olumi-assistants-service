@@ -128,7 +128,7 @@ describe('R3-2a — a NON-terminal lever-only tally (served pj-20260927T192916Z:
   });
   it('⭐ said once', async () => {
     const { out } = await build(R.brief, candidate(R));
-    const s = 'Olumi reads "Total incremental growth spend" as "Incremental feature development…" + "Incremental advertising spend": '
+    const s = 'Olumi reads "Total incremental growth spend" as "Incremental feature development spend" + "Incremental advertising spend": '
       + 'Olumi\'s reading, not your figure; tell me if it includes other costs.';
     expect(said(out).filter((x) => x === s)).toHaveLength(1);
     expect(said(out).filter((x) => x.startsWith('Olumi reads "Total incremental growth spend"'))).toEqual([s]);

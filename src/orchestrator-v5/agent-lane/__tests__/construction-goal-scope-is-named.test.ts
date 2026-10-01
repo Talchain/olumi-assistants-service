@@ -149,7 +149,8 @@ describe('an unstated scope is named in the goal and asked, never silently picke
   });
 
   it('RED (e) CONTROL: a goal whose label had to be shortened shows its full_label as the user\'s own full metric, and nothing else', async () => {
-    const metric = 'Monthly recurring revenue by the end of next year';
+    // Over the 80-character label budget (52f8cd: a brief-length metric is now kept whole, so the control needs a longer one).
+    const metric = 'Monthly recurring revenue across every paid plan, net of refunds and discounts, by the end of next year';
     const { raw, out } = await build(pricing(metric, AMBIGUOUS));
     const goal = (await canonicalEntities(raw)).find((e) => e.kind === 'goal')!;
     // The probe sees `full_label` (it is present here), and it is exactly the user's words.

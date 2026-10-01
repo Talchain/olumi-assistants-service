@@ -122,9 +122,10 @@ describe('⛔ a retry is adopted only if every user-stated identity survives', (
 });
 
 describe('⛔ identity is the FULL stated text and the stated direction (Panel pre-review 5791588889)', () => {
-  it('RED (B1): two options that share a 33-character prefix are two identities — a retry dropping one is not adopted', async () => {
-    const london = 'Hire a senior engineer in London office';
-    const berlin = 'Hire a senior engineer in Berlin office';
+  it('RED (B1): two options that share a label-budget prefix are two identities — a retry dropping one is not adopted', async () => {
+    // Longer than the 80-character label budget and identical before the city (52f8cd: the budget moved from 33).
+    const london = 'Hire a senior engineer with deep payments, platform and data experience to start next quarter in our London office';
+    const berlin = 'Hire a senior engineer with deep payments, platform and data experience to start next quarter in our Berlin office';
     const first = candidate({ extraFactors: 15, options: [london, berlin] });
     const retry = candidate({ extraFactors: 2, options: [london] });
     const s1 = sizeOf(first); const s2 = sizeOf(retry);
