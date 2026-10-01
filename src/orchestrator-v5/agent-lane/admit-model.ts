@@ -38,9 +38,11 @@ import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
-import { admitCandidateLinks, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
+import { admitCandidateLinks, definitionalLink, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
-import { sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { resolveMagnitudeFrame, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
+import { niceFrameAtLeast } from './refit-frames.js';
+import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
@@ -3659,6 +3661,44 @@ function admitOnce(
     if (n.goal_threshold_frame === 'change_rel') return Math.abs(raw * today);
     return Math.abs(raw - today);
   };
+  // ⭐ A4/A4b ROOT — A £ GOAL WITH NO TARGET, NO LEVEL AND NO FRAME GETS A NORMALISING FRAME (R3 5922308054 F1–F5; DL
+  // 5922308488; MG 5922280148). Paul's brief states neither, so `resolveMagnitudeFrame(goal)` was undefined and every
+  // stated £ size into the goal ("£1-2m" per deal, a definitional −£1 per £1 exposure) was `unconvertible`: a ±0.5
+  // placeholder with its natural size dropped. A frame is a choice of UNITS, never a claim (F1): it is set only here, only
+  // on such a goal, and seen only by the links that carry a size of the user's or a definition (F5: Olumi's own sizes into
+  // it stay exactly as they were). It is the smallest {1, 2, 5}·10^k at or above the largest money the brief writes and
+  // every such link's reach over 0.8 (F3: |β| ≤ 0.8, so no user size is ever cut), and it persists as the goal's
+  // `scale_frame` so the stored β keeps its meaning across reload, and a later target is read on the same units.
+  const normalisingFrameGoalId = ((): string | undefined => {
+    const goal = nodes.find((n) => n.kind === 'goal');
+    if (goal === undefined || goal.goal_threshold_raw !== undefined || goal.observed_state?.raw_value !== undefined) return undefined;
+    const unit = unitById.get(goal.id) ?? goal.goal_threshold_unit;
+    const reading = typeof unit === 'string' ? readCurrencyUnitWithQualifiers(unit) : undefined;
+    if (reading === undefined || reading.kind !== 'currency') return undefined;
+    const asNode = (n: AdmittedNode): MagnitudeNode => ({
+      label: n.label, kind: n.kind, scale_frame: n.scale_frame, observed_state: n.observed_state as MagnitudeNode['observed_state'],
+      goal_threshold_cap: n.goal_threshold_cap, goal_threshold_unit: n.goal_threshold_unit, unit: unitById.get(n.id) ?? null,
+      option_levels: optionLevelsById.get(n.id) ?? [],
+    });
+    if (resolveMagnitudeFrame(asNode(goal)) !== undefined) return undefined;
+    const written = findStatedAmounts(brief ?? '')
+      .filter((a) => a.kind === 'currency' && (a.currencyCode === undefined || reading.currencyCode === undefined || a.currencyCode === reading.currencyCode))
+      .map((a) => Math.abs(a.magnitude) / reading.multiplier);
+    const reach = resolvable
+      .filter((l) => l.to === goal.id && ((l.effect_provenance ?? l.provenance) === 'explicit' || l.provenance_source === 'user_specified' || l.definitional === true))
+      .map((l) => {
+        const source = nodes.find((n) => n.id === l.from);
+        const fs = source === undefined ? undefined : resolveMagnitudeFrame(asNode(source));
+        const a = l.effect_amount; const per = l.effect_per_source_change;
+        return typeof a === 'number' && Number.isFinite(a) && typeof per === 'number' && Number.isFinite(per) && per !== 0 && fs !== undefined
+          ? Math.abs(a / per) * fs / 0.8 : undefined;
+      })
+      .filter((x): x is number => x !== undefined);
+    const top = Math.max(0, ...written, ...reach);
+    if (!(top > 1)) return undefined;
+    goal.scale_frame = niceFrameAtLeast(top);
+    return goal.id;
+  })();
   const magnitudeNodeById = new Map<string, MagnitudeNode>(nodes.map((n) => [n.id, {
     label: n.label,
     kind: n.kind,
@@ -3699,13 +3739,19 @@ function admitOnce(
         others: quantityLabels.filter((q) => q !== source.label),
       })
       : null;
-    sizing.set(`${l.from}::${l.to}`, sizeLink({
+    const statement = {
       direction: l.direction,
       effect_amount: l.effect_amount,
       effect_per_source_change: l.effect_per_source_change,
       user_stated,
       ...(range !== null ? { stated_range: range } : {}),
-    }, source, target));
+    };
+    // F5: on a goal framed only to normalise, the frame is seen by the user's size and by a definition that CHECKS
+    // (`definitionalLink`); every other link into it is sized exactly as before, on no frame.
+    const unframed = l.to === normalisingFrameGoalId ? { ...target, scale_frame: undefined } : target;
+    const framed = sizeLink(statement, source, target);
+    sizing.set(`${l.from}::${l.to}`, l.to !== normalisingFrameGoalId || user_stated || (l.definitional === true && definitionalLink(l, framed))
+      ? framed : sizeLink(statement, source, unframed));
   }
 
   const linkResult = admitCandidateLinks(resolvable, sizing);
