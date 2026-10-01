@@ -88,7 +88,8 @@ export function residualDigest(plotPayload: Rec, recorded: Recorded): string | n
     if (!isRec(n) || typeof n.id !== 'string') continue;
     const id = n.id;
     // A factor's value as the diff compares it (`authoredPair`: raw, unit, encoded). Its `source` is recorded but not
-    // compared, so it stays (CODEX r2: `cee_inference → user_override` at the same value moved no row).
+    // compared, so it stays (CODEX r2: the source moving from Olumi's inference to the user's own, at the same value,
+    // moved no row).
     const f = goal?.node_id === id ? undefined : factorById.get(id);
     if (f !== undefined && isRec(n.observed_state)) {
       const os = n.observed_state;
