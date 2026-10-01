@@ -7,9 +7,11 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import served from './fixtures/m1-s1-served-graphs.json';
 import { strengthenCardFor, STRENGTHEN_PRESS_CHIP_ID } from '../strengthen-press.js';
 import { NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
+import { linkStrengthCardFor } from '../approval-chips.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
 const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
@@ -65,6 +67,14 @@ describe('the card for a press (pure)', () => {
   it('CONTROL: an unreadable graph → null, never a throw', () => {
     expect(strengthenCardFor({ graph: { nodes: 'x' }, analysisState: CURRENT })).toBeNull();
   });
+  it('the approval card is the STORED proposal\'s, bound by its id and to link strengths only', () => {
+    const stored = (id: string, op: string) => ({ proposal_id: id, public_label: 'Record this link strength: "A" \u2192 "B" as moderate, Olumi\u2019s estimate',
+      operations: [{ op, path: 'a::b', value: {} }] }) as never;
+    expect(linkStrengthCardFor('p1', stored('p1', 'set_link_strength'))).toBe('Record this link strength: "A" \u2192 "B" as moderate, Olumi\u2019s estimate');
+    expect(linkStrengthCardFor('p1', stored('p2', 'set_link_strength')), 'another proposal\'s card').toBeUndefined();
+    expect(linkStrengthCardFor('p1', stored('p1', 'set_factor_value')), 'not a link-strength proposal').toBeUndefined();
+    expect(linkStrengthCardFor('p1', undefined)).toBeUndefined();
+  });
   it('the press chip is the product\'s own "Strengthen the model" next step', () => {
     expect(NEXT_STEP_CHIPS.map((c) => c.id)).toContain(STRENGTHEN_PRESS_CHIP_ID);
   });
@@ -78,6 +88,8 @@ const rows = new Map<string, { id: string; request_hash: string; assistant_messa
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
+  // The latest answer row's carrier, as `supabase-store.ts` reads it after a restart (rehydration of the stored proposal).
+  readMostRecentPendingActions: vi.fn(async (sid: string) => [...rows.entries()].filter(([k]) => k.startsWith(`${sid}:`)).at(-1)?.[1].pending_actions ?? []),
   append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[] }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
     if (!rows.has(k)) rows.set(k, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0, pending_actions: JSON.parse(JSON.stringify(w.pending_actions ?? [])) });
@@ -135,6 +147,46 @@ describe('the real route: the press → ONE held card, 0 model calls', () => {
     expect(ids.some((id) => id.startsWith('agent-approve-proposal') && id.includes(proposalId!))).toBe(true);
     expect(ids).toContain('agent-amend-proposal');
     expect(b._diagnostic_trace?.fast_path).toBe('strengthen');
+  });
+
+  /** RC's S1 card as `proposeLinkStrengths` stores it: the link, its band and whose estimate (CODEX P1 #2 on #2481). */
+  const CARD = 'Record this link strength: "Sprint capacity for AI reporting" \u2192 "AI reporting module availability" as moderate, Olumi\u2019s estimate';
+  const approveOf = (b: Body) => (b.suggested_actions as { id: string; detail?: string }[]).find((a) => a.id.startsWith('agent-approve-proposal:'));
+
+  it('RED (P1 #2): the approval carries the STORED card — the link, its band, "Olumi\'s estimate" — on the wire', async () => {
+    const b = await press();
+    expect(approveOf(b)?.detail).toBe(CARD);
+  });
+
+  it('RED (P1 #2): a lost response retried with the same turn_id replays the same card', async () => {
+    const turn_id = randomUUID();
+    const first = await press({ turn_id });
+    const again = await press({ turn_id });
+    expect(approveOf(again)?.id).toBe(approveOf(first)?.id);
+    expect(approveOf(again)?.detail).toBe(CARD);
+    expect(modelCalls).toBe(0);
+  });
+
+  it('RED (P1 #2): the same replay on a RESTARTED process (no memory) rebuilds the card from the stored proposal', async () => {
+    const turn_id = randomUUID();
+    const first = await press({ turn_id });
+    vi.resetModules();
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const fresh = Fastify({ logger: false });
+    fresh.post('/assist/v1/scenarios/:id/graph', async () => ({
+      graph: D1.graph, graph_hash: 'h-d1', analysis_ready: { status: 'ready', may_run: true },
+      analysis_state: analysisState, analysis_option_participation: PARTICIPATION,
+    }));
+    fresh.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'ok', blocks: [] }));
+    await fresh.register(agentV1TurnRoute);
+    await fresh.ready();
+    const chip = NEXT_STEP_CHIPS.find((c) => c.id === STRENGTHEN_PRESS_CHIP_ID)!;
+    const r = await fresh.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: chip.message, source: 'chip', chip: { id: chip.id }, turn_id } });
+    await fresh.close();
+    expect(r.statusCode, r.body).toBe(200);
+    const again = r.json() as Body;
+    expect(approveOf(again)?.id).toBe(approveOf(first)?.id);
+    expect(approveOf(again)?.detail).toBe(CARD);
   });
 
   it('CONTROL: the same press on a STALE Run → today\'s answer (the model is called, no card)', async () => {
