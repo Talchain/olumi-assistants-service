@@ -100,7 +100,8 @@ import {
 import { ADD_CONSTRAINT_USER_GUIDANCE,
   SUCCESS_TARGET_POSITIVE_USER_GUIDANCE,
 } from './d1-shared/user-guidance.js';
-import { retireNormalisingGoalFrame } from '../../agent-lane/normalising-goal-frame.js';
+import { retireNormalisingGoalFrame, rederiveGoalInLinks } from '../../agent-lane/normalising-goal-frame.js';
+import { frameOf } from '../../agent-lane/refit-frames.js';
 
 /**
  * Parameter Zod schema. The brief originally listed
@@ -1387,9 +1388,14 @@ export function createAddConstraintHandler(): HandlerFn {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
           if (goalNode !== undefined) delete (goalNode as { goal_direction?: unknown }).goal_direction;
         }
+        // ⭐ D1 B: the frame the goal was read on before this write moved its level (see the stamp below), else undefined.
+        let levelFrameMovedFrom: number | undefined;
         if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
           if (goalNode) {
+            // Read BEFORE anything below writes: the frame every link into the goal was sized on (`frameOf`).
+            const frameBefore = frameOf(goalNode);
+            const capBefore = goalNode.goal_threshold_cap;
             const resolvedCap = resolveGoalThresholdCapWithProvenance(
               goalNode.goal_threshold_cap,
               params.value,
@@ -1433,6 +1439,42 @@ export function createAddConstraintHandler(): HandlerFn {
               // the line below the constant 0.8 for every target.
               goalNode.goal_threshold_cap_provenance = resolvedCap.provenance;
               goalNode.goal_threshold = params.value / cap; // model units (0–1)
+              /**
+               * ⭐⭐ D1 B — THE INVARIANT: A GOAL'S STORED LEVEL IS READ ON THE GOAL'S OWN CAP (DL #85 5930770727, adopting
+               * R3 F5 D1 5930715560 (a)). A goal `observed_state` carrying a numeric `raw_value` satisfies
+               * value = baseline = raw_value / goal cap. Today's level can now be carded BEFORE any target, on its own frame
+               * (`goal-current-level.ts`: Paul's "Our quarterly revenue is £100,000." → cap £125,000), and this stamp then
+               * sets the target's cap ("double that": £200,000 → cap £250,000). Left alone, the level would stay 0.8 of
+               * £125,000 while the target is 0.8 of £250,000: ISL would score P(goal) as if today were ALREADY at the
+               * target — a silently wrong chance of reaching the goal. So the level moves onto this cap IN THIS SAME WRITE:
+               * value and baseline become raw_value / cap and `cap` becomes this cap; `source`, `raw_value`, `unit` and
+               * every other field are untouched (the figure stays the user's own, at its own size). A level already on
+               * this cap is not touched (no byte moves). A goal `observed_state` with NO numeric `raw_value` (an Olumi value
+               * with no stated size) has no figure to re-read, and is left exactly as it was.
+               */
+              const level = goalNode.observed_state as Record<string, unknown> | undefined;
+              const rawLevel = level?.raw_value;
+              if (level !== undefined && level !== null && typeof rawLevel === 'number' && Number.isFinite(rawLevel)) {
+                // The frame the level is on: its own `cap`, else the goal's cap before this write.
+                const levelFrame = typeof level.cap === 'number' && Number.isFinite(level.cap) && level.cap > 0
+                  ? level.cap
+                  : capBefore;
+                if (levelFrame !== cap) {
+                  const onCap = rawLevel / cap;
+                  const k = typeof levelFrame === 'number' && levelFrame > 0 ? levelFrame / cap : undefined;
+                  goalNode.observed_state = {
+                    ...level,
+                    value: onCap,
+                    ...(typeof level.baseline === 'number' ? { baseline: onCap } : {}),
+                    // A real spread stays in natural units (`refit-frames` `reframed`'s own rule): std · F_old / F_new.
+                    ...(typeof level.std === 'number' && level.std > 0 && k !== undefined ? { std: level.std * k } : {}),
+                    cap,
+                  } as typeof goalNode.observed_state;
+                  // The level's cap is the goal's frame (`frameOf`: cap → goal cap), so the frame moved with it: the
+                  // user-sized links into the goal follow it below (`rederiveGoalInLinks`), in this same write.
+                  if (frameBefore !== undefined) levelFrameMovedFrom = frameBefore;
+                }
+              }
               // ROADMAP 2.273 — the chat-path twin of the draft-path baseline
               // stamp (cee/factor-extraction/enricher.ts). Same shared
               // extractor, so the two registration paths cannot drift.
@@ -1503,6 +1545,12 @@ export function createAddConstraintHandler(): HandlerFn {
               extractionType: 'explicit',
             };
           }
+        }
+        // ⭐ D1 B (DL #85 5930770727): the level moved the goal's frame above, so every user-sized or definitional link into
+        // the goal is re-derived onto the new frame from its unchanged natural size — the F4 rule, from the old frame.
+        if (levelFrameMovedFrom !== undefined) {
+          const moved = rederiveGoalInLinks(clone, targetId, levelFrameMovedFrom);
+          if (moved !== clone) { clone.nodes = moved.nodes; clone.edges = moved.edges; }
         }
         // ⭐ F4 (R3 #75 5922368144): a target or level landing on a goal read on a normalising frame retires that frame
         // and re-derives the user's own sizes into it, so the analysis is the same as a build with this target present.

@@ -21,6 +21,8 @@ export async function onceMoreOnTransportFailure<T>(
   } catch (err) {
     // An HTTP status we raised ourselves is a real answer; do not repeat it.
     if (String(err).startsWith('Error: openai_')) throw err;
+    // A deadline WE set (AbortSignal.timeout) is a decision, not a transport failure: repeating it doubles the wait.
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) throw err;
     onRetry?.(label, String(err));
     return call();
   }

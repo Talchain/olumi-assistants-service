@@ -159,7 +159,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
       // the agreement recorded as `reviewed_by_user` with Olumi's band.
       const { natural_effect: _n, ...kept } = was[k]!.provenance ?? {};
       const { reviewed_by_user: review, ...rest } = (e.provenance ?? {}) as Record<string, unknown>;
-      expect(rest, k).toEqual(kept);
+      // L4 (DL 5929790081): approval SIZES a link nobody sized — Olumi's default becomes Olumi's estimate, accepted.
+      // Authorship (`source`, `reasoning`, display) is still kept byte for byte.
+      const unsized = (kept as Record<string, unknown>).magnitude === undefined || (kept as Record<string, unknown>).magnitude === 'olumi_placeholder';
+      expect(rest, k).toEqual(unsized ? { ...kept, magnitude: 'olumi_estimate' } : kept);
       expect(review, k).toMatchObject({ intent: 'confirm', band: (STRONG as readonly string[]).includes(k) ? 'strong' : 'moderate' });
       expect(e.provenance_display, k).toEqual(was[k]!.display);
       expect(e.defaulted, k).toBe(true);

@@ -167,12 +167,21 @@ function expectReviewed(graph: unknown, band?: string): void {
   else expect(review!.band).toBe(band);
 }
 
-/** Everything on the target edge except the review record and (for a band) the std — must be byte-identical. */
+/**
+ * Everything on the target edge except the review record, (for a band) the std and — L4 — a placeholder's magnitude must
+ * be byte-identical. ⭐ L4 AMENDMENT (DL ruling #85 5929790081 on 52f8cd's trace 5929778726): a review on a PLACEHOLDER
+ * sizes it — `olumi_placeholder` becomes `olumi_estimate` (Olumi's band, now accepted). Authorship stays R11's: `source`,
+ * `reasoning`, `provenance_display` and the `defaulted` flags are kept, and the licence rows below still read NO licence.
+ */
 function expectKeptExactly(before: GraphV3T, after: unknown, opts: { bandStd?: number } = {}): void {
   const b = structuredClone(edgeOf(before));
   const a = structuredClone(edgeOf(after));
   const ap = a.provenance as Record<string, unknown>;
   delete ap.reviewed_by_user;
+  if ((b.provenance as Record<string, unknown> | undefined)?.magnitude === 'olumi_placeholder') {
+    expect(ap.magnitude, 'L4: an approved placeholder is sized — Olumi\u2019s estimate, accepted').toBe('olumi_estimate');
+    ap.magnitude = 'olumi_placeholder';
+  }
   if (opts.bandStd !== undefined) {
     expect((a.strength as { std: number }).std).toBe(opts.bandStd);
     (a.strength as { std: number }).std = (b.strength as { std: number }).std;

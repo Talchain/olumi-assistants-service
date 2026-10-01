@@ -207,6 +207,7 @@ import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
+import { approvalSizes } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
@@ -2604,7 +2605,9 @@ export function createAgentCapabilities(
       const reviewed = (prov as { reviewed_by_user?: { intent?: unknown } }).reviewed_by_user?.intent === 'confirm';
       const stamped = l.author === 'user_specified' && l.intent === 'set' ? prov.source === 'user_specified'
         : l.author === 'user_specified' ? reviewed : reviewed && !usersOwn;
-      return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && stamped;
+      return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && stamped
+        // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
+        && !approvalSizes(e);
     });
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
@@ -3146,9 +3149,14 @@ export function createAgentCapabilities(
             + 'NEXT CALL: the same links without this one \u2014 unless the user names its band in their own words.');
         }
         const magnitude = bandMidpoint(band);
-        if (Math.abs(mean) === magnitude) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
-        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
-        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps: false, was: currentBand });
+        // ⭐ L4 (c) (DL 5929790081; CODEX preflight 5929956793): a PLACEHOLDER already at Olumi's band is still unsized —
+        // approving that band is what sizes it (`sizedByApproval`). Skipped as "already sits at", no card could ever clear
+        // "Olumi hasn't sized…" on it: Paul's e-12/e-13 sit at 0.85, the very-strong midpoint (`96c6f5f4`).
+        const keeps = Math.abs(mean) === magnitude;
+        if (keeps && !approvalSizes(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
+        // Kept at its value it is a REVIEW of Olumi's band (`confirm_current`): the writer refuses a `set` that changes nothing.
+        ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
+        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand });
       }
       if (ops.length === 0) {
         if (definitional.length > 0) {
@@ -3199,10 +3207,10 @@ export function createAgentCapabilities(
      */
     async proposeGoalTarget(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const type = args?.constraint_type;
+      const typed = args?.constraint_type;
       const value = args?.value;
       const unit = typeof args?.unit === 'string' ? args.unit.trim() : '';
-      if ((type !== 'at_least' && type !== 'at_most') || typeof value !== 'number' || !Number.isFinite(value) || unit === '') {
+      if ((typed !== 'at_least' && typed !== 'at_most') || typeof value !== 'number' || !Number.isFinite(value) || unit === '') {
         return { ok: false, mutated: false, refusal: 'unreadable_target',
           detail: 'A target needs the figure, its unit, and whether the goal must be at least or at most that figure. Nothing was prepared; ask the user for whichever is missing.' };
       }
@@ -3210,17 +3218,40 @@ export function createAgentCapabilities(
       const targetNotStated: ToolResult = { ok: false, mutated: false, refusal: 'target_not_stated',
         detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
           + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
-      // ⛔ The figure is recorded as the user's target, so it must be one the user wrote.
-      if (!figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
-      // ⛔ And so is which way it binds: said, affirmed, in this turn's own typed words.
-      const said = comparatorTheUserWrote(ctx.user_turn_text);
-      if (said !== type) {
-        return { ok: false, mutated: false, refusal: 'direction_not_stated',
-          detail: (said === null
-            ? 'The user has not said in this message, in their own words, whether the goal must be at least or at most this figure (or they said both, asked, or denied it), so nothing was prepared. '
-            : `The user said ${DIRECTION_WORDS[said]}, not ${DIRECTION_WORDS[type]}, so nothing was prepared. `)
-            + 'Ask them whether the goal must be at least or at most the figure, and never choose it for them.' };
+      /**
+       * ⛔ The figure is recorded as the user's target, so it must be one the user wrote — or, TYPED by the Agent, one
+       * derived from a figure they wrote (`derived_from {base, multiplier}`: "double that" after "£100,000"; F5 D1, DL
+       * 380e54 on #2447). Code checks the base with the same door as any figure (and, below, its scope), and the value is
+       * exactly base × multiplier. No word list reads the user's wording (DL: a free-text door is banned).
+       */
+      const derivedArg = (args as { derived_from?: { base?: unknown; multiplier?: unknown } }).derived_from;
+      const derived = derivedArg === undefined || derivedArg === null ? null
+        : typeof derivedArg.base === 'number' && Number.isFinite(derivedArg.base) && typeof derivedArg.multiplier === 'number'
+          && Number.isFinite(derivedArg.multiplier) && derivedArg.multiplier > 0 && derivedArg.multiplier !== 1
+          ? { base: derivedArg.base, multiplier: derivedArg.multiplier } : undefined;
+      if (derived === undefined) {
+        return { ok: false, mutated: false, refusal: 'unreadable_derivation',
+          detail: 'derived_from needs the figure the user gave (base) and the multiple they asked for (multiplier, e.g. 2 for "double"). Nothing was prepared.' };
       }
+      if (derived !== null) {
+        if (Math.abs(derived.base * derived.multiplier - value) > Math.abs(value) * Number.EPSILON * 4) {
+          return { ok: false, mutated: false, refusal: 'derivation_mismatch',
+            detail: `${figure} is not ${derived.multiplier} × ${targetFigure(derived.base, unit)}, so nothing was prepared. Recompute it, or ask the user.` };
+        }
+        if (!figureTheUserWrote(derived.base, unit, ctx.user_text)) return { ...targetNotStated,
+          detail: `${targetFigure(derived.base, unit)} is not a figure the user wrote, so nothing was prepared: a target derived from it would be recorded as theirs. Ask them for the figure.` };
+      } else if (!figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
+      /**
+       * ⭐ WHICH WAY IT BINDS (DL 380e54 on #2447, the product ruling 5930770727 kept; follow-up 5931593767): NO REFUSAL ON
+       * DIRECTION. The Agent's typed `constraint_type` is its READING; the user's own literal comparator words, when they
+       * read one way, are THEIRS. When the two agree, the card is the user's. Otherwise the card is a DECISION: the literal
+       * reading primary when there is one ("cut costs to £34k over the next year" reads `over`), the Agent's reading
+       * primary when the words are silent, asked, denied or both ways ("double that", "our target is £200k"); the other
+       * direction is the alternative button, and the user's click is the authorship. No word list over the user's wording.
+       */
+      const said = comparatorTheUserWrote(ctx.user_turn_text);
+      const type: 'at_least' | 'at_most' = said ?? typed;
+      const directionIsADecision = said !== typed;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       // Exactly ONE goal: the event is id-addressed, and choosing between two goals would be a guess.
@@ -3255,7 +3286,7 @@ export function createAgentCapabilities(
             + 'Ask the user for the target in the goal’s own units, and never record a figure given for something else as this goal’s target.' };
       }
       // ⛔ …and written ABOUT this goal (DL #72 5862394804): "300 Pro paying subscribers" is never a £300 MRR target.
-      if (!figureTheUserWroteFor(value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
+      if (!figureTheUserWroteFor(derived?.base ?? value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
       /**
        * ⭐ THE GOAL'S LEVEL TODAY, WHEN THE USER STATED IT BESIDE THE TARGET — on THIS card, written on THIS approval
        * (AIQ #75 5913873948 row G6, 5913897396, 5913952911; DL 5913935708). R3's run: "We have secured £0 so far and need
@@ -3317,7 +3348,7 @@ export function createAgentCapabilities(
         validation: { admitted: true, loss_count: 0, refusals: [] },
         // AIQ's words for the one card (5913952911): both figures, the user's own.
         public_label: today === undefined
-          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}`
+          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}${derived === null ? '' : ` (${derived.multiplier} × your ${targetFigure(derived.base, unit)})`}`
           : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`,
       });
       proposals.put(proposal);
@@ -3333,6 +3364,9 @@ export function createAgentCapabilities(
           ...(today !== undefined ? { today } : {}),
         },
         ...(levelLeftOut !== undefined ? { current_level_left_out: levelLeftOut } : {}),
+        // ⭐ DL 380e54 (#2447): the user's words were silent on the direction, so the card is a DECISION — the Agent's
+        // reading is the primary button, the other the alternative (`approval-chips.ts`); the user's click is the authorship.
+        ...(directionIsADecision ? { direction_choice: { chosen: type, alternative: type === 'at_least' ? 'at_most' : 'at_least' } } : {}),
         note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
@@ -4361,7 +4395,9 @@ export function createAgentCapabilities(
           const p = x?.provenance !== null && typeof x?.provenance === 'object' ? x.provenance as { source?: unknown; reviewed_by_user?: unknown } : undefined;
           const review = p?.reviewed_by_user !== null && typeof p?.reviewed_by_user === 'object' ? p.reviewed_by_user as { intent?: unknown } : undefined;
           const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : p?.source === 'user_specified';
-          return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded;
+          return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded
+            // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
+            && !approvalSizes(x);
         };
         /**
          * ⛔ LANDED IS WHAT THE MODEL HOLDS, NOT WHETHER TWO REVISIONS ARE EQUAL (round-2 review of

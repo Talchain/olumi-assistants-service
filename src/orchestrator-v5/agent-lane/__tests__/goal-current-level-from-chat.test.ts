@@ -242,10 +242,17 @@ describe('CONTROLS — refused with a plain reason, nothing proposed, nothing wr
     }
   });
 
-  it('a goal_is the user has not stated is refused, never defaulted to "at least"', async () => {
+  // ⭐ SUPERSEDED BY D1 (DL #85 5930770727, adopting R3 F5 D1 5930715560 (a)): "A current level is a fact about today. It
+  // does NOT depend on the comparator." An unstated `goal_is` with no comparator held is no longer refused: the level is
+  // admitted on the scale rule alone, and nothing is defaulted to "at least" (no comparator is written or sent).
+  // `goal-level-first-d1.test.ts` (iii) owns the held-comparator and off-scale rows.
+  it('a goal_is the user has not stated, no comparator held → proposed on the scale rule, never defaulted to "at least"', async () => {
     for (const goal_is of [undefined, 'roughly']) {
-      const r = await refusedAndInert({ ...T2, goal_is });
-      expect(r.refusal, String(goal_is)).toBe('goal_is_unstated');
+      const s = setup();
+      const r = await s.call(TOOL, { ...T2, goal_is }) as ToolResult & { public_label?: string };
+      expect(r.ok, `${String(goal_is)}: ${JSON.stringify(r)}`).toBe(true);
+      expect(s.registers).toEqual([]);
+      expect(goalOf(s.graph())).not.toHaveProperty('goal_direction');
     }
   });
 
@@ -270,12 +277,17 @@ describe('CONTROLS — refused with a plain reason, nothing proposed, nothing wr
     expect(s.registers, 'held for approval: nothing written').toEqual([]);
   });
 
-  it('a goal with no stated target on the level frame has nothing to measure against', async () => {
+  // ⭐ SUPERSEDED BY D1 (DL #85 5930770727): with no target yet, today's level is carded ON ITS OWN, saying today's level
+  // only. `goal-level-first-d1.test.ts` (i)/(ii) owns the write and the target that follows it.
+  it('a goal with no stated target on the level frame → today\'s level is carded on its own (no target named)', async () => {
     const g = clone(paulGraph);
     const goal = goalOf(g);
     for (const k of ['goal_threshold', 'goal_threshold_raw', 'goal_threshold_cap', 'goal_threshold_cap_provenance']) delete goal[k];
-    const r = await refusedAndInert(T2, g);
-    expect(r.refusal).toBe('no_target');
+    const s = setup(g);
+    const r = await s.call(TOOL, T2) as ToolResult & { public_label?: string };
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.public_label).toBe('Record today\'s level of "MRR" as your figure: £12,000');
+    expect(s.registers).toEqual([]);
   });
 });
 

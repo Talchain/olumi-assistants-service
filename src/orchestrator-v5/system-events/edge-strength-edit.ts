@@ -8,6 +8,7 @@
  * compare-and-swap remain owned by `dispatch.ts` → `commitDirectAnswer`.
  */
 
+import { approvalSizes, ESTIMATE_MAGNITUDE } from '../../cee/magnitude/link-sizing.js';
 import type {
   OlumiResponse,
   SystemEventTurnPayload,
@@ -263,6 +264,13 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
   if (isRecord(beforeProvenance)) {
     if (!isRecord(afterProvenance)) return false;
     if (!isConfirmReview(afterProvenance.reviewed_by_user, args.statedBand)) return false;
+    // ⭐ L4 (DL 5929790081): the ONE other provenance change a confirm may make — a placeholder becomes Olumi's estimate,
+    // now accepted (`sizedByApproval`). Exactly that transition, checked, then restored for the byte comparison below.
+    if (afterProvenance.magnitude !== beforeProvenance.magnitude) {
+      if (!(approvalSizes(rawBeforeEdge) && afterProvenance.magnitude === ESTIMATE_MAGNITUDE)) return false;
+      if ('magnitude' in beforeProvenance) afterProvenance.magnitude = beforeProvenance.magnitude;
+      else delete afterProvenance.magnitude;
+    }
     if ('reviewed_by_user' in beforeProvenance) {
       afterProvenance.reviewed_by_user = structuredClone(beforeProvenance.reviewed_by_user);
     } else {

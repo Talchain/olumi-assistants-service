@@ -145,7 +145,7 @@ describe('AIQ 5900908629 — the five rows on the rep1 request shape (Paul\'s le
     const check = limitChecksForAgent(g, { per_limit: [row], joint: { state: 'scored' } } as never)!
       .find((c) => c.constraint_id === CHURN_LIMIT)!;
     expect(check.withheld_for).toEqual(['Retention intervention for at-risk accounts', '£59 for new Pro customers; grandfather existing customers']);
-    expect(check.say).toContain('For ‘Retention intervention for at-risk accounts’ and ‘£59 for new Pro customers; grandfather existing customers’ it couldn’t be checked: those options move it through a link Olumi has not sized (a placeholder, not an estimate).');
+    expect(check.say).toContain('For ‘Retention intervention for at-risk accounts’ and ‘£59 for new Pro customers; grandfather existing customers’ it couldn’t be checked: those options move it through a link Olumi hasn’t sized in this limit’s units.');
     // The question is MG's ask, never the sentence's: one per unsized part (Paul's own level asks nothing).
     expect(check.say).not.toContain('How much');
     expect(check.ask).toMatch(/How much does ‘At-risk account retention intervention’ change ‘Monthly churn’\? How much does ‘Grandfather existing customers’ change ‘Monthly churn’\?$/);

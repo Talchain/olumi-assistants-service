@@ -1,7 +1,7 @@
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * Selected coach request configuration: #78 5915316114 and DL #75 5916003868.
- * Populated-model conversation and Run interpretation use Sol/high/3400.
+ * Populated-model conversation uses Sol/high/3400; the Run's interpretation uses the interpret role, Sol/low/3400 (2a).
  * This supersedes PJ-C1 batch 5's Terra/low conversation setting; authoritative
  * empty-model turns retain Terra/low, covered by selected-coach-wiring.test.ts.
  * Construction keeps its separate Terra/medium budget. These captured requests
@@ -29,7 +29,7 @@ const GRAPH = {
 };
 const STATE = { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } };
 
-describe('selected coach: populated conversation and Run use high; construction keeps its own', () => {
+describe('selected coach: conversation uses high, interpretation uses low; construction keeps its own', () => {
   let app: FastifyInstance;
   let modelBodies: Body[] = [];
 
@@ -75,7 +75,7 @@ describe('selected coach: populated conversation and Run use high; construction 
     }
   });
 
-  it('⭐ RED: the Run button’s one interpreting call (tool_choice none) uses selected Sol/high/3400', async () => {
+  it('⭐ RED (AI HARNESS 2a): the offered Run explanation uses the interpret role — Sol/LOW/3400', async () => {
     const scenarioId = randomUUID();
     const res = await explainRun(app, scenarioId, await app.inject({
       method: 'POST', url: '/agent/v1/turn',
@@ -83,9 +83,12 @@ describe('selected coach: populated conversation and Run use high; construction 
     }));
     expect(res.statusCode, res.body).toBe(200);
     const interpreting = modelBodies.filter((b) => b.tool_choice === 'none');
-    expect(interpreting.length, 'the typed Run made its interpreting call').toBe(1);
+    expect(interpreting.length, 'the separate explanation made one interpreting call').toBe(1);
     expect(interpreting[0]!.model).toBe('gpt-6.1-sol');
-    expect(interpreting[0]!.reasoning).toEqual({ effort: 'high' });
+    // Measured on Paul's frozen Run turn: high median 38.3 s vs low 9.4 s, truth content equal (`model-budgets.ts`).
+    expect(interpreting[0]!.reasoning).toEqual({ effort: 'low' });
+    // The deadline is a request option, never a body field.
+    expect(interpreting[0]).not.toHaveProperty('deadline_ms');
     expect(interpreting[0]!.max_output_tokens).toBe(3400);
   });
 

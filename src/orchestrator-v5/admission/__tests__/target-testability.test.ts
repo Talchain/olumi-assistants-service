@@ -17,6 +17,8 @@ import { claimPermissionsFrom } from '../../agent-lane/first-analysis.js';
 import { readinessViewOf } from '../../agent-lane/readiness-view.js';
 import { postWriteReadinessLine } from '../../../routes/agent-v1-turn.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
+import { sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
+import { olumiGuessedGoalLink, olumiGuessedLink } from '../../../orchestrator/context/placeholder-parts.js';
 
 type Json = Record<string, any>;
 const RAW = JSON.parse(readFileSync(new URL('./fixtures/target-testability-20260930.json', import.meta.url), 'utf8')) as { paul: Json; mrr: Json; n1: Json; cc: Json };
@@ -322,3 +324,73 @@ describe('row 3: a size construction credits to the user is no Olumi guess, even
   });
 });
 
+
+/**
+ * ⭐ L4 / DL ruling 5929790081 (i) AT THE GOAL TARGET READER (CODEX CR #2446 5930402198): Olumi's estimate the user
+ * ACCEPTED sizes a link for goal figures, so R3's m1 is testable once the user approves Olumi's sizes, with Olumi's origin
+ * kept. Controls: unapproved Olumi sizes and a reviewed legacy placeholder still cap it, and the user's own size lifts it.
+ * The accepted state is built by the writer's own rule (`sizedByApproval`) plus the review the writer records.
+ */
+describe('L4 (i): an ACCEPTED Olumi size licenses the goal target; unapproved Olumi sizes still cap it', () => {
+  const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-mrr-m1-card-yes-20260930.json', import.meta.url), 'utf8')).graph as Json;
+  const review = { intent: 'confirm', at: '2026-10-01T09:25:10.219Z' };
+  const accepted = (g: Json): Json => { const c = structuredClone(g); for (const e of c.edges) if (olumiSized(e) && e.provenance) e.provenance = { ...sizedByApproval(e.provenance, e), reviewed_by_user: review }; return c; };
+
+  it('PRECONDITION: m1 rests on Olumi’s unapproved size → not testable (P5)', () => {
+    const v = targetTestabilityOf(M1);
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.precondition)).toContain('P5');
+  });
+
+  it('RED (i): every Olumi size on the path ACCEPTED → the target is no longer capped by them, and stays Olumi’s', () => {
+    const g = accepted(M1);
+    expect(g.edges.filter((e: Json) => olumiSized(e)).every((e: Json) => e.provenance.source !== 'user_specified'), 'origin kept (R11)').toBe(true);
+    expect(targetTestabilityOf(g).kind).not.toBe('not_testable');
+    expect(targetTestabilityOf(g)).toEqual(targetTestabilityOf(userSized(M1)));
+  });
+
+  it('CONTROL: a REVIEWED legacy placeholder (Paul’s 09:25 links before L4) is still unsized → still capped', () => {
+    const g = structuredClone(M1);
+    for (const e of g.edges) if (olumiSized(e) && e.provenance) e.provenance = { ...e.provenance, magnitude: 'olumi_placeholder', reviewed_by_user: review };
+    expect(targetTestabilityOf(g).kind).toBe('not_testable');
+  });
+
+  it('CONTROL (ii): the limit rule keeps the whole test — an accepted Olumi size is still Olumi’s guess for a limit', () => {
+    const e = accepted(M1).edges.find((x: Json) => olumiSized(x))!;
+    expect(olumiGuessedLink(e, () => undefined)).toBe(true);
+    expect(olumiGuessedGoalLink(e, () => undefined)).toBe(false);
+  });
+});
+
+/**
+ * ⭐ DL condition (1) on #2446 (5930770727): a link that HOLDS BY DEFINITION on a goal path never caps target
+ * testability, even when the size is Olumi's — the goal reader keeps `holdsByDefinition` (the ONE structural test, #2445).
+ * Built on Paul's testable graph (today's level + £-sized links): one link into the goal becomes Olumi's, definitional,
+ * exactly +1 £ per £. CONTROL: the same link without the definitional mark is Olumi's guess and caps the target.
+ */
+describe('L4 × #2445: a definitional Olumi link on the goal path never caps the target', () => {
+  const definitionalInto = (definitional: boolean): Json => {
+    const g = poundsInto(withToday(FIX.paul));
+    const goal = g.nodes.find((n: Json) => n.kind === 'goal');
+    const unit = goal.goal_threshold_unit as string;
+    const e = g.edges.find((x: Json) => x.to === goal.id && g.nodes.find((n: Json) => n.id === x.from)?.kind !== 'option')!;
+    for (const n of g.nodes) if (n.id === e.from) { delete n.unit; if (n.observed_state) delete n.observed_state.unit; }
+    e.strength = { mean: 1, std: 0.01 };
+    e.defaulted = true;
+    e.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate', ...(definitional ? { definitional: true } : {}),
+      natural_effect: { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit, strength_mean: 1 } };
+    return g;
+  };
+
+  it('PRECONDITION: Paul’s graph with today’s level and £-sized links is testable', () => {
+    expect(targetTestabilityOf(poundsInto(withToday(FIX.paul)))).toEqual({ kind: 'testable', goal_id: 'securing_funding' });
+  });
+
+  it('RED: Olumi’s definitional +1 £ per £ link into the goal → still testable', () => {
+    expect(targetTestabilityOf(definitionalInto(true))).toEqual({ kind: 'testable', goal_id: 'securing_funding' });
+  });
+
+  it('CONTROL: the same Olumi link WITHOUT the definitional mark is a guess → not testable (P5)', () => {
+    const v = targetTestabilityOf(definitionalInto(false));
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.precondition)).toEqual(['P5']);
+  });
+});

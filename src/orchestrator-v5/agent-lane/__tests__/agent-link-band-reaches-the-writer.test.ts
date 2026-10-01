@@ -18,6 +18,7 @@ import { OrchestratorTurnPayloadSchema } from '@talchain/schemas/boundary';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { statedLinkBandFor } from '../stated-link-band-context.js';
+import { sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554400a6';
 const VERY_STRONG = 'Price sensitivity drives monthly churn very strongly. Record that link as very strong, as my own estimate.';
@@ -49,7 +50,8 @@ function world(initial: ReturnType<typeof graphWith>) {
     // R11 (AIQ #72 5872082179): a `set` that changes the strength stamps it the user's; a `confirm_current` is REVIEW —
     // the writer keeps the provenance and records `reviewed_by_user` (before R11 this fake stamped both `user_specified`).
     const provenanceAfter = (x: Edge) => (ev['intent'] === 'confirm_current'
-      ? { ...x.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' } }
+      // L4 (DL 5929790081): …and a confirm on a placeholder sizes it (`sizedByApproval`), as the real writer does.
+      ? { ...sizedByApproval(x.provenance ?? {}, x), reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' } }
       : { source: 'user_specified' });
     g = { ...g, edges: g.edges.map((x) => (x.from === ev['from'] && x.to === ev['to'] ? { ...x, strength: { ...x.strength, mean: mag }, provenance: provenanceAfter(x) } : x)) };
     rev += 1;

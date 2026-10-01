@@ -2640,6 +2640,34 @@ export function admitStatedGoalLevel(args: {
 }
 
 /**
+ * ⭐ A CURRENT LEVEL IS A FACT ABOUT TODAY — THE SCALE RULE ALONE (DL #85 5930770727, adopting R3 F5 D1 5930715560 (a):
+ * "A current level is a fact about today. It does NOT depend on the comparator; card it on its own").
+ *
+ * For a stated level beside a target when NO comparator is known — the user did not say how they put the target
+ * (`goal_is`) and the goal holds none (`goal_direction`). Which way the goal points is a question about the TARGET,
+ * never about where things stand today, so the level never waits on it: the shared rule (`admitGoalBaseline`) is asked
+ * on the floor reading, then on the ceiling reading, and either admitting is enough. Between them they cover every
+ * order of level and target, so the ONLY refusal left is rule 2 — a level off the target's own cap scale, said with
+ * the same sentence as the comparator paths (`offCapScaleSentence`). The normalised value is raw / cap either way.
+ *
+ * ⛔ NOT a direction ruling: nothing here says the goal is a floor or a ceiling, and nothing is sent that says so. A
+ * comparator the user states or the goal holds still goes through `admitStatedGoalLevel`, word for word.
+ */
+export function admitStatedGoalLevelOnScale(args: {
+  readonly metric: string;
+  readonly rawTarget: number;
+  readonly rawBaseline: number;
+  readonly cap: number;
+}): StatedGoalLevelVerdict {
+  const { metric, rawTarget, rawBaseline, cap } = args;
+  for (const ceiling of [false, true]) {
+    const admission = admitGoalBaseline({ rawTarget, rawBaseline, cap, ceiling });
+    if (admission.admitted) return { admitted: true, normalised: admission.normalised };
+  }
+  return { admitted: false, reason: offCapScaleSentence(metric, rawBaseline, rawTarget, cap) };
+}
+
+/**
  * Whether the candidate's current level of its goal is Olumi's, not the user's: "known" alone is not enough (verdict
  * 5824647383) — a level the model marks known but attributes to itself (`ai_proposed`/`inferred`) is Olumi's too.
  */

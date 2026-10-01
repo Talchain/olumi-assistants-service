@@ -425,12 +425,20 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'for a figure or a direction the user did not state: if they have not given both in their own words, ask first — '
       + 'a figure or direction they did not state is refused. If the user ALSO stated the goal’s level today (for example "we have secured '
       + '£0 so far and need at least £1m"), pass it as current_level: both go on ONE card and are written on ONE approval. '
-      + 'Never promise to record today’s level later: without current_level nothing records it.',
+      + 'Never promise to record today’s level later: without current_level nothing records it. '
+      + 'When the target is DERIVED from a figure the user gave ("we\u2019re at £100,000 … aiming to double that"), give the '
+      + 'result as value and pass derived_from {base, multiplier} (100000 and 2): the base must be a figure they wrote. '
+      + 'When the user did not say at least or at most, give your reading in constraint_type: the card offers it as a '
+      + 'decision with the other direction beside it, and the user chooses.',
     parameters: obj({
       constraint_type: { type: 'string', enum: ['at_least', 'at_most'], description: 'at_least when the user said the goal must reach at least the figure; at_most when they said it must stay at or under it.' },
       value: { type: 'number', description: 'The figure the user stated, in their own units.' },
       unit: { type: 'string', description: 'The unit of that figure, as the user gave it (for example £, % or customers).' },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
+      derived_from: obj({
+        base: { type: 'number', description: 'The figure the user wrote that the target is derived from, in their units (100000 for "£100,000").' },
+        multiplier: { type: 'number', description: 'The multiple they asked for: 2 for "double that", 3 for "triple", 0.5 for "halve".' },
+      }, ['base', 'multiplier']),
       current_level: obj({
         value: { type: 'number', description: 'The goal’s level TODAY, exactly as the user stated it in their units (0 for "we have secured £0 so far").' },
         unit: { type: 'string', description: 'The unit the user gave it in (for example £).' },

@@ -192,7 +192,7 @@ describe('R-c at the fold: a limit moved only through placeholder parts is WITHH
     const checks = limitChecksForAgent(graph, { per_limit: [row], joint: { state: row.state } } as never)!;
     const check = checks.find((c) => c.constraint_id === BUDGET_LIMIT)!;
     expect(check.say).toBe('‘Total initiative spend’ was checked against the figures in your model. For ‘Additional Advertising’ it couldn’t be checked: '
-      + 'that option moves it through a link Olumi has not sized (a placeholder, not an estimate).');
+      + 'that option moves it through a link Olumi hasn’t sized in this limit’s units.');
     expect(check.withheld_for).toEqual(['Additional Advertising']);
     // A scored row has no level ask; the link-size question is MG's ask, never the sentence's.
     expect(check.ask).toBe('How much does ‘Advertising spend’ change ‘Total initiative spend’?');
@@ -202,7 +202,7 @@ describe('R-c at the fold: a limit moved only through placeholder parts is WITHH
     const row = rowFor(graph, optionsOf(graph).filter((o) => o.option_id === 'additional_advertising'), BUDGET_LIMIT)!;
     const check = limitChecksForAgent(graph, { per_limit: [row], joint: { state: 'unscored', reason: row.reason } } as never)!
       .find((c) => c.constraint_id === BUDGET_LIMIT)!;
-    expect(check.say).toBe('‘Total initiative spend’ cannot be checked in this model yet: Olumi’s links from its parts to it are placeholders, not estimates.');
+    expect(check.say).toBe('‘Total initiative spend’ cannot be checked in this model yet: Olumi hasn’t sized the links from its parts to it in this limit’s units.');
     expect(check.ask).toBeUndefined();
   });
   it('without the options PLoT scores, the fold withholds nothing (the level owners are unchanged)', () => {
@@ -325,7 +325,7 @@ describe('R-c on journey A (served 17d1): the churn limit moved by price only th
     const check = limitChecksForAgent(g, { per_limit: [row], joint: { state: row.state } } as never)!
       .find((c) => c.constraint_id === CHURN_LIMIT)!;
     expect(check.say).toBe('‘Monthly churn’ was checked against the figures in your model. For ‘Increase price to £59’ and '
-      + '‘Increase price to £54’ it couldn’t be checked: those options move it through a link Olumi has not sized (a placeholder, not an estimate).');
+      + '‘Increase price to £54’ it couldn’t be checked: those options move it through a link Olumi hasn’t sized in this limit’s units.');
     expect(check.withheld_for).toEqual(['Increase price to £59', 'Increase price to £54']);
     expect(check.ask).toMatch(/How much does ‘Pro plan price’ change ‘Monthly churn’\?$/);
   });

@@ -39,7 +39,7 @@ function world(verdicts: unknown | null = FX.limit_verdicts) {
 }
 
 /** R-c per option (AI Quality #72 5900908629): the C10 options whose own churn check is withheld, as the sentence names them. */
-const CHURN_WITHHELD = ' For ‘Features and Pro price’ and ‘Additional advertising’ it couldn’t be checked: those options move it through a link Olumi has not sized (a placeholder, not an estimate).';
+const CHURN_WITHHELD = ' For ‘Features and Pro price’ and ‘Additional advertising’ it couldn’t be checked: those options move it through a link Olumi hasn’t sized in this limit’s units.';
 /** B6 (ii) as served: the two options that leave churn where it is carry Olumi's 3% as their P's whole basis. */
 const CHURN_B6 = ' For ‘Carry on as now’ and ‘Split £30,000 between feature development and advertising’ it isn’t shown: it starts from Olumi’s estimate of today’s ‘Monthly churn’.';
 /** C10 with churn's level owned as the row under test says it is, so the graph and the row agree. */

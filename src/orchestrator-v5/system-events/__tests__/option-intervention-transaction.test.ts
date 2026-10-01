@@ -990,3 +990,54 @@ describe('ONE user operation → ONE atomic commit, for a WHOLE approved batch (
     expect(persistence.attempts).toHaveLength(0);
   });
 });
+
+/**
+ * ⭐ L4 (DL 5929790081; CODEX preflight 5929956793): an approved link set SIZES a placeholder, through the REAL door and the
+ * REAL link writer, read back cold. Paul's e-12/e-13 (`96c6f5f4`) sat at 0.85 — the very-strong midpoint — as
+ * `olumi_placeholder`; his 09:25 approval left them placeholders, and "Olumi hasn't sized…" repeated three Runs.
+ */
+describe('L4: an approved link set sizes a placeholder (real door, real writer, cold reload)', () => {
+  const PLACEHOLDER = { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' };
+  function withPlaceholder(mean: number) {
+    const g = clone(canonicalGraph());
+    g.edges = g.edges.map(e => (e.from === 'factor' && e.to === 'goal'
+      ? { ...e, strength: { mean, std: 0.1 }, provenance: { ...PLACEHOLDER }, defaulted: true } : e)) as typeof g.edges;
+    return projectGraphForPersistence(g) as ReturnType<typeof canonicalGraph>;
+  }
+  const linkSet = (g: ReturnType<typeof canonicalGraph>, link: Record<string, unknown>) => {
+    const { optionId: _o, factorId: _f, modelValue: _v, ...common } = inputFor(g);
+    return { ...common, targets: [], linkStrengths: [{ from: 'factor', to: 'goal', expected: { mean: (link.mean as number), effect_direction: 'positive' as const, reviewed_at: null }, ...link }] } as never;
+  };
+  const coldEdge = async (p: ReturnType<typeof jsonStore>) => {
+    const cold = GraphStateIngressSchema.parse(await p.fresh().loadGraph(SCENARIO_ID));
+    return cold.edges.find(e => e.from === 'factor' && e.to === 'goal')! as unknown as { strength: { mean: number }; provenance?: Record<string, unknown> };
+  };
+
+  it('RED (e-12): Olumi’s band on a placeholder ALREADY at it — a review (confirm_current, not adopted) — sizes it as Olumi’s estimate, accepted', async () => {
+    const seeded = withPlaceholder(0.85);
+    const p = jsonStore(seeded);
+    const r = await executeOptionInterventionBatch(linkSet(seeded, { mean: 0.85, magnitude: 0.85, intent: 'confirm_current', band: 'very strong', adopted: false }), p.fresh());
+    expect(r.kind, JSON.stringify(r)).toBe('committed');
+    const e = await coldEdge(p);
+    expect(e.strength.mean).toBe(0.85);
+    expect(e.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm', band: 'very strong' } });
+  });
+
+  it('RED: Olumi’s band that MOVES a placeholder (an adopted set) sizes it too — Olumi’s, never the user’s', async () => {
+    const seeded = withPlaceholder(0.5);
+    const p = jsonStore(seeded);
+    const r = await executeOptionInterventionBatch(linkSet(seeded, { mean: 0.5, magnitude: 0.85, intent: 'set', band: 'very strong', adopted: true }), p.fresh());
+    expect(r.kind, JSON.stringify(r)).toBe('committed');
+    const e = await coldEdge(p);
+    expect(e.strength.mean).toBe(0.85);
+    expect(e.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm', band: 'very strong' } });
+  });
+
+  it('⛔ WHY THE DOOR NEVER ADOPTS A confirm_current: the canvas writer refuses it, so the whole set would fail', async () => {
+    const seeded = withPlaceholder(0.85);
+    const p = jsonStore(seeded);
+    const r = await executeOptionInterventionBatch(linkSet(seeded, { mean: 0.85, magnitude: 0.85, intent: 'confirm_current', band: 'very strong', adopted: true }), p.fresh());
+    expect(r).toMatchObject({ kind: 'refused', reason: 'link_adopted_estimate_not_a_set' });
+    expect(p.attempts).toHaveLength(0);
+  });
+});
