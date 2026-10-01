@@ -45,7 +45,7 @@ describe('ONE leader licence', () => {
   });
 
   it('the Agent lane wire gate reads the same licence on every row', () => {
-    for (const [, input, expected] of rows) expect(agentLaneLeaderWithheld(input)).toBe(expected === 'withheld');
+    for (const [, input, expected] of rows) expect(agentLaneLeaderWithheld(input as Parameters<typeof agentLaneLeaderWithheld>[0])).toBe(expected === 'withheld');
   });
 
   it('what the Agent is told follows the same licence (+ comparative_leader for a plain naming)', () => {
@@ -142,7 +142,7 @@ describe('the Agent lane fail-closed final egress', () => {
     expect(body.suggested_actions.map((c: { id: string }) => c.id)).toEqual(['agent-next-pre-mortem']);
     expect(body.run_delta.leader.current_leading_option_id).toBeNull();
     expect(body.run_delta.leader.prior_leading_option_id).toBeNull();
-    expect(body._agent).toEqual(base({})._agent as never);
+    expect(body._agent).toEqual(Reflect.get(base({}), '_agent'));
     expect(error).toHaveBeenCalledWith(expect.objectContaining({ event: 'agent_lane.leader_claim_residual_removed', enforced: true }), expect.any(String));
   });
 
