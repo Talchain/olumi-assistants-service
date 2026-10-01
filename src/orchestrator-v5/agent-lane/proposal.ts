@@ -99,7 +99,13 @@ export interface ProposalOperation {
      * id, `value` is R3's `{outcome_id, operation: 'product', factor_ids, words}` verbatim. Written only through the
      * approved-card door (`commitOptionLevels` → `identity_confirm`, Canonical #2292), one append, alone.
      */
-    | 'confirm_identity';
+    | 'confirm_identity'
+    /**
+     * ⭐ ONE OPTION'S LIFECYCLE (MG F1 T6; spec §3) — `path` is the option's id, `value` is `{status, expected_status}` as the
+     * `option_status_edit` event carries it (feasible | infeasible | removed). Written only through that event's
+     * writer, which derives the participation; never adopts an Olumi suggestion.
+     */
+    | 'set_option_status';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;

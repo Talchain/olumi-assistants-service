@@ -77,7 +77,7 @@ export interface RunInputSnapshotInput {
   /** Factor ids CEE HELD at their current value, per option id (the status-quo scaffold). */
   readonly heldFactorIdsByOptionId: ReadonlyMap<string, ReadonlySet<string>>;
   /** Options the Run did not compare, and why. */
-  readonly optionsNotSent: ReadonlyArray<{ option_id: string; label: string | null; reason: 'not_analysable' | 'olumi_proposed' }>;
+  readonly optionsNotSent: ReadonlyArray<{ option_id: string; label: string | null; reason: 'not_analysable' | 'olumi_proposed' | 'infeasible' | 'removed' }>;
   /** The graph PLoT received. */
   readonly wireGraph: unknown;
   /** The request PLoT received (goal_node_id, goal_constraints, goal_direction live here). */

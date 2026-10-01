@@ -126,6 +126,7 @@ import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import { filterOlumiProposedOptions } from './olumi-option-filter.js';
+import { userExcludedOptions, PARTICIPATION_STATE_FOR } from './user-option-status-filter.js';
 import { buildRunInputSnapshot, runIdFor, sentDigest } from './run-input-snapshot.js';
 import {
   carryLevelLimitBaselines,
@@ -585,8 +586,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // Never overwrites a configured option or an option with persisted
     // intervention intent; purely an outbound-projection change (the persisted
     // graph, and therefore graph_hash_at_run / freshness, is untouched).
+    // ⭐ MG F1 T6: an option the USER took out (`option_status`) leaves the submission first, and is named below.
+    const userStatus = userExcludedOptions({ options: snapshot.options, graph: snapshot.rawPersistedGraph ?? snapshot.graph });
     const gate = gateAnalysableOptions({
-      options: snapshot.options,
+      options: userStatus.options,
       graph: snapshot.graph,
       rawPersistedGraph: snapshot.rawPersistedGraph,
       // P1-1 (one scale convention): the egress scale net is UNCONDITIONAL
@@ -625,6 +628,24 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // `analysis_not_ready` is already in RECOVERABLE_HANDLER_CAUSES and its
     // composer renders `details.next_step` VERBATIM — so this needs no new
     // cause kind and no War-Room gate.
+    // ⭐ MG F1 T6: the user's own exclusions leave one option (or none): said in THEIR terms, never as "no values set".
+    if (userStatus.excluded.length > 0 && gate.excluded.length === 0 && gate.options.length < PLOT_MIN_COMPARISON_OPTIONS) {
+      const named = userStatus.excluded.map((e) => (e.label !== null ? `'${e.label}'` : 'an option')).join(', ');
+      throw new HandlerInvocationFailedError(
+        'The options the user took out leave too few to compare',
+        {
+          cause_kind: 'analysis_not_ready',
+          retryable: false,
+          details: {
+            handler_id: 'run_analysis',
+            scenario_id: args.scenario_id,
+            reason_code: 'insufficient_analysable_options',
+            next_step: `You've taken ${named} out of the comparison, and that leaves fewer than two options, so there's `
+              + `nothing to compare yet. Put one back, or add another option, and ask me to run the analysis again.`,
+          },
+        },
+      );
+    }
     if (gate.excluded.length > 0 && gate.options.length < PLOT_MIN_COMPARISON_OPTIONS) {
       const excludedLabel = firstUsableExcludedLabel(gate.excluded);
       throw new HandlerInvocationFailedError(
@@ -1208,6 +1229,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       wirePerOption: requestProjection.perOption as ReadonlyArray<Readonly<Record<string, number>>>,
       heldFactorIdsByOptionId: scaffoldedFactorIdsByOptionId,
       optionsNotSent: [
+        ...userStatus.excluded.map((e) => ({ option_id: e.option_id, label: e.label, reason: e.status })),
         ...gate.excluded.map((e) => ({ option_id: e.option_id, label: e.label, reason: 'not_analysable' as const })),
         ...olumiExcluded,
       ],
@@ -2710,7 +2732,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // ⭐ 52f8cd (DL 5924731600): the Olumi options this Run left out of the ordinary comparison, and why — stored with
         // the facts so the read and the turn carry the SAME record (`option-participation.ts`). ALWAYS written on a
         // completed Run, `[]` included (schemas 0.65; CODEX 5924967500): absent strictly means an older Run, not recorded.
-        option_participation: [...olumiFilter.participation],
+        option_participation: [
+          ...userStatus.excluded.map((e) => ({ option_id: e.option_id, state: PARTICIPATION_STATE_FOR[e.status] })),
+          ...olumiFilter.participation,
+        ],
         computed_at: runComputedAt,
         // SC-24 (schemas 0.68.0): the Run's execution identity and the input it was sent (3.9 above).
         run_id: runId,

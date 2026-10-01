@@ -58,6 +58,7 @@ import type { PatchOperation } from '../../orchestrator/types.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { identityConfirmBaseIsWritable, isEditableGraph, type EditableGraph } from './editable-graph.js';
 import { commitDirectAnswer } from '../commit.js';
+import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { buildOptionEffectRawOperation, linkedFactorsOf, formatOptionEffectWriteAck, readCommittedOptionEffect } from '../routing/option-effect-write.js';
@@ -645,6 +646,11 @@ export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactio
   readonly stage: OlumiResponse['stage_indicator'];
   /** Existing caller request digest: informational, NOT the idempotency key. */
   readonly requestHash: string;
+  /**
+   * B8 (DL CR 5934735711): let a turn-fence refusal escape (the Agent's in-process door only), so its
+   * `runFencedInProcessWrite` maps the verdict. The wire event keeps `commit_not_confirmed`.
+   */
+  readonly fenceRefusalReachesCaller?: boolean;
 };
 
 /**
@@ -893,7 +899,9 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       baseGraphForInvariants: before, ...computeExpectedGraphCasHashes(before),
       graph_hash: plan.analysisGraphHash, priorPendingActions: holds.threaded,
     }, store);
-  } catch {
+  } catch (err) {
+    // The fence refuses BEFORE the write (nothing saved): the in-process door's wrapper names the verdict.
+    if (input.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
     // A transport error need not prove rollback. No Applied response or claim
     // of "nothing changed" escapes; retry/readback must settle that question.
     return { kind: 'unverified', reason: 'commit_not_confirmed', commitAttempted: true };

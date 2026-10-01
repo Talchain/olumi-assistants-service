@@ -610,11 +610,21 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // the exact false claim the field exists to prevent.
       "analysis_participation",
       "category",
+      // MG F1, 1 Oct (schemas 0.69.0; spec §1 §3 §5 §5b) — THE VALUE-BEARING DECISION for six fields: NONE is
+      // value-bearing and none joins `carriesValue` (nor `NODE_QUANTITY_FIELDS`). `goal_period` (per what period) and
+      // `goal_horizon` (by when) are FRAMES, siblings of `goal_threshold_frame` / `goal_horizon_months`. `goal_stated_as`
+      // is the record of what the user SAID ({value, unit, period, quote}); the level it implies is written into
+      // `goal_threshold_raw` in the SAME write (G1), so the quote never stands alone as a level (sibling of
+      // `source_quote`). `option_status` is lifecycle (sibling of `analysis_participation`). `count_noun` names what a
+      // count counts, and `full_label` is identity (sibling of `label`). Joining any of them would let a frame, a quote
+      // or a name read as a figure.
+      "count_noun",
       "description",
       "display_value",
       "encoding_map",
       "extractionType",
       "factor_type",
+      "full_label",
       // G1, 27 Sep — THE VALUE-BEARING DECISION: `goal_direction` and `goal_horizon_months` are NOT value-bearing
       // and must NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). The direction is a comparator, never a
       // magnitude. The horizon IS a number the user stated, but it says WHEN, never HOW MUCH of the goal metric:
@@ -625,6 +635,7 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // same reason and more plainly: it is the brief's WORDS for when ("by Q3"), never a number of the goal metric.
       "goal_deadline_as_stated",
       "goal_direction",
+      "goal_horizon",
       "goal_horizon_months",
       // MG, 29 Sep (R3-B #72 5893233864, AIQ 5893340150 / 5893587951) — THE VALUE-BEARING DECISION: `goal_sense_reading`
       // is NOT value-bearing. It is Olumi's reading of the goal's SENSE (minimise) and the words that say so; its
@@ -633,7 +644,9 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // value-bearing. The level it reads is carried where every reader reads it, `observed_state` (raw_value/cap);
       // its `level` is a staleness key copied from that, and the rest is the brief's clause and Olumi's words.
       "goal_level_reading",
+      "goal_period",
       "goal_sense_reading",
+      "goal_stated_as",
       "goal_threshold",
       "goal_threshold_cap",
       "goal_threshold_cap_provenance",
@@ -658,6 +671,7 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // whose reading that is (`stated_in_brief`) — a statement about the model's form, never a magnitude.
       "nonlinear_identity",
       "observed_state",
+      "option_status",
       "prior",
       // MG #2295, 29 Sep (DL #72 5888551510) — THE VALUE-BEARING DECISION: `proposed_by` is NOT value-bearing and must
       // NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). It says WHO put the option forward (`'olumi'`, written

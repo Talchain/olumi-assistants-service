@@ -16,10 +16,14 @@ vi.mock('../../commit.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../commit.js')>()),
   commitDirectAnswer: mocks.commitDirectAnswer,
 }));
+// B8: the turn-fence claim the wrapper makes before the door writes (the store enforces the slot at commit).
+vi.mock('../../session/index.js', () => ({ getSessionStore: () => ({ claimTurnFence: async (scenarioId: string, turnId: string) => ({ scenarioId, turnId, generation: 7 }) }) }));
 
 import { computeExpectedGraphCasHashes } from '../../context/graph-cas-conflict.js';
 import { modelVersionMutationReceiptFromResponse, toModelVersionMutationReceiptV1 } from '../../model-management/mutation-receipt.js';
 import { applyOlumiOptionAdoption, commitOlumiOptionAdoptionInProcess } from '../olumi-option-adoption.js';
+import { TurnFenceRejectedError } from '../../session/turn-fence.js';
+import { runFencedInProcessWrite } from '../../../orchestrator/turn-fence-prehandler.js';
 
 const graph = () => ({
   nodes: [
@@ -157,3 +161,56 @@ describe('adoption commit receipt projection', () => {
     }
   });
 });
+
+/**
+ * ⛔ B8 (CODEX CR 5934133792 on #2456): a fence verdict through the REAL adoption door. The store refuses the write at
+ * commit (`commitDirectAnswer` throws `TurnFenceRejectedError`), so NOTHING was written. The door used to swallow it as
+ * `unconfirmed`, and the Agent then said "may have been saved" with `mutated: true`. It now reaches the fence wrapper with
+ * the route's own mappings: a conflict is `stale`, an infrastructure refusal is the typed `refused`. Both are outcomes the
+ * Agent reports as "nothing changed" (`agent-capabilities.ts`, the `res.status !== 'committed'` branch, `mutated: false`).
+ */
+describe('B8: a turn-fence verdict through the real adoption door', () => {
+  const SCENARIO = '550e8400-e29b-41d4-a716-446655440000';
+  const STALE = { status: 'stale' as const };
+  const REFUSED = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
+  const refusal = (verdict: 'superseded' | 'stopped' | 'unclaimed' | 'unavailable') =>
+    new TurnFenceRejectedError(`fence ${verdict}`, { verdict, generation: 7, maxGeneration: 8 } as never);
+  beforeEach(() => {
+    mocks.loadPersistedGraphStrict.mockReset();
+    mocks.loadMostRecentPendingActionsIntegrityStrict.mockReset();
+    mocks.commitDirectAnswer.mockReset();
+  });
+  const arm = (verdict: Parameters<typeof refusal>[0]) => {
+    const before = graph();
+    mocks.loadPersistedGraphStrict.mockResolvedValue(before);
+    mocks.loadMostRecentPendingActionsIntegrityStrict.mockResolvedValue([]);
+    mocks.commitDirectAnswer.mockRejectedValue(refusal(verdict));
+    return { scenario_id: SCENARIO, turn_id: 'adopt-turn', ...input(before) };
+  };
+
+  it.each(['superseded', 'stopped', 'unclaimed', 'unavailable'] as const)('RED: the door lets a %s verdict out — never "unconfirmed"', async (verdict) => {
+    await expect(commitOlumiOptionAdoptionInProcess(arm(verdict), 'test-request')).rejects.toBeInstanceOf(TurnFenceRejectedError);
+    expect(mocks.commitDirectAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['superseded', 'stopped'] as const)('RED (door + wrapper, the route\'s mappings): %s → stale, nothing written', async (verdict) => {
+    const req = arm(verdict);
+    const out = await runFencedInProcessWrite(SCENARIO, 'adopt-turn', () => commitOlumiOptionAdoptionInProcess(req, 'test-request'), () => STALE, REFUSED);
+    expect(out).toEqual(STALE);
+  });
+
+  it.each(['unclaimed', 'unavailable'] as const)('RED (door + wrapper): %s → the typed refusal, nothing written', async (verdict) => {
+    const req = arm(verdict);
+    const out = await runFencedInProcessWrite(SCENARIO, 'adopt-turn', () => commitOlumiOptionAdoptionInProcess(req, 'test-request'), () => STALE, REFUSED);
+    expect(out).toEqual(REFUSED(verdict));
+  });
+
+  it('CONTROL: an ordinary commit failure is still "unconfirmed" (only fence verdicts changed)', async () => {
+    const before = graph();
+    mocks.loadPersistedGraphStrict.mockResolvedValue(before);
+    mocks.loadMostRecentPendingActionsIntegrityStrict.mockResolvedValue([]);
+    mocks.commitDirectAnswer.mockRejectedValue(new Error('network'));
+    expect(await commitOlumiOptionAdoptionInProcess({ scenario_id: SCENARIO, turn_id: 'adopt-turn', ...input(before) }, 'test-request')).toEqual({ status: 'unconfirmed' });
+  });
+});
+

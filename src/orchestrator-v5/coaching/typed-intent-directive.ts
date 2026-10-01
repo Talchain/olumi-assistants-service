@@ -106,7 +106,7 @@
  * (frame/analyse/decide/review) are different sets and that "no mapping
  * between them is defined anywhere in this estate". THAT CLAIM IS FALSE — a
  * mapping exists and is live: `mapStageToDecisionStage`
- * (`handlers/edit-graph-dispatch.ts:754-767`) maps
+ * (now `dsk/stage-edge.ts`; it was private in `handlers/edit-graph-dispatch.ts`) maps
  * `frame→frame, analyse→evaluate, decide→decide, review→optimise`. It was
  * missed because it is a PRIVATE function with exactly ONE caller
  * (`:1944`), invisible to a symbol sweep for the vocabularies themselves.
@@ -116,9 +116,10 @@
  *
  * The BEHAVIOUR still uses exact-token matching, now as a deliberate choice
  * with a named cost rather than a claim of necessity:
- *   - Reusing `mapStageToDecisionStage` would require EXPORTING it from
- *     `edit-graph-dispatch.ts`, which is under a live three-way conflict
- *     (#1029/#1007/#987). This lane does not touch it.
+ *   - `mapStageToDecisionStage` is now exported from `dsk/stage-edge.ts`
+ *     (moved there for the agent-lane science context, SCIENCE/DSK 1 Oct).
+ *     This route-v2 arm deliberately still does not use it: switching would
+ *     change which turns cite a protocol here, a separate route-v2 change.
  *   - Copying the map here would be a second authority for one question —
  *     the genuine trap-12 mirror, and the thing that later drifts.
  *   - Exact-token matching agrees with the live map on every cell either can
@@ -127,8 +128,8 @@
  *     the live map would send to `evaluate` (in DSK-P-003's applicability)
  *     and which this arm instead leaves uncited. It UNDER-serves, never
  *     over-claims — a missing badge, never a wrong one.
- * Whoever exports the shared mapper should delete the exact-token gate and
- * that test together.
+ * Moving this arm onto the shared mapper means deleting the exact-token gate
+ * and that test together.
  *
  * ⭐ AND THE REACHABILITY QUESTION, DERIVED RATHER THAN ASSUMED. ROADMAP 2.616
  * records DSK-P-004 as blocked because "no live stage maps to `ideate`". That
@@ -537,25 +538,7 @@ export function buildCoachingMethodDirective(
     ...spec.method.map(step => `- ${step}`),
   ];
 
-  if (protocol !== null) {
-    const outputs = (protocol.expected_outputs ?? []).filter(o => typeof o === 'string' && o.length > 0);
-    lines.push(
-      '',
-      `This is the published "${protocol.title}" protocol. Produce what it expects: ${outputs.join('; ')}.`,
-    );
-    const steps = literalProtocolSteps(protocol);
-    if (steps.length > 0) {
-      lines.push(
-        '',
-        // "as written" is the point. These are the authored exercise questions
-        // from the published protocol; a paraphrase is what the model would
-        // produce anyway, and is precisely what citing the protocol is meant to
-        // replace.
-        'The protocol asks these, in order. Put them to the user as written rather than paraphrasing them:',
-        ...steps.map(step => `- ${step}`),
-      );
-    }
-  }
+  if (protocol !== null) lines.push(...protocolDirectiveLines(protocol, { askSteps: true }));
 
   lines.push(
     '',
@@ -566,6 +549,44 @@ export function buildCoachingMethodDirective(
     directive: lines.join('\n'),
     dskProtocolId: protocol === null ? null : protocol.id,
   };
+}
+
+/**
+ * The protocol block of a method directive: the published protocol's title and
+ * expected outputs, then (with `askSteps`) its literal steps to put to the user
+ * as written. `buildCoachingMethodDirective` appends exactly these lines, so its
+ * output is unchanged (`typed-coaching-intent-wire.test.ts` pins the bytes).
+ *
+ * Exported for the agent-lane science context
+ * (`agent-lane/science/method-science-context.ts`), which adjudicates WHICH
+ * protocol applies on typed signals and reuses this composition rather than
+ * restating it. `askSteps: false` is for a method whose contract already
+ * carries the steps in its own shape (the pre-mortem's "Watch for:" /
+ * "Mitigate:" stories), where asking them again would double them.
+ */
+export function protocolDirectiveLines(
+  protocol: DSKProtocol,
+  opts: { readonly askSteps: boolean },
+): string[] {
+  const outputs = (protocol.expected_outputs ?? []).filter(o => typeof o === 'string' && o.length > 0);
+  const lines: string[] = [
+    '',
+    `This is the published "${protocol.title}" protocol. Produce what it expects: ${outputs.join('; ')}.`,
+  ];
+  if (!opts.askSteps) return lines;
+  const steps = literalProtocolSteps(protocol);
+  if (steps.length > 0) {
+    lines.push(
+      '',
+      // "as written" is the point. These are the authored exercise questions
+      // from the published protocol; a paraphrase is what the model would
+      // produce anyway, and is precisely what citing the protocol is meant to
+      // replace.
+      'The protocol asks these, in order. Put them to the user as written rather than paraphrasing them:',
+      ...steps.map(step => `- ${step}`),
+    );
+  }
+  return lines;
 }
 
 /**
