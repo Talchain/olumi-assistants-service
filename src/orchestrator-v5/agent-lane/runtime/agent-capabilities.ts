@@ -83,6 +83,19 @@ const NOT_THE_USERS_FIGURE_NOTE =
   'The user did not write these figures, so they are proposed as Olumi\u2019s estimates, not as the user\u2019s own. '
   + 'Say so plainly; never call a figure the user\u2019s unless they wrote it.';
 
+/** What the Agent says about a keep proposal (52f8cd, lease #75 5925744661): the figure is unchanged and stays Olumi's. */
+const KEEP_NOTE =
+  'This keeps Olumi\u2019s current figure exactly as it is and, once the user approves, records that they accepted it. It stays '
+  + 'Olumi\u2019s estimate: never call it the user\u2019s own figure or a measurement, and never say it changed. Show the figure '
+  + 'and ask them to approve; until they do, nothing is recorded.';
+
+/** Why a figure was not offered for keeping: only Olumi's own estimate can be accepted (`heldFigureOwner`). */
+const NOT_KEEPABLE_NOTE =
+  'These were not offered for keeping. `yours`: it is already the user\u2019s own figure. `brief`: it came from the user\u2019s '
+  + 'brief. `already_accepted`: the user has already accepted Olumi\u2019s estimate. `no_figure`: the factor holds no figure '
+  + 'to keep. `not_exact`: Olumi could not record it without changing the figure, so it was left as it is. Say which applies '
+  + 'in plain words; never offer a card for them.';
+
 /** Why a level the user never wrote is left unset (`stated-by-user.ts`). */
 const notWrittenReason = (value: number, factor: string): string =>
   `${value} is not a figure the user gave for ${factor}, so this change leaves that level unset. Say plainly it has no level yet, `
@@ -165,8 +178,9 @@ import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
-import { figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
+import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
+import { normaliseFactorValue } from '../../tools/handlers/d1-shared/normalise-factor-value.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
 import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEvaluatedIdentityNodeIds } from '../admit-model.js';
@@ -766,6 +780,20 @@ const ADOPTED_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumpt
  * model still holds with ITS owner, read from the stored node (the refused write changed nothing). The words are
  * `write-outcome.ts`'s.
  */
+/**
+ * WHOSE IS THE FIGURE THE MODEL HOLDS for this node — ONE rule for every sentence and gate that names an owner (the
+ * not-saved words, and the `keep` door that only Olumi's own figure may pass). `undefined` when the node holds no figure.
+ * Whose figure it is (AIQ 5924240860 (1)): a source that DEFERS (`brief_extraction`, `cee_inference`) is decided by its
+ * `extractionType`, so a figure read from the user's brief is never said as Olumi's.
+ */
+function heldFigureOwner(node: { observed_state?: unknown; extractionType?: unknown } | undefined): NonNullable<NotSavedValue['still']>['owner'] | undefined {
+  const os = (node?.observed_state ?? undefined) as Record<string, unknown> | undefined;
+  if (os === undefined || os === null) return undefined;
+  if (isAcceptedOlumiEstimate(os)) return 'olumi_accepted';
+  const display = observedValueAuthorship(os)?.provenance ?? nodeProvenanceDisplay(os.extractionType ?? node?.extractionType);
+  return display === 'user_set' ? 'yours' : display === 'from_brief' ? 'brief' : 'olumi';
+}
+
 function valuesNotSaved(
   valueOps: readonly ProposalOperation[], parent: StructuredProposal, read: GraphRead | null, labelOf: (id: string) => string,
 ): NotSavedValue[] {
@@ -784,14 +812,7 @@ function valuesNotSaved(
     const native = nativeStartingValue(os);
     const held = native !== undefined && typeof os?.raw_value !== 'number' && !(typeof os?.cap === 'number' && os.cap > 0)
       && isPercentScaledUnit(unit) && Math.abs(native) <= 1 ? native * 100 : native;
-    // Whose figure it is (AIQ 5924240860 (1)): a source that DEFERS (`brief_extraction`, `cee_inference`) is decided by its
-    // `extractionType`, so a figure read from the user's brief is never said as Olumi's.
-    const display = os === undefined ? undefined
-      : observedValueAuthorship(os)?.provenance
-        ?? nodeProvenanceDisplay(os.extractionType ?? (node as { extractionType?: unknown } | undefined)?.extractionType);
-    const owner: NonNullable<NotSavedValue['still']>['owner'] | undefined = os === undefined ? undefined
-      : isAcceptedOlumiEstimate(os) ? 'olumi_accepted'
-        : display === 'user_set' ? 'yours' : display === 'from_brief' ? 'brief' : 'olumi';
+    const owner = heldFigureOwner(node);
     return {
       label: node?.label ?? labelOf(o.path), value: Number(v.value), unit: proposedUnit,
       yours: valueOpAuthor(o, parent) === 'user_stated',
@@ -993,6 +1014,38 @@ function nativeStartingValue(os: { value?: unknown; raw_value?: unknown; cap?: u
   const model = typeof os?.value === 'number' ? os.value : undefined;
   const cap = typeof os?.cap === 'number' && os.cap > 0 ? os.cap : undefined;
   return typeof os?.raw_value === 'number' ? os.raw_value : model !== undefined && cap !== undefined ? model * cap : model;
+}
+
+/**
+ * ⛔ THE FIGURE A KEEP SENDS IS THE ONE THE WRITER STORES AS *EXACTLY* WHAT THE MODEL HOLDS NOW (CODEX CEE BUDDY 5925977983).
+ * `nativeStartingValue` reads `observed_state` only: on a factor framed by its node `scale_frame` (value 0.1, frame 40, no
+ * raw) it gave 0.1, the card said "0.1 hours/week", and the writer stored 0.0025 — the "unchanged" figure moved fortyfold.
+ * So the candidates (raw; value × cap; value × scale_frame; value × 100 on a percent unit; the bare value) are each run
+ * through the WRITER'S OWN normaliser with the inputs the writer gives it, and the first that reproduces the stored value
+ * (and raw, when one is stored) is the figure. None → `undefined`, and nothing is offered: never an inverse done by hand.
+ */
+function keptFigureFor(node: { scale_frame?: unknown; observed_state?: unknown }, unit: string): number | undefined {
+  const os = (node.observed_state ?? undefined) as { value?: unknown; raw_value?: unknown; cap?: unknown; unit?: unknown } | undefined;
+  if (typeof os?.value !== 'number' || !Number.isFinite(os.value)) return undefined;
+  const value = os.value;
+  const raw = typeof os.raw_value === 'number' ? os.raw_value : undefined;
+  const cap = typeof os.cap === 'number' && os.cap > 0 ? os.cap : undefined;
+  const frame = typeof node.scale_frame === 'number' ? node.scale_frame : undefined;
+  const candidates = [raw, cap !== undefined ? value * cap : undefined, frame !== undefined ? value * frame : undefined,
+    isPercentScaledUnit(unit) && Math.abs(value) <= 1 ? value * 100 : undefined, value]
+    .filter((c): c is number => typeof c === 'number' && Number.isFinite(c));
+  for (const c of candidates) {
+    try {
+      const n = normaliseFactorValue({
+        rawInput: c, ...(unit !== '' ? { unit } : {}),
+        ...(cap !== undefined ? { factorCap: cap } : {}), ...(typeof os.unit === 'string' ? { factorUnit: os.unit } : {}),
+        factorObservedValue: value, ...(raw !== undefined ? { factorObservedRawValue: raw } : {}),
+        ...(frame !== undefined ? { factorScaleFrame: frame } : {}), inputHasUnit: unit !== '',
+      });
+      if (n.value === value && (raw === undefined || n.raw_value === raw)) return c;
+    } catch { /* a figure the writer would refuse is no figure to keep */ }
+  }
+  return undefined;
 }
 
 /**
@@ -3421,7 +3474,8 @@ export function createAgentCapabilities(
       const scaleAmbiguous: { label: string; value: number; as_percent: number; as_share: number }[] = [];
       const directionConflict: { label: string }[] = [];
       const seen = new Set<string>();
-      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; asPercent?: true }[] = [];
+      const adopted: { id: string; label: string; value: number; unit: string; basis: string; replaces?: number; userWrote: boolean; quote?: string; asPercent?: true; kept?: true }[] = [];
+      const notKeepable: { label: string; why: 'no_figure' | 'not_exact' | 'yours' | 'brief' | 'already_accepted' }[] = [];
 
       for (const given of input) {
         let a = given;
@@ -3435,6 +3489,31 @@ export function createAgentCapabilities(
         }
         if (res.kind === 'other') { notAFactor.push({ label: res.node.label, kind: String(res.node.kind) }); continue; }
         const node = res.node;
+        /**
+         * ⭐ KEEP OLUMI'S ESTIMATE (52f8cd, lease #75 5925744661). Served `b47db0b5`, guest `9390a1b4`: Examine → "4 hours a
+         * week is about right for me. Keep it." → "no change is needed", no card, nothing recorded; on a model the draft
+         * filled, nothing else could record it either (adoption fills only blanks). `keep` is that act. The figure is the
+         * one STORED, never the model's argument; it stays Olumi's, and the approval records the user's acceptance with the
+         * adoption marker the writer already stamps (`user_assumption` + `reviewed_by_user`). Only Olumi's OWN figure may
+         * pass (`heldFigureOwner`): the user's, the brief's, or one already accepted is not Olumi's to accept.
+         */
+        if (a?.keep === true) {
+          const os = (node.observed_state ?? undefined) as Record<string, unknown> | undefined;
+          const keptUnit = typeof os?.unit === 'string' ? os.unit : String(factorUnitOf(g.raw, node) ?? '');
+          const held = keptFigureFor(node as never, keptUnit);
+          const owner = heldFigureOwner(node);
+          if (typeof held !== 'number' || owner !== 'olumi') {
+            const holdsValue = typeof os?.value === 'number';
+            notKeepable.push({ label: node.label, why: owner === undefined || !holdsValue ? 'no_figure'
+              : owner === 'olumi_accepted' ? 'already_accepted' : owner === 'olumi' ? 'not_exact' : owner });
+            continue;
+          }
+          if (seen.has(node.id)) continue;
+          seen.add(node.id);
+          adopted.push({ id: node.id, label: node.label, value: held, unit: keptUnit,
+            basis: String(a?.basis ?? ''), userWrote: false, kept: true });
+          continue;
+        }
         // ⛔ A figure in another kind of unit is never this factor's value (`unit-conflict.ts`): left out, and said.
         const nodeUnit = factorUnitOf(g.raw, node);
         if (unitsConflict(a?.unit, nodeUnit) !== null) {
@@ -3542,9 +3621,17 @@ export function createAgentCapabilities(
         });
       }
 
+      // ⛔ A keep is its own approval: "accept Olumi's estimate" and "change this figure" are different acts, and one card
+      // saying both would let one Yes stand for either. The Agent proposes them in separate calls.
+      if (adopted.some((x) => x.kept) && adopted.some((x) => !x.kept)) {
+        return { ok: false, mutated: false, refusal: 'keep_with_other_changes',
+          detail: 'Keeping Olumi\u2019s estimate is its own approval. Nothing was proposed: propose the figures to keep in one call '
+            + 'and any other values in another.' };
+      }
       if (adopted.length === 0) {
         return {
           ok: false, mutated: false, refusal: 'nothing_to_adopt',
+          ...(notKeepable.length > 0 ? { not_keepable: notKeepable, not_keepable_note: NOT_KEEPABLE_NOTE } : {}),
           unresolved_labels: unresolved, already_valued: occupied,
           ...(notAFactor.length > 0 ? { not_a_factor: notAFactor } : {}),
           ...(ambiguous.length > 0 ? { ambiguous_targets: ambiguous, ambiguous_note: AMBIGUOUS_NOTE } : {}),
@@ -3582,16 +3669,21 @@ export function createAgentCapabilities(
       const said = (value: number, unit: string) => sayFigureExactly(value, unit) ?? `${value}${unit !== '' ? ' ' + unit : ''}`;
       const withUnit = (a: { value: number; unit: string }) => said(a.value, a.unit);
       const pct = (v: number): string => `${Number((v * 100).toPrecision(6))}%`;
-      const describe = (a: { label: string; value: number; unit: string; replaces?: number; quote?: string; asPercent?: true }) =>
-        typeof a.replaces === 'number'
+      const describe = (a: { label: string; value: number; unit: string; replaces?: number; quote?: string; asPercent?: true; kept?: true }) =>
+        a.kept ? `${a.label} = ${sayFigureRead(a.value, a.unit)}`
+        : typeof a.replaces === 'number'
           // The replaced figure is not written: an inexact one is said "about", rounded (DL #2227 follow-up A). A pairing the
           // approval confirms is shown with the user's own sentence (above), in the units they wrote.
           ? a.quote !== undefined
             ? `${a.label}: ${a.asPercent ? `${pct(a.replaces)} \u2192 ${pct(a.value)}` : `${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`} (your figure, in your words: "${a.quote}")`
             : `${a.label}: ${sayFigureRead(a.replaces, a.unit)} \u2192 ${withUnit(a)}`
           : `${a.label} = ${withUnit(a)}`;
+      const kept = ordered.filter((a) => a.kept);
       const heading =
-        revisions.length === 0
+        kept.length > 0
+          // The figure is unchanged and stays Olumi's; what the Yes records is the user's acceptance (AIQ words).
+          ? `Accept Olumi\u2019s estimate${kept.length === 1 ? '' : 's'}, unchanged: `
+          : revisions.length === 0
           ? `Adopt ${fresh.length} starting assumption${fresh.length === 1 ? '' : 's'}: `
           : fresh.length === 0
             ? `Revise ${revisions.length} value${revisions.length === 1 ? '' : 's'} you asked to change: `
@@ -3606,7 +3698,9 @@ export function createAgentCapabilities(
           // made entirely of those may claim it.
           authored_by: fresh.length === 0 && revisions.length > 0 && notWritten.length === 0 ? 'user_stated' : 'model_proposed',
           basis:
-            revisions.length > 0 && fresh.length === 0 && notWritten.length === 0
+            kept.length > 0
+              ? KEEP_PROPOSAL_BASIS
+              : revisions.length > 0 && fresh.length === 0 && notWritten.length === 0
               ? 'values the user asked to change, at the figures they gave'
               : 'starting assumptions offered for the user to adopt or correct',
         },
@@ -3627,7 +3721,9 @@ export function createAgentCapabilities(
           factor: a.label, value: a.value, unit: a.unit, basis: a.basis,
           ...(typeof a.replaces === 'number' ? { replaces: a.replaces } : {}),
           ...(usersOwn(a) ? { your_figure: true } : {}),
+          ...(a.kept ? { keeps_olumis_estimate: true } : {}),
         })),
+        ...(notKeepable.length > 0 ? { not_keepable: notKeepable, not_keepable_note: NOT_KEEPABLE_NOTE } : {}),
         ...(unresolved.length > 0 ? { unresolved_labels: unresolved } : {}),
         ...(occupied.length > 0 ? { left_alone_already_valued: occupied } : {}),
         // Named, but not something a value can be set on (a risk, an outcome, an option): left out,
@@ -3643,7 +3739,7 @@ export function createAgentCapabilities(
         } : {}),
         // ⛔ Served e25d0aa (29 Sep): one note for every value made the Agent call the user's own "3.7%" churn "a model
         // assumption … not a measurement", though it is stored as theirs. The words follow `usersOwn`, value by value.
-        note: proposalNoteFor(ordered.filter(usersOwn).length, ordered.length),
+        note: kept.length > 0 ? KEEP_NOTE : proposalNoteFor(ordered.filter(usersOwn).length, ordered.length),
       };
     },
 
@@ -3681,6 +3777,13 @@ export function createAgentCapabilities(
       const levels = Array.isArray(args?.option_levels) ? args.option_levels : [];
       if (assumptions.length === 0 && levels.length === 0) {
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: `Nothing was proposed.${EMPTY_PROPOSAL_WORDS}` };
+      }
+      // ⛔ A keep is its own approval (`keep_with_other_changes`, CODEX CEE BUDDY 5925846990): never folded into a starting
+      // point's one Yes, whose card would call Olumi's kept figure a starting assumption.
+      if (assumptions.some((x) => (x as { keep?: unknown } | null)?.keep === true)) {
+        return { ok: false, mutated: false, refusal: 'keep_with_other_changes',
+          detail: 'Keeping Olumi\u2019s estimate is its own approval. Nothing was proposed: use propose_assumptions with keep for it, '
+            + 'and propose the starting point without it.' };
       }
       const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
       // What THIS starting point would make each factor's starting value — read off the stored

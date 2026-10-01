@@ -242,7 +242,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       // PTL decision #78 5921683490 (AIQ ruling #75 5921113788): the Agent once scripted "Set Warm introductions to 2 per
       // month" for the user to type — stored as the user's own override and shown "Set by you", laundering Olumi's figure.
       'When the user asks to revise an existing value without supplying a replacement figure, ask what figure they ' +
-      'would use; never supply a number or an instruction for them to repeat as their own.',
+      'would use; never supply a number or an instruction for them to repeat as their own. ' +
+      'When the user says Olumi\u2019s current estimate for a factor is right and should stay, set `keep: true` on it ' +
+      'instead: nothing changes, and their approval records that they accepted Olumi\u2019s estimate.',
     parameters: obj({
       assumptions: {
         type: 'array',
@@ -258,6 +260,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'Set true ONLY when the user has just asked for this factor to be changed and gave the ' +
               'number. It permits replacing a value that is already there; the approval will show the ' +
               'user both the current value and the new one. Omit it in every other case.',
+          },
+          keep: {
+            type: 'boolean',
+            description:
+              'Set true ONLY when the user has just said Olumi\u2019s CURRENT figure for this factor is right and should ' +
+              'stay. The stored figure is kept exactly (give it as value); it stays Olumi\u2019s estimate and the approval ' +
+              'records that the user accepted it. Never on the user\u2019s own figure or one from their brief, never with a ' +
+              'different number, and never in the same call as other values. Omit it in every other case.',
           },
         }, ['factor_label', 'value', 'unit', 'basis']),
       },
@@ -772,7 +782,7 @@ export interface AgentCapabilities {
   buildModelFromBrief(ctx: AgentToolContext, args: { brief: string }): Promise<ToolResult>;
   proposeAssumptions(ctx: AgentToolContext, args: {
     // `revise` is in the tool's schema (above) and read by the capability (`a?.revise === true`); the type now says so.
-    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean }[];
+    assumptions: readonly { factor_label: string; value: number; unit: string; basis: string; revise?: boolean; keep?: boolean }[];
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label?: string; acts_on?: NewOptionActsOn[]; rationale: string;
