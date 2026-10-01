@@ -16,17 +16,17 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
 };
 
 describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
-  it('imports all 35 cases and all 18 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(18);
+  it('imports all 35 cases and all 20 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(20);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('d18ddf35d0c9290ba342c0ffaa264f095026baa1');
+    expect(SPEC_SHA).toBe('41b36299ff754a41f0e8a4685342eb069dc865c3');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('d38c4688474e982e3c682ffb12537db969ec8468ad34e3a64db4329ed2023401');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('42f6dd7b96a9e64a033e656697b013f7ae79ca1147da1022dec6c47d9bc10cb7');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('772d309fbf9eca166b8d3d98f452256ad80d961388d412625b24c1515d841f3f');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('cd8a41074a90d66776ac9af4c743f2dec5cbbb1609d8e7e4cf2ef172c86a8846');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });
@@ -169,6 +169,14 @@ describe('discriminating controls for selector and rendering', () => {
     expect(() => renderCopy({ policy_id: 'RC-WIDEN', variant: 'W6' }, state)).not.toThrow();
     for (const row of rowsOf(state).rows) for (const field of Object.values(row.copy)) expect(field ?? '').not.toMatch(/\{|null/u);
   });
+  it('W7 and W2Z with a null goal label: null copy fields, never a throw (note 3 guard)', () => {
+    const state = { ...stateOf('A-PREMORTEM-LICENSED'), 'model.goal_label': null };
+    // The field whose template names {goal_label} is null; the rest render (W7: title; W2Z: question).
+    for (const [variant, field] of [['W7', 'title'], ['W2Z', 'question']] as const) {
+      expect(() => renderCopy({ policy_id: 'RC-WIDEN', variant }, state)).not.toThrow();
+      expect(renderCopy({ policy_id: 'RC-WIDEN', variant }, state)[field]).toBeNull();
+    }
+  });
   it('a user label is inserted verbatim: braces in it neither blank the copy nor pull in another field', () => {
     const state = stateOf('A-PREMORTEM-LICENSED');
     const plan = state['run.leader_option_id']!;
@@ -226,6 +234,15 @@ describe('all deterministic text post-check ids, including methods without vendo
     const rx = { change_labels: ['Churn rose to plan'], attribution_case: 'C2_unpaired' as const, prior_withheld: true, current_option_labels: ['Best-of-breed vendor'], leader_licensed: false };
     expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor is one option.', rx)).toEqual({ pass: true, failed: [], targets: [] });
     expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor wins and churn rose.', rx).failed.sort()).toEqual(['RX-NO-LEADER-UNLICENSED', 'RX-NO-MOVEMENT-WITHOUT-PRIOR']);
+  });
+  it('masking and label matching are WHOLE-TOKEN: short labels never hide Olumi\u2019s own words (HARNESS #2478 P1 probes)', () => {
+    const go = { current_option_labels: ['Go', 'No go'], model_labels: ['Go', 'No go'] };
+    expect(checkMethodTurn('RC-PREMORTEM', 'The launch is going to fail.', go).failed).toContain('PM-NO-PREDICTION');
+    expect(checkMethodTurn('RC-PREMORTEM', 'There is a high probability of this.', { current_option_labels: ['A'], model_labels: ['A'] }).failed).toContain('PM-NO-PROB');
+    const lead = { current_option_labels: ['Raise price'], model_labels: ['Lead', 'Raise price'], leader_licensed: false };
+    expect(checkMethodTurn('RERUN-EXPLANATION', '\u2018Raise price\u2019 now leads.', lead).failed).toContain('RX-NO-LEADER-UNLICENSED');
+    // Control: the whole label is still masked.
+    expect(checkMethodTurn('RERUN-EXPLANATION', '\u2018Raise price\u2019 changes Lead.', lead).failed).not.toContain('RX-NO-LEADER-UNLICENSED');
   });
   it('Coach edits requires the stale line only for a stale run', () => {
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);

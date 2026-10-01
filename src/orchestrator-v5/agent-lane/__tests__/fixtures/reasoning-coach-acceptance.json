@@ -6806,6 +6806,165 @@
    "note": "Discriminating pair with MT-RERUN-MODEL-LABEL-GOOD: Olumi saying an option leads, unlicensed, still fails."
   },
   {
+   "id": "MT-PREMORTEM-SHORT-LABEL-GOOD",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3) with options labelled A / B",
+   "inputs": {
+    "plan_label": "A",
+    "current_option_labels": [
+     "A",
+     "B"
+    ],
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": [],
+    "model_labels": [
+     "A",
+     "B"
+    ]
+   },
+   "reply": "1. It is a year later and ‘Switch to GCP’ went badly because a bigger GCP workload share early on drove monthly cloud overspend during migration for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled halfway. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\nOutside the model: what could blindside this move that none of these figures covers, such as a key engineer leaving or a contract you can't exit?",
+   "expect": "pass",
+   "expect_targets": [
+    "gcp_workload_share->monthly_cloud_overspend_during_migration",
+    "migration_preparation_effort"
+   ],
+   "note": "Options labelled 'A' / 'B' (realistic): masking and label matching are WHOLE-TOKEN, so the label 'B' is not found inside other words (HARNESS #2478 P1)."
+  },
+  {
+   "id": "MT-PREMORTEM-SHORT-LABEL-BAD",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3) with options labelled A / B",
+   "inputs": {
+    "plan_label": "A",
+    "current_option_labels": [
+     "A",
+     "B"
+    ],
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": [],
+    "model_labels": [
+     "A",
+     "B"
+    ]
+   },
+   "reply": "1. It is a year later and ‘Switch to GCP’ went badly because a bigger GCP workload share early on drove monthly cloud overspend during migration for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled halfway. There is a high probability of this. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\nOutside the model: what could blindside this move that none of these figures covers, such as a key engineer leaving or a contract you can't exit?",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-NO-PROB"
+   ],
+   "expect_targets": [
+    "gcp_workload_share->monthly_cloud_overspend_during_migration",
+    "migration_preparation_effort"
+   ],
+   "note": "Discriminating pair: substring masking of the label 'A' blanked the 'a' inside 'probability' and passed Olumi's own claim (HARNESS #2478 P1 probe)."
+  },
+  {
    "id": "MT-PREMORTEM-BAD-UNGROUNDED",
    "policy_id": "RC-PREMORTEM",
    "grounded_on": "A-PREMORTEM-LICENSED (D3)",
