@@ -185,6 +185,7 @@ import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
+import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import type { NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
@@ -735,9 +736,10 @@ function valuesNotSaved(valueOps: readonly ProposalOperation[], parent: Structur
     const node = read.nodes.find((n) => n.id === o.path);
     const os = (node?.observed_state ?? undefined) as Record<string, unknown> | undefined;
     const unit = typeof os?.unit === 'string' ? os.unit : '';
-    // The figure in the user's units: `raw_value` when stored; a bare 0–1 share of a % factor is said as a percentage.
+    // The figure in the user's units: `raw_value` when stored; a bare 0–1 share of a % factor (the one scale authority,
+    // `isPercentScaledUnit`) is said as a percentage.
     const held = typeof os?.raw_value === 'number' ? os.raw_value
-      : typeof os?.value === 'number' ? (unit === '%' && Math.abs(os.value) <= 1 ? os.value * 100 : os.value) : undefined;
+      : typeof os?.value === 'number' ? (isPercentScaledUnit(unit) && Math.abs(os.value) <= 1 ? os.value * 100 : os.value) : undefined;
     const owner: NonNullable<NotSavedValue['still']>['owner'] | undefined = os === undefined ? undefined
       : isAcceptedOlumiEstimate(os) ? 'olumi_accepted'
         : observedValueAuthorship(os)?.provenance === 'user_set' ? 'yours' : 'olumi';

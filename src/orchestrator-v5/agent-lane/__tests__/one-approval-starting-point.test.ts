@@ -305,7 +305,8 @@ describe('propose_starting_point', () => {
     const { caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
     const out = await caps.authoriseChange(ctx, { proposal_id: id });
     expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status)
-      .toBe('Not saved: the starting value. Not saved: none of the 2 option levels.');
+      // AIQ 5924015300 (52f8cd): the value not saved is NAMED with its owner, and what the model still holds is said.
+      .toBe('Olumi\u2019s suggested 40 index points (0-100) for \u201cCoordination load\u201d wasn\u2019t saved. The model still has no figure for it. Not saved: none of the 2 option levels.');
   });
 
   /**
