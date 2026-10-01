@@ -16,7 +16,7 @@
  * Words with no unit to say them in are never improvised: no ask.
  */
 
-import { sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { unitOf } from '../../cee/magnitude/link-effect.js';
 import { CURRENCY_SYMBOL_TO_CODE, isCurrencyUnit } from '../../utils/currency-alphabet.js';
 
@@ -131,7 +131,7 @@ export function linkSizeAsk(graph: unknown, ctx: LinkSizeAskContext): string | n
   const link = namedLink(graph, ctx.message);
   if (link === null) return null;
   const { edge, source, target, nodes } = link;
-  if (usersOwnLink(edge) || sizedLinkTest(nodes)(edge)) return null;
+  if (usersOwnLink(edge) || sizedLinkTest(nodes, limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints))(edge)) return null;
   const direction = directionOf(edge);
   if (direction === null) return null;
   const s = labelOf(source); const t = labelOf(target);

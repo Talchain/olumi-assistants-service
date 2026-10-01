@@ -166,7 +166,7 @@ describe('(a) Paul’s captured edge (17d1cd3a): the user writes the exact figur
 // ─────────────────────────────────────────────────────────────────────────────
 // (b) CONTRAST — a band write
 // ─────────────────────────────────────────────────────────────────────────────
-describe('(b) CONTRAST: a band the user named keeps the band’s spread and is NOT flagged', () => {
+describe('(b) CONTRAST: a band the user named — a set stores the band’s spread and is NOT flagged; a confirm keeps it all', () => {
   it('⭐ the Agent’s "very strong" (band set): std is the band’s, no `std_defaulted`', async () => {
     const edge = persistedEdge(await applyStated(paulGraph(), eventFor(), 'very strong'));
     expect(edge.strength).toStrictEqual({ mean: USER_FIGURE, std: edgeBandStd('very strong') });
@@ -191,7 +191,10 @@ describe('(b) CONTRAST: a band the user named keeps the band’s spread and is N
   // R11 (AIQ #72 5872082179): a confirm is REVIEW, not authorship, so it keeps every authorship flag exactly — the
   // band's spread is stored (A6f/A6e) and the band recorded in `reviewed_by_user`. Before R11 this row pinned the flag
   // CLEARED on a band confirm.
-  it('the Agent’s band CONFIRM (mean kept): band std, flag KEPT (R11), band recorded, admitted by the confirm guard', async () => {
+  // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): this row used to pin std → the band's spread on a confirm
+  // that keeps the mean. A no-change confirm is byte-equal for every author and door; only a band that MOVES the link
+  // (a `set`, above) stores the band's spread.
+  it('the Agent’s band CONFIRM (mean kept): std KEPT byte-equal (#2473), flag KEPT (R11), band recorded, admitted', async () => {
     const inBand = paulGraph({ strength: { mean: USER_FIGURE, std: 0.425 }, std_defaulted: true });
     const result = await applyStated(
       inBand,
@@ -200,7 +203,7 @@ describe('(b) CONTRAST: a band the user named keeps the band’s spread and is N
     );
     expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
     const edge = persistedEdge(result);
-    expect(edge.strength).toStrictEqual({ mean: USER_FIGURE, std: edgeBandStd('very strong') });
+    expect(edge.strength).toStrictEqual({ mean: USER_FIGURE, std: 0.425 });
     expect(edge.std_defaulted).toBe(true);
     expect(edge.provenance?.reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'very strong' });
   });
@@ -335,20 +338,29 @@ describe('(f) isProvenanceOnlyEdgeConfirmation admits exactly the std-provenance
     expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong') }))).toBe(false);
   });
 
-  // R11: a band confirm stores the band's spread and records the band, but keeps the flag exactly. Before R11 it had
-  // to CLEAR the flag (present → absent admitted, kept refused).
-  it('R11: a band confirm: band std, band recorded, flag KEPT (absent → absent, present → present): admitted', () => {
+  // R11: a band confirm records the band and keeps the flag exactly. Before R11 it had to CLEAR the flag (present →
+  // absent admitted, kept refused).
+  // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): a band confirm keeps the std byte-equal too (it once
+  // admitted std → the band's spread). The band is recorded in the review; the strength never moves on any confirm.
+  it('R11 + #2473: a band confirm: std KEPT, band recorded, flag KEPT (absent → absent, present → present): admitted', () => {
     const b = before();
-    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong' }), 'very strong')).toBe(true);
+    expect(guard(b, stamped(b, { band: 'very strong' }), 'very strong')).toBe(true);
     const flagged = paulGraph({ strength: { mean: USER_FIGURE, std: 0.425 }, std_defaulted: true });
-    expect(guard(flagged, stamped(flagged, { bandStd: edgeBandStd('very strong'), band: 'very strong' }), 'very strong')).toBe(true);
+    expect(guard(flagged, stamped(flagged, { band: 'very strong' }), 'very strong')).toBe(true);
+  });
+
+  it('⭐ RED (#2473): a band confirm that moves the std to the band’s spread → refused (a no-change approval)', () => {
+    const b = before();
+    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong' }), 'very strong')).toBe(false);
+    const flagged = paulGraph({ strength: { mean: USER_FIGURE, std: 0.425 }, std_defaulted: true });
+    expect(guard(flagged, stamped(flagged, { bandStd: edgeBandStd('very strong'), band: 'very strong' }), 'very strong')).toBe(false);
   });
 
   it('⭐ TAMPER (R11): a band confirm that sets or clears `std_defaulted` → refused', () => {
     const b = before();
-    expect(guard(b, stamped(b, { bandStd: edgeBandStd('very strong'), band: 'very strong', stdDefaulted: true }), 'very strong')).toBe(false);
+    expect(guard(b, stamped(b, { band: 'very strong', stdDefaulted: true }), 'very strong')).toBe(false);
     const flagged = paulGraph({ strength: { mean: USER_FIGURE, std: 0.425 }, std_defaulted: true });
-    expect(guard(flagged, stamped(flagged, { bandStd: edgeBandStd('very strong'), band: 'very strong', stdDefaulted: null }), 'very strong')).toBe(false);
+    expect(guard(flagged, stamped(flagged, { band: 'very strong', stdDefaulted: null }), 'very strong')).toBe(false);
   });
 
   it('TAMPER: `std_defaulted` added to ANOTHER edge → refused', () => {

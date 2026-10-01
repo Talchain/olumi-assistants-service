@@ -18,6 +18,7 @@ import {
   PLACEHOLDER_PARTS_REASON,
   optionIdOf,
   placeholderPartsFinding,
+  limitUnitsOf,
   type PlaceholderPartsFinding,
 } from '../../orchestrator/context/placeholder-parts.js';
 import { log } from '../../utils/telemetry.js';
@@ -117,7 +118,7 @@ function withheldOptionsFor(
   const target = labelOf(targetId);
   const out = NONE_WITHHELD();
   for (const o of recs.filter((n) => n.kind === 'option')) {
-    const finding = placeholderPartsFinding(targetId, recs, links, [o]);
+    const finding = placeholderPartsFinding(targetId, recs, links, [o], limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints));
     const label = labelOf(optionIdOf(o));
     if (finding === null || label === null) continue;
     out.labels.push(label);

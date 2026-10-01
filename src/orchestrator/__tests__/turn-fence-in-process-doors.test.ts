@@ -9,7 +9,7 @@
  *
  * Pinned here: (1) the mechanics — inside the door the handle is claimed for the door's identity; (2) a superseded or
  * stopped refusal is `stale`, nothing else is swallowed; (3) a failed claim binds the UNCLAIMED handle, which the store
- * refuses fail-closed; (4) the Agent route wraps exactly the three graph doors (the hold doors write no graph).
+ * refuses fail-closed; (4) the Agent route wraps exactly the four graph doors (the hold doors write no graph).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -68,12 +68,19 @@ describe('B8: an in-process graph write is fenced for its own identity', () => {
   });
 });
 
-describe('B8: the Agent route fences exactly its three graph doors', () => {
+describe('B8: the Agent route fences exactly its four graph doors', () => {
   const src = readFileSync(new URL('../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-  it.each(['commitOptionLevelsInProcess', 'commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess'])('RED: %s is called only inside runFencedInProcessWrite', (door) => {
+  it.each(['commitOptionLevelsInProcess', 'commitLimitEditInProcess', 'commitOlumiOptionAdoptionInProcess', 'commitOptionStatusInProcess'])('RED: %s is called only inside runFencedInProcessWrite', (door) => {
     const calls = src.split('\n').filter((l) => l.includes(`${door}(input`));
     expect(calls.length, 'PRECONDITION: the door is wired').toBeGreaterThan(0);
     for (const l of calls) expect(l).toMatch(/runFencedInProcessWrite\(input\.scenario_id, input\.turn_id, \(\) => /);
+  });
+  // MG F1 T6 (#2471, DL CR P2): the option-status door replaced an HTTP dispatch that ran as an Agent sub-turn (:1499); it
+  // still does, so the writer's narration is never stored as conversation (#2352 class).
+  it('RED: commitOptionStatusInProcess runs as an Agent sub-turn for its own scenario, outside the fence', () => {
+    const calls = src.split('\n').filter((l) => l.includes('commitOptionStatusInProcess(input'));
+    expect(calls.length, 'PRECONDITION: the door is wired').toBe(1);
+    expect(calls[0]).toMatch(/runAsAgentSubturn\(input\.scenario_id, \(\) => runFencedInProcessWrite\(input\.scenario_id, input\.turn_id, \(\) => commitOptionStatusInProcess\(input/);
   });
   it('CONTROL: the hold doors (no graph write) are not fenced', () => {
     for (const door of ['holdAddRiskInProcess', 'holdAddFactorInProcess']) {

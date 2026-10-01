@@ -127,7 +127,7 @@ import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js'
 import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import { filterOlumiProposedOptions } from './olumi-option-filter.js';
 import { userExcludedOptions, PARTICIPATION_STATE_FOR } from './user-option-status-filter.js';
-import { buildRunInputSnapshot, runIdFor } from './run-input-snapshot.js';
+import { buildRunInputSnapshot, runIdFor, sentDigest } from './run-input-snapshot.js';
 import {
   carryLevelLimitBaselines,
   carryLimitTargetCaps,
@@ -144,7 +144,8 @@ import {
   readinessQuestions,
   resolveRunAdmission,
 } from './analysis-ready-core.js';
-import { AnalysisSnapshotDivergedError } from '../../run-analysis-snapshot-binding.js';
+import { AnalysisSnapshotDivergedError, currentBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
+import { decideSeedReuse } from '../../coaching/seed-reuse.js';
 // The 2026-08-28 disclosure defect: the run proceeds past unset option effects
 // (the compute-discard waiver) and the analyse turn says nothing about them.
 import {
@@ -1243,6 +1244,26 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'Run input snapshot refused by the contract; this Run records no inputs',
       );
     }
+
+    // C1 "why it moved" (`coaching/seed-reuse.ts`; R3 #75 5920656318 S1–S4 + 5920859011): a rerun whose DRAW STRUCTURE
+    // matches the Run it will be paired with reuses that Run's own PLoT seed echo, so the two draw the same samples and
+    // a value edit is attributable (C1). Decided on the snapshot's inputs; the seed then joins the request.
+    const bound = currentBoundAnalysisSnapshot();
+    const seedReuse = decideSeedReuse({
+      prior: bound !== undefined && bound.scenarioId === args.scenario_id ? bound.priorRunSeed : undefined,
+      current: inputSnapshot,
+      explicitSeed: plotPayload.seed,
+    });
+    if (seedReuse.seed !== undefined) plotPayload.seed = seedReuse.seed;
+    // ⛔ `sent_digest` is "the request CEE sent PLoT" (vendored `RunInputSnapshotSchema`): a lent seed is part of that
+    // request, so the digest is taken from the FINAL payload — never the pre-seed copy (#2410 overflow P2 5935956450).
+    const runInputSnapshot = inputSnapshot === null || seedReuse.seed === undefined
+      ? inputSnapshot
+      : { ...inputSnapshot, sent_digest: sentDigest(plotPayload) };
+    log.info(
+      { event: 'run_analysis.seed_reuse', request_id: invocation.requestId, scenario_id: args.scenario_id, reason: seedReuse.reason },
+      'run_analysis seed decision',
+    );
 
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
@@ -2720,7 +2741,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         computed_at: runComputedAt,
         // SC-24 (schemas 0.68.0): the Run's execution identity and the input it was sent (3.9 above).
         run_id: runId,
-        ...(inputSnapshot !== null ? { input_snapshot: inputSnapshot } : {}),
+        ...(runInputSnapshot !== null ? { input_snapshot: runInputSnapshot } : {}),
         // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT
         // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and
         // read back on every path that rebuilds from them, rather than

@@ -524,6 +524,12 @@ export interface ApprovedLinkStrength {
    * band the user named this turn, stamped as the canvas writer stamps it.
    */
   readonly adopted: boolean;
+  /**
+   * ⛔ R3 DEFECT 1 (5936673643): Olumi's band REVIEWED on a link already in it (`confirm_current`, author
+   * `model_proposed`). A review only: written with NO band context, so the writer holds μ, σ and Olumi's sizing note
+   * byte-equal and records `reviewed_by_user` (sizing a placeholder). The band is Olumi's, never the user's: no spread.
+   */
+  readonly review?: boolean;
 }
 
 /**
@@ -624,10 +630,14 @@ async function applyApprovedLinkStrengths(
       event: event as never, requestId: ctx.requestId, persistedGraph: working, lastRunIdentityUse: ctx.lastRunIdentityUse,
     });
     let res: Awaited<ReturnType<typeof applyEdgeStrengthEdit>>;
+    // A review of Olumi's band holds the link's figure: no band context, so no spread (DEFECT 1). The writer still sizes a
+    // placeholder on review (`sizedByApproval`, L4 c).
     try {
       res = l.adopted
         ? await runWithApprovedLinkAdoptions([{ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, magnitude: l.magnitude, band: l.band }], write)
-        : await runWithStatedLinkBand({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, band: l.band }, write);
+        : l.review === true
+          ? await write()
+          : await runWithStatedLinkBand({ scenarioId: ctx.scenarioId, proposalId: ctx.turnId, from: l.from, to: l.to, band: l.band }, write);
     } catch {
       return refuse('canonical_graph_unavailable', i);
     }
