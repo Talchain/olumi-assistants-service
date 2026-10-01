@@ -120,6 +120,13 @@ describe('≤1 ask, and only for the link the user named (CODEX collision class 
     expect(linkSizeAsk(FX.graph, { ...at(''), message: two })).toBeNull();
     expect(linkSizeAsk(FX.graph, { ...at(''), message: 'Tell me about the link from "Angel investor outreach" to "Hours per week on angel outreach".' })).toBeNull();
   });
+
+  it('a STRUCTURAL link (an option setting its lever) is never a size to ask for, even when every other rule would ask', () => {
+    // An option whose label reads as a count, into a lever with a unit: only the structural rule stops the ask.
+    const g = withNode('angel_investor_outreach', (o) => ({ ...o, label: 'Angel investor calls' }));
+    const msg = 'Tell me about the link from "Angel investor calls" to "Hours per week on angel outreach".';
+    expect(linkSizeAsk(g, { message: msg, restingText: '', awaitingApproval: false })).toBeNull();
+  });
 });
 
 // ── The route: the served inspect turn, model stubbed to the served model words (0 LLM) ──
