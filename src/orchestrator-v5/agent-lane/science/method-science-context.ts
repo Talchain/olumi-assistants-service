@@ -81,7 +81,11 @@ export interface MethodScienceInput {
    */
   readonly canonical_stage: StageType | null;
   readonly signals: MethodScienceSignals;
-  /** An option the user explicitly chose for this method, or null. It names the plan; it never licenses a leader. */
+  /**
+   * The option the user explicitly chose for this method (REASONING COACH's `user.selected_option_id`), or null. It
+   * names the plan only while it is still one of the user's OWN options (`model.non_sq_option_ids`): never the status
+   * quo, never an option taken out of the comparison (RC 5937065922 / 5937114487). It never licenses a leader.
+   */
   readonly user_selected_option_id?: string | null;
   /** The current graph, read ONLY for the limits on the plan's path. */
   readonly graph?: unknown;
@@ -196,7 +200,11 @@ function choosePlan(
       return { option_id: leader, label: labels[leader], basis: 'licensed_leader' };
     }
   }
-  if (typeof userSelected === 'string' && typeof labels[userSelected] === 'string') {
+  if (
+    typeof userSelected === 'string'
+    && s['model.non_sq_option_ids'].includes(userSelected)
+    && typeof labels[userSelected] === 'string'
+  ) {
     return { option_id: userSelected, label: labels[userSelected], basis: 'user_selected' };
   }
   return null;
