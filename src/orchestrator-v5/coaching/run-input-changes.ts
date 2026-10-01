@@ -195,8 +195,23 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     }
     // A link's mean, spread and existence probability are the ENGINE's numbers on the model scale — the user never
     // wrote them and they carry no unit. None is a row figure (AIQ 5918134795, the class rule already applied to
-    // `encoded`): any of them changing makes the pair partial.
-    if (pl.mean !== cl.mean || pl.std !== cl.std || pl.exists_probability !== cl.exists_probability) complete = false;
+    // `encoded`).
+    // ⭐ 0.70.0 (R3 DEFECT 3; DL 5937207590): each Run also records the link in the user's terms, and those ARE rows:
+    //   - its BAND moving (`moderate` → `strong`) is a `strength` row, raw = the contract's band literals; the engine
+    //     numbers that moved with it (mean, and the spread that follows the band) are what that row states;
+    //   - WHO SIZED it changing (`placeholder` → `olumi_accepted`: the user accepted Olumi's estimate, no number moved)
+    //     is a `sizing` row.
+    // Still partial, never a row: a mean/spread move INSIDE one band (or with a band unrecorded on either Run), any
+    // existence-probability move, and sizing recorded on one Run only (whether it changed cannot be known).
+    const linkBase = { entity_kind: 'link' as const, entity_id: id, link: { from: ends.from, to: ends.to } };
+    const bandMoved = pl.band !== undefined && cl.band !== undefined && pl.band !== cl.band;
+    if (bandMoved) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
+    if (pl.sizing !== undefined && cl.sizing !== undefined) {
+      if (pl.sizing !== cl.sizing) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
+    } else if (pl.sizing !== cl.sizing) {
+      complete = false;
+    }
+    if (((pl.mean !== cl.mean || pl.std !== cl.std) && !bandMoved) || pl.exists_probability !== cl.exists_probability) complete = false;
   }
 
   return { rows, complete };

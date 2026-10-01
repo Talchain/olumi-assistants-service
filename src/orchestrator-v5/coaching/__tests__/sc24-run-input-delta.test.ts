@@ -359,3 +359,96 @@ describe('SC-24 · diffRunInputSnapshots', () => {
     expect(pair(withRange(20), withRange(20))).toEqual(['complete', []]);
   });
 });
+
+/**
+ * ⭐ 0.70.0 (R3 DEFECT 3, #85 5936673643; DL 5937207590): a link's edit in the user's terms. Before 0.70.0 every link
+ * edit was `partial` with NO row — the engine numbers are never a row figure (AIQ 5918134795) — and accepting Olumi's
+ * estimate moved no number at all, so R3's Accept → Run pair showed nothing for it.
+ */
+describe('0.70.0 · link rows in the user\'s terms (band, who sized it)', () => {
+  const pairOf = (a: RunInputSnapshot, b: RunInputSnapshot) => {
+    const out = buildRunDelta({ priorFacts: [
+      fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: b }),
+      fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: a }),
+    ], mayNameLeadingOption: true });
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(RunDeltaSchema.safeParse(out.delta).success, 'the contract accepts the delta').toBe(true);
+    return out.delta;
+  };
+  type L = RunInputSnapshot['links'][number];
+  const withLink = (l: Partial<L>) => snap({ links: [{ from: 'fac_price', to: 'fac_churn', mean: 0.5, ...l }] });
+  const LINK = { entity_kind: 'link', entity_id: 'fac_price->fac_churn', link: { from: 'fac_price', to: 'fac_churn' } };
+
+  it('RED (the Accept step): placeholder → accepted, same β → ONE `sizing` row, coverage complete', () => {
+    const d = pairOf(withLink({ band: 'strong', sizing: 'placeholder' }), withLink({ band: 'strong', sizing: 'olumi_accepted' }));
+    expect(d.input_coverage).toBe('complete');
+    expect(d.input_changes).toEqual([{ ...LINK, field: 'sizing', before: { raw: 'placeholder' }, after: { raw: 'olumi_accepted' }, change: 'changed' }]);
+  });
+
+  it('RED: a band move (moderate → strong) is a `strength` row with the contract\'s band literals — never the β', () => {
+    const d = pairOf(withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' }), withLink({ mean: 0.55, std: 0.0866, band: 'strong', sizing: 'user' }));
+    expect(d.input_coverage).toBe('complete');
+    expect(d.input_changes).toEqual([{ ...LINK, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' }, change: 'changed' }]);
+    expect(JSON.stringify(d.input_changes)).not.toMatch(/0\.(3|55)\b/);
+  });
+
+  it('a user strength edit from a placeholder writes BOTH rows for the one link (band + who sized it; RC 5937295784)', () => {
+    const d = pairOf(withLink({ mean: 0.3, band: 'moderate', sizing: 'placeholder' }), withLink({ mean: 0.85, band: 'very_strong', sizing: 'user' }));
+    expect(d.input_changes?.map((r) => [r.field, r.before, r.after])).toEqual([
+      ['strength', { raw: 'moderate' }, { raw: 'very_strong' }],
+      ['sizing', { raw: 'placeholder' }, { raw: 'user' }],
+    ]);
+  });
+
+  it('CONTROL: β moving INSIDE one band (R3 DEFECT 1\'s 0.6 → 0.55) stays partial with no row — no engine number shown', () => {
+    const d = pairOf(withLink({ mean: 0.6, std: 0.3, band: 'strong', sizing: 'olumi_estimate' }), withLink({ mean: 0.55, std: 0.275, band: 'strong', sizing: 'olumi_estimate' }));
+    expect([d.input_coverage, d.input_changes]).toEqual(['partial', []]);
+  });
+
+  it('CONTROL: sizing on ONE Run only (an older Run) → partial, no sizing row; band unrecorded on one end + β move → partial', () => {
+    const oneSided = pairOf(withLink({ band: 'strong' }), withLink({ band: 'strong', sizing: 'olumi_accepted' }));
+    expect([oneSided.input_coverage, oneSided.input_changes]).toEqual(['partial', []]);
+    const oldBand = pairOf(withLink({ mean: 0.3 }), withLink({ mean: 0.55, band: 'strong' }));
+    expect([oldBand.input_coverage, oldBand.input_changes]).toEqual(['partial', []]);
+  });
+
+  it('CONTROL: an identical link with band and sizing recorded on both Runs is complete with no row', () => {
+    const d = pairOf(withLink({ band: 'strong', sizing: 'olumi_accepted' }), withLink({ band: 'strong', sizing: 'olumi_accepted' }));
+    expect([d.input_coverage, d.input_changes]).toEqual(['complete', []]);
+  });
+});
+
+/** ⭐ 0.70.0 (CANVAS 5936762171, RC 5936776917): WHY a pair has no win shares, typed — only when the cause is known. */
+describe('0.70.0 · win_probabilities_unavailable', () => {
+  const at = (d: string) => `2026-06-0${d}T00:00:00.000Z`;
+  const reason = (facts: readonly HandlerFact[], mayName = true) => {
+    const out = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: mayName });
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(RunDeltaSchema.safeParse(out.delta).success).toBe(true);
+    return [out.delta.win_probabilities.length, out.delta.win_probabilities_unavailable];
+  };
+
+  it('RED (RC\'s unwithheld rerun): the earlier Run\'s shares withheld, this Run\'s shown → prior_withheld', () => {
+    expect(reason([
+      runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', at('7'), true),
+      runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), false),
+    ])).toEqual([0, 'prior_withheld']);
+  });
+
+  it('RED: both Runs show shares but no option is on both sides → no_matched_option', () => {
+    expect(reason([
+      runAnalysisFact([{ id: 'opt-c', win: 0.45 }, { id: 'opt-d', win: 0.55 }], '222', 'hash-b', at('7'), true),
+      runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), true),
+    ])).toEqual([0, 'no_matched_option']);
+  });
+
+  it('CONTROL: THIS Run\'s shares withheld (or the turn\'s) → no reason (cause-neutral words); shares present → no reason', () => {
+    expect(reason([
+      runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', at('7'), false),
+      runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), true),
+    ])).toEqual([0, undefined]);
+    expect(reason(PRESENT_PAIR, false)).toEqual([0, undefined]);
+    expect(reason(PRESENT_PAIR)).toEqual([2, undefined]);
+  });
+});

@@ -7,7 +7,26 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.69.0.tgz` ← **THE CURRENT PIN** (MG, F1 T1)
+### `talchain-schemas-0.70.0.tgz` ← **THE CURRENT PIN** (F1b 52f8cd, R3 DEFECT 3 + typed empty win shares)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** `npm publish` from `olumi-schemas` `main`
+> **`cace462d`** (schemas #80 merge; the registry's `gitHead` binds it), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.70.0/a987224c3442bdf1bb1c9efe02e2f0f2470769e8`.
+>
+> **766,456 bytes.** Verified against the registry's published metadata on 1 Oct:
+>
+> ```
+> npm shasum (sha1)  a987224c3442bdf1bb1c9efe02e2f0f2470769e8   ← matches
+> integrity (sha512) sha512-+IUB15tcl7WCOUgJNkqTh1LEtzr4j+0pALo2a57uvb9DHqUPQWR33um8ywigiHOSAEOKA1AOAuOadpgYudRmlg==   ← matches
+> sha256             d7764a0067639b4b207234960eb6779c9a0d3e9d6f495f57c5fb723aebb1806e
+> ```
+>
+> **What 0.70.0 adds (additive, optional; no analysis-hash input moves):** Run snapshot `links[].band` / `links[].sizing`;
+> `RunInputField` `sizing`; `run_delta.win_probabilities_unavailable` (`prior_withheld | no_matched_option`, only beside
+> an empty list). **UI-first:** DGAI vendors 0.70.0 before CEE emits any of them (the `.strict()` RunDelta on 0.69
+> refuses every new member).
+
+### `talchain-schemas-0.69.0.tgz` (superseded) (MG, F1 T1)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** `npm publish` from `olumi-schemas` `main`
 > **`5b0ca7f5`** (schemas #78 merge; the registry's `gitHead` binds it), 2026-10-01. Registry download:

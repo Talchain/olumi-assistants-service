@@ -25,6 +25,8 @@ import { createHash } from 'node:crypto';
 import { InterventionRangeSchema } from '@talchain/schemas';
 import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
+import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
 
 type Rec = Record<string, unknown>;
 
@@ -82,6 +84,11 @@ export interface RunInputSnapshotInput {
   readonly wireGraph: unknown;
   /** The request PLoT received (goal_node_id, goal_constraints, goal_direction live here). */
   readonly plotPayload: Rec;
+  /**
+   * 0.70.0 (R3 DEFECT 3): the edges of the graph this Run was built from — who sized each link is provenance, never on
+   * the wire, so it is read here. Absent = sizing not recorded (an older caller); never inferred.
+   */
+  readonly persistedEdges?: ReadonlyArray<unknown>;
 }
 
 /** The snapshot, or `null` when it cannot be recorded honestly (over a bound, or refused by the contract). */
@@ -217,6 +224,15 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
   });
 
   // ── links ──────────────────────────────────────────────────────────────
+  // 0.70.0 (R3 DEFECT 3; AIQ 5918134795): a link's mean/std/exists_probability are the engine's numbers and never a
+  // row figure, so the link is also recorded in the user's terms: the BAND its sent strength sits in (CEE's cuts, the
+  // contract's literal) and WHO SIZED it (`linkSizing` on the graph this Run was built from — one edge per pair, or
+  // none recorded).
+  const persistedByPair = new Map<string, Rec | null>();
+  for (const pe of (input.persistedEdges ?? []).filter(isRec)) {
+    const k = `${String(pe.from)}\u0000${String(pe.to)}`;
+    persistedByPair.set(k, persistedByPair.has(k) ? null : pe);
+  }
   const links = edges.flatMap((e) => {
     const from = text(e.from);
     const to = text(e.to);
@@ -224,12 +240,15 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     const mean = finite(strength.mean);
     if (from === undefined || to === undefined || mean === undefined) return [];
     const p = finite(e.exists_probability);
+    const persisted = input.persistedEdges === undefined ? undefined : persistedByPair.get(`${from}\u0000${to}`) ?? undefined;
     return [{
       from,
       to,
       mean,
       ...(finite(strength.std) !== undefined ? { std: finite(strength.std) } : {}),
       ...(p !== undefined && p >= 0 && p <= 1 ? { exists_probability: p } : {}),
+      band: strengthBandFromEdgeBand(edgeBandFromMagnitude(Math.abs(mean))),
+      ...(persisted !== undefined ? { sizing: linkSizing(persisted) } : {}),
     }];
   });
 

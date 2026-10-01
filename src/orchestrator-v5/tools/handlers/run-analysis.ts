@@ -1234,6 +1234,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ],
       wireGraph: plotPayload.graph,
       plotPayload,
+      // 0.70.0 (R3 DEFECT 3): who sized each link, read from the graph this Run was built from (never on the wire).
+      persistedEdges: ((snapshot.rawPersistedGraph ?? snapshot.graph) as { edges?: ReadonlyArray<unknown> } | null | undefined)?.edges ?? [],
     });
     if (inputSnapshot === null) {
       log.warn(
