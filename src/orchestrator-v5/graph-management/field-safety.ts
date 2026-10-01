@@ -207,6 +207,15 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'goal_horizon_months',
   // The deadline in the brief's own words (PJ-E-A2 part 2): the same G1 class, written only by construction.
   'goal_deadline_as_stated',
+  // ⛔ An option's LIFECYCLE AUTHORITY (F1 T6; CODEX overflow #2467 5935234950 P1-1). `proposed_by` is written only by
+  // construction (`olumi-option-marker.ts`, after admission), `analysis_participation` only by the adoption door and the
+  // option-status writer, `option_status` only by the option-status writer. A producer that could add a node carrying
+  // them would forge the adoption inference (`isUnadoptedOlumiSuggestion`): an option "Olumi suggested and the user took
+  // out", which "put it back" would then include. Stripped from an AI add (`stripPipelineOwnedFromAddOperations`) and
+  // refused anywhere else on the add path, like every other name here.
+  'proposed_by',
+  'option_status',
+  'analysis_participation',
 ];
 
 /**

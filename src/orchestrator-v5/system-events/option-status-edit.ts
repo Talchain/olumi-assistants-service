@@ -24,17 +24,16 @@
  *   · a change that changes nothing (already that status).
  * The baseline is an option like any other (spec O2).
  */
+import { isDeepStrictEqual } from 'node:util';
+
 import type { OlumiResponse, SystemEventTurnPayload } from '@talchain/schemas/boundary';
 import { EditGraphHandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
-import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { log } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { BASE_HASH_DIVERGED } from '../graph-management/reason-codes.js';
-import { projectGraphForPersistence } from '../persisted-graph-projection.js';
-import { mergeAppliedGraphForPersistence } from '../handlers/edit-graph-dispatch.js';
-import { applyPatchOperations, PatchApplyError } from '../../orchestrator/patch-applier.js';
+import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 
 export type OptionStatusEditEvent = Extract<SystemEventTurnPayload['event'], { kind: 'option_status_edit' }>;
@@ -48,7 +47,12 @@ export const PARTICIPATION_FOR_STATUS: Readonly<Record<OptionStatusValue, 'inclu
 };
 
 export interface OptionStatusBaseHashConflict {
-  readonly conflict_category: typeof BASE_HASH_DIVERGED;
+  /**
+   * `BASE_HASH_DIVERGED`: the analysis hash moved. `option_expected_status_mismatch` (CODEX overflow #2467 P2): the stored
+   * status moved since it was read — invisible to the hash for infeasible ↔ removed — so it is the SAME typed 409, never
+   * an honest-refusal 200 a caller could mistake for its own write (a concurrent client may have set the very status).
+   */
+  readonly conflict_category: typeof BASE_HASH_DIVERGED | 'option_expected_status_mismatch';
   readonly recovery_action: 'refresh_and_reconfirm';
   readonly expected_base_graph_hash: string | null;
 }
@@ -200,40 +204,59 @@ export function applyOptionStatusEdit(params: ApplyOptionStatusEditParams): Opti
     log.info({ ...logBase, event: 'v5.system_event.option_status_edit.expected_status_mismatch', expected_status: event.expected_status,
       stored_status: currentStatus }, 'option_status_edit — the stored status moved since it was read; refusing');
     return refuse(payload, 'expected_status_mismatch',
-      `"${target.label}" was changed while you were working (it is now ${currentStatus === 'feasible' ? 'in the comparison' : currentStatus === 'removed' ? 'removed' : 'marked not feasible'}), so I haven't changed it. Choose again from what you can see now.`);
+      `"${target.label}" was changed while you were working (it is now ${currentStatus === 'feasible' ? 'in the comparison' : currentStatus === 'removed' ? 'removed' : 'marked not feasible'}), so I haven't changed it. Choose again from what you can see now.`,
+      { recovery_action: 'refresh_and_reconfirm', conflict_category: 'option_expected_status_mismatch', expected_base_graph_hash: currentBaseHash });
   }
   if (currentStatus === event.status && (target.analysis_participation ?? 'included') === participation) {
     return refuse(payload, 'no_effect', `"${target.label}" is already ${event.status === 'feasible' ? 'in the comparison' : `marked ${event.status === 'removed' ? 'removed' : 'not feasible'}`}, so there was nothing to change.`);
   }
 
-  // ── 4. the write: status + derived participation, through the canonical applier ──
+  // ── 4. the write: TWO fields on ONE node of the RAW stored graph; parsing only validates ──
+  // ⛔ CODEX overflow #2467 5935234950 P1-2 (persisted-model corruption): the strict mirror's parse STRIPS what it does not
+  // declare (a node's `position`, `data`, …). Applying to that parse and writing it back replaced every node/edge array, so
+  // a one-option edit silently dropped unrelated stored bytes. The write is made on a clone of the raw bytes the base hash
+  // was read from — the `olumi-option-adoption.ts` pattern — and proved to change nothing else:
+  //   · a base the persistence projection would also REPAIR is refused (this write never bundles a repair);
+  //   · the postimage parses, holds the status, and is again a projection fixed point;
+  //   · with the two fields restored, the postimage equals the stored base byte-for-byte.
   const operations: PatchOperation[] = [
     { op: 'update_node', path: event.option_node_id, value: { option_status: event.status, analysis_participation: participation } },
   ];
-  let candidate: GraphV3T;
-  try {
-    candidate = applyPatchOperations(baseGraph, operations);
-  } catch (err) {
-    log.error({ ...logBase, event: 'v5.system_event.option_status_edit.apply_failed', code: err instanceof PatchApplyError ? err.code : 'unknown' },
-      'option_status_edit — canonical applier refused; nothing written');
-    return refuse(payload, err instanceof PatchApplyError ? err.code : 'apply_failed', `I couldn't change that option in the saved model, so I haven't changed anything.`);
+  const projectionCtx = { scenarioId: payload.scenario_id, turnId: payload.turn_id, turnClass: 'handler' as const, source: 'option_status_edit' };
+  if (!isDeepStrictEqual(projectGraphForPersistence(persistedGraph, projectionCtx), normaliseAbsenceOnly(persistedGraph))) {
+    log.info({ ...logBase, event: 'v5.system_event.option_status_edit.base_needs_repair' },
+      'option_status_edit — the stored graph would be repaired by the projection; refusing rather than bundling a repair');
+    return refuse(payload, 'canonical_graph_needs_repair', `The saved model needs repairing before this option can be changed safely, so I haven't changed anything.`);
   }
-  const ingressParse = GraphStateIngressSchema.safeParse(persistedGraph);
-  if (!ingressParse.success) {
-    return refuse(payload, 'ingress_projection_failed', `I couldn't save that change safely, so I haven't changed anything.`);
+  const projectedGraph = structuredClone(persistedGraph) as { nodes: unknown[] } & Record<string, unknown>;
+  const rawTargets = projectedGraph.nodes.filter((n): n is Record<string, unknown> =>
+    typeof n === 'object' && n !== null && (n as { id?: unknown }).id === event.option_node_id);
+  if (rawTargets.length !== 1) {
+    return refuse(payload, 'node_target_ambiguous', `I couldn't find that option exactly once in the saved model, so I haven't changed anything.`);
   }
-  const merged = structuredClone(mergeAppliedGraphForPersistence({
-    appliedGraph: candidate, persistedBase: persistedGraph, ingressBase: ingressParse.data, requestId, scenarioId: payload.scenario_id,
-  }));
-  const projectedGraph = projectGraphForPersistence(merged, {
-    scenarioId: payload.scenario_id, turnId: payload.turn_id, turnClass: 'handler', source: 'option_status_edit',
-  });
+  const rawTarget = rawTargets[0]!;
+  const heldBefore = { option_status: rawTarget.option_status, analysis_participation: rawTarget.analysis_participation };
+  const hadBefore = { option_status: Object.hasOwn(rawTarget, 'option_status'), analysis_participation: Object.hasOwn(rawTarget, 'analysis_participation') };
+  rawTarget.option_status = event.status;
+  rawTarget.analysis_participation = participation;
   const projectedParse = GraphV3.safeParse(projectedGraph);
-  // The projection must KEEP both fields (the strict mirror declares them): a write that would not hold is refused here.
-  if (!projectedParse.success || !optionStatusHolds(projectedGraph, event.option_node_id, event.status)) {
-    log.error({ ...logBase, event: 'v5.system_event.option_status_edit.projection_lost_status', parse_ok: projectedParse.success },
-      'option_status_edit — the projected graph does not hold the status; refusing the write');
+  if (!projectedParse.success || !optionStatusHolds(projectedGraph, event.option_node_id, event.status)
+    || !isDeepStrictEqual(projectGraphForPersistence(projectedGraph, projectionCtx), normaliseAbsenceOnly(projectedGraph))) {
+    log.error({ ...logBase, event: 'v5.system_event.option_status_edit.postimage_invalid', parse_ok: projectedParse.success },
+      'option_status_edit — the postimage does not parse, hold the status, or stay a projection fixed point; refusing the write');
     return refuse(payload, 'projected_graph_invalid', `I couldn't save that change safely, so I haven't changed anything.`);
+  }
+  // The scope proof: put the two fields back, and nothing else may differ from the stored base.
+  const restored = structuredClone(projectedGraph);
+  const restoredTarget = (restored.nodes as Record<string, unknown>[]).find((n) => n.id === event.option_node_id)!;
+  for (const key of ['option_status', 'analysis_participation'] as const) {
+    if (hadBefore[key]) restoredTarget[key] = heldBefore[key];
+    else delete restoredTarget[key];
+  }
+  if (!isDeepStrictEqual(restored, persistedGraph)) {
+    log.error({ ...logBase, event: 'v5.system_event.option_status_edit.postimage_scope_mismatch' },
+      'option_status_edit — the postimage changed more than the two authorised fields; refusing the write');
+    return refuse(payload, 'postimage_scope_mismatch', `I couldn't save that change safely, so I haven't changed anything.`);
   }
   const afterHash = computeAnalysisAffectingGraphHash(projectedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
 

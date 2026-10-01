@@ -69,6 +69,37 @@ describe('option_status_edit — the writer (F1 T6)', () => {
     expect(r.handlerFacts[0]).toMatchObject({ fact_type: 'edit_graph', result: { rerun_recommended: true } });
   });
 
+  // ⛔ CODEX overflow #2467 5935234950 P1-2 (persisted-model corruption): the writer applied to the strict mirror's parse
+  // and wrote it back, so every node/edge lost what the mirror does not declare. The stored graph is the authority.
+  it('RED (CODEX P1-2): a one-option edit leaves EVERY other stored byte as it was — the canvas position/data of other nodes, edge extras, top-level keys', () => {
+    const g = persistedGraph({
+      opt_launch: { position: { x: 120, y: 40 }, data: { colour: 'teal', pinned: true } },
+      opt_carry_on: { position: { x: 320, y: 40 }, data: { note: 'kept' } },
+    });
+    const nodes = g.nodes as Record<string, unknown>[];
+    nodes.find((n) => n.id === 'fac_price')!.position = { x: 10, y: 200 };
+    nodes.find((n) => n.id === 'goal_revenue')!.data = { pinned: true };
+    (g.edges as Record<string, unknown>[])[0]!.ui = { bend: 0.3 };
+    (g as Record<string, unknown>).layout_version = 7;
+    const before = structuredClone(g);
+    const r = run({ status: 'removed' }, g);
+    expect(r.kind, JSON.stringify(r).slice(0, 300)).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    expect(g).toEqual(before); // the base handed in is untouched
+    const after = structuredClone(r.mutatedGraph) as { nodes: Record<string, unknown>[] };
+    const target = after.nodes.find((n) => n.id === 'opt_carry_on')!;
+    expect(target).toMatchObject({ option_status: 'removed', analysis_participation: 'retained_excluded', position: { x: 320, y: 40 }, data: { note: 'kept' } });
+    delete target.option_status;
+    delete target.analysis_participation;
+    expect(after).toEqual(before);
+  });
+
+  it('REFUSED: a base the persistence projection would REPAIR is never written with a bundled repair', () => {
+    const g = persistedGraph();
+    (g.options as Record<string, unknown>[]).splice(1, 1); // the top-level options mirror is missing an option node
+    expect(run({ status: 'removed' }, g)).toMatchObject({ kind: 'refused', reason: 'canonical_graph_needs_repair' });
+  });
+
   it('RED: putting it back → feasible + included; the analysis hash MOVES (the last Run reads stale)', () => {
     const out = persistedGraph({ opt_carry_on: { option_status: 'removed', analysis_participation: 'retained_excluded' } });
     const r = run({ expected_status: 'removed', status: 'feasible' }, out);
@@ -82,6 +113,8 @@ describe('option_status_edit — the writer (F1 T6)', () => {
     const stored = persistedGraph({ opt_carry_on: { option_status: 'infeasible', analysis_participation: 'retained_excluded' } });
     const r = run({ expected_status: 'feasible', status: 'removed' }, stored);
     expect(r).toMatchObject({ kind: 'refused', reason: 'expected_status_mismatch' });
+    // CODEX overflow #2467 P2: a TYPED conflict (dispatch → 409), never an honest-refusal 200 a caller could read as its own write.
+    expect(r).toMatchObject({ baseHashConflict: { conflict_category: 'option_expected_status_mismatch', recovery_action: 'refresh_and_reconfirm' } });
   });
 
   it('CONTROL: the matching expected_status (infeasible → removed) is applied', () => {

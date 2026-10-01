@@ -4526,8 +4526,23 @@ export function createAgentCapabilities(
           return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
             detail: 'The option was not changed, and nothing on the model changed. Tell the user plainly and ask what they would like instead.' };
         }
+        /**
+         * ⛔ OPERATION-BOUND EVIDENCE (CODEX overflow #2467 5935234950 P2). A refused event is committed honestly as a 200 with
+         * no write, and the model can hold the requested status for another reason (a concurrent client set it first), so a
+         * 200 plus a matching read-back is NOT "applied". Applied only when the committed response's own receipt names THIS
+         * operation's turn (`source_turn_id`, the estate's replay proof, `dispatch.ts`) AND the model holds the status. A retry
+         * of the same approval replays that receipt, so it recovers the original result instead of reading "superseded".
+         */
+        const receipt = receiptSummaryOf(res.json);
+        const thisOperationWrote = res.status === 200 && receipt.summary !== null && receipt.summary.source_turn_id === operationId;
+        if (res.status === 200 && !thisOperationWrote && !receipt.unreadable) {
+          const said = String((res.json as { assistant_text?: unknown } | null)?.assistant_text ?? '').trim();
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
+            detail: (said !== '' ? `This approval did not change the option. Olumi said: "${said}" ` : 'This approval did not change the option. ')
+              + 'Tell the user plainly, and offer to prepare it again from what the model holds now.' };
+        }
         const after = await readGraph(ctx.scenario_id);
-        const landed = res.status === 200 && after !== null && optionStatusHolds(after.raw, op.path, status);
+        const landed = thisOperationWrote && after !== null && optionStatusHolds(after.raw, op.path, status);
         if (!landed) {
           return { ok: false, mutated: res.status === 200, applied: false, refusal: res.status === 200 ? 'not_confirmed' : 'not_applied',
             proposal_id: decision.proposal.proposal_id,
@@ -4535,7 +4550,10 @@ export function createAgentCapabilities(
               ? 'The change was sent but could not be confirmed in the saved model. Tell the user it could not be confirmed (never that it was saved, never that it failed) and offer to check.'
               : 'The option was not changed. Tell the user plainly.' };
         }
-        return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId,
+        // The exact proposal is APPLIED (CODEX P2): it is no longer offered, and a retry reads "already applied", never "superseded".
+        const receipts = receipt.summary !== null ? [receipt.summary] : [];
+        proposals.markApplied(decision.proposal.proposal_id, receipts);
+        return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           // The writer's own sentence, about the option the model now holds (one wording for the UI and the Agent).
           follow_up: optionStatusConfirmationText(String(after!.nodes.find((n) => n.id === op.path)?.label ?? ''), status),
           note: 'The last analysis no longer reflects the options compared. Offer to run the analysis again.' };
