@@ -969,13 +969,16 @@ export function statingSentenceOf(
 /** Words that may stand between a distributive word and the source it counts ("each EXTRA conversation", "one MORE hire"). */
 const ONE_FILLER = /^(?:extra|more|additional|single|new|another)$/;
 /**
- * The token index of the SOURCE word a distributive phrase counts one of ("each extra conversation" → conversation),
- * or -1. The walk from the distributive word crosses only fillers and the source's own label words, never punctuation.
+ * The token index of the word a distributive phrase counts one of ("each extra conversation" → conversation), or -1.
+ * ⛔ AIQ 5925663053: it must be what the source COUNTS — the change unit's noun ("conversations"), else the label's last
+ * word — never any other label word: "Each investment firm brings in £1m" on "Warm conversations with investment firms"
+ * is per FIRM, not per conversation. The walk crosses only fillers and the source's label words, never punctuation.
  */
-function distributiveOneAt(q: string, ends: { readonly source: string; readonly target: string }): number {
+function distributiveOneAt(q: string, ends: { readonly source: string; readonly target: string }, unit: string): number {
   const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
   const label = wordsOf(ends.source);
-  const own = label.filter((w) => !wordsOf(ends.target).some((t) => sameWord(w, t)));
+  const unitWords = wordsOf(unit);
+  const own = unitWords.length > 0 ? unitWords : label.slice(-1);
   const isLabel = (w: string): boolean => label.some((x) => sameWord(x, w));
   for (let i = 0; i < tokens.length; i += 1) {
     const w = tokens[i]!.w; const next = tokens[i + 1]?.w;
@@ -1007,7 +1010,7 @@ function linkEffectInOneSentence(
   // ⭐ R3 #75 5925568501: "each / every / per / one more / an extra / a single" + a word of the SOURCE, one phrase with no
   // punctuation between, is the user writing a change of ONE ("Each extra conversation brings in about £20,000"). A
   // plural with no distributive word ("extra conversations bring £20,000") is not: it could be a total.
-  const oneAt = perFigure === undefined && Math.abs(effect.per_source_change) === 1 ? distributiveOneAt(q, ends) : -1;
+  const oneAt = perFigure === undefined && Math.abs(effect.per_source_change) === 1 ? distributiveOneAt(q, ends, effect.per_source_change_unit) : -1;
   if (amountFigure === undefined || (perFigure === undefined && oneAt < 0)) return 'figures_not_in_statement';
   const othersOf = (label: string): string[] => scope.quantities.filter((l) => l !== label);
   const quoteWords = wordsOf(q);

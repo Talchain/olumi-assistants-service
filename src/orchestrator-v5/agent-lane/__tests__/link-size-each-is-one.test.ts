@@ -42,6 +42,21 @@ describe('R3 5925568501: a distributive word + the source names a change of one'
   ] as const) {
     it(`refused (${why}): "${s}"`, () => expect(door(s)).not.toBeNull());
   }
+  // AIQ 5925663053: the governed word must be what the source COUNTS (its unit noun, else its label's last word).
+  for (const [source, sentence] of [
+    ['Warm conversations with investment firms', 'Each investment firm brings in about £1m of funding'],
+    ['Investor conversations', 'Every new investor brings in about £20,000 of funding'],
+  ] as const) {
+    it(`AIQ: "${sentence}" on "${source}" is per FIRM / INVESTOR, never per conversation → refused`, () => {
+      const e2 = { ...effect, amount: sentence.includes('£1m') ? 1000000 : 20000 };
+      expect(linkEffectTheUserStated(sentence, e2, { source, target: 'Funding secured' }, { quantities: ['Funding secured', source] })).not.toBeNull();
+    });
+  }
+  it('AIQ control: "Each extra conversation with investment firms brings in about £20,000 of funding" on that source → per 1', () => {
+    expect(linkEffectTheUserStated('Each extra conversation with investment firms brings in about £20,000 of funding', effect,
+      { source: 'Warm conversations with investment firms', target: 'Funding secured' }, { quantities: ['Funding secured', 'Warm conversations with investment firms'] })).toBeNull();
+  });
+
   it('a written per figure still wins: "Every 2 extra conversations add about £20,000" is NOT read as per 1', () => {
     expect(door('Every 2 extra conversations add about £20,000 to funding')).not.toBeNull();
   });
