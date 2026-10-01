@@ -25,6 +25,8 @@ const CODE = 'GOAL_DIRECTION_UNATTESTED';
 /** PLoT's entry as served on train-2255Z, verbatim to the cut. */
 const DIRECTION = { code: CODE, severity: 'warning', message: 'No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team\'s stated aim.' };
 const OTHER = { code: 'EDGE_E_VALUE_NON_FINITE_DROPPED', severity: 'info', message: 'kept as served' };
+/** The goal-frame and data-gap codes that ride the same channel: never touched (CODEX lease class 5923549381). */
+const KEPT = ['GOAL_THRESHOLD_NOT_CONVERTIBLE', 'GOAL_ANCESTOR_DATA_GAP'].map((code) => ({ code, severity: 'warning', message: `${code} kept` }));
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -34,7 +36,7 @@ function goal(edit?: (g: Rec) => void): Rec {
   return graph;
 }
 function plotResponse(): V2RunResponseEnvelope {
-  return { ...JSON.parse(JSON.stringify(minimalFixture)), inference_warnings: [OTHER, DIRECTION], decision_brief: { warning_codes: [CODE, 'OTHER_CODE'], warnings: [{ code: CODE }, { code: 'OTHER_CODE' }] } } as unknown as V2RunResponseEnvelope;
+  return { ...JSON.parse(JSON.stringify(minimalFixture)), inference_warnings: [OTHER, DIRECTION, ...KEPT], decision_brief: { warning_codes: [CODE, 'OTHER_CODE'], warnings: [{ code: CODE }, { code: 'OTHER_CODE' }] } } as unknown as V2RunResponseEnvelope;
 }
 /** Every place the run's result carries the code, by JSON path. */
 function carriers(o: unknown, path = ''): string[] {
@@ -60,6 +62,13 @@ describe('A9 residual: PLoT\'s GOAL_DIRECTION_UNATTESTED never reaches a run who
     expect(carriers(out)).toEqual([]);
     expect(JSON.stringify(out)).toContain(OTHER.message);
     expect(JSON.stringify(out)).toContain('OTHER_CODE');
+    for (const k of KEPT) expect(JSON.stringify(out)).toContain(k.message);
+  });
+
+  it('a held ">=" on a positive level is a floor too → the code is on no carrier', async () => {
+    const out = await run(goal((g) => { g.goal_direction = '>='; }));
+    expect(carriers(out)).toEqual([]);
+    for (const k of KEPT) expect(JSON.stringify(out)).toContain(k.message);
   });
 
   it.each([
