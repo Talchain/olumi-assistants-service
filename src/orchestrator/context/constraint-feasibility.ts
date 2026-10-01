@@ -45,6 +45,7 @@ import {
   PLACEHOLDER_PARTS_REASON,
   optionIdOf,
   placeholderMovedOptions,
+  limitUnitsOf,
   type PlaceholderPartsReason,
 } from "./placeholder-parts.js";
 import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
@@ -1067,10 +1068,12 @@ export function collectLimitLevelOwners(
   if (options !== undefined) {
     const nodes = rawNodes.map(readRecord).filter((n): n is Record<string, unknown> => n !== null);
     const edges = Array.isArray(rawEdges) ? rawEdges.map(readRecord).filter((e): e is Record<string, unknown> => e !== null) : [];
+    // A unit-less node is read in its own level limit's unit (the stored rows: `RatifiedConstraint` carries no frame).
+    const limitUnits = limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints);
     for (const c of ratified) {
       if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
       if (nodes.find((n) => n.id === c.node_id)?.kind === 'goal') continue;
-      const moved = placeholderMovedOptions(c.node_id, nodes, edges, options);
+      const moved = placeholderMovedOptions(c.node_id, nodes, edges, options, limitUnits);
       if (moved.size === 0) continue;
       out.placeholderMovedOptionIds.set(c.constraint_id, new Set(moved.keys()));
       const scored = options.map((o) => optionIdOf(o)).filter((id): id is string => id !== undefined);

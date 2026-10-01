@@ -1,0 +1,619 @@
+{
+ "_source": "R3 F5 b8-2456/799d1a5d/03-cold-s1.json (served CEE b410b1c5, guest 799d1a5d), the stored graph verbatim",
+ "graph": {
+  "edges": [
+   {
+    "to": "build_ai_reporting_module",
+    "from": "how_should_i_approach_this_trade_off",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "fix_trial_signup_flow",
+    "from": "how_should_i_approach_this_trade_off",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "continue_current_priorities",
+    "from": "how_should_i_approach_this_trade_off",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "ai_reporting_module_completion",
+    "from": "build_ai_reporting_module",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "trial_flow_bug_resolution",
+    "from": "fix_trial_signup_flow",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "ai_reporting_module_completion",
+    "from": "continue_current_priorities",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "trial_flow_bug_resolution",
+    "from": "continue_current_priorities",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "enterprise_deal_close_probability",
+    "from": "ai_reporting_module_completion",
+    "strength": {
+     "std": 0.1,
+     "mean": 0.2
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "natural_effect": {
+      "amount": 0.2,
+      "amount_unit": "proportion",
+      "strength_mean": 0.2,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "switch"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "sprint_initiatives_tackled_properly",
+    "from": "ai_reporting_module_completion",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "initiatives per sprint",
+      "strength_mean": 0.5,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "switch"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "profile_completion_rate",
+    "from": "trial_flow_bug_resolution",
+    "strength": {
+     "std": 0.018750000000000003,
+     "mean": 0.037500000000000006
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder",
+     "natural_effect": {
+      "amount": 0.0375,
+      "amount_unit": "proportion",
+      "strength_mean": 0.037500000000000006,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "switch"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "sprint_initiatives_tackled_properly",
+    "from": "trial_flow_bug_resolution",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "initiatives per sprint",
+      "strength_mean": 0.5,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "switch"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "revenue_lost_to_rushed_ai_delivery",
+    "from": "ai_reporting_module_completion",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "expected_enterprise_revenue",
+    "from": "enterprise_deal_close_probability",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.25
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 250000,
+      "amount_unit": "\u00a3 per quarter",
+      "strength_mean": 0.25,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "proportion"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "expected_enterprise_revenue",
+    "from": "enterprise_prospect_contract_value",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "expected_trial_profile_revenue",
+    "from": "trial_signup_starts",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "expected_trial_profile_revenue",
+    "from": "profile_completion_rate",
+    "strength": {
+     "std": 0.075,
+     "mean": 0.15
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 300000,
+      "amount_unit": "\u00a3 per quarter",
+      "strength_mean": 0.15,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "proportion"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "expected_trial_profile_revenue",
+    "from": "expected_revenue_per_completed_trial_profile",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "expected_quarterly_revenue",
+    "from": "expected_enterprise_revenue",
+    "strength": {
+     "std": 0.25,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "\u00a3 per quarter",
+      "strength_mean": 0.5,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "\u00a3 per quarter"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "expected_quarterly_revenue",
+    "from": "expected_trial_profile_revenue",
+    "strength": {
+     "std": 0.5,
+     "mean": 1
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": 1,
+      "amount_unit": "\u00a3 per quarter",
+      "strength_mean": 1,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "\u00a3 per quarter"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "expected_quarterly_revenue",
+    "from": "revenue_lost_to_rushed_ai_delivery",
+    "strength": {
+     "std": 0.04999999999999999,
+     "mean": -0.09999999999999998
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "definitional": true,
+     "natural_effect": {
+      "amount": -1,
+      "amount_unit": "\u00a3 per quarter",
+      "strength_mean": -0.09999999999999998,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "\u00a3 per quarter"
+     }
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   }
+  ],
+  "nodes": [
+   {
+    "id": "how_should_i_approach_this_trade_off",
+    "ref": "D1",
+    "kind": "decision",
+    "label": "How should I approach this trade-off?",
+    "provenance": "from_brief"
+   },
+   {
+    "id": "expected_quarterly_revenue",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Expected quarterly revenue",
+    "provenance": "ai_inferred",
+    "goal_direction": ">=",
+    "goal_threshold": 0.1,
+    "threshold_source": "user",
+    "success_threshold": 200000,
+    "goal_threshold_cap": 2000000,
+    "goal_threshold_raw": 200000,
+    "goal_threshold_unit": "\u00a3",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "stated_effect_fit"
+   },
+   {
+    "id": "build_ai_reporting_module",
+    "ref": "O1",
+    "kind": "option",
+    "label": "Build AI Reporting Module",
+    "provenance": "from_brief",
+    "interventions": {
+     "ai_reporting_module_completion": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "ai_reporting_module_completion",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "fix_trial_signup_flow",
+    "ref": "O2",
+    "kind": "option",
+    "label": "Fix Trial Signup Flow",
+    "provenance": "from_brief",
+    "interventions": {
+     "trial_flow_bug_resolution": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "trial_flow_bug_resolution",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "continue_current_priorities",
+    "ref": "O3",
+    "kind": "option",
+    "label": "Continue Current Priorities",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "ai_reporting_module_completion",
+    "ref": "F1",
+    "kind": "factor",
+    "label": "AI reporting module completion",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "unit": "proportion",
+     "value": 0,
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "trial_flow_bug_resolution",
+    "ref": "F2",
+    "kind": "factor",
+    "label": "Trial-flow bug resolution",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "unit": "proportion",
+     "value": 0,
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "enterprise_deal_close_probability",
+    "ref": "F3",
+    "kind": "factor",
+    "label": "Enterprise deal close probability",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "unit": "proportion",
+     "value": 0.2,
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "enterprise_prospect_contract_value",
+    "ref": "F4",
+    "kind": "factor",
+    "label": "Enterprise prospect contract value",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 1000000,
+    "observed_state": {
+     "unit": "\u00a3 per quarter",
+     "value": 0.25,
+     "source": "cee_inference",
+     "raw_value": 250000,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "trial_signup_starts",
+    "ref": "F5",
+    "kind": "factor",
+    "label": "Trial signup starts",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 20000,
+    "observed_state": {
+     "unit": "trial signups per quarter",
+     "value": 0.15,
+     "source": "cee_inference",
+     "raw_value": 3000,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "profile_completion_rate",
+    "ref": "F6",
+    "kind": "factor",
+    "label": "Profile completion rate",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "unit": "proportion",
+     "value": 0.85,
+     "source": "cee_inference"
+    }
+   },
+   {
+    "id": "expected_revenue_per_completed_trial_profile",
+    "ref": "F7",
+    "kind": "factor",
+    "label": "Expected revenue per completed trial profile",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 1000,
+    "observed_state": {
+     "unit": "\u00a3 per completed trial profile per quarter",
+     "value": 0.1,
+     "source": "cee_inference",
+     "raw_value": 100,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "revenue_lost_to_rushed_ai_delivery",
+    "ref": "R1",
+    "kind": "risk",
+    "label": "Revenue lost to rushed AI delivery",
+    "provenance": "ai_inferred",
+    "scale_frame": 200000
+   },
+   {
+    "id": "sprint_initiatives_tackled_properly",
+    "ref": "OC1",
+    "kind": "outcome",
+    "label": "Sprint initiatives tackled properly",
+    "provenance": "ai_inferred",
+    "scale_frame": 2
+   },
+   {
+    "id": "expected_enterprise_revenue",
+    "ref": "OC2",
+    "kind": "outcome",
+    "label": "Expected enterprise revenue",
+    "provenance": "ai_inferred",
+    "scale_frame": 1000000,
+    "nonlinear_identity": {
+     "operation": "product",
+     "factor_ids": [
+      "enterprise_deal_close_probability",
+      "enterprise_prospect_contract_value"
+     ],
+     "stated_in_brief": false
+    }
+   },
+   {
+    "id": "expected_trial_profile_revenue",
+    "ref": "OC3",
+    "kind": "outcome",
+    "label": "Expected trial-profile revenue",
+    "provenance": "ai_inferred",
+    "scale_frame": 2000000,
+    "nonlinear_identity": {
+     "operation": "product",
+     "factor_ids": [
+      "trial_signup_starts",
+      "profile_completion_rate",
+      "expected_revenue_per_completed_trial_profile"
+     ],
+     "stated_in_brief": false
+    }
+   }
+  ],
+  "ref_high_water": {
+   "D": 1,
+   "F": 7,
+   "G": 1,
+   "O": 3,
+   "R": 1,
+   "OC": 3
+  },
+  "goal_constraints": [
+   {
+    "unit": "initiatives per sprint",
+    "label": "Sprint initiatives tackled properly",
+    "value": 1,
+    "node_id": "sprint_initiatives_tackled_properly",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:sprint_initiatives_tackled_properly:<="
+   },
+   {
+    "unit": "\u00a3",
+    "label": "Expected quarterly revenue",
+    "value": 200000,
+    "node_id": "expected_quarterly_revenue",
+    "operator": ">=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "gc-13f114b6-13fa-4ef5-b7f7-f33bfa7313bb"
+   }
+  ]
+ }
+}
