@@ -360,3 +360,37 @@ describe('L4 (i): an ACCEPTED Olumi size licenses the goal target; unapproved Ol
     expect(olumiGuessedGoalLink(e, () => undefined)).toBe(false);
   });
 });
+
+/**
+ * ⭐ DL condition (1) on #2446 (5930770727): a link that HOLDS BY DEFINITION on a goal path never caps target
+ * testability, even when the size is Olumi's — the goal reader keeps `holdsByDefinition` (the ONE structural test, #2445).
+ * Built on Paul's testable graph (today's level + £-sized links): one link into the goal becomes Olumi's, definitional,
+ * exactly +1 £ per £. CONTROL: the same link without the definitional mark is Olumi's guess and caps the target.
+ */
+describe('L4 × #2445: a definitional Olumi link on the goal path never caps the target', () => {
+  const definitionalInto = (definitional: boolean): Json => {
+    const g = poundsInto(withToday(FIX.paul));
+    const goal = g.nodes.find((n: Json) => n.kind === 'goal');
+    const unit = goal.goal_threshold_unit as string;
+    const e = g.edges.find((x: Json) => x.to === goal.id && g.nodes.find((n: Json) => n.id === x.from)?.kind !== 'option')!;
+    for (const n of g.nodes) if (n.id === e.from) { delete n.unit; if (n.observed_state) delete n.observed_state.unit; }
+    e.strength = { mean: 1, std: 0.01 };
+    e.defaulted = true;
+    e.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate', ...(definitional ? { definitional: true } : {}),
+      natural_effect: { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: unit, strength_mean: 1 } };
+    return g;
+  };
+
+  it('PRECONDITION: Paul’s graph with today’s level and £-sized links is testable', () => {
+    expect(targetTestabilityOf(poundsInto(withToday(FIX.paul)))).toEqual({ kind: 'testable', goal_id: 'securing_funding' });
+  });
+
+  it('RED: Olumi’s definitional +1 £ per £ link into the goal → still testable', () => {
+    expect(targetTestabilityOf(definitionalInto(true))).toEqual({ kind: 'testable', goal_id: 'securing_funding' });
+  });
+
+  it('CONTROL: the same Olumi link WITHOUT the definitional mark is a guess → not testable (P5)', () => {
+    const v = targetTestabilityOf(definitionalInto(false));
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.precondition)).toEqual(['P5']);
+  });
+});
