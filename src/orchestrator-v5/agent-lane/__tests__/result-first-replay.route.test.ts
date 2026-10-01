@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE, RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
+import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_RESULT_READY_TEXT } from '../run-explanation.js';
 
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-withheld-leader-0948Z.json', import.meta.url), 'utf8')) as {
   analysis_state: Record<string, unknown>;
@@ -24,7 +24,10 @@ const RUN_B = '2026-10-01T09:58:47.190Z';
 const PROSE = 'The result depends on the assumptions in your model.';
 
 let computedAt = RUN_A;
-const state = () => ({ ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: computedAt } });
+let runKind = 'complete_current';
+const state = () => ({ ...SERVED.analysis_state, run_state: { kind: runKind, computed_at: computedAt } });
+/** Olumi's own line when request 1 ran but no current result can be confirmed (the route's `RUN_RESULT_UNVERIFIED_TEXT`). */
+const UNVERIFIED = 'The analysis finished, but I can’t verify a current result. Check the current results before asking again.';
 
 type Row = Record<string, unknown>;
 const rows: Row[] = [];
@@ -82,7 +85,7 @@ describe('result-first on retry, lost response and failed explanation (live rout
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { computedAt = RUN_A; rows.length = 0; provider = 'ok'; modelCalls = 0; });
+  beforeEach(() => { computedAt = RUN_A; runKind = 'complete_current'; rows.length = 0; provider = 'ok'; modelCalls = 0; });
 
   const post = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: SCENARIO, ...payload } });
   const runTurn = (turnId: string) => post({ turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
@@ -139,6 +142,38 @@ describe('result-first on retry, lost response and failed explanation (live rout
     expect(runB.narration!.run_key).not.toBe(runA.narration!.run_key);
     expect(replay.narration).toEqual({ status: 'pending', run_key: runB.narration!.run_key });
     expect(explainIds(replay)).toEqual(explainIds(runB));
+  });
+
+  it('RED (P1 @b30759b2): retry Run A after the figures changed and Run B completed → Olumi\'s fixed line, never A\'s stored figures — also after a restart', async () => {
+    const r1 = randomUUID();
+    const runA = (await runTurn(r1)).json() as Body;
+    // What request 1 stored can carry paragraphs built from ITS readback (the break-even arithmetic, the provisional
+    // view): A's figures, persisted with A's answer row.
+    const row = rows.find((x) => x.turn_id === r1 && typeof x.assistantMessage === 'string')!;
+    row.assistantMessage = `${String(row.assistantMessage)}\n\nIf MRR is £1,234,567 a month, the price covers it at 4,321 subscribers.`;
+    computedAt = RUN_B;
+    // What a live Run turn says on the CURRENT state: the replay must say the same, never A's paragraphs.
+    const live = (await runTurn(randomUUID())).json() as Body;
+    expect(live.assistant_text.startsWith(RUN_RESULT_READY_TEXT)).toBe(true);
+    for (const restart of [false, true]) {
+      if (restart) { await app.close(); app = await freshApp(); }
+      const replay = (await runTurn(r1)).json() as Body;
+      expect(replay.assistant_text, `restart=${restart}`).toBe(live.assistant_text);
+      expect(replay.assistant_text).not.toMatch(/1,234,567|4,321/);
+      expect(replay.narration?.run_key).not.toBe(runA.narration!.run_key);
+    }
+  });
+
+  it('CONTROL (P1 @b30759b2): no current Run to show → Olumi\'s "can\'t verify" line, no pending narration, no control, none of A\'s figures', async () => {
+    const r1 = randomUUID();
+    await runTurn(r1);
+    const row = rows.find((x) => x.turn_id === r1 && typeof x.assistantMessage === 'string')!;
+    row.assistantMessage = `${String(row.assistantMessage)}\n\nIf MRR is £1,234,567 a month, the price covers it at 4,321 subscribers.`;
+    runKind = 'complete_stale';
+    const replay = (await runTurn(r1)).json() as Body;
+    expect(replay.assistant_text).toBe(UNVERIFIED);
+    expect(replay.narration).toBeUndefined();
+    expect(explainIds(replay)).toEqual([]);
   });
 
   for (const mode of ['empty', 'fetch_failed'] as const) {

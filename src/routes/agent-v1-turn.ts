@@ -76,7 +76,7 @@ import { decisionInputLines, textAtRest, withA7AfterGate } from '../orchestrator
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
-import { goalChanceLineOwed, goalChanceSayFromThisTurn } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
+import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
 import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
@@ -689,6 +689,9 @@ export const INTERPRETER_V02_BANKED: string = "Explain the current **model-relat
  */
 /** A Run whose own turn failed: nothing ran, nothing changed, and Olumi does not claim to know why. */
 export const RUN_FAILED_TEXT = 'I couldn\u2019t run the analysis: something went wrong on Olumi\u2019s side while starting it. Nothing in your model changed, so please try again in a moment.';
+
+/** Request 1 ran, but the readback cannot confirm a current result: Olumi's own line, live and on replay (#2470). */
+export const RUN_RESULT_UNVERIFIED_TEXT = 'The analysis finished, but I can’t verify a current result. Check the current results before asking again.';
 
 export function interpretationUnavailableText(ran: { ok?: unknown; ran?: unknown; refusal?: unknown; status?: unknown; what_is_missing?: unknown }): string {
   if (ran.ran === true) {
@@ -1544,7 +1547,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * - request 2 (the explanation) returns its stored words ONLY while its bound key still names the CURRENT Run.
        *   Explain Run A, complete Run B, retry A's turn: `stale` with the honest line, never A's words beside B;
        * - request 1 (the Run) whose response was lost returns the CURRENT result, its narration metadata and the bound
-       *   Explain control, so the retry is the same Run experience, across a restart too.
+       *   Explain control, so the retry is the same Run experience, across a restart too. Its words are Olumi's fixed
+       *   line plus what the CURRENT readback says at rest, never the stored answer: that answer's appended paragraphs
+       *   (break-even arithmetic, the provisional view) were built from THAT turn's readback, and a newer Run B would sit
+       *   beside Run A's figures (overflow P1, b30759b2).
        * Which request it was is read from the request itself (the typed chips), and whether the Run made a result from
        * the stored reply being Olumi's own fixed line, never from the user's words.
        */
@@ -1564,9 +1570,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         } else {
           replayNarration = { status: 'ready', run_key: runKey };
         }
-      } else if (approvedProposal === undefined && typedRunOf(body) && replayChip !== null && replayText.startsWith(RUN_RESULT_READY_TEXT)) {
-        replayNarration = { status: 'pending', run_key: replayChip.id.slice(RUN_EXPLANATION_PREFIX.length) };
-        boundControl.push(replayChip);
+      } else if (approvedProposal === undefined && typedRunOf(body) && replayText.startsWith(RUN_RESULT_READY_TEXT)) {
+        if (replayChip !== null) {
+          // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
+          // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
+          // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
+          const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
+          const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
+          const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
+          const withoutAsks = withDisclosures(RUN_RESULT_READY_TEXT, owedNow);
+          const lines = decisionInputLines(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks });
+          let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow, ...lines]);
+          const breakEvenNow = (state.analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
+            ? breakEvenFor(state.graph, state.identityEvaluated) : null;
+          if (breakEvenNow !== null) rebuilt = withBreakEvenAnswer(rebuilt, breakEvenNow, { afterIdentityAsk: false });
+          replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
+          replayNarration = { status: 'pending', run_key: replayChip.id.slice(RUN_EXPLANATION_PREFIX.length) };
+          boundControl.push(replayChip);
+        } else {
+          replayText = RUN_RESULT_UNVERIFIED_TEXT;
+        }
       }
       const resultFirstReplay = replayNarration !== undefined;
       const remembered = turnId !== undefined ? offeredActions.get(`${scenarioId}:${turnId}`) ?? [] : [];
@@ -2295,7 +2318,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) === null) {
-      text = 'The analysis finished, but I can’t verify a current result. Check the current results before asking again.';
+      text = RUN_RESULT_UNVERIFIED_TEXT;
     }
     if (fastPath === 'explain' && !runExplanationMatches(explanationId, scenarioId, { graphHash, analysisState, analysisResult })) {
       result = { ...result, assistant_text: RUN_EXPLANATION_UNAVAILABLE_TEXT,
