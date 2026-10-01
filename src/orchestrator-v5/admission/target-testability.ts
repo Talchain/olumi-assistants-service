@@ -13,6 +13,7 @@
  * P5, a quantified path from an option into the goal's own unit, is MODEL GENERATION's `sizeLink` question and is not
  * checked here yet. Words: AIQ #77 5912882031. Pure and total.
  */
+import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
@@ -155,7 +156,7 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     const unconverted = identityForwarded ? undefined : into.find((e) => !sizedInGoalUnit(e, goalUnit));
     const failing = unconverted ?? guess;
     if ((!identityForwarded && into.length === 0) || failing !== undefined) {
-      const placeholderLink = failing !== undefined && isRec(failing.provenance) && failing.provenance.magnitude === 'olumi_placeholder';
+      const placeholderLink = failing !== undefined && isPlaceholderLink(failing);
       failures.push({ precondition: 'P5', case: 'c',
         code: identity !== undefined && !identityForwarded ? 'identity_unconfirmed' : placeholderLink ? 'goal_path_placeholder' : 'goal_path_unsized',
         ...(failing !== undefined ? { lever: labelOf.get(failing.from) ?? String(failing.from) } : {}) });

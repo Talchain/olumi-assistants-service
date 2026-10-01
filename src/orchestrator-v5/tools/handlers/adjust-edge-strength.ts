@@ -20,6 +20,7 @@
  * surfaced explicitly.
  */
 
+import { sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
 import { z } from 'zod';
 
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
@@ -472,8 +473,11 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // has no source to keep, and none may be invented, so nothing is recorded on it.
         if (reviewOnly) {
           if (edge.provenance !== undefined) {
+            // ⭐ L4 (DL 5929790081): a review on a PLACEHOLDER sizes it — Olumi's band, now chosen and accepted
+            // (`sizedByApproval`: `olumi_placeholder` → `olumi_estimate`, authorship untouched). Paul's 09:25 approval
+            // of 8 links kept every placeholder, and three Runs repeated "Olumi hasn't sized…" (`96c6f5f4`).
             edge.provenance = {
-              ...edge.provenance,
+              ...sizedByApproval(edge.provenance),
               reviewed_by_user: {
                 intent: 'confirm',
                 at: new Date().toISOString(),
@@ -512,7 +516,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           // A real write: the clamp marker spoke for the OLD stored size, so it goes with it (CODEX 5925312387).
           const { natural_effect: _oldNaturalEffect, clamped_from: _oldClamp, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
           const reviewed: Record<string, unknown> = {
-            ...keptProvenance,
+            // L4: the same rule as the review branch above — an adopted band on a placeholder sizes it.
+            ...sizedByApproval(keptProvenance),
             reviewed_by_user: { intent: 'confirm', at: new Date().toISOString(), band: adopted.band },
           };
           edge.provenance = reviewed as typeof edge.provenance;

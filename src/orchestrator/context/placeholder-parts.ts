@@ -26,6 +26,7 @@
  * placeholder. Otherwise the normal fold applies. Pure.
  */
 
+import { isSizedOnlyByOlumi } from '../../cee/magnitude/link-sizing.js';
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { isAcceptedOlumiEstimate } from '../../cee/transforms/provenance-display.js';
@@ -53,9 +54,9 @@ export type PlaceholderPartsReason =
  * {@link olumiGuessedLink}.
  */
 export function olumiSizedLink(e: Rec): boolean {
-  const p = isRec(e.provenance) ? e.provenance : undefined;
-  return p?.source !== 'user_specified' && p?.magnitude !== 'user_stated'
-    && ((typeof p?.magnitude === 'string' && p.magnitude.startsWith('olumi_')) || e.defaulted === true);
+  // ONE predicate (L4, `link-sizing.ts`): the parts rule — no Olumi size, accepted or not, scores a parts limit
+  // (DL 5929790081 (ii)).
+  return isSizedOnlyByOlumi(e);
 }
 
 /**

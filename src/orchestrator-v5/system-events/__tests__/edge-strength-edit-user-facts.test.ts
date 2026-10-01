@@ -201,7 +201,8 @@ describe('(2) confirm_current from a band: the mean is kept and the std is the b
     expect(edge.strength.mean).toBe(0.85);
     expect(edge.strength.std).toBe(edgeBandStd('very strong'));
     const { reviewed_by_user: review, ...kept } = edge.provenance!;
-    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reasoning: SERVED_REASONING });
+    // L4 (DL 5929790081): an approved placeholder is sized (`olumi_estimate`); source and reasoning stay Olumi's.
+    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reasoning: SERVED_REASONING });
     expect(review).toMatchObject({ intent: 'confirm', band: 'very strong' });
     expect(edge.defaulted).toBe(true);
     expect(edge).not.toHaveProperty('exists_defaulted');
@@ -227,11 +228,15 @@ describe('(2) confirm_current from a band: the mean is kept and the std is the b
     expect(edge).not.toHaveProperty('std_defaulted');
     expect(edge.defaulted).toBe(true);
     const { reviewed_by_user: review, ...kept } = edge.provenance!;
-    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reasoning: SERVED_REASONING });
+    // L4 (DL 5929790081): an approved placeholder is sized (`olumi_estimate`); source and reasoning stay Olumi's.
+    expect(kept).toStrictEqual({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reasoning: SERVED_REASONING });
     expect(review).toMatchObject({ intent: 'confirm' });
     expect(review).not.toHaveProperty('band');
     if (result.kind !== 'mutated') return;
-    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(graph as GraphV3T));
+    // L4: the ONLY analysis input that moves is the placeholder's sizing (`olumi_estimate`) — never the std.
+    const sized = structuredClone(graph) as GraphV3T;
+    for (const e of sized.edges) if (e.from === edge.from && e.to === edge.to) (e.provenance as Record<string, unknown>).magnitude = 'olumi_estimate';
+    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(sized));
   });
 
   it('CONTRAST: a stated band the link does NOT sit in is not a band for this write — std untouched', async () => {
