@@ -55,8 +55,12 @@ export function strengthenCardFor(state: StrengthenPressState): StrengthenCard |
     });
     const target = selectStrengthenPlaceholder(state.graph, signals['model.non_sq_option_ids'], identityEvaluations);
     if (target === null) return null;
-    // The leaf types an absent goal label as `undefined`, the signals as `null`: no label is no label.
-    const leafSignals = { ...signals, 'model.goal_label': signals['model.goal_label'] ?? undefined } as unknown as LeafSignals;
+    // The S1 copy reads the item's two labels from the goal-path links; nothing else (no goal, plan or leader) is passed.
+    const leafSignals: LeafSignals = {
+      'model.goal_path_links': signals['model.goal_path_links'],
+      'model.non_sq_option_ids': signals['model.non_sq_option_ids'],
+      'model.option_labels': signals['model.option_labels'],
+    };
     const copy = renderCopy({ policy_id: 'RC-STRENGTHEN-ITEM', variant: 'S1', item: `${target.from_id}->${target.to_id}` }, leafSignals);
     if (copy.title === null || copy.question === null) return null;
     return {
