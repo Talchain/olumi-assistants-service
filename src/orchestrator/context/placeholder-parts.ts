@@ -183,7 +183,9 @@ function userStatedStrength(edge: Rec): boolean {
  */
 export function sizedLinkTest(nodes: readonly Rec[]): (edge: Rec) => boolean {
   const unitById = sizerUnitsOf(nodes);
-  return (edge) => linkIsSized(edge, unitById);
+  const unitOf = nodeUnitOf(nodes);
+  // A link that holds by definition is sized by it (never asked about: `link-size-ask.ts`; MG sweep C3).
+  return (edge) => holdsByDefinition(edge, unitOf) || linkIsSized(edge, unitById);
 }
 
 /** The option sets a level on the node (a bare finite number, or `{ value }`), as PLoT reads an intervention. */
@@ -238,6 +240,14 @@ export function placeholderMovedOptions(
  * `parts_links_placeholder`), so the withheld row can ask for that link's size (AI Quality 5882087383: "How much would a
  * price rise move monthly churn? Give a figure, or let Olumi estimate it.").
  */
+/** A declared SUM whose every operand reaches it through a link that holds by definition (`holdsByDefinition`). */
+function definitionalSum(target: Rec, edges: readonly Rec[], unitOf: (id: unknown) => string | undefined): boolean {
+  const identity = target.nonlinear_identity as Rec;
+  const operands = Array.isArray(identity.factor_ids) ? identity.factor_ids : [];
+  return identity.operation === 'sum' && operands.length >= 2 && operands.every((id) => edges.some((e) => e.from === id
+    && e.to === target.id && holdsByDefinition(e, unitOf)));
+}
+
 export function placeholderPartsFinding(
   targetId: string,
   allNodes: readonly Rec[],
@@ -272,7 +282,11 @@ export function placeholderPartsFinding(
     .filter((iv) => !setsLevel(iv[targetId]) && Object.keys(iv).some((k) => parts.has(k)));
   let guessed: { partId: string; from: string; to: string } | undefined;
   if (movers.length > 0) {
-    if (target !== undefined && isRec(target.nonlinear_identity)) return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
+    // A product cannot be added up on links. A SUM whose every part link holds by definition (+1 per 1, one unit) IS the
+    // linear combination, so its limit is scored on the parts (DL ruling (ii) 5929790081; SEMANTIC MODEL SPEC A4).
+    if (target !== undefined && isRec(target.nonlinear_identity) && !definitionalSum(target, edges, nodeUnitOf(nodes))) {
+      return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
+    }
     const unitById = sizerUnitsOf(nodes);
     const unitOf = nodeUnitOf(nodes);
     const onPath = new Set<unknown>([...parts, targetId]);
@@ -285,7 +299,9 @@ export function placeholderPartsFinding(
           const at = walk.shift();
           for (const e of edges) {
             if (e.from !== at || !onPath.has(e.to)) continue;
-            if (!linkIsSized(e, unitById) && !userStatedStrength(e)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
+            // A link that holds by definition is sized by that definition, whatever unit token the sizer would pick
+            // ("%" vs "percentage points"): checked first (MG sweep C2, a percent-level total).
+            if (!holdsByDefinition(e, unitOf) && !linkIsSized(e, unitById) && !userStatedStrength(e)) return { reason: PLACEHOLDER_PARTS_REASON, partId };
             if (guessed === undefined && olumiGuessedLink(e, unitOf)) guessed = { partId, from: String(e.from), to: String(e.to) };
             if (e.to !== targetId && !reached.has(e.to)) {
               reached.add(e.to);
