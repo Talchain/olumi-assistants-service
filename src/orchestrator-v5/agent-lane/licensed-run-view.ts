@@ -94,6 +94,11 @@ export function runToolOutputLicensesLeader(result: unknown): boolean {
   return (record(record(result)?.claim_permissions)?.leader_may_be_named) === true;
 }
 
+/** An identifier, code, enum or timestamp (no whitespace, bounded): never prose. */
+export function isCodeShaped(value: string): boolean {
+  return CODE_SHAPED.test(value);
+}
+
 function stringSurvives(key: string | undefined, value: string): boolean {
   if (CODE_SHAPED.test(value)) return true;
   return key !== undefined && LICENSED_LABEL_KEYS.has(key);

@@ -15,7 +15,9 @@ import { agentLaneLeaderWithheld } from '../withheld-leader-fail-closed.js';
 import { claimPermissionsFrom } from '../first-analysis.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { modelFacingToolResult, withoutLeaderDesignations } from '../licensed-run-view.js';
-import { enforceLeaderLicenceAtFinalEgress, FINAL_EGRESS_FAILED_TEXT } from '../leader-final-egress.js';
+import { enforceLeaderLicenceAtFinalEgress, FINAL_EGRESS_FAILED_TEXT, knownSafeEnvelope } from '../leader-final-egress.js';
+import { AnalysisResultBlockSchema } from '@talchain/schemas/boundary';
+import { LICENSED_LABEL_KEYS } from '../licensed-run-view.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SERVED = JSON.parse(readFileSync(join(here, 'fixtures/served-withheld-leader-0948Z.json'), 'utf8')) as {
@@ -181,6 +183,64 @@ describe('the Agent lane fail-closed final egress', () => {
     expect(JSON.stringify(body)).not.toContain('ai_reporting_sprint');
     expect(JSON.stringify(body)).not.toContain('AI Reporting Sprint');
     expect(error).toHaveBeenCalledWith(expect.objectContaining({ event: 'agent_lane.leader_final_egress_failed' }), expect.any(String));
+  });
+
+  // CODEX CEE BUDDY 5932438459: the envelope kept `analysis_result.summary` by spreading the block. The class is every
+  // unchecked text member, so the hostile body carries the leader sentence in EVERY carrier the Agent reply has.
+  const LEADER = 'AI Reporting Sprint currently performs best, leading in 46% of simulations.';
+  const everyCarrier = (): Record<string, unknown> => ({
+    assistant_text: LEADER,
+    framing_question: LEADER,
+    blocks: [
+      { ...SERVED.block, summary: LEADER, leading_option_id: 'ai_reporting_sprint', enrichment: { fragility_note: LEADER } },
+      { type: 'review_card', title: LEADER, body: LEADER, signal_id: 's1' },
+      { type: 'text', text: LEADER },
+    ],
+    suggested_actions: [{ id: 'x', label: LEADER, message: LEADER }],
+    run_delta: { leader: { current_leading_option_id: 'ai_reporting_sprint' }, summary: LEADER },
+    insights: [LEADER, { text: LEADER }],
+    analysis_state: { run_state: { kind: 'complete_current', note: LEADER }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld', leading_option_id: 'ai_reporting_sprint' } },
+    analysis_ready: { status: 'ready', options: [{ id: 'ai_reporting_sprint', label: 'AI Reporting Sprint' }], blockers: [{ code: 'b1', message: LEADER }] },
+    draft_graph: { nodes: [{ id: 'ai_reporting_sprint', kind: 'option', label: 'AI Reporting Sprint', description: LEADER }], edges: [] },
+    _diagnostic_trace: { exit_path: 'agent_lane_v1', note: LEADER },
+    _agent: { provisional_view: { text: LEADER }, tool_calls: [{ name: 'run_analysis' }], offered: [{ label: 'Why is AI Reporting Sprint the leading option?' }] },
+    _answer_shape: { text: LEADER },
+  });
+  const strings = (v: unknown, key: string | undefined, out: Array<[string | undefined, string]>): Array<[string | undefined, string]> => {
+    if (typeof v === 'string') out.push([key, v]);
+    else if (Array.isArray(v)) v.forEach((x) => strings(x, key, out));
+    else if (v !== null && typeof v === 'object') for (const [k, x] of Object.entries(v)) strings(x, k, out);
+    return out;
+  };
+
+  it('RED (CODEX 5932438459): a forced egress error ships NO leader prose from ANY carrier — summary, block prose, sidecars, model members', () => {
+    const hostile = { get nodes(): never { throw new Error('boom'); } };
+    const out = enforceLeaderLicenceAtFinalEgress(everyCarrier(), { ...opts('withheld'), graph: hostile });
+    const body = out.response as Record<string, any>;
+    expect(body.assistant_text).toBe(FINAL_EGRESS_FAILED_TEXT);
+    const all = strings(body, undefined, []);
+    // No leader sentence anywhere; the option's NAME survives only as a user-given name under a label key.
+    expect(all.filter(([, v]) => /performs best|leading|strongest/i.test(v) && v !== FINAL_EGRESS_FAILED_TEXT)).toEqual([]);
+    for (const [k, v] of all) if (v.includes('AI Reporting Sprint')) expect(k !== undefined && LICENSED_LABEL_KEYS.has(k) && v === 'AI Reporting Sprint', `${k}=${v}`).toBe(true);
+    expect(JSON.stringify(body)).not.toMatch(/leading_option_id":"ai_reporting_sprint/);
+    // The deterministic result survives, schema-valid; every prose block is gone; the model members are omitted whole.
+    expect(body.blocks).toHaveLength(1);
+    expect(body.blocks[0]).toMatchObject({ type: 'analysis_result', summary: '', leading_option_id: null, computed_against_hash: SERVED.block.computed_against_hash });
+    expect(body.blocks[0].enrichment).toBeUndefined();
+    expect(AnalysisResultBlockSchema.safeParse(body.blocks[0]).success).toBe(true);
+    expect(body.draft_graph).toBeUndefined();
+    expect(body.run_delta).toBeUndefined();
+    expect(body.suggested_actions).toEqual([]);
+    expect(body.analysis_state.leader_claim).toEqual({ permitted: false, withheld_reason: 'constraint_verdict_withheld', leading_option_id: null });
+    expect(body.analysis_state.run_state).toEqual({ kind: 'complete_current' });
+    expect(body._agent.provisional_view).toBeUndefined();
+    expect(body._agent.tool_calls).toEqual([{ name: 'run_analysis' }]);
+  });
+
+  it('RED: when building the envelope itself fails, the minimal envelope ships — nothing from the reply', () => {
+    const poisoned = { get blocks(): never { throw new Error('boom'); }, assistant_text: LEADER } as Record<string, unknown>;
+    const env = knownSafeEnvelope(poisoned);
+    expect(env).toEqual({ assistant_text: FINAL_EGRESS_FAILED_TEXT, suggested_actions: [], blocks: [] });
   });
 
   it('CONTROL: a permitted turn is returned by reference', () => {

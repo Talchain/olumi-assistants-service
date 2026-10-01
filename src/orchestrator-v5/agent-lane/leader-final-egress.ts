@@ -24,7 +24,7 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { log } from '../../utils/telemetry.js';
 import type { LeaderLicence } from '../compose/leader-licence.js';
-import { keyNamesLeader, withoutLeaderDesignations } from './licensed-run-view.js';
+import { isCodeShaped, keyNamesLeader, LICENSED_LABEL_KEYS } from './licensed-run-view.js';
 import {
   findLeaderClaims,
   optionLabelPattern,
@@ -141,29 +141,96 @@ function chipAssertsLeader(chip: unknown, labels: readonly string[]): boolean {
  */
 export const FINAL_EGRESS_FAILED_TEXT = WIRE_WITHHELD_LEADER_REPLACEMENT;
 
-/** Known-safe: no prose, no chips, no run delta, no enrichment; leader-designating keys nulled on what remains. */
-export function knownSafeEnvelope(response: Record<string, unknown>): Record<string, unknown> {
-  const src = response;
+/** Members the envelope never ships: prose, chips, the run delta, the provisional rewrite marker. */
+const ENVELOPE_DROPPED: ReadonlySet<string> = new Set(['assistant_text', 'framing_question', 'suggested_actions', 'run_delta', '_answer_shape']);
+
+/**
+ * Members that carry the user's MODEL (`draft_graph`, the applied `graph`): omitted whole, never shipped thinned. The
+ * UI applies them to the canvas, so a graph with its descriptions stripped would show (and could later save) a
+ * different model; omitted, the UI keeps the model it has and the next turn's readback carries it.
+ */
+const ENVELOPE_MODEL_MEMBERS: ReadonlySet<string> = new Set(['draft_graph', 'graph']);
+
+/**
+ * The envelope's ONE string rule (CODEX CEE BUDDY 5932438459: the whole unchecked-text class, not one more field). A
+ * string ships only when it is code-shaped (an id, code, enum, hash or timestamp) or a NAME under a label key, and in
+ * either case uses no leader vocabulary. Everything else (summaries, block prose, sidecar notes, messages) is dropped.
+ */
+function envelopeStringSurvives(key: string | undefined, value: string): boolean {
+  if (textNamesLeadingOption(value)) return false;
+  return isCodeShaped(value) || (key !== undefined && LICENSED_LABEL_KEYS.has(key));
+}
+
+function envelopeAllowList(value: unknown, key: string | undefined, depth: number): unknown {
+  if (depth > MAX_DEPTH) return undefined;
+  if (typeof value === 'string') return envelopeStringSurvives(key, value) ? value : undefined;
+  if (Array.isArray(value)) {
+    const out: unknown[] = [];
+    for (const item of value) {
+      const kept = envelopeAllowList(item, key, depth + 1);
+      if (kept !== undefined) out.push(kept);
+    }
+    return out;
+  }
+  const rec = record(value);
+  if (rec === undefined) return value;
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(src)) {
-    if (k === 'assistant_text' || k === 'framing_question' || k === 'suggested_actions' || k === 'run_delta' || k === '_answer_shape') continue;
-    out[k] = v;
+  for (const [k, v] of Object.entries(rec)) {
+    if (keyNamesLeader(k) && v !== null && v !== undefined && v !== '') { out[k] = null; continue; }
+    const kept = envelopeAllowList(v, k, depth + 1);
+    if (kept !== undefined) out[k] = kept;
   }
-  const agent = record(src._agent);
-  if (agent !== undefined && 'provisional_view' in agent) {
-    const { provisional_view: _view, ...rest } = agent;
-    out._agent = rest;
+  return out;
+}
+
+/**
+ * Blocks: only the `analysis_result` block survives (the UI's deterministic result), reduced by the same allow-list
+ * with its enrichment dropped and its REQUIRED `summary` emptied (`boundary/blocks.ts`: `summary: z.string()`,
+ * `leading_option_id` required + nullable). Every other block type is prose-bearing with a required non-empty
+ * title/body, so it is dropped whole rather than shipped invalid.
+ */
+function envelopeBlocks(blocks: unknown): unknown[] {
+  if (!Array.isArray(blocks)) return [];
+  const out: unknown[] = [];
+  for (const b of blocks) {
+    const block = record(b);
+    if (block?.type !== 'analysis_result') continue;
+    const { enrichment: _e, summary: _s, ...rest } = block;
+    const kept = record(envelopeAllowList(rest, undefined, 0)) ?? {};
+    out.push({ ...kept, type: 'analysis_result', summary: '', leading_option_id: null });
   }
-  if (Array.isArray(src.blocks)) {
-    out.blocks = src.blocks.map((b) => {
-      const block = record(b);
-      if (block === undefined) return b;
-      const { enrichment: _dropped, ...rest } = block;
-      return rest;
-    });
+  return out;
+}
+
+/** The last resort, when building the envelope itself fails: nothing from the reply at all. */
+const MINIMAL_ENVELOPE: Readonly<Record<string, unknown>> = Object.freeze({ assistant_text: WIRE_WITHHELD_LEADER_REPLACEMENT, suggested_actions: [], blocks: [] });
+
+/**
+ * Known-safe, by ALLOW-LIST: the fixed withheld line, no chips, no run delta, no model members, the `analysis_result`
+ * block reduced to codes and numbers, and every other member reduced to codes, numbers, booleans and user-given names
+ * with leader-designating keys nulled. Never throws: a failure here returns {@link MINIMAL_ENVELOPE}.
+ */
+export function knownSafeEnvelope(response: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(response)) {
+      if (ENVELOPE_DROPPED.has(k) || ENVELOPE_MODEL_MEMBERS.has(k)) continue;
+      if (k === 'blocks') { out.blocks = envelopeBlocks(v); continue; }
+      if (k === '_agent') {
+        const agent = record(v);
+        if (agent === undefined) continue;
+        const { provisional_view: _view, ...rest } = agent;
+        out._agent = envelopeAllowList(rest, k, 0);
+        continue;
+      }
+      if (keyNamesLeader(k) && v !== null && v !== undefined && v !== '') { out[k] = null; continue; }
+      const kept = envelopeAllowList(v, k, 0);
+      if (kept !== undefined) out[k] = kept;
+    }
+    return { ...out, assistant_text: FINAL_EGRESS_FAILED_TEXT, suggested_actions: [], blocks: out.blocks ?? [] };
+  } catch {
+    return { ...MINIMAL_ENVELOPE, suggested_actions: [], blocks: [] };
   }
-  const safe: Record<string, unknown> = { ...(withoutLeaderDesignations(out) as Record<string, unknown>), assistant_text: FINAL_EGRESS_FAILED_TEXT, suggested_actions: [] };
-  return safe;
 }
 
 export function enforceLeaderLicenceAtFinalEgress<T extends Record<string, unknown>>(response: T, opts: LeaderFinalEgressOpts): LeaderFinalEgressResult<T> {

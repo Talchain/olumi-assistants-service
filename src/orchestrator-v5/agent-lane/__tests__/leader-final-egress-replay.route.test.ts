@@ -25,10 +25,10 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
   return { ...actual, resolveUserIdentity: async () => ({ mode: 'off' }) };
 });
 
-const provider = { calls: 0 };
+const provider = { calls: 0, text: 'A fresh answer.' };
 const fakeFetch = vi.fn(async () => {
   provider.calls += 1;
-  return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'A fresh answer.' }] }] }), { status: 200 });
+  return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: provider.text }] }] }), { status: 200 });
 });
 
 const SID = '7a1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
@@ -61,7 +61,7 @@ async function freshApp(): Promise<FastifyInstance> {
 describe('a replayed Agent turn passes the final leader egress', () => {
   let app: FastifyInstance;
   beforeEach(async () => {
-    rows.clear(); provider.calls = 0; leaderPermitted = false;
+    rows.clear(); provider.calls = 0; provider.text = 'A fresh answer.'; leaderPermitted = false;
     vi.stubGlobal('fetch', fakeFetch);
     app = await freshApp();
     const { agentTurnRequestHash } = await import('../../../routes/agent-v1-turn.js');
@@ -77,6 +77,31 @@ describe('a replayed Agent turn passes the final leader egress', () => {
     const body = r.json() as { assistant_text?: string; _agent?: { replayed?: boolean } };
     expect(body._agent?.replayed).toBe(true);
     expect(provider.calls).toBe(0);
+    expect(body.assistant_text).not.toContain('AI Reporting Sprint currently performs best');
+  });
+
+  it('RED (DL 5932495794 item 3): a licence NEWLY withheld after the answer was written edits the replay — the stored words came from a live permitted turn', async () => {
+    // Turn 1 runs live under a PERMITTED licence: the model names the leader and the answer row stores those words.
+    const T2 = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b';
+    await app.close();
+    leaderPermitted = true;
+    provider.text = LEADER_PROSE;
+    app = await freshApp();
+    const live = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SID, message: MESSAGE, turn_id: T2 } });
+    expect(live.statusCode).toBe(200);
+    expect((live.json() as { assistant_text?: string }).assistant_text).toBe(LEADER_PROSE);
+    expect(rows.get(T2)?.assistant_message).toBe(LEADER_PROSE);
+    const callsAfterLive = provider.calls;
+    expect(callsAfterLive).toBeGreaterThan(0);
+    // The licence is then withheld (a later Run, a new limit). A lost-response retry of turn 1 replays the stored row.
+    await app.close();
+    leaderPermitted = false;
+    app = await freshApp();
+    const replay = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SID, message: MESSAGE, turn_id: T2 } });
+    expect(replay.statusCode).toBe(200);
+    const body = replay.json() as { assistant_text?: string; _agent?: { replayed?: boolean } };
+    expect(body._agent?.replayed).toBe(true);
+    expect(provider.calls, 'a replay calls no model').toBe(callsAfterLive);
     expect(body.assistant_text).not.toContain('AI Reporting Sprint currently performs best');
   });
 
