@@ -184,7 +184,7 @@ import { registrationTurnId } from '../../graph-registration/registration-identi
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
-import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
+import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
 import type { NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
@@ -736,13 +736,19 @@ function valuesNotSaved(valueOps: readonly ProposalOperation[], parent: Structur
     const node = read.nodes.find((n) => n.id === o.path);
     const os = (node?.observed_state ?? undefined) as Record<string, unknown> | undefined;
     const unit = typeof os?.unit === 'string' ? os.unit : '';
-    // The figure in the user's units: `raw_value` when stored; a bare 0–1 share of a % factor (the one scale authority,
-    // `isPercentScaledUnit`) is said as a percentage.
-    const held = typeof os?.raw_value === 'number' ? os.raw_value
-      : typeof os?.value === 'number' ? (isPercentScaledUnit(unit) && Math.abs(os.value) <= 1 ? os.value * 100 : os.value) : undefined;
+    // The figure the model holds, in the user's units (AIQ 5924240860 (2)): `nativeStartingValue` (raw, else value × cap);
+    // a bare 0–1 share of a % factor with neither raw nor cap is said as a percentage (the one scale authority).
+    const native = nativeStartingValue(os);
+    const held = native !== undefined && typeof os?.raw_value !== 'number' && !(typeof os?.cap === 'number' && os.cap > 0)
+      && isPercentScaledUnit(unit) && Math.abs(native) <= 1 ? native * 100 : native;
+    // Whose figure it is (AIQ 5924240860 (1)): a source that DEFERS (`brief_extraction`, `cee_inference`) is decided by its
+    // `extractionType`, so a figure read from the user's brief is never said as Olumi's.
+    const display = os === undefined ? undefined
+      : observedValueAuthorship(os)?.provenance
+        ?? nodeProvenanceDisplay(os.extractionType ?? (node as { extractionType?: unknown } | undefined)?.extractionType);
     const owner: NonNullable<NotSavedValue['still']>['owner'] | undefined = os === undefined ? undefined
       : isAcceptedOlumiEstimate(os) ? 'olumi_accepted'
-        : observedValueAuthorship(os)?.provenance === 'user_set' ? 'yours' : 'olumi';
+        : display === 'user_set' ? 'yours' : display === 'from_brief' ? 'brief' : 'olumi';
     return {
       label: node?.label ?? o.path, value: Number(v.value), unit: typeof v.unit === 'string' ? v.unit : '',
       yours: valueOpAuthor(o, parent) === 'user_stated',

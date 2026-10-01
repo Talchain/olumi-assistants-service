@@ -90,6 +90,26 @@ describe('a revised figure the writer refused says what was not saved and what t
   });
 });
 
+describe('what still stands is said with its true owner and in the user\u2019s units (AIQ 5924240860)', () => {
+  const withTarget = (observed: Record<string, unknown>) => {
+    const g = inContract(served);
+    return { ...g, nodes: g.nodes.map((n) => (n.id === TARGET ? { ...n, observed_state: { unit: 'connections/month', ...observed } } : n)) };
+  };
+  const say = (v: number) => sayFigureExactly(v, 'connections/month');
+
+  it('RED (1): a figure read from the user\u2019s brief (`brief_extraction` + explicit) is the brief\u2019s, never Olumi\u2019s', async () => {
+    const { status } = await approveRevision(withTarget({ value: 0.1, raw_value: 5, source: 'brief_extraction', extractionType: 'explicit' }), true);
+    expect(status).toContain(`The model still uses the figure from your brief, ${say(5)}.`);
+    expect(status).not.toContain('Olumi’s estimate');
+  });
+
+  it('RED (2): a capped figure with no raw value is said in the user\u2019s units (value × cap), never the scaled 0.5', async () => {
+    const { status } = await approveRevision(withTarget({ value: 0.5, cap: 10, source: 'cee_inference', extractionType: 'inferred' }), true);
+    expect(status).toContain(`The model still uses Olumi’s estimate of ${say(5)}.`);
+    expect(status).not.toMatch(/0\.5/);
+  });
+});
+
 describe('no "Record your figure" on a base the writer would refuse (DL 5924061304)', () => {
   const propose = async (graph: typeof served) => {
     const p = product(graph);
