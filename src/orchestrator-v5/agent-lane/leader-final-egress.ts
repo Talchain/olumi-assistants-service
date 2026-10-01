@@ -33,6 +33,7 @@ import {
 } from '../compose/leading-option-egress-guard.js';
 import {
   enforceLeadingOptionClaimsAtWire,
+  WIRE_WITHHELD_LEADER_REPLACEMENT,
   optionRosterFromAnalysisReady,
   optionRosterFromGraph,
   type WireLeaderClaimEnforcementOpts,
@@ -134,9 +135,11 @@ function chipAssertsLeader(chip: unknown, labels: readonly string[]): boolean {
   return CHIP_TEXT_MEMBERS.some((m) => typeof rec[m] === 'string' && textAssertsLeadingOption(rec[m] as string, { optionLabels: labels }));
 }
 
-/** The one sentence a reply is replaced by when the final egress itself fails. Leader-free by construction. */
-export const FINAL_EGRESS_FAILED_TEXT =
-  'Something went wrong while checking this reply, so it is not shown. Nothing in your model changed; please ask again.';
+/**
+ * The prose a reply is replaced by when the final egress itself fails: the shared gate's fixed withheld line (DL 380e54
+ * 5932098302 item 1). Leader-free by that module's own build-time probe.
+ */
+export const FINAL_EGRESS_FAILED_TEXT = WIRE_WITHHELD_LEADER_REPLACEMENT;
 
 /** Known-safe: no prose, no chips, no run delta, no enrichment; leader-designating keys nulled on what remains. */
 export function knownSafeEnvelope(response: Record<string, unknown>): Record<string, unknown> {
