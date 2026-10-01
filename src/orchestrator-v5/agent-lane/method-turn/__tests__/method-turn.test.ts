@@ -60,17 +60,19 @@ const methodState = (state: Record<string, unknown>): TurnSignals => {
 };
 
 describe('the corpus', () => {
-  it('served cases are byte-identical to their captures; RC carries 4 pre-mortem method cases and 7 reply fixtures', () => {
+  it('served cases are byte-identical to their captures; RC carries its 4 pre-mortem method cases and (at least) the reply fixtures these rows were built on', () => {
     expect(SERVED.cases.every((c) => c.capture_sha_matches_case)).toBe(true);
     const method = RC.cases.filter((c) => c.id.startsWith('A-PREMORTEM') && c.state['turn.request'] === 'method');
     expect(method.map((c) => c.id).sort()).toEqual([
       'A-PREMORTEM-ASKED-CHOOSE-PLAN-D1', 'A-PREMORTEM-GENERIC-PRESS-SINGLE-OPTION-ASKS',
       'A-PREMORTEM-PLAN-CHOSEN-D1', 'A-PREMORTEM-ROW-PRESS-SINGLE-OPTION-RUNS',
     ]);
-    expect(RC_REPLIES.map((f) => f.id).sort()).toEqual([
+    // RC's contract grows (e.g. the whole-token SHORT-LABEL pair); every fixture it carries runs through ROW M10 below.
+    expect(RC_REPLIES.map((f) => f.id)).toEqual(expect.arrayContaining([
       'MT-PREMORTEM-BAD-BLINDSPOT-AS-STORY', 'MT-PREMORTEM-BAD-BLINDSPOT-ASSERTED', 'MT-PREMORTEM-BAD-PREDICTION',
       'MT-PREMORTEM-BAD-UNGROUNDED', 'MT-PREMORTEM-D1-OWN-LABEL-BAD-CLAIM', 'MT-PREMORTEM-D1-OWN-LABEL-GOOD', 'MT-PREMORTEM-GOOD',
-    ]);
+    ]));
+    expect(RC_REPLIES.some((f) => f.expect === 'pass') && RC_REPLIES.some((f) => f.expect === 'fail')).toBe(true);
   });
 
   it('the generic press IS the served next-step chip, and RC\'s fallback is quoted verbatim', async () => {
