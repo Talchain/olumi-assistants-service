@@ -1,3 +1,4 @@
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ EVERY SERVED AGENT CALL SAYS WHICH PROMPT IT SENT — `prompt_alias` + `prompt_sha256` on its `_provider_calls` row.
  *
@@ -92,11 +93,10 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
       return {
         graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
         graph_hash: 'h1',
-        // A completed run whose leader is withheld asks the interpreter for C5b's typed view (a longer prompt); a
-        // scenario with nothing on record does not. Same alias, different composed instructions.
-        ...(sid === RUN_WITHHELD
-          ? { analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } } }
-          : {}),
+        // A completed withheld Run asks for C5b's typed view; the permitted completed control does not. Same alias, different composed instructions.
+        ...([RUN_WITHHELD, RUN_NOTHING_ON_RECORD].includes(sid) ? { analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } },
+          analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: sid === RUN_WITHHELD
+            ? { permitted: false, withheld_reason: 'constraint_verdict_withheld' } : { permitted: true, separation: 'separated' } } } : {}),
       };
     });
     await app.register(agentV1TurnRoute);
@@ -110,7 +110,12 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     return (r.json() as { _provider_calls: Row[] })._provider_calls;
   };
-  const runChip = (scenarioId: string) => turn(scenarioId, { message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
+  const runChip = async (scenarioId: string) => {
+    const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: scenarioId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
+    expect(first.json()._provider_calls).toEqual([]);
+    const second = await explainRun(app, scenarioId, first);
+    return second.json()._provider_calls as Row[];
+  };
 
   it('RED: an ordinary turn — every row is agent.converse, and its sha is of the instructions the provider received', async () => {
     script = [callTool('run_analysis', { reason: 'compare' })];
