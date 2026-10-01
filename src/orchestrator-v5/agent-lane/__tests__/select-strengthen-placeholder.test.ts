@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import served from './fixtures/m1-s1-served-graphs.json';
-import { selectStrengthenPlaceholder } from '../guidance/select-strengthen-placeholder.js';
+import { linkTargetOf, selectStrengthenPlaceholder } from '../guidance/select-strengthen-placeholder.js';
 import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 import { AGENT_TOOLS } from '../runtime/agent-tools.js';
 
@@ -98,6 +98,28 @@ describe('the current Run’s options only, nearest the goal first, then id', ()
       .replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\/\/.*$/gmu, '');
     expect(source).not.toMatch(/leader|withheld|analysis|licen[cs]e|option_status/iu);
     expect(selectStrengthenPlaceholder.length).toBe(4);
+  });
+});
+
+describe('linkTargetOf: ONE read of any link (T3’s method-turn card reads links through it too)', () => {
+  it('an Olumi-estimated link the S1 picker never walks still gets its labels and the writer’s band', () => {
+    const g = d1();
+    const est = { from: 'ai_reporting_module_availability', to: 'enterprise_prospect_signing_likelihood' };
+    expect(edgeOf(g, est).provenance?.magnitude).toBe('olumi_estimate');
+    const label = (id: string) => g.nodes.find((n) => n.id === id)!.label;
+    expect(linkTargetOf(g, est.from, est.to)).toEqual({ from_id: est.from, to_id: est.to, from_label: label(est.from), to_label: label(est.to), band: 'strong' });
+    // A negative link: the band is of |mean| (−0.15 → weak).
+    expect(linkTargetOf(g, 'integration_step_bug_resolution', 'trial_profile_abandonment_rate')!.band).toBe('weak');
+  });
+  it('no link, no readable mean, or a missing label → null; the S1 pick equals linkTargetOf on its link', () => {
+    const g = d1();
+    expect(linkTargetOf(g, AI.to, AI.from)).toBeNull();
+    expect(linkTargetOf(null, AI.from, AI.to)).toBeNull();
+    const noMean = d1(); edgeOf(noMean, AI).strength = {};
+    expect(linkTargetOf(noMean, AI.from, AI.to)).toBeNull();
+    const noLabel = d1(); delete noLabel.nodes.find((n) => n.id === AI.to)!.label;
+    expect(linkTargetOf(noLabel, AI.from, AI.to)).toBeNull();
+    expect(selectStrengthenPlaceholder(g, D1.current_run_option_ids)).toEqual({ variant: 'S1', ...linkTargetOf(g, AI.from, AI.to)! });
   });
 });
 
