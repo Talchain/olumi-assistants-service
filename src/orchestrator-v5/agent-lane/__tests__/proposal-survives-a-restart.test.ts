@@ -430,6 +430,68 @@ describe('the persisted carrier satisfies the production parser', () => {
   });
 });
 
+/**
+ * ⛔ THE CARD THE OFFER SHOWED COMES BACK WITH IT (#2480 Codex P2-2; DL overnight queue 5941571221). A keep card's figure
+ * and target are composed from the stored proposal AND the proposer's result, which is not persisted, so a replay or a
+ * restarted process used to put the button back with no card. The offered chip's `detail` now rides the carrier.
+ */
+describe('the approval card survives a replay and a restart (#2480 P2-2)', () => {
+  const KEEP_CARD = 'Keep Olumi\u2019s estimate: Sprint capacity for AI reporting at 40%';
+  const offer = async (detail: string | undefined, message = 'Yes, keep Olumi\u2019s estimate.') => {
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    const { proposalPendingAction } = await import('../durable-proposal.js');
+    const { createProposal } = await import('../proposal.js');
+    const p = createProposal({ scenario_id: 'scn', user_id: 'u1', base_graph_identity_hash: 'hash-base', operations: [{ op: 'add_edge', path: 'a::b' }],
+      provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] }, public_label: KEEP_CARD });
+    const chip = { id: `agent-approve-proposal:${p.proposal_id}`, label: 'Keep Olumi\u2019s estimate', message, ...(detail !== undefined ? { detail } : {}) };
+    const emitted = proposalPendingAction(p, chip, { scenario_id: 'scn', emitted_at_iso: new Date().toISOString() });
+    // As the column gives it back: JSONB key order, then the REAL parser.
+    return { p, chip, pa: parsePendingAction(jsonbOrder(JSON.parse(JSON.stringify(emitted))))! };
+  };
+  it('RED: a replay of the offering row re-offers the chip WITH its card, exactly as offered', async () => {
+    const { offeredApproveChipOnRow } = await import('../durable-proposal.js');
+    const { chip, pa } = await offer(KEEP_CARD);
+    expect(offeredApproveChipOnRow([pa], { scenario_id: 'scn', user_id: 'u1' })).toEqual(chip);
+  });
+  it('RED: a restarted process restores the carrier WITH its card, and a carried copy keeps it on the next row', async () => {
+    const { rehydrateProposals, carrierForAnswerRow, offeredApproveChipOnRow } = await import('../durable-proposal.js');
+    const { ProposalStore } = await import('../proposal.js');
+    const { parsePendingAction } = await import('../../session/pending-action.js');
+    const { pa } = await offer(KEEP_CARD);
+    const store = new ProposalStore();
+    const restored: { chip: { detail?: string } }[] = [];
+    expect(rehydrateProposals([pa], store, { scenario_id: 'scn', user_id: 'u1' }, Date.now(), (c) => restored.push(c))).toBe(1);
+    expect(restored[0]?.chip.detail).toBe(KEEP_CARD);
+    // A plain question next: its row CARRIES the offer (not offered on it), card included, for the restart after.
+    const carried = carrierForAnswerRow({ offered: undefined, carried: restored[0] as never, store, subject: { scenario_id: 'scn', user_id: 'u1' },
+      currentGraphHash: 'hash-base', emittedAtIso: new Date().toISOString() });
+    const back = parsePendingAction(jsonbOrder(JSON.parse(JSON.stringify(carried))))!;
+    const again: { chip: { detail?: string } }[] = [];
+    rehydrateProposals([back], new ProposalStore(), { scenario_id: 'scn', user_id: 'u1' }, Date.now(), (c) => again.push(c));
+    expect(again[0]?.chip.detail).toBe(KEEP_CARD);
+    // ...and the question's own replay shows no approve chip: that answer never showed it.
+    expect(offeredApproveChipOnRow([back], { scenario_id: 'scn', user_id: 'u1' })).toBeUndefined();
+  });
+  it('CONTROL: a row from before the stored card — no card for a plain message; a link-effect message still reads its reading', async () => {
+    const { offeredApproveChipOnRow } = await import('../durable-proposal.js');
+    const { linkEffectApproveMessage, readingOfLinkEffectApproval } = await import('../approval-chips.js');
+    const { pa } = await offer(undefined);
+    expect(offeredApproveChipOnRow([pa], { scenario_id: 'scn', user_id: 'u1' })?.detail).toBeUndefined();
+    const words = linkEffectApproveMessage('Record: 1 more hour → 2% more signings');
+    const { pa: effect } = await offer(undefined, words);
+    expect(offeredApproveChipOnRow([effect], { scenario_id: 'scn', user_id: 'u1' })?.detail).toBe(readingOfLinkEffectApproval(words));
+  });
+  it('NEGATIVE: a card on a carrier whose chip names ANOTHER proposal is never shown; a blank card is not stored', async () => {
+    const { offeredApproveChipOnRow, proposalPendingAction } = await import('../durable-proposal.js');
+    const { pa } = await offer(KEEP_CARD);
+    const forged = { ...pa, chip_id: 'agent-approve-proposal:prop_000000' };
+    expect(offeredApproveChipOnRow([forged as never], { scenario_id: 'scn', user_id: 'u1' })).toBeUndefined();
+    const { p } = await offer(undefined);
+    const blank = proposalPendingAction(p, { id: `agent-approve-proposal:${p.proposal_id}`, label: 'x', message: 'y', detail: '   ' }, { scenario_id: 'scn', emitted_at_iso: new Date().toISOString() });
+    expect((blank.action as { inline_patch: Record<string, unknown> }).inline_patch).not.toHaveProperty('approve_detail');
+  });
+});
+
 describe('(b) the shared pending-action machinery respects the stamped 12-turn / 30-minute lifetime', () => {
   const T0 = Date.parse('2026-09-24T10:00:00.000Z');
   const carrier = async () => {

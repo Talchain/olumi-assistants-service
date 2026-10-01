@@ -1657,9 +1657,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const durableApproveWords = remembered.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
         ? undefined
         : offeredApproveChipOnRow(prior.pending_actions, { scenario_id: scenarioId, user_id: userId });
-      // The row carries the chip's words; its card (`detail`) is re-derived from the SAME stored proposal, rehydrated above.
-      const durableCard = durableApproveWords === undefined ? undefined
-        : ((id) => linkStrengthCardFor(id, proposals.get(id)))(typedApprovalOf({ chip: { id: durableApproveWords.id } }) as string);
+      // The row carries the chip as offered, its card (`detail`) included (`APPROVE_DETAIL`, #2480 P2-2). A row written
+      // before the card was stored: a link-strength card is re-derived from the SAME stored proposal, rehydrated above.
+      const durableCard = durableApproveWords === undefined ? undefined : durableApproveWords.detail
+        ?? ((id) => linkStrengthCardFor(id, proposals.get(id)))(typedApprovalOf({ chip: { id: durableApproveWords.id } }) as string);
       const durableApprove = durableApproveWords === undefined ? undefined
         : { ...durableApproveWords, ...(durableCard !== undefined ? { detail: durableCard } : {}) };
       const offered = [
