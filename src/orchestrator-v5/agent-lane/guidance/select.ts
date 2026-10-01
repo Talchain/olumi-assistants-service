@@ -1,27 +1,76 @@
 import { POLICY } from './policy.js';
 import { renderCopy } from './render.js';
+import { methodPlanOf, planOf } from './plan.js';
 import { stateKeyHash } from './state-key.js';
-import type { GuidanceSignals, GuidanceState, GoalPathEdit, PolicyId, Priority, SelectedRow, Selection, StateKeyFields, SuppressionReason, Target, Variant } from './types.js';
+import type { GuidanceSignals, GuidanceState, GoalPathEdit, JsonValue, PolicyId, Priority, SelectedRow, Selection, StateKeyFields, SuppressionReason, Target, Variant } from './types.js';
 
 const IDS = POLICY.rows.map(r => r.policy_id);
 const compareId = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const sorted = (ids: readonly string[]) => [...ids].sort(compareId);
+const SETTLED = new Set(['pressed', 'dismissed', 'completed']);
+const LIMIT_REASONS = ['no_option_meets_limit', 'every_option_likely_breaks_limit'];
 const EDIT_KINDS = new Set(['factor_value_edit', 'edge_strength_edit', 'link_effect_edit', 'option_intervention_edit',
   'goal_target_edit', 'limit_edit', 'prior_range_edit', 'structural_add', 'structural_add_edge', 'structural_remove', 'structural_delete']);
 type Draft = { policy_id: PolicyId; priority: Priority; variant?: Variant; target?: Target; item?: string; fields: StateKeyFields };
 type Evaluation = { candidates: Draft[]; reason?: SuppressionReason };
 const none = (reason: SuppressionReason = 'not_eligible'): Evaluation => ({ candidates: [], reason });
 
-function cooled(draft: Draft, guidance: GuidanceState, signals: GuidanceSignals): boolean {
-  if (signals['user.explicit_request'] === draft.policy_id) return false;
-  const perItem = draft.item && draft.policy_id === 'RC-STRENGTHEN-ITEM';
-  const base = guidance[draft.policy_id];
-  const record = perItem ? guidance[`${draft.policy_id}:${draft.item}`]
-    ?? (base?.state_key_fields?.item_id === draft.item ? base : undefined) : base;
-  if (!record || record.status === 'offered' && draft.policy_id !== 'RC-COACH-EDITS') return false;
+/** selection.state_key_rule: a null or absent member is OMITTED (canonical JSON keeps null, which would change the hash). */
+function keyOf(fields: Readonly<Record<string, JsonValue | undefined>>): StateKeyFields {
+  return Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== null && v !== undefined));
+}
+
+/**
+ * The coaching_state entry key (selection.entry_key): the policy id, or for a per-item row the policy id + ':' + the
+ * hash of {item_id}. Never the raw id: node ids carry the user's words, and '->' fails the envelope KEY pattern.
+ */
+export function entryKey(policy_id: PolicyId, item?: string): string {
+  return item === undefined ? policy_id : `${policy_id}:${stateKeyHash({ item_id: item })}`;
+}
+
+/** A pressed, dismissed or completed entry hides its row until the row's state key changes. */
+function cooled(draft: Draft, guidance: GuidanceState): boolean {
+  const record = guidance[entryKey(draft.policy_id, draft.policy_id === 'RC-STRENGTHEN-ITEM' ? draft.item : undefined)];
+  if (!record || !SETTLED.has(record.status)) return false;
   const recorded = record.state_key_hash ?? (record.state_key_fields ? stateKeyHash(record.state_key_fields) : undefined);
-  // Incomplete recorded state cannot prove a relevant change: stay silent.
-  return recorded === undefined || recorded === stateKeyHash(draft.fields);
+  return recorded === stateKeyHash(draft.fields);
+}
+
+type Candidate = { variant: Variant; priority: Priority; items: string[]; kind: 'link' | 'factor' };
+/** Every Strengthen variant that holds, before cooldown, each with its items in pick order (goal distance, then id). */
+function strengthenCandidates(s: GuidanceSignals): Candidate[] {
+  const links = s['model.goal_path_links'] ?? [], factors = s['model.goal_path_factors'] ?? [];
+  const distance = new Map<string, number>([...links.map(l => [l.link_id, l.goal_distance] as const),
+    ...factors.map(f => [f.factor_id, f.goal_distance] as const)]);
+  const ordered = (ids: readonly string[]) => [...ids].sort((a, b) => (distance.get(a) ?? 99) - (distance.get(b) ?? 99) || compareId(a, b));
+  const out: Candidate[] = [];
+  const s1 = ordered((s['model.placeholder_goal_links'] ?? []).filter(id => links.some(l => l.link_id === id)));
+  if (s1.length) out.push({ variant: 'S1', priority: 'P1', items: s1, kind: 'link' });
+  const sensitivity = s['run.decision_sensitivity'];
+  const most = sensitivity?.most_sensitive?.factor_id;
+  const mostFactor = factors.find(f => f.factor_id === most);
+  if (sensitivity?.status === 'measured' && mostFactor && ['olumi_estimate', 'olumi_accepted'].includes(mostFactor.value_authorship)) {
+    out.push({ variant: 'S2', priority: 'P2', items: [mostFactor.factor_id], kind: 'factor' });
+  }
+  const s3l = ordered(links.filter(l => l.link_sizing === 'placeholder' || l.link_sizing === 'olumi_estimate').map(l => l.link_id));
+  if (s3l.length) out.push({ variant: 'S3L', priority: 'P5', items: s3l, kind: 'link' });
+  const s3v = ordered(factors.filter(f => f.value_authorship === 'olumi_estimate').map(f => f.factor_id));
+  if (s3v.length) out.push({ variant: 'S3V', priority: 'P5', items: s3v, kind: 'factor' });
+  return out;
+}
+
+function itemKey(s: GuidanceSignals, item: string, kind: 'link' | 'factor'): StateKeyFields {
+  if (kind === 'link') {
+    const l = s['model.goal_path_links']!.find(x => x.link_id === item)!;
+    return keyOf({ item_id: item, link_sizing: l.link_sizing, value_hash: l.value_hash });
+  }
+  const f = s['model.goal_path_factors']!.find(x => x.factor_id === item)!;
+  return keyOf({ item_id: item, value_authorship: f.value_authorship, value_hash: f.value_hash });
+}
+
+/** method_turns.RC-WHAT-CHANGES.honest_limit.item: the Strengthen pick order S1, then S3L, then S3V (no cooldown). */
+function honestLimitItem(s: GuidanceSignals): string | undefined {
+  return strengthenCandidates(s).find(c => c.variant !== 'S2')?.items[0];
 }
 
 function evaluate(id: PolicyId, s: GuidanceSignals): Evaluation {
@@ -35,55 +84,46 @@ function evaluate(id: PolicyId, s: GuidanceSignals): Evaluation {
       || !s['model.goal_path_factor_ids'] || s['run.kind'] === undefined || s['run.withheld_reason'] === undefined) return none('pending_signal');
     const current = s['run.kind'] === 'complete_current';
     let variant: Variant | undefined;
-    if (current && ['no_option_meets_limit', 'every_option_likely_breaks_limit'].includes(s['run.withheld_reason'] ?? '')) variant = 'W1';
-    else if (options.length <= 1) variant = 'W2';
+    if (current && LIMIT_REASONS.includes(s['run.withheld_reason'] ?? '')) variant = 'W1';
+    else if (options.length === 0) variant = 'W2Z';
+    else if (options.length === 1) variant = 'W2';
     else if (s['model.same_lever']) variant = 'W3';
     else if (options.length === 2 && s['model.status_quo_option_id'] === null) variant = 'W4';
     else if (current && s['run.withheld_reason'] === 'options_do_not_separate') variant = 'W5';
-    else if (risks.length <= 1 && options.length >= 1) variant = 'W6';
+    else if (risks.length <= 1) variant = 'W6';
     else if (s['model.goal_path_factor_ids'].length <= 2) variant = 'W7';
+    // cooldown_scope: the first variant that holds is the ONLY candidate, so a cooled Widen never falls through.
     if (!variant) return none();
     const target: Target = variant === 'W6' ? 'risks' : variant === 'W7' ? 'factors' : 'options';
-    const fields: Record<string, string | readonly string[]> = { variant_id: variant, target, non_sq_option_ids: sorted(options) };
-    if (variant === 'W1' || variant === 'W5') fields.withheld_reason = s['run.withheld_reason']!;
+    const fields: Record<string, JsonValue | undefined> = { variant_id: variant, target, non_sq_option_ids: sorted(options) };
+    if (variant === 'W1' || variant === 'W5') fields.withheld_reason = s['run.withheld_reason'];
     if (target === 'risks') fields.risk_ids = sorted(risks);
-    return { candidates: [{ policy_id: id, variant, target, priority: variant === 'W1' || variant === 'W2' ? 'P1' : variant === 'W7' ? 'P5' : 'P3', fields }] };
+    const priority: Priority = variant === 'W1' || variant === 'W2Z' || variant === 'W2' ? 'P1' : variant === 'W7' ? 'P5' : 'P3';
+    return { candidates: [{ policy_id: id, variant, target, priority, fields: keyOf(fields) }] };
   }
   if (id === 'RC-WHAT-CHANGES') {
     if (s['run.kind'] === undefined || s['run.leader_licensed'] === undefined || !sensitivity || sensitivity.status === 'pending') return none('pending_signal');
     if (s['run.kind'] !== 'complete_current' || s['run.leader_licensed'] !== true || sensitivity.status !== 'measured') return none();
     if (!sensitivity.most_sensitive?.factor_id || !sensitivity.most_sensitive.label) return none('pending_signal');
     return { candidates: [{ policy_id: id, priority: 'P2', item: sensitivity.most_sensitive.factor_id,
-      fields: { run_key: s['run.run_key'], factor_id: sensitivity.most_sensitive.factor_id, range: sensitivity.most_sensitive.range } }] };
+      fields: keyOf({ run_key: s['run.run_key'], factor_id: sensitivity.most_sensitive.factor_id, range: sensitivity.most_sensitive.range }) }] };
   }
   if (id === 'RC-STRENGTHEN-ITEM') {
-    const links = s['model.goal_path_links'], factors = s['model.goal_path_factors'], placeholders = s['model.placeholder_goal_links'];
-    if (!links || !factors || !placeholders || !sensitivity || sensitivity.status === 'pending') return none('pending_signal');
-    const orderedLinks = [...links].filter(l => Number.isFinite(l.goal_distance)).sort((a, b) => a.goal_distance - b.goal_distance || compareId(a.link_id, b.link_id));
-    const orderedFactors = [...factors].filter(f => Number.isFinite(f.goal_distance)).sort((a, b) => a.goal_distance - b.goal_distance || compareId(a.factor_id, b.factor_id));
-    const candidates: Draft[] = [];
-    const linkDraft = (l: typeof orderedLinks[number], variant: Variant, priority: Priority): Draft => ({ policy_id: id, variant, priority, item: l.link_id,
-      fields: { item_id: l.link_id, link_sizing: s['model.link_sizing']?.[l.link_id] ?? l.link_sizing, strength_band_hash: l.strength_band_hash } });
-    const factorDraft = (f: typeof orderedFactors[number], variant: Variant, priority: Priority): Draft => ({ policy_id: id, variant, priority, item: f.factor_id,
-      fields: { item_id: f.factor_id, value_authorship: s['model.value_authorship']?.[f.factor_id] ?? f.value_authorship, value_hash: f.value_hash } });
-    for (const l of orderedLinks) if (placeholders.includes(l.link_id) && l.link_sizing !== 'user') candidates.push(linkDraft(l, 'S1', 'P1'));
-    for (const f of orderedFactors) if (sensitivity.status === 'measured' && f.factor_id === sensitivity.most_sensitive?.factor_id
-      && ['olumi_estimate', 'olumi_accepted'].includes(f.value_authorship)) candidates.push(factorDraft(f, 'S2', 'P2'));
-    for (const l of orderedLinks) if (['placeholder', 'olumi_estimate'].includes(l.link_sizing)) candidates.push(linkDraft(l, 'S3L', 'P5'));
-    for (const f of orderedFactors) if (f.value_authorship === 'olumi_estimate') candidates.push(factorDraft(f, 'S3V', 'P5'));
+    if (!s['model.goal_path_links'] || !s['model.goal_path_factors'] || !s['model.placeholder_goal_links'] || !sensitivity
+      || sensitivity.status === 'pending') return none('pending_signal');
+    // Never a generic "Strengthen the model": every candidate names one item; a cooled item falls through (cooldown_scope).
+    const candidates: Draft[] = strengthenCandidates(s).flatMap(c => c.items.map(item =>
+      ({ policy_id: id, variant: c.variant, priority: c.priority, item, fields: itemKey(s, item, c.kind) })));
     return { candidates, reason: candidates.length ? undefined : 'not_eligible' };
   }
   if (id === 'RC-PREMORTEM') {
     if (s['model.goal_present'] === false || options?.length === 0) return none();
-    const explicit = s['user.explicit_request'] === id;
-    if (s['model.goal_present'] === undefined || !options || (!explicit && (!risks || s['run.kind'] === undefined || s['run.leader_licensed'] === undefined))) return none('pending_signal');
-    if (!explicit && (s['run.kind'] !== 'complete_current' || !(s['run.leader_licensed'] === true || options.length === 1 && risks!.length >= 1))) return none();
+    if (s['model.goal_present'] === undefined || !options || !risks || s['run.kind'] === undefined || s['run.leader_licensed'] === undefined) return none('pending_signal');
+    if (s['run.kind'] !== 'complete_current' || !(s['run.leader_licensed'] === true || options.length === 1 && risks.length >= 1)) return none();
     // A-WIDEN-SAME-KEY-HIDDEN; REASONING COACH ruling #85 / 5933526864:
     // there is no plan to stress when every option fails the limit.
-    if (!explicit && ['no_option_meets_limit', 'every_option_likely_breaks_limit'].includes(s['run.withheld_reason'] ?? '')) return none();
-    const plan = s['run.leader_licensed'] === true ? s['run.leader_option_id'] : options.length === 1 ? options[0] : undefined;
-    if (!plan) return none('pending_signal');
-    return { candidates: [{ policy_id: id, priority: 'P4', fields: { plan_option_id: plan, non_sq_option_ids: sorted(options) } }] };
+    if (LIMIT_REASONS.includes(s['run.withheld_reason'] ?? '')) return none();
+    return { candidates: [{ policy_id: id, priority: 'P4', fields: keyOf({ plan_option_id: planOf(s), non_sq_option_ids: sorted(options) }) }] };
   }
   const sinceRun = s['since_run.goal_path_user_edits'];
   if (!sinceRun || sinceRun.status === 'pending') return none('pending_signal');
@@ -119,10 +159,17 @@ export function selectGuidance(signals: GuidanceSignals, guidance: GuidanceState
   if (signals['turn.request'] === 'run_result') return suppressAll('request_1');
   if (signals['open.decision_point'] === undefined || signals['turn.request'] === undefined) return suppressAll('pending_signal');
   if (signals['turn.request'] === 'method') {
+    // method_turn_rule: run the asked method and offer no other method.
     const requested = signals['user.explicit_request'];
-    const mayRun = requested && IDS.includes(requested) && (requested !== 'RC-PREMORTEM'
-      || signals['model.goal_present'] === true && (signals['model.non_sq_option_ids']?.length ?? 0) >= 1);
-    return { ...suppressAll('not_eligible'), ...(mayRun ? { runs_method: requested } : {}) };
+    if (!requested || !IDS.includes(requested)) return suppressAll('not_eligible');
+    const options = signals['model.non_sq_option_ids'] ?? [];
+    let mode: Pick<Selection, 'mode' | 'item' | 'choices'> = {};
+    if (requested === 'RC-WHAT-CHANGES' && signals['run.decision_sensitivity']?.status !== 'measured') {
+      const item = honestLimitItem(signals);
+      mode = { mode: 'honest_limit', ...(item ? { item } : {}) };
+    }
+    if (requested === 'RC-PREMORTEM' && methodPlanOf(signals) === undefined && options.length >= 1) mode = { mode: 'choose_plan', choices: sorted(options) };
+    return { ...suppressAll('not_eligible'), runs_method: requested, ...mode };
   }
   const eligible: SelectedRow[] = [];
   const suppressed: { policy_id: PolicyId; reason: SuppressionReason }[] = [];
@@ -131,7 +178,7 @@ export function selectGuidance(signals: GuidanceSignals, guidance: GuidanceState
     let reason: SuppressionReason = evaluation.reason ?? 'not_eligible';
     let pick: SelectedRow | undefined;
     for (const draft of evaluation.candidates) {
-      if (cooled(draft, guidance, signals)) { reason = 'cooldown'; continue; }
+      if (cooled(draft, guidance)) { reason = 'cooldown'; continue; }
       const row = selected(draft, signals);
       if (!row) { reason = 'pending_signal'; continue; }
       pick = row; break;
