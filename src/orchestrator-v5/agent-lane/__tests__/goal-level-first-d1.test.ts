@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
-import { dispatchTool, type AgentCapabilities, type ToolResult } from '../runtime/agent-tools.js';
+import { AGENT_TOOLS, dispatchTool, type AgentCapabilities, type ToolResult } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
@@ -365,5 +365,21 @@ describe('(v) the target writer rescales ONLY a stored figure, and only when the
     });
     // No user-sized link into this goal: Olumi's placeholders keep their β (never in natural units).
     expect(out.edges.filter((e) => e.to === 'mrr').map((e) => e.strength)).toStrictEqual(paul.edges.filter((e) => e.to === 'mrr').map((e) => e.strength));
+  });
+});
+
+describe('R3 F5 I1.1 (#85 5933250962): the TOOL the model sees takes a level with no comparator — never "ask for a target first"', () => {
+  const tool = () => AGENT_TOOLS.find((t) => t.name === TOOL)! as unknown as { description: string; parameters: { required: string[]; properties: Record<string, { description?: string }> } };
+  it('RED: `goal_is` is NOT required (served fe8c9ab0 required it, so the model asked for a target instead of carding the level)', () => {
+    expect(tool().parameters.required).toEqual(['goal_label', 'value', 'unit', 'user_stated']);
+  });
+  it('RED: its words say leave it out and record the level on its own — and never tell the model to ask first', () => {
+    const words = String(tool().parameters.properties.goal_is?.description);
+    expect(words).toMatch(/Otherwise leave it out/);
+    expect(words).toMatch(/recorded on its own, with or without a target/);
+    expect(words).not.toMatch(/If they have not said, ask them/);
+  });
+  it('CONTROL: the four comparators are still the only values it takes', () => {
+    expect((tool().parameters.properties.goal_is as { enum?: unknown }).enum).toEqual(['at_least', 'above', 'at_most', 'below']);
   });
 });
