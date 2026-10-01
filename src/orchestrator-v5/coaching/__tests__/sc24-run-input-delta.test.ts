@@ -34,11 +34,16 @@ import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrat
 
 import { buildRunDelta } from '../build-run-delta.js';
 import { diffRunInputSnapshots } from '../run-input-changes.js';
+import { olumiSpreadForMean } from '../../../cee/magnitude/olumi-spread.js';
 import { PRESENT_PAIR, runAnalysisFact } from '../../context/__tests__/run-delta-fixtures.js';
 
+// 0.71.0: every hand-built snapshot carries the SAME residual by default — "everything this snapshot does not record was
+// unchanged" — so these rows test the recorded fields. The residual's own rows (absent / different → partial) are below.
+const RESIDUAL = 'c'.repeat(64);
 const snap = (over: Partial<RunInputSnapshot> = {}, price = 59): RunInputSnapshot => ({
   snapshot_version: 1,
   sent_digest: 'a'.repeat(64),
+  residual_digest: RESIDUAL,
   goal: { node_id: 'goal_mrr', label: 'Pro MRR', target_raw: 55000, unit: 'GBP per month', operator: '>=' },
   options: [
     { option_id: 'opt-a', label: 'Raise price', settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: price, unit: 'GBP', encoded: price }] },
@@ -387,10 +392,32 @@ describe('0.70.0 · link rows in the user\'s terms (band, who sized it)', () => 
   });
 
   it('RED: a band move (moderate → strong) is a `strength` row with the contract\'s band literals — never the β', () => {
-    const d = pairOf(withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' }), withLink({ mean: 0.55, std: 0.0866, band: 'strong', sizing: 'user' }));
+    // The spread that moves WITH the band is the writer's own (`olumiSpreadForMean`): 0.1 × 0.55 / 0.3.
+    const followed = olumiSpreadForMean({ oldMean: 0.3, oldStd: 0.1, newMean: 0.55 });
+    const d = pairOf(withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' }), withLink({ mean: 0.55, std: followed, band: 'strong', sizing: 'user' }));
     expect(d.input_coverage).toBe('complete');
     expect(d.input_changes).toEqual([{ ...LINK, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' }, change: 'changed' }]);
     expect(JSON.stringify(d.input_changes)).not.toMatch(/0\.(3|55)\b/);
+  });
+
+  // ⭐ DL ruling #2482 (5939864517) P1 #1 — a band row states the move of the MEAN only; it never absorbs a sign flip or
+  // a spread the move does not explain. CODEX's two reproductions, then the fixture's own arbitrary spread.
+  it('RED (CODEX repro 1): a sign flip +0.30 → −0.55 across bands → the band row, but partial — never complete', () => {
+    const d = pairOf(withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' }),
+      withLink({ mean: -0.55, std: olumiSpreadForMean({ oldMean: 0.3, oldStd: 0.1, newMean: -0.55 }), band: 'strong', sizing: 'user' }));
+    expect(d.input_coverage).toBe('partial');
+    expect(d.input_changes?.map((r) => r.field)).toEqual(['strength']);
+  });
+
+  it('RED (CODEX repro 2): an independent spread 0.10 → 0.50 beside a band move → partial', () => {
+    const d = pairOf(withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' }), withLink({ mean: 0.55, std: 0.5, band: 'strong', sizing: 'user' }));
+    expect(d.input_coverage).toBe('partial');
+  });
+
+  it('CONTROL: a spread that is not the writer\'s own for the move (0.1 → 0.0866) → partial; the writer\'s own → complete', () => {
+    const before = withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' });
+    expect(pairOf(before, withLink({ mean: 0.55, std: 0.0866, band: 'strong', sizing: 'user' })).input_coverage).toBe('partial');
+    expect(pairOf(before, withLink({ mean: 0.55, std: olumiSpreadForMean({ oldMean: 0.3, oldStd: 0.1, newMean: 0.55 }), band: 'strong', sizing: 'user' })).input_coverage).toBe('complete');
   });
 
   it('a user strength edit from a placeholder writes BOTH rows for the one link (band + who sized it; RC 5937295784)', () => {
@@ -420,6 +447,45 @@ describe('0.70.0 · link rows in the user\'s terms (band, who sized it)', () => 
 });
 
 /** ⭐ 0.70.0 (CANVAS 5936762171, RC 5936776917): WHY a pair has no win shares, typed — only when the cause is known. */
+// ⭐ 0.71.0 — `complete` means VERIFIED (DL ruling #2482 5939864517, P1 #2): the rows speak only for the recorded
+// fields, so the pair is complete only when both Runs carry an EQUAL residual digest (every unrecorded analysis input).
+describe('0.71.0 · input_coverage complete needs equal residuals', () => {
+  const coverageOf = (a: RunInputSnapshot, b: RunInputSnapshot) => {
+    const out = buildRunDelta({ priorFacts: [
+      fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: b }),
+      fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: a }),
+    ], mayNameLeadingOption: true });
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(RunDeltaSchema.safeParse(out.delta).success).toBe(true);
+    return [out.delta.input_coverage, out.delta.input_changes];
+  };
+  const noResidual = (s: RunInputSnapshot): RunInputSnapshot => {
+    const { residual_digest: _r, ...rest } = s;
+    return rest as RunInputSnapshot;
+  };
+
+  it('RED (CODEX repro: factor σ / encoded goal threshold): no recorded field moved but the residuals differ → partial, []', () => {
+    expect(coverageOf(snap(), snap({ residual_digest: 'd'.repeat(64) }))).toEqual(['partial', []]);
+  });
+
+  it('RED: a recorded edit with different residuals keeps its row but is partial', () => {
+    expect(coverageOf(snap({}, 59), snap({ residual_digest: 'd'.repeat(64) }, 60))[0]).toBe('partial');
+  });
+
+  it('RED (legacy): a residual on ONE end only, or on neither, is never complete', () => {
+    expect(coverageOf(noResidual(snap()), snap())).toEqual(['partial', []]);
+    expect(coverageOf(snap(), noResidual(snap()))).toEqual(['partial', []]);
+    expect(coverageOf(noResidual(snap()), noResidual(snap()))).toEqual(['partial', []]);
+  });
+
+  it('CONTROL: equal residuals → complete; the £59 → £60 row with equal residuals → complete with its row', () => {
+    expect(coverageOf(snap(), snap())).toEqual(['complete', []]);
+    const [cov, rows] = coverageOf(snap({}, 59), snap({}, 60));
+    expect(cov).toBe('complete');
+    expect((rows as Array<{ field: string }>).map((r) => r.field)).toEqual(['value']);
+  });
+});
+
 describe('0.70.0 · win_probabilities_unavailable', () => {
   const at = (d: string) => `2026-06-0${d}T00:00:00.000Z`;
   const reason = (facts: readonly HandlerFact[], mayName = true) => {

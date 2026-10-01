@@ -26,6 +26,7 @@
 
 import type { RunDeltaInputChange } from '@talchain/schemas/boundary';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
 
 type Value = { raw: number | string | boolean; unit?: string };
 type Row = RunDeltaInputChange;
@@ -84,10 +85,26 @@ export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInput
   return diffRunInputs(prior, current).rows;
 }
 
+/**
+ * A link's new spread is EXPLAINED by its band move only when it is exactly the spread CEE's own writer derives for
+ * that move from the prior Run's mean and spread (`olumiSpreadForMean`, `adjust-edge-strength.ts`). Anything else —
+ * a stated spread, a spread on one Run only — is a change no row states.
+ */
+function spreadFollowsBand(prior: { mean: number; std?: number }, current: { mean: number; std?: number }): boolean {
+  if (prior.std === current.std) return true;
+  if (prior.std === undefined || current.std === undefined) return false;
+  const derived = olumiSpreadForMean({ oldMean: prior.mean, oldStd: prior.std, newMean: current.mean });
+  return Math.abs(derived - current.std) <= 1e-12 * Math.max(1, Math.abs(derived));
+}
+
 /** The rows, and `complete: false` when a sent input changed that no row states. */
 export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot): { rows: Row[]; complete: boolean } {
   const rows: Row[] = [];
-  let complete = true;
+  // ⭐ 0.71.0 — `complete` means VERIFIED (DL ruling #2482 5939864517): the rows below can only speak for the fields the
+  // snapshots record, so the pair is complete only when every OTHER analysis input is proven unchanged — both Runs
+  // carry a residual digest (`run-input-residual.ts`) and they are equal. An older Run without one is never complete.
+  let complete =
+    prior.residual_digest !== undefined && current.residual_digest !== undefined && prior.residual_digest === current.residual_digest;
   const push = (r: Row | null) => {
     if (r !== null) rows.push(r);
   };
@@ -211,7 +228,12 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     } else if (pl.sizing !== cl.sizing) {
       complete = false;
     }
-    if (((pl.mean !== cl.mean || pl.std !== cl.std) && !bandMoved) || pl.exists_probability !== cl.exists_probability) complete = false;
+    // A band row states the move of the MEAN and nothing else (DL ruling #2482, P1 #1): the band never absorbs a sign
+    // flip or a spread the move does not explain. Either is a change no row states → partial.
+    if (pl.mean !== cl.mean && !bandMoved) complete = false;
+    if (Math.sign(pl.mean) !== Math.sign(cl.mean)) complete = false;
+    if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std)) complete = false;
+    if (pl.exists_probability !== cl.exists_probability) complete = false;
   }
 
   return { rows, complete };

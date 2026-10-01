@@ -250,7 +250,12 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // `cace462d`), RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `939f5c9e…` → `a987224c…`): the FILE SET
     // naming `edge_strength_edit` is identical (the same five dist files); `enums.*` and `turn-payload.*` are
     // byte-unchanged; the one changed file is `fixtures/index.js`, and 0 of its changed lines name a strength.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.70.0');
+    //
+    // 0.70.0 → 0.71.0 (schemas #81, F1b: Run snapshot `residual_digest` — `complete` means verified; main `56888181`),
+    // RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `a987224c…` → `c783076e…`): the FILE SET naming
+    // `edge_strength_edit` is identical and all five files are byte-unchanged; 0 changed dist lines name a strength or a
+    // band (contrast: the same diff finds `residual_digest`).
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.71.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

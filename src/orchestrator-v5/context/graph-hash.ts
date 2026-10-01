@@ -136,6 +136,25 @@ export function computeAnalysisAffectingGraphHash(
 export function computeAnalysisAffectingGraphHashSha256(
   graph: GraphStateIngress | null | undefined,
 ): string | null {
+  const projection = analysisAffectingProjection(graph);
+  return projection === null ? null : createHash('sha256').update(stableStringify(projection)).digest('hex');
+}
+
+/**
+ * The analysis-affecting PROJECTION both hashes above digest — exported so the 0.71.0 Run input snapshot can digest
+ * the same vocabulary minus the fields it records (`residual_digest`, `tools/handlers/run-input-residual.ts`). One
+ * projection, never a second normaliser: the hashes call this, byte for byte as before.
+ */
+export function analysisAffectingProjection(
+  graph: GraphStateIngress | null | undefined,
+): {
+  nodes: NodeProjection[];
+  edges: EdgeProjection[];
+  options: OptionProjection[];
+  goal_node_id: string | null;
+  goal_constraints: unknown[];
+  run_semantics: Record<string, unknown>;
+} | null {
   if (!graph) return null;
 
   const nodes = graph.nodes;
@@ -153,7 +172,7 @@ export function computeAnalysisAffectingGraphHashSha256(
     return null;
   }
 
-  const canonical = stableStringify({
+  return {
     nodes: nodes.map(projectNode).sort((a, b) => a.id.localeCompare(b.id)),
     edges: edges
       .map(projectEdge)
@@ -171,8 +190,7 @@ export function computeAnalysisAffectingGraphHashSha256(
     // vocabulary, so a growth→reduce rename would flip the objective under an unchanged hash; hashing the derived
     // answer (not the label) moves the hash exactly when the sent direction moves, and a cosmetic rename does not.
     run_semantics: runSemantics(graph, goalNodeId),
-  });
-  return createHash('sha256').update(canonical).digest('hex');
+  };
 }
 
 function runSemantics(graph: unknown, goalNodeId: unknown): Record<string, unknown> {
@@ -294,7 +312,7 @@ function projectInterventionRecord(
   return out;
 }
 
-interface NodeProjection {
+export interface NodeProjection {
   id: string;
   [key: string]: unknown;
 }
@@ -328,7 +346,7 @@ function projectNode(raw: unknown): NodeProjection {
   return out;
 }
 
-interface EdgeProjection {
+export interface EdgeProjection {
   from: string;
   to: string;
   [key: string]: unknown;
@@ -368,7 +386,7 @@ function projectEdge(raw: unknown): EdgeProjection {
   return out;
 }
 
-interface OptionProjection {
+export interface OptionProjection {
   id: string;
   [key: string]: unknown;
 }

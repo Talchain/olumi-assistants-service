@@ -7,7 +7,26 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.70.0.tgz` ← **THE CURRENT PIN** (F1b 52f8cd, R3 DEFECT 3 + typed empty win shares)
+### `talchain-schemas-0.71.0.tgz` ← **THE CURRENT PIN** (F1b 52f8cd, `complete` means VERIFIED: `residual_digest`)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`56888181`** (schemas #81 merge; publish run 36923548214), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.71.0/c783076ef0b70d5036ce03a08ec40643d9862912`.
+>
+> **767,235 bytes.** Verified against the registry's published metadata on 1 Oct:
+>
+> ```
+> npm shasum (sha1)  c783076ef0b70d5036ce03a08ec40643d9862912   ← matches
+> integrity (sha512) sha512-xIsf5VttWdKT/cGn98KQhGJblmJ1oZ4Tpk9K5hXy6uZOiTepYWxO6glq3nm0YSCLzDq9TdbnkTMYtyrVer6cyg==   ← matches (pnpm-lock)
+> sha256             7be834c8d062b60f1e600947160332bdda282f8734eeefd6a2e0573ac140e593
+> ```
+>
+> **What 0.71.0 adds (additive, optional):** `RunInputSnapshot.residual_digest` — every analysis input the snapshot does
+> not record, digested; a pair is `input_coverage: 'complete'` only when both ends carry an equal one (DL ruling on
+> #2482, 5939864517). `RunDelta` is unchanged, so the UI needs no re-vendor. ⚠ The lock line is pnpm's own (`pnpm
+> install`), never hand-edited: a hand-edited `version: 0.69.0` beside the 0.70.0 tgz killed every CI install on #2482.
+
+### `talchain-schemas-0.70.0.tgz` (superseded) (F1b 52f8cd, R3 DEFECT 3 + typed empty win shares)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** `npm publish` from `olumi-schemas` `main`
 > **`cace462d`** (schemas #80 merge; the registry's `gitHead` binds it), 2026-10-01. Registry download:

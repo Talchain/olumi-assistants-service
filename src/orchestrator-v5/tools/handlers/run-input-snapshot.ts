@@ -27,6 +27,7 @@ import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas
 import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
+import { residualDigest } from './run-input-residual.js';
 
 type Rec = Record<string, unknown>;
 
@@ -252,9 +253,7 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     }];
   });
 
-  const candidate = {
-    snapshot_version: 1 as const,
-    sent_digest: sentDigest(input.plotPayload),
+  const recorded = {
     goal,
     options,
     options_not_sent: input.optionsNotSent.map((o) => ({
@@ -265,6 +264,15 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     factors,
     constraints,
     links,
+  };
+  // 0.71.0 (DL ruling #2482 5939864517): every analysis input this snapshot does NOT record, digested
+  // (`run-input-residual.ts`) — a pair is `complete` only when both ends carry one and they are equal.
+  const residual = residualDigest(input.plotPayload, recorded);
+  const candidate = {
+    snapshot_version: 1 as const,
+    sent_digest: sentDigest(input.plotPayload),
+    ...(residual !== null ? { residual_digest: residual } : {}),
+    ...recorded,
   };
   // The contract's bounds and one-row-per-input rules decide; a refusal records NO snapshot (never a partial one).
   const parsed = RunInputSnapshotSchema.safeParse(candidate);
