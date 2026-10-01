@@ -46,6 +46,7 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
   let readiness: Record<string, unknown> = READY;
   let failRead = false;
   let script: Record<string, unknown>[] = [];
+  let runs = 0;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -66,11 +67,17 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
         ...(analysisState !== undefined ? { analysis_state: analysisState } : {}),
       };
     });
+    // The Run button's fast path asks the conventional route for the run (as run-offer-after-approval does).
+    app.post('/orchestrate/v2/turn', async (req) => {
+      const body = req.body as { chip?: { action_type?: string } };
+      if (body.chip?.action_type === 'run_analysis') runs += 1;
+      return { assistant_text: 'ok', blocks: body.chip?.action_type === 'run_analysis' ? [{ type: 'analysis_result', data: {} }] : [], analysis_ready: readiness };
+    });
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { analysisState = CURRENT; readiness = READY; failRead = false; script = []; nextScenario(); });
+  beforeEach(() => { analysisState = CURRENT; readiness = READY; failRead = false; script = []; runs = 0; nextScenario(); });
 
   const ask = async (message: string, extra: Record<string, unknown> = {}): Promise<Body> => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, ...extra } });
@@ -87,6 +94,19 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
       { id: 'agent-next-strengthen', label: 'Strengthen the model', message: 'What would most strengthen this model?' },
     ]);
     for (const c of b.suggested_actions) expect(c.action_type, `${c.id} is plain text, never a typed action`).toBeUndefined();
+  });
+
+  it("RED: the Run button's turn ends on the next steps when its result reads back current (Paul: 'the Run, pre-mortem…')", async () => {
+    const b = await ask('Run analysis.', { source: 'chip', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    expect(runs, 'vacuity: the Run fast path really ran').toBe(1);
+    expect(b.suggested_actions.map((c) => c.id)).toEqual(NEXT_IDS);
+  });
+
+  it("CONTROL: the Run button's turn whose result reads back stale offers no next steps", async () => {
+    analysisState = STALE;
+    const b = await ask('Run analysis.', { source: 'chip', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } });
+    expect(runs).toBe(1);
+    expect(b.suggested_actions.filter((c) => NEXT_IDS.includes(c.id))).toEqual([]);
   });
 
   it.each([
