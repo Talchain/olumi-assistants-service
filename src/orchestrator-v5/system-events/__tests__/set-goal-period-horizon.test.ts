@@ -223,3 +223,24 @@ describe('ONE PERIOD CARRIER (CODEX #2454 5932596768): a goal holds ONE period �
     expect(unconverted).toMatchObject({ kind: 'refused', reason: 'goal_period_conversion_mismatch' });
   });
 });
+
+describe('ONE PERIOD CARRIER, the period in force AFTER the write (CODEX #2454 5933216093): an omitted goal_period keeps the typed one', () => {
+  const TYPED_QUARTER = { goal_threshold_unit: '£', goal_period: 'quarter' };
+  it('RED (the CODEX case): held {unit "£", goal_period quarter} + event {unit "£ per month", no goal_period} → REFUSED, nothing written', async () => {
+    const r = await send(graphWith(TYPED_QUARTER), 70000, { unit: '£ per month' });
+    expect(r).toMatchObject({ kind: 'refused', reason: 'goal_period_conflicts_with_unit' });
+  });
+  it.each([
+    ['matching quarter (unit names quarter, typed quarter kept)', { unit: '£ per quarter' }, 'quarter'],
+    ['explicit month (unit names month, event sets month)', { unit: '£ per month', goal_period: 'month' }, 'month'],
+    ['no period anywhere in the unit (typed quarter kept)', { unit: '£' }, 'quarter'],
+  ])('CONTROL: %s → written', async (_n, extra, period) => {
+    const r = await send(graphWith(TYPED_QUARTER), 200000, extra as never);
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    expect(goalOf(r.mutatedGraph).goal_period).toBe(period);
+  });
+  it('CONTROL (legacy no-edit): a legacy "£ per quarter" goal (no typed period) keeps its unit → written', async () => {
+    const r = await send(graphWith({ goal_threshold_unit: '£ per quarter' }), 200000, { unit: '£ per quarter' });
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+  });
+});

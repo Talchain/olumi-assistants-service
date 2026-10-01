@@ -244,3 +244,27 @@ describe('ONE PERIOD CARRIER on the Agent\'s card (CODEX #2454 5932596768; R3 I1
     expect(value).not.toHaveProperty('goal_period');
   });
 });
+
+describe('ONE PERIOD CARRIER on the card, the period in force AFTER the write (CODEX #2454 5933216093)', () => {
+  it('RED: a goal typed per quarter + the Agent\'s unit "£ per month" with no period → refused, nothing prepared', async () => {
+    const w = world(graphWith({ goal_threshold_unit: '£', goal_period: 'quarter' }));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf('We need at least £70k a month.'),
+      { constraint_type: 'at_least', value: 70000, unit: '£ per month', rationale: 'x' });
+    expect(p).toEqual(expect.objectContaining({ ok: false, refusal: 'goal_period_conflicts_with_unit' }));
+    expect(w.sent).toEqual([]);
+  });
+  it('RED (read-back): a writer that keeps quarter beside a stored "£ per month" is NOT confirmed', async () => {
+    const w = world(graphWith({ goal_threshold_unit: '£', goal_period: 'quarter' }));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf('We need at least £200,000 a quarter.'),
+      { constraint_type: 'at_least', value: 200000, unit: '£', rationale: 'x' });
+    expect(p.ok).toBe(true);
+    const lossy: InternalDispatch = async (path, body) => {
+      const r = await w.d(path, body);
+      if (!path.endsWith('/graph')) for (const n of w.graph().nodes) if (n.id === 'mrr') n['goal_threshold_unit'] = '£ per month';
+      return r;
+    };
+    const r = await createAgentCapabilities(lossy, store).authoriseChange(ctxOf('Yes.'), { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: true, refusal: 'not_confirmed' }));
+  });
+});

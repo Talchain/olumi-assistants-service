@@ -78,7 +78,7 @@ import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../t
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { CEE_GOAL_THRESHOLD_FRAME } from '../../utils/goal-threshold-cap.js';
 import type { GoalPeriodType } from '@talchain/schemas';
-import { goalPeriodOf, periodsCollide, statedFigureHolds } from '../goal-target/goal-period.js';
+import { goalPeriodOf, periodsCollide, statedFigureHolds, typedGoalPeriodOf } from '../goal-target/goal-period.js';
 
 type GoalTargetEditEvent = Extract<SystemEventTurnPayload['event'], { kind: 'goal_target_edit' }>;
 
@@ -237,9 +237,10 @@ export async function applyGoalTargetEdit(
   // The goal's period is the event's, else the one the goal already holds; the figure `raw_value` came from is the LAST
   // `stated_as` entry. A day / week / none pair is refused (never guessed); a ×3 / ×4 / ×12 conversion that does not
   // give `raw_value` (1e-9 relative) is refused. Either way nothing is written: the client re-sends the right figure.
-  // ⛔ ONE PERIOD CARRIER (CODEX #2454 5932596768): a unit naming one period beside a `goal_period` naming another is
-  // two answers for one figure — refused for every client, nothing written.
-  if (periodsCollide(event.unit, event.goal_period)) {
+  // ⛔ ONE PERIOD CARRIER (CODEX #2454 5932596768 / 5933216093): a unit naming one period beside the `goal_period` in force
+  // AFTER this write — the event's, else the typed one the goal keeps (absent = unchanged) — is two answers for one
+  // figure. Refused for every client, nothing written; never a period silently chosen.
+  if (periodsCollide(event.unit, event.goal_period ?? typedGoalPeriodOf(matches[0] as { goal_period?: unknown }))) {
     log.info({ ...logBase, event: 'v5.system_event.goal_target_edit.goal_period_conflicts_with_unit' }, 'goal_target_edit — the unit names a different period from goal_period; refusing');
     return refused('goal_period_conflicts_with_unit');
   }

@@ -209,7 +209,7 @@ import { checkProvisionalView, type LeaderStanding } from '../provisional-view.j
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { GoalHorizonSchema, GoalPeriod, GoalStatedAsSchema, type GoalHorizon, type GoalPeriodType, type GoalStatedAs } from '@talchain/schemas';
 import { z } from 'zod';
-import { askForGoalPeriodFigure, convertGoalFigure, GOAL_PERIOD_WORDS, goalPeriodOf, periodNamedByUnit, periodsCollide, periodsNamedIn, unitKeepingHeldPeriod, unitNamesItsPeriod, unitWithoutPeriod } from '../../goal-target/goal-period.js';
+import { askForGoalPeriodFigure, convertGoalFigure, GOAL_PERIOD_WORDS, goalPeriodOf, periodNamedByUnit, periodsCollide, periodsNamedIn, typedGoalPeriodOf, unitKeepingHeldPeriod, unitNamesItsPeriod, unitWithoutPeriod } from '../../goal-target/goal-period.js';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { approvalSizes } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
@@ -1620,6 +1620,8 @@ function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: SetGoa
   if (v.goal_horizon !== undefined && !isDeepStrictEqual(goal?.goal_horizon, v.goal_horizon)) return false;
   if (v.stated_as !== undefined && !isDeepStrictEqual(goal?.goal_stated_as, v.stated_as)) return false;
   if (v.constraint_type === 'at_most') return true;
+  // ⛔ ONE PERIOD CARRIER: a stored unit naming one period beside a typed goal_period naming another is never confirmed.
+  if (periodsCollide(goal?.goal_threshold_unit, typedGoalPeriodOf(goal))) return false;
   return goal?.goal_threshold_raw === v.raw_value && goal?.goal_threshold_unit === v.unit;
 }
 
@@ -3615,6 +3617,13 @@ export function createAgentCapabilities(
       const cardUnit = setGoal.goal_period === undefined || setGoal.goal_period === periodNamedByUnit(heldUnit)
         ? unitKeepingHeldPeriod(unit, heldUnit)
         : unitWithoutPeriod(unit);
+      // …and against the period in force AFTER the write: an omitted period keeps the goal's typed one (CODEX 5933216093).
+      const periodAfter = setGoal.goal_period ?? typedGoalPeriodOf(goal as { goal_period?: unknown });
+      if (periodsCollide(cardUnit, periodAfter)) {
+        return { ok: false, mutated: false, refusal: 'goal_period_conflicts_with_unit',
+          detail: `The unit "${cardUnit}" says per ${periodNamedByUnit(cardUnit)}, but the goal "${goal.label}" is per ${periodAfter}, so nothing was prepared. `
+            + `Give the target per ${periodAfter} (convert it, keeping the user's figure as stated), or set the goal's period to ${periodNamedByUnit(cardUnit)} on this card.` };
+      }
       const setValue: SetGoalTargetValue = {
         constraint_type: type, raw_value: setGoal.raw_value,
         unit: cardUnit,

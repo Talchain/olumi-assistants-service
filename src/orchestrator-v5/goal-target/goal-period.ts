@@ -170,3 +170,12 @@ export function unitWithoutPeriod(unit: string): string {
   const parts = unit.split(UNIT_PERIOD_JOINT);
   return parts.length === 2 && periodNamedByUnit(unit) !== undefined ? parts[0]!.trim() : unit;
 }
+/**
+ * The goal's TYPED period only (what an event that omits `goal_period` leaves in place: absent = unchanged). The
+ * collision check compares the unit a write sends with the period in force AFTER it — the event's, else this inherited
+ * one (CODEX #2454 5933216093: held quarter + an event unit "£ per month" with no period kept quarter beside it).
+ */
+export function typedGoalPeriodOf(goal: { readonly goal_period?: unknown } | undefined): GoalPeriodType | undefined {
+  const typed = GoalPeriod.safeParse(goal?.goal_period);
+  return typed.success ? typed.data : undefined;
+}
