@@ -24,7 +24,7 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
-import { runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
 
 export const NO_SINGLE_ASSUMPTION = 'No single assumption measurably changes which option leads.';
 
@@ -92,10 +92,11 @@ export function analysisResultForAgent(result: unknown): unknown {
   if (enrichment !== undefined) {
     const { factor_sensitivity: _structural, ...rest } = enrichment;
     const withheld = runWithheldGoalFigures(enrichment);
+    const outcomeHidden = keptOutcomeOptionIds(enrichment);
     const brief = recordOf(rest.decision_brief);
     let limitsRenamed = false;
     const rows = (value: unknown): unknown => {
-      const projected = optionRowsForAgent(value, withheld);
+      const projected = optionRowsForAgent(value, withheld, outcomeHidden);
       if (projected.renamed) limitsRenamed = true;
       return projected.rows;
     };
@@ -142,13 +143,26 @@ export function analysisResultForAgent(result: unknown): unknown {
  * together — never the goal's target) becomes `all_limits_hold_probability`; under #416's withhold no row keeps a
  * `probability_of_goal`. Not an array → unchanged.
  */
-function optionRowsForAgent(value: unknown, withheld: boolean): { rows: unknown; renamed: boolean } {
+function optionRowsForAgent(value: unknown, withheld: boolean, outcomeHidden: ReadonlySet<string> = new Set()): { rows: unknown; renamed: boolean } {
   if (!Array.isArray(value)) return { rows: value, renamed: false };
   let renamed = false;
   const rows = value.map((row) => {
     const r = recordOf(row);
     if (r === undefined) return row;
     let next: Record<string, unknown> = r;
+    // ⭐ F1b [R1] (DL 5931658539 item 1, (ii)): an outcome a withhold KEPT for the panel never reaches the model — the UI
+    // shows it deterministically, and the LLM cannot rank what it never sees. The sample counts stay.
+    const id = typeof r.option_id === 'string' ? r.option_id : typeof r.id === 'string' ? r.id : undefined;
+    if (outcomeHidden.has(EVERY_OPTION) || (id !== undefined && outcomeHidden.has(id))) {
+      const outcome = recordOf(next.outcome);
+      const { expected_outcome: _expected, ...others } = next;
+      next = others;
+      if (outcome !== undefined) {
+        const kept: Record<string, unknown> = { ...outcome };
+        for (const k of ['mean', 'std', 'p10', 'p50', 'p90'] as const) delete kept[k];
+        next = { ...next, outcome: kept };
+      }
+    }
     if ('probability_of_joint_goal' in next) {
       const { probability_of_joint_goal: joint, ...others } = next;
       next = { ...others, all_limits_hold_probability: joint };
@@ -168,3 +182,22 @@ export const ALL_LIMITS_HOLD_NOTE =
   '`all_limits_hold_probability` is how often ALL the user\u2019s limits hold together in the model runs. It does NOT include '
   + 'the goal\u2019s target: never call it a chance of reaching the goal, a goal fit or a target fit, and never combine it with '
   + 'the goal. Say it, if at all, as "all your limits hold in N% of model runs (this does not include the goal\u2019s target)".';
+
+/**
+ * The options whose OUTCOME a goal-figure withhold kept for the panel (`withheld_claims` present, without `outcome`; F1b
+ * B2), or {@link EVERY_OPTION}. Their outcome figures are removed from the Agent's view (DL 5931658539 item 1 (ii)).
+ */
+const EVERY_OPTION = '*';
+function keptOutcomeOptionIds(enrichment: Record<string, unknown>): Set<string> {
+  const out = new Set<string>();
+  const warnings = Array.isArray(enrichment.inference_warnings) ? enrichment.inference_warnings : [];
+  for (const w of warnings) {
+    const r = recordOf(w);
+    if (r === undefined || typeof r.code !== 'string' || !GOAL_FIGURES_WITHHELD_CODES.has(r.code)) continue;
+    if (!Array.isArray(r.withheld_claims) || (r.withheld_claims as unknown[]).includes('outcome')) continue;
+    // No option list = every option (fail closed).
+    if (!Array.isArray(r.option_ids)) { out.add(EVERY_OPTION); continue; }
+    for (const id of r.option_ids) if (typeof id === 'string') out.add(id);
+  }
+  return out;
+}

@@ -14,6 +14,7 @@
 import {
   GOAL_FIGURES_PLACEHOLDER_PATH,
   GOAL_FIGURES_PRODUCT_NOT_READ,
+  GOAL_FIGURES_TARGET_NOT_TESTABLE,
   GOAL_FIGURES_USER_EFFECT_CLAMPED,
   GOAL_FIGURES_WITHHELD_CODES,
   GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED,
@@ -64,6 +65,18 @@ export const PRODUCT_NOT_READ_NOTE =
   + 'Olumi will calculate it that way. Say `say` once, as written, when you describe the run. Other results of this run may be '
   + 'described as they are.';
 
+/**
+ * ⭐ F1b [R1] (DL 5930827933; condition (1) 5931324913): a target this run can't test, where every option's OUTCOME was
+ * kept (`withheld_claims` without `outcome`, P2–P4). The outcomes reach this view, so the note says what may be said of
+ * them — one option's own range — and forbids every comparative use: no rank, no leader, no better or worse.
+ */
+export const OUTCOME_KEPT_NOTE =
+  'This run withheld, for EVERY option, the chance of reaching the goal’s target and the share of runs in which it did best: '
+  + 'the target can’t be tested yet. Each option’s outcome for the goal (its centre and spread) is shown to the user on the '
+  + 'results panel; you are not given those figures. Never quote or estimate an option’s outcome, never rank or order the '
+  + 'options by their outcomes, never name a leading or best option, and never say one option is better or worse than another. '
+  + 'Say `say` once, as written, when you describe the run.';
+
 const recordOf = (v: unknown): Record<string, unknown> | undefined =>
   (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
 
@@ -93,6 +106,14 @@ export function goalChanceWithheldForAgent(result: unknown): GoalChanceWithheld 
     const words = typeof w.message === 'string' ? w.message.replace(UI_OPENING, '').trim() : '';
     const ids = (key: string): string[] => (Array.isArray(w[key]) ? (w[key] as unknown[]).filter((id): id is string => typeof id === 'string') : []);
     return { withheld: true, say: words === '' ? OPENING : words, node_ids: ids('node_ids'), note: PRODUCT_NOT_READ_NOTE, option_ids: ids('option_ids') };
+  }
+  // F1b [R1]: every withhold is the untestable target with the outcome KEPT → the outcome-kept licence, never the ban on
+  // quoting an option's value (which would contradict the outcomes the panel now shows).
+  const outcomeKept = warnings.every((w) => w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE
+    && Array.isArray(w.withheld_claims) && !(w.withheld_claims as unknown[]).includes('outcome'));
+  if (outcomeKept) {
+    const nodeIds = [...new Set(warnings.flatMap((w) => (Array.isArray(w.node_ids) ? w.node_ids : [])).filter((id): id is string => typeof id === 'string'))];
+    return { withheld: true, say: OPENING, node_ids: nodeIds, note: OUTCOME_KEPT_NOTE };
   }
   // One reason per cause, identity first (unchanged when it is alone), then PLoT #422's cut link — each in PLoT's words.
   const reasonFor = (code: string): string => {

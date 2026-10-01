@@ -89,3 +89,33 @@ export function approvalSizes(edge: unknown): boolean {
 export function sizedByApproval<P extends object>(provenance: P, edge: unknown): P {
   return approvalSizes(edge) ? { ...provenance, magnitude: ESTIMATE_MAGNITUDE } : provenance;
 }
+
+/**
+ * ⭐ F1b [R1] (DL 5930827933: "each figure carries its `linkSizing` label"): the options whose outcome rests on at least
+ * one Olumi size the user ACCEPTED, on any path from what the option moves into the goal. Their figures read "rests on
+ * Olumi's estimates you accepted". Pure; reads the stored graph only.
+ */
+export function optionsRestingOnAcceptedOlumiSizes(graph: unknown, optionIds: readonly string[]): string[] {
+  if (!isRec(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return [];
+  const nodes = (graph.nodes as unknown[]).filter(isRec);
+  const edges = (graph.edges as unknown[]).filter(isRec);
+  const kindOf = new Map(nodes.map((n) => [n.id, n.kind] as const));
+  const goal = nodes.find((n) => n.kind === 'goal')?.id;
+  if (goal === undefined) return [];
+  // Every node that can reach the goal (the goal included): a link off every such path moves nothing the goal sees.
+  const toGoal = new Set<unknown>([goal]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const e of edges) if (toGoal.has(e.to) && !toGoal.has(e.from)) { toGoal.add(e.from); grew = true; }
+  }
+  return optionIds.filter((option) => {
+    const reached = new Set<unknown>([option]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const e of edges) {
+        if (reached.has(e.from) && !reached.has(e.to) && kindOf.get(e.to) !== 'option' && kindOf.get(e.to) !== 'decision') { reached.add(e.to); grew = true; }
+      }
+    }
+    return edges.some((e) => reached.has(e.from) && kindOf.get(e.from) !== 'option' && toGoal.has(e.to) && isAcceptedOlumiSize(e));
+  });
+}
