@@ -1,3 +1,4 @@
+import { planOf } from './plan.js';
 import { POLICY } from './policy.js';
 import type { GuidanceSignals, RenderedCopy, RowIdentity } from './types.js';
 
@@ -29,7 +30,7 @@ export function renderCopy(selected: RowIdentity, signals: GuidanceSignals): Ren
   const sensitive = signals['run.decision_sensitivity']?.most_sensitive;
   if (sensitive) fills.factor_label = sensitive.label;
   if (options.length === 1) fills.option_label = labels[options[0]];
-  const plan = signals['run.leader_licensed'] === true ? signals['run.leader_option_id'] : options.length === 1 ? options[0] : undefined;
+  const plan = planOf(signals);
   if (plan) Object.assign(fills, { plan_label: labels[plan], leader_label: labels[plan] });
   const horizon = signals['model.goal_horizon'];
   if (horizon?.months) fills.horizon = horizon.months === 1 ? 'a month from now' : `${horizon.months} months from now`;

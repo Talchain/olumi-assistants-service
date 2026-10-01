@@ -1,6 +1,6 @@
 export type PolicyId = 'RC-WIDEN' | 'RC-WHAT-CHANGES' | 'RC-STRENGTHEN-ITEM' | 'RC-PREMORTEM' | 'RC-COACH-EDITS';
 export type Priority = 'P1' | 'P2' | 'P3' | 'P4' | 'P5';
-export type Variant = 'W1' | 'W2' | 'W3' | 'W4' | 'W5' | 'W6' | 'W7' | 'S1' | 'S2' | 'S3L' | 'S3V';
+export type Variant = 'W1' | 'W2Z' | 'W2' | 'W3' | 'W4' | 'W5' | 'W6' | 'W7' | 'S1' | 'S2' | 'S3L' | 'S3V';
 export type Target = 'options' | 'risks' | 'factors';
 export type LinkSizing = 'user' | 'placeholder' | 'olumi_accepted' | 'olumi_estimate' | 'unmarked';
 export type ValueAuthorship = 'yours' | 'olumi_estimate' | 'olumi_accepted' | 'unknown';
@@ -14,8 +14,8 @@ export interface GoalPathLink {
   readonly link_sizing: LinkSizing;
   readonly option_ids: readonly string[];
   readonly goal_distance: number;
-  /** Caller-supplied digest; raw strength bands never leave the caller. */
-  readonly strength_band_hash?: string;
+  /** Caller-supplied digest of the link's value (#2465 `linkValueHash`); raw values never leave the caller. */
+  readonly value_hash?: string;
 }
 export interface GoalPathFactor {
   readonly factor_id: string;
@@ -70,6 +70,8 @@ export interface GuidanceSignals {
   readonly 'since_run.goal_path_user_edits'?: { readonly status: 'pending' } | { readonly status: 'available'; readonly edits: readonly GoalPathEdit[] };
   readonly guidance?: GuidanceState;
   readonly 'user.explicit_request'?: PolicyId | null;
+  /** The option the user picked on choose_plan, or named by pressing a pre-mortem row (#2466 `user_selected_option_id`). */
+  readonly 'user.selected_option_id'?: string | null;
 }
 
 export interface RenderedCopy { readonly title: string | null; readonly why: string | null; readonly question: string | null }
@@ -85,22 +87,36 @@ export interface SelectedRow {
 }
 export type RowIdentity = Pick<SelectedRow, 'policy_id' | 'variant' | 'item' | 'target'>;
 export type SuppressionReason = 'decision_point' | 'request_1' | 'cooldown' | 'budget' | 'pending_signal' | 'not_eligible';
+export type MethodMode = 'honest_limit' | 'choose_plan';
 export interface Selection {
   readonly slot1?: SelectedRow;
   readonly slot2?: SelectedRow;
   /** Dispatch description only: the leaf never runs a method. */
   readonly runs_method?: PolicyId;
+  /** honest_limit: an asked What-changes with no measured factor; choose_plan: an asked pre-mortem with no plan. */
+  readonly mode?: MethodMode;
+  /** honest_limit only: the item the honest answer offers to firm up (Strengthen pick order S1, S3L, S3V). */
+  readonly item?: string;
+  /** choose_plan only: the user's options to pick from, sorted by id. Never a plan chosen for the user. */
+  readonly choices?: readonly string[];
   readonly suppressed: readonly { readonly policy_id: PolicyId; readonly reason: SuppressionReason }[];
 }
 
+export type MethodTurnId = PolicyId | 'RERUN-EXPLANATION';
+/** One grounded input a pre-mortem story may rest on, in action-priority order (`grounded_inputs_shape`). */
+export interface SuppliedItem {
+  readonly id: string;
+  /** Every label must appear: a link carries both end labels, so a story must name both ends. */
+  readonly labels?: readonly string[];
+  readonly ref?: string;
+}
 /** Typed text-check inputs. No structured mechanism assertion is accepted here. */
 export interface MethodInputs {
   readonly plan_label?: string;
   readonly current_option_labels?: readonly string[];
   readonly current_risk_labels?: readonly string[];
   readonly current_factor_labels?: readonly string[];
-  readonly supplied_labels?: readonly string[];
-  readonly supplied_refs?: readonly string[];
+  readonly supplied_items?: readonly SuppliedItem[];
   readonly left_out_labels?: readonly string[];
   readonly supplied_figures?: readonly string[];
   readonly user_figures?: readonly string[];
@@ -113,4 +129,17 @@ export interface MethodInputs {
   readonly item_current_value?: string | number;
   readonly edited_labels?: readonly string[];
   readonly 'run.kind'?: string;
+  /** RERUN-EXPLANATION (run_delta): the changed inputs' labels, the attribution case and the comparison's limits. */
+  readonly change_labels?: readonly string[];
+  readonly attribution_case?: 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
+  readonly leader_licensed?: boolean;
+  readonly noise_verdict?: string;
+  readonly prior_withheld?: boolean;
+  readonly no_matched_figures?: boolean;
+}
+export interface MethodTurnCheck {
+  readonly pass: boolean;
+  readonly failed: string[];
+  /** RC-PREMORTEM only: per numbered story, the id of the first supplied item it rests on, else null. */
+  readonly targets: (string | null)[];
 }

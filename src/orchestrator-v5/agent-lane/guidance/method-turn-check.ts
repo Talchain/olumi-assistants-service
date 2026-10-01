@@ -1,5 +1,5 @@
 import { POLICY } from './policy.js';
-import type { MethodInputs, PolicyId } from './types.js';
+import type { MethodInputs, MethodTurnCheck, MethodTurnId, SuppliedItem } from './types.js';
 
 function normalise(text: string): string {
   return text.replace(/[‘’]/gu, "'").replace(/[“”]/gu, '"').toLowerCase()
@@ -9,8 +9,32 @@ function labelMatches(text: string, labels: readonly string[]): boolean {
   const normal = normalise(text);
   return labels.some(label => normalise(label) !== '' && normal.includes(normalise(label)));
 }
-function refsMatch(text: string, refs: readonly string[]): boolean {
-  return refs.some(ref => /^[OFR][0-9]+$/iu.test(ref) && new RegExp(`\\b${ref}\\b`, 'iu').test(text));
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+/** A supplied item grounds a story by its ref as a whole word, or by EVERY label (a link needs both ends). */
+function itemMatches(text: string, item: SuppliedItem): boolean {
+  if (item.ref && new RegExp(`\\b${escape(item.ref)}\\b`, 'u').test(text)) return true;
+  return (item.labels ?? []).length > 0 && item.labels!.every(label => labelMatches(text, [label]));
+}
+const NUMBERED = /^\s*[1-9]\.\s/u;
+const BLINDSPOT = /^\s*Outside the model:\s/u;
+/** A story runs from its numbered line to the next numbered line, the 'Outside the model:' line, or the end. */
+function numberedItems(reply: string): string[] {
+  const items: string[] = [];
+  let current: string | undefined;
+  for (const line of reply.split(/\r?\n/u)) {
+    if (NUMBERED.test(line)) { if (current !== undefined) items.push(current); current = line.replace(NUMBERED, ''); }
+    else if (BLINDSPOT.test(line)) { if (current !== undefined) items.push(current); current = undefined; }
+    else if (current !== undefined) current += `\n${line}`;
+  }
+  if (current !== undefined) items.push(current);
+  return items.map(item => item.trim());
+}
+/** Exactly one 'Outside the model:' question, after every story. */
+function blindspotOk(reply: string): boolean {
+  const lines = reply.split(/\r?\n/u);
+  const blind = lines.flatMap((line, i) => BLINDSPOT.test(line) ? [i] : []);
+  const numbered = lines.flatMap((line, i) => NUMBERED.test(line) ? [i] : []);
+  return blind.length === 1 && lines[blind[0]].trimEnd().endsWith('?') && numbered.every(i => i < blind[0]);
 }
 function numberTokens(reply: string): string[] {
   const body = reply.replace(/^\s*[1-9]\.\s/gmu, '');
@@ -23,18 +47,34 @@ function supplied(token: string, figures: readonly string[]): boolean {
 }
 
 /** Exactly the text post-checks; no mechanism judgement and no fallback generation. */
-export function checkMethodTurn(policy_id: PolicyId, reply: string, inputs: MethodInputs): { pass: boolean; failed: string[] } {
+export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: MethodInputs): MethodTurnCheck {
   const failed: string[] = [];
+  let targets: (string | null)[] = [];
   const check = (id: string, pass: boolean) => { if (!pass) failed.push(id); };
   if (policy_id === 'RC-PREMORTEM') {
-    const items = reply.split(/^\s*[1-9]\.\s/gmu).slice(1).map(item => item.trim());
+    const items = numberedItems(reply);
+    // Supplied order is action priority, so each story's target is the FIRST supplied item it rests on.
+    targets = items.map(item => (inputs.supplied_items ?? []).find(supplied => itemMatches(item, supplied))?.id ?? null);
     check('PM-COUNT', items.length >= 2 && items.length <= 3);
-    check('PM-GROUNDED', items.length > 0 && items.every(item => labelMatches(item, inputs.supplied_labels ?? []) || refsMatch(item, inputs.supplied_refs ?? [])));
+    check('PM-GROUNDED', items.length > 0 && targets.every(target => target !== null));
     check('PM-WATCH-MITIGATE', items.length > 0 && items.every(item => item.includes('Watch for:') && item.includes('Mitigate:')));
     check('PM-NO-PROB', !reply.includes('%') && !/\b(likely|likelihood|chance|probability|probable|odds)\b/iu.test(reply));
     check('PM-NO-PREDICTION', !/\b(will|is going to|are going to) fail\b/iu.test(reply));
     const otherOptions = (inputs.current_option_labels ?? []).filter(label => normalise(label) !== normalise(inputs.plan_label ?? ''));
     check('PM-PLAN-ONLY', !labelMatches(reply, otherOptions));
+    check('PM-BLINDSPOT', blindspotOk(reply));
+  } else if (policy_id === 'RERUN-EXPLANATION') {
+    check('RX-NAMES-CHANGES', (inputs.change_labels ?? []).slice(0, 3).every(label => labelMatches(reply, [label])));
+    check('RX-NO-CAUSE-UNPAIRED', inputs.attribution_case === 'C1_attributable'
+      || !/\b(because (you|of your)|caused|due to your|as a result of your|led to)\b/iu.test(reply));
+    const sentences = reply.split(/(?<=[.!?])\s+|\n/u);
+    check('RX-NO-LEADER-UNLICENSED', inputs.leader_licensed === true || !sentences.some(sentence =>
+      labelMatches(sentence, inputs.current_option_labels ?? []) && /\b(leads|ahead|best|wins|now first)\b/iu.test(sentence)));
+    check('RX-NOISE', inputs.noise_verdict !== 'not_noise_qualified'
+      || !/\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\b/iu.test(reply));
+    // The earlier run had no figures to move from (prior_withheld), or no option has figures in both runs.
+    check('RX-NO-MOVEMENT-WITHOUT-PRIOR', !(inputs.prior_withheld === true || inputs.no_matched_figures === true)
+      || !/\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu.test(reply));
   } else if (policy_id === 'RC-WIDEN') {
     const items = reply.split(/\r?\n/u).filter(line => /^\s*-\s/u.test(line)).map(line => line.trim().slice(1).trim());
     check('WD-COUNT', items.length >= 1 && items.length <= 3);
@@ -69,5 +109,5 @@ export function checkMethodTurn(policy_id: PolicyId, reply: string, inputs: Meth
   // Fail immediately on implementation/policy drift, rather than quietly leaving a rule unchecked.
   const expected = POLICY.method_turns[policy_id].post_checks.map(rule => rule.id);
   if (failed.some(id => !expected.some(expectedId => expectedId === id))) throw new Error('Unknown text post-check id');
-  return { pass: failed.length === 0, failed };
+  return { pass: failed.length === 0, failed, targets };
 }
