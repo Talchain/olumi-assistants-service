@@ -139,7 +139,13 @@ function cuts(g: Rec): Rec[] {
     && frames.get(e.from) !== undefined && frames.get(e.to) !== undefined);
 }
 
-export function refitFramesForStatedEffects(graph: Rec): { readonly graph: Rec; readonly refits: FrameRefit[]; readonly refused: FrameRefusal[] } {
+/**
+ * `goalOwnRows`: the goal's OWN target/limit rows (`goal_constraints` naming the goal) do not refuse a goal widen. Opt-in,
+ * passed only by `retireNormalisingGoalFrame` (F4, R3 #75 5922368144): those rows hold the RAW figure, and `reframed`
+ * rescales the goal's normalised threshold and level with the frame, so the target the user approved reads the same.
+ * Every other caller keeps v1's refusal byte for byte.
+ */
+export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwnRows?: boolean } = {}): { readonly graph: Rec; readonly refits: FrameRefit[]; readonly refused: FrameRefusal[] } {
   let g = graph;
   const refits: FrameRefit[] = [];
   const refused: FrameRefusal[] = [];
@@ -157,7 +163,8 @@ export function refitFramesForStatedEffects(graph: Rec): { readonly graph: Rec; 
     if (target.kind !== 'goal') { refused.push({ link: key(e), reason: 'not_the_goal' }); continue; }
     const setByOption = (g.nodes as Rec[]).some((n) => n.kind === 'option' && n.interventions !== null && typeof n.interventions === 'object'
       && Object.prototype.hasOwnProperty.call(n.interventions, target.id));
-    const namedByLimit = Array.isArray(g.goal_constraints) && g.goal_constraints.some((c: Rec) => c?.node_id === target.id);
+    const namedByLimit = !(opts.goalOwnRows === true && target.kind === 'goal')
+      && Array.isArray(g.goal_constraints) && g.goal_constraints.some((c: Rec) => c?.node_id === target.id);
     if (setByOption || namedByLimit) { refused.push({ link: key(e), reason: 'levels_set_on_node' }); continue; }
     const F = niceFrameAtLeast(Math.abs(e.strength.mean) * Fold);
     const top = naturalTop(target);

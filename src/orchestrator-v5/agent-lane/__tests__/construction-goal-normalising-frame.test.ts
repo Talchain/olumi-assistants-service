@@ -169,3 +169,92 @@ describe('A4/A4b root: a £ goal with no target, no level and no frame is read o
     expect(edge(g, 'investment_firm_deals_closed')?.provenance?.natural_effect).toBeUndefined();
   });
 });
+
+describe('AIQ G1 (5922456694 (1)): the Agent never reads a goal\'s normalising frame as a number', () => {
+  it('projectEntity omits a goal\'s scale_frame; a factor\'s frame is still projected (contrast)', async () => {
+    const { projectEntity } = await import('../runtime/agent-capabilities.js');
+    const goal = projectEntity({ id: 'securing_funding', kind: 'goal', label: 'securing funding', scale_frame: 5000000 } as never);
+    const factor = projectEntity({ id: 'deals', kind: 'factor', label: 'Deals', scale_frame: 3, observed_state: { value: 0.5 } } as never);
+    expect(goal).not.toHaveProperty('scale_frame');
+    expect(JSON.stringify(goal)).not.toContain('5000000');
+    expect(factor).toHaveProperty('scale_frame', 3);
+  });
+});
+
+/**
+ * ⭐ F4 (R3 5922368144): a target arriving after the build retires the normalising frame, and the goal is read exactly
+ * as a build with that target present reads it: PATH INDEPENDENCE. (A) Paul's build, then the target stamped as the
+ * add_constraint writer stamps it (`resolveGoalThresholdCapWithProvenance`), then retired; (B) the same draft built with
+ * the target present. Frame and every link β into the goal agree.
+ */
+describe('F4: a later target retires the normalising frame — path independent', () => {
+  const TARGET = 1000000;
+  async function pathA() {
+    const { resolveGoalThresholdCapWithProvenance } = await import('../../../utils/goal-threshold-cap.js');
+    const { retireNormalisingGoalFrame } = await import('../normalising-goal-frame.js');
+    const g = structuredClone(await build(draft())) as unknown as Record<string, any>;
+    const goal = g.nodes.find((n: Record<string, unknown>) => n.kind === 'goal');
+    const cap = resolveGoalThresholdCapWithProvenance(goal.goal_threshold_cap, TARGET, 'GBP', goal.goal_threshold_unit)!.cap;
+    Object.assign(goal, { goal_threshold_raw: TARGET, goal_threshold_cap: cap, goal_threshold: TARGET / cap, goal_threshold_unit: 'GBP', goal_threshold_frame: 'level' });
+    return retireNormalisingGoalFrame(g) as unknown as Graph & { nodes: (Node & Record<string, unknown>)[] };
+  }
+  const frame = (g: Graph) => { const n = goalOf(g) as Record<string, any>; return n.scale_frame ?? n.observed_state?.cap ?? n.goal_threshold_cap; };
+  const beta = (g: Graph, from: string) => edge(g, from)!.strength!.mean!;
+
+  it('RED: after the target the frame is the target\'s, and every user/definitional β equals a build with the target present', async () => {
+    const a = await pathA();
+    const b = await build(draft({ target: TARGET }), `${PAUL} We need to raise at least £1m.`);
+    expect(goalOf(a).scale_frame).toBeUndefined();
+    expect(frame(a)).toBe(frame(b));
+    expect(beta(a, 'investment_firm_deals_closed')).toBeCloseTo(beta(b, 'investment_firm_deals_closed'), 9);
+    expect(beta(a, 'funding_lost_to_fundraising_distraction')).toBeCloseTo(beta(b, 'funding_lost_to_fundraising_distraction'), 9);
+    expect(edge(a, 'investment_firm_deals_closed')?.provenance?.natural_effect?.amount).toBe(1000000);
+  });
+
+  // ⚠ NAMED RESIDUAL (R3 asked, #75): Olumi's OWN drafted £ estimate into a frameless goal stays a placeholder at the
+  // build (F5) and its drafted figure is not kept on the edge, so the retirement cannot re-derive it; a build with the
+  // target present converts it to an `olumi_estimate`. Pinned so a change to either side is seen.
+  it('RESIDUAL (pinned): Olumi\'s drafted estimate differs from a with-target build (placeholder vs olumi_estimate)', async () => {
+    const a = await pathA();
+    const b = await build(draft({ target: TARGET }), `${PAUL} We need to raise at least £1m.`);
+    expect(edge(a, 'qualified_angel_conversations')?.provenance?.magnitude).toBeUndefined();
+    expect(edge(b, 'qualified_angel_conversations')?.provenance?.magnitude).toBe('olumi_estimate');
+  });
+
+  it('RED (wiring): the approved goal-target card ("at least £1m", the add_constraint writer) retires the frame on Paul\'s build', async () => {
+    const { applyGoalTargetEdit } = await import('../../system-events/goal-target-edit.js');
+    const { computeAnalysisAffectingGraphHash } = await import('../../context/graph-hash.js');
+    const built = await build(draft());
+    const goalId = goalOf(built).id;
+    const event = { kind: 'goal_target_edit', goal_node_id: goalId, constraint_type: 'at_least', raw_value: TARGET, unit: '£',
+      base_graph_hash: computeAnalysisAffectingGraphHash(built as never) };
+    const r = await applyGoalTargetEdit({
+      payload: { kind: 'system_event', scenario_id: 'f4f4f4f4-0000-4f4f-8f4f-f4f4f4f4f4f4', turn_id: 'turn-f4', stage: 'frame', event } as never,
+      event: event as never, requestId: 'req-f4', persistedGraph: built as never, priorFacts: [],
+    }) as { kind: string; mutatedGraph?: Graph };
+    expect(r.kind, JSON.stringify(r).slice(0, 300)).toBe('mutated');
+    const out = r.mutatedGraph!;
+    const b = await build(draft({ target: TARGET }), `${PAUL} We need to raise at least £1m.`);
+    expect(goalOf(out).scale_frame).toBeUndefined();
+    expect(frame(out)).toBe(frame(b));
+    expect(beta(out, 'investment_firm_deals_closed')).toBeCloseTo(beta(b, 'investment_firm_deals_closed'), 9);
+    // The target the user approved reads the same on the widened frame: threshold = raw / cap; the row keeps the raw figure.
+    const g = goalOf(out) as Record<string, any>;
+    expect(g.goal_threshold_raw).toBe(TARGET);
+    expect(g.goal_threshold).toBeCloseTo(TARGET / g.goal_threshold_cap, 12);
+    expect((out as unknown as { goal_constraints: { node_id: string; value: number }[] }).goal_constraints.find((c) => c.node_id === g.id)?.value).toBe(TARGET);
+  });
+
+  it('CONTROL: a goal with no normalising frame is returned untouched (same reference)', async () => {
+    const { retireNormalisingGoalFrame } = await import('../normalising-goal-frame.js');
+    const g = await build(draft({ target: TARGET }), `${PAUL} We need to raise at least £1m.`);
+    expect(retireNormalisingGoalFrame(g)).toBe(g);
+  });
+
+  it('CONTROL: a normalising frame with no target or level yet is kept (nothing to move to)', async () => {
+    const { retireNormalisingGoalFrame } = await import('../normalising-goal-frame.js');
+    const g = await build(draft());
+    expect(retireNormalisingGoalFrame(g)).toBe(g);
+    expect(goalOf(g).scale_frame).toBe(5000000);
+  });
+});

@@ -1021,7 +1021,9 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             // see that to explain it.
             ...(num(os.cap) ? { cap: os.cap } : {}),
             ...(str(os.declared_scale) ? { declared_scale: os.declared_scale } : {}),
-            ...(n.scale_frame === undefined ? {} : { scale_frame: n.scale_frame }),
+            // ⛔ A goal's frame is a choice of UNITS for sizing its links, never a level or a target (R3 F1; AIQ 5922456694 (1)):
+            // handed to the Agent as a bare number beside a goal with no target, it would be quoted as "your goal".
+            ...(n.scale_frame === undefined || n.kind === 'goal' ? {} : { scale_frame: n.scale_frame }),
             ...(Object.keys(valueProvenance).length === 0
               ? {}
               : { value_provenance: valueProvenance }),
