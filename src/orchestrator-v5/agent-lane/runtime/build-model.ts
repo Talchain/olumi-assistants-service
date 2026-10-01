@@ -59,7 +59,7 @@ import { refitFramesForStatedEffects } from '../refit-frames.js';
 import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
-import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
+import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers, type StatedRange } from '../../../cee/provenance/stated-amounts.js';
 import { limitedLevelAsks, optionSetLimitAsks } from '../limited-level-ask.js';
 import type { ToolResult } from './agent-tools.js';
 import type { InternalDispatch } from './agent-capabilities.js';
@@ -769,6 +769,75 @@ export function prepareProvisionalCandidate(drafted: CandidateModel): {
  * admission never registers, costs no retry call. A loop made only of the user's links and the structural
  * edges is kept and said by admission, and is never an issue: it is theirs to resolve.
  */
+/**
+ * ⭐ A4 ON THE SERVED DRAFT — A MONEY RANGE THE BRIEF WRITES THAT NO LINK CARRIES (R3 5921213011; diagnosis 5921266982).
+ * Served `5479e15e`: Paul's "deals between £1-2m" reached no link, because the drafter drew the route as an effort
+ * lever with no countable, and the per-one rule (#2409) had nothing to size. Each written money range that no admitted
+ * link carries as the user's own size (`natural_effect.stated_range`, bound to its span by #2409) is one construction
+ * issue for the EXISTING repair retry. The retry is adopted only when it CARRIES more ranges (`carriedRanges`), so a
+ * range that is no per-one size (a budget, a target) costs one retry and changes nothing.
+ */
+export function carriedRanges(admitted: Pick<AdmittedModel, 'edges'>): Set<string> {
+  const texts = admitted.edges.map((e) => (e.provenance as { natural_effect?: { stated_range?: { text?: unknown } } } | undefined)?.natural_effect?.stated_range?.text);
+  return new Set(texts.filter((t): t is string => typeof t === 'string'));
+}
+
+/**
+ * A range written inside a QUESTION ("Should we focus on firms that do deals between £1-2m?") is not asked of the
+ * retry (CODEX CEE BUDDY 5921351458): a question states no size. Its sentence ends at the next . ! ? before a space or
+ * the end, or a new line (a decimal point never ends it); a "?" there makes it a question.
+ */
+function inAQuestion(text: string, at: number): boolean {
+  const end = text.slice(at).search(/[.?!](?=\s|$)|\n/);
+  return end !== -1 && text.charAt(at + end) === '?';
+}
+
+/**
+ * The MONEY the draft holds as a value, each with the ONE quantity that holds it: the goal's target and today's level,
+ * each factor's today, each option's level for a factor, each limit, in a currency unit. Never a frame (`plausible_max`),
+ * a count, a horizon or any number in another unit (CODEX CEE BUDDY 5921470248: an hours factor's `plausible_max` of
+ * 1000 once "held" £1m).
+ */
+function moneyHeldBy(drafted: CandidateModel): { readonly label: string; readonly value: number; readonly unit: string }[] {
+  const out: { label: string; value: number; unit: string }[] = [];
+  const add = (label: unknown, value: unknown, unit: unknown) => {
+    if (typeof label !== 'string' || label === '' || typeof value !== 'number' || !Number.isFinite(value) || typeof unit !== 'string') return;
+    if (readCurrencyUnitWithQualifiers(unit).kind !== 'currency') return;
+    out.push({ label, value, unit });
+  };
+  add(drafted.goal.metric, drafted.goal.value, drafted.goal.unit);
+  add(drafted.goal.metric, drafted.goal.baseline_value, drafted.goal.unit);
+  for (const f of drafted.factors) add(f.label, f.baseline_value, f.unit);
+  for (const o of drafted.options) for (const iv of o.interventions ?? []) add(iv.factor_label, iv.value, iv.unit);
+  for (const c of drafted.constraints) add(c.metric, c.value, c.unit);
+  return out;
+}
+
+/**
+ * ⛔ A RANGE IS HELD ONLY BY THE ONE QUANTITY IT IS WRITTEN ABOUT (CODEX CEE BUDDY 5921674571; PTL 5921699859). Pooling
+ * every £ value let an unrelated £1m valuation and £2m payroll "hold" "deals between £1-2m", and A4 was never asked. Held
+ * = ONE quantity holds BOTH ends as values, and the brief's span at each end is that value, in its unit and currency,
+ * written about that quantity (`figureTheUserWroteFor`, strict, read `at` that end: the scoped reader #2409's door binds with).
+ * Every miss asks the retry, which is adopted only when a link then CARRIES the range: asking costs one call, never a figure.
+ */
+export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel, 'edges'>, drafted: CandidateModel): string[] {
+  const carried = carriedRanges(admitted);
+  const held = moneyHeldBy(drafted);
+  const quantities = [drafted.goal.metric, ...drafted.factors.map((f) => f.label), ...drafted.outcomes.map((o) => o.label), ...drafted.risks.map((r) => r.label)];
+  // The written amount AT that end is this quantity's value, in its unit and currency, and written about it.
+  const holdsAt = (label: string, end: { readonly index: number }) => held.some((h) => h.label === label
+    && figureTheUserWroteFor(h.value, h.unit, brief, { target: [label], others: quantities.filter((q) => q !== label), strict: true, at: end.index }));
+  const heldAsOne = (r: StatedRange) => [...new Set(held.map((h) => h.label))].some((label) => holdsAt(label, r.low) && holdsAt(label, r.high));
+  return [...new Map(findStatedRanges(brief).map((r) => [r.text, r] as const)).values()]
+    .filter((r) => !carried.has(r.text) && !heldAsOne(r) && !inAQuestion(brief, r.high.index))
+    // `written`, never a one-letter name: a quoted `"${t}"` reads as a currency token to the currency-vocabulary guard.
+    .map((r) => r.text).map((written) =>
+    `The brief writes "${written}" and no link in the model carries it. If it is a money size PER ONE of something the brief names `
+    + '(per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the '
+    + `money goal, and size that link per one at the LOW end of "${written}" (effect_provenance "explicit"). If it is not a size `
+    + 'per one of anything, change nothing for it.');
+}
+
 export function loopIssues(admitted: Pick<AdmittedModel, 'withheld'>): string[] {
   return admitted.withheld
     .filter((w) => w.reason === 'loop_closing_link' && w.loop !== undefined && w.loop.length > 0)
@@ -1255,7 +1324,7 @@ export type ConstructionTrace =
   | {
     readonly retried: true;
     /** What the retry was asked about: an oversized draft, and the counts of each issue class handed to it. */
-    readonly reasons: { readonly size: boolean; readonly mechanism: number; readonly coverage: number; readonly loop: number };
+    readonly reasons: { readonly size: boolean; readonly mechanism: number; readonly coverage: number; readonly loop: number; readonly range: number };
     /** `adopted`: the retry's model registered · `kept_first`: an adoption gate refused it · `retry_failed`: the call or its parse threw. */
     readonly outcome: 'adopted' | 'kept_first' | 'retry_failed';
   };
@@ -1414,7 +1483,9 @@ export async function buildModelFromBrief(
    */
   const loops = loopIssues(admitted);
   const loopsAsked = needsSizeRetry ? [] : loops;
-  const asked = [...repairIssues(preparation), ...loopsAsked];
+  // A4: a written money range no link carries (never on the size route, where the retry only sheds).
+  const rangesAsked = needsSizeRetry ? [] : uncarriedRangeIssues(brief, admitted, candidate);
+  const asked = [...repairIssues(preparation), ...loopsAsked, ...rangesAsked];
   let trace: ConstructionTrace = { retried: false };
   if (needsSizeRetry || asked.length > 0) {
     sizeRetried = needsSizeRetry;
@@ -1424,6 +1495,7 @@ export async function buildModelFromBrief(
       mechanism: preparation.mechanism_issues.length,
       coverage: sayCoverageGaps(preparation).length,
       loop: loopsAsked.length,
+      range: rangesAsked.length,
     };
     trace = { retried: true, reasons, outcome: 'kept_first' };
     try {
@@ -1494,7 +1566,9 @@ export async function buildModelFromBrief(
           // loop asked within the limit is a reason of its own (#1956), adopted on its other merits.
           retryOpen <= gapCount(preparation) &&
           (needsSizeRetry || preparation.mechanism_issues.length > 0 || loopsAsked.length > 0
-            || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)) &&
+            || (retryOpen < gapCount(preparation) && keepsEveryRegisteredOption)
+            // A4: an asked range is a reason only when the retry CARRIES more of them, registering every option.
+            || (rangesAsked.length > 0 && carriedRanges(retryAdmitted).size > carriedRanges(admitted).size && keepsEveryRegisteredOption)) &&
           // Within the limit, the status quo the first draft held is still held. On a compaction, refusing would cost the user their model.
           (needsSizeRetry || keepsTheHeldStatusQuo(admitted, retryAdmitted)) &&
           (asked.length === 0 || retainsRiskHypotheses(candidate, retryCandidate, needsSizeRetry)) &&
