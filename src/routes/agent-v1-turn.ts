@@ -1029,14 +1029,36 @@ export function agentTurnRequestHash(scenarioId: string, userId: string | null, 
  * things with and without a chip, and with different chips: every chip turn withholds `authorise_change` and
  * `run_analysis` (`withheldToolsOf`), and the Run, research, Strengthen and starting-assumptions chips each take their
  * own path. So a reused turn_id carrying the same words with another chip, or none, is another request: it meets
- * `TURN_ID_REUSED`, never the other's recorded answer. A retry of the same press carries the same chip and still replays.
- * The approve and explanation chips keep their own operations (`approve:<id>`, the explanation id) unchanged.
+ * `TURN_ID_REUSED`, never the other's recorded answer. The approve and explanation chips keep their own operations
+ * (`approve:<id>`, the explanation id) inside the digest, unchanged.
+ *
+ * The chip rides as a SUFFIX (`#chip:<digest>`), not inside the digest, because the UI's own retry resends a turn's words
+ * under its turn_id WITHOUT the chip (DGAI `buildPayload.ts`: `chip` only on chip sources; `retryLast` sends
+ * `source: 'retry'`). `sameAgentTurnRequest` lets exactly that retry replay the recorded press (Codex pre-review P1).
  */
+const CHIP_HASH_SEP = '#chip:';
 export function chipOperationOf(body: Record<string, unknown>): string | undefined {
   const chip = body['chip'];
   if (chip === null || typeof chip !== 'object') return undefined;
   const { id, action_type: actionType } = chip as { id?: unknown; action_type?: unknown };
   return `chip:${JSON.stringify([typeof id === 'string' ? id : null, typeof actionType === 'string' ? actionType : null])}`;
+}
+/** The turn's request hash with its chip bound, when it has one (see `chipOperationOf`). */
+export function withChipOperation(requestHash: string, chipOperation: string | undefined): string {
+  return chipOperation === undefined ? requestHash
+    : `${requestHash}${CHIP_HASH_SEP}${createHash('sha256').update(chipOperation).digest('hex').slice(0, 32)}`;
+}
+/** A UI retry: `source: 'retry'` and no chip (the UI drops it on a retry). */
+export function isChiplessRetry(body: Record<string, unknown>): boolean {
+  return body['source'] === 'retry' && (body['chip'] === undefined || body['chip'] === null);
+}
+/**
+ * Whether a recorded turn (`stored`) is this request. Exact, except that a chipless UI retry of the same words is the
+ * same request as the recorded chip press of those words: it is that press, resent without its chip.
+ */
+export function sameAgentTurnRequest(stored: string, requested: string, chiplessRetry: boolean): boolean {
+  if (stored === requested) return true;
+  return chiplessRetry && !requested.includes(CHIP_HASH_SEP) && stored.startsWith(`${requested}${CHIP_HASH_SEP}`);
 }
 
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
@@ -1551,8 +1573,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     const approvedProposal = typedApprovalOf(body);
     const explanationId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
-    const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}`
-      : isRunExplanationChip(explanationId) ? explanationId : chipOperationOf(body));
+    const ownOperation = approvedProposal !== undefined ? `approve:${approvedProposal}` : isRunExplanationChip(explanationId) ? explanationId : undefined;
+    const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
+      ownOperation === undefined ? chipOperationOf(body) : undefined);
+    const chiplessRetry = isChiplessRetry(body);
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
     /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
     const liveHeldRefs = async (sid: string): Promise<string[]> => {
@@ -1721,7 +1745,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not check whether this turn already ran. Nothing was run — please try again.' });
       }
       if (prior !== null) {
-        if (prior.request_hash !== requestHash) {
+        if (!sameAgentTurnRequest(prior.request_hash, requestHash, chiplessRetry)) {
           return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
         }
         return reply.code(200).send(await replayed(prior));
@@ -1759,7 +1783,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       const claim = {
         won: owner.request_hash === claimHash,
-        sameRequest: requestHashOfClaim(owner.request_hash) === requestHash,
+        sameRequest: sameAgentTurnRequest(requestHashOfClaim(owner.request_hash), requestHash, chiplessRetry),
       };
       if (!claim.won && !claim.sameRequest) {
         return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
@@ -1772,7 +1796,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           let answer: CommittedTurnRecord | null = null;
           try { answer = await readAnswer(); } catch { answer = null; }
           if (answer !== null) {
-            if (answer.request_hash !== requestHash) {
+            if (!sameAgentTurnRequest(answer.request_hash, requestHash, chiplessRetry)) {
               return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
             }
             return reply.code(200).send(await replayed(answer));

@@ -10,7 +10,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import served from './fixtures/m1-s1-served-graphs.json';
 import { strengthenCardFor, STRENGTHEN_PRESS_CHIP_ID } from '../strengthen-press.js';
-import { chipOperationOf, NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
+import { chipOperationOf, NEXT_STEP_CHIPS, sameAgentTurnRequest, withChipOperation } from '../../../routes/agent-v1-turn.js';
 import { linkStrengthCardFor } from '../approval-chips.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
@@ -207,12 +207,37 @@ describe('the real route: the press → ONE held card, 0 model calls', () => {
     expect(r.statusCode, r.body).toBe(409);
     expect((r.json() as { error?: string }).error).toBe('TURN_ID_REUSED');
   });
+  it('RED (Codex pre-review P1): the UI\'s own retry of the press — same turn_id, `source: \'retry\'`, NO chip (DGAI buildPayload) — replays the card', async () => {
+    const turn_id = randomUUID();
+    const first = await press({ turn_id });
+    const chip = NEXT_STEP_CHIPS.find((c) => c.id === STRENGTHEN_PRESS_CHIP_ID)!;
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: chip.message, source: 'retry', turn_id } });
+    expect(r.statusCode, r.body).toBe(200);
+    const again = r.json() as Body;
+    expect(approveOf(again)?.id).toBe(approveOf(first)?.id);
+    expect(approveOf(again)?.detail).toBe(CARD);
+    expect(modelCalls).toBe(0);
+  });
   it('CONTROL: the typed words retried under the same turn_id still replay (an ordinary message hashes as before)', async () => {
     const turn_id = randomUUID();
     const first = await typed(turn_id);
     const again = await typed(turn_id);
     expect(again.statusCode, again.body).toBe(200);
     expect((again.json() as Body).assistant_text).toBe((first.json() as Body).assistant_text);
+  });
+  it('the same request: exact; or a chipless UI retry of the recorded press of the same words — nothing else', () => {
+    const plain = 'agent_turn:aaa';
+    const pressed = withChipOperation(plain, chipOperationOf({ chip: { id: STRENGTHEN_PRESS_CHIP_ID } }));
+    expect(pressed).not.toBe(plain);
+    expect(withChipOperation(plain, undefined)).toBe(plain);
+    expect(sameAgentTurnRequest(pressed, pressed, false)).toBe(true);
+    expect(sameAgentTurnRequest(plain, plain, false)).toBe(true);
+    expect(sameAgentTurnRequest(pressed, plain, true), 'the UI retry of the press').toBe(true);
+    expect(sameAgentTurnRequest(pressed, plain, false), 'the same words typed').toBe(false);
+    expect(sameAgentTurnRequest(plain, pressed, true), 'a press after typed words').toBe(false);
+    const other = withChipOperation(plain, chipOperationOf({ chip: { id: 'agent-next-pre-mortem' } }));
+    expect(sameAgentTurnRequest(pressed, other, true), 'another chip, even on a retry').toBe(false);
+    expect(sameAgentTurnRequest(withChipOperation('agent_turn:bbb', chipOperationOf({ chip: { id: 'x' } })), plain, true), 'other words').toBe(false);
   });
   it('the chip operation: none without a chip; the same chip → the same; another id or action → another', () => {
     expect(chipOperationOf({ message: 'x' })).toBeUndefined();
