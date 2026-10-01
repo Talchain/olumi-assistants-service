@@ -142,7 +142,11 @@ const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFi
  */
 const PREPOSITION = /^(?:of|from|on|in|for|per|with|to|by|at)$/;
 const PARTICIPLE = /^(?:\p{L}+ed|won|lost|made|sent|held|done|given|taken|seen|met|kept)$/u;
-const NOT_A_COUNT = /^(?:revenues|fundings|prices|costs|spends|percentages|rates|shares|times|hours|days|weeks|months|years|minutes|seconds)$/;
+const NOT_A_COUNT = new RegExp('^(?:revenues|fundings|prices|costs|spends|percentages|rates|shares|times|hours|days|weeks|months|years|minutes|seconds'
+  // R3 5926374414: a MONEY plural is never a count — "per payment" on a unitless £ node would be a false scale.
+  + '|fees|payments|savings|expenses|funds|earnings|profits|proceeds|salaries|wages|margins|budgets|losses|donations|receipts|returns)$');
+/** Heads that are a count only as EVENTS ("Angel investments closed"), money otherwise ("Sales", "Bookings"): R3 5926374414. */
+const COUNT_ONLY_AS_EVENT = /^(?:sales|bookings|investments)$/;
 /** A period anywhere in the label makes it a RATE (AIQ 5926286558 / R3 5926308694): its unit is the head PER period. */
 const PERIOD = /^(?:day|days|daily|week|weeks|weekly|month|months|monthly|quarter|quarters|quarterly|year|years|yearly|annual|annually|hour|hours|hourly)$/;
 function countNounOf(node: MagnitudeNode): string | undefined {
@@ -152,8 +156,10 @@ function countNounOf(node: MagnitudeNode): string | undefined {
   const from = words[0] === 'number' && words[1] === 'of' ? 2 : 0;
   const stop = words.findIndex((w, k) => k >= from && PREPOSITION.test(w));
   let span = words.slice(from, stop < 0 ? words.length : stop);
+  const before = span.length;
   while (span.length > 0 && PARTICIPLE.test(span[span.length - 1]!)) span = span.slice(0, -1);
   const head = span[span.length - 1];
+  if (head !== undefined && COUNT_ONLY_AS_EVENT.test(head) && span.length === before) return undefined;
   return head !== undefined && head.length >= 4 && /[^siu]s$/.test(head) && !NOT_A_COUNT.test(head) ? head : undefined;
 }
 

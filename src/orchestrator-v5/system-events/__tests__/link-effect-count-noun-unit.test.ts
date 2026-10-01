@@ -90,6 +90,22 @@ describe('the step-2 unit wall: a unitless count outcome is counted in its plura
     });
   }
 
+  // R3 5926374414: a MONEY plural is never a count — a unitless £ node sized "per payment" would be a false scale.
+  for (const [label, unit] of [['Consulting fees', 'fee'], ['Customer payments', 'payment'], ['Cost savings', 'saving'], ['Operating expenses', 'expense'],
+    ['Investor funds', 'fund'], ['Net earnings', 'earning'], ['Gross profits', 'profit'], ['Grant proceeds', 'proceed'], ['Staff salaries', 'salary']] as const) {
+    it(`R3: money plural "${label}" + "per ${unit}" is refused`, () => {
+      expect(applyLinkEffectEdit(params(served(label), { ...EFFECT, per_source_change_unit: unit }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+    });
+  }
+  it('R3: an AMBIGUOUS head counts only after an event participle — "Angel investments closed" → per investment', () => {
+    expect(applyLinkEffectEdit(params(served('Angel investments closed'), { ...EFFECT, per_source_change_unit: 'investment' })).kind).toBe('mutated');
+  });
+  for (const label of ['Sales', 'Angel investments', 'Bookings']) {
+    it(`R3: bare ambiguous "${label}" is no count`, () => {
+      expect(applyLinkEffectEdit(params(served(label), { ...EFFECT, per_source_change_unit: label.toLowerCase().split(' ').pop()!.replace(/s$/, '') }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+    });
+  }
+
   it('a word that only ENDS in s ("status", "process", "analysis") is not a count', () => {
     expect(applyLinkEffectEdit(params(served('Fundraising process status'), { ...EFFECT, per_source_change_unit: 'status' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });
