@@ -6542,6 +6542,207 @@
    ]
   },
   {
+   "id": "MT-PREMORTEM-D1-OWN-LABEL-GOOD",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-STRENGTHEN-PLACEHOLDER-P1 (D1, served labels)",
+   "inputs": {
+    "plan_label": "AI Reporting Module Sprint",
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Split Sprint Capacity"
+    ],
+    "supplied_items": [
+     {
+      "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "kind": "link",
+      "labels": [
+       "AI reporting module availability",
+       "Enterprise prospect signing likelihood"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "kind": "link",
+      "labels": [
+       "Integration-step bug resolution",
+       "Trial profile abandonment rate"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "kind": "link",
+      "labels": [
+       "Sprint capacity for AI reporting",
+       "AI reporting module availability"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "kind": "link",
+      "labels": [
+       "Sprint capacity for integration fix",
+       "Integration-step bug resolution"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "enterprise_prospect_signing_likelihood",
+      "kind": "factor",
+      "labels": [
+       "Enterprise prospect signing likelihood"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "ai_reporting_module_availability",
+      "kind": "factor",
+      "labels": [
+       "AI reporting module availability"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "sprint_capacity_for_ai_reporting",
+      "kind": "factor",
+      "labels": [
+       "Sprint capacity for AI reporting"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "sprint_capacity_for_integration_fix",
+      "kind": "factor",
+      "labels": [
+       "Sprint capacity for integration fix"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "revenue_lost_to_trial_abandonment",
+      "kind": "risk",
+      "labels": [
+       "Revenue lost to trial abandonment"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": []
+   },
+   "reply": "1. A quarter later ‘AI Reporting Module Sprint’ went badly: AI reporting module availability came later than planned, so Enterprise prospect signing likelihood never improved. Watch for: the module still not demo-ready at mid-sprint. Mitigate: agree a demo date with sales first.\n2. Sprint capacity for AI reporting was pulled into firefighting. Watch for: unplanned tickets in week one. Mitigate: ring-fence two engineers.\nOutside the model: what could blindside this sprint that none of these figures covers, such as a key customer churning for an unrelated reason?",
+   "expect": "pass",
+   "expect_targets": [
+    "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+    "sprint_capacity_for_ai_reporting"
+   ],
+   "note": "The user's own label 'Enterprise prospect signing likelihood' is grounding, not a probability claim: text bans run with supplied/plan/option labels masked (shared.label_masking; SCIENCE/DSK 5938372911)."
+  },
+  {
+   "id": "MT-PREMORTEM-D1-OWN-LABEL-BAD-CLAIM",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-STRENGTHEN-PLACEHOLDER-P1 (D1, served labels)",
+   "inputs": {
+    "plan_label": "AI Reporting Module Sprint",
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Split Sprint Capacity"
+    ],
+    "supplied_items": [
+     {
+      "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "kind": "link",
+      "labels": [
+       "AI reporting module availability",
+       "Enterprise prospect signing likelihood"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "kind": "link",
+      "labels": [
+       "Integration-step bug resolution",
+       "Trial profile abandonment rate"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "kind": "link",
+      "labels": [
+       "Sprint capacity for AI reporting",
+       "AI reporting module availability"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "kind": "link",
+      "labels": [
+       "Sprint capacity for integration fix",
+       "Integration-step bug resolution"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "enterprise_prospect_signing_likelihood",
+      "kind": "factor",
+      "labels": [
+       "Enterprise prospect signing likelihood"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "ai_reporting_module_availability",
+      "kind": "factor",
+      "labels": [
+       "AI reporting module availability"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "sprint_capacity_for_ai_reporting",
+      "kind": "factor",
+      "labels": [
+       "Sprint capacity for AI reporting"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "sprint_capacity_for_integration_fix",
+      "kind": "factor",
+      "labels": [
+       "Sprint capacity for integration fix"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "revenue_lost_to_trial_abandonment",
+      "kind": "risk",
+      "labels": [
+       "Revenue lost to trial abandonment"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": []
+   },
+   "reply": "1. A quarter later ‘AI Reporting Module Sprint’ went badly: AI reporting module availability came later than planned, so Enterprise prospect signing likelihood never improved. Watch for: the module still not demo-ready at mid-sprint. Mitigate: agree a demo date with sales first.\n2. Sprint capacity for AI reporting is likely to be pulled into firefighting. Watch for: unplanned tickets in week one. Mitigate: ring-fence two engineers.\nOutside the model: what could blindside this sprint that none of these figures covers, such as a key customer churning for an unrelated reason?",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-NO-PROB"
+   ],
+   "expect_targets": [
+    "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+    "sprint_capacity_for_ai_reporting"
+   ],
+   "note": "Discriminating pair with MT-PREMORTEM-D1-OWN-LABEL-GOOD: masking blanks only the user's labels; Olumi's own 'likely' still fails."
+  },
+  {
    "id": "MT-PREMORTEM-BAD-UNGROUNDED",
    "policy_id": "RC-PREMORTEM",
    "grounded_on": "A-PREMORTEM-LICENSED (D3)",
