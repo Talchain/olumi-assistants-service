@@ -72,9 +72,9 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { log } from '../../utils/telemetry.js';
 import { goalChanceWithheldForAgent, sameWordsIn } from './goal-chance-withheld.js';
-import { analysisReadyPermitsLeaderNaming, permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
+import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
+import { leaderLicence } from '../compose/leader-licence.js';
 import {
-  leaderClaimReasonKind,
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_LEADER_CAUSE_UNRECORDED,
   WITHHELD_NEAR_TIE,
@@ -1592,12 +1592,8 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
 export function agentLaneLeaderWithheld(
   opts: Pick<WireLeaderClaimEnforcementOpts, 'mayNameLeadingOption' | 'analysisReady' | 'separationEstablished' | 'leaderClaimWithheldReason'>,
 ): boolean {
-  if (opts.mayNameLeadingOption !== true) return true;
-  const separableProvisional =
-    opts.separationEstablished === true && permittedAnalysisModeFromAnalysisReady(opts.analysisReady) === 'quantified_provisional';
-  if (separableProvisional) return false;
-  const separationDeclined = leaderClaimReasonKind(opts.leaderClaimWithheldReason) === 'withheld';
-  return !(analysisReadyPermitsLeaderNaming(opts.analysisReady) && !separationDeclined);
+  // ONE licence (`compose/leader-licence.ts`): the same arms as the shared gate, read in one place.
+  return leaderLicence(opts) === 'withheld';
 }
 
 type WireField = (typeof WIRE_ENFORCED_PROSE_FIELDS)[number];
