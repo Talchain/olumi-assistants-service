@@ -51,15 +51,30 @@ export function unitNamingCurrency(goalUnit: string, statedHead: string): string
 }
 
 /**
+ * The period of an EXACT validated template unit (`currency/<period>` or `<currency>/<period>`, the period one the estate
+ * folds), else null. "currency (USD)/quarter", "currency per month", a bare "currency" and "<currency>/<period>" are all null.
+ */
+export function templatePeriod(unit: unknown): string | null {
+  if (typeof unit !== 'string') return null;
+  const form = TEMPLATE_FORM.exec(unit);
+  return form === null ? null : ratePeriodWord(form[2]!);
+}
+
+/**
  * ⛔ A UNIT THE GOAL ALREADY HOLDS (CEE #2468 P1, CODEX_CLI_OVERFLOW: a user's level in "USD/quarter" beside the target's
  * "currency/quarter" was overwritten by a £ card): the first unit on the goal's own level (`observed_state.unit`) or on a
- * limit row on the goal (`goal_constraints[].unit` joined by `node_id`) that is anything but our placeholder — a currency it
- * already has, or one nobody can read. Null when there is none. Reads only what WE stored.
+ * limit row on the goal (`goal_constraints[].unit` joined by `node_id`) that is anything but the goal's OWN placeholder.
+ * ⛔ EXACT TEMPLATES ONLY (overflow round 2, 5936050145 P1): a held unit is exempt only when it is an exact validated
+ * template (`templatePeriod`) naming the SAME period as the goal's own template unit. "currency (USD)/quarter" — a
+ * placeholder head with a currency in its tail — once passed on its head alone and was replaced by "£/quarter"; so was a
+ * held template in ANOTHER period. Null when there is none. Reads only what WE stored; called at proposal AND at apply.
  */
 export function unitAlreadyOnGoal(
   goal: { readonly id?: unknown; readonly observed_state?: unknown },
   rawGraph: unknown,
+  goalUnit: unknown,
 ): string | null {
+  const goalPeriod = templatePeriod(goalUnit);
   const rows = (rawGraph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints;
   const units = [
     (goal.observed_state as { unit?: unknown } | null | undefined)?.unit,
@@ -67,6 +82,10 @@ export function unitAlreadyOnGoal(
       .filter((r) => (r as { node_id?: unknown } | null)?.node_id === goal.id)
       .map((r) => (r as { unit?: unknown }).unit),
   ];
-  for (const u of units) if (typeof u === 'string' && u.trim() !== '' && !isUnnamedCurrencyUnit(u)) return u;
+  for (const u of units) {
+    if (typeof u !== 'string' || u.trim() === '') continue;
+    const exempt = goalPeriod !== null && templatePeriod(u) === goalPeriod;
+    if (!exempt) return u;
+  }
   return null;
 }

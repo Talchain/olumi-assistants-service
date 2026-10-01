@@ -327,12 +327,8 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   return { nodes: nodes.map((n) => (n === node ? stamped : n)), held: { target, direction, horizon }, horizon: attestation };
 }
 
-/**
- * A figure's scope among a model's QUANTITIES (every node but options and the decision): `target`'s label, and the rest.
- * The Agent lane's `scopeIn` over one label; exported for the goal's level door (`goal-current-level.ts`), which
- * `agent-capabilities.ts` imports and so cannot import it back.
- */
-export function quantityScope(nodes: readonly { readonly kind?: unknown; readonly label?: unknown }[], target: unknown): EntityScope {
+/** A figure's scope among a model's QUANTITIES (every node but options and the decision): `target`'s label, and the rest. */
+function quantityScope(nodes: readonly { readonly kind?: unknown; readonly label?: unknown }[], target: unknown): EntityScope {
   const label = typeof target === 'string' ? target : '';
   const others = nodes
     .filter((n) => n.kind !== 'option' && n.kind !== 'decision')

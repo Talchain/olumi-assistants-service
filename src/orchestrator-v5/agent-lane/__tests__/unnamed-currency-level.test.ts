@@ -290,6 +290,49 @@ describe('#2468 P1 (existing currency): a currency already named anywhere on the
     expect(goalIn(s.graph())).toStrictEqual(before);
   });
 
+  // ⛔ Overflow round 2 (5936050145 P1): the exemption read only the placeholder HEAD, so a held unit with a currency in its
+  // TAIL passed and was replaced by "£/quarter". Only the exact validated template, in the goal's own period, is exempt.
+  it.each([
+    ['the level (observed_state.unit)', 'level'],
+    ['a limit row on the goal (goal_constraints[].unit)', 'row'],
+  ])('RED (overflow round 2): "currency (USD)/quarter" held on %s + a £ card → refused at proposal, nothing stored', async (_n, carrier) => {
+    const g = clone(served);
+    if (carrier === 'level') goalIn(g).observed_state = { ...USD_LEVEL, unit: 'currency (USD)/quarter' };
+    else g.goal_constraints = [{ constraint_id: 'c-usd-tail', node_id: GOAL_ID, operator: '>=', value: 150000, unit: 'currency (USD)/quarter', label: 'quarterly revenue at least 150,000' }];
+    const run = await proposeThenApprove(g, SAID, { value: 100000, unit: '£' });
+    nothingStored(g, run);
+    expect(run.proposed.refusal).toBe('currency_already_named');
+  });
+
+  it('RED (overflow round 2): a held template in ANOTHER period ("currency/month" level on a "currency/quarter" goal) is never re-periodised by adoption', async () => {
+    const g = clone(served); goalIn(g).observed_state = { ...USD_LEVEL, unit: 'currency/month' };
+    const run = await proposeThenApprove(g, SAID, { value: 100000, unit: '£' });
+    nothingStored(g, run);
+    expect(run.proposed.refusal).toBe('currency_already_named');
+  });
+
+  it.each([['the level', 'level'], ['a limit row', 'row']])('RED (apply, overflow round 2): "currency (USD)/quarter" appears on %s AFTER the card → not applied, nothing written', async (_n, carrier) => {
+    const s = setup(clone(served), SAID);
+    const proposed = await s.call(TOOL, { goal_label: GOAL_LABEL, value: 100000, unit: '£', user_stated: true }) as Rec;
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    if (carrier === 'level') goalIn(s.graph()).observed_state = { ...USD_LEVEL, unit: 'currency (USD)/quarter' };
+    else (s.graph() as { goal_constraints?: unknown[] }).goal_constraints = [{ constraint_id: 'c-usd-tail', node_id: GOAL_ID, operator: '>=', value: 150000, unit: 'currency (USD)/quarter', label: 'quarterly revenue at least 150,000' }];
+    const before = clone(goalIn(s.graph()));
+    const approved = await s.call('authorise_change', { proposal_id: proposed.proposal_id }) as Rec;
+    expect(approved.applied, JSON.stringify(approved)).not.toBe(true);
+    expect(s.registers).toEqual([]);
+    expect(goalIn(s.graph())).toStrictEqual(before);
+  });
+
+  it('templatePeriod: the period of an EXACT validated template only', async () => {
+    const { templatePeriod } = await import('../unnamed-currency.js');
+    expect(templatePeriod('currency/quarter')).toBe('quarter');
+    expect(templatePeriod('<currency>/month')).toBe('month');
+    for (const u of ['currency (USD)/quarter', 'currency per quarter', 'currency', '<currency>/<period>', 'currency/fortnightly', 'USD/quarter', undefined]) {
+      expect(templatePeriod(u), String(u)).toBeNull();
+    }
+  });
+
   it('CONTROL: a level held in the placeholder unit itself ("currency/quarter") names no currency → adopted as before', async () => {
     const g = clone(served); goalIn(g).observed_state = { ...USD_LEVEL, unit: SERVED_UNIT };
     const run = await proposeThenApprove(g, SAID, { value: 100000, unit: '£' });

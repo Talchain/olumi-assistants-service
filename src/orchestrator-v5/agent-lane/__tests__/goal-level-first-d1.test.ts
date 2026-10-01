@@ -406,16 +406,6 @@ describe('R3 F5 I1.1 (#85 5933250962): the TOOL the model sees takes a level wit
 // the stated metric or period. Add same-currency wrong-goal and month/quarter negatives.") ──────────────────────────────────
 const SERVED_D1 = JSON.parse(readFileSync(new URL('./fixtures/f5-d1-6bc6cae6-served-graph-20261001.json', import.meta.url), 'utf8')) as Graph;
 const SERVED_GOAL_ID = 'quarterly_revenue';
-const BRIEF_MARKETING = `${BRIEF} We could also raise our marketing spend.`;
-
-/** Paul's D1 draft plus a same-currency quantity the user can state a figure for: "Marketing spend", £ per quarter. */
-function draftWithMarketing() {
-  const d = draft();
-  d.factors.push({ label: 'Marketing spend', role: 'controllable', baseline_known: false, baseline_value: null as unknown as number, unit: UNIT, provenance: 'inferred', plausible_max: 500000 });
-  d.links.push(link('Marketing spend', 'New enterprise customers'));
-  return d;
-}
-
 /** Refused with nothing behind it: no card held, nothing registered, the goal node byte for byte as it was. */
 async function levelRefused(initial: Graph, goalId: string, said: string, args: Rec): Promise<Rec> {
   const s = setup(initial, said);
@@ -430,40 +420,10 @@ async function levelRefused(initial: Graph, goalId: string, said: string, args: 
   return r;
 }
 
-describe('(vi-a) a same-currency figure written about ANOTHER quantity is never the goal\'s current level', () => {
-  it('RED (the reviewer\'s row): "Our marketing spend is £100,000 a quarter." → the revenue goal\'s level is refused, nothing prepared', async () => {
-    const built = await build(draftWithMarketing(), BRIEF_MARKETING);
-    expect(built.nodes.filter((n) => n.label === 'Marketing spend' && n.kind === 'factor'), 'precondition: the model holds the other quantity').toHaveLength(1);
-    const r = await levelRefused(built, D1_GOAL_ID, 'Our marketing spend is £100,000 a quarter.', { goal_label: 'Quarterly revenue', value: 100000, unit: '£' });
-    expect(r.refusal).toBe('figure_not_about_the_goal');
-  });
-
-  it('RED (Paul\'s served D1 graph, sibling "revenue" outcomes): "Our enterprise deal revenue is £100,000 a quarter." → refused for "quarterly revenue"', async () => {
-    const r = await levelRefused(SERVED_D1, SERVED_GOAL_ID, 'Our enterprise deal revenue is £100,000 a quarter.', { goal_label: 'quarterly revenue', value: 100000, unit: '£' });
-    expect(r.refusal).toBe('figure_not_about_the_goal');
-  });
-
-  it('CONTROL (same graphs, same run): "Our quarterly revenue is £100,000." is still carded on both', async () => {
-    const built = await build(draftWithMarketing(), BRIEF_MARKETING);
-    for (const [g, label, id] of [[built, 'Quarterly revenue', D1_GOAL_ID], [SERVED_D1, 'quarterly revenue', SERVED_GOAL_ID]] as const) {
-      const s = setup(g, SAID_1);
-      const r = await s.call(TOOL, { goal_label: label, value: 100000, unit: '£', user_stated: true }) as Rec;
-      expect(r.ok, JSON.stringify(r)).toBe(true);
-      expect(s.proposals.get(String(r.proposal_id))?.operations.map((o) => o.path)).toEqual([id]);
-    }
-  });
-
-  it('CONTROL (binds by entity, not by amount): one message, two £ figures — the goal\'s carded, the marketing figure refused', async () => {
-    const built = await build(draftWithMarketing(), BRIEF_MARKETING);
-    const said = 'Our quarterly revenue is £100,000 and our marketing spend is £40,000 a quarter.';
-    const s = setup(built, said);
-    const ok = await s.call(TOOL, { goal_label: 'Quarterly revenue', value: 100000, unit: '£', user_stated: true }) as Rec;
-    expect(ok.ok, JSON.stringify(ok)).toBe(true);
-    expect(s.proposals.get(String(ok.proposal_id))?.operations.map((o) => o.path)).toEqual([D1_GOAL_ID]);
-    const r = await levelRefused(built, D1_GOAL_ID, said, { goal_label: 'Quarterly revenue', value: 40000, unit: '£' });
-    expect(r.refusal).toBe('figure_not_about_the_goal');
-  });
-});
+// (vi-a) REMOVED (CODEX overflow #2468 5936050145 P2; DL: banned door). A same-currency figure written about ANOTHER
+// quantity ("Our marketing spend is £100,000 a quarter.") is NOT caught by this door: the natural-language "written about"
+// gate that caught it was a word read over the user's sentence, and it both over- and under-fired ("…including enterprise
+// deal revenue" refused; "Our advertising budget is £100,000." accepted). Entity grounding is SEPARATE, TYPED work.
 
 describe('(vi-b) a figure stated per MONTH is never recorded as the per-QUARTER goal\'s level', () => {
   const MONTHLY = 'Our monthly revenue is £100,000.';
