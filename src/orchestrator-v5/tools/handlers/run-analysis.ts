@@ -2676,8 +2676,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
         ...(goalCertainty.recorded ? { goal_certainty: goalCertainty.decisions } : {}),
         // ⭐ 52f8cd (DL 5924731600): the Olumi options this Run left out of the ordinary comparison, and why — stored with
-        // the facts so the read and the turn carry the SAME record (`option-participation.ts`). Absent when none.
-        ...(olumiFilter.participation.length > 0 ? { option_participation: [...olumiFilter.participation] } : {}),
+        // the facts so the read and the turn carry the SAME record (`option-participation.ts`). ALWAYS written on a
+        // completed Run, `[]` included (schemas 0.65; CODEX 5924967500): absent strictly means an older Run, not recorded.
+        option_participation: [...olumiFilter.participation],
         computed_at: runComputedAt,
         // SC-24 (schemas 0.68.0): the Run's execution identity and the input it was sent (3.9 above).
         run_id: runId,

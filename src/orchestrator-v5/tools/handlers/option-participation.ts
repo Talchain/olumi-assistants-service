@@ -18,9 +18,12 @@ const StoredOptionParticipationSchema = RunAnalysisResultSchema.shape.option_par
 
 export type StoredOptionParticipation = readonly OptionParticipationEntry[];
 
-/** Only an array the contract accepts, with at least one entry, is carried: absent = nothing was left out (or not recorded). */
+/**
+ * Only an array the contract accepts is carried, `[]` included: `[]` = recorded, nothing left out; absent = NOT recorded
+ * (a Run from before this, or a record the contract refuses) — never "every option was the user's" (schemas 0.65).
+ */
 export function readStoredOptionParticipation(raw: unknown): StoredOptionParticipation | undefined {
   if (raw === undefined || raw === null) return undefined;
   const parsed = StoredOptionParticipationSchema.safeParse(raw);
-  return parsed.success && parsed.data.length > 0 ? parsed.data : undefined;
+  return parsed.success ? parsed.data : undefined;
 }

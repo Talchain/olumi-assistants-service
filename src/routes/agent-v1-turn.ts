@@ -835,7 +835,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       limitVerdicts = readLimitVerdicts(after.json.analysis_limit_verdicts) ?? undefined;
       // 0.63.0: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
       goalCertainty = readStoredGoalCertainty(after.json.analysis_goal_certainty);
-      // 52f8cd: only an array the published contract accepts is carried: absent = nothing left out (or not recorded).
+      // 52f8cd: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
       optionParticipation = readStoredOptionParticipation(after.json.analysis_option_participation);
       // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
       identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
@@ -2728,7 +2728,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       /**
        * ⭐ 52f8cd (DL 5924731600; PANEL 5924723004): the Olumi options the Run left out of the comparison, and why, as a
        * SIDECAR root key (the `goal_certainty` pattern; DGAI `storedOptionParticipation.ts` reads it). Without it the UI
-       * said "The analysis returned no result for this option" over an option CEE left out on purpose. Absent = none.
+       * said "The analysis returned no result for this option" over an option CEE left out on purpose. `[]` = recorded,
+       * nothing left out; absent = not recorded.
        */
       ...(optionParticipation !== undefined ? { option_participation: optionParticipation } : {}),
       /**

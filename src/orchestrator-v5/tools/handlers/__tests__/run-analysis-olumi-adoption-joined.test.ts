@@ -147,9 +147,10 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
     });
     const reopened = await read();
     expect(reopened.analysis_state?.run_state.kind).toBe('complete_current');
-    // CONTROL: once adopted the option is IN the comparison, so the rerun records nothing left out and the read carries none.
-    expect(second.result).not.toHaveProperty('option_participation');
-    expect(reopened.analysis_option_participation).toBeUndefined();
+    // CONTROL: once adopted the option is IN the comparison, so the rerun RECORDS nothing left out — `[]`, never absent
+    // (schemas 0.65: absent = an older Run, not recorded; CODEX 5924967500) — and the read carries that `[]`.
+    expect(second.result.option_participation).toEqual([]);
+    expect(reopened.analysis_option_participation).toEqual([]);
     expect(reopened.analysis_result).toMatchObject({
       computed_against_hash: second.result.graph_hash_at_run,
       leading_option_id: null,

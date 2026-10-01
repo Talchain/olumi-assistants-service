@@ -94,12 +94,18 @@ describe('52f8cd: the Agent turn carries the run\'s STORED option participation 
     expect(additive).toContain('option_participation');
   });
 
+  it('RECORDED EMPTY: a read carrying `[]` → `option_participation: []` on the turn, never dropped to absent', async () => {
+    readPayload = { ...readPayload, analysis_option_participation: [] };
+    const body = (await turn()).json() as Record<string, unknown>;
+    expect(body).toHaveProperty('option_participation');
+    expect(body.option_participation).toEqual([]);
+  });
+
   it.each([
-    ['the read carries none (nothing was left out, or a Run from before this)', () => {}],
+    ['the read carries none (a Run from before this: not recorded)', () => {}],
     ['the read\'s array is not one the contract accepts (an exclusion naming unanalysable options)', () => {
       readPayload = { ...readPayload, analysis_option_participation: [{ option_id: 'x', state: 'excluded_olumi_proposed', unanalysable_user_option_ids: ['y'] }] };
     }],
-    ['the read carries an empty array', () => { readPayload = { ...readPayload, analysis_option_participation: [] }; }],
   ])('CONTRAST: %s → no `option_participation` key, and the declared body still parses', async (_name, arrange) => {
     arrange();
     const r = await turn();

@@ -193,8 +193,8 @@ export interface ScenarioAnalysisRead {
   readonly analysis_goal_certainty?: StoredGoalCertainty;
   /**
    * 52f8cd (DL 5924731600): the SELECTED fact's own `option_participation` — the Olumi options its Run left out of the
-   * ordinary comparison, and why — under the SAME gates as `analysis_goal_certainty`. ABSENT when none was left out or the
-   * fact records none: a consumer then may not infer a cause from the node.
+   * ordinary comparison, and why — under the SAME gates as `analysis_goal_certainty`. `[]` = recorded, nothing left out.
+   * ABSENT when the fact records none (an older Run): a consumer then may not infer a cause from the node.
    */
   readonly analysis_option_participation?: StoredOptionParticipation;
   /**
