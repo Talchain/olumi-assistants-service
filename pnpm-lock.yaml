@@ -2149,7 +2149,7 @@ packages:
 
   '@talchain/schemas@file:vendor/talchain-schemas-0.70.0.tgz':
     resolution: {integrity: sha512-+IUB15tcl7WCOUgJNkqTh1LEtzr4j+0pALo2a57uvb9DHqUPQWR33um8ywigiHOSAEOKA1AOAuOadpgYudRmlg==, tarball: file:vendor/talchain-schemas-0.70.0.tgz}
-    version: 0.69.0
+    version: 0.70.0
     engines: {node: '>=18.0.0'}
 
   '@types/archiver@7.0.0':
