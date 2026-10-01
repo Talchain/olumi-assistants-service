@@ -1,0 +1,176 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import acceptance from './fixtures/reasoning-coach-acceptance.json';
+import { checkMethodTurn, renderCopy, selectGuidance, stateKeyHash } from '../guidance/index.js';
+import { POLICY, SPEC_SHA } from '../guidance/policy.js';
+import type { GuidanceSignals, GuidanceState, MethodInputs, PolicyId, SelectedRow } from '../guidance/types.js';
+
+const cases = acceptance.cases;
+const fixtures = acceptance.method_turn_fixtures;
+const stateOf = (id: string): GuidanceSignals => structuredClone(cases.find(c => c.id === id)!.state) as GuidanceSignals;
+const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance ?? {}) => {
+  const selection = selectGuidance(state, guidance);
+  return { selection, rows: [selection.slot1, selection.slot2].filter((r): r is SelectedRow => r !== undefined) };
+};
+
+describe('CODEX BUILDER: pinned reasoning-coach acceptance contract', () => {
+  it('imports all 25 cases and all 7 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(25); expect(fixtures).toHaveLength(7);
+    expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
+    expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
+    expect(SPEC_SHA).toBe('6c4fbffdb4a7f783de9efbfb9eb2f2a25a73079b');
+  });
+  it('vendors exact source bytes and uses the same typed policy constants', () => {
+    const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
+    const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('92935feb97293246b9e5ff2f25f68219f70012e5a838ff71e4a7cd7d2e19b7bc');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('227d93835372211940cb5e72de7c6d0e1e99bcfdf37727ad4e760f2400f8aed2');
+    const source = JSON.parse(policy.toString());
+    expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
+  });
+  it.each(cases)('$id — real selector, exact slots/items/actions and rendered copy', c => {
+    const state = c.state as GuidanceSignals;
+    const before = JSON.stringify(state);
+    const { selection, rows } = rowsOf(state);
+    expect(rows.length).toBeLessThanOrEqual(2);
+    expect(rows.map(r => r.policy_id).sort()).toEqual(c.expect.offered.map(r => r.policy_id).sort());
+    for (const offered of c.expect.offered) {
+      const row = offered.slot === 1 ? selection.slot1 : selection.slot2;
+      expect(row?.policy_id).toBe(offered.policy_id);
+      if ('variant' in offered) expect(row?.variant).toBe(offered.variant);
+      if ('priority' in offered) expect(row?.priority).toBe(offered.priority);
+      if ('item' in offered) expect(row?.item).toBe(offered.item);
+      if ('primary_action_kind' in offered) expect(row?.primary_action.action_kind).toBe(offered.primary_action_kind);
+    }
+    if ('not_offered' in c.expect && c.expect.not_offered) for (const id of c.expect.not_offered) expect(rows.some(r => r.policy_id === id)).toBe(false);
+    expect(selection.runs_method).toBe('runs_method' in c.expect ? c.expect.runs_method : undefined);
+    if ('rendered_example' in c.expect && c.expect.rendered_example) for (const example of c.expect.rendered_example) {
+      const row = rows.find(r => r.policy_id === example.policy_id)!;
+      const copy = renderCopy(row, state);
+      expect({ policy_id: row.policy_id, variant: row.variant ?? null, item: row.item ?? null, ...copy }).toEqual(example);
+      expect(row.copy).toEqual(copy);
+    }
+    const copy = rows.flatMap(r => Object.values(r.copy)).filter(Boolean).join('\n');
+    if ('copy_must_contain' in c.expect && c.expect.copy_must_contain) for (const phrase of c.expect.copy_must_contain) expect(copy).toContain(phrase);
+    if ('copy_must_not_contain' in c.expect && c.expect.copy_must_not_contain) for (const phrase of c.expect.copy_must_not_contain) expect(copy).not.toContain(phrase);
+    expect(JSON.stringify(state)).toBe(before);
+  });
+  it.each(fixtures)('$id — real text checker, exact failed-id set', f => {
+    const result = checkMethodTurn(f.policy_id as PolicyId, f.reply, f.inputs as MethodInputs);
+    expect(result.pass).toBe(f.expect === 'pass');
+    expect(new Set(result.failed)).toEqual(new Set('failing_checks' in f ? f.failing_checks : []));
+  });
+  it('cold reload preserves the complete selection using content-free hashes', () => {
+    const state = stateOf('A-TWO-LOAD-HIDDEN-AFTER-RELOAD');
+    const inMemory = selectGuidance(state, state.guidance!);
+    const hashes: GuidanceState = Object.fromEntries(Object.entries(state.guidance!).map(([id, record]) =>
+      [id, { status: record!.status, state_key_hash: stateKeyHash(record!.state_key_fields!) }]));
+    expect(selectGuidance(state, JSON.parse(JSON.stringify(hashes)))).toEqual(inMemory);
+    expect(JSON.stringify(hashes)).not.toContain('switch_to_gcp');
+  });
+});
+
+describe('discriminating controls for selector and rendering', () => {
+  it('a measured factor cannot license WHAT-CHANGES when the leader is unlicensed', () => {
+    const state = { ...stateOf('A-WHAT-CHANGES-MEASURED'), 'run.leader_licensed': false };
+    expect(rowsOf(state).rows.some(r => r.policy_id === 'RC-WHAT-CHANGES')).toBe(false);
+  });
+  it('same item and priority favours the reasoning framing over Strengthen', () => {
+    const state = stateOf('A-WHAT-CHANGES-MEASURED');
+    const factor = state['run.decision_sensitivity']!.most_sensitive!;
+    const { rows, selection } = rowsOf({ ...state, 'model.goal_path_factors': [{ ...factor, value_authorship: 'olumi_estimate', goal_distance: 0 }] });
+    expect(rows[0].policy_id).toBe('RC-WHAT-CHANGES');
+    expect(selection.suppressed).toContainEqual({ policy_id: 'RC-STRENGTHEN-ITEM', reason: 'budget' });
+  });
+  it('absent/pending signals are silent; missing labels never become guessed copy', () => {
+    expect(rowsOf({}).rows).toEqual([]);
+    const state = stateOf('A-WHAT-CHANGES-MEASURED');
+    const { selection } = rowsOf({ ...state, 'run.decision_sensitivity': { status: 'pending' } });
+    expect(selection.suppressed).toContainEqual({ policy_id: 'RC-WHAT-CHANGES', reason: 'pending_signal' });
+    expect(renderCopy({ policy_id: 'RC-WIDEN', variant: 'W2' }, { ...stateOf('A-WHAT-CHANGES-NONE-MEASURABLE-SILENT'), 'model.option_labels': {} }).question).toBeNull();
+  });
+  it('item order is goal distance then id, independent of producer array order', () => {
+    const state = stateOf('A-STRENGTHEN-PLACEHOLDER-P1');
+    const a = rowsOf(state).rows[0];
+    expect(rowsOf({ ...state, 'model.goal_path_links': [...state['model.goal_path_links']!].reverse() }).rows[0]).toEqual(a);
+    const links = state['model.goal_path_links']!.map(l => ({ ...l, goal_distance: 0 }));
+    const expected = state['model.placeholder_goal_links']!.slice().sort()[0];
+    expect(rowsOf({ ...state, 'model.goal_path_links': links }).rows[0].item).toBe(expected);
+  });
+  it('item cooldown falls across variants and returns when the item digest changes', () => {
+    const state = stateOf('A-STRENGTHEN-PLACEHOLDER-P1');
+    const first = rowsOf(state).rows[0];
+    const otherLinks = state['model.goal_path_links']!.filter(l => l.link_id !== first.item).map(l => ({ ...l, link_sizing: 'user' as const }));
+    const link = state['model.goal_path_links']!.find(l => l.link_id === first.item)!;
+    const one = { ...state, 'model.goal_path_links': [link, ...otherLinks], 'model.placeholder_goal_links': [link.link_id],
+      'model.goal_path_factors': [], 'model.same_lever': false, 'model.risk_ids': ['r1', 'r2'], 'model.goal_path_factor_ids': ['f1', 'f2', 'f3'] };
+    const guidance = { [`RC-STRENGTHEN-ITEM:${link.link_id}`]: { status: 'dismissed' as const, state_key_hash: first.state_key_hash } };
+    expect(rowsOf(one, guidance).rows.some(r => r.policy_id === 'RC-STRENGTHEN-ITEM')).toBe(false);
+    expect(rowsOf({ ...one, 'model.goal_path_links': [{ ...link, strength_band_hash: 'new-strength' }, ...otherLinks] }, guidance).rows[0].item).toBe(link.link_id);
+  });
+  it('explicit pre-mortem at an earlier stage dispatches qualitatively without another offer', () => {
+    const state = { ...stateOf('A-EXPLICIT-REQUEST-BYPASSES-COOLDOWN'), 'run.kind': 'none', 'run.leader_licensed': false };
+    expect(rowsOf(state).rows).toEqual([]);
+    expect(rowsOf(state).selection.runs_method).toBe('RC-PREMORTEM');
+    expect(rowsOf({ ...state, 'model.goal_present': false }).selection.runs_method).toBeUndefined();
+  });
+  it('rename/position edits do not offer Coach my edits', () => {
+    const state = stateOf('A-COACH-EDITS-OFFERED');
+    const edit = { kind: 'structural_rename', entity_id: 'x', field: 'label', after_hash: 'h' };
+    expect(rowsOf({ ...state, 'since_run.goal_path_user_edits': { status: 'available', edits: [edit] } }).rows.some(r => r.policy_id === 'RC-COACH-EDITS')).toBe(false);
+  });
+  it('canonical hashes sort object keys and unordered option sets, preserving ordered arrays', () => {
+    expect(stateKeyHash({ z: 1, a: { y: 2, x: 3 } })).toBe(stateKeyHash({ a: { x: 3, y: 2 }, z: 1 }));
+    expect(stateKeyHash({ a: [1, 2] })).not.toBe(stateKeyHash({ a: [2, 1] }));
+    expect(stateKeyHash({ a: 'private figure' })).toMatch(/^[a-f0-9]{12}$/u);
+    const state = stateOf('A-PREMORTEM-LICENSED');
+    expect(rowsOf({ ...state, 'model.non_sq_option_ids': [...state['model.non_sq_option_ids']!].reverse() }).selection).toEqual(rowsOf(state).selection);
+  });
+  it('copy handles one-month/deadline horizons, curly quotes, acronyms and Unicode truncation', () => {
+    const state = stateOf('A-PREMORTEM-LICENSED');
+    expect(renderCopy({ policy_id: 'RC-PREMORTEM' }, { ...state, 'model.goal_horizon': { months: 1 } }).question).toContain('a month from now');
+    expect(renderCopy({ policy_id: 'RC-PREMORTEM' }, { ...state, 'model.goal_horizon': { deadline: '2027-01-01' } }).question).toContain('2027-01-01');
+    const label = '😀'.repeat(41);
+    const copy = renderCopy({ policy_id: 'RC-PREMORTEM' }, { ...state, 'model.option_labels': { switch_to_gcp: label } });
+    expect(copy.title).toContain(`‘${'😀'.repeat(39)}…’`);
+  });
+});
+
+describe('all deterministic text post-check ids, including methods without vendored reply fixtures', () => {
+  const textCases: { id: PolicyId; good: string; bad: string; inputs: MethodInputs; failed: string[] }[] = [
+    { id: 'RC-WHAT-CHANGES', good: 'Olumi varied annual cost at 10. Give your estimate.',
+      bad: 'No single assumption matters. Nothing would change. EVPPI is 90%.', inputs: { factor_label: 'Annual cost', factor_current_value: 10 },
+      failed: ['WC-NAMES-FACTOR', 'WC-NO-NEW-FIGURES', 'WC-NO-NOTHING', 'WC-BANNED'] },
+    { id: 'RC-STRENGTHEN-ITEM', good: 'Annual cost changes revenue. The current figure is 10.',
+      bad: 'This placeholder edge has default strength 90.', inputs: { item_labels: ['Annual cost', 'Revenue'], item_current_value: 10 },
+      failed: ['ST-NAMES-ITEM', 'ST-BANNED', 'ST-NO-NEW-FIGURES'] },
+    { id: 'RC-COACH-EDITS', good: 'You changed annual cost and revenue. The analysis is out of date.',
+      bad: 'The result has changed and this option now leads.', inputs: { edited_labels: ['Annual cost', 'Revenue'], 'run.kind': 'complete_stale' },
+      failed: ['CE-NAMES-EDITS', 'CE-STALE-IFF', 'CE-NO-RESULT-CLAIM'] },
+  ];
+  it.each(textCases)('$id checks every text rule on a good and bad reply', c => {
+    expect(checkMethodTurn(c.id, c.good, c.inputs)).toEqual({ pass: true, failed: [] });
+    expect(new Set(checkMethodTurn(c.id, c.bad, c.inputs).failed)).toEqual(new Set(c.failed));
+    expect(new Set(c.failed)).toEqual(new Set(POLICY.method_turns[c.id].post_checks.map(c => c.id)));
+  });
+  it('list numbers are not invented figures; quoted/punctuated names normalise identically', () => {
+    expect(checkMethodTurn('RC-WIDEN', '- ‘Angel-investor outreach’: more.', { current_option_labels: ['Angel investor outreach'] }).failed).toContain('WD-NO-DUP');
+    const good = fixtures.find(f => f.id === 'MT-PREMORTEM-GOOD')!;
+    expect(checkMethodTurn('RC-PREMORTEM', good.reply, good.inputs as MethodInputs)).toEqual({ pass: true, failed: [] });
+    expect(checkMethodTurn('RC-WIDEN', '- New route: budget £45,000.', { brief: 'Budget £45,000' })).toEqual({ pass: true, failed: [] });
+    expect(checkMethodTurn('RC-WHAT-CHANGES', 'Annual cost is 10. The analysis is sensitive to it.', { factor_label: 'Annual cost', factor_current_value: 10 }).pass).toBe(true);
+  });
+  it('pre-mortem grounding accepts whole-word refs, not prefixes or another plan', () => {
+    const text = '1. F2 fell short. Watch for: delays. Mitigate: a test.\n2. R1 happened. Watch for: invoices. Mitigate: a cap.';
+    const inputs = { supplied_refs: ['F2', 'R1'], plan_label: 'Alpha', current_option_labels: ['Alpha', 'Beta'] };
+    expect(checkMethodTurn('RC-PREMORTEM', text, inputs).pass).toBe(true);
+    expect(checkMethodTurn('RC-PREMORTEM', text.replace('F2', 'F20'), inputs).failed).toContain('PM-GROUNDED');
+    expect(checkMethodTurn('RC-PREMORTEM', text.replace('F2', 'Beta F2'), inputs).failed).toContain('PM-PLAN-ONLY');
+    expect(checkMethodTurn('RC-PREMORTEM', text.replace('Mitigate:', 'Next:'), inputs).failed).toContain('PM-WATCH-MITIGATE');
+  });
+  it('Coach edits requires the stale line only for a stale run', () => {
+    expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);
+    expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' })).toEqual({ pass: true, failed: [] });
+  });
+});

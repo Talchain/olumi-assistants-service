@@ -1,0 +1,4349 @@
+{
+ "schema_version": "rc-acceptance/0.1",
+ "policy": "REASONING-INTERVENTIONS.json rc-policy/0.1",
+ "how_to_use": "AI HARNESS imports this file in vitest and, for each case, feeds `state` (the named signals) to its REAL selector. Assert: every `offered` entry is selected in its slot (variant/item where given); nothing in `not_offered` is selected; at most expect.max_chips (default 1 + optional RC-COACH-EDITS) rows; no rendered copy contains `copy_must_not_contain`. For served cases also derive the signals from `source.capture` with your own readers and compare to `state` (derivation check; this file approximates placeholderGoalPaths and detectSameLeverOptions, so a mismatch is a question for RC, not a silent pass).",
+ "gate": "The harness suite turning RED when a row is weakened (e.g. RC-WHAT-CHANGES allowed with run.leader_licensed false) is the behaviour evidence. check-policy.mjs is lint only.",
+ "cases": [
+  {
+   "id": "A-D2-RUN2-WIDEN-P1",
+   "kind": "served",
+   "note": "Served today: the three static chips, incl. \"What would change the result?\" with the leader withheld.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d2-funding-train0545Z-16-run2.json",
+    "sha256": "0287ca25a0e02ddc12e2fe8daf87c43c9a15b196040ee6685f1e978a50399566",
+    "served_on": "staging 1 Oct 05:45Z train (R3 accept-paul); UI 7303ea9f-era, CEE pre-547eeb35",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ]
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "every_option_likely_breaks_limit",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "securing funding",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_outreach",
+    "model.non_sq_option_ids": [
+     "angel_investor_outreach"
+    ],
+    "model.option_labels": {
+     "continue_current_outreach": "Continue current outreach",
+     "angel_investor_outreach": "Angel investor outreach",
+     "angel_outreach_pilot": "Angel outreach pilot"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "distraction_from_investment_firm_fundraising"
+    ],
+    "model.goal_path_factor_ids": [
+     "hours_per_week_on_angel_outreach"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "hours_per_week_on_angel_outreach->qualified_angel_investor_conversations",
+      "from_label": "Hours per week on angel outreach",
+      "to_label": "Qualified angel investor conversations",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "qualified_angel_investor_conversations->securing_funding",
+      "from_label": "Qualified angel investor conversations",
+      "to_label": "securing funding",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "hours_per_week_on_angel_outreach->angel_fundraising_admin_time",
+      "from_label": "Hours per week on angel outreach",
+      "to_label": "Angel fundraising admin time",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "angel_fundraising_admin_time->distraction_from_investment_firm_fundraising",
+      "from_label": "Angel fundraising admin time",
+      "to_label": "Distraction from investment-firm fundraising",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "distraction_from_investment_firm_fundraising->securing_funding",
+      "from_label": "Distraction from investment-firm fundraising",
+      "to_label": "securing funding",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "hours_per_week_on_angel_outreach",
+      "label": "Hours per week on angel outreach",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W1",
+      "priority": "P1",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES",
+     "RC-STRENGTHEN-ITEM",
+     "RC-PREMORTEM",
+     "RC-COACH-EDITS"
+    ],
+    "copy_must_not_contain": [
+     "Strengthen the model",
+     "What would change the result?",
+     "win",
+     "%"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W1",
+      "item": null,
+      "title": "Every option looks likely to break your limit. Worth finding another route?",
+      "why": "The analysis checked your limit and no option clears it.",
+      "question": "None of these looks likely to stay within your limit. Is there another way to get there?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-WIDEN-SAME-KEY-HIDDEN",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d2-funding-train0545Z-16-run2.json",
+    "sha256": "0287ca25a0e02ddc12e2fe8daf87c43c9a15b196040ee6685f1e978a50399566",
+    "served_on": "staging 1 Oct 05:45Z train (R3 accept-paul); UI 7303ea9f-era, CEE pre-547eeb35",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "guidance RC-WIDEN dismissed with the current state key"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "every_option_likely_breaks_limit",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "securing funding",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_outreach",
+    "model.non_sq_option_ids": [
+     "angel_investor_outreach"
+    ],
+    "model.option_labels": {
+     "continue_current_outreach": "Continue current outreach",
+     "angel_investor_outreach": "Angel investor outreach",
+     "angel_outreach_pilot": "Angel outreach pilot"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "distraction_from_investment_firm_fundraising"
+    ],
+    "model.goal_path_factor_ids": [
+     "hours_per_week_on_angel_outreach"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "hours_per_week_on_angel_outreach->qualified_angel_investor_conversations",
+      "from_label": "Hours per week on angel outreach",
+      "to_label": "Qualified angel investor conversations",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "qualified_angel_investor_conversations->securing_funding",
+      "from_label": "Qualified angel investor conversations",
+      "to_label": "securing funding",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "hours_per_week_on_angel_outreach->angel_fundraising_admin_time",
+      "from_label": "Hours per week on angel outreach",
+      "to_label": "Angel fundraising admin time",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "angel_fundraising_admin_time->distraction_from_investment_firm_fundraising",
+      "from_label": "Angel fundraising admin time",
+      "to_label": "Distraction from investment-firm fundraising",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "distraction_from_investment_firm_fundraising->securing_funding",
+      "from_label": "Distraction from investment-firm fundraising",
+      "to_label": "securing funding",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "hours_per_week_on_angel_outreach",
+      "label": "Hours per week on angel outreach",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "dismissed",
+      "state_key_fields": {
+       "variant_id": "W1",
+       "target": "options",
+       "non_sq_option_ids": [
+        "angel_investor_outreach"
+       ],
+       "withheld_reason": "every_option_likely_breaks_limit"
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S3L",
+      "priority": "P5",
+      "slot": 1,
+      "item_one_of": [
+       "hours_per_week_on_angel_outreach->qualified_angel_investor_conversations",
+       "hours_per_week_on_angel_outreach->angel_fundraising_admin_time"
+      ],
+      "item": "hours_per_week_on_angel_outreach->qualified_angel_investor_conversations"
+     }
+    ],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES",
+     "RC-PREMORTEM"
+    ],
+    "copy_must_not_contain": [
+     "Strengthen the model"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S3L",
+      "item": "hours_per_week_on_angel_outreach->qualified_angel_investor_conversations",
+      "title": "The effect of hours per week on angel outreach is Olumi's guess.",
+      "why": "It sits on the path to your goal.",
+      "question": "Does hours per week on angel outreach really move qualified angel investor conversations as much as Olumi assumed?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-WIDEN-REENTERS-ON-NEW-OPTION-SET",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d2-funding-train0545Z-16-run2.json",
+    "sha256": "0287ca25a0e02ddc12e2fe8daf87c43c9a15b196040ee6685f1e978a50399566",
+    "served_on": "staging 1 Oct 05:45Z train (R3 accept-paul); UI 7303ea9f-era, CEE pre-547eeb35",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as A-WIDEN-SAME-KEY-HIDDEN plus one user-added option; limit verdict unchanged"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "every_option_likely_breaks_limit",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "securing funding",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_outreach",
+    "model.non_sq_option_ids": [
+     "angel_investor_outreach",
+     "user_added_option"
+    ],
+    "model.option_labels": {
+     "continue_current_outreach": "Continue current outreach",
+     "angel_investor_outreach": "Angel investor outreach",
+     "angel_outreach_pilot": "Angel outreach pilot",
+     "user_added_option": "Revenue-based financing"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "distraction_from_investment_firm_fundraising"
+    ],
+    "model.goal_path_factor_ids": [
+     "hours_per_week_on_angel_outreach"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "hours_per_week_on_angel_outreach->qualified_angel_investor_conversations",
+      "from_label": "Hours per week on angel outreach",
+      "to_label": "Qualified angel investor conversations",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "qualified_angel_investor_conversations->securing_funding",
+      "from_label": "Qualified angel investor conversations",
+      "to_label": "securing funding",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "hours_per_week_on_angel_outreach->angel_fundraising_admin_time",
+      "from_label": "Hours per week on angel outreach",
+      "to_label": "Angel fundraising admin time",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "angel_fundraising_admin_time->distraction_from_investment_firm_fundraising",
+      "from_label": "Angel fundraising admin time",
+      "to_label": "Distraction from investment-firm fundraising",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "distraction_from_investment_firm_fundraising->securing_funding",
+      "from_label": "Distraction from investment-firm fundraising",
+      "to_label": "securing funding",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "hours_per_week_on_angel_outreach",
+      "label": "Hours per week on angel outreach",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "dismissed",
+      "state_key_fields": {
+       "variant_id": "W1",
+       "target": "options",
+       "non_sq_option_ids": [
+        "angel_investor_outreach"
+       ],
+       "withheld_reason": "every_option_likely_breaks_limit"
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W1",
+      "priority": "P1",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W1",
+      "item": null,
+      "title": "Every option looks likely to break your limit. Worth finding another route?",
+      "why": "The analysis checked your limit and no option clears it.",
+      "question": "None of these looks likely to stay within your limit. Is there another way to get there?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-STRENGTHEN-PLACEHOLDER-P1",
+   "kind": "served",
+   "note": "Leader withheld (separation_unavailable): what-changes must be silent. RC-WIDEN W3 (same lever) and W6 (one risk) are eligible but lose to P1.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d1-sprint-1149Z-11-s5-run.json",
+    "sha256": "eeeff8b46bc4bbcae7669ca52118b6a6880c5270f0a1010f3ee4de2159f5473f",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ]
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "separation_unavailable",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Quarterly revenue",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_plan",
+    "model.non_sq_option_ids": [
+     "ai_reporting_module_sprint",
+     "integration_bug_fix_sprint"
+    ],
+    "model.option_labels": {
+     "ai_reporting_module_sprint": "AI Reporting Module Sprint",
+     "integration_bug_fix_sprint": "Integration Bug Fix Sprint",
+     "split_sprint_capacity": "Split Sprint Capacity",
+     "continue_current_plan": "Continue Current Plan"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "revenue_lost_to_trial_abandonment"
+    ],
+    "model.goal_path_factor_ids": [
+     "ai_reporting_module_availability",
+     "enterprise_prospect_signing_likelihood",
+     "integration_step_bug_resolution",
+     "sprint_capacity_for_ai_reporting",
+     "sprint_capacity_for_integration_fix",
+     "trial_profile_abandonment_rate"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "from_label": "Sprint capacity for AI reporting",
+      "to_label": "AI reporting module availability",
+      "link_sizing": "placeholder",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "from_label": "AI reporting module availability",
+      "to_label": "Enterprise prospect signing likelihood",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "enterprise_prospect_signing_likelihood->quarterly_revenue",
+      "from_label": "Enterprise prospect signing likelihood",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "from_label": "Sprint capacity for integration fix",
+      "to_label": "Integration-step bug resolution",
+      "link_sizing": "placeholder",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 3
+     },
+     {
+      "link_id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "from_label": "Integration-step bug resolution",
+      "to_label": "Trial profile abandonment rate",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+      "from_label": "Trial profile abandonment rate",
+      "to_label": "Revenue lost to trial abandonment",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "revenue_lost_to_trial_abandonment->quarterly_revenue",
+      "from_label": "Revenue lost to trial abandonment",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [
+     "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+     "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+    ],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "ai_reporting_module_availability",
+      "label": "AI reporting module availability",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "enterprise_prospect_signing_likelihood",
+      "label": "Enterprise prospect signing likelihood",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 1
+     },
+     {
+      "factor_id": "integration_step_bug_resolution",
+      "label": "Integration-step bug resolution",
+      "value_authorship": "unknown",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_ai_reporting",
+      "label": "Sprint capacity for AI reporting",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_integration_fix",
+      "label": "Sprint capacity for integration fix",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 4
+     },
+     {
+      "factor_id": "trial_profile_abandonment_rate",
+      "label": "Trial profile abandonment rate",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S1",
+      "priority": "P1",
+      "slot": 1,
+      "item_one_of": [
+       "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+       "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+      ],
+      "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability"
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES",
+     "RC-PREMORTEM",
+     "RC-WIDEN"
+    ],
+    "copy_must_not_contain": [
+     "Strengthen the model",
+     "placeholder",
+     "edge"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S1",
+      "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "title": "The comparison rests on a link nobody has sized yet.",
+      "why": "Until it is sized, Olumi can't compare the options on your goal.",
+      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it."
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-STRENGTHEN-ITEM-FALLS-THROUGH",
+   "kind": "constructed",
+   "note": "Item rows fall through to the next candidate; a dismissed item stays hidden while its key is unchanged.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d1-sprint-1149Z-11-s5-run.json",
+    "sha256": "eeeff8b46bc4bbcae7669ca52118b6a6880c5270f0a1010f3ee4de2159f5473f",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "guidance: RC-STRENGTHEN-ITEM dismissed for item sprint_capacity_for_ai_reporting->ai_reporting_module_availability"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "separation_unavailable",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Quarterly revenue",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_plan",
+    "model.non_sq_option_ids": [
+     "ai_reporting_module_sprint",
+     "integration_bug_fix_sprint"
+    ],
+    "model.option_labels": {
+     "ai_reporting_module_sprint": "AI Reporting Module Sprint",
+     "integration_bug_fix_sprint": "Integration Bug Fix Sprint",
+     "split_sprint_capacity": "Split Sprint Capacity",
+     "continue_current_plan": "Continue Current Plan"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "revenue_lost_to_trial_abandonment"
+    ],
+    "model.goal_path_factor_ids": [
+     "ai_reporting_module_availability",
+     "enterprise_prospect_signing_likelihood",
+     "integration_step_bug_resolution",
+     "sprint_capacity_for_ai_reporting",
+     "sprint_capacity_for_integration_fix",
+     "trial_profile_abandonment_rate"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "from_label": "Sprint capacity for AI reporting",
+      "to_label": "AI reporting module availability",
+      "link_sizing": "placeholder",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "from_label": "AI reporting module availability",
+      "to_label": "Enterprise prospect signing likelihood",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "enterprise_prospect_signing_likelihood->quarterly_revenue",
+      "from_label": "Enterprise prospect signing likelihood",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "from_label": "Sprint capacity for integration fix",
+      "to_label": "Integration-step bug resolution",
+      "link_sizing": "placeholder",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 3
+     },
+     {
+      "link_id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "from_label": "Integration-step bug resolution",
+      "to_label": "Trial profile abandonment rate",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+      "from_label": "Trial profile abandonment rate",
+      "to_label": "Revenue lost to trial abandonment",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "revenue_lost_to_trial_abandonment->quarterly_revenue",
+      "from_label": "Revenue lost to trial abandonment",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [
+     "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+     "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+    ],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "ai_reporting_module_availability",
+      "label": "AI reporting module availability",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "enterprise_prospect_signing_likelihood",
+      "label": "Enterprise prospect signing likelihood",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 1
+     },
+     {
+      "factor_id": "integration_step_bug_resolution",
+      "label": "Integration-step bug resolution",
+      "value_authorship": "unknown",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_ai_reporting",
+      "label": "Sprint capacity for AI reporting",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_integration_fix",
+      "label": "Sprint capacity for integration fix",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 4
+     },
+     {
+      "factor_id": "trial_profile_abandonment_rate",
+      "label": "Trial profile abandonment rate",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-STRENGTHEN-ITEM:sprint_capacity_for_ai_reporting->ai_reporting_module_availability": {
+      "status": "dismissed",
+      "state_key_fields": {
+       "item_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+       "link_sizing": "placeholder"
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S1",
+      "priority": "P1",
+      "slot": 1,
+      "item_one_of": [
+       "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+      ],
+      "item": "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES",
+     "RC-PREMORTEM",
+     "RC-WIDEN"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S1",
+      "item": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "title": "The comparison rests on a link nobody has sized yet.",
+      "why": "Until it is sized, Olumi can't compare the options on your goal.",
+      "question": "How much does sprint capacity for integration fix really change integration-step bug resolution? The comparison turns on it."
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-STRENGTHEN-B2-SUPPRESSES",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d1-sprint-1149Z-11-s5-run.json",
+    "sha256": "eeeff8b46bc4bbcae7669ca52118b6a6880c5270f0a1010f3ee4de2159f5473f",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "B2 decision point open for the unsized link"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": true,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "separation_unavailable",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Quarterly revenue",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_plan",
+    "model.non_sq_option_ids": [
+     "ai_reporting_module_sprint",
+     "integration_bug_fix_sprint"
+    ],
+    "model.option_labels": {
+     "ai_reporting_module_sprint": "AI Reporting Module Sprint",
+     "integration_bug_fix_sprint": "Integration Bug Fix Sprint",
+     "split_sprint_capacity": "Split Sprint Capacity",
+     "continue_current_plan": "Continue Current Plan"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "revenue_lost_to_trial_abandonment"
+    ],
+    "model.goal_path_factor_ids": [
+     "ai_reporting_module_availability",
+     "enterprise_prospect_signing_likelihood",
+     "integration_step_bug_resolution",
+     "sprint_capacity_for_ai_reporting",
+     "sprint_capacity_for_integration_fix",
+     "trial_profile_abandonment_rate"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "from_label": "Sprint capacity for AI reporting",
+      "to_label": "AI reporting module availability",
+      "link_sizing": "placeholder",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "from_label": "AI reporting module availability",
+      "to_label": "Enterprise prospect signing likelihood",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "enterprise_prospect_signing_likelihood->quarterly_revenue",
+      "from_label": "Enterprise prospect signing likelihood",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "from_label": "Sprint capacity for integration fix",
+      "to_label": "Integration-step bug resolution",
+      "link_sizing": "placeholder",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 3
+     },
+     {
+      "link_id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "from_label": "Integration-step bug resolution",
+      "to_label": "Trial profile abandonment rate",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+      "from_label": "Trial profile abandonment rate",
+      "to_label": "Revenue lost to trial abandonment",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "revenue_lost_to_trial_abandonment->quarterly_revenue",
+      "from_label": "Revenue lost to trial abandonment",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [
+     "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+     "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+    ],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "ai_reporting_module_availability",
+      "label": "AI reporting module availability",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "enterprise_prospect_signing_likelihood",
+      "label": "Enterprise prospect signing likelihood",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 1
+     },
+     {
+      "factor_id": "integration_step_bug_resolution",
+      "label": "Integration-step bug resolution",
+      "value_authorship": "unknown",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_ai_reporting",
+      "label": "Sprint capacity for AI reporting",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_integration_fix",
+      "label": "Sprint capacity for integration fix",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 4
+     },
+     {
+      "factor_id": "trial_profile_abandonment_rate",
+      "label": "Trial profile abandonment rate",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES",
+     "RC-STRENGTHEN-ITEM",
+     "RC-PREMORTEM",
+     "RC-COACH-EDITS"
+    ]
+   }
+  },
+  {
+   "id": "A-WHAT-CHANGES-NONE-MEASURABLE-SILENT",
+   "kind": "served",
+   "note": "Licensed leader, but factor_evppi is below_resolution: never coach \"nothing would change it\". Phased migration is Olumi-proposed and excluded, so the user has one option besides staying on AWS.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ]
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "priority": "P1",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES"
+    ],
+    "copy_must_not_contain": [
+     "No single assumption",
+     "nothing would change",
+     "What would change the result?"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "item": null,
+      "title": "Only one real option on the table. Decisions go better with alternatives.",
+      "why": "There is one option besides carrying on as now.",
+      "question": "Is it really just ‘Switch to GCP’ or carry on as now? What other routes are there?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-REQUEST1-NO-COACHING",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "turn.request = run_result (two-request Run, request 1)"
+   },
+   "state": {
+    "turn.request": "run_result",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES",
+     "RC-STRENGTHEN-ITEM",
+     "RC-PREMORTEM",
+     "RC-COACH-EDITS"
+    ],
+    "note": "Only the agent-explain-run:<run_key> chip, which is not a coaching row."
+   }
+  },
+  {
+   "id": "A-WHAT-CHANGES-MEASURED",
+   "kind": "constructed",
+   "note": "Same-lever W3 (P3) is eligible and loses to P2. Pre-mortem (P4) loses too.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "phased option accepted by the user; decision_sensitivity set to measured (no served run measured it: EVPPI is structurally flat on additive lever models)"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "measured",
+     "most_sensitive": {
+      "factor_id": "gcp_savings_at_full_migration",
+      "label": "GCP savings at full migration",
+      "range": "olumi_assumed"
+     }
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "phased_gcp_migration",
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WHAT-CHANGES",
+      "priority": "P2",
+      "slot": 1,
+      "primary_action_kind": "edit_inline",
+      "item": "gcp_savings_at_full_migration"
+     }
+    ],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-PREMORTEM"
+    ],
+    "copy_must_not_contain": [
+     "EVPPI",
+     "sensitivity score",
+     "win",
+     "%"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-WHAT-CHANGES",
+      "variant": null,
+      "item": "gcp_savings_at_full_migration",
+      "title": "GCP savings at full migration could change which option leads.",
+      "why": "The analysis found that the answer is sensitive to GCP savings at full migration.",
+      "question": "Do you know GCP savings at full migration more precisely? Within Olumi's assumed range it could change which option leads."
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-PREMORTEM-LICENSED",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "phased accepted; RC-WIDEN W3 completed for this option set; EVPPI flat"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "phased_gcp_migration",
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "completed",
+      "state_key_fields": {
+       "variant_id": "W3",
+       "target": "options",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-PREMORTEM",
+      "priority": "P4",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES",
+     "RC-WIDEN"
+    ],
+    "copy_must_not_contain": [
+     "will fail",
+     "probability of failure"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-PREMORTEM",
+      "variant": null,
+      "item": null,
+      "title": "Imagine ‘Switch to GCP’ has failed. What went wrong?",
+      "why": "There is a plan to stress-test now: ‘Switch to GCP’.",
+      "question": "Imagine ‘Switch to GCP’ has gone badly. What most likely went wrong?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-PREMORTEM-DATED-HORIZON",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as A-PREMORTEM-LICENSED with goal_horizon {months: 6} (0.69.0 field; not on any served capture yet)"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": {
+     "months": 6
+    },
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "phased_gcp_migration",
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "completed",
+      "state_key_fields": {
+       "variant_id": "W3",
+       "target": "options",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-PREMORTEM",
+      "priority": "P4",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES",
+     "RC-WIDEN"
+    ],
+    "copy_must_contain": [
+     "6 months from now"
+    ],
+    "copy_must_not_contain": [
+     "a year"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-PREMORTEM",
+      "variant": null,
+      "item": null,
+      "title": "Imagine ‘Switch to GCP’ has failed. What went wrong?",
+      "why": "There is a plan to stress-test now: ‘Switch to GCP’.",
+      "question": "Imagine it's 6 months from now and ‘Switch to GCP’ has gone badly. What most likely went wrong?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-PREMORTEM-COMPLETED-HIDDEN",
+   "kind": "constructed",
+   "note": "Assumes the leader of the licensed run is switch_to_gcp (served text: \"Switch to GCP leads only provisionally\").",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as A-PREMORTEM-LICENSED with RC-PREMORTEM completed for leader switch_to_gcp"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "phased_gcp_migration",
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "completed",
+      "state_key_fields": {
+       "variant_id": "W3",
+       "target": "options",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     },
+     "RC-PREMORTEM": {
+      "status": "completed",
+      "state_key_fields": {
+       "plan_option_id": "switch_to_gcp",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S3L",
+      "priority": "P5",
+      "slot": 1,
+      "item_one_of": [
+       "monthly_cloud_overspend_during_migration->monthly_spend",
+       "monthly_cloud_savings->monthly_spend",
+       "gcp_workload_share->monthly_cloud_overspend_during_migration",
+       "migration_preparation_effort->monthly_cloud_overspend_during_migration"
+      ],
+      "item": "monthly_cloud_overspend_during_migration->monthly_spend"
+     }
+    ],
+    "not_offered": [
+     "RC-PREMORTEM",
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES"
+    ],
+    "copy_must_not_contain": [
+     "Strengthen the model"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S3L",
+      "item": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "title": "The effect of monthly cloud overspend during migration is Olumi's guess.",
+      "why": "It sits on the path to your goal.",
+      "question": "Does monthly cloud overspend during migration really move monthly spend as much as Olumi assumed?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-PREMORTEM-RISK-ADDED-STAYS-HIDDEN",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as A-PREMORTEM-COMPLETED-HIDDEN plus one risk the user added from the pre-mortem"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "phased_gcp_migration",
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration",
+     "risk_added_by_premortem"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "completed",
+      "state_key_fields": {
+       "variant_id": "W3",
+       "target": "options",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     },
+     "RC-PREMORTEM": {
+      "status": "completed",
+      "state_key_fields": {
+       "plan_option_id": "switch_to_gcp",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S3L",
+      "priority": "P5",
+      "slot": 1,
+      "item_one_of": [
+       "monthly_cloud_overspend_during_migration->monthly_spend",
+       "monthly_cloud_savings->monthly_spend",
+       "gcp_workload_share->monthly_cloud_overspend_during_migration",
+       "migration_preparation_effort->monthly_cloud_overspend_during_migration"
+      ],
+      "item": "monthly_cloud_overspend_during_migration->monthly_spend"
+     }
+    ],
+    "not_offered": [
+     "RC-PREMORTEM"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S3L",
+      "item": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "title": "The effect of monthly cloud overspend during migration is Olumi's guess.",
+      "why": "It sits on the path to your goal.",
+      "question": "Does monthly cloud overspend during migration really move monthly spend as much as Olumi assumed?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-EXPLICIT-REQUEST-BYPASSES-COOLDOWN",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "menu press of METHOD_CATALOGUE.pre_mortem after completion"
+   },
+   "state": {
+    "turn.request": "method",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "phased_gcp_migration",
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "completed",
+      "state_key_fields": {
+       "variant_id": "W3",
+       "target": "options",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     },
+     "RC-PREMORTEM": {
+      "status": "completed",
+      "state_key_fields": {
+       "plan_option_id": "switch_to_gcp",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     }
+    },
+    "user.explicit_request": "RC-PREMORTEM"
+   },
+   "expect": {
+    "runs_method": "RC-PREMORTEM",
+    "offered": [],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES",
+     "RC-STRENGTHEN-ITEM"
+    ],
+    "note": "On a method turn no OTHER method is offered (selection.method_turn_rule). Guidance records pressed."
+   }
+  },
+  {
+   "id": "A-TWO-LOAD-HIDDEN-AFTER-RELOAD",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "RC-WIDEN pressed on the previous turn; in-process memory dropped; guidance re-read from v5_conversation_turns.coaching_state"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "pressed",
+      "state_key_fields": {
+       "variant_id": "W2",
+       "target": "options",
+       "non_sq_option_ids": [
+        "switch_to_gcp"
+       ]
+      },
+      "persisted_via": "coaching_state",
+      "read_after_cold_reload": true
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-PREMORTEM",
+      "priority": "P4",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES"
+    ],
+    "harness_procedure": "Persist guidance on turn N, construct a fresh selector/store with no in-memory state, read coaching_state, select for turn N+1 on the same canonical state: RC-WIDEN must be absent, and the selection must equal the in-memory selection.",
+    "rendered_example": [
+     {
+      "policy_id": "RC-PREMORTEM",
+      "variant": null,
+      "item": null,
+      "title": "Imagine ‘Switch to GCP’ has failed. What went wrong?",
+      "why": "There is a plan to stress-test now: ‘Switch to GCP’.",
+      "question": "Imagine ‘Switch to GCP’ has gone badly. What most likely went wrong?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-D3-S4-AFTER-WIDEN-DISMISSED",
+   "kind": "served+guidance",
+   "note": "W2 key excludes withheld_reason, so the new constraint_verdict_withheld does not bring RC-WIDEN back.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-10-s4-run.json",
+    "sha256": "950d30c4ab7f8e647b32bffeaa5632840544e02d26b2e7920f1963dfd5ff2803",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "guidance: RC-WIDEN W2 dismissed at s1 with the same option set"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "constraint_verdict_withheld",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "dismissed",
+      "state_key_fields": {
+       "variant_id": "W2",
+       "target": "options",
+       "non_sq_option_ids": [
+        "switch_to_gcp"
+       ]
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-PREMORTEM",
+      "priority": "P4",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES"
+    ],
+    "copy_must_not_contain": [
+     "What would change the result?"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-PREMORTEM",
+      "variant": null,
+      "item": null,
+      "title": "Imagine ‘Switch to GCP’ has failed. What went wrong?",
+      "why": "There is a plan to stress-test now: ‘Switch to GCP’.",
+      "question": "Imagine ‘Switch to GCP’ has gone badly. What most likely went wrong?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-DECISION-POINT-SUPPRESSES",
+   "kind": "served",
+   "note": "Served: agent-approve-proposal + agent-amend-proposal (the existing offeredSpecific gate already suppresses the static chips).",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-07-s3-say.json",
+    "sha256": "fa13b77b8287c148303f9984369e205cb6567bfecbdc21293a5182878a65bfbb",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-approve-proposal:prop_75237620f52ac4a7b0cf9104ae2ca2f7",
+     "agent-amend-proposal"
+    ]
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": true,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES",
+     "RC-STRENGTHEN-ITEM",
+     "RC-PREMORTEM",
+     "RC-COACH-EDITS"
+    ]
+   }
+  },
+  {
+   "id": "A-STALE-SILENT",
+   "kind": "served",
+   "note": "complete_stale + analysis_out_of_date; the Run offer is a specific next action (open.decision_point).",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-08-s3-press1.json",
+    "sha256": "b6fd971970ff1662859d2a5fe9cd64599aae8f5137ae506fa2311b4e6fbb87a4",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-run-analysis"
+    ]
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": true,
+    "run.kind": "complete_stale",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "analysis_out_of_date",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "phased_gcp_migration",
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [],
+    "not_offered": [
+     "RC-WHAT-CHANGES",
+     "RC-PREMORTEM",
+     "RC-WIDEN",
+     "RC-STRENGTHEN-ITEM"
+    ]
+   }
+  },
+  {
+   "id": "A-COACH-EDITS-OFFERED",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "since_run available with one goal-path factor edit (future: F2-4)"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "available",
+     "edits": [
+      {
+       "kind": "factor_value_edit",
+       "entity_id": "gcp_savings_at_full_migration",
+       "field": "value",
+       "after_hash": "h-34k"
+      }
+     ]
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "slot": 1
+     },
+     {
+      "policy_id": "RC-COACH-EDITS",
+      "slot": 2
+     }
+    ],
+    "max_chips": 2,
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "item": null,
+      "title": "Only one real option on the table. Decisions go better with alternatives.",
+      "why": "There is one option besides carrying on as now.",
+      "question": "Is it really just ‘Switch to GCP’ or carry on as now? What other routes are there?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-COACH-EDITS-PENDING-SILENT",
+   "kind": "served",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ]
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "priority": "P1",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-COACH-EDITS",
+     "RC-WHAT-CHANGES"
+    ],
+    "note": "since_run is pending: silent, never inferred from the \"(Board edit\" text prefix.",
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "item": null,
+      "title": "Only one real option on the table. Decisions go better with alternatives.",
+      "why": "There is one option besides carrying on as now.",
+      "question": "Is it really just ‘Switch to GCP’ or carry on as now? What other routes are there?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-COACH-EDITS-SAME-SET-HIDDEN",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as A-COACH-EDITS-OFFERED with the same edit set already coached"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "available",
+     "edits": [
+      {
+       "kind": "factor_value_edit",
+       "entity_id": "gcp_savings_at_full_migration",
+       "field": "value",
+       "after_hash": "h-34k"
+      }
+     ]
+    },
+    "guidance": {
+     "RC-COACH-EDITS": {
+      "status": "completed",
+      "state_key_fields": {
+       "edits": [
+        {
+         "kind": "factor_value_edit",
+         "entity_id": "gcp_savings_at_full_migration",
+         "field": "value",
+         "after_hash": "h-34k"
+        }
+       ]
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-COACH-EDITS"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "item": null,
+      "title": "Only one real option on the table. Decisions go better with alternatives.",
+      "why": "There is one option besides carrying on as now.",
+      "question": "Is it really just ‘Switch to GCP’ or carry on as now? What other routes are there?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-NO-GENERIC-STRENGTHEN",
+   "kind": "constructed",
+   "note": "",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "variation": "as A-PREMORTEM-COMPLETED-HIDDEN with every goal-path link and value the user's own"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "phased_gcp_migration",
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "user",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "user",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "user",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "user",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "user",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "yours",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "yours",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "completed",
+      "state_key_fields": {
+       "variant_id": "W3",
+       "target": "options",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     },
+     "RC-PREMORTEM": {
+      "status": "completed",
+      "state_key_fields": {
+       "plan_option_id": "switch_to_gcp",
+       "non_sq_option_ids": [
+        "phased_gcp_migration",
+        "switch_to_gcp"
+       ]
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [],
+    "not_offered": [
+     "RC-STRENGTHEN-ITEM",
+     "RC-PREMORTEM"
+    ],
+    "copy_must_not_contain": [
+     "Strengthen the model"
+    ]
+   }
+  },
+  {
+   "id": "A-Q-D1-BUILD",
+   "kind": "served",
+   "note": "Build turn. Served today: \"10 questions this model does not answer yet\" in the producer order, plus the three static chips.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d1-sprint-1149Z-01-brief.json",
+    "sha256": "a0ae98b1c3cb5feba460a564242f62a3a11acf3afe5b75bf4de0b64801162c7c",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ]
+   },
+   "state": {
+    "turn.request": "turn",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "unrequested_analysis_withheld",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Quarterly revenue",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_plan",
+    "model.non_sq_option_ids": [
+     "ai_reporting_module_sprint",
+     "integration_bug_fix_sprint"
+    ],
+    "model.option_labels": {
+     "ai_reporting_module_sprint": "AI Reporting Module Sprint",
+     "integration_bug_fix_sprint": "Integration Bug Fix Sprint",
+     "split_sprint_capacity": "Split Sprint Capacity",
+     "continue_current_plan": "Continue Current Plan"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "revenue_lost_to_trial_abandonment"
+    ],
+    "model.goal_path_factor_ids": [
+     "ai_reporting_module_availability",
+     "enterprise_prospect_signing_likelihood",
+     "integration_step_bug_resolution",
+     "sprint_capacity_for_ai_reporting",
+     "sprint_capacity_for_integration_fix",
+     "trial_profile_abandonment_rate"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "from_label": "Sprint capacity for AI reporting",
+      "to_label": "AI reporting module availability",
+      "link_sizing": "placeholder",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "from_label": "AI reporting module availability",
+      "to_label": "Enterprise prospect signing likelihood",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "enterprise_prospect_signing_likelihood->quarterly_revenue",
+      "from_label": "Enterprise prospect signing likelihood",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "from_label": "Sprint capacity for integration fix",
+      "to_label": "Integration-step bug resolution",
+      "link_sizing": "placeholder",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 3
+     },
+     {
+      "link_id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "from_label": "Integration-step bug resolution",
+      "to_label": "Trial profile abandonment rate",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+      "from_label": "Trial profile abandonment rate",
+      "to_label": "Revenue lost to trial abandonment",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "revenue_lost_to_trial_abandonment->quarterly_revenue",
+      "from_label": "Revenue lost to trial abandonment",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [
+     "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+     "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+    ],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "ai_reporting_module_availability",
+      "label": "AI reporting module availability",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "enterprise_prospect_signing_likelihood",
+      "label": "Enterprise prospect signing likelihood",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 1
+     },
+     {
+      "factor_id": "integration_step_bug_resolution",
+      "label": "Integration-step bug resolution",
+      "value_authorship": "unknown",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_ai_reporting",
+      "label": "Sprint capacity for AI reporting",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_integration_fix",
+      "label": "Sprint capacity for integration fix",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 4
+     },
+     {
+      "factor_id": "trial_profile_abandonment_rate",
+      "label": "Trial profile abandonment rate",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S1",
+      "priority": "P1",
+      "item_one_of": [
+       "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+       "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+      ],
+      "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES"
+    ],
+    "question_surface": {
+     "first": {
+      "source": "Q-ROW",
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S1",
+      "item_one_of": [
+       "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+       "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+      ],
+      "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability"
+     },
+     "shown_at_rest": 1,
+     "drafter_never_in_first": 4,
+     "view_all_count_at_least": 10,
+     "served_open_questions_today": [
+      "The brief does not say whether your \"Quarterly revenue\" goal covers revenue affected by the enterprise prospect and trial-driven customers or all company revenue, so the model measures it for revenue affected by the enterprise prospect and trial-driven customers. Which did you mean?",
+      "Does \"Quarterly revenue\" get there within 3 months? The model holds no deadline yet, so no result answers that.",
+      "Olumi estimated that raising \"Sprint capacity for AI reporting\" by 100 points raises \"AI reporting module availability\" by 1 0-1, but Olumi's own estimate of \"AI reporting module availability\" today is 0 0-1, so that cannot hold across your options and was not used: a placeholder sized to keep \"AI reporting module availability\" within its range stands in for it. How much does \"Sprint capacity for AI reporting\" change \"AI reporting module availability\"?",
+      "Olumi estimated that raising \"Sprint capacity for integration fix\" by 100 points raises \"Integration-step bug resolution\" by 1 0-1, but Olumi's own estimate of \"Integration-step bug resolution\" today is 0 0-1, so that cannot hold across your options and was not used: a placeholder sized to keep \"Integration-step bug resolution\" within its range stands in for it. How much does \"Sprint capacity for integration fix\" change \"Integration-step bug resolution\"?",
+      "Olumi's starting guess is that raising \"Revenue lost to trial abandonment\" by 1 currency/quarter lowers \"Quarterly revenue\" by 1 currency/quarter, but the model doesn't hold it yet. How much does \"Revenue lost to trial abandonment\" change \"Quarterly revenue\"?",
+      "What currency and current quarterly revenue level should the leadership update use? The model does not estimate the current goal level.",
+      "What is the enterprise prospect's expected contract value and the probability of signing with and without an AI reporting commitment? The provisional 10% baseline and 60-point uplift are scenario assumptions, not measurements.",
+      "How many trial signups occur per quarter, what share of completed profiles become paying customers, and what is their expected revenue? These inputs are needed to value the 15% abandonment loss.",
+      "Does a 50/50 sprint split produce any usable AI reporting commitment or meaningful bug resolution by the relevant deadlines? The split option is a proposed test of this assumption.",
+      "Does resolving the integration bug remove the full 15 percentage points of observed profile abandonment, or do other causes account for part of it?"
+     ]
+    },
+    "rendered_example": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S1",
+      "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "title": "The comparison rests on a link nobody has sized yet.",
+      "why": "Until it is sized, Olumi can't compare the options on your goal.",
+      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it."
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-Q-D2-BUILD",
+   "kind": "served",
+   "note": "Build turn. Served today: \"10 questions this model does not answer yet\" in the producer order, plus the three static chips.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d2-funding-train0545Z-01-brief.json",
+    "sha256": "07ea0b1e91bca4ddc314ffd3cfa617eadc2d0e6fe3954cf5443592d55631d5aa",
+    "served_on": "staging 1 Oct 05:45Z train (R3 accept-paul); UI 7303ea9f-era, CEE pre-547eeb35",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ]
+   },
+   "state": {
+    "turn.request": "turn",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "unrequested_analysis_withheld",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "securing funding",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_outreach",
+    "model.non_sq_option_ids": [
+     "angel_investor_outreach"
+    ],
+    "model.option_labels": {
+     "continue_current_outreach": "Continue current outreach",
+     "angel_investor_outreach": "Angel investor outreach",
+     "angel_outreach_pilot": "Angel outreach pilot"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "distraction_from_investment_firm_fundraising"
+    ],
+    "model.goal_path_factor_ids": [
+     "hours_per_week_on_angel_outreach"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "hours_per_week_on_angel_outreach->qualified_angel_investor_conversations",
+      "from_label": "Hours per week on angel outreach",
+      "to_label": "Qualified angel investor conversations",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "qualified_angel_investor_conversations->securing_funding",
+      "from_label": "Qualified angel investor conversations",
+      "to_label": "securing funding",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "hours_per_week_on_angel_outreach->angel_fundraising_admin_time",
+      "from_label": "Hours per week on angel outreach",
+      "to_label": "Angel fundraising admin time",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "angel_fundraising_admin_time->distraction_from_investment_firm_fundraising",
+      "from_label": "Angel fundraising admin time",
+      "to_label": "Distraction from investment-firm fundraising",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "distraction_from_investment_firm_fundraising->securing_funding",
+      "from_label": "Distraction from investment-firm fundraising",
+      "to_label": "securing funding",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "angel_investor_outreach",
+       "angel_outreach_pilot"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "hours_per_week_on_angel_outreach",
+      "label": "Hours per week on angel outreach",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "priority": "P1",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES"
+    ],
+    "question_surface": {
+     "first": {
+      "source": "Q-ROW",
+      "policy_id": "RC-WIDEN",
+      "variant": "W2"
+     },
+     "shown_at_rest": 1,
+     "drafter_never_in_first": 4,
+     "view_all_count_at_least": 10,
+     "served_open_questions_today": [
+      "Does \"securing funding\" get there within 2 months? The model holds the deadline; no result answers that yet.",
+      "Olumi's starting guess is that raising \"Qualified angel investor conversations\" by 1 conversations in 2 month raises \"securing funding\" by 25000 GBP, but the model doesn't hold it yet. How much does \"Qualified angel investor conversations\" change \"securing funding\"?",
+      "What amount of funding must be secured within the next 2 months, and how much funding has already been secured today?",
+      "How many hours per week are currently spent on investment-firm cold emails and finding warm connections? The 8 and 4 hour baselines are provisional modelling estimates.",
+      "Are you already conducting angel outreach? The assumed current angel-outreach level is 0 hours per week and is not a stated fact.",
+      "What share of investment-firm and angel outreach receives a response or produces a qualified conversation? The 5% and 10% responsiveness estimates are provisional.",
+      "What proportion of qualified investment-firm conversations closes as a deal within 2 months? The 0.1-deal estimate per conversation is provisional.",
+      "Investment firms are described as doing deals between £1-2 million; the model uses the stated low end of £1 million per investment-firm deal.",
+      "How much angel fundraising administration would displace investment-firm fundraising, and how strongly would that displacement reduce funding secured within 2 months?",
+      "Should one of the options change Hours per week on investment-firm cold emails or Hours per week finding warm connections?"
+     ]
+    },
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "item": null,
+      "title": "Only one real option on the table. Decisions go better with alternatives.",
+      "why": "There is one option besides carrying on as now.",
+      "question": "Is it really just ‘Angel investor outreach’ or carry on as now? What other routes are there?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-Q-D3-BUILD",
+   "kind": "served",
+   "note": "Build turn. Served today: \"4 questions this model does not answer yet\" in the producer order, plus the three static chips.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-01-brief.json",
+    "sha256": "649e005a3dabf8b779564828af387e4f19838fc5568d8ec78dea6cfc8d7cd655",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ]
+   },
+   "state": {
+    "turn.request": "turn",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "unrequested_analysis_withheld",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "priority": "P1",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES"
+    ],
+    "question_surface": {
+     "first": {
+      "source": "Q-ROW",
+      "policy_id": "RC-WIDEN",
+      "variant": "W2"
+     },
+     "shown_at_rest": 1,
+     "drafter_never_in_first": 4,
+     "view_all_count_at_least": 4,
+     "served_open_questions_today": [
+      "What do you expect ‘GCP workload share’ to be? ‘GCP workload share’ is 0 today, so Olumi adds up their effects on ‘Monthly spend’ instead of multiplying them: treat the comparison as a rough approximation until you say.",
+      "The £6,750/month full-migration saving is a provisional 15% estimate of the stated £45,000/month spend; obtain comparable AWS and GCP workload-level pricing, including committed-use and egress charges.",
+      "Migration preparation effort, downtime effects, and transitional overspend are provisional modelling assumptions. Confirm the workload inventory, migration approach, rollback plan, and expected outage window.",
+      "Clarify whether the 20% cost-cutting objective is assessed on steady-state monthly run-rate only or must include temporary migration-period overspend."
+     ]
+    },
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2",
+      "item": null,
+      "title": "Only one real option on the table. Decisions go better with alternatives.",
+      "why": "There is one option besides carrying on as now.",
+      "question": "Is it really just ‘Switch to GCP’ or carry on as now? What other routes are there?"
+     }
+    ]
+   }
+  }
+ ],
+ "method_turn_fixtures": [
+  {
+   "id": "MT-PREMORTEM-GOOD",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3)",
+   "inputs": {
+    "plan_label": "Switch to GCP",
+    "current_option_labels": [
+     "Switch to GCP",
+     "Stay on AWS",
+     "Phased GCP migration"
+    ],
+    "supplied_labels": [
+     "Switch to GCP",
+     "Monthly cloud overspend during migration",
+     "Migration preparation effort",
+     "Monthly cloud savings",
+     "Monthly spend"
+    ],
+    "supplied_figures": [
+     "45,000",
+     "2"
+    ]
+   },
+   "reply": "Three ways this could go wrong, so you can watch for them early.\n1. It is a year later and ‘Switch to GCP’ went badly because monthly cloud overspend during migration ran on for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\n3. The monthly cloud savings never showed up in monthly spend because egress charges ate them. Watch for: the first GCP invoice. Mitigate: get egress pricing in writing.",
+   "expect": "pass"
+  },
+  {
+   "id": "MT-PREMORTEM-BAD-PREDICTION",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3)",
+   "inputs": {
+    "plan_label": "Switch to GCP",
+    "current_option_labels": [
+     "Switch to GCP",
+     "Stay on AWS"
+    ],
+    "supplied_labels": [
+     "Switch to GCP",
+     "Monthly cloud overspend during migration"
+    ],
+    "supplied_figures": []
+   },
+   "reply": "1. ‘Switch to GCP’ will fail if monthly cloud overspend during migration lasts. There is a 40% chance of that. Watch for: double bills. Mitigate: a cut-over date.\n2. It is also likely to overrun. Watch for: slipping dates. Mitigate: build in a buffer.",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-GROUNDED",
+    "PM-NO-PROB",
+    "PM-NO-PREDICTION"
+   ]
+  },
+  {
+   "id": "MT-PREMORTEM-BAD-UNGROUNDED",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3)",
+   "inputs": {
+    "plan_label": "Switch to GCP",
+    "current_option_labels": [
+     "Switch to GCP",
+     "Stay on AWS"
+    ],
+    "supplied_labels": [
+     "Switch to GCP",
+     "Monthly cloud overspend during migration"
+    ],
+    "supplied_figures": []
+   },
+   "reply": "1. It is a year later and the project went badly because of poor communication. Watch for: missed meetings. Mitigate: a weekly sync.\n2. Leadership lost interest and moved on. Watch for: fewer updates. Mitigate: name a sponsor.",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-GROUNDED"
+   ]
+  },
+  {
+   "id": "MT-WIDEN-GOOD",
+   "policy_id": "RC-WIDEN",
+   "grounded_on": "A-D2-RUN2-WIDEN-P1 (D2, W1)",
+   "inputs": {
+    "variant": "W1",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ],
+    "current_risk_labels": [
+     "Distraction from investment-firm fundraising"
+    ],
+    "current_factor_labels": [
+     "Hours per week on angel outreach"
+    ],
+    "left_out_labels": [
+     "Angel outreach pilot"
+    ],
+    "supplied_figures": [
+     "1,000,000",
+     "2"
+    ]
+   },
+   "reply": "None of the current options looks likely to stay within your limit, so here are different routes.\n- Angel outreach pilot: Olumi suggested this earlier; it was left out of the comparison.\n- Revenue-based financing: changes how much equity you need, not how many hours you spend on outreach.\n- Warm intros through existing investors: changes response rates rather than outreach hours.",
+   "expect": "pass",
+   "note": "Item 1 repeats a LEFT-OUT Olumi option: exempt from WD-NO-DUP. Mechanism materiality is a structured check (AI HARNESS), not a text check."
+  },
+  {
+   "id": "MT-WIDEN-BAD-DUPLICATE",
+   "policy_id": "RC-WIDEN",
+   "grounded_on": "A-D2-RUN2-WIDEN-P1 (D2, W1)",
+   "inputs": {
+    "variant": "W1",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ],
+    "current_risk_labels": [],
+    "current_factor_labels": [],
+    "left_out_labels": [
+     "Angel outreach pilot"
+    ],
+    "supplied_figures": []
+   },
+   "reply": "- Angel investor outreach: do more of it.\n- Continue current outreach: keep going.",
+   "expect": "fail",
+   "failing_checks": [
+    "WD-NO-DUP"
+   ]
+  },
+  {
+   "id": "MT-WIDEN-BAD-TOO-MANY",
+   "policy_id": "RC-WIDEN",
+   "grounded_on": "A-D2-RUN2-WIDEN-P1 (D2, W1)",
+   "inputs": {
+    "variant": "W1",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ],
+    "current_risk_labels": [],
+    "current_factor_labels": [],
+    "left_out_labels": [],
+    "supplied_figures": []
+   },
+   "reply": "- Revenue-based financing: changes the equity you need.\n- Grants: non-dilutive money.\n- Crowdfunding: a community route.\n- Venture debt: a bridge loan.",
+   "expect": "fail",
+   "failing_checks": [
+    "WD-COUNT"
+   ]
+  },
+  {
+   "id": "MT-WIDEN-BAD-NEW-FIGURE",
+   "policy_id": "RC-WIDEN",
+   "grounded_on": "A-D2-RUN2-WIDEN-P1 (D2, W1)",
+   "inputs": {
+    "variant": "W1",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ],
+    "current_risk_labels": [],
+    "current_factor_labels": [],
+    "left_out_labels": [],
+    "supplied_figures": [
+     "1,000,000",
+     "2"
+    ]
+   },
+   "reply": "- Venture debt: borrow £500k against revenue and meets your limit sooner.",
+   "expect": "fail",
+   "failing_checks": [
+    "WD-NO-NEW-FIGURES",
+    "WD-W1-NO-MEETS"
+   ]
+  }
+ ]
+}
