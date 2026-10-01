@@ -156,9 +156,37 @@ const SIZED_MAGNITUDES: ReadonlySet<unknown> = new Set(['olumi_estimate', 'user_
 const norm = (u: unknown): string | undefined =>
   typeof u === 'string' && u.trim().length > 0 ? u.trim().toLowerCase() : undefined;
 
-/** Per node, the unit the sizer says a link's size in ("percentage points" only for a percentage LEVEL on 100). */
-const sizerUnitsOf = (nodes: readonly Rec[]): Map<unknown, string | undefined> =>
-  new Map([...naturalAmountUnitsOf(nodes)].map(([id, u]) => [id, norm(u)] as const));
+/**
+ * ⛔ MG 5936733302 (the root of R3 DEFECT 2, 5936673643): per node with a LEVEL limit, that limit's unit. A node with NO
+ * unit of its own is read in it: construction sizes the links into such a node in its limit's unit ("initiatives per
+ * sprint" on "Sprint initiatives tackled properly", served 799d1a5d), and a reader that looked only at the node read
+ * those sized links as unsized, so the limit stayed withheld as `parts_links_placeholder` and the Agent said "placeholder".
+ * A node whose level limits disagree on the unit gets none (never a guess).
+ */
+export function limitUnitsOf(limits: unknown): ReadonlyMap<unknown, string> {
+  const out = new Map<unknown, string>();
+  const ambiguous = new Set<unknown>();
+  for (const c of Array.isArray(limits) ? limits : []) {
+    if (!isRec(c) || typeof c.node_id !== 'string' || c.value_frame !== 'level' || norm(c.unit) === undefined) continue;
+    const seen = out.get(c.node_id);
+    if (seen !== undefined && norm(seen) !== norm(c.unit)) ambiguous.add(c.node_id);
+    else out.set(c.node_id, c.unit as string);
+  }
+  for (const id of ambiguous) out.delete(id);
+  return out;
+}
+
+const NO_LIMIT_UNITS: ReadonlyMap<unknown, string> = new Map();
+
+/**
+ * Per node, the unit the sizer says a link's size in ("percentage points" only for a percentage LEVEL on 100) — or, for a
+ * node with no unit of its own, its level limit's unit ({@link limitUnitsOf}).
+ */
+const sizerUnitsOf = (nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS): Map<unknown, string | undefined> => {
+  const ownUnit = nodeUnitOf(nodes);
+  return new Map([...naturalAmountUnitsOf(nodes)].map(([id, u]) => [id,
+    ownUnit(id) === undefined && limitUnits.has(id) ? norm(limitUnits.get(id)) : norm(u)] as const));
+};
 
 /**
  * A link Olumi (or the user) sized, in the unit of the node it points at, whose size still describes the link: the
@@ -191,8 +219,8 @@ function userStatedStrength(edge: Rec): boolean {
  * points at, written for the mean it now holds. Shared with the goal-certainty rule (`goal-certainty.ts`), so the two
  * rulings (AI Quality 5882087383, 5882366427) read one definition of "unsized".
  */
-export function sizedLinkTest(nodes: readonly Rec[]): (edge: Rec) => boolean {
-  const unitById = sizerUnitsOf(nodes);
+export function sizedLinkTest(nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS): (edge: Rec) => boolean {
+  const unitById = sizerUnitsOf(nodes, limitUnits);
   const unitOf = nodeUnitOf(nodes);
   // A link that holds by definition is sized by it (never asked about: `link-size-ask.ts`; MG sweep C3).
   return (edge) => holdsByDefinition(edge, unitOf) || linkIsSized(edge, unitById);
@@ -213,8 +241,9 @@ export function targetMovedOnlyThroughPlaceholderParts(
   nodes: readonly Rec[],
   edges: readonly Rec[],
   options: ReadonlyArray<Record<string, unknown>>,
+  limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS,
 ): PlaceholderPartsReason | null {
-  return placeholderPartsFinding(targetId, nodes, edges, options)?.reason ?? null;
+  return placeholderPartsFinding(targetId, nodes, edges, options, limitUnits)?.reason ?? null;
 }
 
 /** An option's id as PLoT and the stored results carry it (`option_id`, else `id`). */
@@ -234,12 +263,13 @@ export function placeholderMovedOptions(
   nodes: readonly Rec[],
   edges: readonly Rec[],
   options: ReadonlyArray<Record<string, unknown>>,
+  limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS,
 ): Map<string, PlaceholderPartsReason> {
   const out = new Map<string, PlaceholderPartsReason>();
   for (const o of options) {
     const id = optionIdOf(o);
     if (id === undefined || out.has(id)) continue;
-    const finding = placeholderPartsFinding(targetId, nodes, edges, [o]);
+    const finding = placeholderPartsFinding(targetId, nodes, edges, [o], limitUnits);
     if (finding !== null) out.set(id, finding.reason);
   }
   return out;
@@ -263,6 +293,8 @@ export function placeholderPartsFinding(
   allNodes: readonly Rec[],
   allEdges: readonly Rec[],
   options: ReadonlyArray<Record<string, unknown>>,
+  /** Per node, its level limit's unit ({@link limitUnitsOf}): read for a node with no unit of its own. */
+  limitUnits: ReadonlyMap<unknown, string> = NO_LIMIT_UNITS,
 ): PlaceholderPartsFinding | null {
   const { nodes, edges } = asAnalysed({ nodes: allNodes, edges: allEdges }, targetId);
   const kindById = new Map(nodes.map((n) => [n.id, n.kind] as const));
@@ -297,7 +329,7 @@ export function placeholderPartsFinding(
     if (target !== undefined && isRec(target.nonlinear_identity) && !definitionalSum(target, edges, nodeUnitOf(nodes))) {
       return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
     }
-    const unitById = sizerUnitsOf(nodes);
+    const unitById = sizerUnitsOf(nodes, limitUnits);
     const unitOf = nodeUnitOf(nodes);
     const onPath = new Set<unknown>([...parts, targetId]);
     for (const iv of movers) {

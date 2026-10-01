@@ -22,7 +22,7 @@
  * No engine run and no new carrier: everything is on CEE's own graph and the run's per-option P(goal). Pure.
  */
 import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
-import { sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
+import { limitUnitsOf, sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { sayFigure } from './say-figure.js';
 
@@ -142,7 +142,8 @@ export function goalCertaintyDecisions(
           : unlinkedOperand !== undefined ? 'operand_not_parent'
             : extraParent !== undefined ? 'extra_goal_parent'
               : undefined;
-  const sized = sizedLinkTest(nodes);
+  // #2473 CR P2 (CODEX_CLI_OVERFLOW 5937437431): the same unit-less-limit-node reading as every other sized reader.
+  const sized = sizedLinkTest(nodes, limitUnitsOf(graph.goal_constraints));
   const exact = (e: Rec): boolean => {
     const to = byId.get(e.to);
     const id = isRec(to?.nonlinear_identity) && evaluated(to!.id) ? to!.nonlinear_identity : undefined;
