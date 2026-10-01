@@ -137,14 +137,18 @@ const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFi
  * conversation" could never match "Angel investor conversations". For an outcome or factor with NO unit and a stored
  * frame, the HEAD noun is what it counts: the last word before the first preposition, trailing participles dropped
  * ("Investment-firm deals closed" → deals); "Number of <plurals>" takes the plural after "of". It must be plural and
- * never a money, percent or time word ("Revenue from renewals" counts revenue, not renewals → none). None → undefined.
+ * never a money, percent or time word ("Revenue from renewals" counts revenue, not renewals → none), and a label with a
+ * period ("Warm conversations per week") is a RATE, never one count. None → undefined.
  */
 const PREPOSITION = /^(?:of|from|on|in|for|per|with|to|by|at)$/;
 const PARTICIPLE = /^(?:\p{L}+ed|won|lost|made|sent|held|done|given|taken|seen|met|kept)$/u;
 const NOT_A_COUNT = /^(?:revenues|fundings|prices|costs|spends|percentages|rates|shares|times|hours|days|weeks|months|years|minutes|seconds)$/;
+/** A period anywhere in the label makes it a RATE (AIQ 5926286558 / R3 5926308694): its unit is the head PER period. */
+const PERIOD = /^(?:day|days|daily|week|weeks|weekly|month|months|monthly|quarter|quarters|quarterly|year|years|yearly|annual|annually|hour|hours|hourly)$/;
 function countNounOf(node: MagnitudeNode): string | undefined {
   if (unitOf(node) !== undefined || (node.kind !== 'outcome' && node.kind !== 'factor') || resolveMagnitudeFrame(node) === undefined) return undefined;
   const words = node.label.toLowerCase().split(/[^\p{L}]+/u).filter((w) => w !== '');
+  if (words.some((w) => PERIOD.test(w))) return undefined;
   const from = words[0] === 'number' && words[1] === 'of' ? 2 : 0;
   const stop = words.findIndex((w, k) => k >= from && PREPOSITION.test(w));
   let span = words.slice(from, stop < 0 ? words.length : stop);

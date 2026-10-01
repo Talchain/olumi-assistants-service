@@ -80,6 +80,13 @@ describe('the step-2 unit wall: a unitless count outcome is counted in its plura
     expect(applyLinkEffectEdit(params(served('Weekly founder hours'), { ...EFFECT, per_source_change_unit: 'hour' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });
 
+  // AIQ 5926286558 / R3 5926308694: a RATE label's unit is the head PER PERIOD — never one count. Under-claim.
+  for (const label of ['Warm conversations per week', 'Weekly investor conversations', 'Conversations each month', 'Investor conversations a quarter']) {
+    it(`AIQ: rate label "${label}" + "per conversation" is refused (one unit of the node is one conversation every period)`, () => {
+      expect(applyLinkEffectEdit(params(served(label), { ...EFFECT, per_source_change_unit: 'conversation' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+    });
+  }
+
   it('a word that only ENDS in s ("status", "process", "analysis") is not a count', () => {
     expect(applyLinkEffectEdit(params(served('Fundraising process status'), { ...EFFECT, per_source_change_unit: 'status' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });
