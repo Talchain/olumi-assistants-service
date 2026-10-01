@@ -9,8 +9,10 @@ import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
 const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c9ed66d';
 const HOST_SHA = '325bb61e58059ba4a10dc5d38472dbfa64b7b2e4080706a0c6a35a9067562ab6';
-const RENDERED_SHA = 'db612011130c8d8c6354c198da357a4ffbf722b149ae45bbed784c585846e39d';
-const RENDERED_BYTES = 26_834;
+// + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
+// Derived from the request the real route SENT (harness raw body), never computed by hand; the template + host shas above are unchanged.
+const RENDERED_SHA = '6b94d6f4ef052640b6dfccf2b1692eadd2c1670261769479dcbf9f234940404c';
+const RENDERED_BYTES = 27_324;
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';

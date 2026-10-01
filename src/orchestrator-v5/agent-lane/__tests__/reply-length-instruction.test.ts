@@ -1,0 +1,34 @@
+/**
+ * ⭐ THE REPLY'S OWN LENGTH (Paul's staging test, 1 Oct 00:1xZ: "the AI replies are much longer again"; DL #75 5922040401;
+ * AIQ bound 5922092866; measurement #75 5922398757). The sentence is APPENDED after the host contract, so the v0.2 template
+ * and every retained host rule reach the model unchanged, and it never licenses dropping a truth sentence to fit.
+ */
+import { describe, it, expect } from 'vitest';
+import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
+import { REPLY_LENGTH_INSTRUCTION } from '../../../routes/agent-v1-turn.js';
+import { readFileSync } from 'node:fs';
+
+describe('the reply-length sentence', () => {
+  it('budgets the model\'s own words per turn kind, below AIQ\'s whole-reply bound (≤180 / ≤150 / ≤130)', () => {
+    expect(REPLY_LENGTH_INSTRUCTION).toContain('about 110 on the turn that builds the model from a brief');
+    expect(REPLY_LENGTH_INSTRUCTION).toContain('about 100 when you explain an analysis result');
+    expect(REPLY_LENGTH_INSTRUCTION).toContain('about 90 otherwise');
+  });
+
+  it('never trades away a truth sentence to fit (AIQ: the bound yields, never the truth)', () => {
+    expect(REPLY_LENGTH_INSTRUCTION).toContain('never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure');
+  });
+
+  it('is appended AFTER the host contract in the route source: the template and every host rule are unchanged', () => {
+    const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
+    expect(src).toContain("'{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION].join(' ')");
+    // The slot is filled once; nothing else in the template or the contract mentions the budget.
+    expect(SELECTED_COACH_V02_TEMPLATE.split('{{MODE_AND_AUTHORITY}}')).toHaveLength(2);
+    expect(HOST_TOOL_CONTRACT).not.toContain(REPLY_LENGTH_INSTRUCTION);
+  });
+
+  it('carries no dash a user could see quoted back and no figure other than the budgets', () => {
+    expect(REPLY_LENGTH_INSTRUCTION).not.toMatch(/[‒-―]/);
+    expect(REPLY_LENGTH_INSTRUCTION.match(/\d+/g)).toEqual(['110', '100', '90']);
+  });
+});
