@@ -159,7 +159,11 @@ export function assembleGuidanceSignals(i: GuidanceSignalInputs): GuidanceSignal
   // Options: the status quo by F1's reader; the user's own options exclude it and any option the Run took out.
   const options = nodes.filter((n) => n.kind === 'option');
   let sq: string | null = null;
-  try { sq = statusQuoOptionId(nodes as unknown as StatusQuoNodeLike[], edges as unknown as GraphEdgeLike[]); } catch { sq = null; }
+  try {
+    const sqNodes: StatusQuoNodeLike[] = nodes.map((n) => ({ id: n.id as string, kind: n.kind as StatusQuoNodeLike['kind'], label: n.label as StatusQuoNodeLike['label'], is_baseline: n.is_baseline as StatusQuoNodeLike['is_baseline'], data: n.data as StatusQuoNodeLike['data'] }));
+    const sqEdges: GraphEdgeLike[] = edges.map((e) => ({ from: e.from as string, to: e.to as string, origin: e.origin }));
+    sq = statusQuoOptionId(sqNodes, sqEdges);
+  } catch { sq = null; }
   const participation = new Map((readStoredOptionParticipation(i.optionParticipation) ?? []).map((p) => [p.option_id, p.state] as const));
   const nonSq = options.map((o) => o.id as string)
     .filter((id) => id !== sq && !String(participation.get(id) ?? '').startsWith('excluded')).sort();
