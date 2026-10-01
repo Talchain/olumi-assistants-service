@@ -64,6 +64,22 @@ describe('the step-2 unit wall: a unitless count outcome is counted in its plura
     expect(applyLinkEffectEdit(params(served('Fundraising admin time'), { ...EFFECT, per_source_change_unit: 'times' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });
 
+  // R3 5926280368's hostile rows: the HEAD noun, before the first preposition.
+  it('R3: unitless "Revenue from renewals" counts revenue, not renewals — "per renewal" is refused', () => {
+    expect(applyLinkEffectEdit(params(served('Revenue from renewals'), { ...EFFECT, per_source_change_unit: 'renewal' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+  });
+  it('R3: "Number of signed contracts" counts contracts — "per contract" is written', () => {
+    const r = applyLinkEffectEdit(params(served('Number of signed contracts'), { ...EFFECT, per_source_change_unit: 'contract' }));
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    if (r.kind === 'mutated') expect(edgeOf(r.mutatedGraph).provenance.natural_effect.per_source_change_unit).toBe('contracts');
+  });
+  it('R3: "Investment-firm deals closed" + "per deal" → written, per deals (the participle is dropped)', () => {
+    expect(applyLinkEffectEdit(params(served('Investment-firm deals closed'), { ...EFFECT, per_source_change_unit: 'deal' })).kind).toBe('mutated');
+  });
+  it('a time word is never a count ("Hours of founder time" → none)', () => {
+    expect(applyLinkEffectEdit(params(served('Weekly founder hours'), { ...EFFECT, per_source_change_unit: 'hour' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+  });
+
   it('a word that only ENDS in s ("status", "process", "analysis") is not a count', () => {
     expect(applyLinkEffectEdit(params(served('Fundraising process status'), { ...EFFECT, per_source_change_unit: 'status' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });

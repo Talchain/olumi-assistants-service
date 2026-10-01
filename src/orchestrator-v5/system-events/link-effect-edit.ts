@@ -132,16 +132,25 @@ const refuse = (reason: LinkEffectRefusal): LinkEffectEditResult => ({ kind: 're
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
 /**
- * ⭐ A COUNT OUTCOME'S PLURAL HEAD NOUN IS ITS UNIT (R3 #75 5926215496; DL 5926238562). The persisted outcome keeps no
- * `unit` (the drafter's units live only in the construction path's `natural_effect`), so "per conversation" could never
- * match "Angel investor conversations". For an outcome or factor with NO unit and a stored frame, its label's last
- * plural noun is what it counts ("Investment-firm deals closed" → deals, never the participle). None → undefined.
+ * ⭐ A COUNT OUTCOME'S PLURAL HEAD NOUN IS ITS UNIT (R3 #75 5926215496 + amendment 5926280368; DL 5926238562). The persisted
+ * outcome keeps no `unit` (the drafter's units live only in the construction path's `natural_effect`), so "per
+ * conversation" could never match "Angel investor conversations". For an outcome or factor with NO unit and a stored
+ * frame, the HEAD noun is what it counts: the last word before the first preposition, trailing participles dropped
+ * ("Investment-firm deals closed" → deals); "Number of <plurals>" takes the plural after "of". It must be plural and
+ * never a money, percent or time word ("Revenue from renewals" counts revenue, not renewals → none). None → undefined.
  */
+const PREPOSITION = /^(?:of|from|on|in|for|per|with|to|by|at)$/;
+const PARTICIPLE = /^(?:\p{L}+ed|won|lost|made|sent|held|done|given|taken|seen|met|kept)$/u;
+const NOT_A_COUNT = /^(?:revenues|fundings|prices|costs|spends|percentages|rates|shares|times|hours|days|weeks|months|years|minutes|seconds)$/;
 function countNounOf(node: MagnitudeNode): string | undefined {
   if (unitOf(node) !== undefined || (node.kind !== 'outcome' && node.kind !== 'factor') || resolveMagnitudeFrame(node) === undefined) return undefined;
-  const words = node.label.toLowerCase().split(/[^\p{L}]+/u).filter((w) => w.length >= 4);
-  for (let i = words.length - 1; i >= 0; i -= 1) if (/[^siu]s$/.test(words[i]!)) return words[i];
-  return undefined;
+  const words = node.label.toLowerCase().split(/[^\p{L}]+/u).filter((w) => w !== '');
+  const from = words[0] === 'number' && words[1] === 'of' ? 2 : 0;
+  const stop = words.findIndex((w, k) => k >= from && PREPOSITION.test(w));
+  let span = words.slice(from, stop < 0 ? words.length : stop);
+  while (span.length > 0 && PARTICIPLE.test(span[span.length - 1]!)) span = span.slice(0, -1);
+  const head = span[span.length - 1];
+  return head !== undefined && head.length >= 4 && /[^siu]s$/.test(head) && !NOT_A_COUNT.test(head) ? head : undefined;
 }
 
 export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffectEditResult {
