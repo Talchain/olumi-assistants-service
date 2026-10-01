@@ -109,6 +109,19 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
     ]);
   });
 
+  // ⛔ CODEX CEE BUDDY CR 5940970957: four complete Accept rows with a C0 pair named three and then said "Nothing else changed".
+  it.each([
+    ['3 recorded changes → all named, no disclosure', [AI, FIX, accept('qualified_leads', 'quarterly_revenue')], ''],
+    ['4 recorded changes → 3 named + "You also made 1 other change."', [AI, FIX, accept('qualified_leads', 'quarterly_revenue'), accept('integration_step_bug_resolution', 'quarterly_revenue')], ' You also made 1 other change.'],
+    ['5 recorded changes → 3 named + "You also made 2 other changes."', [AI, FIX, accept('qualified_leads', 'quarterly_revenue'), accept('integration_step_bug_resolution', 'quarterly_revenue'), accept('ai_reporting_module_availability', 'quarterly_revenue')], ' You also made 2 other changes.'],
+  ])('the cap never hides a recorded change (C0 pair): %s', (_n, rows, disclosed) => {
+    const p = plan({ ...PAIRED, attribution_case: 'C0_identical', input_changes: rows })!;
+    expect(p.changes).toHaveLength(3);
+    expect(p.codeLine).toBe(`${p.changes.join(' ')}${disclosed} ${RERUN_FALLBACK_LINES.C0}`);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+    expect(composeRerunExplanation('', p).text, 'an empty model reply keeps the disclosure').toBe(p.codeLine);
+  });
+
   it('a non-link row says its own label, before → after, with units; at most three changes', () => {
     const price = { entity_kind: 'factor', entity_id: 'f', field: 'value', label_after: 'Pro plan price', before: { raw: 49, unit: '£' }, after: { raw: 59, unit: '£' }, change: 'changed' };
     const p = plan({ ...UNWITHHELD, input_changes: [price, AI, FIX, accept('qualified_leads', 'quarterly_revenue')] })!;

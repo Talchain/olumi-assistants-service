@@ -10,7 +10,8 @@
  *
  * Pure. Read from the TYPED run_delta only (never words; never an inference from an empty array):
  *   · the CODE LINE: rows → RC's `change_label_templates` with the graph's labels for the link's node ids (a `sizing` and a
- *     `strength` row on one link are ONE change) + the case line; `complete` coverage with no rows → "Nothing you entered
+ *     `strength` row on one link are ONE change; at most 3 named, the rest disclosed as "You also made N other changes.")
+ *     + the case line; `complete` coverage with no rows → "Nothing you entered
  *     changed."; anything else → "Olumi can't say what changed between these two runs.";
  *   · the `MethodInputs` RC's `checkMethodTurn('RERUN-EXPLANATION')` judges on;
  *   · an instruction handing the model that line, told never to restate whether inputs changed.
@@ -116,8 +117,11 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
     skipped += 1;
     return undefined;
   }).filter((s): s is string => s !== undefined);
-  return { sentences: sentences.slice(0, MAX_NAMED_CHANGES), skipped };
+  return { sentences, skipped };
 }
+
+/** Recorded changes past the cap are disclosed, never dropped from the record (CODEX CEE BUDDY CR 5940970957). */
+const moreChangesLine = (n: number) => `You also made ${n} other change${n === 1 ? '' : 's'}.`;
 
 type CheckCase = 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
 /** The wire case → the check's three (C3–C5 are not attributable: judged as C2, said with their own fallback line). */
@@ -139,7 +143,9 @@ export function rerunExplanationPlan(
   const d = rec(runDelta);
   if (d === undefined) return null;
   const rows = Array.isArray(d.input_changes) ? d.input_changes.map(rec).filter((r): r is Rec => r !== undefined) : [];
-  const { sentences: changes, skipped } = changeSentences(rows, labelOf);
+  const { sentences, skipped } = changeSentences(rows, labelOf);
+  const changes = sentences.slice(0, MAX_NAMED_CHANGES);
+  const more = sentences.length - changes.length;
   // ⛔ Partial or unrecorded coverage never licenses "same inputs" or a cause (CODEX CEE BUDDY preflight 5939219187): other
   // inputs may have differed unseen, so the pair is judged as unpaired and said as "other things also differed". A recorded
   // change no template can name is the same: it differed, unsaid.
@@ -161,7 +167,7 @@ export function rerunExplanationPlan(
   // "Nothing you entered changed" ONLY on a typed, complete, empty record; rows the graph can't name → "can't say".
   const recordedNothing = coverageComplete && Array.isArray(d.input_changes) && rows.length === 0;
   const codeLine = changes.length > 0
-    ? `${changes.join(' ')} ${priorWithheld ? RERUN_FALLBACK_LINES.unwithheld
+    ? `${changes.join(' ')}${more > 0 ? ` ${moreChangesLine(more)}` : ''} ${priorWithheld ? RERUN_FALLBACK_LINES.unwithheld
       : wireCase === 'C0_identical' ? RERUN_FALLBACK_LINES.C0
         : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.C1
           : wireCase === 'C2_unpaired' ? RERUN_FALLBACK_LINES.C2 : RERUN_FALLBACK_LINES.other}`
