@@ -7227,7 +7227,8 @@
    "reply": "You accepted Olumi's estimate for how much sprint capacity for integration fix changes integration step bug resolution, and ‘AI Reporting Module Sprint’ rose to the top.",
    "expect": "fail",
    "failing_checks": [
-    "RX-NO-MOVEMENT-WITHOUT-PRIOR"
+    "RX-NO-MOVEMENT-WITHOUT-PRIOR",
+    "RX-UNWITHHELD-LINE"
    ],
    "note": "The earlier run had no figures, so nothing \"rose\": the comparison appeared for the first time."
   },
@@ -7256,6 +7257,56 @@
     "RX-NO-MOVEMENT-WITHOUT-PRIOR"
    ],
    "note": "With no matched figures nothing can be said to have moved, whatever the cause; the typed prior_withheld is not needed for this check."
+  },
+  {
+   "id": "MT-RERUN-CONTRARY-SAME-BAD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "MT-RERUN-GOOD inputs (D2)",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Hours per week on investment-firm cold emails",
+     "securing funding"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ]
+   },
+   "reply": "Two things changed since the last run.\n- Hours per week on investment-firm cold emails: 8 → 5 hours a week.\n- Securing funding: you set the target to at least £1,000,000.\nThis run also used a new draw, so the difference can't be put down to your edits alone. You ran it with the same input values.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-CONTRARY-SAME"
+   ],
+   "note": "A recorded change is never 'same input values' / 'nothing in your model changed' (MG 5939414835; served interim words). Control: MT-RERUN-GOOD."
+  },
+  {
+   "id": "MT-RERUN-UNWITHHELD-BAD-NO-LINE",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "MT-RERUN-UNWITHHELD-GOOD inputs (D1)",
+   "inputs": {
+    "attribution_case": "C1_attributable",
+    "prior_withheld": true,
+    "leader_licensed": true,
+    "noise_verdict": "not_noise_qualified",
+    "change_labels": [
+     "Sprint capacity for integration fix",
+     "Integration step bug resolution"
+    ],
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Continue Current Plan"
+    ]
+   },
+   "reply": "You accepted Olumi's estimate for how much sprint capacity for integration fix changes integration step bug resolution.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-UNWITHHELD-LINE"
+   ],
+   "note": "prior_withheld: the reply must say Olumi can now compare the options (MG 5939414835). Control: MT-RERUN-UNWITHHELD-GOOD."
   }
  ]
 }

@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ 41b36299ff754a41f0e8a4685342eb069dc865c3.
+// programme-docs @ 9c8943188b4b2f6053e7fa80fd94760923ac7829.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -1035,6 +1035,16 @@ export const POLICY = {
         {
           "id": "RX-NO-MOVEMENT-WITHOUT-PRIOR",
           "rule": "if prior_withheld OR no_matched_figures: no /\\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\\b/i (on the label-masked reply, shared.label_masking)"
+        },
+        {
+          "id": "RX-NO-CONTRARY-SAME",
+          "rule": "if change_labels is non-empty (changes are recorded): no /\\b(same input values|nothing in your model changed)\\b/i (on the label-masked reply, shared.label_masking)",
+          "source": "MG 5939414835"
+        },
+        {
+          "id": "RX-UNWITHHELD-LINE",
+          "rule": "if prior_withheld: the reply carries 'can now compare the options' (whole-token label_matches), the UNWITHHELD line",
+          "source": "MG 5939414835"
         }
       ],
       "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD: 'That was what held the comparison back, so Olumi can now compare the options.' | C2: 'This run also used a new draw, so the difference can't be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
@@ -1072,4 +1082,4 @@ export const POLICY = {
   }
 } as const;
 
-export const SPEC_SHA = "41b36299ff754a41f0e8a4685342eb069dc865c3";
+export const SPEC_SHA = "9c8943188b4b2f6053e7fa80fd94760923ac7829";

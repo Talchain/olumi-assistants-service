@@ -16,17 +16,17 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
 };
 
 describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
-  it('imports all 35 cases and all 20 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(20);
+  it('imports all 35 cases and all 22 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(22);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('41b36299ff754a41f0e8a4685342eb069dc865c3');
+    expect(SPEC_SHA).toBe('9c8943188b4b2f6053e7fa80fd94760923ac7829');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('772d309fbf9eca166b8d3d98f452256ad80d961388d412625b24c1515d841f3f');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('cd8a41074a90d66776ac9af4c743f2dec5cbbb1609d8e7e4cf2ef172c86a8846');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('7bdd7234741cbd0a4bf0a0567b421e0a7289de9c608cfa53474bdc5077720064');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('a2de52986b35518eb1e232341cb90d160fe81b647ff43e8c628dc578c4249b19');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });
@@ -232,8 +232,11 @@ describe('all deterministic text post-check ids, including methods without vendo
     expect(checkMethodTurn('RC-STRENGTHEN-ITEM', 'Edge compute cost changes revenue.', { item_labels: ['Edge compute cost', 'Revenue'] }).failed).not.toContain('ST-BANNED');
     expect(checkMethodTurn('RC-STRENGTHEN-ITEM', 'Edge compute cost changes revenue on this edge.', { item_labels: ['Edge compute cost', 'Revenue'] }).failed).toContain('ST-BANNED');
     const rx = { change_labels: ['Churn rose to plan'], attribution_case: 'C2_unpaired' as const, prior_withheld: true, current_option_labels: ['Best-of-breed vendor'], leader_licensed: false };
-    expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor is one option.', rx)).toEqual({ pass: true, failed: [], targets: [] });
-    expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor wins and churn rose.', rx).failed.sort()).toEqual(['RX-NO-LEADER-UNLICENSED', 'RX-NO-MOVEMENT-WITHOUT-PRIOR']);
+    const line = ' That was what held the comparison back, so Olumi can now compare the options.';
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor is one option.' + line, rx)).toEqual({ pass: true, failed: [], targets: [] });
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor wins and churn rose.' + line, rx).failed.sort()).toEqual(['RX-NO-LEADER-UNLICENSED', 'RX-NO-MOVEMENT-WITHOUT-PRIOR']);
+    // RX-UNWITHHELD-LINE (MG 5939414835): without the line, the un-withheld transition fails.
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan.', rx).failed).toContain('RX-UNWITHHELD-LINE');
   });
   it('masking and label matching are WHOLE-TOKEN: short labels never hide Olumi\u2019s own words (HARNESS #2478 P1 probes)', () => {
     const go = { current_option_labels: ['Go', 'No go'], model_labels: ['Go', 'No go'] };
