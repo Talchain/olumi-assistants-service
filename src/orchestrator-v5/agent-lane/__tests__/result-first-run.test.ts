@@ -31,7 +31,7 @@ describe('two-request Run through the real handler and canonical analysis reader
   let modelBodies: Record<string, unknown>[] = [];
   let runs = 0;
   let mutateDuringExplanation: (() => void) | undefined;
-  let providerMode: 'ok' | 'empty' | 'failed' | 'timeout' = 'ok';
+  let providerMode: 'ok' | 'empty' | 'failed' | 'timeout' | 'transport' = 'ok';
   let hashOf: (g: unknown) => string | null;
   let timeoutController: AbortController | undefined;
   beforeAll(async () => {
@@ -43,6 +43,7 @@ describe('two-request Run through the real handler and canonical analysis reader
         void Promise.resolve().then(() => timeoutController?.abort());
       });
       if (providerMode === 'failed') return new Response('{}', { status: 400 });
+      if (providerMode === 'transport') throw new TypeError('fetch failed');
       return new Response(JSON.stringify({ output: providerMode === 'empty' ? [] : [
         { type: 'message', content: [{ type: 'output_text', text: 'The result depends on the assumptions in your model.' }] },
       ] }), { status: 200 });
@@ -166,7 +167,7 @@ describe('two-request Run through the real handler and canonical analysis reader
     expect(rows.at(-1)?.assistantMessage).not.toContain('depends on the assumptions');
   });
 
-  for (const mode of ['empty', 'failed', 'timeout'] as const) {
+  for (const mode of ['empty', 'failed', 'timeout', 'transport'] as const) {
     it(`keeps the calculated result after ${mode} narration, without falling through to the Agent`, async () => {
       const first = (await run()).json(); providerMode = mode;
       timeoutController = new AbortController();

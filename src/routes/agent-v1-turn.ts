@@ -1051,7 +1051,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
 
 
-  const callModelFor = (budget: CallBudget, options?: { signal: AbortSignal; retry: false }): CallModel => async (req) => {
+  const callModelFor = (budget: CallBudget): CallModel => async (req) => {
     const call = async () => {
     /**
      * ⭐ THE HANDLE IS KEPT SO CACHING CAN BE MEASURED AT ALL.
@@ -1106,8 +1106,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       },
       body: JSON.stringify(sentBody),
       // 2a: a caller-set deadline aborts the call; `onceMoreOnTransportFailure` does not retry an abort.
-      ...(options !== undefined ? { signal: options.signal }
-        : typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
+      ...(typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
     });
     if (!r.ok) {
       const text = await r.text();
@@ -1125,7 +1124,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(typeof j.incomplete_details?.reason === 'string' ? { incomplete_reason: j.incomplete_details.reason } : {}),
     };
     };
-    return options?.retry === false ? call() : onceMoreOnTransportFailure('conversation', call);
+    // R2 is one provider attempt. Conversation retains its existing transport retry.
+    return budget.role === 'interpret' ? call() : onceMoreOnTransportFailure('conversation', call);
   };
 
   /**
@@ -1935,7 +1935,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (runInterpreted) try {
         // 2a: the interpret role's measured budget (Sol, effort low) and a deadline; the Run stands whatever happens here.
         const interpret = interpretBudget();
-        const resp = await callModelFor(interpret, { signal: AbortSignal.timeout(INTERPRET_DEADLINE.ms), retry: false })({
+        const resp = await callModelFor(interpret)({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
           instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: explanationInput,
