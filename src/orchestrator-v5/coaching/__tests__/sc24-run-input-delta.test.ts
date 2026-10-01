@@ -452,3 +452,32 @@ describe('0.70.0 · win_probabilities_unavailable', () => {
     expect(reason(PRESENT_PAIR)).toEqual([2, undefined]);
   });
 });
+
+/**
+ * ⭐ SERVED BYTES (R3 F5 journey-1, #85 5938917543): two Accepts on guest 2f2b6624 each turned a 0.25 placeholder into
+ * Olumi's accepted estimate, and NO figure moved. The served Changes pill read "Both runs used the same input values"
+ * and never named the Accept (`input_changes []`, coverage complete). Through the real snapshot builder and diff, the
+ * same before/after graphs now name both Accepts, by link, and nothing else.
+ */
+describe('0.70.0 · R3\'s served Accept pair (2f2b6624) names both Accepts', () => {
+  it('RED: two `sizing` rows placeholder → olumi_accepted, coverage complete, no other row', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { buildRunInputSnapshot } = await import('../../tools/handlers/run-input-snapshot.js');
+    const { diffRunInputs } = await import('../run-input-changes.js');
+    const fx = JSON.parse(readFileSync(new URL('./fixtures/served-2f2b6624-accept-pair.json', import.meta.url), 'utf8')) as
+      { before: { nodes: unknown[]; edges: unknown[] }; after: { nodes: unknown[]; edges: unknown[] } };
+    const snapOf = (g: { nodes: unknown[]; edges: unknown[] }) => buildRunInputSnapshot({
+      submittedOptions: [], rawObjectsPerOption: [], wirePerOption: [], heldFactorIdsByOptionId: new Map(), optionsNotSent: [],
+      wireGraph: g, plotPayload: { graph: g }, persistedEdges: g.edges,
+    })!;
+    const before = snapOf(fx.before);
+    const after = snapOf(fx.after);
+    expect(before, 'precondition: both snapshots recorded').not.toBeNull();
+    const { rows, complete } = diffRunInputs(before, after);
+    expect(complete).toBe(true);
+    expect(rows.map((r) => [r.field, r.link, r.before, r.after])).toEqual([
+      ['sizing', { from: 'sprint_capacity_for_ai_reporting', to: 'ai_reporting_module_availability' }, { raw: 'placeholder' }, { raw: 'olumi_accepted' }],
+      ['sizing', { from: 'sprint_capacity_for_integration_fix', to: 'integration_step_bug_resolution' }, { raw: 'placeholder' }, { raw: 'olumi_accepted' }],
+    ]);
+  });
+});
