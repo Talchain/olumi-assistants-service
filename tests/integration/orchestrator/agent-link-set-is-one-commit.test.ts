@@ -141,12 +141,17 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(String(p.public_label)).not.toContain('your estimate');
     const before = JSON.stringify(edge('capacityQuality'));
     const agreed = ['workloadHours', 'qualityHours', 'hoursFocus', 'capacityOverhead', 'aiUseQuality', 'riskQuality', 'overheadQuality'] as const;
-    const was = Object.fromEntries(agreed.map((k) => [k, JSON.parse(JSON.stringify({ provenance: edge(k).provenance, display: edge(k).provenance_display }))])) as Record<string, { provenance?: Record<string, unknown>; display?: string }>;
+    const was = Object.fromEntries(agreed.map((k) => [k, JSON.parse(JSON.stringify({ provenance: edge(k).provenance, display: edge(k).provenance_display, strength: edge(k).strength }))])) as Record<string, { provenance?: Record<string, unknown>; display?: string; strength: Edge['strength'] }>;
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size, 'seven links, ONE commit').toBe(1);
     expect(doorCalls, 'ONE door call').toBe(1);
-    for (const k of ['workloadHours', 'qualityHours', 'hoursFocus'] as const) expect(edge(k).strength.mean, k).toBe(0.55);
+    // ⛔ R3 DEFECT 1 (DL GO, 1 Oct): Olumi's 0.5 placeholders already sit in "strong" [0.4, 0.7), so approving strong KEEPS
+    // them at 0.5 (σ too) and only sizes + reviews them (was: re-set to the 0.55 midpoint, staling the Run for nothing).
+    for (const k of ['workloadHours', 'qualityHours', 'hoursFocus'] as const) {
+      expect(edge(k).strength, k).toEqual(was[k]!.strength);
+    }
+    // 0.5 is not "moderate" [0.2, 0.4): those links MOVE, to the band's midpoint.
     for (const k of ['capacityOverhead', 'aiUseQuality'] as const) expect(edge(k).strength.mean, k).toBe(0.3);
     // The negative links stay negative: a set never reverses a link.
     for (const k of ['riskQuality', 'overheadQuality'] as const) {
@@ -163,12 +168,65 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
       // Authorship (`source`, `reasoning`, display) is still kept byte for byte.
       const unsized = (kept as Record<string, unknown>).magnitude === undefined || (kept as Record<string, unknown>).magnitude === 'olumi_placeholder';
       expect(rest, k).toEqual(unsized ? { ...kept, magnitude: 'olumi_estimate' } : kept);
-      expect(review, k).toMatchObject({ intent: 'confirm', band: (STRONG as readonly string[]).includes(k) ? 'strong' : 'moderate' });
+      // A link KEPT in its band (strong) records the review alone — Olumi's band is never applied or stored as the user's
+      // (DEFECT 1); a link MOVED by Olumi's band (moderate) records that band, as the adoption always has.
+      if ((STRONG as readonly string[]).includes(k)) {
+        expect(review, k).toMatchObject({ intent: 'confirm' });
+        expect(review as Record<string, unknown>, k).not.toHaveProperty('band');
+      } else {
+        expect(review, k).toMatchObject({ intent: 'confirm', band: 'moderate' });
+      }
       expect(e.provenance_display, k).toEqual(was[k]!.display);
       expect(e.defaulted, k).toBe(true);
     }
     expect(JSON.stringify(edge('capacityQuality')), 'his own link is untouched').toBe(before);
     expect(String(out.follow_up)).toContain('Olumi’s estimates stay marked as Olumi’s, not yours');
+  });
+
+  /**
+   * ⛔ R3 DEFECT 1 (5936673643, served dcd72dc3 on CEE b410b1c5): Olumi's estimate ALREADY SIZED inside the band the set
+   * names (μ 0.6, σ 0.3, `olumi_estimate` + its `natural_effect`, band strong) was re-set to the band's midpoint (0.55,
+   * σ 0.275, `natural_effect` dropped): a no-change approval moved the figure and staled the Run. Approving the band a
+   * sized estimate already sits in is a REVIEW: the figure, its spread and Olumi's sizing note are held byte-equal, and
+   * only the review is recorded. (A PLACEHOLDER is still sized to the band on approval — the row above, L4.)
+   */
+  it('RED (R3 DEFECT 1): a SIZED Olumi estimate already in the named band is held byte-equal — the approval records only the review', async () => {
+    const e = edge('workloadHours') as Edge & Record<string, unknown>;
+    e.strength = { mean: 0.6, std: 0.3 };
+    e.provenance = { source: 'cee_hypothesis', magnitude: 'olumi_estimate',
+      natural_effect: { amount: 60, amount_unit: 'percentage points', strength_mean: 0.6, per_source_change: 1, strength_mean_frame: 'edge_strength', per_source_change_unit: 'switch' } } as never;
+    e.defaulted = true;
+    e.effect_direction = 'positive';
+    const before = JSON.parse(JSON.stringify(e)) as Record<string, unknown>;
+    const { caps, ctx } = agent('Keep those as they are.');
+    const p = await caps.proposeLinkStrengths!(ctx, { links: setOf(['workloadHours']) as never, rationale: 'the user accepts Olumi\'s estimate as it stands' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    const after = edge('workloadHours') as Edge & Record<string, unknown>;
+    expect(after.strength, 'μ and σ held exactly').toEqual(before.strength);
+    const { reviewed_by_user: review, ...provenanceRest } = (after.provenance ?? {}) as Record<string, unknown>;
+    expect(provenanceRest, 'Olumi\'s authorship and sizing note held byte-equal').toEqual(before.provenance);
+    expect(review).toMatchObject({ intent: 'confirm' });
+    const { provenance: _a, ...restAfter } = after;
+    const { provenance: _b, ...restBefore } = before;
+    expect(restAfter, 'nothing else on the link moved').toEqual(restBefore);
+  });
+
+  it('CONTRAST (DEFECT 1, DL): the USER\'s own link sitting in the same band, through the same door, is byte-equal — "already", nothing written', async () => {
+    const e = edge('workloadHours') as Edge & Record<string, unknown>;
+    e.strength = { mean: 0.6, std: 0.2 };
+    e.provenance = { source: 'user_specified' } as never;
+    delete e.defaulted;
+    e.provenance_display = 'user_set';
+    const before = JSON.stringify(e);
+    const { caps, ctx } = agent('Keep those as they are.');
+    const p = await caps.proposeLinkStrengths!(ctx, { links: setOf(['workloadHours', 'capacityOverhead']) as never, rationale: 'x' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    expect(p.already, JSON.stringify(p)).toEqual(expect.arrayContaining([expect.stringContaining('is already strong, as the user set it')]));
+    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    expect(JSON.stringify(edge('workloadHours')), 'the user\'s own link is untouched').toBe(before);
+    expect(edge('capacityOverhead').strength.mean, 'control: the other link in the set did land').toBe(0.3);
   });
 
   it('R11 × P1-a (Canonical 5874263009, DL 5874274221): the band the user agreed to is their settled view — the magnitude contract never re-sizes it', async () => {
@@ -210,7 +268,8 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
     const p = await caps.proposeLinkStrengths!(ctx, { links: setOf([...STRONG, ...MODERATE]) as never, rationale: 'x' });
     expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
-    expect(edge('workloadHours').strength.mean, 'control: the figures did move').toBe(0.55);
+    // Control: the figures that left their band did move (moderate → 0.3); the ones already in "strong" are kept (DEFECT 1).
+    expect(edge('capacityOverhead').strength.mean, 'control: the figures did move').toBe(0.3);
     const after = censusConfidenceParameters(persisted);
     // The leader licence reads user-stated parameters: the approval added none.
     expect(after.confidence_parameters_user_stated).toBe(before.confidence_parameters_user_stated);

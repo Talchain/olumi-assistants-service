@@ -3254,7 +3254,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band,
       // L4 (c): Olumi's band on a placeholder already at it is a REVIEW (`confirm_current`), never an adoption — the adoption
       // authority is for a `set` only (`adopted_estimate_not_a_set`).
-      adopted: l.author === 'model_proposed' && l.intent === 'set' })) } : {}),
+      adopted: l.author === 'model_proposed' && l.intent === 'set',
+      // DEFECT 1: Olumi's band kept on its own link is a review, which holds the figure (`ApprovedLinkStrength.review`).
+      ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) } : {}),
     ...(input.link_effect !== undefined ? { linkEffect: { from: input.link_effect.from, to: input.link_effect.to, effect: input.link_effect.effect,
       edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token } } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,

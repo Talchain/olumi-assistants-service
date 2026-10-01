@@ -208,7 +208,7 @@ import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { approvalSizes } from '../../../cee/magnitude/link-sizing.js';
+import { approvalSizes, isAcceptedOlumiSize } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
@@ -3153,12 +3153,14 @@ export function createAgentCapabilities(
           return refuseSet('users_own_strength', `The strength of ${pair} is the user\u2019s own (${linkBandWord(currentBand)}), and an estimate never replaces it. `
             + 'NEXT CALL: the same links without this one \u2014 unless the user names its band in their own words.');
         }
-        const magnitude = bandMidpoint(band);
-        // ⭐ L4 (c) (DL 5929790081; CODEX preflight 5929956793): a PLACEHOLDER already at Olumi's band is still unsized —
-        // approving that band is what sizes it (`sizedByApproval`). Skipped as "already sits at", no card could ever clear
-        // "Olumi hasn't sized…" on it: Paul's e-12/e-13 sit at 0.85, the very-strong midpoint (`96c6f5f4`).
-        const keeps = Math.abs(mean) === magnitude;
-        if (keeps && !approvalSizes(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
+        // ⛔ R3 DEFECT 1 (5936673643, served dcd72dc3; DL GO 1 Oct): approving the band a link ALREADY SITS IN keeps its
+        // figure. Matching only the band's midpoint re-set a sized estimate μ 0.6 → 0.55 (σ 0.3 → 0.275, its sizing note
+        // dropped) and Paul's placeholders 0.5 → 0.55 on a no-change approval, staling the Run. Kept, it is a REVIEW
+        // (`confirm_current`); on a PLACEHOLDER that review is what sizes it (L4 (c), DL 5929790081: `sizedByApproval`).
+        // An estimate already accepted in that band is "already". Only a band that MOVES the link sets its midpoint.
+        const keeps = currentBand === band;
+        const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
+        if (keeps && !approvalSizes(edge) && isAcceptedOlumiSize(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
         // Kept at its value it is a REVIEW of Olumi's band (`confirm_current`): the writer refuses a `set` that changes nothing.
         ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
         shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand });
