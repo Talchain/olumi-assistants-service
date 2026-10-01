@@ -16,17 +16,17 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
 };
 
 describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
-  it('imports all 35 cases and all 16 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(16);
+  it('imports all 35 cases and all 18 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(18);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('ebdd5110fafc7124524e8422ff7a07d38f785c9f');
+    expect(SPEC_SHA).toBe('0fd12a9fe502ce8aa0c37ea1bfeaa61f43e6a0c1');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('d57b00e1f375e1dfaec8dc5def51be972856d905047339dcc322102e8d289e8c');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('652bc5bbe2c721dd3b0b97625c267816259e2e1c9cf70475e0570e3638f7e97a');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('1ea8f6434534081d357ca5dec9ac53aafab4edabd5a3986807afb958f60d7289');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('42f6dd7b96a9e64a033e656697b013f7ae79ca1147da1022dec6c47d9bc10cb7');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });

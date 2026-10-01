@@ -6743,6 +6743,69 @@
    "note": "Discriminating pair with MT-PREMORTEM-D1-OWN-LABEL-GOOD: masking blanks only the user's labels; Olumi's own 'likely' still fails."
   },
   {
+   "id": "MT-RERUN-MODEL-LABEL-GOOD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served labels: CEE fixtures (factor \"Qualified leads per month\", option \"Move 30% to LinkedIn\")",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Qualified leads per month"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "prior_withheld": false,
+    "no_matched_figures": true,
+    "current_option_labels": [
+     "Move 30% to LinkedIn",
+     "Keep current channel mix"
+    ],
+    "model_labels": [
+     "Grow MRR",
+     "Qualified leads per month",
+     "LinkedIn Qualified Leads",
+     "Move 30% to LinkedIn",
+     "Keep current channel mix",
+     "Churn above 4%"
+    ]
+   },
+   "reply": "You changed Qualified leads per month.\n- Qualified leads per month: Olumi's estimate → yours.\n'Move 30% to LinkedIn' and 'Keep current channel mix' have no figures from both runs to compare yet, and Churn above 4% is still a limit. 'Move 30% to LinkedIn' works through LinkedIn Qualified Leads.",
+   "expect": "pass",
+   "note": "A model label ('…leads…', '30%', '4%') is the user's word, not a leader or probability claim: every text ban masks model_labels (shared.label_masking; RC served-label scan 1,440 labels / 305 graphs)."
+  },
+  {
+   "id": "MT-RERUN-MODEL-LABEL-BAD-LEADER",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served labels: CEE fixtures",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Qualified leads per month"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "prior_withheld": false,
+    "no_matched_figures": true,
+    "current_option_labels": [
+     "Move 30% to LinkedIn",
+     "Keep current channel mix"
+    ],
+    "model_labels": [
+     "Grow MRR",
+     "Qualified leads per month",
+     "LinkedIn Qualified Leads",
+     "Move 30% to LinkedIn",
+     "Keep current channel mix",
+     "Churn above 4%"
+    ]
+   },
+   "reply": "You changed Qualified leads per month.\n- Qualified leads per month: Olumi's estimate → yours.\n'Move 30% to LinkedIn' now leads.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-LEADER-UNLICENSED"
+   ],
+   "note": "Discriminating pair with MT-RERUN-MODEL-LABEL-GOOD: Olumi saying an option leads, unlicensed, still fails."
+  },
+  {
    "id": "MT-PREMORTEM-BAD-UNGROUNDED",
    "policy_id": "RC-PREMORTEM",
    "grounded_on": "A-PREMORTEM-LICENSED (D3)",

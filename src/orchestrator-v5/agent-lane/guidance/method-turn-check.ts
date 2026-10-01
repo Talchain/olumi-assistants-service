@@ -63,6 +63,8 @@ function supplied(token: string, figures: readonly string[]): boolean {
 export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: MethodInputs): MethodTurnCheck {
   const failed: string[] = [];
   let targets: (string | null)[] = [];
+  // shared.label_masking: every node label of the current model is the user's word, never a claim.
+  const model = inputs.model_labels ?? [];
   const check = (id: string, pass: boolean) => { if (!pass) failed.push(id); };
   if (policy_id === 'RC-PREMORTEM') {
     const items = numberedItems(reply);
@@ -71,7 +73,7 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('PM-COUNT', items.length >= 2 && items.length <= 3);
     check('PM-GROUNDED', items.length > 0 && targets.every(target => target !== null));
     check('PM-WATCH-MITIGATE', items.length > 0 && items.every(item => item.includes('Watch for:') && item.includes('Mitigate:')));
-    const own = masked(reply, [...(inputs.supplied_items ?? []).flatMap(item => item.labels ?? []), inputs.plan_label, ...(inputs.current_option_labels ?? [])]);
+    const own = masked(reply, [...model, ...(inputs.supplied_items ?? []).flatMap(item => item.labels ?? []), inputs.plan_label, ...(inputs.current_option_labels ?? [])]);
     check('PM-NO-PROB', !own.includes('%') && !/\b(likely|likelihood|chance|probability|probable|odds)\b/iu.test(own));
     check('PM-NO-PREDICTION', !/\b(will|is going to|are going to) fail\b/iu.test(own));
     const otherOptions = (inputs.current_option_labels ?? []).filter(label => normalise(label) !== normalise(inputs.plan_label ?? ''));
@@ -79,7 +81,7 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('PM-BLINDSPOT', blindspotOk(reply));
   } else if (policy_id === 'RERUN-EXPLANATION') {
     check('RX-NAMES-CHANGES', (inputs.change_labels ?? []).slice(0, 3).every(label => labelMatches(reply, [label])));
-    const labels = [...(inputs.change_labels ?? []), ...(inputs.current_option_labels ?? [])];
+    const labels = [...model, ...(inputs.change_labels ?? []), ...(inputs.current_option_labels ?? [])];
     const own = masked(reply, labels);
     check('RX-NO-CAUSE-UNPAIRED', inputs.attribution_case === 'C1_attributable'
       || !/\b(because (you|of your)|caused|due to your|as a result of your|led to)\b/iu.test(own));
@@ -107,13 +109,13 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     const figures = [...(inputs.user_figures ?? []), ...(inputs.user_messages ?? []).flatMap(numberTokens),
       ...(inputs.factor_current_value === undefined ? [] : [String(inputs.factor_current_value)])];
     check('WC-NO-NEW-FIGURES', numberTokens(reply).every(token => supplied(token, figures)));
-    const own = masked(reply, [inputs.factor_label]);
+    const own = masked(reply, [...model, inputs.factor_label]);
     check('WC-NO-NOTHING', !/nothing would change|no single (assumption|factor)/iu.test(own));
     check('WC-BANNED', !/\b(EVPI|EVPPI|sensitivity score|elasticity)\b/iu.test(own) && !own.includes('%'));
   } else if (policy_id === 'RC-STRENGTHEN-ITEM') {
     const labels = inputs.item_labels ?? [];
     check('ST-NAMES-ITEM', labels.length > 0 && labels.every(label => labelMatches(reply, [label])));
-    check('ST-BANNED', !/\b(placeholder|edge|node|default strength)\b/iu.test(masked(reply, labels)));
+    check('ST-BANNED', !/\b(placeholder|edge|node|default strength)\b/iu.test(masked(reply, [...model, ...labels])));
     const figures = [...(inputs.user_figures ?? []), ...(inputs.user_messages ?? []).flatMap(numberTokens),
       ...(inputs.item_current_value === undefined ? [] : [String(inputs.item_current_value)])];
     check('ST-NO-NEW-FIGURES', numberTokens(reply).every(token => supplied(token, figures)));
@@ -121,7 +123,7 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     const labels = (inputs.edited_labels ?? []).slice(0, 3);
     check('CE-NAMES-EDITS', labels.length > 0 && labels.every(label => labelMatches(reply, [label])));
     check('CE-STALE-IFF', /out of date/iu.test(reply) === (inputs['run.kind'] === 'complete_stale'));
-    check('CE-NO-RESULT-CLAIM', !/\b(the result (has )?changed|now leads|is now ahead|the answer is now)\b/iu.test(masked(reply, inputs.edited_labels ?? [])));
+    check('CE-NO-RESULT-CLAIM', !/\b(the result (has )?changed|now leads|is now ahead|the answer is now)\b/iu.test(masked(reply, [...model, ...(inputs.edited_labels ?? [])])));
   }
   // Fail immediately on implementation/policy drift, rather than quietly leaving a rule unchecked.
   const expected = POLICY.method_turns[policy_id].post_checks.map(rule => rule.id);
