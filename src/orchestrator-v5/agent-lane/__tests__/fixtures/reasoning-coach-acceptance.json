@@ -7398,6 +7398,75 @@
    "note": "A recorded change is never 'same input values' / 'nothing in your model changed' (MG 5939414835; served interim words). Control: MT-RERUN-GOOD."
   },
   {
+   "id": "MT-RERUN-CONTRARY-NOTHING-CHANGED-BAD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "MT-RERUN-GOOD inputs (D2)",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Hours per week on investment-firm cold emails",
+     "securing funding"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ]
+   },
+   "reply": "Two things changed since the last run.\n- Hours per week on investment-firm cold emails: 8 → 5 hours a week.\n- Securing funding: you set the target to at least £1,000,000.\nThis run also used a new draw, so the difference can't be put down to your edits alone. Nothing changed.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-CONTRARY-SAME"
+   ],
+   "note": "The whole 'no change' class fails, not two phrases (CODEX CEE BUDDY 5940259670: 'Nothing changed.' passed once MG's M2 relied on this one checker). Control: MT-RERUN-NOTHING-ELSE-GOOD."
+  },
+  {
+   "id": "MT-RERUN-CONTRARY-INPUTS-UNCHANGED-BAD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "MT-RERUN-GOOD inputs (D2)",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Hours per week on investment-firm cold emails",
+     "securing funding"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ]
+   },
+   "reply": "Two things changed since the last run.\n- Hours per week on investment-firm cold emails: 8 → 5 hours a week.\n- Securing funding: you set the target to at least £1,000,000.\nThis run also used a new draw, so the difference can't be put down to your edits alone. The inputs were unchanged.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-CONTRARY-SAME"
+   ],
+   "note": "Same class, different words (CODEX CEE BUDDY 5940259670). Control: MT-RERUN-NOTHING-ELSE-GOOD."
+  },
+  {
+   "id": "MT-RERUN-NOTHING-ELSE-GOOD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "MT-RERUN-GOOD inputs (D2)",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Hours per week on investment-firm cold emails",
+     "securing funding"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ]
+   },
+   "reply": "Two things changed since the last run.\n- Hours per week on investment-firm cold emails: 8 → 5 hours a week.\n- Securing funding: you set the target to at least £1,000,000.\nThis run also used a new draw, so the difference can't be put down to your edits alone. Nothing else changed.",
+   "expect": "pass",
+   "note": "Honest control: after naming the change, 'Nothing else changed.' is true and passes (MG's C0 line)."
+  },
+  {
    "id": "MT-RERUN-UNWITHHELD-BAD-NO-LINE",
    "policy_id": "RERUN-EXPLANATION",
    "grounded_on": "MT-RERUN-UNWITHHELD-GOOD inputs (D1)",

@@ -30,6 +30,16 @@ function banned(text: string, ban: RegExp, labels: readonly (string | undefined)
     && ban.test(foldQuotes(label)) && !whole.test(foldQuotes(label).trim()));
   return ban.test(masked(text, own));
 }
+/**
+ * RX-NO-CONTRARY-SAME: every "nothing / no input changed" claim (seven forms passed the two-phrase ban once M2 relied on
+ * this checker, CODEX CEE BUDDY 5940259670). "Nothing else changed." is the honest control: "else" breaks every form.
+ */
+const CONTRARY_SAME = new RegExp(String.raw`\b(nothing(?:'s| has| had)? changed|nothing (?:was|has been|had been) changed`
+  + String.raw`|nothing in (?:your|the) model(?:'s| has| had)? changed|same inputs?`
+  + String.raw`|inputs?(?: values)? (?:were|was|are|is|stayed|remained|have stayed|have remained) (?:unchanged|the same)`
+  + String.raw`|unchanged inputs?|(?:no|none of the) inputs? (?:were |was |have been |has been )?changed`
+  + String.raw`|no changes? (?:were|was|have been|has been) made`
+  + String.raw`|(?:didn'?t|did not|haven't|have not|hasn't|has not) changed? anything)\b`, 'iu');
 /** WHOLE-TOKEN match after normalise(): label 'B' never matches inside another word (HARNESS #2478 P1). */
 function labelMatches(text: string, labels: readonly string[]): boolean {
   const normal = ` ${normalise(text)} `;
@@ -105,8 +115,8 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     // The earlier run had no figures to move from (prior_withheld), or no option has figures in both runs.
     check('RX-NO-MOVEMENT-WITHOUT-PRIOR', !(inputs.prior_withheld === true || inputs.no_matched_figures === true)
       || !banned(reply, /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu, labels));
-    // A recorded change is never "no change" (MG 5939414835).
-    check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 || !banned(reply, /\b(same input values|nothing in your model changed)\b/iu, labels));
+    // A recorded change is never "no change": the whole claim class (MG 5939414835; CODEX CEE BUDDY 5940259670).
+    check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 || !banned(reply, CONTRARY_SAME, labels));
     // The un-withheld transition must say so (MG 5939414835).
     check('RX-UNWITHHELD-LINE', inputs.prior_withheld !== true || labelMatches(reply, ['can now compare the options']));
   } else if (policy_id === 'RC-WIDEN') {

@@ -16,17 +16,17 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
 };
 
 describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
-  it('imports all 35 cases and all 24 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(24);
+  it('imports all 35 cases and all 27 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(27);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('aeefbb3d2fe392d31e77977b321c5ab255ede9b7');
+    expect(SPEC_SHA).toBe('84767db585cd47f50952b11e70617d5977017441');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('a23e827cf4f5298c126126f6527a420a5cb410512980f049ae4358c94e73e6a8');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('08a978c3160cdeb6ded7a2bc4366608271634e6f420846c7d34bb8d2814c0dce');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('832a17d5fcfe363612c71b0596b0fcb29326bcfefb35ccde9d9e3d4d08d2c2de');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('349a31bf7ce9de6b53e21400e8c182b3af76df61bc211b548a67ee4a9954fb3b');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });
@@ -259,6 +259,19 @@ describe('all deterministic text post-check ids, including methods without vendo
     expect(checkMethodTurn('RC-PREMORTEM', 'Cut Burn Rate by 30% slipped.', { model_labels: ['Cut Burn Rate by 30%'] }).failed).not.toContain('PM-NO-PROB');
     expect(checkMethodTurn('RC-WHAT-CHANGES', 'Price elasticity of demand decides it.', { factor_label: 'Price elasticity of demand' }).failed).not.toContain('WC-BANNED');
     expect(checkMethodTurn('RC-WHAT-CHANGES', 'Price elasticity of demand decides it; elasticity is high.', { factor_label: 'Price elasticity of demand' }).failed).toContain('WC-BANNED');
+  });
+  it('RX-NO-CONTRARY-SAME bans the whole "no change" class; "Nothing else changed." is honest (CODEX CEE BUDDY 5940259670, MG 5940298428)', () => {
+    const rx = { change_labels: ['Sprint capacity for AI reporting'], attribution_case: 'C2_unpaired' as const, leader_licensed: false, prior_withheld: false, no_matched_figures: false, current_option_labels: ['Continue Current Plan'] };
+    const named = 'You accepted Olumi\u2019s estimate for Sprint capacity for AI reporting. ';
+    for (const claim of ['Nothing changed.', 'These used the same inputs.', 'The inputs were unchanged.', 'No inputs were changed.', 'We didn\u2019t change anything.',
+      'Nothing in your model has changed.', 'These used the same input values.', 'Nothing in your model changed.', 'No changes were made.', 'None of the inputs changed.']) {
+      expect(checkMethodTurn('RERUN-EXPLANATION', named + claim, rx).failed, claim).toEqual(['RX-NO-CONTRARY-SAME']);
+    }
+    for (const honest of ['Nothing else changed.', 'The comparison was rerun on the same draw.', 'Nothing else in your model changed.']) {
+      expect(checkMethodTurn('RERUN-EXPLANATION', named + honest, rx), honest).toEqual({ pass: true, failed: [], targets: [] });
+    }
+    // With no recorded change the claim is not contrary.
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'Nothing changed.', { ...rx, change_labels: [] }).failed).not.toContain('RX-NO-CONTRARY-SAME');
   });
   it('Coach edits requires the stale line only for a stale run', () => {
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);
