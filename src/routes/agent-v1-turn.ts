@@ -101,6 +101,7 @@ import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licenc
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
+import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
@@ -2949,6 +2950,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
     });
+    let pendingPreview: ProposalPreview | undefined;
     /**
      * ⭐ T2 — THE GUIDANCE ROW (M1; `turn-context/guidance-wire.ts`): at most one coaching row (+ one edits row) from this
      * same final readback, as root `guidance: {slot1?, slot2?}` with `item_ref` by id (PANEL `readGuidanceRow`). Added
@@ -2956,7 +2958,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     {
       // Any proposal that would still execute waits for its yes: that card is the step, re-offered or not (`offeredNow`).
-      const waiting = executableWaitingProposalIds(scenarioId, userId, graphHash).map((id) => ({ id: approvalChipIdFor(id) }));
+      const waitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash);
+      const waiting = waitingIds.map((id) => ({ id: approvalChipIdFor(id) }));
       const guidance = turnGuidanceFor({
         request: guidanceRequestOf(fastPath, (body['chip'] as { id?: unknown } | null | undefined)?.id, NEXT_STEP_CHIP_IDS),
         offeredSpecific: firstOfEachId([...offeredSpecific, ...waiting]),
@@ -2966,6 +2969,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
       });
       if (guidance !== undefined) wireBody = { ...wireBody, guidance };
+      // ⭐ THE SUGGESTION PREVIEW (DL 5941839936; `turn-context/proposal-preview.ts`): what a Yes on THIS turn's consent
+      // chip would do, from the STORED proposal the chip names, only while it would still execute. Attached below, AFTER
+      // the final egress and only beside its surviving chip (`previewBesideItsChip`); never on the answer row.
+      const offeredId = offeredApprove !== undefined ? typedApprovalOf({ chip: { id: offeredApprove.id } }) : undefined;
+      pendingPreview = offeredId !== undefined && waitingIds.includes(offeredId)
+        ? proposalPreviewFor(offeredId, proposals.get(offeredId), readbackGraph) : undefined;
     }
     /**
      * ⛔ THE FAIL-CLOSED FINAL EGRESS (AI HARNESS PR-L1, `leader-final-egress.ts`): on EVERY turn, on the body exactly as
@@ -2988,6 +2997,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const { _answer_shape: _stale, ...withoutShape } = finalEgress.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (finalEgress.proseEdited ? withoutShape : finalEgress.response) as OlumiResponse & Record<string, unknown>;
       }
+    }
+    {
+      const preview = previewBesideItsChip(pendingPreview, approvalChipIdFor, wireBody.suggested_actions);
+      if (preview !== undefined) wireBody = { ...wireBody, proposal_preview: preview };
     }
     // T3, terminal: the ONE history write for a method turn — the history before it, the user's words, and the FINAL SENT
     // text (the wire after the last gate), never a pre-gate copy or anything the call produced.
