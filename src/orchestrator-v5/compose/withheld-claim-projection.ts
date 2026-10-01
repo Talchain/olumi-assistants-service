@@ -238,6 +238,32 @@ export const WITHHELD_DROPPED_DECISION_BRIEF_MEMBERS: readonly string[] = Object
 ]);
 
 /**
+ * ⛔ F2 §licence — A BRIEF WARNING CROSSES A WITHHELD TURN AS ITS TYPED PARTS, NEVER AS PLoT'S PROSE.
+ *
+ * The derivation above kept `warnings[]` verbatim because it "carries no comparative claim". SERVED counter-example
+ * (Paul, 1 Oct, scenario 96c6f5f4, all 4 later Runs, `v5.invariant_violation … enforced:false`): PLoT's
+ * `CONSTRAINT_LEVEL_DRAWS_OUT_OF_DOMAIN` says "…(option ai_reporting_sprint: 0.3784 of draws…)… the leading option's
+ * draws…" while `leader_claim.permitted` was false — and the Agent's `run_analysis` result, read after this projection,
+ * handed it to the LLM. A producer's prose can name the leader in any member it likes, so on a withheld turn a warning
+ * keeps only these members (an ALLOW-list: a new prose member never passes by default). The UI renders the brief's
+ * warnings nowhere (DGAI `DECISION_BRIEF_DECLARED_DARK.warnings`) and its strip renders by `code` (V14.3), so no user
+ * copy is lost. Pinned: `withheld-brief-warnings-carry-no-prose.test.ts`.
+ */
+export const WITHHELD_KEPT_BRIEF_WARNING_MEMBERS: readonly string[] = Object.freeze(['code', 'severity']);
+
+function projectBriefWarningsForWithheldClaim(warnings: unknown): unknown {
+  if (!Array.isArray(warnings)) return warnings;
+  return warnings.map((w) => {
+    if (w === null || typeof w !== 'object' || Array.isArray(w)) return w;
+    const kept: Record<string, unknown> = {};
+    for (const member of WITHHELD_KEPT_BRIEF_WARNING_MEMBERS) {
+      if (member in (w as Record<string, unknown>)) kept[member] = (w as Record<string, unknown>)[member];
+    }
+    return kept;
+  });
+}
+
+/**
  * Members that are leader-designating ONLY BECAUSE OF THE OBJECT THEY SIT IN,
  * and therefore cannot be recognised by {@link keyDesignatesLeadingOption}.
  *
@@ -871,6 +897,10 @@ function projectDecisionBriefForWithheldClaim(brief: unknown): Record<string, un
     if (key === 'options') {
       const projected = projectOptionsForWithheldClaim(value);
       if (projected !== undefined) out[key] = projected;
+      continue;
+    }
+    if (key === 'warnings') {
+      out[key] = projectBriefWarningsForWithheldClaim(value);
       continue;
     }
     out[key] = value;
