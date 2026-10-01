@@ -32,10 +32,14 @@ const BASE: Node[] = [
   { id: 'reply_rate', kind: 'factor', label: 'Reply rate', category: 'observable', observed_state: { value: 0.05, raw_value: 5, unit: '%', source: 'user_assumption', reviewed_by_user: { intent: 'confirm', at: '2026-10-01T00:00:00.000Z' } } },
   { id: 'deal_count', kind: 'factor', label: 'Deals in pipeline', category: 'observable', observed_state: { value: 0.3, cap: 10, unit: 'deals', source: 'cee_inference', extractionType: 'inferred' } },
   { id: 'blank', kind: 'factor', label: 'Intro quality', category: 'observable', scale_frame: 100 },
+  // CODEX CEE BUDDY 5925977983: framed by the NODE's `scale_frame` alone (no raw, no cap), and a bare percent share.
+  { id: 'cold_hours', kind: 'factor', label: 'Hours per week on cold emails', category: 'controllable', scale_frame: 40, observed_state: { unit: 'hours/week', value: 0.1, source: 'cee_inference', extractionType: 'inferred' } },
+  { id: 'firm_reply', kind: 'factor', label: 'Investment-firm responsiveness', category: 'observable', observed_state: { unit: '%', value: 0.05, source: 'cee_inference', extractionType: 'inferred' } },
+  { id: 'odd_cap', kind: 'factor', label: 'Odd-capped estimate', category: 'observable', observed_state: { unit: 'deals', value: 0.1, cap: 3, source: 'cee_inference', extractionType: 'inferred' } },
   // Served `9390a1b4`'s stored 0: Olumi's estimate that no time goes on angels yet.
   { id: 'angel_hours', kind: 'factor', label: 'Hours per week on angel outreach', category: 'controllable', scale_frame: 40, observed_state: { unit: 'hours/week', value: 0, source: 'cee_inference', raw_value: 0, extractionType: 'inferred' } },
 ];
-const EDGES = ['warm_hours', 'team_size', 'runway', 'reply_rate', 'deal_count', 'blank', 'angel_hours'].map((from) => (
+const EDGES = ['warm_hours', 'team_size', 'runway', 'reply_rate', 'deal_count', 'blank', 'angel_hours', 'cold_hours', 'firm_reply', 'odd_cap'].map((from) => (
   { from, to: 'funding', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' }));
 
 /** The product double whose value writer IS the served writer. */
@@ -124,13 +128,30 @@ describe('keep: Olumi’s own figure, accepted unchanged, through the real write
     expect(earnsAuthorshipCredit(structureProvenance(g.nodes.find((n) => n.id === 'warm_hours'), g as never))).toBe(false);
   });
 
-  it('a capped figure with no raw value keeps its model value byte for byte', async () => {
-    const { p, caps, proposed } = await keep([keepOf('Deals in pipeline', 3, 'deals')]);
+  // CODEX CEE BUDDY 5925977983: every way a stored figure is framed — the card says the user-unit figure, and the model
+  // value is byte-identical after the write (a scale-frame-only 0.1 was sent as 0.1 and stored 0.0025).
+  it.each([
+    ['raw', 'Hours per week finding warm connections', 'warm_hours', 4, 'hours/week', 0.1],
+    ['cap only', 'Deals in pipeline', 'deal_count', 3, 'deals', 0.3],
+    ['scale_frame only', 'Hours per week on cold emails', 'cold_hours', 4, 'hours/week', 0.1],
+    ['percent, no raw', 'Investment-firm responsiveness', 'firm_reply', 5, '%', 0.05],
+  ] as const)('%s: the card names the figure in the user’s units and the model value is unchanged', async (_, label, id, figure, unit, modelValue) => {
+    const { p, caps, proposed } = await keep([keepOf(label, 999, unit)]);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(String(proposed.public_label)).toBe(`Accept Olumi\u2019s estimate, unchanged: ${label} = ${sayFigureRead(figure, unit)}`);
     await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
-    const os = p.byId().deal_count.observed_state!;
-    expect(os.value).toBe(0.3);
+    const os = p.byId()[id].observed_state!;
+    expect(os.value).toBe(modelValue);
+    expect(os.raw_value).toBe(figure);
     expect(os.source).toBe('user_assumption');
+  });
+
+  it('NEGATIVE: a figure no user-unit number reproduces exactly (0.1 on a cap of 3) is not offered, and nothing is written', async () => {
+    const { p, proposed, stored } = await keep([keepOf('Odd-capped estimate', 0.3, 'deals')]);
+    expect(proposed.ok).toBe(false);
+    expect(proposed.not_keepable).toEqual([{ label: 'Odd-capped estimate', why: 'not_exact' }]);
+    expect(stored()).toBe(0);
+    expect(p.writes()).toBe(0);
   });
 });
 
