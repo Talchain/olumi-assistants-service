@@ -117,6 +117,8 @@ export interface MethodInputs {
   readonly current_risk_labels?: readonly string[];
   readonly current_factor_labels?: readonly string[];
   readonly supplied_items?: readonly SuppliedItem[];
+  /** shared.label_masking: EVERY node label of the current model (goal, options, factors, risks, outcomes). */
+  readonly model_labels?: readonly string[];
   readonly left_out_labels?: readonly string[];
   readonly supplied_figures?: readonly string[];
   readonly user_figures?: readonly string[];

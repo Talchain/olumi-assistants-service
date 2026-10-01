@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ ebdd5110fafc7124524e8422ff7a07d38f785c9f.
+// programme-docs @ 0fd12a9fe502ce8aa0c37ea1bfeaa61f43e6a0c1.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -758,10 +758,11 @@ export const POLICY = {
         "owner": "SCIENCE/DSK owns applicability and the badge; RC owns the method shape, checks and fallback; AI HARNESS composes (PTL 5933036532 owner split)."
       },
       "label_masking": {
-        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked: case-insensitive, curly quotes folded, longest label first. RC-PREMORTEM: supplied_items labels + plan_label + current_option_labels. RERUN-EXPLANATION: change_labels + current_option_labels. RC-WHAT-CHANGES / RC-STRENGTHEN-ITEM / RC-COACH-EDITS: factor_label / item_labels / edited_labels.",
-        "why": "A label the user wrote is grounding, not a claim. Served D1 (the investor decision) has the factor 'Enterprise prospect signing likelihood': without masking every grounded pre-mortem failed PM-NO-PROB and fell back (SCIENCE/DSK 5938372911).",
+        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked: case-insensitive, curly quotes folded, longest label first. The mask set is model_labels (EVERY node label in the current model: goal, options, factors, risks, outcomes) plus the method's own labels: RC-PREMORTEM supplied_items + plan_label + current_option_labels; RERUN-EXPLANATION change_labels + current_option_labels; RC-WHAT-CHANGES factor_label; RC-STRENGTHEN-ITEM item_labels; RC-COACH-EDITS edited_labels.",
+        "why": "A label the user wrote is grounding, not a claim. Served D1 (the investor decision) has the factor 'Enterprise prospect signing likelihood': without masking every grounded pre-mortem failed PM-NO-PROB and fell back (SCIENCE/DSK 5938372911). RC served-label scan (CEE staging fixtures, 1,440 labels / 305 graphs): goal labels with '%' ('Cut Burn Rate by 30%'), factor labels with 'leads' ('Qualified leads per month'), risk labels with '%' ('Churn above 4%'): none of them supplied items, so the mask set is every model label.",
         "never": "Mask Olumi's own words: only labels the inputs supply.",
-        "reference": "tools/check_method_turn.py masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM"
+        "reference": "tools/check_method_turn.py masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM, MT-RERUN-MODEL-LABEL-GOOD / -BAD-LEADER",
+        "input": "model_labels: string[] = every node label of the current model (the caller has the graph)."
       }
     },
     "RC-PREMORTEM": {
@@ -1062,4 +1063,4 @@ export const POLICY = {
   }
 } as const;
 
-export const SPEC_SHA = "ebdd5110fafc7124524e8422ff7a07d38f785c9f";
+export const SPEC_SHA = "0fd12a9fe502ce8aa0c37ea1bfeaa61f43e6a0c1";
