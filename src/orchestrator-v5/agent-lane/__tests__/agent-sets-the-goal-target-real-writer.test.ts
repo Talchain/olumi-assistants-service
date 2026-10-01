@@ -356,7 +356,7 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     const chips = approveChipOf(t1);
     expect(chips).toHaveLength(1);
     expect(chips[0]!.label ?? chips[0]!.message, 'the card names the target only').not.toMatch(/Today:/);
-    expect(t1.assistant_text, 'the £5,000 was never the user\'s: no line about it').not.toContain('I haven\'t recorded');
+    expect(t1.assistant_text, 'the £5,000 was never the user\'s: no line about it').not.toContain('as today\'s level of');
     await turn({ message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
     expect(goalNow()).toEqual(expect.objectContaining({ goal_threshold_raw: 60000 }));
     expect((goalNow() as Record<string, unknown>).observed_state, 'no level written').toBeUndefined();
@@ -410,8 +410,10 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
       expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
       const chips = approveChipOf(t1);
       expect(chips, JSON.stringify(t1.suggested_actions)).toHaveLength(1);
-      // True even for a misread amount: it names what was NOT done, never "the level you gave", and asks nothing.
-      expect(t1.assistant_text, t1.assistant_text).toContain(`I haven't recorded £${today.toLocaleString('en-GB')} as today's level of "securing funding". Approving sets only the target.`);
+      // The pure negation (AIQ 5924492553): never "the level you gave" — this amount was misread as the level.
+      expect(t1.assistant_text, t1.assistant_text).toContain(`Not included in this proposal: "£${today / 1000}k" as today's level of "securing funding".`);
+      expect(t1.assistant_text).not.toContain('level you gave');
+      expect(t1.assistant_text).toContain('Approving sets only the target.');
       const t2 = await turn({ message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
       expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
       expect(goalNow()).toEqual(expect.objectContaining({ goal_threshold_raw: 1000000, threshold_source: 'user' }));
@@ -436,17 +438,18 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
     expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(approveChipOf(t1), JSON.stringify(t1.suggested_actions)).toHaveLength(1);
-    // AIQ CR 5924479737: a true negation and NO ask beside the card (≤1 ask; "set it" would only meet the same refusal).
-    const LINE = 'I haven\'t recorded £0 as today\'s level of "Funding secured". Approving sets only the target.';
+    // AIQ words 5924376899: DGAI's producer opener, the verbatim span, the rivals the door found, no question.
+    const LINE = 'Not included in this proposal: "£0" as today\'s level of "Funding secured". It could belong to more than one figure in this model ("Investment-firm funding secured", "Angel funding secured"), so it isn’t recorded. Approving sets only the target.';
     expect(t1.assistant_text, t1.assistant_text).toContain(LINE);
-    expect(t1.assistant_text.split('I haven\'t recorded').length - 1, 'said once').toBe(1);
-    expect(t1.assistant_text.split('\n\n').find((para) => para.startsWith('I haven\'t recorded')), 'the whole host paragraph: it asks nothing').toBe(LINE);
+    expect(t1.assistant_text.split('Not included in this proposal: "').length - 1, 'said once').toBe(1);
+    // ≤1 ask (AIQ CR 5924479737): the whole host paragraph is the line — no ask beside the card.
+    expect(t1.assistant_text.split('\n\n').find((para) => para.startsWith('Not included in this proposal: "')), 'the whole host paragraph').toBe(LINE);
   }, 180_000);
   it('CONTROL: the same answer on a draft with NO sibling "…secured" labels binds his £0 to the card, and no "not recorded" line', async () => {
     graphOf.set(SCENARIO, { ...fundingSeed(), nodes: fundingSeed().nodes.map((n) => (n.id === 'goal_mrr' ? { ...n, label: 'Funding secured' } : n)) });
     const t1 = await proposeFunding(0);
     expect(approveChipOf(t1)).toHaveLength(1);
-    expect(t1.assistant_text).not.toContain('I haven\'t recorded');
+    expect(t1.assistant_text).not.toContain('as today\'s level of');
   }, 180_000);
   // ⛔ A DECIMAL IS NOT A SENTENCE END (MG SUCCESSOR #75 5918338227, measured on staging `d3d28031`): with Paul's real
   // target, "£1.2m", the level's quote was cut at "£1." ("…need at least £1"), so the target was not in its statement and
