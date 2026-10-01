@@ -123,8 +123,17 @@ export function optionStatusHolds(graph: unknown, optionId: string, status: Opti
 }
 
 /** An Olumi suggestion the user has not adopted (origin kept for life; adoption records `included`). */
-function unadoptedOlumiSuggestion(node: Record<string, unknown>): boolean {
-  return node.proposed_by === 'olumi' && node.analysis_participation !== 'included';
+/**
+ * ⛔ ADOPTION IS NOT CURRENT PARTICIPATION (CODEX overflow #2454 5934135126 P2). An Olumi suggestion is ADOPTED once the
+ * user added it (`analysis_participation: 'included'`, `olumi-option-adoption.ts`). Taking an adopted option out of the
+ * comparison sets `retained_excluded` beside its `option_status`, so participation alone then read it as never adopted and
+ * "put it back" was refused. The rule: an Olumi option is UNADOPTED only when it is not included AND carries no user
+ * exclusion; and a status edit on an unadopted suggestion is refused outright (it is not in the comparison to take out —
+ * adding it is the adoption door), so an Olumi option holding `infeasible` / `removed` was necessarily adopted first.
+ */
+export function isUnadoptedOlumiSuggestion(node: Record<string, unknown>): boolean {
+  const userExcluded = node.option_status === 'infeasible' || node.option_status === 'removed';
+  return node.proposed_by === 'olumi' && node.analysis_participation !== 'included' && !userExcluded;
 }
 
 /** The user-facing sentence for a status that landed — said in the user's terms, never as a code. */
@@ -180,9 +189,9 @@ export function applyOptionStatusEdit(params: ApplyOptionStatusEditParams): Opti
       'option_status_edit — the id names a node that is not an option; refusing');
     return refuse(payload, 'not_an_option', `"${target.label}" isn't an option, so I haven't changed anything.`);
   }
-  if (event.status === 'feasible' && unadoptedOlumiSuggestion(target)) {
+  if (isUnadoptedOlumiSuggestion(target)) {
     return refuse(payload, 'olumi_suggestion_not_adopted',
-      `"${target.label}" is Olumi's suggestion. To compare it, add it to your options first; I haven't changed anything.`);
+      `"${target.label}" is Olumi's suggestion and isn't in your comparison yet. To compare it, add it to your options first; I haven't changed anything.`);
   }
   const participation = PARTICIPATION_FOR_STATUS[event.status];
   const currentStatus = target.option_status ?? 'feasible';

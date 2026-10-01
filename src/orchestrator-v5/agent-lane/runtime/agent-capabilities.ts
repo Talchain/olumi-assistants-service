@@ -195,7 +195,7 @@ import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrat
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
-import { optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
+import { isUnadoptedOlumiSuggestion, optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
@@ -3236,7 +3236,7 @@ export function createAgentCapabilities(
           detail: `No option in the model is called "${requested}", so nothing was prepared. Use the option's name exactly as get_canonical_state gives it, or ask the user which option they mean.` };
       }
       const option = res.node as GraphRead['nodes'][number] & { option_status?: unknown; analysis_participation?: unknown; proposed_by?: unknown };
-      if (status === 'feasible' && option.proposed_by === 'olumi' && option.analysis_participation !== 'included') {
+      if (isUnadoptedOlumiSuggestion(option as Record<string, unknown>)) {
         return { ok: false, mutated: false, refusal: 'olumi_suggestion_not_adopted',
           detail: `"${option.label}" is Olumi's suggestion, which the user has not added to their options; putting it into the comparison is adding it, which is a different change. Nothing was prepared.` };
       }

@@ -85,10 +85,22 @@ describe('the Agent takes an option out of the comparison through option_status_
     expect(w.sent).toEqual([]);
   });
 
-  it('REFUSED: Olumi\'s un-added suggestion is never put into the comparison by this door', async () => {
-    const w = world({ opt_ai: { proposed_by: 'olumi', option_status: 'removed', analysis_participation: 'retained_excluded' } });
-    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeOptionStatus!(ctxOf('Add it back.'), { option_label: 'AI Reporting Module Sprint', status: 'feasible', rationale: 'x' });
+  it.each(['removed', 'infeasible', 'feasible'] as const)('REFUSED, nothing prepared: %s on Olumi\'s un-added suggestion (adding it is the adoption door)', async (status) => {
+    const w = world({ opt_ai: { proposed_by: 'olumi' } });
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeOptionStatus!(ctxOf('Take the AI one out.'), { option_label: 'AI Reporting Module Sprint', status, rationale: 'x' });
     expect(p).toEqual(expect.objectContaining({ ok: false, refusal: 'olumi_suggestion_not_adopted' }));
+    expect(w.sent).toEqual([]);
+  });
+
+  it('RED (CODEX overflow P2): an ADOPTED Olumi option the user took out → "put it back" → ONE card → ONE event (removed → feasible) → included again', async () => {
+    const w = world({ opt_ai: { proposed_by: 'olumi', option_status: 'removed', analysis_participation: 'retained_excluded' } });
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeOptionStatus!(ctxOf('Put the AI one back.'), { option_label: 'AI Reporting Module Sprint', status: 'feasible', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.'), { proposal_id: String(p.proposal_id) });
+    expect(w.sent).toHaveLength(1);
+    expect((w.sent[0] as { event: Record<string, unknown> }).event).toMatchObject({ option_node_id: 'opt_ai', expected_status: 'removed', status: 'feasible' });
+    expect(w.graph().nodes.find((n) => n.id === 'opt_ai')).toMatchObject({ analysis_participation: 'included', proposed_by: 'olumi' });
   });
 
   it('the tool is declared, a mutation tool, and routed', async () => {

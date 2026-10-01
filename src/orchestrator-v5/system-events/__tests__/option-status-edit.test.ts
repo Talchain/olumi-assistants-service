@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { OrchestratorTurnPayloadSchema, type SystemEventTurnPayload } from '@talchain/schemas/boundary';
 
-import { applyOptionStatusEdit, optionStatusHolds, PARTICIPATION_FOR_STATUS, type OptionStatusEditResult } from '../option-status-edit.js';
+import { applyOptionStatusEdit, isUnadoptedOlumiSuggestion, optionStatusHolds, PARTICIPATION_FOR_STATUS, type OptionStatusEditResult } from '../option-status-edit.js';
 import { userExcludedOptions } from '../../tools/handlers/user-option-status-filter.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { BASE_HASH_DIVERGED } from '../../graph-management/reason-codes.js';
@@ -100,9 +100,48 @@ describe('option_status_edit — the writer (F1 T6)', () => {
     expect(run(ev)).toMatchObject({ kind: 'refused', reason });
   });
 
-  it('REFUSED: `feasible` on an Olumi suggestion the user has not added — that is adoption, a different door', () => {
-    const g = persistedGraph({ opt_launch: { proposed_by: 'olumi', option_status: 'removed', analysis_participation: 'retained_excluded' } });
-    expect(run({ option_node_id: 'opt_launch', expected_status: 'removed', status: 'feasible' }, g)).toMatchObject({ kind: 'refused', reason: 'olumi_suggestion_not_adopted' });
+  // ⛔ CODEX overflow #2454 5934135126 P2: ADOPTION IS NOT CURRENT PARTICIPATION. Removing an ADOPTED Olumi option sets
+  // `retained_excluded`; reading participation alone then called it "never adopted" and refused putting it back, while the
+  // adoption door refuses it too (`excluded_option`, olumi-option-adoption.ts) — the user had no way back.
+  it('RED (CODEX P2): an ADOPTED Olumi option taken out can be PUT BACK — included again, still Olumi\'s, the other option untouched', () => {
+    const adopted = persistedGraph({ opt_launch: { proposed_by: 'olumi', analysis_participation: 'included' } });
+    const out = run({ option_node_id: 'opt_launch', expected_status: 'feasible', status: 'removed' }, adopted);
+    expect(out.kind, JSON.stringify(out)).toBe('mutated');
+    if (out.kind !== 'mutated') return;
+    expect(nodeOf(out.mutatedGraph, 'opt_launch')).toMatchObject({ option_status: 'removed', analysis_participation: 'retained_excluded', proposed_by: 'olumi' });
+    const back = run({ option_node_id: 'opt_launch', expected_status: 'removed', status: 'feasible' }, out.mutatedGraph as Record<string, unknown>);
+    expect(back.kind, JSON.stringify(back)).toBe('mutated');
+    if (back.kind !== 'mutated') return;
+    expect(optionStatusHolds(back.mutatedGraph, 'opt_launch', 'feasible')).toBe(true);
+    expect(nodeOf(back.mutatedGraph, 'opt_launch')).toMatchObject({ analysis_participation: 'included', proposed_by: 'olumi', label: 'Launch now' });
+    const other = nodeOf(back.mutatedGraph, 'opt_carry_on');
+    expect(other.option_status).toBeUndefined();
+    expect(other.analysis_participation).toBeUndefined();
+  });
+
+  it.each([
+    ['taking it out (removed)', { expected_status: 'feasible', status: 'removed' }],
+    ['marking it not feasible', { expected_status: 'feasible', status: 'infeasible' }],
+    ['"putting it in" (feasible) — that is adoption, a different door', { expected_status: 'feasible', status: 'feasible' }],
+  ])('REFUSED: %s on an Olumi suggestion the user has NOT added → nothing written', (_n, ev) => {
+    const g = persistedGraph({ opt_launch: { proposed_by: 'olumi' } });
+    const r = run({ option_node_id: 'opt_launch', ...ev }, g);
+    expect(r).toMatchObject({ kind: 'refused', reason: 'olumi_suggestion_not_adopted' });
+    expect(r.kind === 'mutated').toBe(false);
+  });
+
+  it('CONTROL: the user\'s OWN option (no proposed_by) with the same bytes is taken out', () => {
+    const g = persistedGraph();
+    expect(run({ option_node_id: 'opt_launch', expected_status: 'feasible', status: 'removed' }, g).kind).toBe('mutated');
+  });
+
+  it('isUnadoptedOlumiSuggestion: adoption is read from authorship + participation + the user\'s own exclusion, never participation alone', () => {
+    expect(isUnadoptedOlumiSuggestion({ proposed_by: 'olumi' })).toBe(true);
+    expect(isUnadoptedOlumiSuggestion({ proposed_by: 'olumi', analysis_participation: 'included' })).toBe(false);
+    expect(isUnadoptedOlumiSuggestion({ proposed_by: 'olumi', option_status: 'removed', analysis_participation: 'retained_excluded' })).toBe(false);
+    expect(isUnadoptedOlumiSuggestion({ proposed_by: 'olumi', option_status: 'infeasible', analysis_participation: 'retained_excluded' })).toBe(false);
+    expect(isUnadoptedOlumiSuggestion({ proposed_by: 'olumi', option_status: 'feasible' })).toBe(true);
+    expect(isUnadoptedOlumiSuggestion({ analysis_participation: 'retained_excluded' })).toBe(false);
   });
 
   it('PARTICIPATION_FOR_STATUS is the one map', () => {
