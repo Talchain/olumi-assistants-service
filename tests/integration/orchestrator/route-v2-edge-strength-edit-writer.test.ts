@@ -1872,11 +1872,15 @@ describe('M1 Accept receipt at the Agent card: whose figure is read off the stor
     expect(String(r.note)).toMatch(/^Recorded as the user’s own estimate\./);
   });
 
-  it('⭐ RED (Codex pre-review 2 P2): labels that read as the user or a code — the accept sentence is SHOWN whole, never dropped by the boundary', async () => {
-    persisted = graphWithLink({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' }, ['Size of the user base', 'cost_per_hire']);
-    const { r } = await approveOnTheCard(['Size of the user base', 'cost_per_hire']);
+  it.each([
+    [['Size of the user base', 'cost_per_hire'], 'You accepted Olumi\'s estimate for how much "Size of the user base" changes "cost_per_hire".'],
+    // Codex pre-review 3 P2: a label holding its own straight quotes is held aside whole (curly quotes).
+    [['Size of "the user" base', 'cost_per_hire'], 'You accepted Olumi\'s estimate for how much “Size of "the user" base” changes "cost_per_hire".'],
+  ] as const)('⭐ RED (Codex pre-reviews 2+3 P2): labels %j that read as the user or a code — the accept sentence is SHOWN whole', async (labels, sentence) => {
+    persisted = graphWithLink({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' }, labels);
+    const { r } = await approveOnTheCard(labels);
     expect(linkSizing(storedLink())).toBe('olumi_accepted');
-    expect(r.follow_up).toBe('You accepted Olumi\'s estimate for how much "Size of the user base" changes "cost_per_hire".');
+    expect(r.follow_up).toBe(sentence);
     expect(shown(r.follow_up)).toEqual({ text: r.follow_up, dropped: [] });
   });
 });

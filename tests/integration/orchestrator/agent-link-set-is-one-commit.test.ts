@@ -321,6 +321,22 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(edge('capacityOverhead').strength.mean, 'control: the other link in the set did land').toBe(0.3);
   });
 
+  it('CONTROL (M1 Accept receipt, Codex pre-review 3 P1): a model-proposed link the sizer never marked, kept in its band → stored unmarked → no authorship claim', async () => {
+    const e = edge('workloadHours') as Edge & Record<string, unknown>;
+    e.strength = { mean: 0.55, std: 0.3 };
+    e.provenance = { source: 'cee_hypothesis' } as never;
+    delete e.defaulted;
+    e.effect_direction = 'positive';
+    const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
+    const p = await caps.proposeLinkStrengths!(ctx, { links: setOf(['workloadHours']) as never, rationale: 'agreed' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    const { linkSizing } = await import('../../../src/cee/magnitude/link-sizing.js');
+    expect(linkSizing(edge('workloadHours'))).toBe('unmarked');
+    expect(out.follow_up).toBe('Recorded this link strength: "Delegable routine workload" \u2192 "Routine-work hours delegated" as strong.');
+  });
+
   it('CONTROL (#2473): a named band that MOVES the link still writes it — the user\'s band, its spread', async () => {
     sizedEstimate();
     const words = 'Make Delegable routine workload very strong';

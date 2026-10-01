@@ -203,7 +203,7 @@ import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLe
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import type { NotSavedValue } from '../write-outcome.js';
+import { quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -2631,7 +2631,6 @@ export function createAgentCapabilities(
         detail: 'These links were sent as one change, but reading the model back did not show all of them as approved. Say exactly that; never say they were recorded or not recorded.' };
     }
     proposals.markApplied(parent.proposal_id, receipts);
-    const olumis = sent.filter((l) => l.author === 'model_proposed').length;
     /**
      * ⭐ M1 ACCEPT RECEIPT (DL 5942097719; Codex pre-review 2 P1): whose figure each link holds is read off the STORED link
      * after the write (`linkSizing`), never off the card. Every link stored `olumi_accepted` says RC's accept sentence (the
@@ -2640,16 +2639,18 @@ export function createAgentCapabilities(
      * "Size of the user base" or `cost_per_hire` would drop the sentence.
      */
     const storedSizing = (l: { from: string; to: string }) => linkSizing(check!.edges.find((x) => x.from === l.from && x.to === l.to));
-    const quotedLabel = (id: string): string => `"${labelOf(id)}"`;
+    const quotedLabel = (id: string): string => quoteLabelForUser(labelOf(id));
     const parts = sent.map((l) => `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
     const accepted = sent.filter((l) => storedSizing(l) === 'olumi_accepted').map((l) => acceptedOlumiEstimateSentence(quotedLabel(l.from), quotedLabel(l.to)));
+    // Olumi's estimates as STORED (Codex pre-review 3 P1): a model-proposed link the sizer never marked (`unmarked`) is no one's.
+    const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate', 'placeholder'].includes(storedSizing(l))).length;
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
       follow_up: `Recorded ${sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
         + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
-        + (olumis > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
+        + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
   };
@@ -4561,7 +4562,7 @@ export function createAgentCapabilities(
           ? `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`
           : typeof fromLabel === 'string' && typeof toLabel === 'string'
             // Quoted: shown through `withoutAgentDirections`, where an unquoted label can drop the sentence (Codex P2).
-            ? formatEdgeStrengthConfirmed({ fromLabel: `"${fromLabel}"`, toLabel: `"${toLabel}"`, sizing })
+            ? formatEdgeStrengthConfirmed({ fromLabel: quoteLabelForUser(fromLabel), toLabel: quoteLabelForUser(toLabel), sizing })
             : 'Recorded your review of this link; its strength stays as it was.';
         const whoseNote = sizing === 'user'
           ? 'Recorded as the user’s own estimate.'
