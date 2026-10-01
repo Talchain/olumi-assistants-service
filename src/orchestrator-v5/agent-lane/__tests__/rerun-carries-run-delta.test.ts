@@ -1,3 +1,4 @@
+import { explainRun, explanationContext } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ A RE-RUN ON THE AGENT ROUTE SAYS WHAT CHANGED SINCE THE LAST RUN (DL #70 5849261529: "emit `run_delta` on a
  * re-run turn as the conventional route does. The UI consumer is waiting."). The Agent's Run — the typed chip and its
@@ -66,11 +67,9 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       modelCalls += 1;
-      // What the one interpreter call (tool_choice 'none') is given: the run's tool output, as the model reads it.
+      // The separate interpreter reads the selected Run context, not the earlier tool output.
       if (body['tool_choice'] === 'none') {
-        // The LAST tool output is this turn's run; earlier ones are the scenario's history.
-        const out = [...((body['input'] ?? []) as { type?: string; output?: string }[])].reverse().find((i) => i.type === 'function_call_output');
-        interpreterSaw = out?.output !== undefined ? JSON.parse(out.output) as Record<string, unknown> : undefined;
+        interpreterSaw = explanationContext(body['input']);
       }
       if (body['tool_choice'] !== 'none' && modelCalls === 1) {
         return new Response(JSON.stringify({ output: [{ type: 'function_call', name: 'run_analysis', call_id: 'c1', arguments: JSON.stringify({ reason: 'asked' }) }] }), { status: 200 });
@@ -101,6 +100,7 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
       analysis_ready: { status: 'ready', options: [], blockers: [], goal_node_id: 'g' },
       analysis_state: readback === 'newer_run' ? { ...STATE, run_state: { kind: 'complete_current', computed_at: '2026-09-26T20:41:00.000Z' } } : STATE,
       analysis_result: readback === 'other_graph' ? { ...RESULT, computed_against_hash: 'fedcba9876543210' } : RESULT,
+      current_read: runTurn === 'delta' && readback === 'same' ? { run_delta: DELTA } : {},
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
@@ -130,22 +130,26 @@ describe('a re-run on the Agent route carries the run turn\'s run_delta, bound t
   it('RED (served 263dbd5, 053159Z/15): the interpreter is GIVEN the same run_delta the user is shown — no "no delta supplied"', async () => {
     const b = (await pressRun()).json() as Body;
     expect(b.run_delta).toEqual(DELTA);
+    await explainRun(app, SCENARIO, { statusCode: 200, json: () => b });
     const cs = interpreterSaw?.canonical_state as Record<string, unknown> | undefined;
     expect(cs?.run_delta, 'the one interpreter call reads the delta the wire carries').toEqual(DELTA);
   });
 
-  it('RED: a first run → the interpreter is given the producer\'s reason, not a delta', async () => {
+  it('a first Run carries its reason; the separate explanation never invents absent canonical metadata', async () => {
     runTurn = 'first_run';
-    await pressRun();
+    const first = await pressRun();
+    expect(first.json().analysis_ready.run_delta_absence_reason).toBe('insufficient_runs');
+    await explainRun(app, SCENARIO, first);
     const cs = interpreterSaw?.canonical_state as Record<string, unknown> | undefined;
     expect(cs?.run_delta).toBeUndefined();
-    expect(cs?.run_delta_absence_reason).toBe('insufficient_runs');
+    expect(cs?.run_delta_absence_reason, 'the canonical read did not publish a reason; narration must not invent one').toBeUndefined();
   });
 
   it('CONTRAST (the same guard as the wire): the readback shows a NEWER run → the interpreter is given neither', async () => {
     readback = 'newer_run';
     const b = (await pressRun()).json() as Body;
     expect('run_delta' in b).toBe(false);
+    await explainRun(app, SCENARIO, { statusCode: 200, json: () => b });
     const cs = interpreterSaw?.canonical_state as Record<string, unknown> | undefined;
     expect(cs, 'PRECONDITION: the interpreter call happened and read canonical state').toBeDefined();
     expect(cs?.run_delta).toBeUndefined();
