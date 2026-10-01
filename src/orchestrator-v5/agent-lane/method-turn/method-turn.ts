@@ -22,6 +22,8 @@ import type { SuggestedAction } from '../../compose/types.js';
 import { deriveAuthoritativeStage } from '../../context/derive-stage.js';
 import type { AnalysisFreshness } from '../../context/freshness.js';
 import { extractGraphOptionIds } from '../../context/option-identity.js';
+import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
+import type { InfluenceBand } from '../../format/influence-bands.js';
 import { checkMethodTurn, methodPlanOf, selectGuidance, stateKeyHash } from '../guidance/index.js';
 import type { GuidanceSignals as SelectorSignals, GuidanceState, MethodInputs, PolicyId } from '../guidance/index.js';
 import type { GuidanceRecord } from '../guidance/types.js';
@@ -308,4 +310,70 @@ export function settleMethodTurn(turn: RunMethodTurn, draft: string): SettledMet
   const indices = check.targets.map((id) => items.findIndex((item) => item.id === id));
   if (indices.length === 0 || indices.some((i) => i < 0)) return fallback(['PM-GROUNDED']);
   return { reply: draft, passed: true, failed: [], target: items[Math.min(...indices)] };
+}
+
+/** The ONE change card's call through the existing door: the tool and the exact arguments its schema takes. */
+export type CardCall =
+  | {
+      readonly tool: 'propose_link_strengths';
+      readonly args: {
+        readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength: InfluenceBand }];
+        readonly rationale: string;
+      };
+    }
+  | {
+      readonly tool: 'propose_assumptions';
+      readonly args: {
+        readonly assumptions: readonly [{
+          readonly factor_label: string; readonly value: number; readonly unit: string; readonly basis: string; readonly keep: true;
+        }];
+      };
+    };
+
+/**
+ * The ONE change card the method turn ends in (RC `action_target`), as the existing door's own call. It authors no
+ * figure: a link is offered at the band the writer itself reads as current (`edgeBandFromMagnitude(|strength.mean|)`,
+ * as `propose_link_strengths` computes `currentBand`, and as RC's S1 helper #2477 does), with no `from_words`, so it is
+ * recorded as Olumi's estimate that the user accepts or edits; a factor is offered as Olumi's STORED figure to keep
+ * (`keep`: the writer re-reads the stored figure and refuses anything not Olumi's own). Labels are the graph's, which
+ * the writer resolves.
+ *
+ * Null = no card, and the turn offers 'Talk it through' only: a risk or a limit (its card would need a label drawn from
+ * the story, i.e. model text: not in v1), or a target the graph no longer holds as it was read.
+ */
+export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: string): CardCall | null {
+  const g = rec(graph);
+  const nodes = Array.isArray(g?.nodes) ? g.nodes.map(rec).filter((n): n is Rec => n !== undefined) : [];
+  const edges = Array.isArray(g?.edges) ? g.edges.map(rec).filter((e): e is Rec => e !== undefined) : [];
+  const labelOf = (id: unknown): string | null => {
+    const label = nodes.find((n) => n.id === id)?.label;
+    return typeof label === 'string' && label !== '' ? label : null;
+  };
+  if (target.kind === 'link') {
+    const edge = edges.find((e) => `${String(e.from)}->${String(e.to)}` === target.id);
+    const mean = rec(edge?.strength)?.mean;
+    const from = labelOf(edge?.from);
+    const to = labelOf(edge?.to);
+    if (typeof mean !== 'number' || !Number.isFinite(mean) || from === null || to === null) return null;
+    return {
+      tool: 'propose_link_strengths',
+      args: { links: [{ from_label: from, to_label: to, strength: edgeBandFromMagnitude(Math.abs(mean)) }], rationale },
+    };
+  }
+  if (target.kind === 'factor') {
+    const node = nodes.find((n) => n.id === target.id);
+    const os = rec(node?.observed_state);
+    const label = labelOf(target.id);
+    if (label === null || typeof os?.value !== 'number' || !Number.isFinite(os.value)) return null;
+    return {
+      tool: 'propose_assumptions',
+      args: {
+        assumptions: [{
+          factor_label: label, value: os.value, unit: typeof os.unit === 'string' ? os.unit : '',
+          basis: 'Olumi\u2019s current estimate', keep: true,
+        }],
+      },
+    };
+  }
+  return null;
 }

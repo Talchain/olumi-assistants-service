@@ -11,12 +11,15 @@ import { POLICY } from '../../guidance/policy.js';
 import { methodPlanOf, type GuidanceSignals as SelectorSignals } from '../../guidance/index.js';
 import type { SuppliedItem } from '../../science/method-science-context.js';
 import type { GuidanceSignalInputs, GuidanceSignals as TurnSignals } from '../../turn-context/guidance-signals.js';
+import { AGENT_TOOLS } from '../../runtime/agent-tools.js';
+import { edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
 import {
   FALLBACK_TEMPLATE,
   PLAN_PICK_PREFIX,
   PREMORTEM_PRESS_ID,
   TALK_IT_THROUGH_CHIP,
   canonicalStageOf,
+  cardCallFor,
   methodDirective,
   methodPressOf,
   methodTurnFromSignals,
@@ -260,5 +263,82 @@ describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared
       expect(out.passed).toBe(false);
       expect(out.reply.startsWith('Imagine ')).toBe(true);
     }
+  });
+});
+
+describe('the ONE change card, through the existing door (RC action_target; HARNESS 5937421801)', () => {
+  const D3 = served('A-Q-D3-BUILD');
+  const run = () => {
+    const out = turnFor(D3, planPickChipId('switch_to_gcp'));
+    if (out?.kind !== 'run') throw new Error('expected a run');
+    return out;
+  };
+  const toolSchema = (name: string) => (AGENT_TOOLS.find((t) => (t as { name?: string }).name === name) as unknown as { parameters: any }).parameters;
+  const nodeLabel = (id: unknown) => (D3.body.draft_graph.nodes as { id: string; label: string }[]).find((n) => n.id === id)!.label;
+
+  it('ROW C1 SERVED D3: every link item becomes ONE propose_link_strengths link at the band the WRITER reads as current, labels by the graph', () => {
+    const links = run().context.supplied_items.filter((i) => i.kind === 'link');
+    expect(links.length).toBeGreaterThan(0);
+    const bandEnum = toolSchema('propose_link_strengths').properties.links.items.properties.strength.enum as string[];
+    for (const item of links) {
+      const edge = (D3.body.draft_graph.edges as { from: string; to: string; strength: { mean: number } }[]).find((e) => `${e.from}->${e.to}` === item.id)!;
+      const card = cardCallFor(item, D3.body.draft_graph, 'Run a pre-mortem');
+      expect(card?.tool).toBe('propose_link_strengths');
+      if (card?.tool !== 'propose_link_strengths') return;
+      expect(card.args.links).toEqual([{ from_label: nodeLabel(edge.from), to_label: nodeLabel(edge.to), strength: edgeBandFromMagnitude(Math.abs(edge.strength.mean)) }]);
+      expect([nodeLabel(edge.from), nodeLabel(edge.to)]).toEqual(item.labels);
+      expect(bandEnum).toContain(card.args.links[0].strength);
+      expect(Object.keys(card.args.links[0])).not.toContain('from_words');
+      expect(card.args.rationale).toBe('Run a pre-mortem');
+    }
+  });
+
+  it('ROW C2 PAIR (served sign): a NEGATIVE link is offered at the band of its size, never of its sign', () => {
+    const item = run().context.supplied_items.find((i) => i.id === 'monthly_cloud_savings->monthly_spend')!;
+    const card = cardCallFor(item, D3.body.draft_graph, 'x');
+    expect(card?.tool === 'propose_link_strengths' && card.args.links[0].strength).toBe('moderate');
+    expect(edgeBandFromMagnitude(-0.3555555555555555)).toBe('weak'); // the sign would have said 'weak'
+  });
+
+  it('ROW C3 SERVED D1 + D3: each factor item becomes ONE propose_assumptions keep of Olumi\'s STORED `value` (never `raw_value`), valid against the tool schema', () => {
+    const required = toolSchema('propose_assumptions').properties.assumptions.items.required as string[];
+    let contrast = 0;
+    for (const [c, pick] of [[D3, 'switch_to_gcp'], [served('A-Q-D1-BUILD'), 'ai_reporting_module_sprint']] as const) {
+      const out = turnFor(c, planPickChipId(pick));
+      if (out?.kind !== 'run') throw new Error('expected a run');
+      for (const item of out.context.supplied_items.filter((i) => i.kind === 'factor')) {
+        const node = (c.body.draft_graph.nodes as { id: string; label: string; observed_state: { value: number; unit: string; raw_value?: number } }[]).find((n) => n.id === item.id)!;
+        const card = cardCallFor(item, c.body.draft_graph, 'x');
+        expect(card, item.id).toEqual({ tool: 'propose_assumptions', args: { assumptions: [{
+          factor_label: node.label, value: node.observed_state.value, unit: node.observed_state.unit, basis: 'Olumi\u2019s current estimate', keep: true }] } });
+        if (card?.tool === 'propose_assumptions') for (const key of required) expect(card.args.assumptions[0]).toHaveProperty(key);
+        if (node.observed_state.raw_value !== undefined && node.observed_state.raw_value !== node.observed_state.value) contrast += 1;
+      }
+    }
+    expect(contrast).toBeGreaterThan(0); // D1's signing likelihood: value 0.1, raw_value 10
+  });
+
+  it('ROW C4 SERVED D2: a risk and a limit get NO card in v1 (their label would be model text); the turn offers Talk it through only', () => {
+    const out = turnFor(served('A-D2-RUN2-WIDEN-P1'), planPickChipId('angel_investor_outreach'));
+    if (out?.kind !== 'run') throw new Error('expected a run');
+    const kinds = out.context.supplied_items.map((i) => i.kind);
+    expect(kinds).toContain('risk');
+    expect(kinds).toContain('limit');
+    for (const item of out.context.supplied_items.filter((i) => i.kind === 'risk' || i.kind === 'limit')) {
+      expect(cardCallFor(item, served('A-D2-RUN2-WIDEN-P1').body.draft_graph, 'x'), item.id).toBeNull();
+    }
+  });
+
+  it('ROW C5 FAIL-CLOSED PAIR: a link the graph no longer holds, or a factor with no stored figure, gets no card', () => {
+    const items = run().context.supplied_items;
+    const link = items.find((i) => i.kind === 'link')!;
+    const factor = items.find((i) => i.kind === 'factor')!;
+    const g = D3.body.draft_graph;
+    expect(cardCallFor(link, g, 'x')).not.toBeNull();
+    expect(cardCallFor(link, { ...g, edges: g.edges.filter((e: { from: string; to: string }) => `${e.from}->${e.to}` !== link.id) }, 'x')).toBeNull();
+    expect(cardCallFor(factor, g, 'x')).not.toBeNull();
+    const blank = { ...g, nodes: g.nodes.map((n: { id: string }) => (n.id === factor.id ? { ...n, observed_state: { unit: 'person-weeks' } } : n)) };
+    expect(cardCallFor(factor, blank, 'x')).toBeNull();
+    expect(cardCallFor(link, null, 'x')).toBeNull();
   });
 });
