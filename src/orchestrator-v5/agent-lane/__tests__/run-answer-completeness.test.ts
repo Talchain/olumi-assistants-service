@@ -1,3 +1,4 @@
+import { explainRun, explanationContext } from './fixtures/run-explanation-follow-up.js';
 /**
  * AI EXPERIENCE / CHATGPT: bounded typed-Run versus free-text-Run regression.
  *
@@ -38,12 +39,13 @@ const GRAPH = {
   edges: [{ from: 'f', to: 'g' }],
 };
 const STATE = {
-  run_state: { kind: 'complete_current' },
+  run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' },
   leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' },
 };
 const WHY = 'The churn limit was not evaluated because its baseline was not supplied.';
 const FINDING = 'In the current model, the result turns on Capacity.';
 const COMPLETE_TEXT = `${FINDING} ${WHY}`;
+const RESULT = { type: 'analysis_result', computed_against_hash: '0123456789abcdef', summary: WHY, data: { marker: 'same-canonical-result' } };
 
 function runOutput(body: Body): Body | undefined {
   const input = Array.isArray(body.input) ? body.input as Body[] : [];
@@ -120,7 +122,7 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
       };
     });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: GRAPH, graph_hash: 'h1', analysis_state: STATE,
+      graph: GRAPH, graph_hash: 'h1', analysis_state: STATE, analysis_result: RESULT,
     }));
     await app.register(route.agentV1TurnRoute);
     await app.ready();
@@ -143,9 +145,10 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
         ...(entry === 'typed_run' ? { source: 'chip_click', chip: { action_type: 'run_analysis' } } : {}),
       },
     });
-    const body = response.json() as Body;
+    const final = entry === 'typed_run' ? await explainRun(app, scenarioId, response) : response;
+    const body = final.json() as Body;
     // Keep complete capture available in assertion failures. Expected rules are never model input.
-    return { response, body, capture: { modelBodies, providerReplies } };
+    return { response: final, body, capture: { modelBodies, providerReplies } };
   }
 
   for (const entry of ['typed_run', 'free_text_run'] as const) {
@@ -154,11 +157,13 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
       expect(response.statusCode, JSON.stringify(capture)).toBe(200);
       expect(runs).toBe(1);
       // The model receives the same run-domain result and correct supplied reason in both paths.
-      const answering = modelBodies.find((b) => runOutput(b) !== undefined);
+      const answering = modelBodies.find((b) => entry === 'typed_run' ? explanationContext(b.input) !== undefined : runOutput(b) !== undefined);
       expect(answering).toBeDefined();
-      const seen = runOutput(answering!)!;
-      expect(seen.ran).toBe(true);
-      expect(seen.what_is_missing).toBe(WHY);
+      const seen = entry === 'typed_run' ? explanationContext(answering!.input)! : runOutput(answering!)!;
+      if (entry === 'free_text_run') {
+        expect(seen.ran).toBe(true);
+        expect(seen.what_is_missing).toBe(WHY);
+      } else expect(JSON.stringify(seen.result)).toContain(WHY);
       expect(JSON.stringify(seen.result)).toContain('same-canonical-result');
       expect(seen.claim_permissions).toBeDefined();
       expect(body.assistant_text).toContain('Capacity');
@@ -187,7 +192,7 @@ describe('AI Experience: analysis explanation completion, both Run entry points'
         // response, preserving the successful run. This is not a new public result schema.
         expect(body.assistant_text, JSON.stringify(capture)).toBe(fallback);
         const toolCalls = (body._agent as { tool_calls?: { name: string }[] } | undefined)?.tool_calls ?? [];
-        expect(toolCalls.map((c) => c.name)).toEqual(['run_analysis']);
+        expect(toolCalls.map((c) => c.name)).toEqual(entry === 'typed_run' ? [] : ['run_analysis']);
       });
     }
   }

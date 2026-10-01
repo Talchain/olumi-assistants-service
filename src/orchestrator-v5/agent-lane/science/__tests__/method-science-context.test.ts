@@ -303,6 +303,28 @@ describe('a user\'s pick names the plan only while it is one of their OWN option
   });
 });
 
+describe('a user\'s pick names the plan only while it is one of their OWN options', () => {
+  it('ROW 15 PAIR (D2 served): the status quo and a taken-out option never become the plan; the user\'s own option does', () => {
+    // D2 run 2: `continue_current_outreach` is the status quo; `angel_outreach_pilot` was taken out of the comparison.
+    expect(D2['model.status_quo_option_id']).toBe('continue_current_outreach');
+    expect(D2['model.non_sq_option_ids']).toEqual(['angel_investor_outreach']);
+    expect(D2['model.option_labels']['angel_outreach_pilot']).toBeTypeOf('string');
+    const pick = (id: string) => methodScienceContext({
+      method: 'pre_mortem', canonical_stage: 'decide', signals: D2, user_selected_option_id: id,
+      graph: { goal_constraints: FIXTURE.goal_constraints['d2-run2'] },
+    });
+    for (const id of ['continue_current_outreach', 'angel_outreach_pilot', 'not_an_option']) {
+      const ctx = pick(id);
+      expect(ctx.plan, id).toBeNull();
+      expect(ctx.supplied_items, id).toEqual([]);
+    }
+    // CONTROL: the user's own option is named, with basis `user_selected`.
+    expect(pick('angel_investor_outreach').plan).toEqual({
+      option_id: 'angel_investor_outreach', label: D2['model.option_labels']['angel_investor_outreach'], basis: 'user_selected',
+    });
+  });
+});
+
 describe('the leader is read only behind its licence', () => {
   /** D3's signals with `run.leader_option_id` behind a getter that counts reads. */
   function probed(licensed: boolean): { signals: MethodScienceSignals; reads: () => number } {

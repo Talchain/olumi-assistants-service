@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { onceMoreOnTransportFailure } from '../runtime/transport-retry.js';
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 
 const store = vi.hoisted(() => ({
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -20,7 +21,9 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 });
 
 const GRAPH = { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] };
-const STATE = { run_state: { kind: 'complete_current' }, leader_claim: { permitted: true } };
+// A current Run with its identity, so the result-first follow-up (#2455) is offered for it.
+const STATE = { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: true } };
+const BLOCK = { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } };
 
 describe('the Run interpreting call has a deadline', () => {
   let app: FastifyInstance;
@@ -44,9 +47,9 @@ describe('the Run interpreting call has a deadline', () => {
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
       response_version: 2, assistant_text: 'Done.', suggested_actions: [], insights: [], graph_hash: 'h1', analysis_state: STATE,
-      blocks: [{ type: 'analysis_result', data: { marker: 'synthetic' } }], analysis_ready: { status: 'ready', options: [], blockers: [] },
+      blocks: [BLOCK], analysis_ready: { status: 'ready', options: [], blockers: [] },
     }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: 'h1', analysis_state: STATE }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: 'h1', analysis_state: STATE, analysis_result: BLOCK }));
     await app.register(route.agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -58,18 +61,24 @@ describe('the Run interpreting call has a deadline', () => {
   });
 
   it('RED: a provider that never answers gets the honest fallback at the deadline — one call, no retry, the Run stands', async () => {
-    const started = Date.now();
-    const res = await app.inject({
+    const scenarioId = randomUUID();
+    const first = await app.inject({
       method: 'POST', url: '/agent/v1/turn',
-      payload: { kind: 'message', scenario_id: randomUUID(), message: 'Run the analysis please', source: 'chip_click', chip: { action_type: 'run_analysis' } },
+      payload: { kind: 'message', scenario_id: scenarioId, message: 'Run the analysis please', source: 'chip_click', chip: { action_type: 'run_analysis' } },
     });
+    // Result first (#2455): the Run stands with no model call; the interpreting call is the follow-up's.
+    expect(interpretCalls, 'request 1 makes no model call').toBe(0);
+    expect((first.json() as { _agent?: { tool_calls?: { name: string }[] } })._agent?.tool_calls?.map((c) => c.name)).toEqual(['run_analysis']);
+    const started = Date.now();
+    const res = await explainRun(app, scenarioId, first);
     const ms = Date.now() - started;
     expect(res.statusCode, res.body).toBe(200);
     expect(interpretCalls, 'the deadline is not retried').toBe(1);
     expect(ms).toBeLessThan(10_000);
-    const body = res.json() as { assistant_text?: string; _agent?: { tool_calls?: { name: string }[] } };
+    const body = res.json() as { assistant_text?: string; narration?: { status?: string }; _agent?: { tool_calls?: unknown[] } };
     expect(body.assistant_text).toMatch(/couldn.t explain it/i);
-    expect(body._agent?.tool_calls?.map((c) => c.name)).toEqual(['run_analysis']);
+    expect(body.narration?.status).toBe('unavailable');
+    expect(body._agent?.tool_calls).toEqual([]);
   }, 30_000);
 });
 
