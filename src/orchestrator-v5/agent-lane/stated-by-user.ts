@@ -541,7 +541,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
      * ⭐ STRICT: A RIVAL CLAIMS A SHARED WORD ONLY BY ITS OWN QUALIFIER (R3 #75 5924350620; MG A4u 5924448020). A word the
      * target shares with another label names neither by itself ("deals" in "Investment-firm deals closed" and "Angel deals
      * closed"; "secured" in "Funding secured" and "Angel funding secured"), so it was passed over, and on a draft with
-     * sibling labels nothing was left to bind: served 0258Z refused Paul's "£1-2 million" for the investment-firm deals,
+     * sibling labels nothing was left to bind: served 0258Z refused Paul's written deal range for the investment-firm deals,
      * and 0341Z refused his "secured £0 so far" for the goal. The clause decides, rival by rival: the target holds the word
      * when its OWN words (those that rival lacks) are written in the clause and the rival's own are not ("investment
      * firms that do deals"); when neither's own is written, the more GENERAL label holds it (the one with no own words:
