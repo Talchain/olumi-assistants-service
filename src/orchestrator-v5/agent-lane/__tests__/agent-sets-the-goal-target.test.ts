@@ -226,14 +226,21 @@ describe('the Agent sets the goal\'s success target the user stated, through the
     expect(p.refusal).toBe('target_not_stated');
   });
 
-  it('RED: the direction must be the user\'s own, said THIS turn — absent, contradictory, negated, asked, or different from the Agent\'s → refused, nothing prepared', async () => {
+  it('⭐ DL 380e54 (#2447): words SILENT on the direction → the Agent\'s reading is offered as a DECISION (no refusal)', async () => {
+    for (const [turn, earlier] of [['MRR should be £60k by December.', undefined], ['Yes.', SAID]] as const) {
+      const w = world(graphWith());
+      const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf(turn, earlier !== undefined ? [earlier] : []), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+      expect(p, turn).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen: 'at_least', alternative: 'at_most' } }));
+      expect(w.sent).toEqual([]);
+    }
+  });
+
+  it('RED: the direction the user\'s words DO hold must be the Agent\'s — contradictory, negated, asked, or both ways → refused, nothing prepared', async () => {
     const cases: [string, 'at_least' | 'at_most', string?][] = [
-      ['MRR should be £60k by December.', 'at_least'],
       ['We need at least £60k MRR, and keep it under £60k of spend.', 'at_least'],
       ['It is not at least £60k we need.', 'at_least'],
       ['Is at least £60k realistic?', 'at_least'],
       ['We need at most £60k MRR.', 'at_least'],
-      ['Yes.', 'at_least', SAID],
     ];
     for (const [turn, type, earlier] of cases) {
       const w = world(graphWith());

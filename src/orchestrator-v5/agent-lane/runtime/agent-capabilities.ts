@@ -176,7 +176,7 @@ import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, derivedFigureTheUserWrote, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, comparatorWordsIn, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -3210,23 +3210,46 @@ export function createAgentCapabilities(
       const targetNotStated: ToolResult = { ok: false, mutated: false, refusal: 'target_not_stated',
         detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
           + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
-      // ⛔ The figure is recorded as the user's target, so it must be one the user wrote — or one they DERIVED from their own
-      // figure in this turn's words ("double that": F5 D1, DL 5930770727), bound to that base by exact arithmetic.
-      const derived = figureTheUserWrote(value, unit, ctx.user_text)
-        ? null : derivedFigureTheUserWrote(value, unit, ctx.user_text, ctx.user_turn_text);
-      if (derived === null && !figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
-      // ⛔ And so is which way it binds: said, affirmed, in this turn's own typed words.
+      /**
+       * ⛔ The figure is recorded as the user's target, so it must be one the user wrote — or, TYPED by the Agent, one
+       * derived from a figure they wrote (`derived_from {base, multiplier}`: "double that" after "£100,000"; F5 D1, DL
+       * 380e54 on #2447). Code checks the base with the same door as any figure (and, below, its scope), and the value is
+       * exactly base × multiplier. No word list reads the user's wording (DL: a free-text door is banned).
+       */
+      const derivedArg = (args as { derived_from?: { base?: unknown; multiplier?: unknown } }).derived_from;
+      const derived = derivedArg === undefined || derivedArg === null ? null
+        : typeof derivedArg.base === 'number' && Number.isFinite(derivedArg.base) && typeof derivedArg.multiplier === 'number'
+          && Number.isFinite(derivedArg.multiplier) && derivedArg.multiplier > 0 && derivedArg.multiplier !== 1
+          ? { base: derivedArg.base, multiplier: derivedArg.multiplier } : undefined;
+      if (derived === undefined) {
+        return { ok: false, mutated: false, refusal: 'unreadable_derivation',
+          detail: 'derived_from needs the figure the user gave (base) and the multiple they asked for (multiplier, e.g. 2 for "double"). Nothing was prepared.' };
+      }
+      if (derived !== null) {
+        if (Math.abs(derived.base * derived.multiplier - value) > Math.abs(value) * Number.EPSILON * 4) {
+          return { ok: false, mutated: false, refusal: 'derivation_mismatch',
+            detail: `${figure} is not ${derived.multiplier} × ${targetFigure(derived.base, unit)}, so nothing was prepared. Recompute it, or ask the user.` };
+        }
+        if (!figureTheUserWrote(derived.base, unit, ctx.user_text)) return { ...targetNotStated,
+          detail: `${targetFigure(derived.base, unit)} is not a figure the user wrote, so nothing was prepared: a target derived from it would be recorded as theirs. Ask them for the figure.` };
+      } else if (!figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
+      /**
+       * ⭐ WHICH WAY IT BINDS (DL 380e54 on #2447, the product ruling 5930770727 kept): the Agent's typed `constraint_type` is
+       * its READING. Only the user's own literal comparator words can overrule it — when they CONTRADICT it, nothing is
+       * prepared (as before). When they are SILENT ("double that", "our target is £200k"), the card is prepared with the
+       * Agent's reading as the primary decision button and the other direction as the alternative; the user's click is
+       * the authorship. One path for neutral wording and an increase; no word list over the user's wording.
+       */
       const said = comparatorTheUserWrote(ctx.user_turn_text);
-      if (said !== type) {
+      const silent = said === null && !comparatorWordsIn(ctx.user_turn_text);
+      if (said !== type && !silent) {
         return { ok: false, mutated: false, refusal: 'direction_not_stated',
           detail: (said === null
-            ? 'The user has not said in this message, in their own words, whether the goal must be at least or at most this figure (or they said both, asked, or denied it), so nothing was prepared. '
+            ? 'The user\u2019s words in this message are unclear on whether the goal must be at least or at most this figure (they asked, denied it, or said both), so nothing was prepared. '
             : `The user said ${DIRECTION_WORDS[said]}, not ${DIRECTION_WORDS[type]}, so nothing was prepared. `)
-            + 'Ask them whether the goal must be at least or at most the figure, and never choose it for them.',
-          // ⭐ (c) DL 5930770727: neutral wording is asked with the At least / At most DECISION BUTTONS, never a typed word —
-          // this typed ask is what the surface renders them from (CANVAS grammar).
-          needs: 'direction', direction_options: ['at_least', 'at_most'] };
+            + 'Ask them whether the goal must be at least or at most the figure, and never choose it for them.' };
       }
+      const directionReadByAgent = silent;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       // Exactly ONE goal: the event is id-addressed, and choosing between two goals would be a guess.
@@ -3323,7 +3346,7 @@ export function createAgentCapabilities(
         validation: { admitted: true, loss_count: 0, refusals: [] },
         // AIQ's words for the one card (5913952911): both figures, the user's own.
         public_label: today === undefined
-          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}${derived === null ? '' : ` (${derived.word} your ${targetFigure(derived.base, unit)})`}`
+          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}${derived === null ? '' : ` (${derived.multiplier} × your ${targetFigure(derived.base, unit)})`}`
           : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`,
       });
       proposals.put(proposal);
@@ -3339,6 +3362,9 @@ export function createAgentCapabilities(
           ...(today !== undefined ? { today } : {}),
         },
         ...(levelLeftOut !== undefined ? { current_level_left_out: levelLeftOut } : {}),
+        // ⭐ DL 380e54 (#2447): the user's words were silent on the direction, so the card is a DECISION — the Agent's
+        // reading is the primary button, the other the alternative (`approval-chips.ts`); the user's click is the authorship.
+        ...(directionReadByAgent ? { direction_choice: { chosen: type, alternative: type === 'at_least' ? 'at_most' : 'at_least' } } : {}),
         note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'

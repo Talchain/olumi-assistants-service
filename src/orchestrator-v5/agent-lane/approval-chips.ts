@@ -189,8 +189,35 @@ export function approvalChipsFor(
   // "Set … to"; the card with the figure rides in `detail`.
   const keep = keepCardFor(tool, labelSourceFor?.(proposalId));
   if (keep !== undefined) return [{ id: approvalChipIdFor(proposalId), ...keep }, AMEND_CHIP];
+  // ⭐ A GOAL TARGET WHOSE DIRECTION IS THE AGENT'S READING IS A DECISION (DL 380e54 on #2447; ruling 5930770727 (c)):
+  // the user's words said neither way, so the reading is the primary button and the other direction the alternative —
+  // never a typed magic word. The primary approves the stored card; the alternative asks for the other direction.
+  const choice = directionChoiceFor(tool, labelSourceFor?.(proposalId));
+  if (choice !== undefined) {
+    const card = labelSourceFor?.(proposalId)?.proposal?.public_label;
+    return [
+      { id: approvalChipIdFor(proposalId), label: DIRECTION_CHOICE_LABEL[choice.chosen], message: approve.message, ...(card !== undefined ? { detail: card } : {}) },
+      { id: 'agent-direction-alternative', label: DIRECTION_CHOICE_LABEL_INSTEAD[choice.alternative], message: DIRECTION_CHOICE_MESSAGE[choice.alternative] },
+      AMEND_CHIP,
+    ];
+  }
   const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId));
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
+}
+
+type Direction = 'at_least' | 'at_most';
+const DIRECTION_CHOICE_LABEL: Readonly<Record<Direction, string>> = { at_least: 'Yes, at least', at_most: 'Yes, at most' };
+const DIRECTION_CHOICE_LABEL_INSTEAD: Readonly<Record<Direction, string>> = { at_least: 'At least instead', at_most: 'At most instead' };
+const DIRECTION_CHOICE_MESSAGE: Readonly<Record<Direction, string>> = {
+  at_least: 'No, the goal should be at least that figure.',
+  at_most: 'No, the goal should be at most that figure.',
+};
+/** The proposer's own typed choice for a goal target the Agent read the direction of (`proposeGoalTarget`). */
+function directionChoiceFor(tool: string, source: ApprovalLabelSource | undefined): { chosen: Direction; alternative: Direction } | undefined {
+  if (tool !== 'propose_goal_target') return undefined;
+  const c = (source?.result as { direction_choice?: { chosen?: unknown; alternative?: unknown } } | undefined)?.direction_choice;
+  const ok = (d: unknown): d is Direction => d === 'at_least' || d === 'at_most';
+  return c !== undefined && ok(c.chosen) && ok(c.alternative) && c.chosen !== c.alternative ? { chosen: c.chosen, alternative: c.alternative } : undefined;
 }
 
 /** The stored basis of a keep proposal (`proposeAssumptions` `keep: true`) — the authority the keep button binds to. */

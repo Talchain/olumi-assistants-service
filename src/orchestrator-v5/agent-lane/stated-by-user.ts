@@ -50,35 +50,6 @@ export function figureTheUserWrote(value: number, unit: unknown, userText: strin
 }
 
 /**
- * ⭐ A FIGURE THE USER DERIVED FROM THEIR OWN FIGURE, IN THEIR OWN WORDS (F5 D1, R3 5930715560; DL 5930770727; F1 spec §4
- * D1–D3). Paul: "Our quarterly revenue is £100,000." then "We're aiming to double that within the next 6 months." — £200,000
- * is not a figure he wrote, so the target door refused it and the Agent asked again. It IS his: his own £100,000 (written in
- * this session, `userText`) times the multiplier he wrote in THIS turn (`turnText`: "double"/"twice" ×2, "triple"/"treble"
- * ×3, "quadruple" ×4, "halve"/"half" ×½, "N times"/"Nx"). Bound to the base by exact arithmetic (`same`), never a nearby
- * figure; the base obeys every unit rule of `figureTheUserWrote`. Returns the base and the multiplier, so the card can say
- * "double your £100,000", or null. A multiplier asked or denied in this turn ("should we double it?") grounds nothing.
- */
-const MULTIPLIER_WORDS = /\b(double|twice|triple|treble|quadruple|halve|half|(\d+(?:\.\d+)?)\s*(?:times|x)(?=\s|$|[,.;!?]))/gi;
-const MULTIPLIER_OF: Readonly<Record<string, number>> = { double: 2, twice: 2, triple: 3, treble: 3, quadruple: 4, halve: 0.5, half: 0.5 };
-export function derivedFigureTheUserWrote(
-  value: number, unit: unknown, userText: string | null | undefined, turnText: string | null | undefined,
-): { readonly base: number; readonly multiplier: number; readonly word: string } | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || typeof turnText !== 'string') return null;
-  const family = unitPhraseFamily(unit);
-  const bases = findStatedAmounts(userText);
-  for (const m of turnText.matchAll(MULTIPLIER_WORDS)) {
-    const reading = readingAt(turnText, m.index);
-    if (reading.said !== 'affirmed') continue;
-    const word = m[1]!.toLowerCase();
-    const k = m[2] !== undefined ? Number(m[2]) : MULTIPLIER_OF[word];
-    if (k === undefined || !Number.isFinite(k) || k <= 0 || k === 1) continue;
-    const base = value / k;
-    if (bases.some((a) => amountIs(a, base, unit, family, userText ?? undefined))) return { base, multiplier: k, word };
-  }
-  return null;
-}
-
-/**
  * How many times `value`, in `unit`, is WRITTEN in `userText`: one per written amount (`findStatedAmounts` reads each
  * writing once), under the unit rules of `figureTheUserWrote` (which is this count ≥ 1).
  */
@@ -855,16 +826,17 @@ export function holdsABandWord(words: unknown): boolean {
  * - KNOWN LIMIT, as for bands: the words are not tied to the figure. "At least \u00a360k, over the next year" reads once as
  *   at least; "under" beside "over" reads as both, and the Agent asks.
  */
-const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap|double|triple|(?:grow|increase|raise|get)\s+(?:it\s+)?(?:up\s+)?to|reach|hit|(?:reduce|cut)\s+(?:it\s+)?to|bring\s+(?:it\s+)?down\s+to|halve)\b/gi;
+const COMPARATOR_WORDS = /\b(no\s+less\s+than|no\s+more\s+than|at\s+least|at\s+most|more\s+than|less\s+than|minimum|maximum|over|above|under|below|cap)\b/gi;
+const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'less than', 'maximum', 'under', 'below', 'cap']);
+
 /**
- * ⭐ F5 D1 (R3 5930715560 (b); DL 5930770727, a PRODUCT RULING): a target stated as an INCREASE ("aiming to double that",
- * "reach", "grow to", "hit") binds at least; one stated as a DECREASE or a ceiling ("cut to", "bring down to", "halve",
- * "cap", "keep under") binds at most. The words say which way, so the card reads it — the user's, editable on the card —
- * and the Agent never asks for a magic word. Neutral wording ("our target is £200k") still says nothing: the Agent asks
- * with the At least / At most decision buttons. Asked, denied or both-ways readings are unchanged (`readingAt`).
+ * Whether `turnText` holds ANY comparator word at all — said, asked, denied or both ways. When it holds none, the user's
+ * words are SILENT on the direction, and the target card is a decision (DL 380e54 on #2447); when it holds some but
+ * `comparatorTheUserWrote` reads null (asked, denied, both ways), the Agent asks.
  */
-const AT_MOST_WORDS: ReadonlySet<string> = new Set(['no more than', 'at most', 'less than', 'maximum', 'under', 'below', 'cap', 'halve']);
-const AT_MOST_VERB = /^(?:reduce|cut)\s+(?:it\s+)?to$|^bring\s+(?:it\s+)?down\s+to$/;
+export function comparatorWordsIn(turnText: string | null | undefined): boolean {
+  return typeof turnText === 'string' && [...turnText.matchAll(COMPARATOR_WORDS)].length > 0;
+}
 
 /** At least / at most, as the user said it in `turnText`; null when not said, asked, denied, or said both ways. */
 export function comparatorTheUserWrote(turnText: string | null | undefined): 'at_least' | 'at_most' | null {
@@ -874,8 +846,7 @@ export function comparatorTheUserWrote(turnText: string | null | undefined): 'at
     const reading = readingAt(turnText, m.index);
     if (reading.said === 'asked') continue;
     if (reading.said === 'denied') return null;
-    const word = m[1]!.toLowerCase().replace(/\s+/g, ' ');
-    said.add(AT_MOST_WORDS.has(word) || AT_MOST_VERB.test(word) ? 'at_most' : 'at_least');
+    said.add(AT_MOST_WORDS.has(m[1]!.toLowerCase().replace(/\s+/g, ' ')) ? 'at_most' : 'at_least');
   }
   return said.size === 1 ? [...said][0]! : null;
 }
