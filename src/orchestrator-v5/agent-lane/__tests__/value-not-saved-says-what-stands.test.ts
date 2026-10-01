@@ -36,8 +36,10 @@ const inContract = (g: typeof served) => ({ ...g, edges: g.edges.map((e) => (Mat
 function product(graph: typeof served) {
   let nodes: Node[] = structuredClone(graph.nodes);
   let rev = 0;
+  let readsFail = false;
   const d: InternalDispatch = async (path, body) => {
     const b = (body ?? {}) as Record<string, unknown>;
+    if (readsFail && path.endsWith('/graph')) return { status: 500, json: {} };
     if (path.endsWith('/graph/register')) {
       nodes = (b as { graph: { nodes: Node[] } }).graph.nodes;
       rev += 1;
@@ -45,15 +47,22 @@ function product(graph: typeof served) {
     }
     return { status: 200, json: { graph: { nodes, edges: graph.edges }, graph_hash: `h${rev}` } };
   };
-  return { d, nodes: () => nodes };
+  return {
+    d, nodes: () => nodes,
+    /** Another writer moves the target (a concurrent edit). */
+    setTarget: (observed: Record<string, unknown>) => { nodes = nodes.map((n) => (n.id === TARGET ? { ...n, observed_state: observed } : n)); rev += 1; },
+    failReads: () => { readsFail = true; },
+  };
 }
 
-async function approveRevision(graph: typeof served, writerRefuses: boolean) {
+type Product = ReturnType<typeof product>;
+async function approveRevision(graph: typeof served, writerRefuses: boolean | ((p: Product) => CommitOptionLevelsResult)) {
   const p = product(graph);
   const door = levelsPortOver(p.d);
   // The served refusal (the writer's base check) or the product's door.
   const port = async (input: CommitOptionLevelsInput): Promise<CommitOptionLevelsResult> =>
-    writerRefuses ? { status: 'refused', reason: 'canonical_graph_unavailable' } : door(input);
+    typeof writerRefuses === 'function' ? writerRefuses(p)
+      : writerRefuses ? { status: 'refused', reason: 'canonical_graph_unavailable' } : door(input);
   const caps = createAgentCapabilities(p.d, new ProposalStore(), undefined, 'full', undefined, { commitOptionLevels: port });
   const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: LABEL, value: 3, unit: 'connections/month', basis: 'their contacts’ capacity', revise: true }] } as never);
   expect(r.ok, JSON.stringify(r)).toBe(true);
@@ -107,6 +116,27 @@ describe('what still stands is said with its true owner and in the user\u2019s u
     const { status } = await approveRevision(withTarget({ value: 0.5, cap: 10, source: 'cee_inference', extractionType: 'inferred' }), true);
     expect(status).toContain(`The model still uses Olumi’s estimate of ${say(5)}.`);
     expect(status).not.toMatch(/0\.5/);
+  });
+});
+
+describe('what still stands is read AFTER the refusal, never from the approved snapshot (CODEX CEE BUDDY 5924253824)', () => {
+  const say = (v: number) => sayFigureExactly(v, 'connections/month');
+
+  it('RED: another writer set the user\u2019s 7 and the port reports STALE → "your figure of 7", never Olumi\u2019s 5', async () => {
+    const { status, node } = await approveRevision(inContract(served), (p) => {
+      p.setTarget({ value: 0.14, raw_value: 7, unit: 'connections/month', source: 'user_override' });
+      return { status: 'stale' };
+    });
+    expect(node.observed_state).toMatchObject({ raw_value: 7, source: 'user_override' });
+    expect(status).toContain(`The model still uses your figure of ${say(7)}.`);
+    expect(status).not.toContain('Olumi’s estimate');
+  });
+
+  it('RED: the model cannot be read after the refusal → the figure not saved is named, what stands is NOT inferred', async () => {
+    const { status } = await approveRevision(inContract(served), (p) => { p.failReads(); return { status: 'refused', reason: 'canonical_graph_unavailable' }; });
+    expect(status).toContain(`Your ${say(3)} for “${LABEL}” wasn’t saved.`);
+    expect(status).toContain('Olumi couldn’t confirm which figure the model uses now.');
+    expect(status).not.toMatch(/still uses|no figure for it/);
   });
 });
 

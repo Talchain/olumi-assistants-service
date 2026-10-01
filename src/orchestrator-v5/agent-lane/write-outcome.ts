@@ -182,6 +182,8 @@ export interface NotSavedValue {
   /** The figure not saved was the user's own (`user_stated`); else Olumi's suggestion. */
   readonly yours: boolean;
   readonly still?: { readonly value: number; readonly unit: string; readonly owner: 'yours' | 'brief' | 'olumi' | 'olumi_accepted' };
+  /** The model could not be read after the refusal: what it holds now is not said (never inferred). */
+  readonly unconfirmed?: true;
 }
 
 const figureWords = (value: number, unit: string): string => sayFigureExactly(value, unit) ?? `${value}${unit !== '' ? ` ${unit}` : ''}`;
@@ -193,6 +195,7 @@ const figureWords = (value: number, unit: string): string => sayFigureExactly(va
  */
 function notSavedValueLine(x: NotSavedValue, why: string): string {
   const head = `${x.yours ? 'Your' : 'Olumi\u2019s suggested'} ${figureWords(x.value, x.unit)} for \u201c${x.label}\u201d wasn\u2019t saved${why}.`;
+  if (x.unconfirmed === true) return `${head} Olumi couldn\u2019t confirm which figure the model uses now.`;
   if (x.still === undefined) return `${head} The model still has no figure for it.`;
   // A figure this approval does not write is said the estate's way: exact, else "about" (`sayFigureRead`; AIQ 5924240860).
   const held = sayFigureRead(x.still.value, x.still.unit);

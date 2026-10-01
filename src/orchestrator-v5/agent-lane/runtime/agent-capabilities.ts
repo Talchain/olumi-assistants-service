@@ -730,9 +730,16 @@ const ADOPTED_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumpt
  * model still holds with ITS owner, read from the stored node (the refused write changed nothing). The words are
  * `write-outcome.ts`'s.
  */
-function valuesNotSaved(valueOps: readonly ProposalOperation[], parent: StructuredProposal, read: GraphRead): NotSavedValue[] {
+function valuesNotSaved(
+  valueOps: readonly ProposalOperation[], parent: StructuredProposal, read: GraphRead | null, labelOf: (id: string) => string,
+): NotSavedValue[] {
   return valueOps.map((o) => {
     const v = (o.value ?? {}) as { value?: unknown; unit?: unknown };
+    const proposedUnit = typeof v.unit === 'string' ? v.unit : '';
+    // The model could not be read after the refusal: the figure not saved is still named; what stands is NOT inferred.
+    if (read === null) {
+      return { label: labelOf(o.path), value: Number(v.value), unit: proposedUnit, yours: valueOpAuthor(o, parent) === 'user_stated', unconfirmed: true as const };
+    }
     const node = read.nodes.find((n) => n.id === o.path);
     const os = (node?.observed_state ?? undefined) as Record<string, unknown> | undefined;
     const unit = typeof os?.unit === 'string' ? os.unit : '';
@@ -750,7 +757,7 @@ function valuesNotSaved(valueOps: readonly ProposalOperation[], parent: Structur
       : isAcceptedOlumiEstimate(os) ? 'olumi_accepted'
         : display === 'user_set' ? 'yours' : display === 'from_brief' ? 'brief' : 'olumi';
     return {
-      label: node?.label ?? o.path, value: Number(v.value), unit: typeof v.unit === 'string' ? v.unit : '',
+      label: node?.label ?? labelOf(o.path), value: Number(v.value), unit: proposedUnit,
       yours: valueOpAuthor(o, parent) === 'user_stated',
       ...(held !== undefined && owner !== undefined ? { still: { value: held, unit, owner } } : {}),
     };
@@ -2193,10 +2200,14 @@ export function createAgentCapabilities(
     }
 
     const all = levelStop === null && levelsRecorded === levelOps.length;
+    // ⛔ WHAT STILL STANDS IS READ AFTER THE REFUSAL, never from the pre-attempt snapshot (CODEX CEE BUDDY 5924253824): a
+    // stale refusal means the model moved, so the approved read can name a figure that is no longer there. `null` = the
+    // read failed, and the words then say the current figure could not be confirmed.
+    const readAfterRefusal = valueOps.length > 0 && !valuesLanded ? await readGraph(ctx.scenario_id) : null;
     if (all) proposals.markApplied(parent.proposal_id, receipts);
     const parts = [
       ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length,
-        ...(valuesLanded ? {} : { ...(stopReason !== undefined ? { reason: stopReason } : {}), not_saved: valuesNotSaved(valueOps, parent, approvedRead) }) }] : []),
+        ...(valuesLanded ? {} : { ...(stopReason !== undefined ? { reason: stopReason } : {}), not_saved: valuesNotSaved(valueOps, parent, readAfterRefusal, labelOf) }) }] : []),
       ...(linkOps.length > 0 ? [{ part: 'links', ok: linksAdded.length === linkOps.length, recorded_count: linksAdded.length, requested_count: linkOps.length }] : []),
       ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),
     ];
