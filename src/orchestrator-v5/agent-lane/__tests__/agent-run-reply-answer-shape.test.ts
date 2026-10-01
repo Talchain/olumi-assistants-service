@@ -37,7 +37,7 @@ const SERVED_RUN = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fix
 const RESULT_BLOCK = SERVED_RUN.turns.t2.analysis_result;
 const GRAPH_HASH = RESULT_BLOCK.computed_against_hash;
 
-const WITHHELD_STATE = FX.state.analysis_state;
+const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { ...FX.state.analysis_state.run_state, computed_at: '2026-10-01T12:00:00.000Z' } };
 const PERMITTED_STATE = { ...WITHHELD_STATE, leader_claim: { permitted: true, separation: 'separated' } };
 
 /** First sentence, 4 bullets (one ranks, which is lawful on a PERMITTED turn), a closing line — 833 chars. */
@@ -134,14 +134,22 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
   const typedRun = async (text: string, scenario = SCENARIO) => {
     callModelOutputs = [say(text)];
     const turnId = nextTurnId();
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: scenario, message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' }, turn_id: turnId,
+    } });
+    expect(first.statusCode, first.body.slice(0, 300)).toBe(200);
+    expect(callModelOutputs).toHaveLength(1);
+    const chip = first.json().suggested_actions.find((c: { id: string }) => c.id.startsWith('agent-explain-run:'));
+    expect(chip).toBeDefined();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+      scenario_id: scenario, agent_session_id: first.json()._agent.session_id, turn_id: nextTurnId(),
+      message: chip.message, chip: { id: chip.id },
     } });
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     expect(callModelOutputs, 'the control: the scripted interpretation was consumed').toEqual([]);
     const b = r.json() as Body;
-    expect(b._diagnostic_trace.fast_path, 'the control: the typed Run took fast path 3').toBe('run');
-    return { b, turnId };
+    expect(b._diagnostic_trace.fast_path, 'the control: the follow-up only explains').toBe('explain');
+    return { b, turnId: [...rows.keys()].at(-1)! };
   };
   /** An ordinary composer message the Agent answers directly, with no tool call. */
   const askedTurn = async (text: string, scenario = SCENARIO, calls: Record<string, unknown>[][] = [], message = 'What does the analysis say?') => {
