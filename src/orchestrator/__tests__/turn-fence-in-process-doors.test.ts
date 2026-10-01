@@ -27,8 +27,9 @@ const claimTurnFence = vi.fn(async (scenarioId: string, turnId: string) => {
 });
 vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => ({ claimTurnFence }) }));
 
-const STALE = { status: 'stale' as const };
-const REFUSED = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
+type DoorOutcome = { readonly status: 'stale' } | { readonly status: 'refused'; readonly reason: string };
+const STALE: DoorOutcome = { status: 'stale' };
+const REFUSED = (verdict: 'unclaimed' | 'unavailable'): DoorOutcome => ({ status: 'refused', reason: `turn_fence_${verdict}` });
 const refusal = (verdict: 'superseded' | 'stopped' | 'unclaimed' | 'unavailable') =>
   new TurnFenceRejectedError(`fence ${verdict}`, { verdict, generation: 7, maxGeneration: 8 } as never);
 
