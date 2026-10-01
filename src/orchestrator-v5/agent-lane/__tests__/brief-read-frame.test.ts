@@ -433,8 +433,8 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       expect(call.call_id).toMatch(/^host_first_call_[0-9a-f-]{36}$/);
     });
 
-    it('CONTRAST: a first message that names no goal and no option (a question with only a limit) → today\'s path', async () => {
-      readingReply = { status: 200, text: JSON.stringify({ goal: null, options: [], limits: ['monthly churn under 4%'] }) };
+    it('CONTRAST: a first message that names no goal and no option (a question with only a limit) → today\'s path, even with `build: true`', async () => {
+      readingReply = { status: 200, text: JSON.stringify({ goal: null, options: [], limits: ['monthly churn under 4%'], build: true }) };
       script = [say('Happy to help — what are you deciding?')];
       const body = await buffered({ message: 'Can we keep monthly churn under 4%?' });
       expect(readingCalls, 'control: the reading ran and found a span').toBe(1);
