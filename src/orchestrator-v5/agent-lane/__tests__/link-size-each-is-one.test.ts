@@ -57,6 +57,18 @@ describe('R3 5925568501: a distributive word + the source names a change of one'
       { source: 'Warm conversations with investment firms', target: 'Funding secured' }, { quantities: ['Funding secured', 'Warm conversations with investment firms'] })).toBeNull();
   });
 
+  // CODEX 5925755067: a compound unit binds only its HEAD noun; its qualifiers are crossed, never bound.
+  const qualified = { ...effect, per_source_change_unit: 'qualified investment-firm conversations' };
+  it('CODEX: "Each qualified round of conversations…" (unit "qualified investment-firm conversations") counts ROUNDS → refused', () => {
+    expect(door('Each qualified round of conversations brings in about £20,000 towards funding', qualified)).not.toBeNull();
+  });
+  it('CODEX control: "Each qualified conversation…" on that unit → per 1', () => {
+    expect(door('Each qualified conversation brings in about £20,000 towards funding', qualified)).toBeNull();
+  });
+  it('a rate unit ("conversations per week") counts its noun before "per": "Each extra conversation…" → per 1', () => {
+    expect(door('Each extra conversation brings in about £20,000 towards funding', { ...effect, per_source_change_unit: 'conversations per week' })).toBeNull();
+  });
+
   it('a written per figure still wins: "Every 2 extra conversations add about £20,000" is NOT read as per 1', () => {
     expect(door('Every 2 extra conversations add about £20,000 to funding')).not.toBeNull();
   });

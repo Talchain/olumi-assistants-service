@@ -977,9 +977,12 @@ const ONE_FILLER = /^(?:extra|more|additional|single|new|another)$/;
 function distributiveOneAt(q: string, ends: { readonly source: string; readonly target: string }, unit: string): number {
   const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
   const label = wordsOf(ends.source);
+  // CODEX 5925755067: the unit's HEAD noun — its last word before any "per" / "/" ("qualified investment-firm
+  // conversations" → conversations; "conversations per week" → conversations). Its qualifiers are crossed, never bound.
   const unitWords = wordsOf(unit);
-  const own = unitWords.length > 0 ? unitWords : label.slice(-1);
-  const isLabel = (w: string): boolean => label.some((x) => sameWord(x, w));
+  const head = wordsOf(unit.split(/\s+per\s+|\//iu)[0] ?? '').slice(-1);
+  const own = head.length > 0 ? head : label.slice(-1);
+  const isLabel = (w: string): boolean => [...label, ...unitWords].some((x) => sameWord(x, w));
   for (let i = 0; i < tokens.length; i += 1) {
     const w = tokens[i]!.w; const next = tokens[i + 1]?.w;
     const from = /^(?:each|every|per)$/.test(w) ? i + 1 : w === 'one' && next === 'more' ? i + 2
