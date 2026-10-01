@@ -347,20 +347,35 @@ describe('a definitional link is refit like a user size (the card path, served d
 });
 
 /**
- * ⭐ THE PERSIST INVARIANT (DL 5924014025): no edge leaves CEE's construction write with |mean| > 1 unless it is the
- * user's own size that could not be fitted AND the user is asked about it ("…would be cut short"). Over every build in
- * this spec's real paths: a stored cut is never silent.
+ * ⭐ THE PERSIST INVARIANT (DL 5924014025; 52f8cd 5924036192): a stored |mean| > 1 breaks the WHOLE model, not one link.
+ * The UI cold open declines the Run (CANVAS 5923984462) and `isEditableGraph` refuses every later write
+ * (`assertIngressGraphNumericBounds`), so "Record your figure" → approve → "Not saved". No edge leaves construction above 1
+ * on these paths. ⚠ NAMED RESIDUAL (pinned): a user size the refit REFUSES (into a factor; a goal its limit rows name) is
+ * still stored as stated and asked; its store policy is the DL's / R3's next ruling.
  */
-describe('persist invariant: a stored |mean| > 1 is only ever a user size the user is asked about', () => {
+describe('persist invariant: construction stores no |mean| > 1', () => {
   it.each([
     ['raw-1 shape', {}], ['deals max 100 (cascade)', { dealsMax: 100 }], ['outcome £3m (p3)', { fundingMax: 3000000 }],
-    ['a factor target (refused)', { fundingAsFactor: true }], ['with a stated target', { fundingMax: 3000000, target: 1000000 }],
-  ] as const)('%s', async (_label, o) => {
-    const { g, out } = await build(draft(o as never));
-    const asked = questionsOf(out).filter((q) => q.includes(NOT_REPRESENTABLE));
-    for (const e of g.edges.filter((x: Rec) => typeof x.strength?.mean === 'number' && Math.abs(x.strength.mean) > 1)) {
-      expect(e.provenance?.magnitude, `${e.from}→${e.to} stored at ${e.strength.mean}`).toBe('user_stated');
-      expect(asked.length, `${e.from}→${e.to} stored cut but not asked`).toBeGreaterThan(0);
-    }
+    ['with a stated target', { fundingMax: 3000000, target: 1000000 }],
+  ] as const)('%s → every stored |mean| ≤ 1, and the model is writable', async (_label, o) => {
+    const { isEditableGraph } = await import('../../system-events/editable-graph.js');
+    const { g } = await build(draft(o as never));
+    for (const e of g.edges.filter((x: Rec) => typeof x.strength?.mean === 'number')) expect(Math.abs(e.strength.mean), `${e.from}→${e.to}`).toBeLessThanOrEqual(1);
+    expect(isEditableGraph(g)).toBe(true);
+  });
+
+  it('RESIDUAL (pinned): a user size into a FACTOR is refused by the refit — stored as stated (> 1) and asked', async () => {
+    const { g, out } = await build(draft({ fundingAsFactor: true }));
+    expect(Math.abs(edge(g, ...DEAL).strength.mean)).toBeGreaterThan(1);
+    expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(true);
+  });
+
+  it('REPLAY 52f8cd (guest 61a8c07c, served): the stored 1.667 makes the model unwritable; the refit this PR runs makes it writable', async () => {
+    const { isEditableGraph } = await import('../../system-events/editable-graph.js');
+    const stored = (JSON.parse(readFileSync(new URL('./fixtures/61a8c07c-stored-graph-20261001.json', import.meta.url), 'utf8')) as { graph: Rec }).graph;
+    expect(isEditableGraph(stored)).toBe(false); // the served defect, verbatim
+    const after = refitFramesForStatedEffects(stored).graph;
+    for (const e of after.edges.filter((x: Rec) => typeof x.strength?.mean === 'number')) expect(Math.abs(e.strength.mean), `${e.from}→${e.to}`).toBeLessThanOrEqual(1);
+    expect(isEditableGraph(after)).toBe(true);
   });
 });
