@@ -124,7 +124,6 @@ import {
 import type {
   ConversationContext,
   ConversationMessage,
-  DecisionStage,
   GraphPatchBlockData,
   GraphV3T,
   PatchOperation,
@@ -242,13 +241,10 @@ import {
 } from '../session/pending-action.js';
 import type { SuggestedAction as BoundarySuggestedAction } from '../compose/types.js';
 import { randomUUID } from 'node:crypto';
+import { mapStageToDecisionStage } from '../../dsk/stage-edge.js';
 
-// v0.7.0's Stage enum (frame | analyse | decide | review) does not align with
-// V4's DecisionStage (frame | ideate | evaluate | decide | optimise). Map
-// across the boundary so ConversationContext.framing.stage is a valid V4
-// DecisionStage. Unmapped values fall back to 'frame' — edit_graph is a
-// structural operation that doesn't branch on stage, so a broad default is
-// safe here.
+// ConversationContext.framing.stage is a V4/DSK DecisionStage: the turn's wire
+// stage crosses the ONE stage edge (`dsk/stage-edge.ts`) on the way in.
 /**
  * V5 Context Management v1 — no-op recovery decision.
  *
@@ -958,21 +954,6 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
     assistantText: null,
     suggestedActions: [],
   };
-}
-
-function mapStageToDecisionStage(stage: MessageTurnPayload['stage']): DecisionStage {
-  switch (stage) {
-    case 'frame':
-      return 'frame';
-    case 'analyse':
-      return 'evaluate';
-    case 'decide':
-      return 'decide';
-    case 'review':
-      return 'optimise';
-    default:
-      return 'frame';
-  }
 }
 
 /**
