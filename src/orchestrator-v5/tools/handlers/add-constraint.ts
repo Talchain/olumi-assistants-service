@@ -1104,6 +1104,7 @@ export function createAddConstraintHandler(): HandlerFn {
       //   · the goal's own `goal_threshold_unit` — re-stamped only when `stampGoalThreshold`, else RETAINED (an at-most
       //     edit never stamps it, so "£ per quarter" stayed beside a new `month`: CODEX 5934135126 P1);
       //   · the goal's other-direction row, which this write does not touch.
+      //   · the unit of the goal's recorded level (`observed_state.unit`), which no target write touches.
       // Any one naming another period is two answers for one figure: refused for every door and both directions, nothing
       // written, never a period silently chosen.
       if (targetNode.kind === 'goal') {
@@ -1111,6 +1112,10 @@ export function createAddConstraintHandler(): HandlerFn {
           newConstraint.unit,
           stampGoalThreshold ? newConstraint.unit : targetNode.goal_threshold_unit,
           ...(graph.goal_constraints ?? []).filter((c) => c.node_id === targetId && c.operator !== operator).map((c) => c.unit),
+          // the unit of the goal's recorded level (today's figure), which no target write touches: a level "£/quarter"
+          // beside a goal made per month is the same two answers, and the Run's figures then read nothing (they need the
+          // level and target units byte-equal, `routes/selected-run-figures.ts`).
+          targetNode.observed_state?.unit,
         ];
         const colliding = unitsAfter.find((u) => goalUnitCollidesWithPeriod(u, goalSemantics?.goal_period, targetNode));
         if (colliding !== undefined) {

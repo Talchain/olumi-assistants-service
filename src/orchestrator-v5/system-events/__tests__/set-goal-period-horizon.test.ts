@@ -253,6 +253,23 @@ describe('ONE PERIOD CARRIER, the period in force AFTER the write (CODEX #2454 5
     expect(r).toMatchObject({ kind: 'refused', reason: 'goal_period_conflicts_with_unit' });
     expect(bytes(g)).toBe(before);
   });
+  // ⛔ The goal's RECORDED LEVEL is a unit it holds too (I1.1: "Our quarterly revenue is £100,000" stores `£/quarter` on
+  // both the level and the target). A target made per month beside it is two answers, and the Run's figures read nothing.
+  it('RED: a target "£" per month on a goal whose recorded level is "£/quarter" → REFUSED, nothing written (the level\'s unit collides)', async () => {
+    const g = graphWith({ goal_threshold_unit: '£/quarter', observed_state: { value: 0.5, raw_value: 100000, unit: '£/quarter', cap: 200000 } });
+    const before = bytes(g);
+    const r = await send(g, 70000, { unit: '£', goal_period: 'month' });
+    expect(r).toMatchObject({ kind: 'refused', reason: 'goal_period_conflicts_with_unit' });
+    expect(bytes(g)).toBe(before);
+  });
+  it('CONTROL: Paul\'s journey — "double that" (£200,000) per quarter beside the level "£/quarter" → written, level and target units byte-equal', async () => {
+    const g = graphWith({ goal_threshold_unit: '£/quarter', observed_state: { value: 0.5, raw_value: 100000, unit: '£/quarter', cap: 200000 } });
+    const r = await send(g, 200000, { unit: '£/quarter', goal_period: 'quarter', goal_horizon: { months: 6 } });
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    const goal = goalOf(r.mutatedGraph);
+    expect(goal).toMatchObject({ goal_threshold_unit: '£/quarter', goal_period: 'quarter', goal_threshold_raw: 200000 });
+    expect(goal.observed_state.unit).toBe(goal.goal_threshold_unit);
+  });
   it('CONTROL: the same at-most write naming the goal\'s own period (quarter) → written; the floor and its unit untouched', async () => {
     const r = await send(graphWith({ goal_threshold_unit: '£ per quarter', goal_threshold_raw: 200000 }), 15000, { unit: '£', goal_period: 'quarter' }, 'at_most');
     expect(r.kind, JSON.stringify(r)).toBe('mutated');

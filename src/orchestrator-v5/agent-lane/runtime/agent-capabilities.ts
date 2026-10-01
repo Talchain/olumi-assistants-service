@@ -1620,9 +1620,9 @@ function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: SetGoa
   if (v.goal_horizon !== undefined && !isDeepStrictEqual(goal?.goal_horizon, v.goal_horizon)) return false;
   if (v.stated_as !== undefined && !isDeepStrictEqual(goal?.goal_stated_as, v.stated_as)) return false;
   // ⛔ ONE PERIOD CARRIER, judged BEFORE the at-most return (DL 380e54 on #2454; CODEX 5934135126 P1): ANY unit the goal
-  // holds — each of its rows, and its own `goal_threshold_unit` (which an at-most write retains) — naming one period beside
+  // holds — each of its rows, its own `goal_threshold_unit` (which an at-most write retains) and its level's unit — naming one period beside
   // the typed goal_period it holds is never confirmed, whichever direction wrote it. The same function the writer enforces.
-  const heldUnits = [goal?.goal_threshold_unit, ...(Array.isArray(raw.goal_constraints) ? raw.goal_constraints : [])
+  const heldUnits = [goal?.goal_threshold_unit, (goal?.observed_state as { unit?: unknown } | undefined)?.unit, ...(Array.isArray(raw.goal_constraints) ? raw.goal_constraints : [])
     .filter((c): c is { node_id?: unknown; unit?: unknown } => c !== null && typeof c === 'object')
     .filter((c) => c.node_id === goalId).map((c) => c.unit)];
   if (heldUnits.some((u) => goalUnitCollidesWithPeriod(u, undefined, goal))) return false;
