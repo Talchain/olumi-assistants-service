@@ -33,7 +33,7 @@ import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
-import { approvedAdoptionSourceFor } from '../../agent-lane/approved-adoption-context.js';
+import { APPROVED_ADOPTION_SOURCE, approvedAdoptionSourceFor } from '../../agent-lane/approved-adoption-context.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -670,7 +670,13 @@ export function createSetFactorValueHandler(): HandlerFn {
       if (reviewOnly) {
         // A review is recorded on SOMEONE ELSE's figure (Olumi's, the brief's, a colleague's). The user's own figure
         // re-sent unchanged is a pure no-op: no bytes move, so no new model version is minted.
-        if ((node.observed_state as { source?: unknown } | undefined)?.source !== USER_EDIT_SOURCE) {
+        //
+        // ⛔ `user_assumption` IS NEVER REVIEWED HERE EITHER (AIQ 5922034166; CODEX CEE BUDDY 5922079681). Bare, it is the
+        // user's own declared guess: theirs, so a no-op like `user_override`. With a review, that review is the ADOPTION
+        // MARKER (`isAcceptedOlumiEstimate`): only the approved adoption writes it, and a later confirm keeps it byte for
+        // byte. Confirming here would forge the marker onto the user's own figure and make it read as Olumi's.
+        const reviewedSource = (node.observed_state as { source?: unknown } | undefined)?.source;
+        if (reviewedSource !== USER_EDIT_SOURCE && reviewedSource !== APPROVED_ADOPTION_SOURCE) {
           node.observed_state = {
             ...(node.observed_state as NonNullable<typeof node.observed_state>),
             reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() },

@@ -565,7 +565,9 @@ export function stampUserEditProvenance(
     if (storedGraph !== undefined && !userValueTargets.has(op.path) && restatesStoredValue(observed, storedGraph, op.path)
       && userTyped?.(op.path, observed) !== true) {
       // The user's own figure re-sent unchanged is a pure no-op; a review is recorded only on someone else's figure.
-      if (observed.source === USER_EDIT_SOURCE) return op;
+      // ⛔ `user_assumption` too (AIQ 5922034166): bare, it is the user's own guess; with a review, that review is the
+      // approved adoption's marker (`provenance-display.ts` `isAcceptedOlumiEstimate`), which only the adoption writes.
+      if (observed.source === USER_EDIT_SOURCE || observed.source === 'user_assumption') return op;
       return {
         ...op,
         value: { ...value, [OBSERVED_ROOT]: { ...observed, reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() } } },
