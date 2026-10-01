@@ -12,7 +12,15 @@
  *   R4  the Accept step (Olumi's placeholder → the estimate the user accepted, no number moved) → complete + ONE sizing row.
  *   R5  a band move with the writer's own spread (who sized it unchanged) → complete + ONE strength row.
  *   R6  £59 → £60 on an option → complete + ONE option_setting row.
- *   R7  MEASURED: a factor value edit (churn 3% → 4%) — the row, and the coverage the wire supports.
+ *   R7  a factor value edit (churn 3% → 4%) → complete + ONE factor row.
+ * CODEX pre-review on r2 — inputs the snapshot records but the diff does not compare, or does not record at all:
+ *   R8  a factor's `source` only (`cee_inference → user_override`, same value) → partial, [].
+ *   R9  a link's `provenance.source` only (`cee_hypothesis → user_specified` under `magnitude: user_stated`; sizing `user`
+ *       both Runs, yet the placeholder-parts reader moves) → partial, [].
+ *   R10 `observed_state.std_source` only (`olumi → user`, same σ; PLoT moves spread ownership) → partial, [].
+ *   R11 a node label only (PLoT's binary classifier reads labels) → partial, [].
+ *   R12 the REAL strength writer's band edit (`adjust-edge-strength.ts`: source → user_specified, natural_effect
+ *       dropped) → BOTH rows, and partial: neither unrecorded member is verified (honest, not "complete").
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -130,7 +138,7 @@ describe('0.71.0 residual on the real wire — complete means verified', () => {
     const p = await pair(
       (g) => {
         const e = edge(g, ...LINK);
-        e.provenance = { ...e.provenance, magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } };
+        e.provenance = { ...e.provenance, magnitude: 'olumi_estimate', reviewed_by_user: { at: '2026-10-01T19:17:12.809Z', intent: 'confirm' } };
       },
       (g) => {
         const e = edge(g, ...LINK);
@@ -168,5 +176,58 @@ describe('0.71.0 residual on the real wire — complete means verified', () => {
     expect(p.wireMoved).toBe(true);
     expect(p.rows.map((r) => [r.entity_kind, r.before?.raw, r.after?.raw])).toEqual([['factor_value', 3, 4]]);
     expect(p.complete).toBe(true);
+  });
+
+  it('R8 (CODEX r2): a factor\'s source only (cee_inference → user_override) → partial, []', async () => {
+    // σ stated on both Runs (CODEX's construction): a user source otherwise also derives a σ on the wire, which would
+    // make this row pass for the σ, not the source (measured: `std: 0.0001` appears).
+    const p = await pair(
+      (g) => { node(g, 'monthly_churn').observed_state.source = 'user_override'; },
+      (g) => { node(g, 'monthly_churn').observed_state.std = 0.02; },
+    );
+    expect(p.wireMoved).toBe(true);
+    expect(p.a.sent.graph.nodes.find((n: Rec) => n.id === 'monthly_churn').observed_state.std, 'precondition: σ identical on the wire')
+      .toBe(p.b.sent.graph.nodes.find((n: Rec) => n.id === 'monthly_churn').observed_state.std);
+    expect([p.complete, p.rows]).toEqual([false, []]);
+  });
+
+  it('R9 (CODEX r2): a link\'s provenance.source only, sizing `user` on both Runs → partial, []', async () => {
+    const p = await pair(
+      (g) => { edge(g, ...LINK).provenance.source = 'user_specified'; },
+      (g) => { edge(g, ...LINK).provenance = { ...edge(g, ...LINK).provenance, magnitude: 'user_stated' }; },
+    );
+    expect(p.wireMoved).toBe(true);
+    expect(p.a.snapshot.links.find((l) => l.from === LINK[0] && l.to === LINK[1])?.sizing).toBe('user');
+    expect([p.complete, p.rows]).toEqual([false, []]);
+  });
+
+  it('R10 (CODEX r2): observed_state.std_source only (olumi → user), same σ → partial, []', async () => {
+    const p = await pair(
+      (g) => { node(g, 'monthly_churn').observed_state.std_source = 'user'; },
+      (g) => { node(g, 'monthly_churn').observed_state = { ...node(g, 'monthly_churn').observed_state, std: 0.02, std_source: 'olumi' }; },
+    );
+    expect(p.wireMoved).toBe(true);
+    expect([p.complete, p.rows]).toEqual([false, []]);
+  });
+
+  it('R11 (CODEX r2): a node label only (Monthly churn → Monthly churn yes/no) → partial, []', async () => {
+    const p = await pair((g) => { node(g, 'monthly_churn').label = 'Monthly churn yes/no'; });
+    expect(p.wireMoved).toBe(true);
+    expect([p.complete, p.rows]).toEqual([false, []]);
+  });
+
+  it('R12: the REAL strength writer\'s band edit (source → user_specified, natural_effect dropped) → both rows, partial', async () => {
+    const p = await pair((g) => {
+      const e = edge(g, ...LINK);
+      const { natural_effect: _ne, ...kept } = e.provenance;
+      e.provenance = { ...kept, source: 'user_specified' };
+      e.strength = { mean: 0.6, std: olumiSpreadForMean({ oldMean: 0.1, oldStd: 0.05, newMean: 0.6 }) };
+    });
+    expect(p.wireMoved).toBe(true);
+    expect(p.rows.map((r) => [r.field, r.before, r.after])).toEqual([
+      ['strength', { raw: 'slight' }, { raw: 'strong' }],
+      ['sizing', { raw: 'olumi_estimate' }, { raw: 'user' }],
+    ]);
+    expect(p.complete).toBe(false);
   });
 });
