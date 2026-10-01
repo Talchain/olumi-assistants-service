@@ -198,8 +198,15 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const same = (stated: string, ...own: (string | undefined)[]) => unitComparisonKey(stated) !== undefined
     && own.some((u) => u !== undefined && u !== '' && unitComparisonKey(stated) === unitComparisonKey(u));
   const countNoun = countNounOf(sourceNode);
-  // The count noun or its singular ("conversations" / "conversation") — `unitComparisonKey` keeps plurals apart.
-  const perCount = countNoun !== undefined && [countNoun, countNoun.slice(0, -1)].includes(effect.per_source_change_unit.trim().toLowerCase());
+  // The count noun or its singular ("conversations" / "conversation") — `unitComparisonKey` keeps plurals apart. R3 #85
+  // 5926783007: the unit may name the count with the SOURCE's own words ("investor conversation" on "Angel investor
+  // conversations", as Paul's card words it) — its last word the count noun, every other word a word of the source label
+  // or "extra/additional/more/new", which count nothing ("seed conversation" names another kind: refused).
+  const perWords = effect.per_source_change_unit.toLowerCase().split(/[^\p{L}]+/u).filter((w) => w !== '');
+  const sourceWords = sourceNode.label.toLowerCase().split(/[^\p{L}]+/u).filter((w) => w !== '');
+  const perCount = countNoun !== undefined && perWords.length > 0
+    && [countNoun, countNoun.slice(0, -1)].includes(perWords[perWords.length - 1]!)
+    && perWords.slice(0, -1).every((w) => sourceWords.includes(w) || /^(?:extra|additional|more|new)$/.test(w));
   if (!same(effect.amount_unit, unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))
     || !(perCount || same(effect.per_source_change_unit, unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode))))) {
     return refuse('unit_mismatch');

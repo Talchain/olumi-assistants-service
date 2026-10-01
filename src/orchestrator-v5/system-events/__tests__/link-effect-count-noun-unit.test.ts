@@ -56,6 +56,20 @@ describe('the step-2 unit wall: a unitless count outcome is counted in its plura
     expect(applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change_unit: 'conversation' })).kind).toBe('mutated');
   });
 
+  // R3 #85 5926783007: Paul's card words — the unit names the count with the source's own words.
+  for (const unit of ['investor conversation', 'investor conversations', 'angel investor conversation', 'extra conversation']) {
+    it(`R3: "per ${unit}" on "Angel investor conversations" is the same count → written`, () => {
+      const r = applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change_unit: unit }));
+      expect(r.kind, JSON.stringify(r)).toBe('mutated');
+      if (r.kind === 'mutated') expect(edgeOf(r.mutatedGraph).provenance.natural_effect.per_source_change_unit).toBe('conversations');
+    });
+  }
+  for (const unit of ['seed conversation', 'investor meeting', 'conversation investor']) {
+    it(`R3 hostile: "per ${unit}" names another kind (or no count last) → refused`, () => {
+      expect(applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change_unit: unit }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+    });
+  }
+
   it('per a DIFFERENT count ("per deal") on that source is still a unit mismatch', () => {
     expect(applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change_unit: 'deals' }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
   });
