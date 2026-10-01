@@ -120,6 +120,8 @@ import { applyCoachingSignal } from '../coaching/coaching-signal-application.js'
 import { applyDefaultedValueEgress } from '../compose/defaulted-value-egress.js';
 import { readDefaultedAssumptionsFromEnrichment } from '../coaching/pick-defaulted-assumptions.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
+import { priorRunForSeed } from '../coaching/seed-reuse.js';
+import { bindAnalysisSnapshotForTurn, NO_CLAIM } from '../run-analysis-snapshot-binding.js';
 import type { V5TurnTimings } from '../telemetry/turn-timings.js';
 import { generateChips } from '../compose/chip-generator.js';
 import {
@@ -1327,6 +1329,20 @@ export async function dispatchChipClickRunAnalysis(
   // Build the turn context using the same builder TurnExecutor uses, so the
   // handler invocation is indistinguishable from a Sonnet-routed call.
   const context = await buildTurnContext(payload, requestId);
+
+  // ⛔ C1 — THE RUN THE USER ASKS FOR COMES HERE, NEVER THROUGH `runTurnExecutor` (R3 #85 5939245408). The Run chip, the
+  // Agent's Run fast path and its `run_analysis` tool all post a typed chip turn, which route-v2 sends to this
+  // dispatcher. The seed binding lived only in the executor (`turn-executor.ts`), so on served 4e53dfa5 every Run
+  // logged `run_analysis.seed_reuse` `no_prior_run` although its own window held `run_analysis` facts (served
+  // `v5_turn_context_facts`), and every rerun drew fresh samples (`C2_unpaired`). Bound here from the SAME window this exit pairs from
+  // (`[...enrichedFacts, ...context.prior_facts]` below), so the Run that lends its seed is the Run the delta compares
+  // against. The read-A guard stays down (`NO_CLAIM`, as with no binding): this dispatcher reads the snapshot once
+  // and hands the handler that exact copy, so there is no second read to compare.
+  bindAnalysisSnapshotForTurn({
+    scenarioId: context.session_id,
+    analysisGraphHash: NO_CLAIM,
+    priorRunSeed: priorRunForSeed(context.prior_facts),
+  });
 
   // V5 finaliser contract — single-source-of-truth for the scenario graph.
   //
