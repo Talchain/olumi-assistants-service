@@ -101,6 +101,7 @@ import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licenc
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
+import { proposalPreviewFor } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
@@ -2956,7 +2957,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     {
       // Any proposal that would still execute waits for its yes: that card is the step, re-offered or not (`offeredNow`).
-      const waiting = executableWaitingProposalIds(scenarioId, userId, graphHash).map((id) => ({ id: approvalChipIdFor(id) }));
+      const waitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash);
+      const waiting = waitingIds.map((id) => ({ id: approvalChipIdFor(id) }));
       const guidance = turnGuidanceFor({
         request: guidanceRequestOf(fastPath, (body['chip'] as { id?: unknown } | null | undefined)?.id, NEXT_STEP_CHIP_IDS),
         offeredSpecific: firstOfEachId([...offeredSpecific, ...waiting]),
@@ -2966,6 +2968,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
       });
       if (guidance !== undefined) wireBody = { ...wireBody, guidance };
+      /**
+       * ⭐ THE SUGGESTION PREVIEW (DL 5941839936; `turn-context/proposal-preview.ts`): what a Yes on THIS turn's consent chip
+       * would draw, from the STORED proposal the chip names, only while that proposal would still execute. Same placement
+       * as `guidance`: inside the final egress, never on the answer row (a replay carries none).
+       */
+      const offeredId = offeredApprove !== undefined ? typedApprovalOf({ chip: { id: offeredApprove.id } }) : undefined;
+      const preview = offeredId !== undefined && waitingIds.includes(offeredId)
+        ? proposalPreviewFor(offeredId, proposals.get(offeredId), readbackGraph) : undefined;
+      if (preview !== undefined) wireBody = { ...wireBody, proposal_preview: preview };
     }
     /**
      * ⛔ THE FAIL-CLOSED FINAL EGRESS (AI HARNESS PR-L1, `leader-final-egress.ts`): on EVERY turn, on the body exactly as

@@ -248,6 +248,28 @@ describe('the real route: the press → ONE held card, 0 model calls', () => {
     expect(chipOperationOf({ chip: {} })).toBeDefined();
   });
 
+  /** DL 5941839936: the suggestion preview rides the press that offers the card, from the STORED proposal it names. */
+  type Previewed = Body & { proposal_preview?: { proposal_id: string; ops: unknown[] } };
+  it('RED (preview): the press carries `proposal_preview` for the card\'s OWN proposal: the link and its band, nothing else', async () => {
+    const b = await press() as Previewed;
+    const id = approveOf(b)!.id.slice('agent-approve-proposal:'.length);
+    expect(b.proposal_preview).toEqual({ proposal_id: id, ops: [{ op: 'set_link_strength', from_id: AI.from, to_id: AI.to, band: 'moderate' }] });
+  });
+  it('NEGATIVE (preview): a replay of the press carries none; nor does a typed follow-up that does not re-offer the card', async () => {
+    const turn_id = randomUUID();
+    await press({ turn_id });
+    const again = await press({ turn_id }) as Previewed;
+    expect(again.proposal_preview).toBeUndefined();
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'Tell me more.' } });
+    expect((r.json() as Previewed).proposal_preview).toBeUndefined();
+  });
+  it('NEGATIVE (preview): once the card is approved, the approval turn carries none (the proposal settled)', async () => {
+    const b = await press();
+    const chip = approveOf(b)!;
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: (chip as { message?: string }).message ?? 'Yes', source: 'chip', chip: { id: chip.id } } });
+    expect((r.json() as Previewed).proposal_preview).toBeUndefined();
+  });
+
   it('CONTROL: the same press on a STALE Run → today\'s answer (the model is called, no card)', async () => {
     analysisState = STALE;
     const b = await press();
