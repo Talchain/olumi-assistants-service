@@ -23,9 +23,9 @@ import type { SuggestedAction } from '../../compose/types.js';
 import { deriveAuthoritativeStage } from '../../context/derive-stage.js';
 import type { AnalysisFreshness } from '../../context/freshness.js';
 import { extractGraphOptionIds } from '../../context/option-identity.js';
-import { edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../../format/influence-bands.js';
 import { checkMethodTurn, methodPlanOf, selectGuidance, stateKeyHash } from '../guidance/index.js';
+import { linkTargetOf } from '../guidance/select-strengthen-placeholder.js';
 import type { GuidanceSignals as SelectorSignals, GuidanceState, MethodInputs, PolicyId } from '../guidance/index.js';
 import type { GuidanceRecord } from '../guidance/types.js';
 import { POLICY } from '../guidance/policy.js';
@@ -336,8 +336,8 @@ export type CardCall =
 
 /**
  * The ONE change card the method turn ends in (RC `action_target`), as the existing door's own call. It authors no
- * figure: a link is offered at the band the writer itself reads as current (`edgeBandFromMagnitude(|strength.mean|)`,
- * as `propose_link_strengths` computes `currentBand`, and as RC's S1 helper #2477 does), with no `from_words`, so it is
+ * figure: a link is offered at the band the writer itself reads as current, read through RC's `linkTargetOf` (#2477:
+ * the ONE read of a link's mean and band, shared with the S1 picker), with no `from_words`, so it is
  * recorded as Olumi's estimate that the user accepts or edits; a factor is offered as Olumi's STORED figure to keep
  * (`keep`: the writer re-reads the stored figure and refuses anything not Olumi's own). Labels are the graph's, which
  * the writer resolves.
@@ -354,14 +354,13 @@ export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: str
     return typeof label === 'string' && label !== '' ? label : null;
   };
   if (target.kind === 'link') {
+    // The ends come from the graph's own edge, never from splitting the id (AI HARNESS 5938348370).
     const edge = edges.find((e) => `${String(e.from)}->${String(e.to)}` === target.id);
-    const mean = rec(edge?.strength)?.mean;
-    const from = labelOf(edge?.from);
-    const to = labelOf(edge?.to);
-    if (typeof mean !== 'number' || !Number.isFinite(mean) || from === null || to === null) return null;
+    const link = typeof edge?.from === 'string' && typeof edge.to === 'string' ? linkTargetOf(graph, edge.from, edge.to) : null;
+    if (link === null || labelOf(link.from_id) === null || labelOf(link.to_id) === null) return null;
     return {
       tool: 'propose_link_strengths',
-      args: { links: [{ from_label: from, to_label: to, strength: edgeBandFromMagnitude(Math.abs(mean)) }], rationale },
+      args: { links: [{ from_label: link.from_label, to_label: link.to_label, strength: link.band }], rationale },
     };
   }
   if (target.kind === 'factor') {
@@ -428,7 +427,8 @@ export function withSentReply(items: readonly unknown[], text: string): unknown[
   const sent = { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] };
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const it = rec(items[i]);
-    if (it?.role === 'assistant' && (it.type === 'message' || it.type === undefined)) {
+    // The model's own output message carries `type: 'message'` and may carry no role; an input item carries a role.
+    if (it !== undefined && (it.role === 'assistant' || (it.type === 'message' && it.role === undefined))) {
       return [...items.slice(0, i), sent, ...items.slice(i + 1)];
     }
   }
