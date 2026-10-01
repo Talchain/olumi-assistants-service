@@ -211,11 +211,14 @@ function linkStrengthReply(r: Rec): string | null {
  */
 /** F1b's sizing classes (`LinkSizing`, link-sizing.ts): what a link's `was.sizing` may hold. */
 const LINK_SIZINGS: ReadonlySet<string> = new Set<LinkSizing>(['user', 'placeholder', 'olumi_accepted', 'olumi_estimate', 'unmarked']);
+/** `proposeLinkStrengths`' own two literals for whose a strength is (agent-capabilities.ts `links[].whose`). */
+const LINK_WHOSE: ReadonlySet<string> = new Set(['yours', 'Olumi\u2019s estimate']);
 
 function linkSetReply(r: Rec): string | null {
   if (!nonEmpty(r.public_label) || !Array.isArray(r.links) || r.links.length === 0) return null;
   const links = r.links.map(recordOf);
-  if (links.some((l) => l === undefined)) return null;
+  // Whose each strength is, as the capability types it: anything else is untyped and keeps the second call (DL on #2475).
+  if (links.some((l) => l === undefined || !LINK_WHOSE.has(l.whose as string))) return null;
   const olumis = links.filter((l) => l!.whose !== 'yours').length;
   /**
    * ⭐ A LINK OLUMI HAD ALREADY ESTIMATED IS RE-SIZED, NOT SIZED (AI HARNESS #2475; CODEX_CLI_OVERFLOW + DL CR 5937945418 on

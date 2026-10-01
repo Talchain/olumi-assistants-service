@@ -128,6 +128,17 @@ describe('the composed reply says when it replaces Olumi\'s estimate (served 799
     expect(text).not.toContain(REPLACES);
   });
 
+  it.each([
+    ['missing', (l: Record<string, unknown>) => { const { whose: _w, ...rest } = l; return rest; }],
+    ['null', (l: Record<string, unknown>) => ({ ...l, whose: null })],
+    ['an unknown literal', (l: Record<string, unknown>) => ({ ...l, whose: 'Olumi' })],
+  ])('FAIL-CLOSED: a moved estimate whose `whose` is %s keeps the second call (no attribution, no note)', async (_n, edit) => {
+    const { result, text } = await composed(PARTS_ESTIMATES.map((k) => [k, 'very strong'] as const));
+    expect(text).toContain(REPLACES);
+    const untyped = { ...result, links: result.links.map((l) => edit(l as unknown as Record<string, unknown>)) };
+    expect(composeProposalReply('propose_link_strengths', { whole_request: true, links: [] }, untyped, 'fix them all')).toBeNull();
+  });
+
   it('FAIL-CLOSED: a link whose sizing before is not typed keeps the second call', async () => {
     const { result } = await composed(PARTS_ESTIMATES.map((k) => [k, 'very strong'] as const));
     const untyped = { ...result, links: result.links.map((l) => ({ ...l, was: { ...l.was, sizing: undefined } })) };
