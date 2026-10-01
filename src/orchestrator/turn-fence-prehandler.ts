@@ -165,12 +165,17 @@ export async function admitCurrentTurnFence(): Promise<void> {
  * claim refuses fail-closed. The claim is idempotent on (scenario_id, turn_id), so a retried approval re-reads its own
  * generation.
  *
- * A CONFLICT (`superseded` / `stopped`: a later turn claimed this scenario, or the user stopped) is the door's own
- * `stale` (`onFenceConflict`): "the model changed after this was approved; nothing was written". An infrastructure refusal
- * (`unclaimed` / `unavailable`) still throws — fail closed, exactly as for a turn.
+ * Every fence verdict is a door outcome that says NOTHING WAS WRITTEN (CODEX CR 5934133792 on #2456: the adoption door
+ * swallowed them as "may have been saved"):
+ *   · a CONFLICT (`superseded` / `stopped`: a later turn claimed this scenario, or the user stopped) is the door's own
+ *     `stale` (`onFenceConflict`): "the model changed after this was approved";
+ *   · an INFRASTRUCTURE refusal (`unclaimed` / `unavailable`) is the door's typed refusal (`onFenceRefused`): the store
+ *     refused fail-closed, so nothing was written and nothing may be reported as possibly saved.
+ * Any other error is rethrown. A door must let `TurnFenceRejectedError` reach this wrapper, never catch it itself.
  */
 export async function runFencedInProcessWrite<T>(
-  scenarioId: string, turnId: string, write: () => Promise<T>, onFenceConflict: () => T,
+  scenarioId: string, turnId: string, write: () => Promise<T>,
+  onFenceConflict: () => T, onFenceRefused: (verdict: 'unclaimed' | 'unavailable') => T,
 ): Promise<T> {
   try {
     return await runWithPendingTurnFence(scenarioId, turnId, async () => {
@@ -178,7 +183,10 @@ export async function runFencedInProcessWrite<T>(
       return write();
     });
   } catch (err) {
-    if (err instanceof TurnFenceRejectedError && (err.verdict === 'superseded' || err.verdict === 'stopped')) return onFenceConflict();
+    if (err instanceof TurnFenceRejectedError) {
+      if (err.verdict === 'superseded' || err.verdict === 'stopped') return onFenceConflict();
+      if (err.verdict === 'unclaimed' || err.verdict === 'unavailable') return onFenceRefused(err.verdict);
+    }
     throw err;
   }
 }

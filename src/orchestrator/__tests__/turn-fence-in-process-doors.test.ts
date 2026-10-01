@@ -28,6 +28,7 @@ const claimTurnFence = vi.fn(async (scenarioId: string, turnId: string) => {
 vi.mock('../../orchestrator-v5/session/index.js', () => ({ getSessionStore: () => ({ claimTurnFence }) }));
 
 const STALE = { status: 'stale' as const };
+const REFUSED = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
 const refusal = (verdict: 'superseded' | 'stopped' | 'unclaimed' | 'unavailable') =>
   new TurnFenceRejectedError(`fence ${verdict}`, { verdict, generation: 7, maxGeneration: 8 } as never);
 
@@ -39,28 +40,30 @@ describe('B8: an in-process graph write is fenced for its own identity', () => {
     const seen = await runFencedInProcessWrite(SCENARIO, TURN, async () => {
       await Promise.resolve();
       return currentTurnFence();
-    }, () => undefined);
+    }, () => undefined, () => undefined);
     expect(claimTurnFence).toHaveBeenCalledWith(SCENARIO, TURN);
     expect(seen).toEqual({ scenarioId: SCENARIO, turnId: TURN, generation: 7 });
   });
 
   it('a claim that throws binds the UNCLAIMED handle (generation null): the store refuses the write fail-closed', async () => {
     claimThrows = true;
-    const seen = await runFencedInProcessWrite(SCENARIO, TURN, async () => currentTurnFence(), () => undefined);
+    const seen = await runFencedInProcessWrite(SCENARIO, TURN, async () => currentTurnFence(), () => undefined, () => undefined);
     expect(seen).toEqual({ scenarioId: SCENARIO, turnId: TURN, generation: null });
   });
 
   it.each(['superseded', 'stopped'] as const)('a %s refusal is the door\'s stale — nothing was written', async (verdict) => {
-    const out = await runFencedInProcessWrite(SCENARIO, TURN, async () => { throw refusal(verdict); }, () => STALE);
+    const out = await runFencedInProcessWrite(SCENARIO, TURN, async () => { throw refusal(verdict); }, () => STALE, REFUSED);
     expect(out).toBe(STALE);
   });
 
-  it.each(['unclaimed', 'unavailable'] as const)('CONTROL: an infrastructure refusal (%s) still throws', async (verdict) => {
-    await expect(runFencedInProcessWrite(SCENARIO, TURN, async () => { throw refusal(verdict); }, () => STALE)).rejects.toBeInstanceOf(TurnFenceRejectedError);
+  // CODEX CR 5934133792: an infrastructure refusal also wrote NOTHING, so it is the door's typed refusal — never thrown
+  // past the door (where a consumer could report "may have been saved").
+  it.each(['unclaimed', 'unavailable'] as const)('an infrastructure refusal (%s) is the door\'s typed refusal — nothing was written', async (verdict) => {
+    expect(await runFencedInProcessWrite(SCENARIO, TURN, async () => { throw refusal(verdict); }, () => STALE, REFUSED)).toEqual(REFUSED(verdict));
   });
 
   it('CONTROL: any other error is never swallowed as stale', async () => {
-    await expect(runFencedInProcessWrite(SCENARIO, TURN, async () => { throw new Error('boom'); }, () => STALE)).rejects.toThrow('boom');
+    await expect(runFencedInProcessWrite(SCENARIO, TURN, async () => { throw new Error('boom'); }, () => STALE, REFUSED)).rejects.toThrow('boom');
   });
 });
 
