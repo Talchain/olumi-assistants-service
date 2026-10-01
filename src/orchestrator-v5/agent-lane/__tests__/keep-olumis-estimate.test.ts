@@ -1,0 +1,151 @@
+/**
+ * ⭐ KEEP OLUMI'S ESTIMATE (52f8cd, lease #75 5925744661) — the user's "that's about right, keep it" is recorded as their
+ * ACCEPTANCE of Olumi's figure, through the REAL writer, with the figure unchanged and still Olumi's.
+ *
+ * Served `b47db0b5`, guest `9390a1b4` (Paul's funding brief): Examine → "4 hours a week is about right for me. Keep it." →
+ * "no change is needed", no card, the node stayed `cee_inference` with no review, and on reload Examine still said
+ * "You haven't confirmed it". The draft had filled every value, so the adoption door (blanks only) could not record it.
+ *
+ * The fake dispatch hands each `factor_value_edit` to the PRODUCT'S OWN writer (`applyFactorValueEdit`), as the route's
+ * `app.inject` does, so the stamp under test is the served writer's (`values-only-adoption-is-an-assumption.test.ts`).
+ */
+import { describe, it, expect } from 'vitest';
+import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
+import { ProposalStore } from '../proposal.js';
+import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
+import { earnsAuthorshipCredit, structureProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
+import { sayFigureRead } from '../say-figure.js';
+
+const SCENARIO = '9390a1b4-ab29-4a16-b39c-64bc00cc4ed0';
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: '4 hours a week is about right for me. Keep it.', user_turn_text: '4 hours a week is about right for me. Keep it.' };
+
+type Node = { id: string; kind: string; label: string; category?: string; observed_state?: Record<string, unknown>; scale_frame?: number; provenance?: string };
+const OLUMIS = { unit: 'hours/week', value: 0.1, source: 'cee_inference', raw_value: 4, extractionType: 'inferred' };
+const BASE: Node[] = [
+  { id: 'funding', kind: 'goal', label: 'Funding secured' },
+  // Served `9390a1b4`'s node, verbatim: Olumi's inferred 4 hours/week on a 40-hour frame.
+  { id: 'warm_hours', kind: 'factor', label: 'Hours per week finding warm connections', category: 'external', provenance: 'ai_inferred', scale_frame: 40, observed_state: { ...OLUMIS } },
+  { id: 'team_size', kind: 'factor', label: 'Team size', category: 'controllable', observed_state: { value: 0.5, raw_value: 5, cap: 10, unit: 'FTE', source: 'user_override' } },
+  { id: 'runway', kind: 'factor', label: 'Months of runway', category: 'observable', scale_frame: 24, observed_state: { value: 0.25, raw_value: 6, unit: 'months', source: 'brief_extraction', extractionType: 'explicit' } },
+  { id: 'reply_rate', kind: 'factor', label: 'Reply rate', category: 'observable', observed_state: { value: 0.05, raw_value: 5, unit: '%', source: 'user_assumption', reviewed_by_user: { intent: 'confirm', at: '2026-10-01T00:00:00.000Z' } } },
+  { id: 'deal_count', kind: 'factor', label: 'Deals in pipeline', category: 'observable', observed_state: { value: 0.3, cap: 10, unit: 'deals', source: 'cee_inference', extractionType: 'inferred' } },
+  { id: 'blank', kind: 'factor', label: 'Intro quality', category: 'observable', scale_frame: 100 },
+];
+const EDGES = ['warm_hours', 'team_size', 'runway', 'reply_rate', 'deal_count', 'blank'].map((from) => (
+  { from, to: 'funding', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' }));
+
+/** The product double whose value writer IS the served writer. */
+function product() {
+  let nodes: Node[] = structuredClone(BASE);
+  let rev = 0;
+  let writes = 0;
+  const graph = () => ({ nodes, edges: EDGES });
+  const d: InternalDispatch = async (path, body) => {
+    const b = (body ?? {}) as Record<string, unknown>;
+    if (path === '/orchestrate/v2/turn' && b.kind === 'system_event') {
+      const ev = b.event as Record<string, unknown>;
+      if (ev.kind !== 'factor_value_edit') return { status: 400, json: {} };
+      const res = await applyFactorValueEdit({
+        payload: { kind: 'system_event', turn_id: String(b.turn_id), scenario_id: SCENARIO, stage: 'frame', event: ev } as never,
+        event: ev as never, requestId: `w${writes}`, persistedGraph: graph() as never, priorFacts: [],
+      });
+      if (res.kind !== 'mutated') return { status: 200, json: { assistant_text: 'Not changed.' } };
+      writes += 1;
+      nodes = (res as unknown as { mutatedGraph: { nodes: Node[] } }).mutatedGraph.nodes;
+      rev += 1;
+      const fact = (res as unknown as { handlerFacts: { fact_type: string; result: { after?: unknown } }[] }).handlerFacts.find((f) => f.fact_type === 'set_factor_value');
+      return { status: 200, json: { assistant_text: 'Saved.', graph_hash: `h${rev}`, blocks: [{ type: 'graph_patch', status: 'applied', operation: 'set_factor_value', target_id: String(ev.target_id), after: fact?.result.after }] } };
+    }
+    return { status: 200, json: { graph: graph(), graph_hash: `h${rev}` } };
+  };
+  return { d, byId: () => Object.fromEntries(nodes.map((n) => [n.id, n])), graph, writes: () => writes };
+}
+
+const keepOf = (factor_label: string, value: number, unit: string) => ({ factor_label, value, unit, basis: 'the user said it is about right', keep: true });
+
+async function keep(items: ReturnType<typeof keepOf>[]) {
+  const p = product();
+  const store = new ProposalStore();
+  let stored = 0;
+  const put = store.put.bind(store);
+  store.put = (x) => { stored += 1; return put(x); };
+  const caps = createAgentCapabilities(p.d, store);
+  const proposed = await caps.proposeAssumptions(ctx, { assumptions: items } as never);
+  return { p, caps, proposed, stored: () => stored };
+}
+
+describe('keep: Olumi’s own figure, accepted unchanged, through the real writer', () => {
+  it('RED: the card offers to accept Olumi’s estimate unchanged, and approving it records the acceptance on the SAME figure', async () => {
+    const { p, caps, proposed } = await keep([keepOf('Hours per week finding warm connections', 4, 'hours/week')]);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(String(proposed.public_label)).toBe(`Accept Olumi’s estimate, unchanged: Hours per week finding warm connections = ${sayFigureRead(4, 'hours/week')}`);
+    expect(String(proposed.note)).toMatch(/stays Olumi’s estimate/);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    const os = p.byId().warm_hours.observed_state!;
+    // The figure is byte-identical; only who has reviewed it moved.
+    expect({ value: os.value, raw_value: os.raw_value, unit: os.unit }).toEqual({ value: OLUMIS.value, raw_value: OLUMIS.raw_value, unit: OLUMIS.unit });
+    expect(os.source).toBe('user_assumption');
+    expect(os.reviewed_by_user).toMatchObject({ intent: 'confirm' });
+    expect(isAcceptedOlumiEstimate(os)).toBe(true);
+    expect(observedValueAuthorship(os)?.provenance, 'never "set by you"').not.toBe('user_set');
+    expect(p.byId().warm_hours.provenance).toBe('ai_inferred');
+  });
+
+  it('the stored figure is kept, never the model’s argument: a keep sent with 9 still offers and keeps 4', async () => {
+    const { p, caps, proposed } = await keep([keepOf('Hours per week finding warm connections', 9, 'hours/week')]);
+    expect(String(proposed.public_label)).toContain(sayFigureRead(4, 'hours/week'));
+    expect(String(proposed.public_label)).not.toMatch(/\b9\b/);
+    await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(p.byId().warm_hours.observed_state).toMatchObject({ raw_value: 4, value: 0.1, source: 'user_assumption' });
+  });
+
+  it('an accepted estimate earns no authorship credit: it is Olumi’s figure the user accepted, not one they stated', async () => {
+    const { p, caps, proposed } = await keep([keepOf('Hours per week finding warm connections', 4, 'hours/week')]);
+    await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const g = p.graph();
+    expect(earnsAuthorshipCredit(structureProvenance(g.nodes.find((n) => n.id === 'warm_hours'), g as never))).toBe(false);
+  });
+
+  it('a capped figure with no raw value keeps its model value byte for byte', async () => {
+    const { p, caps, proposed } = await keep([keepOf('Deals in pipeline', 3, 'deals')]);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const os = p.byId().deal_count.observed_state!;
+    expect(os.value).toBe(0.3);
+    expect(os.source).toBe('user_assumption');
+  });
+});
+
+describe('only Olumi’s own figure may be kept', () => {
+  it.each([
+    ['Team size', 5, 'FTE', 'yours', 'team_size'],
+    ['Months of runway', 6, 'months', 'brief', 'runway'],
+    ['Reply rate', 5, '%', 'already_accepted', 'reply_rate'],
+    ['Intro quality', 50, 'index points (0-100)', 'no_figure', 'blank'],
+  ])('NEGATIVE: %s (%s) → no card, the reason named, nothing written', async (label, value, unit, why, id) => {
+    const { p, stored, proposed } = await keep([keepOf(label, value, unit)]);
+    const before = structuredClone(BASE.find((n) => n.id === id)!.observed_state);
+    expect(proposed.ok).toBe(false);
+    expect(proposed.proposal_id).toBeUndefined();
+    expect(proposed.not_keepable).toEqual([{ label, why }]);
+    expect(stored()).toBe(0);
+    expect(p.byId()[id].observed_state).toEqual(before);
+    expect(p.writes()).toBe(0);
+  });
+
+  it('NEGATIVE: a keep beside another value is refused whole — one Yes never stands for two different acts', async () => {
+    const { stored, proposed } = await keep([keepOf('Hours per week finding warm connections', 4, 'hours/week'),
+      { factor_label: 'Intro quality', value: 50, unit: 'index points (0-100)', basis: 'a guess' } as never]);
+    expect(proposed).toMatchObject({ ok: false, refusal: 'keep_with_other_changes' });
+    expect(stored()).toBe(0);
+  });
+
+  it('CONTROL: without `keep`, Olumi’s figure is left alone exactly as before (the door is opt-in)', async () => {
+    const p = product();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Hours per week finding warm connections', value: 4, unit: 'hours/week', basis: 'x' }] });
+    expect(r).toMatchObject({ ok: false, refusal: 'nothing_to_adopt', already_valued: [{ label: 'Hours per week finding warm connections', current_value: 4 }] });
+  });
+});
