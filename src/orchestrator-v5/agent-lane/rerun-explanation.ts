@@ -17,7 +17,7 @@
  * Inert by construction: no run_delta, or no change rows (a pre-0.70 Accept pair carries none) → no plan, and the
  * route's explanation is exactly what it was.
  */
-import { checkMethodTurn, type MethodInputs } from './guidance/index.js';
+import { checkMethodTurn, labelMatches, masked, type MethodInputs } from './guidance/index.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -92,9 +92,13 @@ function changeSentences(rows: readonly Rec[], labelOf: (id: string) => string |
     if (sizedTo === 'user') {
       return band?.before !== undefined && band.after !== undefined ? ownEstimateMoved(l.from, l.to, band.before, band.after) : ownEstimate(l.from, l.to);
     }
-    if (sizedTo === 'olumi_accepted' && band === undefined) return acceptedEstimate(l.from, l.to);
+    if (sizedTo === 'olumi_accepted') {
+      // ⛔ The Accept is never folded away (buddy draft CR 5939351197): with a band move on the same link it is still said.
+      return band?.before !== undefined && band.after !== undefined
+        ? `You accepted Olumi's estimate for how much ${l.from} changes ${l.to}: ${band.before} → ${band.after}.` : acceptedEstimate(l.from, l.to);
+    }
     if (band?.before !== undefined && band.after !== undefined) return strengthMoved(l.from, l.to, band.before, band.after);
-    return sizedTo === 'olumi_accepted' ? acceptedEstimate(l.from, l.to) : undefined;
+    return undefined;
   }).filter((s): s is string => s !== undefined).slice(0, MAX_NAMED_CHANGES);
 }
 
@@ -144,6 +148,7 @@ export function rerunExplanationPlan(
   const instruction = [
     'This Run follows the user’s change. Start by naming each change in exactly these words, one line each:',
     ...changes.map((c) => `- ${c}`),
+    'Never say the inputs were the same or that nothing changed: the user changed what is named above.',
     priorWithheld
       ? `Then say: "${RERUN_FALLBACK_LINES.unwithheld}" The earlier Run had no figures, so never say anything rose, fell, moved or changed in value.`
       : noMatched
@@ -155,8 +160,27 @@ export function rerunExplanationPlan(
   return { inputs, changes, instruction, fallback: `${changes.join(' ')} ${caseLine}` };
 }
 
-/** The reply as sent: the model's when it passes RC's check, else RC's deterministic fallback (no repair call). */
+/**
+ * A reply that says the inputs were the same, or that nothing changed, while the typed rows record the user's change
+ * (CODEX CEE BUDDY draft CR 5939351197 P1). "Nothing else changed" (RC's C0 line) is not one. Run on the label-masked reply.
+ */
+const CONTRARY_SAME = /\b(same input(s)?( values)?|nothing (in (your|the) model )?(has )?changed|nothing was changed|no (inputs?|changes?) (were|was) (made|changed)|inputs? (were|was|are|is) unchanged|unchanged inputs?|did ?n[o’']t change anything)\b/iu;
+
+/**
+ * The required typed facts RC's text bans do not enforce (buddy draft CR 5939351197; proposed to RC for the contract):
+ *   · RX-UNWITHHELD-LINE: when `prior_withheld`, the reply says the UNWITHHELD line;
+ *   · RX-NO-CONTRARY-SAME: a reply never says the inputs were the same / nothing changed when changes are recorded.
+ */
+function requiredFacts(reply: string, plan: RerunExplanationPlan): string[] {
+  const failed: string[] = [];
+  if (plan.inputs.prior_withheld === true && !labelMatches(reply, [RERUN_FALLBACK_LINES.unwithheld])) failed.push('RX-UNWITHHELD-LINE');
+  if (plan.changes.length > 0 && CONTRARY_SAME.test(masked(reply, plan.inputs.model_labels ?? []))) failed.push('RX-NO-CONTRARY-SAME');
+  return failed;
+}
+
+/** The reply as sent: the model's when it passes RC's check AND the required facts, else RC's deterministic fallback. */
 export function guardRerunExplanation(reply: string, plan: RerunExplanationPlan): { readonly text: string; readonly passed: boolean; readonly failed: readonly string[] } {
   const verdict = checkMethodTurn('RERUN-EXPLANATION', reply, plan.inputs);
-  return verdict.pass ? { text: reply, passed: true, failed: [] } : { text: plan.fallback, passed: false, failed: verdict.failed };
+  const failed = [...verdict.failed, ...requiredFacts(reply, plan)];
+  return failed.length === 0 ? { text: reply, passed: true, failed: [] } : { text: plan.fallback, passed: false, failed };
 }

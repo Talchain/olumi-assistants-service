@@ -140,6 +140,35 @@ describe('the guard: RC\'s check before send, RC\'s fallback on a fail', () => {
     expect(guardRerunExplanation(reply, unmasked!).failed, 'the contrast: without model_labels it reads as a leader claim').toContain('RX-NO-LEADER-UNLICENSED');
   });
 
+  // ⛔ CODEX CEE BUDDY draft CR 5939351197 P1: model-reply bypasses RC's text bans did not reject.
+  it.each([
+    ['a partial Accept delta + "The same input values were used."', { ...UNWITHHELD, input_coverage: 'partial', win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] }, 'The same input values were used.'],
+    ['a complete Accept + "Nothing in your model changed."', UNWITHHELD, `${RERUN_FALLBACK_LINES.unwithheld} Nothing in your model changed.`],
+  ])('RED (RX-NO-CONTRARY-SAME): %s → fallback', (_n, delta, extra) => {
+    const p3 = plan(delta)!;
+    const r = guardRerunExplanation(`${SAID_AI}\n${SAID_FIX}\n${extra}`, p3);
+    expect(r.failed).toContain('RX-NO-CONTRARY-SAME');
+    expect(r.text).toBe(p3.fallback);
+  });
+
+  it('CONTROL: RC\'s own C0 line "Nothing else changed." is not a contrary claim', () => {
+    const c0 = plan({ ...UNWITHHELD, attribution_case: 'C0_identical', win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] })!;
+    expect(guardRerunExplanation(c0.fallback, c0)).toMatchObject({ passed: true });
+  });
+
+  it('RED (RX-UNWITHHELD-LINE): with prior_withheld, the change sentences alone are not enough → fallback', () => {
+    const r = guardRerunExplanation(`${SAID_AI}\n${SAID_FIX}`, p);
+    expect(r.failed).toEqual(['RX-UNWITHHELD-LINE']);
+    expect(r.text).toBe(p.fallback);
+  });
+
+  it('the Accept is never folded away: sizing → olumi_accepted + a band move on ONE link keeps "You accepted"', () => {
+    const band = { ...AI, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' } };
+    expect(plan({ ...UNWITHHELD, input_changes: [AI, band] })!.changes).toEqual([
+      "You accepted Olumi's estimate for how much Sprint capacity for AI reporting changes AI reporting module availability: moderate → strong.",
+    ]);
+  });
+
   it('CONTROL (buddy preflight 5939219187): a PAIRED, licensed C1 rerun with win shares on both sides MAY say what moved', () => {
     const paired = plan({ ...UNWITHHELD, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'ai_reporting_module_sprint' }] }, true)!;
     expect(paired.inputs).toMatchObject({ prior_withheld: false, no_matched_figures: false, leader_licensed: true });
