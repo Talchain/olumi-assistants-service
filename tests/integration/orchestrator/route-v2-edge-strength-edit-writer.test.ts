@@ -1777,3 +1777,93 @@ describe('R3-9 × AIQ 5867435409 (1) at the ROUTE: the canvas edit reads the DUR
     expect(JSON.stringify(persisted)).toBe(before);
   });
 });
+
+/**
+ * ⭐ M1 ACCEPT RECEIPT AT THE AGENT CARD (R3 5942069984; DL 5942097719; Codex pre-review P1 on 63892196): the Agent's
+ * own propose → authorise, dispatched into the REAL route and link writer. Whose figure the approval says is read off the
+ * STORED link after the write (`linkSizing`), never off the card: a confirm is review (R11), so Olumi's estimate lands
+ * `olumi_accepted` and the user reads RC's accept sentence — the same one the system-event receipt says.
+ */
+describe('M1 Accept receipt at the Agent card: whose figure is read off the stored link', () => {
+  let app: FastifyInstance;
+  let createAgentCapabilities: typeof import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js').createAgentCapabilities;
+  let ProposalStore: typeof import('../../../src/orchestrator-v5/agent-lane/proposal.js').ProposalStore;
+  let linkSizing: typeof import('../../../src/cee/magnitude/link-sizing.js').linkSizing;
+  let acceptedOlumiEstimateSentence: typeof import('../../../src/orchestrator-v5/agent-lane/rerun-explanation.js').acceptedOlumiEstimateSentence;
+  beforeAll(async () => {
+    app = Fastify(); await ceeOrchestratorRouteV2(app); await app.ready();
+    ({ createAgentCapabilities } = await import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js'));
+    ({ ProposalStore } = await import('../../../src/orchestrator-v5/agent-lane/proposal.js'));
+    ({ linkSizing } = await import('../../../src/cee/magnitude/link-sizing.js'));
+    ({ acceptedOlumiEstimateSentence } = await import('../../../src/orchestrator-v5/agent-lane/rerun-explanation.js'));
+  });
+  afterAll(async () => { await app.close(); });
+
+  const FROM = 'price_sensitivity';
+  const TO = 'monthly_churn';
+  // Codex's probe link: μ 0.85, σ 0.3 — "very strong" on CEE's cuts.
+  const graphWithLink = (provenance: Record<string, unknown>) => {
+    const g = buildPersistedGraph() as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+    g.nodes.push({ id: FROM, kind: 'factor', label: 'Price sensitivity' }, { id: TO, kind: 'factor', label: 'Monthly churn' });
+    g.edges.push({ from: FROM, to: TO, strength: { mean: 0.85, std: 0.3 }, exists_probability: 0.9, effect_direction: 'positive', provenance });
+    return g;
+  };
+  const storedLink = () => ((persisted as { edges: Record<string, unknown>[] }).edges).find((e) => e.from === FROM && e.to === TO);
+  const SAYS = 'Record that link as very strong, as my own estimate.';
+
+  beforeEach(() => {
+    graphCasRpcEnforce = true;
+    commitReceiptState.mode = 'normal';
+    appendMock.mockReset();
+    appendMock.mockResolvedValue({ id: 'mock-row-id' });
+    loadGraphMock.mockReset();
+    loadGraphMock.mockImplementation(async () => persisted);
+    readMostRecentPendingActionsMock.mockReset();
+    readMostRecentPendingActionsMock.mockResolvedValue([]);
+    readRecentMock.mockReset();
+    readRecentMock.mockResolvedValue([]);
+    readFactsForMock.mockReset();
+    readFactsForMock.mockResolvedValue([]);
+    readScenarioRunAnalysisFactsForMock.mockReset();
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({ facts: [], total_count: 0 });
+  });
+
+  /** The Agent's own dispatch, wired to the real route; the committed graph becomes the stored one the read-back reads. */
+  const approveOnTheCard = async () => {
+    const dispatch = async (path: string, body: unknown) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: persisted, graph_hash: computeAnalysisAffectingGraphHash(persisted as never) } };
+      const calls = appendMock.mock.calls.length;
+      const res = await app.inject({ method: 'POST', url: path, payload: body as Record<string, unknown> });
+      if (appendMock.mock.calls.length > calls && lastAppend().graph !== undefined) persisted = lastAppend().graph;
+      return { status: res.statusCode, json: JSON.parse(res.body) as Record<string, unknown> };
+    };
+    const caps = createAgentCapabilities(dispatch as never, new ProposalStore());
+    const ctx = { scenario_id: SCENARIO_ID, authenticated_user_id: null, request_id: 'r', user_text: SAYS, user_turn_text: SAYS };
+    const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Price sensitivity', to_label: 'Monthly churn', strength: 'very strong', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, link: { keeps_current_strength: true } });
+    const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, applied: true });
+    expect(lastAppend().handler_id).toBe('adjust_edge_strength');
+    return { p, r };
+  };
+
+  it('⭐ RED: Olumi\'s estimate confirmed on the card → stored olumi_accepted → the user reads RC\'s accept sentence, never "your own estimate"', async () => {
+    persisted = graphWithLink({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    const { p, r } = await approveOnTheCard();
+    expect(String(p.public_label)).not.toContain('your own');
+    expect(String(p.note)).toContain('never the user’s own');
+    expect(linkSizing(storedLink())).toBe('olumi_accepted');
+    expect(r.follow_up).toBe(acceptedOlumiEstimateSentence('Price sensitivity', 'Monthly churn'));
+    expect(r.follow_up).toBe('You accepted Olumi\'s estimate for how much Price sensitivity changes Monthly churn.');
+    expect(String(r.note)).toMatch(/^Recorded as the user’s review: the strength stays Olumi’s estimate/);
+  });
+
+  it('CONTROL: the user\'s OWN link confirmed on the same card → stored user → "as your own estimate" is kept', async () => {
+    persisted = graphWithLink({ source: 'user_specified' });
+    const { p, r } = await approveOnTheCard();
+    expect(String(p.public_label)).toContain('as very strong, as your own estimate (its strength stays as it is)');
+    expect(linkSizing(storedLink())).toBe('user');
+    expect(r.follow_up).toBe('Recorded "Price sensitivity" → "Monthly churn" as very strong, as your own estimate (its strength stays as it is).');
+    expect(String(r.note)).toMatch(/^Recorded as the user’s own estimate\./);
+  });
+});

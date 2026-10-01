@@ -262,6 +262,10 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { caps, ctx } = agent(NAMED);
     const p = await caps.proposeLinkStrengths!(ctx, { links: named as never, rationale: 'the user named the band it already sits in' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
+    // M1 Accept receipt (Codex pre-review P2): naming the band is review, so the kept figure stays Olumi's — never "yours".
+    expect((p as unknown as { links: { whose: unknown; keeps_current_strength: unknown }[] }).links)
+      .toEqual([expect.objectContaining({ whose: 'Olumi\u2019s estimate', keeps_current_strength: true })]);
+    expect(String(p.note)).toContain('is never the user\u2019s own (`whose`)');
     // The approval both the chip and a typed "yes" reach (`authorise_change`).
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
