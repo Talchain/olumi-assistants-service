@@ -176,7 +176,7 @@ import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, derivedFigureTheUserWrote, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -3210,8 +3210,11 @@ export function createAgentCapabilities(
       const targetNotStated: ToolResult = { ok: false, mutated: false, refusal: 'target_not_stated',
         detail: `${figure} is not a figure the user wrote, so nothing was prepared: it would be recorded as their target. `
           + 'Ask them what figure the goal must reach, in their own words, and never offer a figure of your own as theirs.' };
-      // ⛔ The figure is recorded as the user's target, so it must be one the user wrote.
-      if (!figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
+      // ⛔ The figure is recorded as the user's target, so it must be one the user wrote — or one they DERIVED from their own
+      // figure in this turn's words ("double that": F5 D1, DL 5930770727), bound to that base by exact arithmetic.
+      const derived = figureTheUserWrote(value, unit, ctx.user_text)
+        ? null : derivedFigureTheUserWrote(value, unit, ctx.user_text, ctx.user_turn_text);
+      if (derived === null && !figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
       // ⛔ And so is which way it binds: said, affirmed, in this turn's own typed words.
       const said = comparatorTheUserWrote(ctx.user_turn_text);
       if (said !== type) {
@@ -3219,7 +3222,10 @@ export function createAgentCapabilities(
           detail: (said === null
             ? 'The user has not said in this message, in their own words, whether the goal must be at least or at most this figure (or they said both, asked, or denied it), so nothing was prepared. '
             : `The user said ${DIRECTION_WORDS[said]}, not ${DIRECTION_WORDS[type]}, so nothing was prepared. `)
-            + 'Ask them whether the goal must be at least or at most the figure, and never choose it for them.' };
+            + 'Ask them whether the goal must be at least or at most the figure, and never choose it for them.',
+          // ⭐ (c) DL 5930770727: neutral wording is asked with the At least / At most DECISION BUTTONS, never a typed word —
+          // this typed ask is what the surface renders them from (CANVAS grammar).
+          needs: 'direction', direction_options: ['at_least', 'at_most'] };
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
@@ -3255,7 +3261,7 @@ export function createAgentCapabilities(
             + 'Ask the user for the target in the goal’s own units, and never record a figure given for something else as this goal’s target.' };
       }
       // ⛔ …and written ABOUT this goal (DL #72 5862394804): "300 Pro paying subscribers" is never a £300 MRR target.
-      if (!figureTheUserWroteFor(value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
+      if (!figureTheUserWroteFor(derived?.base ?? value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
       /**
        * ⭐ THE GOAL'S LEVEL TODAY, WHEN THE USER STATED IT BESIDE THE TARGET — on THIS card, written on THIS approval
        * (AIQ #75 5913873948 row G6, 5913897396, 5913952911; DL 5913935708). R3's run: "We have secured £0 so far and need
@@ -3317,7 +3323,7 @@ export function createAgentCapabilities(
         validation: { admitted: true, loss_count: 0, refusals: [] },
         // AIQ's words for the one card (5913952911): both figures, the user's own.
         public_label: today === undefined
-          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}`
+          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}${derived === null ? '' : ` (${derived.word} your ${targetFigure(derived.base, unit)})`}`
           : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`,
       });
       proposals.put(proposal);
