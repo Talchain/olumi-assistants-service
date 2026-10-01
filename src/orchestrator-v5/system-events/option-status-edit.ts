@@ -174,7 +174,7 @@ export function applyOptionStatusEdit(params: ApplyOptionStatusEditParams): Opti
     return refuse(payload, matches.length === 0 ? 'node_target_not_found' : 'node_target_ambiguous',
       `I couldn't find that option in the saved model, so I haven't changed anything. Reload it and try again.`);
   }
-  const target = matches[0] as unknown as Record<string, unknown> & { label: string; kind: string };
+  const target: Record<string, unknown> & { label: string; kind: string } = { ...matches[0]! };
   if (target.kind !== 'option') {
     log.info({ ...logBase, event: 'v5.system_event.option_status_edit.not_an_option', kind: target.kind },
       'option_status_edit — the id names a node that is not an option; refusing');
