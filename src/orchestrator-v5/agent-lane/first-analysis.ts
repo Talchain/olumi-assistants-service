@@ -36,6 +36,7 @@ import { dispatchChipClickRunAnalysis, type ChipClickAutoRunTrigger } from '../h
 import { AGENT_RUN_ANALYSIS_CHIP_ID } from '../handlers/agent-chip-ids.js';
 import { RUN_PROVENANCE_ENRICHMENT_KEY } from '../context/run-initiator.js';
 import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
+import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { blockPresumesLeadingOption } from '../compose.js';
 
 /**
@@ -237,15 +238,16 @@ export function claimPermissionsFrom(
 ): ClaimPermissions {
   const claim = (analysisState as { leader_claim?: { permitted?: unknown; withheld_reason?: unknown; separation?: unknown } } | null | undefined)?.leader_claim;
   const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
-  // Paul's ruling (programme-docs#38 5576895511): a SEPARABLE run whose only objection is that every estimate
-  // is machine-authored is "caveat, not withhold" — the wire gate's separable-provisional arm, mirrored here so
-  // the Agent and the wire agree. It is named as provisional; every other population is unchanged.
+  // ONE licence (`compose/leader-licence.ts`), the same one the wire gate reads, so what the Agent is told and what the
+  // wire lets through cannot disagree. Paul's ruling (programme-docs#38 5576895511): a SEPARABLE run whose only
+  // objection is that every estimate is machine-authored is "caveat, not withhold" — the licence's caveat arm.
   // ⛔ REQUESTED RUNS ONLY (RC #63 5826599698): Paul's 24 Sep "keep the unrequested-analysis claim policy"
   // governs the AUTOMATIC first run, so `describeFirstAnalysisForAgent` passes nothing and keeps today's answer.
-  const separableProvisional = run.requested === true
-    && claim?.permitted === true && claim?.separation === 'separated' && mode === 'quantified_provisional';
+  // The admission must also be `comparative_leader` for a plain naming: absent admission fails CLOSED for the Agent.
+  const licence = leaderLicenceFromState(analysisState, analysisReady);
+  const separableProvisional = run.requested === true && licence === 'permitted_with_caveat';
   return {
-    leader_may_be_named: (claim?.permitted === true && mode === 'comparative_leader') || separableProvisional,
+    leader_may_be_named: (licence === 'permitted' && mode === 'comparative_leader') || separableProvisional,
     ...(separableProvisional ? { provisional: true } : {}),
     ...(typeof claim?.withheld_reason === 'string' && claim.withheld_reason !== '' ? { withheld_reason: claim.withheld_reason } : {}),
     permitted_analysis_mode: mode,
