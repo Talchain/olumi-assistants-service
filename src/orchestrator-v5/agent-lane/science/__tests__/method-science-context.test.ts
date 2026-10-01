@@ -16,7 +16,8 @@ import type { StageType } from '@talchain/schemas/boundary';
 
 import { deriveAuthoritativeStage } from '../../../context/derive-stage.js';
 import { _resetDskBundleCache, loadVerifiedDskBundle } from '../../../compose/dsk-bundle-record.js';
-import type { DSKProtocol } from '../../../../dsk/types.js';
+import { computeDSKHash } from '../../../../dsk/hash.js';
+import type { DSKBundle, DSKProtocol } from '../../../../dsk/types.js';
 import {
   methodScienceContext,
   type MethodScienceInput,
@@ -239,17 +240,41 @@ describe('the context is an allow-list', () => {
   });
 });
 
+/** Serve `bundle` as `data/dsk/v1.json` from a temp dir, as the loader reads it. */
+function serveBundle(bundle: unknown): void {
+  const dir = mkdtempSync(join(tmpdir(), 'sdsk-bundle-'));
+  mkdirSync(join(dir, 'data', 'dsk'), { recursive: true });
+  writeFileSync(join(dir, 'data', 'dsk', 'v1.json'), JSON.stringify(bundle));
+  vi.spyOn(process, 'cwd').mockReturnValue(dir);
+  _resetDskBundleCache();
+}
+
+const realBundle = (): DSKBundle =>
+  JSON.parse(readFileSync(join(process.cwd(), 'data', 'dsk', 'v1.json'), 'utf8')) as DSKBundle;
+
 describe('the bundle is the authority', () => {
   it('ROW 12: a bundle that fails its own hash cites nothing (missing badge, never a wrong one)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sdsk-bundle-'));
-    mkdirSync(join(dir, 'data', 'dsk'), { recursive: true });
-    const real = JSON.parse(readFileSync(join(process.cwd(), 'data', 'dsk', 'v1.json'), 'utf8')) as { objects: { id: string; title?: string }[] };
-    const tampered = { ...real, objects: real.objects.map((o) => (o.id === 'DSK-P-001' ? { ...o, title: 'Tampered' } : o)) };
-    writeFileSync(join(dir, 'data', 'dsk', 'v1.json'), JSON.stringify(tampered));
-    vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    _resetDskBundleCache();
+    const real = realBundle();
+    serveBundle({ ...real, objects: real.objects.map((o) => (o.id === 'DSK-P-001' ? { ...o, title: 'Tampered' } : o)) });
     const ctx = methodScienceContext(premortem());
     expect(ctx.dsk).toBeNull();
     expect(ctx.not_cited).toBe('bundle_unverified');
+  });
+
+  it('ROW 13 PAIR: a NEW valid bundle with P-001\'s steps reordered still cites, but gives NO blind-spot step', () => {
+    const real = realBundle();
+    const reordered = {
+      ...real,
+      objects: real.objects.map((o) =>
+        o.id === 'DSK-P-001' && o.type === 'protocol' ? { ...o, steps: [...(o as DSKProtocol).steps].reverse() } : o),
+    } as DSKBundle;
+    const rehashed = { ...reordered, dsk_version_hash: computeDSKHash(reordered) };
+    expect(rehashed.dsk_version_hash).not.toBe(real.dsk_version_hash);
+    serveBundle(rehashed);
+    const ctx = methodScienceContext(premortem());
+    expect(ctx.dsk?.protocol_id).toBe('DSK-P-001');
+    expect(ctx.dsk?.bundle_hash).toBe(rehashed.dsk_version_hash);
+    // Position 1 of the new bundle is a different step: bound to the hash it was read from, it is withheld.
+    expect(ctx.dsk?.blind_spot_step).toBeNull();
   });
 });
