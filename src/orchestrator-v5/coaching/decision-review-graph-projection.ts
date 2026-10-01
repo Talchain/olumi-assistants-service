@@ -67,7 +67,7 @@ import {
   projectUncertaintyDriversForContext,
   type GraphV3Compact,
 } from '../../orchestrator/context/graph-compact.js';
-import { valueSourceAuthorship } from '../../cee/transforms/provenance-display.js';
+import { observedValueAuthorship } from '../../cee/transforms/provenance-display.js';
 
 /** How the projection was obtained. Reported in telemetry; never user-facing. */
 export type DecisionReviewGraphSource =
@@ -339,7 +339,7 @@ function projectNodePreserving(raw: unknown): Record<string, unknown> | null {
     // Returns the PAIR (`source` + `provenance`), which is what the compactor
     // emits too — so spreading it keeps both arms' shape identical, not just
     // their vocabulary.
-    const authorship = valueSourceAuthorship(observed.source);
+    const authorship = observedValueAuthorship(observed);
     if (authorship !== undefined) Object.assign(out, authorship);
   }
   if (node.is_baseline === true) out.is_baseline = true;

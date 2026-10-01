@@ -43,10 +43,10 @@ const CHURN_WITHHELD = ' For ‘Features and Pro price’ and ‘Additional adve
 /** B6 (ii) as served: the two options that leave churn where it is carry Olumi's 3% as their P's whole basis. */
 const CHURN_B6 = ' For ‘Carry on as now’ and ‘Split £30,000 between feature development and advertising’ it isn’t shown: it starts from Olumi’s estimate of today’s ‘Monthly churn’.';
 /** C10 with churn's level owned as the row under test says it is, so the graph and the row agree. */
-const withChurnLevel = (source: string) => {
+const withChurnLevel = (source: string, extra: Record<string, unknown> = {}) => {
   const g = structuredClone(FX.graph) as { nodes: Array<Record<string, any>> };
   const n = g.nodes.find((x) => x.id === 'monthly_churn')!;
-  n.observed_state = { ...n.observed_state, source };
+  n.observed_state = { ...n.observed_state, source, ...extra };
   return g;
 };
 
@@ -87,6 +87,15 @@ describe('⛔ run_analysis says how each of the user’s limits was checked', ()
   it('CONTROL: a limit checked against a figure the user accepted as an assumption says so', () => {
     const rows = { per_limit: [{ constraint_id: 'agent-lane:monthly_churn:<=', state: 'estimate_only' as const, reason: 'level_user_assumption' }], joint: { state: 'estimate_only' as const } };
     expect(limitChecksForAgent(withChurnLevel('user_assumption'), rows)![0]!.say).toBe(`‘Monthly churn’ was checked, against a figure you accepted as an assumption.${CHURN_WITHHELD}`);
+  });
+
+  // ⭐ ORIGIN ≠ ACCEPTANCE (52f8cd; DL CR on #2412 5921764485): the same stored row, but the level is Olumi's figure the
+  // user ACCEPTED (the approved adoption records `reviewed_by_user`). The row's words stand; the options that start from
+  // that level are named as starting from Olumi's estimate — accepting it did not make it the user's.
+  it('RED: the same row over Olumi\'s ADOPTED figure also names the options that start from Olumi\'s estimate', () => {
+    const rows = { per_limit: [{ constraint_id: 'agent-lane:monthly_churn:<=', state: 'estimate_only' as const, reason: 'level_user_assumption' }], joint: { state: 'estimate_only' as const } };
+    const adopted = withChurnLevel('user_assumption', { reviewed_by_user: { intent: 'confirm', at: '2026-09-30T23:00:00.000Z' } });
+    expect(limitChecksForAgent(adopted, rows)![0]!.say).toBe(`‘Monthly churn’ was checked, against a figure you accepted as an assumption.${CHURN_WITHHELD}${CHURN_B6}`);
   });
 
   it('CONTROL: no per-limit rows on the read → no limit_checks (nothing invented); a row whose limit has no label is left out', async () => {

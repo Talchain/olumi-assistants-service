@@ -244,13 +244,18 @@ const SOURCE_AUTHORSHIP: Readonly<
   user_edited: { source: "user", provenance: "user_set" },
   user_calibration: { source: "user", provenance: "user_set" },
 
-  // ⚠ `user_assumption` ("mark as assumption") is `user_set` HERE and
-  // `inferred` for the SAMPLING-WIDTH authority, and the divergence is
-  // deliberate rather than an oversight. A declared guess should be sampled as
-  // widely as a model's guess — that is a claim about PRECISION. It is still
-  // the user's guess, not ours — that is a claim about AUTHORSHIP, and calling
-  // it `ai_inferred` would tell the user we invented a number they marked up
-  // themselves. Same literal, two questions, two answers.
+  // ⚠ `user_assumption` ALONE is the user's declared guess ("mark as assumption"), so the bare literal
+  // stays `user_set` HERE and `inferred` for the SAMPLING-WIDTH authority — a declared guess is sampled
+  // as widely as a model's (PRECISION), but it is still the user's guess (AUTHORSHIP). Same literal, two
+  // questions, two answers.
+  //
+  // ⭐ BUT THE LITERAL HAS TWO WRITERS, AND ONLY ONE OF THEM IS THE USER'S NUMBER. The approved adoption
+  // of Olumi's proposed figure (`set-factor-value.ts`, `approved-adoption-context.ts`) writes the same
+  // literal AND records the approval as `observed_state.reviewed_by_user` (`intent: 'confirm'`). That pair
+  // is Olumi's figure, accepted — never the user's — and it is told apart by
+  // {@link observedValueAuthorship}, which every reader of a whole `observed_state` calls (DL CR on
+  // #2412 5921764485; served defect: guest `c708fca5`, #75 5921124922). This row answers for the bare
+  // literal only.
   user_assumption: { source: "user", provenance: "user_set" },
 
   // ⚠ LOSSY, AND THE LOSS IS NAMED. `panel_elicited` is a named colleague's
@@ -399,6 +404,37 @@ export function valueSourceAuthorship(source: unknown): ValueAuthorshipDisplay |
     return SOURCE_AUTHORSHIP[source as KnownObservedStateSourceLiteral] ?? undefined;
   }
   return undefined;
+}
+
+/** An approved adoption's pair: Olumi's number, accepted — see {@link isAcceptedOlumiEstimate}. */
+const ACCEPTED_OLUMI_ESTIMATE: ValueAuthorshipDisplay = { source: "assumption", provenance: "ai_inferred" };
+
+/**
+ * ⭐ ORIGIN AND ACCEPTANCE ARE TWO FACTS: is this `observed_state` Olumi's figure the user ACCEPTED?
+ *
+ * True only for the approved adoption's pair — `source: 'user_assumption'` WITH the approval its writer records,
+ * `reviewed_by_user.intent === 'confirm'` (`set-factor-value.ts`). The bare literal is the user's own declared guess
+ * and stays theirs; a link-pairing quote (`confirm_pairing`) is not the acceptance of a figure. Takes `unknown`: the
+ * wire field is `z.string()` and the review is optional, so nothing is assumed parsed.
+ */
+export function isAcceptedOlumiEstimate(observed: unknown): boolean {
+  if (typeof observed !== "object" || observed === null) return false;
+  const o = observed as { source?: unknown; reviewed_by_user?: unknown };
+  const review = o.reviewed_by_user;
+  return o.source === "user_assumption"
+    && typeof review === "object" && review !== null
+    && (review as { intent?: unknown }).intent === "confirm";
+}
+
+/**
+ * {@link valueSourceAuthorship} for a whole `observed_state`: the one place the adoption fact is read. An accepted
+ * Olumi estimate projects Olumi's pair (`assumption` / `ai_inferred`); everything else is the literal's own row.
+ */
+export function observedValueAuthorship(observed: unknown): ValueAuthorshipDisplay | undefined {
+  if (isAcceptedOlumiEstimate(observed)) return ACCEPTED_OLUMI_ESTIMATE;
+  return valueSourceAuthorship(
+    typeof observed === "object" && observed !== null ? (observed as { source?: unknown }).source : undefined,
+  );
 }
 
 /**

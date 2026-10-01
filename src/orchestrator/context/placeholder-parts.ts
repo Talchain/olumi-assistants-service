@@ -28,6 +28,7 @@
 
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
+import { isAcceptedOlumiEstimate } from '../../cee/transforms/provenance-display.js';
 import { sameUnit } from '../../orchestrator-v5/agent-lane/same-unit.js';
 
 type Rec = Record<string, unknown>;
@@ -127,9 +128,17 @@ export interface PlaceholderPartsFinding {
   readonly link?: { readonly from: string; readonly to: string };
 }
 
-/** A value stamp the user authored (`user_stated`) or admitted as their own assumption: the user's, not Olumi's guess. */
-function usersOwn(stamp: unknown): boolean {
-  return earnsAuthorshipCredit(classifyValueSource(stamp)) || stamp === 'user_assumption';
+/**
+ * A value the user authored (`user_stated`) or admitted as their own assumption: the user's, not Olumi's guess.
+ *
+ * ⛔ EXCEPT OLUMI'S FIGURE THE USER ACCEPTED. The approved adoption writes the same `user_assumption` literal plus
+ * the approval as `reviewed_by_user` (`isAcceptedOlumiEstimate`); crediting that pair let B6 call a limit resting on
+ * Olumi's number "the user's" after a bare Accept — served `5479e15e`, guest `c708fca5` (#75 5921124922). Reads the
+ * whole carrier, because the literal alone cannot tell the two writers apart (DL CR on #2412 5921764485).
+ */
+function usersOwn(carrier: unknown): boolean {
+  if (!isRec(carrier) || isAcceptedOlumiEstimate(carrier)) return false;
+  return earnsAuthorshipCredit(classifyValueSource(carrier.source)) || carrier.source === 'user_assumption';
 }
 
 const SIZED_MAGNITUDES: ReadonlySet<unknown> = new Set(['olumi_estimate', 'user_stated']);
@@ -257,7 +266,7 @@ export function placeholderPartsFinding(
   // definition, not an estimate ((c); R3 5916179718). A target with no level at all is not this arm's trigger: B5's
   // own fold already says whose base an unlevelled limit has.
   const level = today?.raw_value ?? today?.value;
-  const levelIsOlumis = today !== undefined && typeof level === 'number' && level !== 0 && !usersOwn(today.source);
+  const levelIsOlumis = today !== undefined && typeof level === 'number' && level !== 0 && !usersOwn(today);
   const movers = parts.size === 0 ? [] : options
     .map((o) => (isRec(o.interventions) ? o.interventions : {}))
     .filter((iv) => !setsLevel(iv[targetId]) && Object.keys(iv).some((k) => parts.has(k)));
@@ -320,7 +329,7 @@ export function placeholderPartsFinding(
     // A range lifts it only as the user stated it: the stored `interventions[T].range` with the user's `source` (TEMPORAL
     // #2382's writer; AIQ 5914222384: a range with no author is refused). The wire's `intervention_ranges` carries no
     // author, so it never does on its own.
-    const theirs = isRec(setting) && (usersOwn(setting.source) || (isRec(setting.range) && usersOwn(setting.range.source)));
+    const theirs = isRec(setting) && (usersOwn(setting) || (isRec(setting.range) && usersOwn(setting.range)));
     if (!theirs) return { reason: OLUMI_GUESS_LIMIT_REASON, arm: 'point' };
   }
   return null;

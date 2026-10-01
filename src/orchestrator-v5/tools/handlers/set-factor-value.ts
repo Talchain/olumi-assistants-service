@@ -269,6 +269,21 @@ interface ObservedSnapshot {
   };
 }
 
+/**
+ * The review already recorded for THIS adoption — the same adoption stamp on the same figure — or `undefined`. A retry
+ * must keep that review byte-identical, or it is not a retry. Pure.
+ */
+function recordedReviewOfSameAdoption(
+  observed: unknown,
+  adoptedSource: string,
+  next: { readonly value: number; readonly raw_value?: number },
+): object | undefined {
+  if (observed === null || typeof observed !== 'object') return undefined;
+  const o = observed as { source?: unknown; value?: unknown; raw_value?: unknown; reviewed_by_user?: unknown };
+  const same = o.source === adoptedSource && o.value === next.value && o.raw_value === next.raw_value;
+  return same && o.reviewed_by_user !== null && typeof o.reviewed_by_user === 'object' ? o.reviewed_by_user : undefined;
+}
+
 function snapshotObservedState(node: GraphV3T['nodes'][number]): ObservedSnapshot {
   const obs = node.observed_state;
   if (!obs) return {};
@@ -769,7 +784,30 @@ export function createSetFactorValueHandler(): HandlerFn {
         // An approved adoption of Olumi's figure (defined only when there is no panel
         // provenance — see `adoptedSource`) is stored as an assumption, not as typed.
         ...(adoptedSource !== undefined ? { source: adoptedSource } : {}),
+        // ⭐ ORIGIN AND ACCEPTANCE ARE TWO FACTS (DL #75 5921002291; AIQ 5921018606). `user_assumption` says
+        // whose NUMBER it is (Olumi's, adopted); the approval itself is recorded as REVIEW, the same carrier the
+        // same-value confirm (below) and an adopted link band (`adjust-edge-strength.ts`) already write. Not a hash
+        // input (`graph-hash-contract`), so recording it moves no Run.
+        //
+        // ⛔ IDEMPOTENT: a retry of the SAME adoption (same stamp, same figure) keeps the review already recorded, byte
+        // for byte. A fresh `at` made a retried approval commit a second version instead of `already_applied`
+        // (the compound door's retry rows, `tests/integration/orchestrator/route-v2-…` — named by path prefix on purpose:
+        // `consent-coverage-manifest.test.ts` scans production source for the internal option writer's file name).
+        ...(adoptedSource !== undefined
+          ? {
+              reviewed_by_user:
+                recordedReviewOfSameAdoption(node.observed_state, adoptedSource, normalised)
+                  ?? { intent: 'confirm' as const, at: new Date().toISOString() },
+            }
+          : {}),
       };
+
+      // ⭐ AND EVERY AUTHORING WRITE CLEARS IT — the same rule as `elicited_from` and `extractionType` below. A review
+      // is of the figure that was there; once someone writes a different figure (the user's own, a colleague's) that
+      // review describes nothing, and left in place it would tell a reader Olumi's accepted estimate is still here.
+      if (adoptedSource === undefined) {
+        delete (merged as { reviewed_by_user?: unknown }).reviewed_by_user;
+      }
 
       // ⭐⭐ AND THE ABSENT BRANCH MUST *CLEAR* IT, NOT MERELY DECLINE TO SET IT.
       //
@@ -885,7 +923,11 @@ export function createSetFactorValueHandler(): HandlerFn {
 
       // Stamp provenance so downstream consumers know the value was
       // user-set (NodeV3.provenance enum supports 'user_set' directly).
-      node.provenance = 'user_set';
+      // ⛔ EXCEPT an approved adoption: the NUMBER is Olumi's, so the node keeps Olumi's origin and the
+      // approval rides `reviewed_by_user` above. `user_set` here made every reader of `node.provenance`
+      // (the Agent's `projectEntity`, the served read) tell the user they set a figure Olumi proposed —
+      // served `5479e15e`, guest `c708fca5`, #75 5921124922.
+      node.provenance = adoptedSource !== undefined ? 'ai_inferred' : 'user_set';
       // The second carrier of the same producer claim. Repair stages promote
       // `extractionType` to the node (`NodeV3.extractionType`), and both the UI
       // predicate (`d?.extractionType`) and `readFactorValueView` (observed_state
