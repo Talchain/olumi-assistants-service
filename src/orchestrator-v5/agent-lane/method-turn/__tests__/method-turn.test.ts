@@ -60,7 +60,7 @@ const methodState = (state: Record<string, unknown>): TurnSignals => {
 };
 
 describe('the corpus', () => {
-  it('served cases are byte-identical to their captures; RC carries 4 pre-mortem method cases and 5 reply fixtures', () => {
+  it('served cases are byte-identical to their captures; RC carries 4 pre-mortem method cases and 7 reply fixtures', () => {
     expect(SERVED.cases.every((c) => c.capture_sha_matches_case)).toBe(true);
     const method = RC.cases.filter((c) => c.id.startsWith('A-PREMORTEM') && c.state['turn.request'] === 'method');
     expect(method.map((c) => c.id).sort()).toEqual([
@@ -69,7 +69,7 @@ describe('the corpus', () => {
     ]);
     expect(RC_REPLIES.map((f) => f.id).sort()).toEqual([
       'MT-PREMORTEM-BAD-BLINDSPOT-AS-STORY', 'MT-PREMORTEM-BAD-BLINDSPOT-ASSERTED', 'MT-PREMORTEM-BAD-PREDICTION',
-      'MT-PREMORTEM-BAD-UNGROUNDED', 'MT-PREMORTEM-GOOD',
+      'MT-PREMORTEM-BAD-UNGROUNDED', 'MT-PREMORTEM-D1-OWN-LABEL-BAD-CLAIM', 'MT-PREMORTEM-D1-OWN-LABEL-GOOD', 'MT-PREMORTEM-GOOD',
     ]);
   });
 
@@ -254,6 +254,22 @@ describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared
     expect(after.reply).not.toBe(before.reply);
     expect(after.target).toEqual(items[indices[0]]);
     expect(before.target).toEqual(items[indices[0]]);
+  });
+
+  it('ROW M13 SERVED D1 (RC label masking, 5938455358): a story naming the user\'s own "…likelihood" factor is grounding, not a probability; Olumi\'s own "likely" still fails', () => {
+    const out = turnFor(served('A-Q-D1-BUILD'), planPickChipId('ai_reporting_module_sprint'));
+    if (out?.kind !== 'run') throw new Error('expected a run');
+    const [i0, , i2] = out.context.supplied_items;
+    expect(i0.labels.join(' ')).toMatch(/likelihood/iu);
+    const reply = (extra: string) => ['Two ways this could go wrong.',
+      `1. ${i2.labels[0]} stayed thin, so ${i2.labels[1]} slipped${extra}. Watch for: a missed demo. Mitigate: protect the sprint.`,
+      `2. ${i0.labels[0]} came late and ${i0.labels[1]} never moved. Watch for: prospects asking for dates. Mitigate: share a roadmap early.`,
+      'Outside the model: what could blindside this that none of these figures covers?'].join('\n');
+    const grounded = settleMethodTurn(out, reply(''));
+    expect(grounded.failed).toEqual([]);
+    expect(grounded.target.id).toBe(i0.id);
+    const claimed = settleMethodTurn(out, reply(', which was likely'));
+    expect(claimed.failed).toContain('PM-NO-PROB');
   });
 
   it('ROW M12: an empty or garbled draft is never sent', () => {
