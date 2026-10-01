@@ -95,7 +95,7 @@ describe('F1 T5: propose_goal_target → ONE card → ONE goal_target_edit carry
     parsesOnTheWire(w.sent[0]!);
     expect(JSON.stringify(w.sent[0]!['event'])).toBe(JSON.stringify({
       kind: 'goal_target_edit', goal_node_id: 'mrr', constraint_type: 'at_least', raw_value: 100000 / 3, unit: '£', base_graph_hash: 'h1',
-      goal_horizon: { deadline: '2027-03-31' }, stated_as: [QUARTER],
+      goal_horizon: { deadline: '2027-03-31' }, expected_goal_horizon: null, stated_as: [QUARTER], expected_stated_as: null,
     }));
     expect(r.follow_up).toBe('The goal "MRR" now has the target at least £33,333.3333 a month (£100,000 a quarter, as you stated it) by 2027-03-31.');
   });

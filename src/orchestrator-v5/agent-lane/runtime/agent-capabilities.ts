@@ -1630,6 +1630,11 @@ type SetGoalTargetValue = {
   constraint_type: 'at_least' | 'at_most'; raw_value: number; unit: string;
   current_level?: { value: number; unit: string; quote: string };
   goal_period?: GoalPeriodType; goal_horizon?: GoalHorizon; stated_as?: GoalStatedAs[];
+  /**
+   * What the goal held when THIS card was read, for each of the three it sends (null = none recorded): the writer refuses
+   * if it has moved since (schemas 0.69.0 `expected_*`, CODEX #78 5930825929 — they are outside the analysis hash).
+   */
+  expected?: { goal_period?: GoalPeriodType | null; goal_horizon?: GoalHorizon | null; stated_as?: GoalStatedAs[] | null };
 };
 
 /** Whether the card's figure is the user's own converted into the goal's period (the writer's rule: the LAST stated entry). */
@@ -1647,9 +1652,9 @@ function setGoalEvent(goalId: string, v: SetGoalTargetValue, baseGraphHash: stri
   return {
     kind: 'goal_target_edit', goal_node_id: goalId, constraint_type: v.constraint_type, raw_value: v.raw_value, unit: v.unit,
     base_graph_hash: baseGraphHash,
-    ...(v.goal_period !== undefined ? { goal_period: v.goal_period } : {}),
-    ...(v.goal_horizon !== undefined ? { goal_horizon: v.goal_horizon } : {}),
-    ...(v.stated_as !== undefined ? { stated_as: v.stated_as } : {}),
+    ...(v.goal_period !== undefined ? { goal_period: v.goal_period, expected_goal_period: v.expected?.goal_period ?? null } : {}),
+    ...(v.goal_horizon !== undefined ? { goal_horizon: v.goal_horizon, expected_goal_horizon: v.expected?.goal_horizon ?? null } : {}),
+    ...(v.stated_as !== undefined ? { stated_as: v.stated_as, expected_stated_as: v.expected?.stated_as ?? null } : {}),
   };
 }
 
@@ -3598,6 +3603,12 @@ export function createAgentCapabilities(
         ...(setGoal.goal_period !== undefined ? { goal_period: setGoal.goal_period } : {}),
         ...(setGoal.goal_horizon !== undefined ? { goal_horizon: setGoal.goal_horizon } : {}),
         ...(setGoal.stated_as !== undefined ? { stated_as: setGoal.stated_as } : {}),
+        // The goal as THIS card read it (null = none recorded), for each field the card sends.
+        expected: {
+          goal_period: ((goal as { goal_period?: GoalPeriodType }).goal_period ?? null),
+          goal_horizon: ((goal as { goal_horizon?: GoalHorizon }).goal_horizon ?? null),
+          stated_as: ((goal as { goal_stated_as?: GoalStatedAs[] }).goal_stated_as ?? null),
+        },
       };
       // The figure the card shows: the target in the goal's period, the user's own figure when converted, the horizon.
       const cardFigure = goalTargetWords(setValue, setGoal.held_period);

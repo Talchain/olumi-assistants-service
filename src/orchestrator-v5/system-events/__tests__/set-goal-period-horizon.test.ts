@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { GoalStatedAs } from '@talchain/schemas';
-import { SystemEventTurnPayloadSchema } from '@talchain/schemas/boundary';
+import { OrchestratorTurnPayloadSchema } from '@talchain/schemas/boundary';
 import { applyGoalTargetEdit } from '../goal-target-edit.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
@@ -36,13 +36,21 @@ const goalOf = (g: unknown): Json => (g as { nodes: Json[] }).nodes.find((n) => 
 const bytes = (v: unknown): string => JSON.stringify(v, (_k, x) => (x !== null && typeof x === 'object' && !Array.isArray(x)
   ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, (x as Json)[k]])) : x));
 
-type Extra = { goal_period?: string; goal_horizon?: Json; stated_as?: GoalStatedAs[] };
+type Extra = { goal_period?: string; goal_horizon?: Json; stated_as?: GoalStatedAs[]; expected?: Json };
 /** The 0.69.0 event, through the REAL door. Every event is parsed by the REAL boundary schema first. */
 const send = async (graph: GraphV3T, raw_value: number, extra: Extra = {}, constraint_type: 'at_least' | 'at_most' = 'at_least') => {
+  // A client that READ the graph sends, for each field it writes, the value it read (null = none recorded): schemas
+  // 0.69.0 `expected_*` (CODEX #78 5930825929). A stale one is a separate row.
+  const held = goalOf(graph) as { goal_period?: unknown; goal_horizon?: unknown; goal_stated_as?: unknown };
   const event = { kind: 'goal_target_edit', goal_node_id: GOAL, constraint_type, raw_value, unit: '£',
-    base_graph_hash: computeAnalysisAffectingGraphHash(graph as never), ...extra };
+    base_graph_hash: computeAnalysisAffectingGraphHash(graph as never), ...extra,
+    ...(extra.goal_period !== undefined ? { expected_goal_period: held.goal_period ?? null } : {}),
+    ...(extra.goal_horizon !== undefined ? { expected_goal_horizon: held.goal_horizon ?? null } : {}),
+    ...(extra.stated_as !== undefined ? { expected_stated_as: held.goal_stated_as ?? null } : {}),
+    ...(extra.expected ?? {}) };
+  delete (event as Json).expected;
   const payload = { kind: 'system_event', scenario_id: SCENARIO, turn_id: '7c9e6679-7425-40de-944b-e07fc1f90ae7', stage: 'frame', event };
-  const wire = SystemEventTurnPayloadSchema.safeParse(payload);
+  const wire = OrchestratorTurnPayloadSchema.safeParse(payload);
   expect(wire.success, wire.success ? '' : JSON.stringify(wire.error.issues)).toBe(true);
   return applyGoalTargetEdit({
     payload: payload as never, event: event as never, requestId: 'req-t5', persistedGraph: graph, priorFacts: [],
@@ -153,6 +161,14 @@ describe('F1 T5: `goal_target_edit` writes the goal\'s period, horizon and state
     expect(ask).toContain('per month');
     expect(ask).toContain('Nothing was changed');
     expect(ask).not.toMatch(/4\.3|4\.33|×/);
+  });
+
+  it('RED (CODEX #78 5930825929): a STALE expected value refuses with nothing written — the period moved since it was read', async () => {
+    const stored = graphWith({ goal_period: 'quarter' });
+    const r = await send(stored, 40000, { goal_period: 'month', expected: { expected_goal_period: 'month' } });
+    expect(r).toEqual({ kind: 'refused', reason: 'expected_goal_metadata_mismatch' });
+    // CONTROL: the value it really read (quarter) → written.
+    expect((await send(stored, 40000, { goal_period: 'month' })).kind).toBe('mutated');
   });
 
   it('a period-only change is a change: never "no need to change it", the fact is not a no-op — and the analysis hash does not move (none of the three is an input)', async () => {

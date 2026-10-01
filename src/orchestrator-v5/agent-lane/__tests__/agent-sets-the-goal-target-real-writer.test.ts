@@ -525,7 +525,9 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
   /** The Canvas control's event for Paul's intent, written out by hand in the contract's order (never built by CEE code). */
   const uiEvent = (base: string, raw = 100000 / 3) => ({
     kind: 'goal_target_edit', goal_node_id: 'goal_mrr', constraint_type: 'at_least', raw_value: raw, unit: '£', base_graph_hash: base,
-    goal_period: 'month', goal_horizon: { deadline: '2027-03-31' }, stated_as: [T5_QUARTER],
+    // What the Canvas READ on the monthly goal (schemas 0.69.0 `expected_*`, CODEX #78): month held; no horizon or figures yet.
+    goal_period: 'month', expected_goal_period: 'month', goal_horizon: { deadline: '2027-03-31' }, expected_goal_horizon: null,
+    stated_as: [T5_QUARTER], expected_stated_as: null,
   });
   const sendUi = (event: Record<string, unknown>) => app.inject({ method: 'POST', url: '/orchestrate/v2/turn',
     payload: { kind: 'system_event', scenario_id: SCENARIO, turn_id: randomUUID(), stage: 'frame', event } });

@@ -249,6 +249,27 @@ export async function applyGoalTargetEdit(
     );
     return refused(g1.reason);
   }
+  /**
+   * ⛔ THE HASH-BLIND METADATA GUARD (schemas 0.69.0, CODEX #78 5930825929): `goal_period` / `goal_horizon` /
+   * `goal_stated_as` are outside the analysis hash, so a concurrent change to them alone moves no `base_graph_hash`. Each
+   * field the event SENDS carries the value it last read (`expected_*`; null = none recorded; the payload root refuses a
+   * field without its expected value). A stored value that differs from it refuses with nothing written — the
+   * `structural_rename` `expected_label` pattern. Compared as canonical JSON (key order normalised by the contract's
+   * closed shapes; an absent stored value reads as null).
+   */
+  const stored = matches[0] as { goal_period?: unknown; goal_horizon?: unknown; goal_stated_as?: unknown };
+  const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  for (const [sent, expected, held, name] of [
+    [event.goal_period, event.expected_goal_period, stored.goal_period, 'goal_period'],
+    [event.goal_horizon, event.expected_goal_horizon, stored.goal_horizon, 'goal_horizon'],
+    [event.stated_as, event.expected_stated_as, stored.goal_stated_as, 'goal_stated_as'],
+  ] as const) {
+    if (sent !== undefined && !sameValue(expected, held)) {
+      log.info({ ...logBase, event: 'v5.system_event.goal_target_edit.expected_goal_metadata_mismatch', field: name },
+        'goal_target_edit — the goal metadata moved since it was read; refusing without a write');
+      return refused('expected_goal_metadata_mismatch');
+    }
+  }
   // Present keys only: an absent one leaves the stored value unchanged (the 0.69.0 contract), never cleared.
   const goalSemantics: NonNullable<HandlerInvocation['goalSemantics']> = {
     ...(event.goal_period !== undefined ? { goal_period: event.goal_period } : {}),
