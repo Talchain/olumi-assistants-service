@@ -509,4 +509,100 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(approveChipOf(t1)).toHaveLength(1);
   }, 180_000);
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  // ⭐ F1 T5 `set_goal` (MG; spec `output/mg-0ebb952a/SEMANTIC-MODEL-SPEC.md` §1 G1, §7 P4; schemas 0.69.0). The goal's
+  // period, horizon and the figures the user stated ride the ONE `goal_target_edit`, through the REAL route, commit and
+  // store — from the Canvas control's event AND from the Agent's approval, which must send the SAME event.
+  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  const T5_SAID = 'Our MRR goal is monthly. We need at least £100k MRR a quarter by the end of March.';
+  const T5_QUARTER = { value: 100000, unit: '£', period: 'quarter', quote: '£100k MRR a quarter' };
+  /** Paul's shape: the goal is per month (construction holds `goal_period`, F1 L1). */
+  const monthlySeed = () => {
+    const g = seedGraph();
+    return { ...g, nodes: g.nodes.map((x) => (x.id === 'goal_mrr' ? { ...x, goal_period: 'month' } : x)) };
+  };
+  /** The Canvas control's event for Paul's intent, written out by hand in the contract's order (never built by CEE code). */
+  const uiEvent = (base: string, raw = 100000 / 3) => ({
+    kind: 'goal_target_edit', goal_node_id: 'goal_mrr', constraint_type: 'at_least', raw_value: raw, unit: '£', base_graph_hash: base,
+    goal_period: 'month', goal_horizon: { deadline: '2027-03-31' }, stated_as: [T5_QUARTER],
+  });
+  const sendUi = (event: Record<string, unknown>) => app.inject({ method: 'POST', url: '/orchestrate/v2/turn',
+    payload: { kind: 'system_event', scenario_id: SCENARIO, turn_id: randomUUID(), stage: 'frame', event } });
+  /** Canonical bytes: the store re-orders JSONB keys, so byte-equal is equal after a deep key sort. */
+  const canon = (v: unknown): string => JSON.stringify(v, (_k, x) => (x !== null && typeof x === 'object' && !Array.isArray(x)
+    ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, (x as Record<string, unknown>)[k]])) : x));
+
+  it('RED (a) F1 T5 through the REAL route: the Canvas event with period + horizon + stated_as → 200, and the STORED goal holds each byte-equal beside the converted target; (b) a later event without them leaves them unchanged', async () => {
+    const seed = monthlySeed();
+    graphOf.set(SCENARIO, seed);
+    const r = await sendUi(uiEvent(analysisHash(seed)!));
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    const goal = goalNow() as Record<string, unknown>;
+    expect(goal.goal_threshold_raw).toBe(100000 / 3);
+    expect(canon([goal.goal_period, goal.goal_horizon, goal.goal_stated_as])).toBe(canon(['month', { deadline: '2027-03-31' }, [T5_QUARTER]]));
+    // (b) the CONTROL: a target-only event (no F1 keys) → the three stay exactly as stored.
+    const r2 = await sendUi({ kind: 'goal_target_edit', goal_node_id: 'goal_mrr', constraint_type: 'at_least', raw_value: 40000, unit: '£', base_graph_hash: analysisHash(graphNow())! });
+    expect(r2.statusCode, r2.body.slice(0, 400)).toBe(200);
+    const after = goalNow() as Record<string, unknown>;
+    expect(after.goal_threshold_raw, 'the target moved').toBe(40000);
+    expect(canon([after.goal_period, after.goal_horizon, after.goal_stated_as])).toBe(canon(['month', { deadline: '2027-03-31' }, [T5_QUARTER]]));
+  }, 180_000);
+
+  it('RED (d) F1 T5 through the REAL route: the unconverted £100k against a monthly goal → 422, and NOTHING is written', async () => {
+    const seed = monthlySeed();
+    graphOf.set(SCENARIO, seed);
+    const r = await sendUi(uiEvent(analysisHash(seed)!, 100000));
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(422);
+    expect(graphNow(), 'nothing was written').toEqual(seed);
+  }, 180_000);
+
+  it('RED (f) F1 T5: the Agent\'s approval sends a BYTE-IDENTICAL event to the Canvas control\'s for the same intent, and the two stored goals are byte-identical', async () => {
+    // ── the Agent path: Paul's words → ONE card → the typed approve chip on a LATER turn → ONE event ──
+    const seed = monthlySeed();
+    graphOf.set(SCENARIO, seed);
+    const base = analysisHash(seed)!;
+    script = [
+      () => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 100000, unit: '£', rationale: 'Paul stated his target.',
+        period: 'month', horizon: { deadline: '2027-03-31' }, as_stated: T5_QUARTER }),
+      () => say('Shall I record it?'),
+    ];
+    const t1 = await turn({ message: T5_SAID });
+    const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+    expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const chips = approveChipOf(t1);
+    expect(chips, JSON.stringify(t1.suggested_actions)).toHaveLength(1);
+    const t2 = await turn({ message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    const events = systemEvents();
+    expect(events).toHaveLength(1);
+    const agentEvent = events[0]!['event'];
+    expect(JSON.stringify(agentEvent), 'byte-identical to the Canvas control\'s event').toBe(JSON.stringify(uiEvent(base)));
+    expect(t2.assistant_text, t2.assistant_text).toContain('The goal "MRR" now has the target at least £33,333.3333 a month (£100,000 a quarter, as you stated it) by 2027-03-31.');
+    const agentGoal = goalNow();
+    const agentRows = (graphNow().goal_constraints ?? []).map(({ constraint_id: _id, ...row }) => row);
+    // ── the Canvas path: the same intent, on the same model, in another scenario ──
+    nextScenario();
+    graphOf.set(SCENARIO, monthlySeed());
+    expect(analysisHash(graphNow()), 'PRECONDITION: the same base').toBe(base);
+    const r = await sendUi(uiEvent(base));
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    expect(canon(goalNow()), 'the stored goal nodes are byte-identical').toBe(canon(agentGoal));
+    expect(canon((graphNow().goal_constraints ?? []).map(({ constraint_id: _id, ...row }) => row))).toBe(canon(agentRows));
+    expect((agentGoal as Record<string, unknown>).goal_threshold_raw).toBe(100000 / 3);
+  }, 180_000);
+
+  it('RED (e) F1 T5 through the REAL route: "£25k MRR a week" against a monthly goal → the Agent is refused with the ask; no card, nothing sent', async () => {
+    graphOf.set(SCENARIO, monthlySeed());
+    script = [
+      () => fnCall('propose_goal_target', { constraint_type: 'at_least', value: 25000, unit: '£', rationale: 'x',
+        as_stated: { value: 25000, unit: '£', period: 'week', quote: '£25k MRR a week' } }),
+      () => say('Could you give me the figure per month?'),
+    ];
+    const t1 = await turn({ message: 'We need at least £25k MRR a week.' });
+    expect(t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target'), JSON.stringify(t1._agent.tool_calls))
+      .toEqual(expect.objectContaining({ ok: false, refusal: 'period_not_convertible' }));
+    expect(approveChipOf(t1)).toEqual([]);
+    expect(systemEvents()).toEqual([]);
+  }, 180_000);
 });

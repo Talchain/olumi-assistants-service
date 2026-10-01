@@ -11,6 +11,7 @@
  * turn's own verified identity before any tool runs. That is why this is a
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
+import { GoalPeriod } from '@talchain/schemas';
 import { sendableQuery } from './public-research.js';
 
 /**
@@ -120,6 +121,9 @@ export interface ToolDefinition {
 const obj = (props: Record<string, unknown>, required: string[]): Record<string, unknown> => ({
   type: 'object', additionalProperties: false, properties: props, required,
 });
+
+/** The contract's goal periods (`@talchain/schemas` 0.69.0 `GoalPeriod`), never a second list. */
+const GOAL_PERIODS: readonly string[] = GoalPeriod.options;
 
 
 /**
@@ -443,6 +447,20 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         value: { type: 'number', description: 'The goal’s level TODAY, exactly as the user stated it in their units (0 for "we have secured £0 so far").' },
         unit: { type: 'string', description: 'The unit the user gave it in (for example £).' },
       }, ['value', 'unit']),
+      // ⭐ F1 T5 `set_goal` (MG; spec §1, §7): period, horizon and the figure as stated ride the SAME card and the SAME
+      // `goal_target_edit` event. The capability converts (`goal-target/goal-period.ts`); the model never does arithmetic.
+      period: { type: 'string', enum: GOAL_PERIODS, description: 'The period the GOAL’s figures are per (month for a monthly MRR goal), only when the user said it or the goal already holds one. Leave it out rather than guess.' },
+      horizon: obj({
+        deadline: { type: 'string', description: 'The date the target must be met by, as YYYY-MM-DD, only when the user gave a date.' },
+        months: { type: 'integer', minimum: 1, maximum: 120, description: 'How many months from now the target must be met within, only when the user said so (6 for "within 6 months").' },
+      }, []),
+      as_stated: obj({
+        value: { type: 'number', description: 'The figure exactly as the user wrote it: the same figure as value (100000 for "£100k a quarter").' },
+        unit: { type: 'string', description: 'Its unit, as the user gave it.' },
+        period: { type: 'string', enum: GOAL_PERIODS, description: 'The period the user gave it per (quarter for "£100k a quarter"); none for a one-off figure.' },
+        quote: { type: 'string', description: 'The user’s exact words that state the figure and its period, copied from their message ("£100k a quarter"). '
+          + 'When this period differs from the goal’s, Olumi converts the figure itself (month and quarter ×3, month and year ×12, quarter and year ×4) and keeps these words; never convert it yourself. A figure per week or per day is never converted: ask for it per the goal’s period.' },
+      }, ['value', 'unit', 'period', 'quote']),
     }, ['constraint_type', 'value', 'unit', 'rationale']),
   },
   {
@@ -785,6 +803,12 @@ export interface AgentCapabilities {
     constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
+    /** F1 T5 `set_goal`: the period the goal's figures are per. */
+    period?: string;
+    /** F1 T5: when the target must be met — exactly one of the two. */
+    horizon?: { deadline?: string; months?: number };
+    /** F1 T5: the figure as the user stated it, with its own period and their words; converted by the capability. */
+    as_stated?: { value: number; unit: string; period: string; quote: string };
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
   proposeOptionStatus?(ctx: AgentToolContext, args: {

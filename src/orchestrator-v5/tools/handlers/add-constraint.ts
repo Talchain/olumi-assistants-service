@@ -39,6 +39,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 
 import { z } from 'zod';
@@ -1069,6 +1070,17 @@ export function createAddConstraintHandler(): HandlerFn {
         !userStampDisagrees;
       const valueUnchanged = rowValueUnchanged || nodeChannelUnchanged;
       const labelChanged = existing !== undefined && existing.label !== newConstraint.label;
+      // ⭐ F1 T5 `set_goal` (MG; spec §1 G1, §7): the goal's period / horizon / stated figures the event carries
+      // (`goalSemantics`, set ONLY by the `goal_target_edit` door). A key present that differs from what the goal holds is
+      // a change the user made on THIS write, so the turn is never recorded or narrated as a no-op (the F9 discipline
+      // `mintedBaseline` and `isCorrection` follow below). None of the three is an analysis-hash input (`cee-v3.ts`), so
+      // the threshold stamp stays gated on the VALUE alone (`stampGoalThreshold`): a period-only edit moves the identity
+      // hash (a new model version), never the analysis hash. Compared structurally: the store re-orders JSONB keys.
+      const goalSemantics = targetNode.kind === 'goal' ? invocation.goalSemantics : undefined;
+      const semanticsChanged = goalSemantics !== undefined && (
+        (goalSemantics.goal_period !== undefined && goalSemantics.goal_period !== targetNode.goal_period)
+        || (goalSemantics.goal_horizon !== undefined && !isDeepStrictEqual(goalSemantics.goal_horizon, targetNode.goal_horizon))
+        || (goalSemantics.goal_stated_as !== undefined && !isDeepStrictEqual(goalSemantics.goal_stated_as, targetNode.goal_stated_as)));
       // F9 — the node's goal_threshold_raw/_unit/_cap fields are the exact
       // fields `computeAnalysisAffectingGraphHash` reads; re-stamping them
       // on a turn whose OWN receipt says "nothing changed" moves the
@@ -1525,6 +1537,19 @@ export function createAddConstraintHandler(): HandlerFn {
             }
           }
         }
+        // ⭐ F1 T5 `set_goal`: the goal's period, horizon and stated figures, in THIS validated write — the same commit as
+        // the target (G1: `raw_value` and its period are never written apart). Written for `at_most` too: the period is
+        // the goal's, and its `<=` row is a figure per that period. Present = written byte-for-byte as the event carried
+        // it (the read-back compares exactly these bytes); absent = untouched, never cleared. The G1 conversion was
+        // checked before this handler ran (`goal-target-edit.ts`, `statedFigureHolds`).
+        if (goalSemantics !== undefined) {
+          const goalNode = clone.nodes.find((n) => n.id === targetId);
+          if (goalNode !== undefined) {
+            if (goalSemantics.goal_period !== undefined) goalNode.goal_period = goalSemantics.goal_period;
+            if (goalSemantics.goal_horizon !== undefined) goalNode.goal_horizon = { ...goalSemantics.goal_horizon };
+            if (goalSemantics.goal_stated_as !== undefined) goalNode.goal_stated_as = goalSemantics.goal_stated_as.map((s) => ({ ...s }));
+          }
+        }
         // ROADMAP 2.877 (link 2) — the stated-baseline write. Same committed
         // write as the row upsert (mutated_graph → persistence), no new
         // writer. Guarded by `mintedBaseline`, whose derivation above already
@@ -1580,7 +1605,8 @@ export function createAddConstraintHandler(): HandlerFn {
       // ⚠ `!isCorrection` is the same discipline as `!mintedBaseline` beside it:
       // a correction REMOVES a constraint row, which is analysis-affecting, so
       // the turn changed the model however unchanged the value looks.
-      const turnIsNoop = valueUnchanged && !labelChanged && !mintedBaseline && !isCorrection;
+      // F1 T5: a changed period / horizon / stated figure is a change, whatever the value (`semanticsChanged` above).
+      const turnIsNoop = valueUnchanged && !labelChanged && !mintedBaseline && !isCorrection && !semanticsChanged;
       const fact: AddConstraintHandlerFact = {
         fact_type: 'add_constraint',
         fact_version: 1,
@@ -1633,7 +1659,8 @@ export function createAddConstraintHandler(): HandlerFn {
       //
       // A correction is never "unchanged": it removes a row, which is
       // analysis-affecting, whatever the value looks like.
-      const narratesUnchanged = valueUnchanged && !isCorrection;
+      // F1 T5: the same conjunct as the fact channel's `turnIsNoop` (the rule above): a period-only edit is never "no need".
+      const narratesUnchanged = valueUnchanged && !isCorrection && !semanticsChanged;
       const constraintText = isSuccessTargetTurn
         ? narratesUnchanged
           ? formatGoalTargetUnchanged({

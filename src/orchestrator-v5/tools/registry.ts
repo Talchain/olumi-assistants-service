@@ -326,6 +326,19 @@ export interface HandlerInvocation {
    */
   readonly holdsGoalDirection?: true;
   /**
+   * ⭐ F1 T5 `set_goal` (MG; spec §1 G1, §7; `@talchain/schemas` 0.69.0 `goal_target_edit`): the goal's period, its
+   * horizon and the figures the user stated, carried by the event beside the target and written onto the GOAL node in
+   * the SAME mutation as the target, so `raw_value` and its period are never written apart. Set ONLY by the
+   * `goal_target_edit` door (`goal-target-edit.ts`), after its G1 gate (`goal-period.ts` `statedFigureHolds`). Each key
+   * present is written; each key absent leaves the stored value UNCHANGED, never cleared. Absent altogether (the chat
+   * path, the limit door, pending actions): none of the three is touched.
+   */
+  readonly goalSemantics?: {
+    readonly goal_period?: import('@talchain/schemas').GoalPeriodType;
+    readonly goal_horizon?: import('@talchain/schemas').GoalHorizon;
+    readonly goal_stated_as?: readonly import('@talchain/schemas').GoalStatedAs[];
+  };
+  /**
    * Exact persisted edge identity for the strict `edge_strength_edit` adapter.
    *
    * The legacy natural-language lane addresses an edge with a composite
