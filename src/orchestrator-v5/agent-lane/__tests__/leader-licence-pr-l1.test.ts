@@ -15,7 +15,7 @@ import { agentLaneLeaderWithheld } from '../withheld-leader-fail-closed.js';
 import { claimPermissionsFrom } from '../first-analysis.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { modelFacingToolResult, withoutLeaderDesignations } from '../licensed-run-view.js';
-import { enforceLeaderLicenceAtFinalEgress } from '../leader-final-egress.js';
+import { enforceLeaderLicenceAtFinalEgress, FINAL_EGRESS_FAILED_TEXT } from '../leader-final-egress.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SERVED = JSON.parse(readFileSync(join(here, 'fixtures/served-withheld-leader-0948Z.json'), 'utf8')) as {
@@ -128,8 +128,8 @@ describe('the Agent lane fail-closed final egress', () => {
     _agent: { provisional_view: { text: 'AI Reporting Sprint looks strongest, provisionally.' } },
     ...extra,
   } as unknown as OlumiResponse);
-  const opts = (licence: 'withheld' | 'permitted', proseGateRan = true) => ({
-    requestId: 'req-l1', exitPath: 'test', licence, proseGateRan,
+  const opts = (licence: 'withheld' | 'permitted') => ({
+    requestId: 'req-l1', exitPath: 'test', licence,
     mayNameLeadingOption: licence !== 'withheld', graph: GRAPH, analysisReady: ready('comparative_leader'),
   });
 
@@ -156,10 +156,31 @@ describe('the Agent lane fail-closed final egress', () => {
   it('a non-analysis turn still gets the exact-label prose edit', () => {
     const out = enforceLeaderLicenceAtFinalEgress(
       base({ assistant_text: 'AI Reporting Sprint currently performs best, leading in 46% of simulations.', suggested_actions: [], run_delta: undefined }),
-      opts('withheld', false),
+      opts('withheld'),
     );
     expect(out.proseEdited).toBe(true);
     expect((out.response as { assistant_text: string }).assistant_text).not.toContain('AI Reporting Sprint currently performs best');
+  });
+
+  it("RED (DL 5931709758): text rewritten AFTER the earlier gate (break-even / A7 / shape) still gets the exact-label edit", () => {
+    // An analysis-bearing turn: the gate ran on the model's words, then a later rewrite appended a leader sentence.
+    const body = base({ assistant_text: 'The figures are below.\n\nAI Reporting Sprint currently performs best, leading in 46% of simulations.', suggested_actions: [], run_delta: undefined });
+    const out = enforceLeaderLicenceAtFinalEgress(body, opts('withheld'));
+    expect((out.response as { assistant_text: string }).assistant_text).not.toContain('AI Reporting Sprint currently performs best');
+    expect(out.proseEdited).toBe(true);
+  });
+
+  it('RED: if the egress itself throws, the reply FAILS CLOSED to the known-safe envelope', () => {
+    const error = vi.spyOn(log, 'error');
+    const hostile = { get nodes(): never { throw new Error('boom'); } };
+    const out = enforceLeaderLicenceAtFinalEgress(base({}), { ...opts('withheld'), graph: hostile });
+    const body = out.response as unknown as Record<string, any>;
+    expect(body.assistant_text).toBe(FINAL_EGRESS_FAILED_TEXT);
+    expect(body.suggested_actions).toEqual([]);
+    expect(body.run_delta).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain('ai_reporting_sprint');
+    expect(JSON.stringify(body)).not.toContain('AI Reporting Sprint');
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ event: 'agent_lane.leader_final_egress_failed' }), expect.any(String));
   });
 
   it('CONTROL: a permitted turn is returned by reference', () => {

@@ -13,18 +13,18 @@
  * 2. the analysis block's enrichment → the wire's withheld projection again (idempotent), then any producer-prose string
  *    that BOTH uses leader vocabulary AND names an exact option label or id → deleted;
  * 3. a chip whose label / message / detail asserts a leading option by exact label → dropped;
- * 4. `assistant_text` / `framing_question` → the shared exact-label edit, when the earlier leader gate did not run.
+ * 4. `assistant_text` / `framing_question` → the shared exact-label edit, on every withheld turn (after every rewrite).
  * Every removal is logged at level 50 (`agent_lane.leader_claim_residual_removed`), field PATHS only, never prose.
  * Prose that only matches the wide alarm vocabulary is reported at level 40 and left alone: the alarm is wider than any
  * enforcer may safely be over user-facing prose (see `leading-option-egress-guard.ts`).
  *
  * `_agent` (the provisional view, permitted on a withheld turn by design) is never touched. NEVER THROWS: a failure
- * logs at level 50 and the response ships with every structured removal made so far.
+ * logs at level 50 and the reply is replaced by a known-safe envelope (fail closed), never shipped half-checked.
  */
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { log } from '../../utils/telemetry.js';
 import type { LeaderLicence } from '../compose/leader-licence.js';
-import { keyNamesLeader } from './licensed-run-view.js';
+import { keyNamesLeader, withoutLeaderDesignations } from './licensed-run-view.js';
 import {
   findLeaderClaims,
   optionLabelPattern,
@@ -48,8 +48,6 @@ const MAX_DEPTH = 40;
 
 export interface LeaderFinalEgressOpts extends WireLeaderClaimEnforcementOpts {
   readonly licence: LeaderLicence;
-  /** The earlier Agent-lane leader gate already ran its prose edit on this body (an analysis-bearing turn). */
-  readonly proseGateRan: boolean;
 }
 
 export interface LeaderFinalEgressResult {
@@ -136,6 +134,34 @@ function chipAssertsLeader(chip: unknown, labels: readonly string[]): boolean {
   return CHIP_TEXT_MEMBERS.some((m) => typeof rec[m] === 'string' && textAssertsLeadingOption(rec[m] as string, { optionLabels: labels }));
 }
 
+/** The one sentence a reply is replaced by when the final egress itself fails. Leader-free by construction. */
+export const FINAL_EGRESS_FAILED_TEXT =
+  'Something went wrong while checking this reply, so it is not shown. Nothing in your model changed; please ask again.';
+
+/** Known-safe: no prose, no chips, no run delta, no enrichment; leader-designating keys nulled on what remains. */
+export function knownSafeEnvelope(response: OlumiResponse): OlumiResponse {
+  const src = response as OlumiResponse & Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (k === 'assistant_text' || k === 'framing_question' || k === 'suggested_actions' || k === 'run_delta' || k === '_answer_shape') continue;
+    out[k] = v;
+  }
+  const agent = record(src._agent);
+  if (agent !== undefined && 'provisional_view' in agent) {
+    const { provisional_view: _view, ...rest } = agent;
+    out._agent = rest;
+  }
+  if (Array.isArray(src.blocks)) {
+    out.blocks = src.blocks.map((b) => {
+      const block = record(b);
+      if (block === undefined) return b;
+      const { enrichment: _dropped, ...rest } = block;
+      return rest;
+    });
+  }
+  return { ...(withoutLeaderDesignations(out) as Record<string, unknown>), assistant_text: FINAL_EGRESS_FAILED_TEXT, suggested_actions: [] } as unknown as OlumiResponse;
+}
+
 export function enforceLeaderLicenceAtFinalEgress(response: OlumiResponse, opts: LeaderFinalEgressOpts): LeaderFinalEgressResult {
   if (opts.licence !== 'withheld') return { response, removedPaths: [], proseEdited: false };
   const removed: string[] = [];
@@ -188,20 +214,22 @@ export function enforceLeaderLicenceAtFinalEgress(response: OlumiResponse, opts:
       if (kept.length !== body.suggested_actions.length) body = { ...body, suggested_actions: kept } as typeof body;
     }
 
-    // 4: prose, by the shared exact-label edit, only where the earlier gate did not already run.
-    if (!opts.proseGateRan) {
-      const shared = enforceLeadingOptionClaimsAtWire(body, opts);
-      if (shared.changed) {
-        body = shared.response as typeof body;
-        proseEdited = shared.editedFields.length > 0;
-        for (const f of shared.editedFields) removed.push(f);
-      }
+    // 4: prose, by the shared exact-label edit, on EVERY withheld turn: the break-even / A7 / answer-shape rewrites run
+    // after the earlier gate (DL 380e54 5931709758), so this is the only edit that sees the final words.
+    const shared = enforceLeadingOptionClaimsAtWire(body, opts);
+    if (shared.changed) {
+      body = shared.response as typeof body;
+      proseEdited = shared.editedFields.length > 0;
+      for (const f of shared.editedFields) removed.push(f);
     }
   } catch (err) {
+    // FAIL CLOSED: an unfinished check never ships unexamined content. The known-safe envelope keeps the state the UI
+    // renders deterministically, drops every structured carrier a leader could ride in, and says one true sentence.
     log.error(
-      { event: 'agent_lane.leader_final_egress_failed', request_id: opts.requestId, err: err instanceof Error ? err.message : String(err), removed_paths: removed },
-      'agent-lane: the final leader egress threw; the response ships with the removals made so far',
+      { event: 'agent_lane.leader_final_egress_failed', request_id: opts.requestId, exit_path: opts.exitPath, err: err instanceof Error ? err.message : String(err), removed_paths: removed },
+      'agent-lane: the final leader egress threw — the reply is replaced by the known-safe envelope',
     );
+    return { response: knownSafeEnvelope(response), removedPaths: ['*'], proseEdited: true };
   }
 
   if (removed.length > 0) {
