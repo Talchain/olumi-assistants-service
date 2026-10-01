@@ -64,10 +64,28 @@ export function isSizedOnlyByOlumi(edge: unknown): boolean {
 }
 
 /**
- * The approval rule (L4 design 2): a review recorded on a PLACEHOLDER sizes it — Olumi's band, now chosen and accepted —
- * and on any other link changes nothing. Authorship is untouched (`source`, `reasoning` and the rest are kept by the
- * caller): an accepted Olumi estimate is still Olumi's figure. Returns the provenance to store.
+ * (i) GOAL FIGURES ONLY: an Olumi size the user accepted counts as sized for the goal (DL 5929790081 (i)). The parts rule
+ * ({@link isSizedOnlyByOlumi}) never reads this: an accepted Olumi size still never scores a parts limit (ii).
  */
-export function sizedByApproval<P extends object>(provenance: P): P {
-  return (provenance as Rec).magnitude === PLACEHOLDER_MAGNITUDE ? { ...provenance, magnitude: ESTIMATE_MAGNITUDE } : provenance;
+export function isAcceptedOlumiSize(edge: unknown): boolean {
+  return linkSizing(edge) === 'olumi_accepted';
+}
+
+/**
+ * The links an approval SIZES (L4 design 2): nobody sized them — Olumi's placeholder, or Olumi's older default (no sizing
+ * mark at all, `defaulted: true`, not the user's: Paul's 4 magnitude-less links approved at 09:25, `96c6f5f4`).
+ */
+export function approvalSizes(edge: unknown): boolean {
+  const s = linkSizing(edge);
+  return s === 'placeholder' || (s === 'unmarked' && isRec(edge) && edge.defaulted === true);
+}
+
+/**
+ * The approval rule (L4 design 2): a review recorded on a link nobody sized ({@link approvalSizes}) sizes it — Olumi's
+ * band, now chosen and accepted — and on any other link changes nothing. Authorship is untouched (`source`, `reasoning`
+ * and the rest are kept by the caller): an accepted Olumi estimate is still Olumi's figure. Returns the provenance to
+ * store. `edge` is the link as stored BEFORE this write.
+ */
+export function sizedByApproval<P extends object>(provenance: P, edge: unknown): P {
+  return approvalSizes(edge) ? { ...provenance, magnitude: ESTIMATE_MAGNITUDE } : provenance;
 }

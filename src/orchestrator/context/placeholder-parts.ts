@@ -26,7 +26,7 @@
  * placeholder. Otherwise the normal fold applies. Pure.
  */
 
-import { isSizedOnlyByOlumi } from '../../cee/magnitude/link-sizing.js';
+import { isSizedOnlyByOlumi, isAcceptedOlumiSize } from '../../cee/magnitude/link-sizing.js';
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { isAcceptedOlumiEstimate } from '../../cee/transforms/provenance-display.js';
@@ -98,6 +98,15 @@ export function nodeUnitOf(nodes: readonly unknown[]): (id: unknown) => string |
  */
 export function olumiGuessedLink(e: Rec, unitOf: (id: unknown) => string | undefined): boolean {
   return olumiSizedLink(e) && !holdsByDefinition(e, unitOf);
+}
+
+/**
+ * ⭐ The SAME test for the GOAL (DR row 4, `target-testability`), minus the one class DL ruling 5929790081 (i) licenses
+ * there: Olumi's estimate the user ACCEPTED sizes a link for goal figures. A limit keeps {@link olumiGuessedLink} whole —
+ * (ii): no Olumi size, accepted or not, scores a parts limit (CODEX CR #2446 5930402198).
+ */
+export function olumiGuessedGoalLink(e: Rec, unitOf: (id: unknown) => string | undefined): boolean {
+  return olumiGuessedLink(e, unitOf) && !isAcceptedOlumiSize(e);
 }
 
 /**

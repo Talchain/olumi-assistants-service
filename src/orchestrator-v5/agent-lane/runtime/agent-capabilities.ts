@@ -206,7 +206,7 @@ import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { isPlaceholderLink } from '../../../cee/magnitude/link-sizing.js';
+import { approvalSizes } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
@@ -2602,7 +2602,7 @@ export function createAgentCapabilities(
         : l.author === 'user_specified' ? reviewed : reviewed && !usersOwn;
       return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && stamped
         // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
-        && !isPlaceholderLink(e);
+        && !approvalSizes(e);
     });
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
@@ -3148,7 +3148,7 @@ export function createAgentCapabilities(
         // approving that band is what sizes it (`sizedByApproval`). Skipped as "already sits at", no card could ever clear
         // "Olumi hasn't sized…" on it: Paul's e-12/e-13 sit at 0.85, the very-strong midpoint (`96c6f5f4`).
         const keeps = Math.abs(mean) === magnitude;
-        if (keeps && !isPlaceholderLink(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
+        if (keeps && !approvalSizes(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
         // Kept at its value it is a REVIEW of Olumi's band (`confirm_current`): the writer refuses a `set` that changes nothing.
         ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
         shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand });
@@ -4366,7 +4366,7 @@ export function createAgentCapabilities(
           const recorded = v.intent === 'confirm_current' ? review?.intent === 'confirm' : p?.source === 'user_specified';
           return typeof mean === 'number' && Math.abs(mean - want) < 1e-9 && recorded
             // L4: an approved link is SIZED — a review that left it a placeholder did not record what was approved.
-            && !isPlaceholderLink(x);
+            && !approvalSizes(x);
         };
         /**
          * ⛔ LANDED IS WHAT THE MODEL HOLDS, NOT WHETHER TWO REVISIONS ARE EQUAL (round-2 review of

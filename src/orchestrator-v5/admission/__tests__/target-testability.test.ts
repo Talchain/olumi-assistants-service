@@ -17,6 +17,8 @@ import { claimPermissionsFrom } from '../../agent-lane/first-analysis.js';
 import { readinessViewOf } from '../../agent-lane/readiness-view.js';
 import { postWriteReadinessLine } from '../../../routes/agent-v1-turn.js';
 import { guardAnalysisParticipation } from '../../tools/handlers/run-analysis-participation-guard.js';
+import { sizedByApproval } from '../../../cee/magnitude/link-sizing.js';
+import { olumiGuessedGoalLink, olumiGuessedLink } from '../../../orchestrator/context/placeholder-parts.js';
 
 type Json = Record<string, any>;
 const RAW = JSON.parse(readFileSync(new URL('./fixtures/target-testability-20260930.json', import.meta.url), 'utf8')) as { paul: Json; mrr: Json; n1: Json; cc: Json };
@@ -322,3 +324,39 @@ describe('row 3: a size construction credits to the user is no Olumi guess, even
   });
 });
 
+
+/**
+ * ⭐ L4 / DL ruling 5929790081 (i) AT THE GOAL TARGET READER (CODEX CR #2446 5930402198): Olumi's estimate the user
+ * ACCEPTED sizes a link for goal figures, so R3's m1 is testable once the user approves Olumi's sizes, with Olumi's origin
+ * kept. Controls: unapproved Olumi sizes and a reviewed legacy placeholder still cap it, and the user's own size lifts it.
+ * The accepted state is built by the writer's own rule (`sizedByApproval`) plus the review the writer records.
+ */
+describe('L4 (i): an ACCEPTED Olumi size licenses the goal target; unapproved Olumi sizes still cap it', () => {
+  const M1 = JSON.parse(readFileSync(new URL('./fixtures/r3-mrr-m1-card-yes-20260930.json', import.meta.url), 'utf8')).graph as Json;
+  const review = { intent: 'confirm', at: '2026-10-01T09:25:10.219Z' };
+  const accepted = (g: Json): Json => { const c = structuredClone(g); for (const e of c.edges) if (olumiSized(e) && e.provenance) e.provenance = { ...sizedByApproval(e.provenance, e), reviewed_by_user: review }; return c; };
+
+  it('PRECONDITION: m1 rests on Olumi’s unapproved size → not testable (P5)', () => {
+    const v = targetTestabilityOf(M1);
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.precondition)).toContain('P5');
+  });
+
+  it('RED (i): every Olumi size on the path ACCEPTED → the target is no longer capped by them, and stays Olumi’s', () => {
+    const g = accepted(M1);
+    expect(g.edges.filter((e: Json) => olumiSized(e)).every((e: Json) => e.provenance.source !== 'user_specified'), 'origin kept (R11)').toBe(true);
+    expect(targetTestabilityOf(g).kind).not.toBe('not_testable');
+    expect(targetTestabilityOf(g)).toEqual(targetTestabilityOf(userSized(M1)));
+  });
+
+  it('CONTROL: a REVIEWED legacy placeholder (Paul’s 09:25 links before L4) is still unsized → still capped', () => {
+    const g = structuredClone(M1);
+    for (const e of g.edges) if (olumiSized(e) && e.provenance) e.provenance = { ...e.provenance, magnitude: 'olumi_placeholder', reviewed_by_user: review };
+    expect(targetTestabilityOf(g).kind).toBe('not_testable');
+  });
+
+  it('CONTROL (ii): the limit rule keeps the whole test — an accepted Olumi size is still Olumi’s guess for a limit', () => {
+    const e = accepted(M1).edges.find((x: Json) => olumiSized(x))!;
+    expect(olumiGuessedLink(e, () => undefined)).toBe(true);
+    expect(olumiGuessedGoalLink(e, () => undefined)).toBe(false);
+  });
+});

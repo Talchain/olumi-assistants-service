@@ -477,7 +477,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             // (`sizedByApproval`: `olumi_placeholder` → `olumi_estimate`, authorship untouched). Paul's 09:25 approval
             // of 8 links kept every placeholder, and three Runs repeated "Olumi hasn't sized…" (`96c6f5f4`).
             edge.provenance = {
-              ...sizedByApproval(edge.provenance),
+              ...sizedByApproval(edge.provenance, edge),
               reviewed_by_user: {
                 intent: 'confirm',
                 at: new Date().toISOString(),
@@ -517,7 +517,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
           const { natural_effect: _oldNaturalEffect, clamped_from: _oldClamp, ...keptProvenance } = (edge.provenance ?? {}) as Record<string, unknown>;
           const reviewed: Record<string, unknown> = {
             // L4: the same rule as the review branch above — an adopted band on a placeholder sizes it.
-            ...sizedByApproval(keptProvenance),
+            ...sizedByApproval(keptProvenance, edge),
             reviewed_by_user: { intent: 'confirm', at: new Date().toISOString(), band: adopted.band },
           };
           edge.provenance = reviewed as typeof edge.provenance;

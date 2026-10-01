@@ -17,7 +17,7 @@ import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { sameUnit } from '../agent-lane/reconciling-product.js';
 import { sayFigure } from '../agent-lane/say-figure.js';
-import { asAnalysed, nodeUnitOf, olumiGuessedLink } from '../../orchestrator/context/placeholder-parts.js';
+import { asAnalysed, nodeUnitOf, olumiGuessedGoalLink } from '../../orchestrator/context/placeholder-parts.js';
 
 /** R3's preconditions (#77 5912916965). */
 export type TargetPrecondition = 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6';
@@ -150,7 +150,7 @@ export function targetTestabilityOf(input: unknown): TargetTestability {
     // limit on the same path never disagree (AIQ 5917939324; P0 PARTNER 5918016361).
     const unitOf = nodeUnitOf(nodes);
     const guess = edges.find((e) => reached.has(e.from) && reached.has(e.to) && kindOf.get(e.from) !== 'option' && !exactInto.has(e.to)
-      && olumiGuessedLink(e, unitOf));
+      && olumiGuessedGoalLink(e, unitOf));
     // (1) the links into the goal, unless a confirmed identity carries the goal's samples.
     const into = edges.filter((e) => e.to === goalId && reached.has(e.from) && kindOf.get(e.from) !== 'option');
     const unconverted = identityForwarded ? undefined : into.find((e) => !sizedInGoalUnit(e, goalUnit));

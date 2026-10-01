@@ -147,3 +147,31 @@ describe('the canvas confirm allowlist admits exactly the one L4 transition', ()
   it('ACCEPTS placeholder → Olumi’s estimate', () => expect(confirmAfter('olumi_estimate')).toBe(true));
   it('⛔ REFUSES placeholder → the user’s (a confirm is never authorship, R11)', () => expect(confirmAfter('user_stated')).toBe(false));
 });
+
+describe('L4: Olumi’s OLDER default (no sizing mark, `defaulted`) is sized by approval too — Paul’s 4 magnitude-less links', () => {
+  const UNMARKED = { source: 'cee_hypothesis' } as const;
+  it('RED: approving it records Olumi’s estimate, accepted — origin kept', async () => {
+    const before = graphWith(UNMARKED);
+    expect(linkSizing(target(before)), 'PRECONDITION: unmarked').toBe('unmarked');
+    const after = await approve(before, 0.85, 'very strong');
+    expect(target(after).provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } });
+    expect(linkSizing(target(after))).toBe('olumi_accepted');
+  });
+  it('CONTROL: a link with no sizing mark that is NOT Olumi’s default (no `defaulted`) is not re-marked', async () => {
+    const before = graphWith(UNMARKED);
+    delete (target(before) as Record<string, unknown>).defaulted;
+    const after = await approve(before, 0.85, 'very strong');
+    expect((target(after).provenance as Record<string, unknown>).magnitude).toBeUndefined();
+  });
+  it('the canvas allowlist admits unmarked default → Olumi’s estimate, and refuses it on a link that is not a default', () => {
+    const run = (defaulted: boolean) => {
+      const before = graphWith(UNMARKED);
+      if (!defaulted) delete (target(before) as Record<string, unknown>).defaulted;
+      const after = structuredClone(before) as GraphV3T;
+      Object.assign(target(after).provenance as Record<string, unknown>, { magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm', at: new Date().toISOString() } });
+      return isProvenanceOnlyEdgeConfirmation({ before, after, from: FROM, to: TO });
+    };
+    expect(run(true)).toBe(true);
+    expect(run(false)).toBe(false);
+  });
+});

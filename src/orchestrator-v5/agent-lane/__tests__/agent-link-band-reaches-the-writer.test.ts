@@ -51,7 +51,7 @@ function world(initial: ReturnType<typeof graphWith>) {
     // the writer keeps the provenance and records `reviewed_by_user` (before R11 this fake stamped both `user_specified`).
     const provenanceAfter = (x: Edge) => (ev['intent'] === 'confirm_current'
       // L4 (DL 5929790081): …and a confirm on a placeholder sizes it (`sizedByApproval`), as the real writer does.
-      ? { ...sizedByApproval(x.provenance ?? {}), reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' } }
+      ? { ...sizedByApproval(x.provenance ?? {}, x), reviewed_by_user: { intent: 'confirm', at: '2026-09-28T15:00:00.000Z' } }
       : { source: 'user_specified' });
     g = { ...g, edges: g.edges.map((x) => (x.from === ev['from'] && x.to === ev['to'] ? { ...x, strength: { ...x.strength, mean: mag }, provenance: provenanceAfter(x) } : x)) };
     rev += 1;
