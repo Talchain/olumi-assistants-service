@@ -538,9 +538,30 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       provenance: { source: 'cee_hypothesis', reviewed_by_user: { intent: 'confirm' } },
       provenance_display: 'ai_inferred',
     });
-    expect(body.assistant_text).toContain('Confirmed the current strength');
-    expect(body.assistant_text).toContain('as your judgement');
+    // R3 5942069984: the stored link is Olumi's (cee_hypothesis, no sizing marker) — the receipt claims no authorship.
+    expect(body.assistant_text).toContain('Confirmed the current strength of the link between Demand and Growth.');
+    expect(body.assistant_text).not.toContain('your judgement');
     expect(body.assistant_text).not.toContain('Adjusted');
+  });
+
+  it('CONTROL (R3 5942069984): a USER-sized link confirmed → the receipt keeps "as your judgement" (the stored link is theirs)', async () => {
+    const graph = buildPersistedGraph();
+    graph.edges[0]!.strength.mean = 0;
+    graph.edges[0]!.effect_direction = 'negative';
+    (graph.edges[0] as Record<string, unknown>).provenance = { source: 'user_specified', reasoning: 'Initial hypothesis' };
+    persisted = graph;
+    const beforeHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    readRecentMock.mockResolvedValueOnce([{ id: 'prior-run-row' }]);
+    readFactsForMock.mockResolvedValueOnce([successfulRunFact(beforeHash)]);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(validEvent({ magnitude: 0, direction_intent: 'preserve', expected: { mean: 0, effect_direction: 'negative' }, intent: 'confirm_current' }), '94'),
+    });
+    expect(response.statusCode, response.body.slice(0, 400)).toBe(200);
+    expect(committedEdge()).toMatchObject({ provenance: { source: 'user_specified', reviewed_by_user: { intent: 'confirm' } } });
+    expect((JSON.parse(response.body) as { assistant_text: string }).assistant_text)
+      .toContain('Confirmed the current strength of the link between Demand and Growth as your judgement.');
   });
 
   it('refuses an unchanged set without graph, fact, or provenance write and carries prior pending canonically', async () => {
@@ -1274,7 +1295,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Demand changes Growth.");
       expect(committedEdge()).toMatchObject({
         strength: { mean: -0.4, std: 0.1 },
         // L4 (DL 5929790081): Olumi's default, approved, is sized as Olumi's estimate — authorship kept.
@@ -1344,7 +1365,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode, response.body).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Demand changes Growth.");
       expect(committedEdge()?.strength).toStrictEqual(strengthBefore);
       expect((committedEdge()?.strength as { std: number }).std).not.toBe(edgeBandStd('strong'));
       expect(committedEdge()).toMatchObject({
@@ -1495,7 +1516,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Pro plan price changes Monthly churn.");
       const committed = edgeOf(lastAppend().graph, FROM, TO);
       const receipt = edgeOf(body.draft_graph, FROM, TO);
       for (const [where, edge] of [['commit', committed], ['receipt', receipt]] as const) {

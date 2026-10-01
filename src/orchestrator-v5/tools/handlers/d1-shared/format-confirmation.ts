@@ -17,6 +17,8 @@ import type { PendingAction } from '../../../session/pending-action.js';
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../../../agent-lane/limit-operator-words.js';
 import { sayLimitInFrame } from '../../../agent-lane/limit-frame.js';
 import { sayFigureAsWritten } from '../../../agent-lane/say-figure.js';
+import { acceptedOlumiEstimateSentence } from '../../../agent-lane/rerun-explanation.js';
+import type { LinkSizing } from '../../../../cee/magnitude/link-sizing.js';
 import {
   durationNotEvaluatedSentence,
   UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE,
@@ -700,22 +702,24 @@ export function formatEdgeStrengthUnchanged(input: {
 }
 
 /**
- * Receipt for an explicit `confirm_current` edge-strength act. Unlike an
- * ordinary numeric no-op, confirmation changes provenance: the human has
- * adopted the current model value as their judgement. It deliberately repeats
- * neither a number nor a direction; the strict expected-before check proves
- * which current value was confirmed, and omitting both avoids reconstructing
- * either one from display state (especially at zero, whose direction is not
- * recoverable from sign).
+ * Receipt for an explicit `confirm_current` edge-strength act. It deliberately repeats neither a number nor a
+ * direction; the strict expected-before check proves which current value was confirmed, and omitting both avoids
+ * reconstructing either one from display state (especially at zero, whose direction is not recoverable from sign).
+ *
+ * ⛔ WHOSE FIGURE IT IS follows the link's STORED sizing after the write (`linkSizing`, 52f8cd's one predicate), never
+ * the act (R3 5942069984: an Accept read "as your judgement" while the stored link stayed Olumi's estimate):
+ *   · `olumi_accepted` → RC's `accept_olumi_estimate` sentence, the one the rerun's line says too: still Olumi's figure;
+ *   · `user`           → the user's own judgement;
+ *   · anything else, or no link read → no authorship claim at all.
  */
 export function formatEdgeStrengthConfirmed(input: {
   readonly fromLabel: string;
   readonly toLabel: string;
+  readonly sizing: LinkSizing | undefined;
 }): string {
-  return (
-    `Confirmed the current strength of the link between ${input.fromLabel} ` +
-    `and ${input.toLabel} as your judgement.`
-  );
+  if (input.sizing === 'olumi_accepted') return acceptedOlumiEstimateSentence(input.fromLabel, input.toLabel);
+  const confirmed = `Confirmed the current strength of the link between ${input.fromLabel} and ${input.toLabel}`;
+  return input.sizing === 'user' ? `${confirmed} as your judgement.` : `${confirmed}.`;
 }
 
 function describeBandWithDirection(mean: number): string {

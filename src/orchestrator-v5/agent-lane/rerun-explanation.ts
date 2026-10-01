@@ -20,6 +20,7 @@
  * contradict the record). No delta (a first Run) → no plan, and the route's explanation is exactly what it was.
  */
 import { checkMethodTurn, type MethodInputs } from './guidance/index.js';
+import { POLICY } from './guidance/policy.js';
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -28,8 +29,15 @@ const text = (v: unknown): string | undefined => (typeof v === 'string' && v.tri
 /** The most changes named, as the contract's format allows. */
 export const MAX_NAMED_CHANGES = 3;
 
-/** RC's change sentences (`change_label_templates`), verbatim. */
-const acceptedEstimate = (from: string, to: string) => `You accepted Olumi's estimate for how much ${from} changes ${to}.`;
+/**
+ * RC's `accept_olumi_estimate` sentence, rendered from the contract itself: the ONE sentence for an Accept, said by the
+ * rerun's code line AND by the Accept's own receipt (`formatEdgeStrengthConfirmed`; DL ruling on R3 5942069984).
+ */
+export const acceptedOlumiEstimateSentence = (from: string, to: string): string =>
+  POLICY.method_turns['RERUN-EXPLANATION'].change_label_templates.accept_olumi_estimate.label
+    .replace(/\{(from|to)\}/gu, (_m, key: string) => (key === 'from' ? from : to));
+/** RC's other change sentences (`change_label_templates`), verbatim. */
+const acceptedEstimate = acceptedOlumiEstimateSentence;
 const ownEstimate = (from: string, to: string) => `You gave your own estimate for how much ${from} changes ${to}.`;
 const ownEstimateMoved = (from: string, to: string, before: string, after: string) =>
   `You gave your own estimate for how much ${from} changes ${to}: ${before} → ${after}.`;
