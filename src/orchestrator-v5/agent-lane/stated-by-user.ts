@@ -966,6 +966,30 @@ export function statingSentenceOf(
   return sentencesOf(quote.trim()).find((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope) === null) ?? null;
 }
 
+/** Words that may stand between a distributive word and the source it counts ("each EXTRA conversation", "one MORE hire"). */
+const ONE_FILLER = /^(?:extra|more|additional|single|new|another)$/;
+/**
+ * The token index of the SOURCE word a distributive phrase counts one of ("each extra conversation" → conversation),
+ * or -1. The walk from the distributive word crosses only fillers and the source's own label words, never punctuation.
+ */
+function distributiveOneAt(q: string, ends: { readonly source: string; readonly target: string }): number {
+  const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
+  const label = wordsOf(ends.source);
+  const own = label.filter((w) => !wordsOf(ends.target).some((t) => sameWord(w, t)));
+  const isLabel = (w: string): boolean => label.some((x) => sameWord(x, w));
+  for (let i = 0; i < tokens.length; i += 1) {
+    const w = tokens[i]!.w; const next = tokens[i + 1]?.w;
+    const from = /^(?:each|every|per)$/.test(w) ? i + 1 : w === 'one' && next === 'more' ? i + 2
+      : (w === 'a' || w === 'an') && next !== undefined && /^(?:extra|single|additional)$/.test(next) ? i + 2 : -1;
+    if (from < 0) continue;
+    for (let j = from; j < tokens.length && (ONE_FILLER.test(tokens[j]!.w) || isLabel(tokens[j]!.w)); j += 1) {
+      if (/[,;:()\u2013\u2014]/.test(q.slice(tokens[i]!.at, tokens[j]!.at))) break;
+      if (own.some((x) => sameWord(x, tokens[j]!.w))) return j;
+    }
+  }
+  return -1;
+}
+
 function linkEffectInOneSentence(
   q: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
@@ -975,7 +999,11 @@ function linkEffectInOneSentence(
   const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
   const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
     unitPhraseFamily(effect.per_source_change_unit), q));
-  if (amountFigure === undefined || perFigure === undefined) return 'figures_not_in_statement';
+  // ⭐ R3 #75 5925568501: "each / every / per / one more / an extra / a single" + a word of the SOURCE, one phrase with no
+  // punctuation between, is the user writing a change of ONE ("Each extra conversation brings in about £20,000"). A
+  // plural with no distributive word ("extra conversations bring £20,000") is not: it could be a total.
+  const oneAt = perFigure === undefined && Math.abs(effect.per_source_change) === 1 ? distributiveOneAt(q, ends) : -1;
+  if (amountFigure === undefined || (perFigure === undefined && oneAt < 0)) return 'figures_not_in_statement';
   const othersOf = (label: string): string[] => scope.quantities.filter((l) => l !== label);
   const quoteWords = wordsOf(q);
   const has = (w: string): boolean => quoteWords.some((t) => sameWord(w, t));
@@ -988,10 +1016,10 @@ function linkEffectInOneSentence(
   const sourceOwn = wordsOf(ends.source).filter((w) => !wordsOf(ends.target).some((s) => sameWord(w, s)));
   const sourceAt = tokens.flatMap((t, i) => (sourceOwn.some((w) => sameWord(w, t.w)) ? [i] : []));
   const tokenAt = (index: number | undefined): number => tokens.findIndex((t) => t.at >= (index ?? 0));
-  const perAt = tokenAt(perFigure.index);
+  const perAt = perFigure === undefined ? oneAt : tokenAt(perFigure.index);
   const amountAt = tokenAt(amountFigure.index);
   // A figure's own digits ("0.5" → 0, 5) are never words standing between it and what it sizes.
-  const inFigure = (i: number): boolean => [perFigure, amountFigure].some((f) => tokens[i]!.at >= (f.index ?? 0)
+  const inFigure = (i: number): boolean => [perFigure, amountFigure].some((f) => f !== undefined && tokens[i]!.at >= (f.index ?? 0)
     && tokens[i]!.at < (f.index ?? 0) + f.matchedText.length);
   // Punctuation ends a phrase (PR Review's fifth CR: "£1, raising it"): a comma, dash or bracket between two words breaks them.
   const unbroken = (a: number, b: number): boolean => {
@@ -1012,7 +1040,9 @@ function linkEffectInOneSentence(
     if (end === 'target') { if (target !== 0 && target !== dir) targetBoth = true; target = dir; targetMoves.push(i); } else { if (source !== 0 && source !== dir) sourceBoth = true; source = dir; sourceMoves.push(i); }
   };
   tokens.forEach((t, i) => {
-    if (TARGET_DOWN.test(t.w)) say('target', -1, i);
+    // "brings in £20,000" is money coming in (R3 5925568501's served step 2); a bare "brings" ("brings down") says no way.
+    if (/^(?:bring|brings|bringing|brought)$/.test(t.w) && tokens[i + 1]?.w === 'in') say('target', 1, i + 1);
+    else if (TARGET_DOWN.test(t.w)) say('target', -1, i);
     else if (TARGET_UP.test(t.w)) say('target', 1, i);
     else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1, i);
     else if (MOVE_DOWN.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', -1, i);
@@ -1028,7 +1058,7 @@ function linkEffectInOneSentence(
   // increase"), or "by £1" after a move ("falls by £1", "raise the Pro price by £1").
   const isMove = (w: string): boolean => MOVE_UP.test(w) || MOVE_DOWN.test(w);
   const isLabel = (w: string): boolean => sourceLabel.some((x) => sameWord(x, w));
-  const distributive = perAt > 0 && DELTA_BEFORE.test(tokens[perAt - 1]!.w) && unbroken(perAt - 1, perAt);
+  const distributive = perFigure === undefined || (perAt > 0 && DELTA_BEFORE.test(tokens[perAt - 1]!.w) && unbroken(perAt - 1, perAt));
   const moveAfter = [1, 2, 3].some((d) => perAt + d < tokens.length && CHANGE_NOUN.test(tokens[perAt + d]!.w) && unbroken(perAt, perAt + d)
     && tokens.slice(perAt + 1, perAt + d).every((t, k) => inFigure(perAt + 1 + k) || isLabel(t.w)));
   const byAfterMove = perAt > 1 && tokens[perAt - 1]!.w === 'by' && tokens.slice(Math.max(0, perAt - 7), perAt - 1).some((t, k, xs) => {
