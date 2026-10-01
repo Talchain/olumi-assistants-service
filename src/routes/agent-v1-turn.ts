@@ -37,6 +37,8 @@ import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
+import { EMPTY_AGENT_GUIDANCE, type AgentGuidanceRecord } from '../orchestrator-v5/coaching/agent-guidance-snapshot.js';
+import { nextStepStateKey, recordOffers, recordPress, withoutSettledNextSteps } from '../orchestrator-v5/agent-lane/guidance/next-step-guidance.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
@@ -442,6 +444,20 @@ export const NEXT_STEP_CHIPS = [
 ] as const satisfies readonly OfferedAction[];
 
 const NEXT_STEP_CHIP_IDS: ReadonlySet<string> = new Set(NEXT_STEP_CHIPS.map((c) => c.id));
+
+/**
+ * AI HARNESS G1: the scenario's guidance record, or empty. A store without the reader (a test double) or a failed read
+ * degrades to empty: every next step is then eligible, as before G1, and the failure is logged.
+ */
+export async function readAgentGuidance(store: { readMostRecentAgentGuidance?: (scenarioId: string) => Promise<AgentGuidanceRecord | null> }, scenarioId: string): Promise<AgentGuidanceRecord> {
+  if (typeof store.readMostRecentAgentGuidance !== 'function') return EMPTY_AGENT_GUIDANCE;
+  try {
+    return (await store.readMostRecentAgentGuidance(scenarioId)) ?? EMPTY_AGENT_GUIDANCE;
+  } catch (err) {
+    log.warn({ event: 'agent_lane.guidance_read_failed', scenario_id: scenarioId, err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the guidance record could not be read; every next step is eligible this turn');
+    return EMPTY_AGENT_GUIDANCE;
+  }
+}
 
 /**
  * The next steps are offered only on a result that is current and that the canonical state lets chips build on
@@ -2395,11 +2411,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return chip === null ? [] : [[chip.id, chip] as const];
       })).values()],
     ]);
+    // ⭐ AI HARNESS G1: the durable guidance record (the answer rows, not a process Map, so a restart remembers it).
+    // A next step pressed in THIS state (the saved model + the Run) is not offered again until either changes.
+    const guidanceStateKey = nextStepStateKey({ graphHash, analysisState });
+    const guidancePrior = await readAgentGuidance(store, scenarioId);
+    const guidanceWithPress = recordPress(guidancePrior, (body['chip'] as { id?: unknown } | null | undefined)?.id, guidanceStateKey, turnId ?? null);
     // ⭐ Nothing specific to press, on a result that is current: the product's own next steps (NEXT_STEP_CHIPS). Never
     // beside another control, and never while a proposal that would still execute waits for its yes (that is the step).
     const offeredNow: OfferedAction[] = offeredSpecific.length === 0 && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash) === undefined
-      ? [...NEXT_STEP_CHIPS] : offeredSpecific;
+      ? withoutSettledNextSteps(NEXT_STEP_CHIPS, guidanceWithPress, guidanceStateKey) : offeredSpecific;
+    const guidanceNext = recordOffers(guidanceWithPress, offeredNow, guidanceStateKey, turnId ?? null);
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
     rememberResearchOffers(approveKey, offeredNow);
@@ -2746,6 +2768,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
           // approval that reaches a restarted process, can still find them.
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
+          // AI HARNESS G1: the guidance record, only when this turn changed it (the newest one is the current one).
+          ...(guidanceNext !== guidancePrior ? { agent_guidance: guidanceNext } : {}),
           },
         });
         if (outcome.priorTurnConflict === true) {
