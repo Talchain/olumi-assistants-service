@@ -208,3 +208,31 @@ describe('F1b [R1]: an off-scale target withholds the claims against it, not the
     expect(warningsOf(after).find((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).not.toHaveProperty('withheld_claims');
   });
 });
+
+/**
+ * DL condition (1) on #2448 (5931324913): the kept outcomes reach the Agent's view, so its note licenses one option's own
+ * range and forbids every comparative use. Read through the REAL Agent reader on the REAL withheld body.
+ */
+describe('F1b [R1] condition (1): the Agent may describe a kept outcome, never rank by it', () => {
+  it('RED: P2 → the Agent\'s note is the outcome-kept licence (no rank, no leader, no better/worse)', async () => {
+    const { goalChanceWithheldForAgent, OUTCOME_KEPT_NOTE } = await import('../../../agent-lane/goal-chance-withheld.js');
+    const g = clone(M1.graph);
+    for (const e of g.edges as Json[]) {
+      if ((e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months') && (e.defaulted === true || String(e.provenance?.magnitude ?? '').startsWith('olumi_'))) {
+        e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' };
+      }
+    }
+    (g.nodes as Json[]).find((n) => n.kind === 'goal')!.goal_threshold = 1.5;
+    const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), g) as Json;
+    const agent = goalChanceWithheldForAgent({ enrichment: after })!;
+    expect(agent.note).toBe(OUTCOME_KEPT_NOTE);
+    expect(agent.note).toMatch(/Never rank or order the options by their outcomes, never name a leading or best option/);
+    expect(agent.note).toMatch(/never say one option is better or worse/);
+  });
+
+  it('CONTROL: P5 (outcome withheld) keeps the ban on quoting any option\'s value', async () => {
+    const { goalChanceWithheldForAgent, GOAL_CHANCE_WITHHELD_NOTE } = await import('../../../agent-lane/goal-chance-withheld.js');
+    const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), M1.graph) as Json;
+    expect(goalChanceWithheldForAgent({ enrichment: after })!.note).toBe(GOAL_CHANCE_WITHHELD_NOTE);
+  });
+});

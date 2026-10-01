@@ -3470,7 +3470,8 @@ export function withholdGoalFiguresForUntestableTarget<E>(response: E, graph: un
   // about how the TARGET is stated (P2 off scale, P3 comparator, P4 unit), the goal has today's level and every path size
   // is sound, so each option's outcome is in the goal's own units: only the claims AGAINST the target go. No today's
   // level (P1: a normalised scale) or a path resting on a guess (P5) still withholds the outcome.
-  const keepOutcome = verdict.kind === 'not_testable' && verdict.failures.every((f) => OUTCOME_SAFE_PRECONDITIONS.has(f.precondition));
+  const keepOutcome = verdict.kind === 'not_testable' && verdict.failures.length > 0
+    && verdict.failures.every((f) => OUTCOME_SAFE_PRECONDITIONS.has(f.precondition));
   if (warning === null) return response;
   // DL [R1] condition: each kept figure carries its sizing label — the options resting on Olumi's accepted estimates.
   const accepted = keepOutcome ? optionsRestingOnAcceptedOlumiSizes(graph, ids) : [];
