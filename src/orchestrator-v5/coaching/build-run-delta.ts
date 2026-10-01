@@ -390,9 +390,12 @@ function classifyAttribution(
    * Both Runs' RECORDED PLoT→ISL requests show the same draw structure (`draw-structure.ts` `islDrawStructureKey`).
    * C1 needs it: the same seed on a different draw structure misaligns the draws, so the movement is not attributable
    * (R3 #75 5920859011). Fails CLOSED — a Run with no recorded request cannot show its draws line up (AI EXPERIENCE
-   * BUILD CR 5921519604). C0 does not need it: an equal analysis hash on an equal build sends an identical request.
+   * BUILD CR 5921519604).
+   * C0 trusts an equal analysis hash, EXCEPT over a KNOWN mismatch: the canonical hash sorts nodes, the ISL draws follow
+   * the request's order, so two recorded requests in a different node order draw differently under one hash (AI
+   * EXPERIENCE BUILD CR 5922160816). A Run with no recorded request keeps C0 on the hash (legacy: nothing contradicts it).
    */
-  drawStructureVerified: boolean,
+  drawStructure: 'verified' | 'mismatch' | 'unknown',
 ): RunDeltaAttributionCaseLiteral | null {
   // Observed divergences first, most fundamental first. Each of these is a
   // fact we measured off two echoes.
@@ -403,8 +406,8 @@ function classifyAttribution(
   // Past every observed divergence. Only the two VERIFIED cases remain, and
   // both require a positively-confirmed builds equality.
   if (provenance.builds_equal === 'equal') {
-    if (provenance.hash_equal) return 'C0_identical';
-    return drawStructureVerified ? 'C1_attributable' : 'C2_unpaired';
+    if (provenance.hash_equal) return drawStructure === 'mismatch' ? 'C2_unpaired' : 'C0_identical';
+    return drawStructure === 'verified' ? 'C1_attributable' : 'C2_unpaired';
   }
 
   // seed, n and hash all agree but builds is unverifiable. Nothing in the table
@@ -553,9 +556,9 @@ export function buildRunDelta(input: {
   // is still nothing honest to show, and the old refusal stands.
   const priorDrawStructure = islDrawStructureKeyOfFact(pair.prior);
   const currentDrawStructure = islDrawStructureKeyOfFact(pair.current);
-  const drawStructureVerified =
-    priorDrawStructure !== null && currentDrawStructure !== null && priorDrawStructure === currentDrawStructure;
-  const classified = classifyAttribution(pairProvenance, drawStructureVerified);
+  const drawStructure = priorDrawStructure === null || currentDrawStructure === null ? 'unknown'
+    : priorDrawStructure === currentDrawStructure ? 'verified' : 'mismatch';
+  const classified = classifyAttribution(pairProvenance, drawStructure);
   if (classified === null && inputs.kind !== 'compared') {
     return { kind: 'none', reason: 'no_honest_attribution_case' };
   }

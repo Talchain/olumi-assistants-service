@@ -196,6 +196,12 @@ describe('the classifier: C1 only when both Runs\' RECORDED ISL requests show th
   });
   it('CONTROL: C0 is not downgraded — an equal analysis hash on an equal build is identical, recorded request or not', () => {
     expect(pair(null, null, true, ['h1', 'h1'])).toBe('C0_identical');
+    expect(pair(isl(), isl(), true, ['h1', 'h1']), 'both recorded, same draw structure').toBe('C0_identical');
+    expect(pair(isl(), isl((r) => { r.graph.edges[0].strength.mean = 0.6; }), true, ['h1', 'h1']), 'a non-structural value under one hash').toBe('C0_identical');
+  });
+  it('CR 5922160816: an equal hash over a KNOWN recorded draw mismatch (stochastic nodes in reversed order) → C2, never C0', () => {
+    expect(pair(isl(), isl((r) => { r.graph.nodes.reverse(); }), true, ['h1', 'h1'])).toBe('C2_unpaired');
+    expect(pair(isl(), isl((r) => { r.graph.nodes.reverse(); }), false, ['h1', 'h1']), 'legacy pair, same rule').toBe('C2_unpaired');
   });
   it('the ISL key keeps LIST ORDER and ignores the seed and non-structural values', () => {
     expect(islDrawStructureKey(isl((r) => { r.seed = '999'; r.options[0].interventions.fac_price = 0.6; }))).toBe(islDrawStructureKey(isl()));
