@@ -203,8 +203,22 @@ export function approvalChipsFor(
       AMEND_CHIP,
     ];
   }
-  const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId));
+  const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
+    ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
+}
+
+/**
+ * ⭐ A LINK-STRENGTH APPROVAL SAYS WHAT IT RECORDS (CODEX_CLI_OVERFLOW P1 + DL ruling on #2481; ONE projection, shared
+ * with #2480's card): the button alone read "Record these links", so the band and whose estimate it is were hidden. The
+ * STORED proposal's own card — each link, its band and "Olumi's estimate" or "your estimate", as `proposeLinkStrengths`
+ * minted it — rides in `detail`. Identity: the store's proposal for THIS chip's id, every operation a link strength.
+ * Never the Agent's prose. Used live and on a replay, which rebuilds the chip from the same stored proposal.
+ */
+export function linkStrengthCardFor(proposalId: string, proposal: StructuredProposal | undefined): string | undefined {
+  if (proposal === undefined || proposal.proposal_id !== proposalId || proposal.operations.length === 0
+    || proposal.operations.some((o) => o.op !== 'set_link_strength')) return undefined;
+  return typeof proposal.public_label === 'string' && proposal.public_label.trim() !== '' ? proposal.public_label : undefined;
 }
 
 type Direction = 'at_least' | 'at_most';

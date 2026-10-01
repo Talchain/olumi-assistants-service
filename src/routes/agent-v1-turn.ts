@@ -79,7 +79,7 @@ import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orch
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
 import { collectTurnStateFacts } from '../orchestrator-v5/agent-lane/turn-state-facts.js';
 import { withoutProposalIds } from '../orchestrator-v5/agent-lane/display-ids.js';
-import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
+import { AMEND_CHIP, approvalChipIdFor, approvalChipsFor, linkStrengthCardFor, proposalsAwaitingApproval, typedApprovalOf, WITHDRAW_PROPOSAL, withdrawnThisTurn } from '../orchestrator-v5/agent-lane/approval-chips.js';
 import { identityCardToIssue, identityCardToReoffer } from '../orchestrator-v5/agent-lane/identity-card.js';
 import { proposeProductIdentity } from '../orchestrator-v5/agent-lane/identity-proposal.js';
 import { identityConfirmBaseIsWritable } from '../orchestrator-v5/system-events/editable-graph.js';
@@ -1601,9 +1601,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // lost proposing response retried on a restarted process replayed the proposal with no way to approve
       // it). Only its words come from the row; `stillValidOffers` below decides whether it is still offered,
       // against the store the rehydration above has already refilled from the latest answer row.
-      const durableApprove = remembered.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
+      const durableApproveWords = remembered.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
         ? undefined
         : offeredApproveChipOnRow(prior.pending_actions, { scenario_id: scenarioId, user_id: userId });
+      // The row carries the chip's words; its card (`detail`) is re-derived from the SAME stored proposal, rehydrated above.
+      const durableCard = durableApproveWords === undefined ? undefined
+        : ((id) => linkStrengthCardFor(id, proposals.get(id)))(typedApprovalOf({ chip: { id: durableApproveWords.id } }) as string);
+      const durableApprove = durableApproveWords === undefined ? undefined
+        : { ...durableApproveWords, ...(durableCard !== undefined ? { detail: durableCard } : {}) };
       const offered = [
         ...(durableApprove !== undefined ? [durableApprove] : []),
         ...remembered,
