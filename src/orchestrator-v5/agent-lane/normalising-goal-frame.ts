@@ -16,7 +16,7 @@
  * there), so its presence is the marker. With no frame to move to (no cap, no level) nothing changes: never a half state.
  * PURE: returns the graph itself when there is nothing to retire, otherwise a new one.
  */
-import { frameOf, refitFramesForStatedEffects } from './refit-frames.js';
+import { clampForPersist, frameOf, refitFramesForStatedEffects, withStatedStrengths } from './refit-frames.js';
 
 type Rec = Record<string, any>;
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -28,7 +28,8 @@ export function retireNormalisingGoalFrame<G>(graph: G): G {
   if (goal === undefined || !(num(goal.scale_frame) && goal.scale_frame > 1)) return graph;
   const os = goal.observed_state ?? {};
   if (!(num(goal.goal_threshold_raw) || num(os.raw_value) || num(os.baseline))) return graph;
-  const g = structuredClone(graph) as Rec;
+  // A stored clamp is undone first (re-derived from the full β, never from the stored ±1), and re-applied at the end.
+  const g = withStatedStrengths(structuredClone(graph)) as Rec;
   const node = (g.nodes as Rec[]).find((n) => n.id === goal.id)!;
   const from = node.scale_frame as number;
   delete node.scale_frame;
@@ -42,5 +43,5 @@ export function retireNormalisingGoalFrame<G>(graph: G): G {
     if (num(e.strength?.std)) e.strength.std *= k;
     if (num(p.natural_effect?.strength_mean)) p.natural_effect.strength_mean *= k;
   }
-  return refitFramesForStatedEffects(g, { goalOwnRows: true }).graph as G;
+  return clampForPersist(refitFramesForStatedEffects(g, { goalOwnRows: true }).graph) as G;
 }

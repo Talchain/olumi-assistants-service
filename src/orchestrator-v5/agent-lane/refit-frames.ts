@@ -113,6 +113,61 @@ const userStated = (e: Rec): boolean => e.provenance?.magnitude === 'user_stated
  */
 const sizedExactly = (e: Rec): boolean => userStated(e) || e.provenance?.definitional === true;
 
+const clampedFrom = (e: Rec): number | undefined => (num(e?.provenance?.clamped_from) ? e.provenance.clamped_from : undefined);
+
+/**
+ * ⭐ CLAMP AT PERSIST (DL #75 5924108406; R3 5924108105 / 5924114341; AIQ 5924120672; CODEX 5924186955 / 5924209469).
+ * A stored |mean| > 1 breaks the WHOLE model: `assertIngressGraphNumericBounds` refuses every later write ("Not saved",
+ * 52f8cd 5924036192) and the UI cold open declines its Run (CANVAS 5923984462). PLoT clamps it to ±1 at parse anyway, so
+ * the analysis is the same: a link no refit could fit is STORED at ±1 (sign kept, its spread scaled with it) with
+ * `provenance.clamped_from` = its full β. `EdgeStrengthV3` is a strict {mean, std}, so the marker rides the provenance,
+ * which passes through. `natural_effect` is never touched: the user's figure and range stay byte-exact, and its
+ * `strength_mean` keeps the full β, so the readers that trust a natural size only while it is the β analysed
+ * (`placeholder-parts`) read a clamped link as not analysed at the user's size, which is true.
+ */
+export function clampForPersist<G>(graph: G): G {
+  // ⛔ THE EXACT INGRESS BOUND (CODEX 5925312387): `assertIngressGraphNumericBounds` refuses ANY |mean| > 1, so ±1.0000000005
+  // is clamped too. Within rounding noise (≤ 1 + TOL) it is simply ±1 — nothing was cut, so no marker.
+  const over = (e: Rec): boolean => num(e?.strength?.mean) && Math.abs(e.strength.mean) > 1;
+  const edges = (graph as Rec | null)?.edges;
+  if (!Array.isArray(edges) || !edges.some(over)) return graph;
+  const g = structuredClone(graph) as Rec;
+  for (const e of g.edges as Rec[]) {
+    if (!over(e)) continue;
+    const full = e.strength.mean as number;
+    e.strength = { ...e.strength, mean: Math.sign(full), ...(num(e.strength.std) ? { std: e.strength.std / Math.abs(full) } : {}) };
+    if (Math.abs(full) > 1 + TOL) e.provenance = { ...(e.provenance ?? {}), clamped_from: full };
+  }
+  return g as G;
+}
+
+/**
+ * Every stored clamp undone: each marked link back at its full β, its spread with it, the marker dropped. Every refit, the
+ * F4 retirement and the run's wire copy start here (R3 5924114341: re-derive from the user's size, never from the stored
+ * ±1), so a later fit restores the full size, and PLoT is sent what it always was (it clamps, marks and withholds itself).
+ */
+export function withStatedStrengths<G>(graph: G): G {
+  const edges = (graph as Rec | null)?.edges;
+  if (!Array.isArray(edges) || !edges.some((e: Rec) => clampedFrom(e) !== undefined)) return graph;
+  const g = structuredClone(graph) as Rec;
+  for (const e of g.edges as Rec[]) {
+    const full = clampedFrom(e);
+    if (full === undefined) continue;
+    delete e.provenance.clamped_from;
+    // ⛔ A STALE MARKER IS DROPPED, NEVER APPLIED (CODEX 5924209469): the marker speaks only while the link still holds the
+    // clamp it was written with (±1, the same sign) and its natural size, where it has one, still records that β. Any
+    // later write of the strength or of the size (an edge edit, a link-effect answer) leaves it stale: the edit stands.
+    const ne = e.provenance?.natural_effect;
+    const stillTheClamp = num(e.strength?.mean) && Math.abs(Math.abs(e.strength.mean) - 1) <= TOL && Math.sign(e.strength.mean) === Math.sign(full)
+      // CODEX 5925312387: the clamp always writes the marker beside the user's natural size, and every real write of the
+      // strength or the size drops or replaces that size (adjust_edge_strength, link-effect-edit). No natural size = stale.
+      && num(ne?.strength_mean) && Math.abs(ne.strength_mean - full) <= TOL * Math.max(1, Math.abs(full));
+    if (!stillTheClamp) continue;
+    e.strength = { ...e.strength, mean: full, ...(num(e.strength?.std) ? { std: e.strength.std * Math.abs(full) } : {}) };
+  }
+  return g as G;
+}
+
 function reframed(graph: Rec, id: string, F: number): Rec {
   const g: Rec = structuredClone(graph);
   const node = (g.nodes as Rec[]).find((n) => n.id === id)!;
@@ -158,7 +213,7 @@ function cuts(g: Rec): Rec[] {
  * Every other caller keeps v1's refusal byte for byte.
  */
 export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwnRows?: boolean } = {}): { readonly graph: Rec; readonly refits: FrameRefit[]; readonly refused: FrameRefusal[] } {
-  let g = graph;
+  let g = withStatedStrengths(graph);
   const refits: FrameRefit[] = [];
   const refused: FrameRefusal[] = [];
   const tried = new Set<string>();

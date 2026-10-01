@@ -486,7 +486,7 @@ export function sizeLink(link: LinkStatement, source: MagnitudeNode, target: Mag
         ? `${who} ${statement}, but "${target.label}" is ${today(check!)} today, so that cannot hold across your options. `
           + `It is kept exactly as you said it. Should the size of that effect change, or today's level of "${target.label}"?`
         : issue === 'not_representable'
-          ? `${who} ${statement}, ${NOT_REPRESENTABLE}: it would be cut short. It is kept exactly as you said it. Is that the size you meant?`
+          ? `${who} ${statement}, ${NOT_REPRESENTABLE}: it is cut short in the analysis. It is kept exactly as you said it. Is that the size you meant?`
           : undefined;
       const carried = natural(beta, per as number).natural_effect;
       // C1: the figure is said WITH the range it is one end of, never as "your £1m"; C2: a floor (or ceiling), "at least".
