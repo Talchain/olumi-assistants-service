@@ -347,12 +347,19 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     expect(scaleOf()).toEqual(targetOnly);
   }, 180_000);
 
-  it('RED: a today\'s level the user did not write → refused, NOTHING prepared (no card promising what it cannot record)', async () => {
+  // E1 (DL 5924370309): the level is LEFT OUT of the card, never a reason to offer none — and the card promises nothing about it.
+  it('RED: a today\'s level the user did not write → left out: the TARGET card goes out, promising no level, writing none, and saying nothing about a figure that was never theirs', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const t1 = await proposeWithToday(5000, 'We need at least £60k MRR.');
     const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
-    expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'figure_not_in_users_words' }));
-    expect(approveChipOf(t1)).toEqual([]);
+    expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    const chips = approveChipOf(t1);
+    expect(chips).toHaveLength(1);
+    expect(chips[0]!.label ?? chips[0]!.message, 'the card names the target only').not.toMatch(/Today:/);
+    expect(t1.assistant_text, 'the £5,000 was never the user\'s: no "not recorded" line about it').not.toContain('I haven\'t recorded');
+    await turn({ message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
+    expect(goalNow()).toEqual(expect.objectContaining({ goal_threshold_raw: 60000 }));
+    expect((goalNow() as Record<string, unknown>).observed_state, 'no level written').toBeUndefined();
   }, 180_000);
 
   it('RED: the level write is refused after the target lands → the target is set, and the reply says today\'s level was NOT recorded', async () => {
@@ -393,15 +400,50 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     ];
     return turn({ message: PAUL });
   };
+  // ⭐ E1 (R3 #75 5924332644; DL 5924370309): a level that cannot be bound is LEFT OUT of the card — the target card still
+  // goes out (served: the Agent resent the level 6× to `hop_limit`, so NO card reached Paul) — and is never written.
   for (const [today, name] of [[180000, 'cash in the bank (£180k)'], [45000, 'monthly spend (£45k)']] as const) {
-    it(`RED: Paul's answer — ${name} as today's level → refused, NOTHING prepared`, async () => {
+    it(`RED: Paul's answer — ${name} as today's level → left out; the TARGET card still goes out and writes no level`, async () => {
       graphOf.set(SCENARIO, fundingSeed());
       const t1 = await proposeFunding(today);
       const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
-      expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: false, refusal: 'current_level_not_bound' }));
-      expect(approveChipOf(t1)).toEqual([]);
+      expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+      const chips = approveChipOf(t1);
+      expect(chips, JSON.stringify(t1.suggested_actions)).toHaveLength(1);
+      expect(t1.assistant_text, 'never called "today\'s" figure, never promised').toContain(`as today's level of "securing funding"; tell me if you want it set.`);
+      const t2 = await turn({ message: chips[0]!.message, source: 'chip', chip: { id: chips[0]!.id } });
+      expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+      expect(goalNow()).toEqual(expect.objectContaining({ goal_threshold_raw: 1000000, threshold_source: 'user' }));
+      expect((goalNow() as Record<string, unknown>).observed_state, 'the misread level is never written').toBeUndefined();
+      expect(t2.assistant_text).not.toContain('Its level today is recorded');
     }, 180_000);
   }
+
+  // The SERVED shape (`train-0341Z`, CEE ff5453bd): the A4f draft's sibling outcomes "Investment-firm funding secured" /
+  // "Angel funding secured" take both of the goal's words, so the strict scope cannot bind "secured £0 so far".
+  const servedSiblingsSeed = () => {
+    const g = fundingSeed();
+    return { ...g, nodes: [
+      ...g.nodes.map((n) => (n.id === 'goal_mrr' ? { ...n, label: 'Funding secured' } : n)),
+      { id: 'out_firm', kind: 'outcome', label: 'Investment-firm funding secured' },
+      { id: 'out_angel', kind: 'outcome', label: 'Angel funding secured' },
+    ] };
+  };
+  it('RED (served E1): siblings "…funding secured" → his £0 cannot be bound, so it is left out — the £1m card STILL goes out, and the reply says the £0 was not recorded', async () => {
+    graphOf.set(SCENARIO, servedSiblingsSeed());
+    const t1 = await proposeFunding(0);
+    const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+    expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(approveChipOf(t1), JSON.stringify(t1.suggested_actions)).toHaveLength(1);
+    expect(t1.assistant_text, t1.assistant_text).toContain('I haven\'t recorded £0 as today\'s level of "Funding secured"; tell me if you want it set.');
+    expect(t1.assistant_text.split('I haven\'t recorded').length - 1, 'said once').toBe(1);
+  }, 180_000);
+  it('CONTROL: the same answer on a draft with NO sibling "…secured" labels binds his £0 to the card, and no "not recorded" line', async () => {
+    graphOf.set(SCENARIO, { ...fundingSeed(), nodes: fundingSeed().nodes.map((n) => (n.id === 'goal_mrr' ? { ...n, label: 'Funding secured' } : n)) });
+    const t1 = await proposeFunding(0);
+    expect(approveChipOf(t1)).toHaveLength(1);
+    expect(t1.assistant_text).not.toContain('I haven\'t recorded');
+  }, 180_000);
   // ⛔ A DECIMAL IS NOT A SENTENCE END (MG SUCCESSOR #75 5918338227, measured on staging `d3d28031`): with Paul's real
   // target, "£1.2m", the level's quote was cut at "£1." ("…need at least £1"), so the target was not in its statement and
   // his own £0 was refused `current_level_not_bound`: no card, so the funding goal had no today's level (DR row 4 P1).

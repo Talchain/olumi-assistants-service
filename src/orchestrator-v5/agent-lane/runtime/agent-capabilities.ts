@@ -3119,15 +3119,26 @@ export function createAgentCapabilities(
        */
       const levelArg = (args as { current_level?: unknown }).current_level;
       let currentLevel: { value: number; unit: string; quote: string } | undefined;
+      /**
+       * ⭐ E1 — A LEVEL THAT CANNOT RIDE THE CARD IS LEFT OUT, NEVER A REASON TO OFFER NO CARD (R3 #75 5924332644; DL
+       * 5924354666). Served `train-0341Z`: the strict scope rightly refused Paul's "£0" (the A4f draft's sibling outcomes
+       * "Investment-firm funding secured" / "Angel funding secured" make "secured £0 so far" ambiguous), the refusal said
+       * "offer the target on its own", and the Agent resent the level 6× → hop limit → no card, nothing written. The target
+       * passed its own doors above, so the card holds it alone, and the level is never written unbound or unread.
+       */
+      let levelLeftOut: { refusal: string; reason: string; users_figure?: string; goal?: string } | undefined;
+      const firstSentence = (t: string): string => (/^.*?[.?!](?=\s|$)/.exec(t)?.[0] ?? t).trim();
       if (levelArg !== undefined && levelArg !== null) {
         const lv = (levelArg as { value?: unknown }).value;
         const lu = (levelArg as { unit?: unknown }).unit;
-        if (typeof lv !== 'number' || !Number.isFinite(lv) || typeof lu !== 'string' || lu.trim() === '') {
-          return { ok: false, mutated: false, refusal: 'unreadable_current_level',
-            detail: 'Today’s level needs the figure and its unit, as the user wrote them. Nothing was prepared; ask the user for whichever is missing.' };
-        }
-        const inWords = statedGoalLevelInUsersWords(lv, lu, { label: goal.label, unit }, ctx.user_text);
-        if (!inWords.ok) return { ok: false, mutated: false, refusal: inWords.refusal, detail: inWords.detail };
+        const inWords = typeof lv !== 'number' || !Number.isFinite(lv) || typeof lu !== 'string' || lu.trim() === ''
+          ? undefined
+          : statedGoalLevelInUsersWords(lv, lu, { label: goal.label, unit }, ctx.user_text);
+        if (inWords === undefined) {
+          levelLeftOut = { refusal: 'unreadable_current_level', reason: 'Today’s level needs the figure and its unit, as the user wrote them.' };
+        } else if (!inWords.ok) {
+          levelLeftOut = { refusal: inWords.refusal, reason: firstSentence(inWords.detail) };
+        } else {
         /**
          * ⛔ BOUND TO THE GOAL, IN THE TARGET'S OWN STATEMENT (AIQ CHANGES_REQUIRED on #2373; the #2275 authorship-door
          * class). Paul's answer holds three £ amounts — "about £180k in the bank … roughly £45k a month … secured £0 so far
@@ -3139,11 +3150,14 @@ export function createAgentCapabilities(
         const sameStatement = inWords.quote !== null && figureTheUserWrote(value, unit, inWords.quote);
         const aboutTheGoal = figureTheUserWroteFor(inWords.raw, unit, ctx.user_text, { ...scopeIn(g, goal.label), strict: true });
         if (!sameStatement || !aboutTheGoal) {
-          return { ok: false, mutated: false, refusal: 'current_level_not_bound',
-            detail: `${targetFigure(inWords.raw, unit)} is not written as today's level of "${goal.label}" in the same statement as its target, `
-              + 'so nothing was prepared. Offer the target on its own, and never say today’s level will be recorded.' };
+          // The figure IS the user's (it passed the words rule); only its binding to this goal failed, so the host says it
+          // was not recorded (`disclosuresFor`, AIQ's words via DL 5924370309) — never silently dropped.
+          levelLeftOut = { refusal: 'current_level_not_bound', users_figure: targetFigure(inWords.raw, unit), goal: goal.label,
+            reason: `${targetFigure(inWords.raw, unit)} is not written as today's level of "${goal.label}" in the same statement as its target.` };
+        } else {
+          currentLevel = { value: inWords.raw, unit, quote: inWords.quote! };
         }
-        currentLevel = { value: inWords.raw, unit, quote: inWords.quote! };
+        }
       }
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
       const proposal = createProposal({
@@ -3170,9 +3184,11 @@ export function createAgentCapabilities(
           becomes: `${DIRECTION_WORDS[type]} ${figure}`,
           ...(today !== undefined ? { today } : {}),
         },
+        ...(levelLeftOut !== undefined ? { current_level_left_out: levelLeftOut } : {}),
         note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
-          + ' — never the id — and call authorise_change with this proposal_id once they agree.',
+          + ' — never the id — and call authorise_change with this proposal_id once they agree.'
+          + (levelLeftOut !== undefined ? ` Today’s level was left out of this card: ${levelLeftOut.reason} Never say it will be recorded.` : ''),
       };
     },
 
