@@ -11,6 +11,7 @@
  * turn's own verified identity before any tool runs. That is why this is a
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
+import { GoalPeriod } from '@talchain/schemas';
 import { sendableQuery } from './public-research.js';
 
 /**
@@ -120,6 +121,9 @@ export interface ToolDefinition {
 const obj = (props: Record<string, unknown>, required: string[]): Record<string, unknown> => ({
   type: 'object', additionalProperties: false, properties: props, required,
 });
+
+/** The contract's goal periods (`@talchain/schemas` 0.69.0 `GoalPeriod`), never a second list. */
+const GOAL_PERIODS: readonly string[] = GoalPeriod.options;
 
 
 /**
@@ -443,6 +447,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         value: { type: 'number', description: 'The goal’s level TODAY, exactly as the user stated it in their units (0 for "we have secured £0 so far").' },
         unit: { type: 'string', description: 'The unit the user gave it in (for example £).' },
       }, ['value', 'unit']),
+      // ⭐ F1 T5 `set_goal` (MG; spec §1, §7): the figure as stated rides the SAME card and the SAME `goal_target_edit` event.
+      // ⛔ No period and no horizon here (DL 380e54 on #2454, CODEX overflow 5935202003 P1-4): this card never sets them;
+      // the goal keeps its own. A typed choice for them is a later PR. The capability refuses either if it is passed.
+      as_stated: obj({
+        value: { type: 'number', description: 'The figure exactly as the user wrote it: the same figure as value (100000 for "£100k a quarter").' },
+        unit: { type: 'string', description: 'Its unit, as the user gave it.' },
+        period: { type: 'string', enum: GOAL_PERIODS, description: 'The period the user gave it per (quarter for "£100k a quarter"); none for a one-off figure.' },
+        quote: { type: 'string', description: 'The user’s exact words that state the figure and its period, copied from their message ("£100k a quarter"). '
+          + 'When this period differs from the goal’s own, nothing is prepared: ask the user for the figure per the goal’s period, and never convert it yourself.' },
+      }, ['value', 'unit', 'period', 'quote']),
     }, ['constraint_type', 'value', 'unit', 'rationale']),
   },
   {
@@ -785,6 +799,8 @@ export interface AgentCapabilities {
     constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
+    /** F1 T5: the figure as the user stated it, with its own period and their words; never converted on this card. */
+    as_stated?: { value: number; unit: string; period: string; quote: string };
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
   proposeOptionStatus?(ctx: AgentToolContext, args: {

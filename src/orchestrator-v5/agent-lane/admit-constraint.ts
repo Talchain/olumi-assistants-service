@@ -134,8 +134,11 @@ const PERCENT_HEADS: readonly string[] = [...(UNIT_SCALE_CLASS_TOKENS.find(([cls
   .sort((a, b) => b.length - a.length);
 // The groups name the period a match states (`periodOf`); they do not change what the grammar accepts.
 const PERIOD_TAIL = /^(?:(?:per|a|an|each|\/)\s*(month|year|annum|quarter|week|day)|(monthly|annually|annual|yearly|quarterly|weekly|daily)|(p\.?a\.?))?$/;
-/** The one period each word PERIOD_TAIL accepts names ("p.a." is a year): the grammar's own words, never a wider list. */
-const PERIOD_NAME: Readonly<Record<string, string>> = {
+/**
+ * The one period each word PERIOD_TAIL accepts names ("p.a." is a year): the grammar's own words, never a wider list.
+ * Exported for `set_goal`'s period attestation (`goal-target/goal-period.ts` `periodsNamedIn`, F1 T5): one period vocabulary.
+ */
+export const PERIOD_NAME: Readonly<Record<string, string>> = {
   month: 'month', monthly: 'month',
   year: 'year', annum: 'year', annual: 'year', annually: 'year', yearly: 'year',
   quarter: 'quarter', quarterly: 'quarter',

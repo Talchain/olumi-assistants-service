@@ -39,6 +39,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { isChangeFrame } from '../../agent-lane/limit-frame.js';
 
 import { z } from 'zod';
@@ -76,6 +77,7 @@ import {
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
+import { goalUnitCollidesWithPeriod } from '../../goal-target/goal-period.js';
 import {
   formatBaselineElicitation,
   formatBaselineNoted,
@@ -1069,6 +1071,17 @@ export function createAddConstraintHandler(): HandlerFn {
         !userStampDisagrees;
       const valueUnchanged = rowValueUnchanged || nodeChannelUnchanged;
       const labelChanged = existing !== undefined && existing.label !== newConstraint.label;
+      // ⭐ F1 T5 `set_goal` (MG; spec §1 G1, §7): the goal's period / horizon / stated figures the event carries
+      // (`goalSemantics`, set ONLY by the `goal_target_edit` door). A key present that differs from what the goal holds is
+      // a change the user made on THIS write, so the turn is never recorded or narrated as a no-op (the F9 discipline
+      // `mintedBaseline` and `isCorrection` follow below). None of the three is an analysis-hash input (`cee-v3.ts`), so
+      // the threshold stamp stays gated on the VALUE alone (`stampGoalThreshold`): a period-only edit moves the identity
+      // hash (a new model version), never the analysis hash. Compared structurally: the store re-orders JSONB keys.
+      const goalSemantics = targetNode.kind === 'goal' ? invocation.goalSemantics : undefined;
+      const semanticsChanged = goalSemantics !== undefined && (
+        (goalSemantics.goal_period !== undefined && goalSemantics.goal_period !== targetNode.goal_period)
+        || (goalSemantics.goal_horizon !== undefined && !isDeepStrictEqual(goalSemantics.goal_horizon, targetNode.goal_horizon))
+        || (goalSemantics.goal_stated_as !== undefined && !isDeepStrictEqual(goalSemantics.goal_stated_as, targetNode.goal_stated_as)));
       // F9 — the node's goal_threshold_raw/_unit/_cap fields are the exact
       // fields `computeAnalysisAffectingGraphHash` reads; re-stamping them
       // on a turn whose OWN receipt says "nothing changed" moves the
@@ -1082,6 +1095,47 @@ export function createAddConstraintHandler(): HandlerFn {
       // ONLY the node-threshold stamp that is gated, since that is the
       // field the F9 defect actually moved.
       const stampGoalThreshold = ownsGoalThresholdChannel && !valueUnchanged;
+
+      // ⛔ ONE PERIOD CARRIER — THE ONE ENFORCEMENT POINT (DL 380e54 on #2454; CODEX 5932596768 / 5933216093 / 5934135126).
+      // Every door that writes a goal's figure reaches this line: the `goal_target_edit` event (the UI, and the Agent's
+      // approved card), a typed `add_constraint` chip, and the chat tool. Judged over EVERY unit the goal holds AFTER this
+      // write against the `goal_period` in force after it (this write's, else the typed one the goal keeps):
+      //   · the row this write leaves (`newConstraint.unit`: stated, else the row's, else the node's);
+      //   · the goal's own `goal_threshold_unit` — re-stamped only when `stampGoalThreshold`, else RETAINED (an at-most
+      //     edit never stamps it, so "£ per quarter" stayed beside a new `month`: CODEX 5934135126 P1);
+      //   · the goal's other-direction row, which this write does not touch.
+      //   · the unit of the goal's recorded level (`observed_state.unit`), which no target write touches.
+      // Any one naming another period is two answers for one figure: refused for every door and both directions, nothing
+      // written, never a period silently chosen.
+      if (targetNode.kind === 'goal') {
+        const unitsAfter: unknown[] = [
+          newConstraint.unit,
+          stampGoalThreshold ? newConstraint.unit : targetNode.goal_threshold_unit,
+          ...(graph.goal_constraints ?? []).filter((c) => c.node_id === targetId && c.operator !== operator).map((c) => c.unit),
+          // the unit of the goal's recorded level (today's figure), which no target write touches: a level "£/quarter"
+          // beside a goal made per month is the same two answers, and the Run's figures then read nothing (they need the
+          // level and target units byte-equal, `routes/selected-run-figures.ts`).
+          targetNode.observed_state?.unit,
+        ];
+        const colliding = unitsAfter.find((u) => goalUnitCollidesWithPeriod(u, goalSemantics?.goal_period, targetNode));
+        if (colliding !== undefined) {
+          const periodAfter = goalSemantics?.goal_period ?? targetNode.goal_period;
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            `add_constraint: the goal would hold the unit "${String(colliding)}" beside goal_period ${periodAfter}; refused, nothing written.`,
+            {
+              details: {
+                handler_id: 'add_constraint',
+                target_id: targetId,
+                target_kind: targetNode.kind,
+                rejection_reason: 'goal_period_conflicts_with_unit',
+                reason_code: 'goal_period_conflicts_with_unit',
+              },
+              userGuidance: `The goal's figure is "${String(colliding)}", but its period would be per ${periodAfter}, so I haven't changed it. Say which period the figure is for.`,
+            },
+          );
+        }
+      }
 
       // Gate-1 EMIT GUARD — a constraint must not reach the wire
       // unit-ambiguous. A unit-less value outside [0,1] targeting a
@@ -1525,6 +1579,19 @@ export function createAddConstraintHandler(): HandlerFn {
             }
           }
         }
+        // ⭐ F1 T5 `set_goal`: the goal's period, horizon and stated figures, in THIS validated write — the same commit as
+        // the target (G1: `raw_value` and its period are never written apart). Written for `at_most` too: the period is
+        // the goal's, and its `<=` row is a figure per that period. Present = written byte-for-byte as the event carried
+        // it (the read-back compares exactly these bytes); absent = untouched, never cleared. The G1 conversion was
+        // checked before this handler ran (`goal-target-edit.ts`, `statedFigureHolds`).
+        if (goalSemantics !== undefined) {
+          const goalNode = clone.nodes.find((n) => n.id === targetId);
+          if (goalNode !== undefined) {
+            if (goalSemantics.goal_period !== undefined) goalNode.goal_period = goalSemantics.goal_period;
+            if (goalSemantics.goal_horizon !== undefined) goalNode.goal_horizon = { ...goalSemantics.goal_horizon };
+            if (goalSemantics.goal_stated_as !== undefined) goalNode.goal_stated_as = goalSemantics.goal_stated_as.map((s) => ({ ...s }));
+          }
+        }
         // ROADMAP 2.877 (link 2) — the stated-baseline write. Same committed
         // write as the row upsert (mutated_graph → persistence), no new
         // writer. Guarded by `mintedBaseline`, whose derivation above already
@@ -1580,7 +1647,8 @@ export function createAddConstraintHandler(): HandlerFn {
       // ⚠ `!isCorrection` is the same discipline as `!mintedBaseline` beside it:
       // a correction REMOVES a constraint row, which is analysis-affecting, so
       // the turn changed the model however unchanged the value looks.
-      const turnIsNoop = valueUnchanged && !labelChanged && !mintedBaseline && !isCorrection;
+      // F1 T5: a changed period / horizon / stated figure is a change, whatever the value (`semanticsChanged` above).
+      const turnIsNoop = valueUnchanged && !labelChanged && !mintedBaseline && !isCorrection && !semanticsChanged;
       const fact: AddConstraintHandlerFact = {
         fact_type: 'add_constraint',
         fact_version: 1,
@@ -1633,7 +1701,8 @@ export function createAddConstraintHandler(): HandlerFn {
       //
       // A correction is never "unchanged": it removes a row, which is
       // analysis-affecting, whatever the value looks like.
-      const narratesUnchanged = valueUnchanged && !isCorrection;
+      // F1 T5: the same conjunct as the fact channel's `turnIsNoop` (the rule above): a period-only edit is never "no need".
+      const narratesUnchanged = valueUnchanged && !isCorrection && !semanticsChanged;
       const constraintText = isSuccessTargetTurn
         ? narratesUnchanged
           ? formatGoalTargetUnchanged({

@@ -207,6 +207,9 @@ import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
+import { GoalHorizonSchema, GoalPeriod, GoalStatedAsSchema, type GoalHorizon, type GoalPeriodType, type GoalStatedAs } from '@talchain/schemas';
+import { z } from 'zod';
+import { askForGoalPeriodFigure, GOAL_PERIOD_WORDS, goalPeriodOf, goalUnitCollidesWithPeriod, periodNamedByUnit, periodsCollide, periodsNamedIn, typedGoalPeriodOf, unitKeepingHeldPeriod, unitNamesItsPeriod } from '../../goal-target/goal-period.js';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { approvalSizes } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
@@ -1210,6 +1213,19 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
           })(),
         },
       }),
+      /**
+       * ⭐ F1 T5 `set_goal` (spec §1): the period the goal's figures are per, when it must be met, and every figure the user
+       * gave for it VERBATIM — stored carriers passed through (`heldGoalSemantics`: a malformed one is absent, never
+       * guessed), so a reply quotes "£100k a quarter" as the user said it beside the monthly target it became.
+       */
+      ...((): Record<string, unknown> => {
+        const held = heldGoalSemantics(n);
+        return {
+          ...(held.period !== undefined ? { goal_period: held.period } : {}),
+          ...(held.horizon !== undefined ? { goal_horizon: held.horizon } : {}),
+          ...(held.stated_as !== undefined ? { goal_stated_as: held.stated_as } : {}),
+        };
+      })(),
     };
   });
   const limits = (Array.isArray(g.raw.goal_constraints) ? g.raw.goal_constraints : [])
@@ -1589,15 +1605,175 @@ const targetFigure = (value: number, unit: string): string =>
  * figure, for both directions; for at least it also stamps the goal's own `goal_threshold_raw` (what the Agent's
  * `target` and the UI read). Both must hold exactly what was approved.
  */
-function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: { constraint_type: 'at_least' | 'at_most'; raw_value: number }): boolean {
+function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: SetGoalTargetValue): boolean {
   const operator = v.constraint_type === 'at_least' ? '>=' : '<=';
   const rows = (Array.isArray(raw.goal_constraints) ? raw.goal_constraints : [])
-    .filter((c): c is { node_id?: unknown; operator?: unknown; value?: unknown } => c !== null && typeof c === 'object')
+    .filter((c): c is { node_id?: unknown; operator?: unknown; value?: unknown; unit?: unknown } => c !== null && typeof c === 'object')
     .filter((c) => c.node_id === goalId && c.operator === operator);
-  if (rows.length !== 1 || rows[0]!.value !== v.raw_value) return false;
+  // ⛔ The WHOLE unit, byte-exact (CODEX 5932175508, R3 F5 I1.1): a row holding "£" is not the approved "£ per quarter".
+  if (rows.length !== 1 || rows[0]!.value !== v.raw_value || rows[0]!.unit !== v.unit) return false;
+  const goal = (Array.isArray(raw.nodes) ? raw.nodes : []).find((n) => (n as { id?: unknown } | null)?.id === goalId) as Record<string, unknown> | undefined;
+  // ⭐ F1 T5 `set_goal` (spec §7 "every written field, byte-exact"; P3/W4, the #2439 lesson): each of the goal's period,
+  // horizon and stated figures the card wrote must be held exactly as approved — structurally, since the store re-orders
+  // JSONB keys. A field the card did not carry is not this write's to confirm.
+  if (v.goal_period !== undefined && goal?.goal_period !== v.goal_period) return false;
+  if (v.goal_horizon !== undefined && !isDeepStrictEqual(goal?.goal_horizon, v.goal_horizon)) return false;
+  if (v.stated_as !== undefined && !isDeepStrictEqual(goal?.goal_stated_as, v.stated_as)) return false;
+  // ⛔ ONE PERIOD CARRIER, judged BEFORE the at-most return (DL 380e54 on #2454; CODEX 5934135126 P1): ANY unit the goal
+  // holds — each of its rows, its own `goal_threshold_unit` (which an at-most write retains) and its level's unit — naming one period beside
+  // the typed goal_period it holds is never confirmed, whichever direction wrote it. The same function the writer enforces.
+  const heldUnits = [goal?.goal_threshold_unit, (goal?.observed_state as { unit?: unknown } | undefined)?.unit, ...(Array.isArray(raw.goal_constraints) ? raw.goal_constraints : [])
+    .filter((c): c is { node_id?: unknown; unit?: unknown } => c !== null && typeof c === 'object')
+    .filter((c) => c.node_id === goalId).map((c) => c.unit)];
+  if (heldUnits.some((u) => goalUnitCollidesWithPeriod(u, undefined, goal))) return false;
   if (v.constraint_type === 'at_most') return true;
-  const goal = (Array.isArray(raw.nodes) ? raw.nodes : []).find((n) => (n as { id?: unknown } | null)?.id === goalId) as { goal_threshold_raw?: unknown } | undefined;
-  return goal?.goal_threshold_raw === v.raw_value;
+  return goal?.goal_threshold_raw === v.raw_value && goal?.goal_threshold_unit === v.unit;
+}
+
+/**
+ * The `set_goal_target` operation's value: the `goal_target_edit` event's own fields (0.69.0), plus today's level when it
+ * rides the same card. `goal_period` / `goal_horizon` / `stated_as` are present only when this card sends them: the Agent's
+ * card sends `goal_period` only as the TYPED period it read, pinned (P1-1), and never a `goal_horizon` (P1-4).
+ */
+type SetGoalTargetValue = {
+  constraint_type: 'at_least' | 'at_most'; raw_value: number; unit: string;
+  current_level?: { value: number; unit: string; quote: string };
+  goal_period?: GoalPeriodType; goal_horizon?: GoalHorizon; stated_as?: GoalStatedAs[];
+  /**
+   * What the goal held when THIS card was read, for each of the three it sends (null = none recorded): the writer refuses
+   * if it has moved since (schemas 0.69.0 `expected_*`, CODEX #78 5930825929 — they are outside the analysis hash).
+   */
+  expected?: { goal_period?: GoalPeriodType | null; goal_horizon?: GoalHorizon | null; stated_as?: GoalStatedAs[] | null };
+};
+
+/** Whether the card's figure is the user's own converted into the goal's period (the writer's rule: the LAST stated entry). */
+function convertedOnCard(v: Pick<SetGoalTargetValue, 'goal_period' | 'stated_as'>, heldPeriod?: GoalPeriodType): boolean {
+  const period = v.goal_period ?? heldPeriod;
+  const last = v.stated_as?.[v.stated_as.length - 1];
+  return last !== undefined && period !== undefined && last.period !== period;
+}
+
+/**
+ * ⭐ THE ONE `goal_target_edit` THE APPROVAL SENDS (F1 T5: the Canvas control's op, spec §7 P4). The contract's fields in
+ * the contract's order; the 0.69.0 three only when the card carries them (absent = the stored value stays, never cleared).
+ */
+function setGoalEvent(goalId: string, v: SetGoalTargetValue, baseGraphHash: string): Record<string, unknown> {
+  return {
+    kind: 'goal_target_edit', goal_node_id: goalId, constraint_type: v.constraint_type, raw_value: v.raw_value, unit: v.unit,
+    base_graph_hash: baseGraphHash,
+    ...(v.goal_period !== undefined ? { goal_period: v.goal_period, expected_goal_period: v.expected?.goal_period ?? null } : {}),
+    ...(v.goal_horizon !== undefined ? { goal_horizon: v.goal_horizon, expected_goal_horizon: v.expected?.goal_horizon ?? null } : {}),
+    ...(v.stated_as !== undefined ? { stated_as: v.stated_as, expected_stated_as: v.expected?.stated_as ?? null } : {}),
+  };
+}
+
+/**
+ * ⭐ THE GOAL TARGET AS THE USER READS IT, on the card AND in the receipt (one function, so the two never differ): the
+ * figure in the goal's period, the user's own figure when it was converted, and the horizon. With none of the F1 fields
+ * it is exactly the figure, as before ("at least £60,000").
+ */
+function goalTargetWords(v: Pick<SetGoalTargetValue, 'raw_value' | 'unit' | 'goal_period' | 'goal_horizon' | 'stated_as'>, heldPeriod?: GoalPeriodType): string {
+  const period = v.goal_period ?? heldPeriod;
+  const per = period === undefined || period === 'none' || unitNamesItsPeriod(v.unit) ? '' : ` ${GOAL_PERIOD_WORDS[period]}`;
+  const last = v.stated_as?.[v.stated_as.length - 1];
+  const said = last !== undefined && convertedOnCard(v, heldPeriod)
+    ? ` (${targetFigure(last.value, last.unit)}${last.period === 'none' ? '' : ` ${GOAL_PERIOD_WORDS[last.period]}`}, as you stated it)` : '';
+  const by = v.goal_horizon === undefined ? ''
+    : 'deadline' in v.goal_horizon ? ` by ${v.goal_horizon.deadline}`
+      : ` within ${v.goal_horizon.months} month${v.goal_horizon.months === 1 ? '' : 's'}`;
+  return `${targetFigure(v.raw_value, v.unit)}${per}${said}${by}`;
+}
+
+/** What `projectModelContext` and the card read off a stored goal: each F1 field only when it parses (a raw read). */
+function heldGoalSemantics(goal: unknown): { period?: GoalPeriodType; horizon?: GoalHorizon; stated_as?: GoalStatedAs[] } {
+  const g = (goal ?? {}) as { goal_period?: unknown; goal_horizon?: unknown; goal_stated_as?: unknown; goal_threshold_unit?: unknown };
+  // ONE period carrier (CODEX #2454 5932596768): the typed `goal_period`, else the one the stored unit names.
+  const held = goalPeriodOf(g);
+  const period = held === undefined ? GoalPeriod.safeParse(undefined) : GoalPeriod.safeParse(held);
+  const horizon = GoalHorizonSchema.safeParse(g.goal_horizon);
+  const stated = z.array(GoalStatedAsSchema).min(1).max(20).safeParse(g.goal_stated_as);
+  return {
+    ...(period.success ? { period: period.data } : {}),
+    ...(horizon.success ? { horizon: horizon.data } : {}),
+    ...(stated.success ? { stated_as: stated.data } : {}),
+  };
+}
+
+const squash = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
+/** The most figures a goal records as the user stated them (schemas 0.69.0 `goal_stated_as`, `.max(20)`). */
+const STATED_FIGURES_MAX = 20;
+
+/**
+ * ⭐ F1 T5 `set_goal` (MG; spec §1 G1, §0 P1/P2/P5, §7) — THE FIGURE AS THE USER STATED IT, read off
+ * `propose_goal_target`'s optional `as_stated` for the ONE card and the ONE `goal_target_edit` that writes it. The user's
+ * figure is kept verbatim, last, in `stated_as` (appended to what the goal already holds: never dropped).
+ *
+ * ⛔ SCOPE CUT (DL 380e54 on #2454; CODEX overflow 5935202003 P1-4 and P2; MG owner decision B):
+ *   · the card NEVER sets the goal's period or horizon. The period-word attestation and the model-supplied horizon were
+ *     banned doors (no free-text period authority; no prompt-only control). An omitted field is unchanged; a passed one is
+ *     refused with nothing prepared (`goal_period_or_horizon_not_settable`). The typed period / horizon chip is the next PR.
+ *   · the card NEVER converts. The quote's period is a word read ("£60k by the end of the month" could pass as a monthly
+ *     rate and be scaled ×3), so a figure stated per another period than the goal's own is refused with the ask
+ *     (`stated_period_differs`), never arithmetic. The Canvas event door, whose period is typed, keeps conversion.
+ *   · the goal's record of stated figures is never trimmed to make room: the 21st distinct one is refused.
+ *
+ * ⛔ NOTHING RIDES AS THE USER'S THAT THE USER DID NOT SAY (the `figureTheUserWrote` rule; refusing guards only):
+ *   · the stated figure is the target figure already attested above (`value`), in a non-conflicting unit;
+ *   · its `quote` is the user's words VERBATIM and writes that figure;
+ *   · the quote names exactly the period claimed for it (`periodsNamedIn`; `none` names none).
+ * Each miss refuses with nothing prepared, and the Agent asks.
+ */
+function goalSemanticsFromArgs(
+  args: { period?: unknown; horizon?: unknown; as_stated?: unknown },
+  goal: { label: string; goal_threshold_unit?: unknown; goal_period?: unknown; goal_stated_as?: unknown },
+  userText: string | undefined,
+  value: number,
+  unit: string,
+):
+  | { ok: true; stated_as?: GoalStatedAs[]; held_period?: GoalPeriodType }
+  | { ok: false; refusal: ToolResult } {
+  const refuse = (refusal: string, detail: string) => ({ ok: false as const, refusal: { ok: false, mutated: false, refusal, detail } });
+  // ── P1-4: the goal's period and horizon are never this card's to set ──
+  if ((args.period !== undefined && args.period !== null) || (args.horizon !== undefined && args.horizon !== null)) {
+    return refuse('goal_period_or_horizon_not_settable', 'This card never sets the goal’s period or its horizon: the goal keeps its own, and changing them is a later, typed choice. '
+      + 'Nothing was prepared. Call propose_goal_target again without period and horizon.');
+  }
+  const held = heldGoalSemantics(goal);
+  // ── the figure as the user stated it ──
+  let statedAs: GoalStatedAs[] | undefined;
+  if (args.as_stated !== undefined && args.as_stated !== null) {
+    const a = args.as_stated as { value?: unknown; unit?: unknown; period?: unknown; quote?: unknown };
+    const entry = GoalStatedAsSchema.safeParse({
+      value: a.value, unit: typeof a.unit === 'string' ? a.unit.trim() : a.unit, period: a.period, quote: typeof a.quote === 'string' ? squash(a.quote) : a.quote,
+    });
+    if (!entry.success) return refuse('unreadable_as_stated', 'The figure as stated needs its value, unit, period and the user’s exact words. Nothing was prepared.');
+    const s = entry.data;
+    if (s.value !== value || unitsConflict(s.unit, unit) !== null) {
+      return refuse('as_stated_not_the_target', 'The figure as stated must be the same figure as the target, as the user wrote it. Nothing was prepared.');
+    }
+    if (!squash(userText ?? '').includes(s.quote) || !figureTheUserWrote(s.value, s.unit, s.quote)) {
+      return refuse('quote_not_users', 'The quote must be the user’s own words, copied exactly from their message, and must write the figure. Nothing was prepared; quote them exactly.');
+    }
+    const named = periodsNamedIn(s.quote);
+    if (s.period === 'none' ? named.size > 0 : !(named.size === 1 && named.has(s.period))) {
+      return refuse('stated_period_not_in_words', `The user’s words "${s.quote}" do not say the figure is per ${s.period}, so nothing was prepared. Ask the user what period their figure is per.`);
+    }
+    // ⛔ B: never converted on this card — a figure per another period than the goal's own is asked for again.
+    if (held.period !== undefined && s.period !== held.period) return refuse('stated_period_differs', askForGoalPeriodFigure(s.period, held.period));
+    // Appended LAST (the writer reads the last entry); an identical earlier record is not repeated, and none is dropped.
+    const kept = (held.stated_as ?? []).filter((x) => !isDeepStrictEqual(x, s));
+    if (kept.length + 1 > STATED_FIGURES_MAX) {
+      return refuse('stated_figures_full', `The goal already records ${STATED_FIGURES_MAX} figures the user stated, so nothing was dropped and nothing was prepared. `
+        + 'Offer the target without the figure as stated (as_stated left out).');
+    }
+    statedAs = [...kept, s];
+  }
+  return {
+    ok: true,
+    ...(statedAs !== undefined ? { stated_as: statedAs } : {}),
+    ...(held.period !== undefined ? { held_period: held.period } : {}),
+  };
 }
 
 /** The approval-facing disclosure of a name left out as ambiguous (empty when none was). */
@@ -3344,6 +3520,10 @@ export function createAgentCapabilities(
       }
       // ⛔ …and written ABOUT this goal (DL #72 5862394804): "300 Pro paying subscribers" is never a £300 MRR target.
       if (!figureTheUserWroteFor(derived?.base ?? value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
+      // ⭐ F1 T5 `set_goal`: the figure as stated — attested and carried on THIS card by `goalSemanticsFromArgs`, in the
+      // goal's own period only (never converted here; never a period or horizon set here). The writer re-checks it (G1).
+      const setGoal = goalSemanticsFromArgs(args as { period?: unknown; horizon?: unknown; as_stated?: unknown }, goal, ctx.user_text, value, unit);
+      if (!setGoal.ok) return setGoal.refusal;
       /**
        * ⭐ THE GOAL'S LEVEL TODAY, WHEN THE USER STATED IT BESIDE THE TARGET — on THIS card, written on THIS approval
        * (AIQ #75 5913873948 row G6, 5913897396, 5913952911; DL 5913935708). R3's run: "We have secured £0 so far and need
@@ -3396,17 +3576,57 @@ export function createAgentCapabilities(
         }
       }
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
+      /**
+       * ⛔ ONE PERIOD CARRIER (R3 F5 I1.1 #85 5932127058; CODEX #2454 5932596768). The goal's held "£ per quarter" survives
+       * a card that says "£" (`unitKeepingHeldPeriod`). This card never changes the goal's period (P1-4, DL 380e54), and a
+       * stored unit is a period carrier too (`goalPeriodOf`), so a card whose own unit names a period other than the
+       * goal's own — typed, or named by its legacy unit — is refused: it would re-period the goal by its unit.
+       */
+      const heldUnit = (goal as { goal_threshold_unit?: unknown }).goal_threshold_unit;
+      if (periodsCollide(unit, setGoal.held_period)) {
+        return { ok: false, mutated: false, refusal: 'goal_period_conflicts_with_unit',
+          detail: `The unit "${unit}" says per ${periodNamedByUnit(unit)}, but the goal "${goal.label}" is per ${setGoal.held_period}, so nothing was prepared. `
+            + `This card never changes the goal's period: send the unit without its period (for example "£"), and ask the user for the figure per ${setGoal.held_period}.` };
+      }
+      const cardUnit = unitKeepingHeldPeriod(unit, heldUnit);
+      // …and the unit the goal will hold against the TYPED period it keeps (CODEX 5933216093): the shared writer's own rule.
+      const typedPeriod = typedGoalPeriodOf(goal as { goal_period?: unknown });
+      if (goalUnitCollidesWithPeriod(cardUnit, undefined, goal as { goal_period?: unknown })) {
+        return { ok: false, mutated: false, refusal: 'goal_period_conflicts_with_unit',
+          detail: `The unit "${cardUnit}" says per ${periodNamedByUnit(cardUnit)}, but the goal "${goal.label}" is per ${typedPeriod}, so nothing was prepared. `
+            + `This card never changes the goal's period or converts a figure: ask the user for the target per ${typedPeriod}.` };
+      }
+      const setValue: SetGoalTargetValue = {
+        constraint_type: type, raw_value: value,
+        unit: cardUnit,
+        ...(currentLevel !== undefined ? { current_level: currentLevel } : {}),
+        /**
+         * ⛔ P1-1 (CODEX overflow 5935202003): the TYPED period this card was read in is pinned — sent unchanged with its
+         * expected value — because it is outside the analysis hash: a concurrent period change moves no base hash. The
+         * writer refuses a moved one (`expected_goal_metadata_mismatch`), and the read-back binds it (`goalTargetHolds`).
+         * A period named only by the legacy unit rides the unit itself, which the read-back binds byte-exact.
+         */
+        ...(typedPeriod !== undefined ? { goal_period: typedPeriod } : {}),
+        ...(setGoal.stated_as !== undefined ? { stated_as: setGoal.stated_as } : {}),
+        // The goal as THIS card read it (null = none recorded), for each field the card sends.
+        expected: {
+          goal_period: typedPeriod ?? null,
+          stated_as: ((goal as { goal_stated_as?: GoalStatedAs[] }).goal_stated_as ?? null),
+        },
+      };
+      // The figure the card shows: the target, in the goal's own period.
+      const cardFigure = goalTargetWords(setValue, setGoal.held_period);
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
-        operations: [{ op: 'set_goal_target', path: goal.id, value: { constraint_type: type, raw_value: value, unit, ...(currentLevel !== undefined ? { current_level: currentLevel } : {}) } }],
+        operations: [{ op: 'set_goal_target', path: goal.id, value: setValue }],
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         // AIQ's words for the one card (5913952911): both figures, the user's own.
         public_label: today === undefined
-          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}${derived === null ? '' : ` (${derived.multiplier} × your ${targetFigure(derived.base, unit)})`}`
-          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${figure} · Today: ${today}`,
+          ? `Set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${cardFigure}${derived === null ? '' : ` (${derived.multiplier} × your ${targetFigure(derived.base, unit)})`}`
+          : `Set the goal "${goal.label}" · Your target: ${DIRECTION_WORDS[type]} ${cardFigure} · Today: ${today}`,
       });
       proposals.put(proposal);
       return {
@@ -3417,14 +3637,14 @@ export function createAgentCapabilities(
         goal: {
           label: goal.label,
           current_target: trio.goal_threshold_raw === undefined ? null : targetFigure(trio.goal_threshold_raw, trio.goal_threshold_unit ?? ''),
-          becomes: `${DIRECTION_WORDS[type]} ${figure}`,
+          becomes: `${DIRECTION_WORDS[type]} ${cardFigure}`,
           ...(today !== undefined ? { today } : {}),
         },
         ...(levelLeftOut !== undefined ? { current_level_left_out: levelLeftOut } : {}),
         // ⭐ DL 380e54 (#2447): the user's words were silent on the direction, so the card is a DECISION — the Agent's
         // reading is the primary button, the other the alternative (`approval-chips.ts`); the user's click is the authorship.
         ...(directionIsADecision ? { direction_choice: { chosen: type, alternative: type === 'at_least' ? 'at_most' : 'at_least' } } : {}),
-        note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
+        note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${cardFigure}, as their own target`
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
           + (levelLeftOut !== undefined ? ` Today’s level was left out of this card: ${levelLeftOut.reason} Never say it is or will be recorded`
@@ -4559,11 +4779,11 @@ export function createAgentCapabilities(
 
       if (ops.length === 1 && ops[0]!.op === 'set_goal_target') {
         const op = ops[0]!;
-        const v = op.value as { constraint_type: 'at_least' | 'at_most'; raw_value: number; unit: string };
+        const v = op.value as SetGoalTargetValue;
         const operationId = authorisationTurnId(decision.proposal.proposal_id);
         const res = await dispatch('/orchestrate/v2/turn', {
           kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
-          event: { kind: 'goal_target_edit', goal_node_id: op.path, constraint_type: v.constraint_type, raw_value: v.raw_value, unit: v.unit, base_graph_hash: decision.proposal.base_graph_identity_hash },
+          event: setGoalEvent(op.path, v, decision.proposal.base_graph_identity_hash),
         });
         // The writer's stale-base gate: the model moved between this approval's read and the write. Nothing written.
         if (res.status === 409) {
@@ -4590,8 +4810,13 @@ export function createAgentCapabilities(
         const receipt = receiptSummaryOf(res.json);
         const receipts = receipt.summary !== null ? [receipt.summary] : [];
         proposals.markApplied(decision.proposal.proposal_id, receipts);
-        const goalLabel = String(after!.nodes.find((x) => x.id === op.path)?.label ?? 'the goal');
-        const targetSaid = `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${targetFigure(v.raw_value, v.unit)}, as you stated it.`;
+        const goalAfter = after!.nodes.find((x) => x.id === op.path);
+        const goalLabel = String(goalAfter?.label ?? 'the goal');
+        // F1 T5: the same words as the card (`goalTargetWords`); a converted figure already says "as you stated it" of the
+        // user's own figure, so the sentence does not say it twice of the converted one.
+        const heldPeriodAfter = heldGoalSemantics(goalAfter).period;
+        const targetSaid = `The goal "${goalLabel}" now has the target ${DIRECTION_WORDS[v.constraint_type]} ${goalTargetWords(v, heldPeriodAfter)}`
+          + (convertedOnCard(v, heldPeriodAfter) ? '.' : ', as you stated it.');
         const applied = {
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),

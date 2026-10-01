@@ -48,7 +48,15 @@
  *     resolved — `goal_threshold*` and `goal_constraints` are all inside the
  *     analysis hash, so the gate genuinely covers what this writes;
  *   · the id resolves to EXACTLY ONE node, and that node is a GOAL → else
- *     refused (the contract: "server MUST refuse unknown or non-goal node").
+ *     refused (the contract: "server MUST refuse unknown or non-goal node");
+ *   · ⭐ F1 T5 `set_goal` (0.69.0, MG; spec §1 G1, §7): the event's optional
+ *     `goal_period` / `goal_horizon` / `stated_as` pass the ONE G1 gate
+ *     (`goal-target/goal-period.ts` `statedFigureHolds`: a figure stated per
+ *     another period is converted ×3/×4/×12 and must equal `raw_value`; a day /
+ *     week / none pair is never converted) → else refused, nothing written.
+ *     They are then RELAYED to the handler's side-band (`goalSemantics`), which
+ *     writes them onto the goal node in the same mutation as the target. This
+ *     file still writes none of them itself.
  */
 
 import type { OlumiResponse, SystemEventTurnPayload } from '@talchain/schemas/boundary';
@@ -65,10 +73,11 @@ import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
 import { buildTypedChipMutationProposal } from '../routing/typed-chip-mutation-proposal.js';
 import { validateToolCall } from '../routing/validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
-import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
+import { blockedReasonForHandlerFailure, HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../tools/registry.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { CEE_GOAL_THRESHOLD_FRAME } from '../../utils/goal-threshold-cap.js';
+import { goalPeriodOf, statedFigureHolds } from '../goal-target/goal-period.js';
 
 type GoalTargetEditEvent = Extract<SystemEventTurnPayload['event'], { kind: 'goal_target_edit' }>;
 
@@ -223,6 +232,57 @@ export async function applyGoalTargetEdit(
     log.info({ ...logBase, event: 'v5.system_event.goal_target_edit.goal_is_a_change' }, 'goal_target_edit — the goal target is a change from today; refusing');
     return refused('goal_is_a_change');
   }
+  // ⭐ F1 T5 `set_goal` — the G1 gate, before anything is written (spec §1 G1; MG brief rule, `statedFigureHolds`).
+  // The goal's period is the event's, else the one the goal already holds; the figure `raw_value` came from is the LAST
+  // `stated_as` entry. A day / week / none pair is refused (never guessed); a ×3 / ×4 / ×12 conversion that does not
+  // give `raw_value` (1e-9 relative) is refused. Either way nothing is written: the client re-sends the right figure.
+  // ⛔ ONE PERIOD CARRIER: a unit naming a period other than the one in force after this write is refused by THE shared
+  // writer (`add-constraint.ts`, `goalUnitCollidesWithPeriod`), which every door reaches — never a second guard here. Its
+  // reason (`goal_period_conflicts_with_unit`) reaches this event's refusal through the handler's declared reason_code.
+  const g1 = statedFigureHolds({
+    raw_value: event.raw_value,
+    // ⛔ P1-2: the stated figure's base unit is judged against the target's before any period arithmetic.
+    unit: event.unit,
+    // The goal's period: the event's, else the one the goal holds — typed, or named by its stored unit (legacy).
+    goal_period: event.goal_period ?? goalPeriodOf(matches[0] as { goal_period?: unknown; goal_threshold_unit?: unknown }),
+    stated_as: event.stated_as,
+  });
+  if (!g1.ok) {
+    log.info(
+      { ...logBase, event: `v5.system_event.goal_target_edit.${g1.reason}`,
+        ...(g1.reason === 'stated_unit_mismatch' ? { stated_unit: event.stated_as?.at(-1)?.unit, unit: event.unit }
+          : g1.reason === 'goal_period_not_convertible' ? { from: g1.from, to: g1.to } : { expected: g1.expected, raw_value: event.raw_value }) },
+      'goal_target_edit — the stated figure does not hold in the goal\'s period (G1); refusing without a write',
+    );
+    return refused(g1.reason);
+  }
+  /**
+   * ⛔ THE HASH-BLIND METADATA GUARD (schemas 0.69.0, CODEX #78 5930825929): `goal_period` / `goal_horizon` /
+   * `goal_stated_as` are outside the analysis hash, so a concurrent change to them alone moves no `base_graph_hash`. Each
+   * field the event SENDS carries the value it last read (`expected_*`; null = none recorded; the payload root refuses a
+   * field without its expected value). A stored value that differs from it refuses with nothing written — the
+   * `structural_rename` `expected_label` pattern. Compared as canonical JSON (key order normalised by the contract's
+   * closed shapes; an absent stored value reads as null).
+   */
+  const stored = matches[0] as { goal_period?: unknown; goal_horizon?: unknown; goal_stated_as?: unknown };
+  const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  for (const [sent, expected, held, name] of [
+    [event.goal_period, event.expected_goal_period, stored.goal_period, 'goal_period'],
+    [event.goal_horizon, event.expected_goal_horizon, stored.goal_horizon, 'goal_horizon'],
+    [event.stated_as, event.expected_stated_as, stored.goal_stated_as, 'goal_stated_as'],
+  ] as const) {
+    if (sent !== undefined && !sameValue(expected, held)) {
+      log.info({ ...logBase, event: 'v5.system_event.goal_target_edit.expected_goal_metadata_mismatch', field: name },
+        'goal_target_edit — the goal metadata moved since it was read; refusing without a write');
+      return refused('expected_goal_metadata_mismatch');
+    }
+  }
+  // Present keys only: an absent one leaves the stored value unchanged (the 0.69.0 contract), never cleared.
+  const goalSemantics: NonNullable<HandlerInvocation['goalSemantics']> = {
+    ...(event.goal_period !== undefined ? { goal_period: event.goal_period } : {}),
+    ...(event.goal_horizon !== undefined ? { goal_horizon: event.goal_horizon } : {}),
+    ...(event.stated_as !== undefined ? { goal_stated_as: event.stated_as } : {}),
+  };
 
   // ── 4–7. the SAME proposal, validator, handler and re-merge — shared with the limit edit ──
   return applyConstraintEditThroughAddConstraint({
@@ -242,6 +302,7 @@ export async function applyGoalTargetEdit(
     confirmedConstraintValueFrame: CEE_GOAL_THRESHOLD_FRAME,
     // DR row 1: the user approved THIS card, so its comparator is the goal's direction (the limit door never sets it).
     holdsGoalDirection: true,
+    ...(Object.keys(goalSemantics).length > 0 ? { goalSemantics } : {}),
     eventName: 'goal_target_edit',
     logBase,
   });
@@ -270,13 +331,15 @@ export async function applyConstraintEditThroughAddConstraint(params: {
   readonly statedConstraintOperator?: HandlerInvocation['statedConstraintOperator'];
   /** DR row 1: only the approved goal target card sets it (see `HandlerInvocation.holdsGoalDirection`). */
   readonly holdsGoalDirection?: HandlerInvocation['holdsGoalDirection'];
+  /** F1 T5: the goal's period / horizon / stated figures — only `goal_target_edit` sets it (see `HandlerInvocation.goalSemantics`). */
+  readonly goalSemantics?: HandlerInvocation['goalSemantics'];
   /** The writer's name in its logs (`goal_target_edit`, `limit_edit`). */
   readonly eventName: string;
   readonly logBase: Readonly<Record<string, unknown>>;
 }): Promise<GoalTargetEditResult> {
   const {
     payload, requestId, persistedGraph, graph, priorFacts, targetId, constraintType, rawValue, unit, label,
-    confirmedConstraintValueFrame, statedConstraintOperator, holdsGoalDirection, eventName, logBase,
+    confirmedConstraintValueFrame, statedConstraintOperator, holdsGoalDirection, goalSemantics, eventName, logBase,
   } = params;
   // ── 4. the SAME proposal the typed chip builds ───────────────────────────
   const built = buildTypedChipMutationProposal(
@@ -378,6 +441,8 @@ export async function applyConstraintEditThroughAddConstraint(params: {
     // the handler keeps the row's own `operator_as_stated`.
     ...(statedConstraintOperator !== undefined ? { statedConstraintOperator } : {}),
     ...(holdsGoalDirection === true ? { holdsGoalDirection } : {}),
+    // F1 T5: relayed, never written here; the handler writes it in the same mutation as the target.
+    ...(goalSemantics !== undefined ? { goalSemantics } : {}),
   };
 
   let outcome;
@@ -393,7 +458,8 @@ export async function applyConstraintEditThroughAddConstraint(params: {
         },
         `${eventName} — handler refused; no graph written`,
       );
-      return refused(err.cause_kind);
+      // The handler's own declared reason (the finest grain), else its typed cause — the estate's one mapping.
+      return refused(blockedReasonForHandlerFailure(err));
     }
     throw err;
   }
