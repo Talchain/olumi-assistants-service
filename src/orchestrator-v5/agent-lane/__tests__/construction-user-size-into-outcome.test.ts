@@ -1,0 +1,169 @@
+/**
+ * ⭐ A4f — THE USER'S SIZE INTO AN OUTCOME FITS THE OUTCOME'S FRAME (R3 #75 5923240262; AIQ 5923220559; DL 5923244548).
+ *
+ * MEASURED: served paul-1 on `d23f5df1` (#2416 live) carried Paul's £1,000,000 per deal as `user_stated`, but the drafter
+ * routed it through an intermediate £ OUTCOME ("Investment-firm funding secured", frame £5m; deals frame 10): β 2, cut.
+ * The reply then told him the run "couldn't use it at full size". The same shape is in 2 of 4 raw-captured drafts of his
+ * brief (raw-1: frame £5m, β 2; raw-2: frame £3m, β 1.67); this spec's draft is raw-1's retry draft, trimmed.
+ * #2416 widened only the GOAL's frame. An outcome is computed from its parents, so widening its frame is a pure change of
+ * units (R3): every natural size holds, its out-links move up by the same factor, and a factor target stays refused.
+ *
+ * Real path: strict candidate schema → `buildModelFromBrief` (ONE scripted drafter call) → `/graph/register` → GraphV3.
+ */
+import { describe, expect, it } from 'vitest';
+import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import type { InternalDispatch } from '../runtime/agent-capabilities.js';
+import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
+import { refitFramesForStatedEffects } from '../refit-frames.js';
+
+type Rec = Record<string, any>;
+
+/** Paul's 506-character brief, verbatim (R3 `accept-paul/paul-scenario-read.json`): no target, no level. */
+const PAUL =
+  "I need to accelerate securing funding within the next 2 months. We've been focused on investment firms that do deals "
+  + "between £1-2 million, mostly based in the UK. We'll keep sending cold emails and trying to find warm connections, but I "
+  + "want to explore alternatives to support the funding process, as we'll run out of money soon. For example, angel "
+  + 'investors might be able to provide a small amount of funding quicker to buy us more time, but we would need to decide '
+  + 'whether the overhead would be worth it.';
+
+type Prov = 'explicit' | 'inferred' | 'ai_proposed';
+const link = (from: string, to: string, size?: { amount: number; per: number; by: Prov }, definitional: boolean | null = null) => ({
+  from, to, direction: 'positive', provenance: 'inferred' as Prov,
+  effect_amount: size?.amount ?? null, effect_per_source_change: size?.per ?? null, effect_provenance: size?.by ?? null, definitional,
+});
+
+/** raw-1's retry draft (`/private/tmp/mgc-resume/raw-1/call-2.json`), trimmed: the £ size lands on an intermediate £ outcome. */
+function draft(o: { dealsMax?: number; fundingMax?: number } = {}) {
+  return {
+    goal: {
+      metric: 'Funding secured', operator: '>=', target_stated: false, frame: 'level', value: null, unit: '£', horizon_months: 2,
+      provenance: 'explicit', baseline_known: false, baseline_value: null, baseline_provenance: 'ai_proposed', scope: null,
+    },
+    constraints: [],
+    options: [
+      { label: 'Continue investment-firm outreach', provenance: 'explicit', changes: [], is_status_quo: true, interventions: [] },
+      { label: 'Angel outreach pilot', provenance: 'ai_proposed', changes: [], is_status_quo: null, interventions: [
+        { factor_label: 'Hours per week on angel outreach', value: 5, value_kind: 'absolute', unit: 'hours/week', provenance: 'ai_proposed' },
+      ] },
+    ],
+    factors: [
+      { label: 'Hours per week on investment-firm outreach', role: 'controllable', baseline_known: true, baseline_value: 15, unit: 'hours/week', provenance: 'ai_proposed', plausible_max: 60 },
+      { label: 'Hours per week on angel outreach', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'hours/week', provenance: 'ai_proposed', plausible_max: 40 },
+    ],
+    risks: [],
+    outcomes: [
+      { label: 'Qualified investment-firm conversations', provenance: 'inferred', unit: 'qualified investment-firm conversations', plausible_max: 100 },
+      { label: 'Investment-firm deals closed', provenance: 'inferred', unit: 'deals', plausible_max: o.dealsMax ?? 10 },
+      { label: 'Funding from investment firms', provenance: 'inferred', unit: '£', plausible_max: o.fundingMax ?? 5000000 },
+      { label: 'Funding from angel investors', provenance: 'inferred', unit: '£', plausible_max: 1000000 },
+    ],
+    links: [
+      link('Hours per week on investment-firm outreach', 'Qualified investment-firm conversations', { amount: 0.4, per: 1, by: 'ai_proposed' }),
+      link('Qualified investment-firm conversations', 'Investment-firm deals closed', { amount: 0.05, per: 1, by: 'ai_proposed' }),
+      link('Investment-firm deals closed', 'Funding from investment firms', { amount: 1000000, per: 1, by: 'explicit' }),
+      link('Hours per week on angel outreach', 'Funding from angel investors'),
+      link('Funding from investment firms', 'Funding secured', { amount: 1, per: 1, by: 'ai_proposed' }, true),
+      link('Funding from angel investors', 'Funding secured', { amount: 1, per: 1, by: 'ai_proposed' }, true),
+    ],
+    identities: [],
+    unknowns: [],
+    decision_question: null,
+  };
+}
+
+async function build(d: Record<string, unknown>) {
+  let body: unknown = null;
+  const call = (async () => ({ text: JSON.stringify(d) })) as unknown as CallStructuredModel;
+  const dispatch: InternalDispatch = async (path, b) => {
+    if (path.endsWith('/graph/register')) { body = structuredClone((b as { graph: unknown }).graph); return { status: 200, json: { model_version: { version_number: 1 } } }; }
+    return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
+  };
+  const out = await buildModelFromBrief('a4f0a4f0-0000-4a4f-8a4f-a4f0a4f0a4f0', PAUL, dispatch, call) as Rec;
+  expect(out.ok, JSON.stringify(out)).toBe(true);
+  return { g: GraphV3.parse(body) as unknown as Rec, out };
+}
+/** Every `open_questions` the build returns, wherever it sits in the result. */
+const questionsOf = (o: unknown): string[] => (o === null || typeof o !== 'object' ? []
+  : Object.entries(o as Rec).flatMap(([k, v]) => (k === 'open_questions' && Array.isArray(v) ? v as string[] : questionsOf(v))));
+const frame = (g: Rec, id: string): number | undefined => g.nodes.find((n: Rec) => n.id === id)?.scale_frame;
+const edge = (g: Rec, from: string, to: string): Rec => g.edges.find((e: Rec) => e.from === from && e.to === to);
+const DEAL = ['investment_firm_deals_closed', 'funding_from_investment_firms'] as const;
+
+describe('A4f: the user\'s £ size into an intermediate £ outcome fits that outcome\'s frame', () => {
+  it('RED: raw-1\'s shape → £1,000,000 per deal is carried at |β| ≤ 1 (frame £5m → £10m), never asked as "cut short"', async () => {
+    const { g, out } = await build(draft());
+    const deal = edge(g, ...DEAL);
+    expect(deal.provenance.magnitude).toBe('user_stated');
+    expect(frame(g, DEAL[1])).toBe(10000000);
+    expect(Math.abs(deal.strength.mean)).toBeLessThanOrEqual(1);
+    for (const e of g.edges.filter((x: Rec) => x.provenance?.magnitude === 'user_stated')) expect(Math.abs(e.strength.mean)).toBeLessThanOrEqual(1);
+    expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(false);
+  });
+
+  it('the user\'s natural size is exactly the stated one, and its range is carried (£1,000,000 per 1 deal, low end of "£1-2 million")', async () => {
+    const deal = edge((await build(draft())).g, ...DEAL);
+    expect(deal.provenance.natural_effect.amount).toBe(1000000);
+    expect(deal.provenance.natural_effect.per_source_change).toBe(1);
+    expect(deal.provenance.natural_effect.stated_range?.end).toBe('low');
+  });
+
+  it('control: Olumi\'s own estimate the frames cannot hold is still set aside and still asked (only the USER\'s fitted size drops its question)', async () => {
+    const d = draft() as Rec;
+    d.links = d.links.map((l: Rec) => (l.to === 'Qualified investment-firm conversations' ? { ...l, effect_amount: 100 } : l));
+    const { out } = await build(d);
+    expect(questionsOf(out).some((q) => q.startsWith('Olumi estimated that') && q.includes(NOT_REPRESENTABLE))).toBe(true);
+  });
+
+  it('control: a widen that would cut the outcome\'s own out-link is refused — the size stays cut and the question is still asked', async () => {
+    const { g, out } = await build(draft({ dealsMax: 100 }));
+    expect(frame(g, DEAL[1])).toBe(5000000);
+    expect(Math.abs(edge(g, ...DEAL).strength.mean)).toBeGreaterThan(1);
+    expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(true);
+  });
+});
+
+/** Served paul-1 (`d23f5df1`, `a4w2/paul-1/02-cold-after-build.json`): the investment-firm chain, verbatim frames and β. */
+function servedPaul1(fundingKind: string = 'outcome'): Rec {
+  const n = (id: string, kind: string, scale_frame?: number, observed_state?: Rec) => ({ id, kind, label: id, ...(scale_frame ? { scale_frame } : {}), ...(observed_state ? { observed_state } : {}) });
+  return {
+    nodes: [
+      n('securing_funding', 'goal', 10000000),
+      n('cold_emails_to_investment_firms', 'factor', 200, { unit: 'emails/week', value: 0.1, source: 'cee_inference', raw_value: 20 }),
+      n('qualified_investment_firm_conversations', 'outcome', 100),
+      n('investment_firm_deals_closed', 'outcome', 10),
+      n('investment_firm_funding_secured', fundingKind, 5000000),
+    ],
+    edges: [
+      { from: 'cold_emails_to_investment_firms', to: 'qualified_investment_firm_conversations', strength: { mean: 0.4, std: 0.2 }, provenance: { magnitude: 'olumi_estimate' } },
+      { from: 'qualified_investment_firm_conversations', to: 'investment_firm_deals_closed', strength: { mean: 0.5, std: 0.25 }, provenance: { magnitude: 'olumi_estimate' } },
+      { from: 'investment_firm_deals_closed', to: 'investment_firm_funding_secured', strength: { mean: 2, std: 1 },
+        provenance: { magnitude: 'user_stated', natural_effect: { amount: 1000000, per_source_change: 1, strength_mean: 2 } } },
+      { from: 'investment_firm_funding_secured', to: 'securing_funding', strength: { mean: 0.5, std: 0.25 }, provenance: { magnitude: 'olumi_estimate' } },
+    ],
+  };
+}
+const natural = (g: Rec): number[] => g.edges.map((e: Rec) => {
+  const F = (id: string) => g.nodes.find((x: Rec) => x.id === id).scale_frame ?? g.nodes.find((x: Rec) => x.id === id).observed_state.raw_value / g.nodes.find((x: Rec) => x.id === id).observed_state.value;
+  return (e.strength.mean * F(e.to)) / F(e.from);
+});
+
+describe('A4f on the served paul-1 graph (0 LLM)', () => {
+  it('the outcome frame £5m → £10m: deal β 2 → 1, its out-link 0.5 → 1, no |β| > 1 left, every natural size held', () => {
+    const before = servedPaul1();
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refits).toEqual([{ node: 'investment_firm_funding_secured', from: 5000000, to: 10000000, for_link: 'investment_firm_deals_closed→investment_firm_funding_secured' }]);
+    expect(r.graph.edges.map((e: Rec) => e.strength.mean)).toEqual([0.4, 0.5, 1, 1]);
+    expect(natural(r.graph)).toEqual(natural(before));
+    expect(r.graph.edges[2].provenance.natural_effect.amount).toBe(1000000);
+    expect(r.graph.edges[2].provenance.natural_effect.strength_mean).toBe(1);
+    expect(r.graph.nodes[0]).toEqual(before.nodes[0]); // the goal is untouched
+  });
+
+  it('control: the same size into a FACTOR is still refused, the graph returned as it came', () => {
+    const before = servedPaul1('factor');
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refused).toEqual([{ link: 'investment_firm_deals_closed→investment_firm_funding_secured', reason: 'not_the_goal' }]);
+    expect(r.graph).toBe(before);
+  });
+});

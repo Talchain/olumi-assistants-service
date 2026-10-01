@@ -15,7 +15,9 @@
  *
  * v1 moves ONE kind of frame: the stated link's TARGET is widened to the smallest {1, 2, 5}·10^k frame that fits (AIQ's
  * `c96` ruling: MRR 106,250 → 500,000, β 4.61 → 0.98, `pro_plan_price → mrr` 0.5 → 0.106, the same £265.6 per £1). A goal
- * has no out-links, so widening it moves no other β up. It is REFUSED (the clamp and #422's withhold stay) when:
+ * has no out-links, so widening it moves no other β up; an outcome's or a risk's out-links move up by the same factor, and
+ * the new-cut guard refuses any move that would cut one (A4f). It is REFUSED (the clamp and #422's withhold stay) when:
+ *  · the target is a FACTOR (its sampled spread; PR Review CR on #2314);
  *  · the target has no frame, or an option SETS it, or a limit NAMES it (their rescaling is not in v1: named under-claim);
  *  · the move would put ANY link at |β| > 1 (a new cut), or move a sampled spread.
  * Tightening the source (AIQ's F_S floor, 5894561359) is not built in v1: on `c96` it makes two new cuts (AIQ).
@@ -157,10 +159,13 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
     const target = (g.nodes as Rec[]).find((n) => n.id === e.to);
     const Fold = frameOf(target);
     if (target === undefined || Fold === undefined) { refused.push({ link: key(e), reason: 'no_frame' }); continue; }
-    // ⛔ PR Review CR on #2314 @ 72b9daed: only the GOAL's frame is widened. A factor's level with no `std` is sampled by
+    // ⛔ PR Review CR on #2314 @ 72b9daed: a FACTOR's frame is never widened. A factor's level with no `std` is sampled by
     // PLoT with a normal spread (`max(0.1, 0.15·|value|)` of its frame), so widening a factor would move its natural
-    // uncertainty while holding its link size. Paul's journeys need the goal only (MRR); a factor target stays clamped.
-    if (target.kind !== 'goal') { refused.push({ link: key(e), reason: 'not_the_goal' }); continue; }
+    // uncertainty while holding its link size; a factor target stays clamped.
+    // ⭐ A4f (R3 #75 5923240262, DL 5923244548): an OUTCOME or a RISK is computed from its parents, so widening one is a pure
+    // change of units. Served paul-1 (`d23f5df1`): the user's £1,000,000 per deal landed on "Investment-firm funding
+    // secured" (frame £5m, deals frame 10), β 2, cut, and the reply said the run could not use it at full size.
+    if (target.kind === 'factor') { refused.push({ link: key(e), reason: 'not_the_goal' }); continue; }
     const setByOption = (g.nodes as Rec[]).some((n) => n.kind === 'option' && n.interventions !== null && typeof n.interventions === 'object'
       && Object.prototype.hasOwnProperty.call(n.interventions, target.id));
     const namedByLimit = !(opts.goalOwnRows === true && target.kind === 'goal')
