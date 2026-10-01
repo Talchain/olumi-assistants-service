@@ -62,7 +62,9 @@ export const OFF_SCALE_LIMIT_REASONS: ReadonlySet<string> = new Set(['threshold_
  * ask the model cannot act on is its own over-claim (AI Quality 5882619314; Runtime's code-read 5882633365).
  */
 const PARTS_LIMIT_SENTENCES: ReadonlyMap<string, string> = new Map([
-  [PLACEHOLDER_PARTS_REASON, 'Olumi’s links from its parts to it are placeholders, not estimates.'],
+  // F1b (F5 D3 5930871304): true for a placeholder AND for Olumi's estimate written in other units — the reason fires
+  // for both (`linkIsSized` reads the size IN the limit's units); "placeholders, not estimates" was false for the second.
+  [PLACEHOLDER_PARTS_REASON, 'Olumi hasn’t sized the links from its parts to it in this limit’s units.'],
   [PARTS_IDENTITY_UNMODELLED_REASON, 'the model cannot yet combine its parts the way they really combine.'],
 ]);
 
@@ -157,8 +159,8 @@ function withheldOptionsOrNone(graph: unknown, targetId: string | null): ReturnT
 
 /** Why an option's own check was withheld, by the predicate's reason: an unsized link, or parts the engine cannot combine. */
 const PER_OPTION_WHY: ReadonlyMap<string, readonly [one: string, many: string]> = new Map([
-  [PLACEHOLDER_PARTS_REASON, ['that option moves it through a link Olumi has not sized (a placeholder, not an estimate).',
-    'those options move it through a link Olumi has not sized (a placeholder, not an estimate).']],
+  [PLACEHOLDER_PARTS_REASON, ['that option moves it through a link Olumi hasn’t sized in this limit’s units.',
+    'those options move it through a link Olumi hasn’t sized in this limit’s units.']],
   [PARTS_IDENTITY_UNMODELLED_REASON, ['that option moves it through parts the model cannot yet combine the way they really combine.',
     'those options move it through parts the model cannot yet combine the way they really combine.']],
 ]);
