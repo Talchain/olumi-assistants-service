@@ -353,8 +353,19 @@ const MUTATION_INSTRUCTION =
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
 
+/**
+ * ⭐ THE REPLY'S OWN LENGTH (Paul's staging test, 1 Oct 00:1xZ: "the AI replies are much longer again"; DL #75 5922040401;
+ * AIQ bound 5922092866). Measured 0-LLM on R3's seven funding brief turns: the model's own words went from ~100
+ * (`base-1449Z` 105 · `train-1924Z` 102 · `train-1942Z` 100) to 180–195 after the v0.2 coach template landed (#2379), and the
+ * host then appends 63–115 words of receipt and disclosure (#75 5922398757). So the sentence budgets the MODEL's words to
+ * the pre-v0.2 size, which keeps the whole reply inside AIQ's ≤180 / ≤150 / ≤130. It never trades away a truth sentence.
+ * Appended after the host contract: no existing rule is restated, moved or dropped.
+ */
+export const REPLY_LENGTH_INSTRUCTION =
+  'Length: your words are only part of what the user reads, because Olumi adds its own status, disclosure and receipt lines after them. Keep your words to about 110 on the turn that builds the model from a brief, about 100 when you explain an analysis result, and about 90 otherwise. To fit, cut restated model contents, process narration and extra questions first; never drop a caveat that changes the meaning, why a result or a leading option is withheld, a limit, or who supplied a figure.';
+
 const AGENT_INSTRUCTIONS = SELECTED_COACH_V02_TEMPLATE.replace(
-  '{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT].join(' '),
+  '{{MODE_AND_AUTHORITY}}', [MUTATION_INSTRUCTION, HOST_TOOL_CONTRACT, REPLY_LENGTH_INSTRUCTION].join(' '),
 );
 
 /**
