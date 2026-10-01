@@ -123,6 +123,22 @@ export type BuildRunDeltaResult =
 /** The four PLoT `_meta.builds` members, in a fixed order. */
 const BUILD_KEYS = ['ui', 'cee', 'plot', 'isl'] as const;
 
+/**
+ * ⭐ M2 cause (52f8cd, DL 5934109147): the two COMPUTE builds from PLoT's ALWAYS-ON `_meta.evidence` when `_meta.builds`
+ * is absent. PLoT sends `_meta.builds` only under `UI_CANONICAL_META` (off on staging), but `evidence.plot_build` /
+ * `evidence.isl_build` are "deliberately NOT gated" (PLoT `run.ts` ~5174), so without this `builds_equal` was permanently
+ * 'unknown' on staging and C0/C1 unreachable. Still PLoT's own echo, never CEE's record. PLoT's literal `'unknown'` (no
+ * build stamped) is not a build: it reads as absent, so it can never make two Runs look equal.
+ */
+function evidenceBuilds(underscoreMeta: Record<string, unknown>): Readonly<Record<string, unknown>> | null {
+  const evidence = asRecord(underscoreMeta.evidence);
+  if (evidence === null) return null;
+  const build = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' && v.trim() !== 'unknown' ? v.trim() : null);
+  const plot = build(evidence.plot_build);
+  const isl = build(evidence.isl_build);
+  return plot === null && isl === null ? null : { plot, isl };
+}
+
 interface RunEchoes {
   /** PLoT `meta.seed_used`, normalised. PLoT echoes it as a STRING. */
   readonly seedUsed: string;
@@ -223,7 +239,7 @@ function readRunEchoes(fact: HandlerFact): RunEchoes | null {
   if (nSamples === null || nSamples <= 0) return null;
 
   const underscoreMeta = asRecord(enrichment._meta);
-  const builds = underscoreMeta === null ? null : asRecord(underscoreMeta.builds);
+  const builds = underscoreMeta === null ? null : asRecord(underscoreMeta.builds) ?? evidenceBuilds(underscoreMeta);
 
   return { seedUsed, nSamples, graphHashAtRun, builds, enrichment };
 }
@@ -387,16 +403,22 @@ function classifyAttribution(
     readonly n_equal: boolean;
   },
   /**
-   * Both Runs' RECORDED PLoT→ISL requests show the same draw structure (`draw-structure.ts` `islDrawStructureKey`).
-   * C1 needs it: the same seed on a different draw structure misaligns the draws, so the movement is not attributable
-   * (R3 #75 5920859011). Fails CLOSED — a Run with no recorded request cannot show its draws line up (AI EXPERIENCE
-   * BUILD CR 5921519604). C0 does not need it: an equal analysis hash on an equal build sends an identical request.
+   * Both Runs' RECORDED PLoT→ISL requests compared on draw structure (`draw-structure.ts` `islDrawStructureKey`):
+   * `equal` / `unequal` when both were recorded, `unrecorded` when either was not.
+   * C1 needs `equal`: the same seed on a different draw structure misaligns the draws, so the movement is not
+   * attributable (R3 #75 5920859011). Fails CLOSED: an `unrecorded` pair cannot show its draws line up (AI EXPERIENCE
+   * BUILD CR 5921519604).
+   * ⛔ A KNOWN MISMATCH IS AN OBSERVED DIVERGENCE (AI EXPERIENCE BUILD CR 5922160590): it outranks C0 as well as C1. An
+   * equal analysis hash does NOT imply an identical request: `computeAnalysisAffectingGraphHash` sorts nodes and edges,
+   * while ISL draws in list order, so a reordered stochastic node list keeps the hash and moves every draw. C0 on an
+   * `unrecorded` pair (the legacy control) is unchanged.
    */
-  drawStructureVerified: boolean,
+  drawStructure: 'equal' | 'unequal' | 'unrecorded',
 ): RunDeltaAttributionCaseLiteral | null {
   // Observed divergences first, most fundamental first. Each of these is a
   // fact we measured off two echoes.
   if (!provenance.seed_equal) return 'C2_unpaired';
+  if (drawStructure === 'unequal') return 'C2_unpaired';
   if (!provenance.n_equal) return 'C4_budget_drift';
   if (provenance.builds_equal === 'unequal') return 'C3_engine_drift';
 
@@ -404,7 +426,7 @@ function classifyAttribution(
   // both require a positively-confirmed builds equality.
   if (provenance.builds_equal === 'equal') {
     if (provenance.hash_equal) return 'C0_identical';
-    return drawStructureVerified ? 'C1_attributable' : 'C2_unpaired';
+    return drawStructure === 'equal' ? 'C1_attributable' : 'C2_unpaired';
   }
 
   // seed, n and hash all agree but builds is unverifiable. Nothing in the table
@@ -553,9 +575,9 @@ export function buildRunDelta(input: {
   // is still nothing honest to show, and the old refusal stands.
   const priorDrawStructure = islDrawStructureKeyOfFact(pair.prior);
   const currentDrawStructure = islDrawStructureKeyOfFact(pair.current);
-  const drawStructureVerified =
-    priorDrawStructure !== null && currentDrawStructure !== null && priorDrawStructure === currentDrawStructure;
-  const classified = classifyAttribution(pairProvenance, drawStructureVerified);
+  const drawStructure = priorDrawStructure === null || currentDrawStructure === null ? 'unrecorded'
+    : priorDrawStructure === currentDrawStructure ? 'equal' : 'unequal';
+  const classified = classifyAttribution(pairProvenance, drawStructure);
   if (classified === null && inputs.kind !== 'compared') {
     return { kind: 'none', reason: 'no_honest_attribution_case' };
   }
