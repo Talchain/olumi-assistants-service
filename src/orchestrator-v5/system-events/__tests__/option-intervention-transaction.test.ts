@@ -1001,7 +1001,7 @@ describe('L4: an approved link set sizes a placeholder (real door, real writer, 
   function withPlaceholder(mean: number) {
     const g = clone(canonicalGraph());
     g.edges = g.edges.map(e => (e.from === 'factor' && e.to === 'goal'
-      ? { ...e, strength: { mean, std: 0.1 }, provenance: { ...PLACEHOLDER }, defaulted: true } : e));
+      ? { ...e, strength: { mean, std: 0.1 }, provenance: { ...PLACEHOLDER }, defaulted: true } : e)) as typeof g.edges;
     return projectGraphForPersistence(g) as ReturnType<typeof canonicalGraph>;
   }
   const linkSet = (g: ReturnType<typeof canonicalGraph>, link: Record<string, unknown>) => {
@@ -1010,7 +1010,7 @@ describe('L4: an approved link set sizes a placeholder (real door, real writer, 
   };
   const coldEdge = async (p: ReturnType<typeof jsonStore>) => {
     const cold = GraphStateIngressSchema.parse(await p.fresh().loadGraph(SCENARIO_ID));
-    return cold.edges.find(e => e.from === 'factor' && e.to === 'goal')! as { strength: { mean: number }; provenance?: Record<string, unknown> };
+    return cold.edges.find(e => e.from === 'factor' && e.to === 'goal')! as unknown as { strength: { mean: number }; provenance?: Record<string, unknown> };
   };
 
   it('RED (e-12): Olumi’s band on a placeholder ALREADY at it — a review (confirm_current, not adopted) — sizes it as Olumi’s estimate, accepted', async () => {
