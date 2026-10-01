@@ -68,6 +68,7 @@ import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, textAtRest, withA7AfterGate } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
+import { caveatOncePerRun, noteCaveatShown } from '../orchestrator-v5/agent-lane/caveat-once.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -2656,6 +2657,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
     });
+    // ⭐ The provisional caveat once per Run (AIQ 5925678816 A; `caveat-once.ts`): LAST, on the reply exactly as it will be
+    // stored and sent, so the answer row and a replay carry the same words.
+    if (typeof wireBody.assistant_text === 'string') {
+      const once = caveatOncePerRun(wireBody.assistant_text, { scenarioId, ranThisTurn: ranAnalysisThisTurn, analysisState, graph: readbackGraph, analysisReady, blocks: wireBody.blocks });
+      if (once !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: once };
+    }
 
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is
@@ -2727,6 +2734,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     // A7: what of the brief the model does not carry — the final readback's own manifest, bound to its graph_hash.
     const notModelledCarrier = notModelledTurnCarrier(notModelled, graphHash);
+    // The caveat these exact bytes open with is now shown for this Run (`caveat-once.ts`): recorded only on the answer sent.
+    if (typeof wireBody.assistant_text === 'string') noteCaveatShown(wireBody.assistant_text, { scenarioId, analysisState });
     return reply.code(200).send({
       ...wireBody,
       /**
