@@ -56,8 +56,8 @@ const storeOver = (rows: Row[], applied?: string[][]) =>
   new SupabaseSessionStore(evaluatingClient(rows, applied), new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
 
 const V5 = toPreDispatchSnapshot(EMPTY_COACHING_STATE);
-const G1 = withEntry(EMPTY_AGENT_GUIDANCE, 'RC-STRENGTHEN-ITEM', { status: 'pressed', state_key_hash: 'abcdefabcdef', turn_id: 't2' });
-const G2 = withEntry(G1, 'RC-PREMORTEM', { status: 'offered', state_key_hash: 'abcdefabcdef', turn_id: 't3' });
+const G1 = withEntry(EMPTY_AGENT_GUIDANCE, 'RC-STRENGTHEN-ITEM', { status: 'pressed', state_key_hash: 'abcdefabcdef', turn_id: 't2', at: '2026-10-01T12:01:00.000Z' });
+const G2 = withEntry(G1, 'RC-PREMORTEM', { status: 'offered', state_key_hash: 'abcdefabcdef', turn_id: 't3', at: '2026-10-01T12:03:00.000Z' });
 const v5Row: Row = { id: 'r1', scenario_id: SCENARIO, created_at: '2026-10-01T12:00:00.000Z', coaching_state: V5 };
 const agentRows: Row[] = [
   { id: 'r2', scenario_id: SCENARIO, created_at: '2026-10-01T12:01:00.000Z', coaching_state: toAgentGuidanceSnapshot(G1) },
@@ -87,9 +87,20 @@ describe('route-v2 coaching read beside Agent guidance rows', () => {
 });
 
 describe('readMostRecentAgentGuidance', () => {
-  it('returns the newest Agent record, never a V5 row', async () => {
+  it('returns the Agent records merged (latest `at` per entry), never a V5 row', async () => {
     expect(await storeOver([v5Row, ...agentRows]).readMostRecentAgentGuidance(SCENARIO)).toEqual(G2);
     expect(await storeOver([v5Row]).readMostRecentAgentGuidance(SCENARIO)).toBeNull();
+  });
+
+  it('RED (CODEX_CLI_OVERFLOW P1): a concurrent tab\'s older-row press survives a newer row that did not see it', async () => {
+    const tabA = withEntry(EMPTY_AGENT_GUIDANCE, 'RC-STRENGTHEN-ITEM', { status: 'pressed', state_key_hash: 'abcdefabcdef', turn_id: 'tA', at: '2026-10-01T12:05:00.000Z' });
+    const tabB = withEntry(EMPTY_AGENT_GUIDANCE, 'RC-PREMORTEM', { status: 'pressed', state_key_hash: 'abcdefabcdef', turn_id: 'tB', at: '2026-10-01T12:06:00.000Z' });
+    const rows: Row[] = [
+      { id: 'ra', scenario_id: SCENARIO, created_at: '2026-10-01T12:05:00.000Z', coaching_state: toAgentGuidanceSnapshot(tabA) },
+      { id: 'rb', scenario_id: SCENARIO, created_at: '2026-10-01T12:06:00.000Z', coaching_state: toAgentGuidanceSnapshot(tabB) },
+    ];
+    const got = await storeOver(rows).readMostRecentAgentGuidance(SCENARIO);
+    expect(Object.keys(got!.entries).sort()).toEqual(['RC-PREMORTEM', 'RC-STRENGTHEN-ITEM']);
   });
 });
 

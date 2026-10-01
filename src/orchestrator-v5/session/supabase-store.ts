@@ -99,7 +99,9 @@ import {
   type CoachingStateSnapshot,
 } from '../coaching/coaching-state-snapshot.js';
 import {
+  AGENT_GUIDANCE_MERGE_WINDOW,
   AGENT_GUIDANCE_SNAPSHOT_TIMING,
+  mergeAgentGuidance,
   parseAgentGuidanceSnapshot,
   toAgentGuidanceSnapshot,
   type AgentGuidanceRecord,
@@ -2616,8 +2618,9 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async readMostRecentAgentGuidance(scenarioId: string): Promise<AgentGuidanceRecord | null> {
-    // AI HARNESS G1: the newest Agent guidance record. Each Agent answer row that changes it writes the WHOLE record,
-    // so the newest one is the current one; the same bounded shape as the coaching read above.
+    // AI HARNESS G1: the Agent guidance record, MERGED over the newest answer rows that carry one (per entry, the latest
+    // `at` wins). One row is not enough: two tabs that read the same prior record each write a whole snapshot, and the
+    // newest would drop the other's press (CODEX_CLI_OVERFLOW P1 on #2459). Bounded like the coaching read above.
     const { data, error } = await this.client
       .from('v5_conversation_turns')
       .select('id, coaching_state')
@@ -2625,7 +2628,7 @@ export class SupabaseSessionStore implements SessionStore {
       .not('coaching_state', 'is', null)
       .eq('coaching_state->>snapshot_timing', AGENT_GUIDANCE_SNAPSHOT_TIMING)
       .order('created_at', { ascending: false })
-      .limit(1);
+      .limit(AGENT_GUIDANCE_MERGE_WINDOW);
     if (error) {
       throw new SessionReadError(
         `readMostRecentAgentGuidance(${scenarioId}) failed: ${errMsg(error)}`,
@@ -2634,7 +2637,7 @@ export class SupabaseSessionStore implements SessionStore {
     }
     const rows = (data ?? []) as Array<{ id: string; coaching_state: unknown }>;
     if (rows.length === 0) return null;
-    return parseAgentGuidanceSnapshot(rows[0]!.coaching_state);
+    return mergeAgentGuidance(rows.map((r) => parseAgentGuidanceSnapshot(r.coaching_state)));
   }
 
   async ensureScenarioExists(
