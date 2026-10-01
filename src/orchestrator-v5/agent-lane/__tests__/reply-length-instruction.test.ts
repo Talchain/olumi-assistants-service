@@ -10,9 +10,16 @@ import { readFileSync } from 'node:fs';
 
 describe('the reply-length sentence', () => {
   it('budgets the model\'s own words per turn kind, below AIQ\'s whole-reply bound (≤180 / ≤150 / ≤130)', () => {
-    expect(REPLY_LENGTH_INSTRUCTION).toContain('about 110 on the turn that builds the model from a brief');
-    expect(REPLY_LENGTH_INSTRUCTION).toContain('about 100 when you explain an analysis result');
-    expect(REPLY_LENGTH_INSTRUCTION).toContain('about 90 otherwise');
+    expect(REPLY_LENGTH_INSTRUCTION).toContain('Stay under 110 words on the turn that builds the model from a brief, under 100 when you explain an analysis result, and under 90 otherwise: these are limits, not targets.');
+  });
+
+  it('K2 (DL 5925649954 item 5): one question at most, last; on a build or Run turn the goal\'s target is the host\'s ask (D1), never the model\'s', () => {
+    expect(REPLY_LENGTH_INSTRUCTION).toContain('Ask at most one question, as your last sentence.');
+    expect(REPLY_LENGTH_INSTRUCTION).toContain('On a turn that builds the model or runs the analysis, never ask for the goal\'s target or name it as the next step: Olumi asks for it after your words.');
+    // The host's ask it defers to exists, on exactly those turns (`decisionInputLines` asks only when built or ran).
+    const ask = readFileSync(new URL('../decision-input-ask.ts', import.meta.url), 'utf8');
+    expect(ask).toContain('if (!ctx.builtOrRan) return [];');
+    expect(ask).toContain("I'll propose it as your target.");
   });
 
   it('never trades away a truth sentence to fit (AIQ: the bound yields, never the truth)', () => {
