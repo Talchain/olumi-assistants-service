@@ -19,6 +19,7 @@
 import { formatFactorValue } from '../compose/format-factor-value.js';
 import { sayFigureExactly } from './say-figure.js';
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
+import type { LinkSizing } from '../../cee/magnitude/link-sizing.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (x: unknown): Rec | undefined => (x !== null && typeof x === 'object' && !Array.isArray(x) ? (x as Rec) : undefined);
@@ -208,12 +209,32 @@ function linkStrengthReply(r: Rec): string | null {
  * ⭐ A SET OF LINK STRENGTHS (DL #72 5871594233): the label names every link, its band, its figure and whose estimate it
  * is; when any is Olumi's, one line says how it is stored. Its words are the capability's own, so nothing is re-derived.
  */
+/** F1b's sizing classes (`LinkSizing`, link-sizing.ts): what a link's `was.sizing` may hold. */
+const LINK_SIZINGS: ReadonlySet<string> = new Set<LinkSizing>(['user', 'placeholder', 'olumi_accepted', 'olumi_estimate', 'unmarked']);
+
 function linkSetReply(r: Rec): string | null {
   if (!nonEmpty(r.public_label) || !Array.isArray(r.links) || r.links.length === 0) return null;
-  const olumis = r.links.filter((l) => recordOf(l)?.whose !== 'yours').length;
-  return reply(subjectOf(r.public_label),
-    olumis > 0 ? ['Olumi\u2019s estimates stay marked as Olumi\u2019s, never as your own: approving applies them.'] : [],
-    question(undefined));
+  const links = r.links.map(recordOf);
+  if (links.some((l) => l === undefined)) return null;
+  const olumis = links.filter((l) => l!.whose !== 'yours').length;
+  /**
+   * ⭐ A LINK OLUMI HAD ALREADY ESTIMATED IS RE-SIZED, NOT SIZED (AI HARNESS #2475; CODEX_CLI_OVERFLOW + DL CR 5937945418 on
+   * R3 DEFECT 2): read from the capability's typed `whose`, `keeps_current_strength` and `was.sizing` (F1b's `linkSizing`),
+   * never from its note. A link whose sizing before is not typed keeps the second call.
+   */
+  const replaced: string[] = [];
+  for (const l of links) {
+    const was = recordOf(l!.was);
+    if (was === undefined || !LINK_SIZINGS.has(was.sizing as string) || typeof l!.keeps_current_strength !== 'boolean') return null;
+    if (l!.whose === 'yours' || l!.keeps_current_strength || (was.sizing !== 'olumi_estimate' && was.sizing !== 'olumi_accepted')) continue;
+    if (!nonEmpty(l!.from) || !nonEmpty(l!.to) || !nonEmpty(was.band)) return null;
+    replaced.push(`${q(l!.from.trim())} \u2192 ${q(l!.to.trim())} (${was.band.trim()})`);
+  }
+  return reply(subjectOf(r.public_label), [
+    ...(olumis > 0 ? ['Olumi\u2019s estimates stay marked as Olumi\u2019s, never as your own: approving applies them.'] : []),
+    ...(replaced.length === 1 ? [`${replaced[0]} already held Olumi\u2019s estimate: this replaces that estimate.`]
+      : replaced.length > 1 ? [`These links already held Olumi\u2019s estimate, which this replaces: ${replaced.join('; ')}.`] : []),
+  ], question(undefined));
 }
 
 /** A verb-led consent label ("Record…", "Change…") read after "I’ve prepared this change:". */
