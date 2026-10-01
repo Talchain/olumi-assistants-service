@@ -69,6 +69,19 @@ describe('R3 5925568501: a distributive word + the source names a change of one'
     expect(door('Each extra conversation brings in about £20,000 towards funding', { ...effect, per_source_change_unit: 'conversations per week' })).toBeNull();
   });
 
+  // CODEX 5925831728: a money/symbol unit has no head noun to count — an unsized "price rise" never invents £1.
+  for (const unit of ['£/month', '£ per month']) {
+    const price = { amount: -50, amount_unit: 'paying subscribers', per_source_change: 1, per_source_change_unit: unit };
+    const priceEnds = { source: 'Pro plan price', target: 'Paying subscribers' };
+    const pq = { quantities: ['Pro plan price', 'Paying subscribers', 'MRR'] };
+    it(`CODEX (${unit}): "Each Pro price rise loses us about 50 paying subscribers" sizes no rise → refused`, () => {
+      expect(linkEffectTheUserStated('Each Pro price rise loses us about 50 paying subscribers', price, priceEnds, pq)).not.toBeNull();
+    });
+    it(`CODEX control (${unit}): "Each £1 Pro price rise loses us about 50 paying subscribers" → stated`, () => {
+      expect(linkEffectTheUserStated('Each £1 Pro price rise loses us about 50 paying subscribers', price, priceEnds, pq)).toBeNull();
+    });
+  }
+
   it('a written per figure still wins: "Every 2 extra conversations add about £20,000" is NOT read as per 1', () => {
     expect(door('Every 2 extra conversations add about £20,000 to funding')).not.toBeNull();
   });

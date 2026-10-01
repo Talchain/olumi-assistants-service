@@ -970,8 +970,8 @@ export function statingSentenceOf(
 const ONE_FILLER = /^(?:extra|more|additional|single|new|another)$/;
 /**
  * The token index of the word a distributive phrase counts one of ("each extra conversation" → conversation), or -1.
- * ⛔ AIQ 5925663053: it must be what the source COUNTS — the change unit's noun ("conversations"), else the label's last
- * word — never any other label word: "Each investment firm brings in £1m" on "Warm conversations with investment firms"
+ * ⛔ AIQ 5925663053: it must be what the source COUNTS — the change unit's head noun ("conversations"); a unit with no
+ * noun counts nothing (CODEX 5925831728) — never any other label word: "Each investment firm brings in £1m" on "Warm conversations with investment firms"
  * is per FIRM, not per conversation. The walk crosses only fillers and the source's label words, never punctuation.
  */
 function distributiveOneAt(q: string, ends: { readonly source: string; readonly target: string }, unit: string): number {
@@ -981,7 +981,10 @@ function distributiveOneAt(q: string, ends: { readonly source: string; readonly 
   // conversations" → conversations; "conversations per week" → conversations). Its qualifiers are crossed, never bound.
   const unitWords = wordsOf(unit);
   const head = wordsOf(unit.split(/\s+per\s+|\//iu)[0] ?? '').slice(-1);
-  const own = head.length > 0 ? head : label.slice(-1);
+  // CODEX 5925831728: a symbol or scalar unit ("£/month") has no head noun, so there is nothing the phrase counts one
+  // of: "Each Pro price rise" sizes no rise. No label fallback — under-claim, never invent a 1.
+  if (head.length === 0) return -1;
+  const own = head;
   const isLabel = (w: string): boolean => [...label, ...unitWords].some((x) => sameWord(x, w));
   for (let i = 0; i < tokens.length; i += 1) {
     const w = tokens[i]!.w; const next = tokens[i + 1]?.w;
