@@ -158,6 +158,18 @@ describe('controls: only a CONSTANT money-per-one in a two-quantity product is r
     expect(perOneLinksForConstantProducts(c)).toBe(c);
   });
 
+  it('CODEX 5924869209: a SHARE of deals ("% of deals") shares the word "deal" but is not a count — the product stays', () => {
+    const c = { ...base, identities: [base.identities![0]!], outcomes: base.outcomes.map((o) => (o.label === 'Investment-firm deals closed' ? { ...o, unit: '% of deals' } : o)) } as unknown as CandidateModel;
+    expect(perOneLinksForConstantProducts(c)).toBe(c);
+  });
+
+  it('CODEX 5924869209: "GBP per deal per month" × "hours per month" match only on the period — the product stays', () => {
+    const c = { ...base, identities: [{ outcome: 'Funding from investment firms', operation: 'product', factors: ['Hours per week on investment-firm outreach', 'Typical investment-firm funding per deal'], provenance: 'ai_proposed' }],
+      links: base.links.filter((l) => l.from !== 'Hours per week on investment-firm outreach'),
+      factors: base.factors.map((f) => (f.label === 'Typical investment-firm funding per deal' ? { ...f, unit: 'GBP per deal per month' } : f.label === 'Hours per week on investment-firm outreach' ? { ...f, role: 'external', unit: 'hours per month' } : f)) } as unknown as CandidateModel;
+    expect(perOneLinksForConstantProducts(c)).toBe(c);
+  });
+
   it('a per-one amount that is ANOTHER identity\'s result is not a constant: left as drafted', () => {
     const c = { ...base, identities: [base.identities![0]!, { outcome: 'Typical investment-firm funding per deal', operation: 'sum', factors: ['Typical angel funding per deal', 'Hours per week on angel outreach'], provenance: 'ai_proposed' }] } as unknown as CandidateModel;
     expect(perOneLinksForConstantProducts(c)).toBe(c);

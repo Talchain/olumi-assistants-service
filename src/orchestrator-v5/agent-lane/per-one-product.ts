@@ -24,10 +24,19 @@ import { sameWord, wordsOf } from './stated-by-user.js';
 
 type Rec = Record<string, any>;
 const money = (unit: unknown): boolean => typeof unit === 'string' && readCurrencyUnitWithQualifiers(unit).kind === 'currency';
-/** "GBP per deal" / "£/deal" → the words after "per" or "/" (deal). None → []. */
-const perWords = (unit: unknown): string[] => {
-  const m = typeof unit === 'string' ? /(?:\bper\b|\/)\s*(.+)$/iu.exec(unit) : null;
-  return m ? wordsOf(m[1]!) : [];
+/** "GBP per deal" / "£/deal" → "deal": money per ONE plain thing. A second "per" ("per deal per month"), a phrase, or nothing → none. */
+const perOneWord = (unit: unknown): string | undefined => {
+  if (typeof unit !== 'string') return undefined;
+  const parts = unit.split(/\s+per\s+|\s*\/\s*/iu);
+  if (parts.length !== 2) return undefined;
+  const w = wordsOf(parts[1]!);
+  return w.length === 1 && parts[1]!.trim().toLowerCase() === w[0] ? w[0] : undefined;
+};
+/** A count's unit is ONE plain word ("deals"): never a share ("% of deals"), a rate or a period ("hours per month"). */
+const countWord = (unit: unknown): string | undefined => {
+  if (typeof unit !== 'string' || /[%/]|\bper\b|\bof\b/iu.test(unit)) return undefined;
+  const w = wordsOf(unit);
+  return w.length === 1 && unit.trim().toLowerCase() === w[0] ? w[0] : undefined;
 };
 
 export function perOneLinksForConstantProducts(c: CandidateModel): CandidateModel {
@@ -52,9 +61,12 @@ export function perOneLinksForConstantProducts(c: CandidateModel): CandidateMode
     const touchesK = cur.links.filter((l) => is(k.label)(l.from) || is(k.label)(l.to));
     // ⛔ CODEX 5924765233 — the complete class: a per-one amount is only CONSTANT here when nothing else reads it (no
     // constraint names it, it is no identity's result or other operand, no other link or option uses it) and it is money
-    // per ONE of the other quantity's own unit ("GBP per deal" × "deals"). A rate or a scale ("%") is never a count.
+    // per ONE of the other quantity's own unit ("GBP per deal" × "deals"; CODEX 5924869209: the count's whole unit, never a
+    // shared word). A share ("% of deals"), a rate or a period ("hours per month", "GBP per deal per month") is left as drafted.
     const countUnit = unitOf(count);
-    const perOneOfCount = perWords(k.unit).some((w) => typeof countUnit === 'string' && wordsOf(countUnit).some((u) => sameWord(u, w)));
+    const per = perOneWord(k.unit);
+    const one = countWord(countUnit);
+    const perOneOfCount = per !== undefined && one !== undefined && sameWord(per, one);
     if (!money(unitOf(id.outcome)) || money(countUnit) || !perOneOfCount || setByOption(k.label)
       || (c.constraints ?? []).some((x) => is(k.label)(x.metric))
       || cur.identities!.some((x) => x !== id && (is(k.label)(x.outcome) || x.factors.some(is(k.label))))
