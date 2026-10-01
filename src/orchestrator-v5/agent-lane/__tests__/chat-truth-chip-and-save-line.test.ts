@@ -81,9 +81,11 @@ describe('the build line says what was saved and what was not', () => {
   it('RED: the tails (left out, open questions, context factors) stay intact after the new line', () => {
     const built = { ...BUILT, left_out_to_stay_compact: [{ label: 'Office space' }], open_questions: ['Who covers holidays'], treated_as_context: ['Recruitment fee'] };
     const n = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }, { name: 'propose_option_interventions' }], [built, { ok: true, mutated: false, proposal_id: 'prop_bbbbbb' }]);
+    // AIQ 5923232439: the held-fixed fact comes BEFORE the questions marker (so the UI's split keeps it at rest), and its
+    // ask joins the questions behind the toggle.
     expect(n.status).toBe(`${NEW_LINE} To keep it readable, I left out: Office space. Ask me to add any of them back.`
-      + ' Questions this model does not answer yet: Who covers holidays?'
-      + ' No option changes Recruitment fee, so I held it as fixed context rather than a lever — tell me if one of the options should change it.');
+      + ' Held fixed (no option changes it): Recruitment fee.'
+      + ' Questions this model does not answer yet: Who covers holidays? Should one of the options change Recruitment fee?');
   });
 
   it('RED: an authorisation withheld beside it (refused, no id) consumed nothing — the figures are still unrecorded', () => {

@@ -56,6 +56,8 @@ import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-readi
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { refitFramesForStatedEffects } from '../refit-frames.js';
+import { perOneLinksForConstantProducts } from '../per-one-product.js';
+import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
 import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
 import { goalUnitReading } from '../goal-unit-reading.js';
@@ -1368,7 +1370,8 @@ export async function buildModelFromBrief(
         ...(cutOff !== undefined ? { incomplete_reason: cutOff, detail: `incomplete: ${cutOff}` } : {}),
       };
     }
-    candidate = JSON.parse(out.text) as CandidateModel;
+    // A4u: a drafted count × constant money-per-one product is read as the per-one link it is (`per-one-product.ts`).
+    candidate = perOneLinksForConstantProducts(JSON.parse(out.text) as CandidateModel);
   } catch (err) {
     if (cutOff !== undefined) {
       return { ok: false, mutated: false, refusal: 'construction_failed', incomplete_reason: cutOff, detail: `incomplete: ${cutOff}` };
@@ -1529,7 +1532,7 @@ export async function buildModelFromBrief(
         schema: strictForTheDrafter(retrySchemaPinningGoal(candidate.goal, candidate.decision_question)),
       });
       if (retry.text.length > 0) {
-        const retryApart = keepOptionsAndQuantitiesApart(JSON.parse(retry.text) as CandidateModel);
+        const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
         const retryRaw = keepLimitedQuantityAuthor(
           neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryApart.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,
@@ -1837,6 +1840,14 @@ export async function buildModelFromBrief(
       ? { goal_constraints: admitted.goal_constraints }
       : {}),
   } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
+  // ⭐ A4f (AIQ 5923220559): the user's size was asked about as "would be cut short" when it was sized, BEFORE the refit
+  // above. Where the refit made it fit, that question is no longer true, so it is not asked. Only the user's own sizes:
+  // Olumi's set-aside estimate quotes the same words but its link holds a placeholder, never the size.
+  const fitted = new Set(graph.edges
+    .filter((e) => e.provenance?.magnitude === 'user_stated' && typeof e.strength?.mean === 'number' && Math.abs(e.strength.mean) <= 1)
+    .map((e) => `edges[${e.from}::${e.to}].magnitude_question`));
+  const noLongerCut = new Set(admitted.loss.filter((l) => fitted.has(l.field_path) && l.reason.includes(NOT_REPRESENTABLE)).map((l) => l.reason));
+  for (let i = openQuestions.length - 1; i >= 0; i--) if (noLongerCut.has(openQuestions[i]!)) openQuestions.splice(i, 1);
 
   // Never persist a graph the product cannot then read.
   const parsed = GraphV3.safeParse(graph);

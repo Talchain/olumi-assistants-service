@@ -27,6 +27,7 @@
 
 import type { ToolResult } from './runtime/agent-tools.js';
 import { proposalsAwaitingApproval } from './approval-chips.js';
+import { sayFigureExactly, sayFigureRead } from './say-figure.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
@@ -173,6 +174,37 @@ const PART_NAMES: Record<string, readonly [string, string]> = {
 };
 const UNNAMED_PART: readonly [string, string] = ['change', 'changes'];
 
+/** One value a refused approval did not save, and the figure the model still holds (`valuesNotSaved`). */
+export interface NotSavedValue {
+  readonly label: string;
+  readonly value: number;
+  readonly unit: string;
+  /** The figure not saved was the user's own (`user_stated`); else Olumi's suggestion. */
+  readonly yours: boolean;
+  readonly still?: { readonly value: number; readonly unit: string; readonly owner: 'yours' | 'brief' | 'olumi' | 'olumi_accepted' };
+  /** The model could not be read after the refusal: what it holds now is not said (never inferred). */
+  readonly unconfirmed?: true;
+}
+
+const figureWords = (value: number, unit: string): string => sayFigureExactly(value, unit) ?? `${value}${unit !== '' ? ` ${unit}` : ''}`;
+
+/**
+ * ⛔ AIQ 5924015300's MINIMUM, for every value an approval did not save: the figure not saved, named, and whose it is;
+ * what the model still uses, and whose THAT is; the reason only when it is known (never a guessed one). "Not saved: the
+ * starting value." named neither, and Paul could believe his 3 a month was in the model while the Run used Olumi's 5.
+ */
+function notSavedValueLine(x: NotSavedValue, why: string): string {
+  const head = `${x.yours ? 'Your' : 'Olumi\u2019s suggested'} ${figureWords(x.value, x.unit)} for \u201c${x.label}\u201d wasn\u2019t saved${why}.`;
+  if (x.unconfirmed === true) return `${head} Olumi couldn\u2019t confirm which figure the model uses now.`;
+  if (x.still === undefined) return `${head} The model still has no figure for it.`;
+  // A figure this approval does not write is said the estate's way: exact, else "about" (`sayFigureRead`; AIQ 5924240860).
+  const held = sayFigureRead(x.still.value, x.still.unit);
+  const still = x.still.owner === 'yours' ? `your figure of ${held}`
+    : x.still.owner === 'brief' ? `the figure from your brief, ${held}`
+      : x.still.owner === 'olumi_accepted' ? `Olumi\u2019s estimate of ${held}, which you accepted` : `Olumi\u2019s estimate of ${held}`;
+  return `${head} The model still uses ${still}.`;
+}
+
 /**
  * A compound approval (#1712) reports each part: what was recorded, out of how
  * many, and with which receipts. State exactly that — "Saved 6 of 6 starting
@@ -196,6 +228,9 @@ function partsLine(r: ToolResult): string | null {
     // A reason nobody has worded is left out rather than shown as a code.
     const words = REFUSAL_WORDS[String(p.reason ?? p.refusal ?? '')];
     const why = words !== undefined ? ` (${words})` : '';
+    if (p.part === 'values' && Array.isArray(p.not_saved) && p.not_saved.length > 0) {
+      return (p.not_saved as NotSavedValue[]).map((x) => notSavedValueLine(x, why)).join(' ');
+    }
     if (rec === null || req === null) return `Not saved: ${many}${why}.`;
     const missing = req - rec;
     if (rec > 0) {
@@ -230,11 +265,41 @@ function leftOutLine(r: ToolResult): string {
   return ` To keep it readable, I left out: ${shown}${more}. Ask me to add any of them back.`;
 }
 
-/** Factors held as context because no option changes them — stated, so the user can say which option should. */
+/** The factors the build held as context because no option changes them. */
+function contextFactorsOf(r: ToolResult | undefined): string[] {
+  return Array.isArray(r?.treated_as_context) ? (r.treated_as_context as unknown[]).map((l) => String(l).trim()).filter((l) => l !== '') : [];
+}
+
+/**
+ * Factors held as context because no option changes them — the fact, stated once, at rest (DL #75 5923219186: a brief
+ * turn's total ≤160 words; AIQ words 5923232439: "Held fixed (no option changes them): <full labels>.", no dash).
+ * It comes BEFORE the open-questions marker, so DGAI's split (`serverOpenQuestions.ts`) leaves it on screen; its ask
+ * moves behind the questions toggle as one more open question (`contextAskOf`).
+ */
 function contextFactorsLine(r: ToolResult): string {
-  const labels = Array.isArray(r.treated_as_context) ? (r.treated_as_context as unknown[]).map((l) => String(l).trim()).filter((l) => l !== '') : [];
+  const labels = contextFactorsOf(r);
   if (labels.length === 0) return '';
-  return ` No option changes ${labels.join(' or ')}, so I held ${labels.length === 1 ? 'it' : 'them'} as fixed context rather than ${labels.length === 1 ? 'a lever' : 'levers'} \u2014 tell me if one of the options should change ${labels.length === 1 ? 'it' : 'them'}.`;
+  const fact = ` Held fixed (no option changes ${labels.length === 1 ? 'it' : 'them'}): ${labels.join('; ')}.`;
+  // The toggle is full: the ask stays at rest, beside its fact, rather than be clipped away (`contextAskOf`).
+  return askFitsBehindToggle(r) ? fact : `${fact} Should one of the options change ${labels.length === 1 ? 'it' : 'them'}?`;
+}
+
+/**
+ * ⛔ THE TOGGLE SHOWS AT MOST 40 (CODEX #2420 CR 5923436781). DGAI's `readOpenQuestionList` keeps the first
+ * `OPEN_QUESTION_LIST_MAX` = 40 items of `_agent.open_questions` (DecisionGuideAI staging `69c05df1`,
+ * `src/canvas/conversation/serverOpenQuestions.ts`). Appended as item 41 the ask would be clipped there AND be absent from
+ * the reply's text, so it moves behind the toggle only while the build's own questions leave it room; otherwise it stays
+ * at rest beside its fact, and no science question is displaced.
+ */
+export const UI_OPEN_QUESTION_LIST_MAX = 40;
+function askFitsBehindToggle(r: ToolResult | undefined): boolean {
+  return openQuestionsOf(r).length < UI_OPEN_QUESTION_LIST_MAX;
+}
+
+/** The held-fixed factors' ask, as an open question the user can take up behind the toggle; null when none was held or no room. */
+function contextAskOf(r: ToolResult | undefined): string | null {
+  const labels = contextFactorsOf(r);
+  return labels.length === 0 || !askFitsBehindToggle(r) ? null : `Should one of the options change ${labels.join(' or ')}?`;
 }
 
 /**
@@ -248,7 +313,7 @@ const OPEN_QUESTIONS_SHOWN = 2;
 
 /** The questions the build parked instead of modelling — what to examine next, not answers. */
 function openQuestionsLine(r: ToolResult): string {
-  const qs = openQuestionsOf(r);
+  const qs = openQuestionsForReply(r);
   if (qs.length === 0) return '';
   // Each question kept whole, so it still reads as a question the team can take up.
   const shown = qs.slice(0, OPEN_QUESTIONS_SHOWN).map((q) => (/[?.!]$/.test(q) ? q : `${q}?`)).join(' ');
@@ -259,9 +324,15 @@ function openQuestionsLine(r: ToolResult): string {
   return ` Questions this model does not answer yet: ${shown}${more}`;
 }
 
-/** Every question a build parked, in the producer's order — the complete list, for the wire. */
+/** Every question a build parked, in the producer's order. */
 export function openQuestionsOf(r: ToolResult | undefined): string[] {
   return Array.isArray(r?.open_questions) ? (r.open_questions as unknown[]).map((q) => String(q).trim()).filter((q) => q !== '') : [];
+}
+
+/** What the reply's questions toggle holds — the build's questions, then the held-fixed ask — the complete list, for the wire. */
+export function openQuestionsForReply(r: ToolResult | undefined): string[] {
+  const ask = contextAskOf(r);
+  return [...openQuestionsOf(r), ...(ask === null ? [] : [ask])];
 }
 
 /**
@@ -307,7 +378,7 @@ function statusLine(name: string, r: ToolResult, pending: AwaitingApproval = nul
           // F3 (DL 5851710093): the goal clause outranks this line, so it says the same two truths in fewer words.
           ? 'Figures you did not give me are Olumi\u2019s estimates; the ones I proposed become yours when you approve them.'
           : 'What I proposed above is not made until you approve it.'}`;
-      return `${saved}${leftOutLine(r)}${openQuestionsLine(r)}${contextFactorsLine(r)}`;
+      return `${saved}${leftOutLine(r)}${contextFactorsLine(r)}${openQuestionsLine(r)}`;
     }
     const unconfirmed = UNCONFIRMED_WORDS[String(r.refusal)];
     if (unconfirmed !== undefined) return unconfirmed;

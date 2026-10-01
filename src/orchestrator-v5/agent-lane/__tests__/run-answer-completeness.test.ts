@@ -32,8 +32,9 @@ type Body = Record<string, unknown>;
 
 // Deliberately minimal graph carrier, following run-fast-path.test.ts.
 // This is NOT a claim that an engine computed the supplied result from this graph.
+// The goal carries a stated target, so D1's goal ask (`decision-input-ask.ts`, pinned there) stays out of these exact-text rows.
 const GRAPH = {
-  nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }],
+  nodes: [{ id: 'g', kind: 'goal', label: 'Velocity', goal_threshold_raw: 100 }, { id: 'f', kind: 'factor', label: 'Capacity' }],
   edges: [{ from: 'f', to: 'g' }],
 };
 const STATE = {
