@@ -2349,7 +2349,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * model, on the conversation's PROVABLY first user message, typed (no chip, no retry), no method press, the first model call only ever
          * decided to call `build_model_from_brief` with the user's words (13.6–14k input tokens, ~4 s). The SAME brief
          * reading the stream shows decides it instead, from typed spans of the user's own message (`gateBriefReading`:
-         * exact substrings, never a wording rule): a goal or at least one option → the host makes that call
+         * exact substrings, never a wording rule) plus its typed `build` judgement (false when the user asks to hold off):
+         * `build` and a goal or at least one option → the host makes that call
          * (`hostFirstCall`) with the message verbatim, and one call answers from its result. No reading within
          * `BRIEF_ROUTE_WAIT_MS`, or neither → the Agent decides, exactly as before. A brief spread over earlier messages
          * is never routed, nor one whose earlier words could not be read (Codex pre-review): only the Agent combines them.
@@ -2367,7 +2368,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }
         if (mayRouteBrief && reading !== undefined) {
           const r = await readingWithin(reading, BRIEF_ROUTE_WAIT_MS);
-          if (r !== null && (r.goal !== null || r.options.length > 0)) hostFirstCall = { name: 'build_model_from_brief', args: { brief: message } };
+          if (r !== null && r.build === true && (r.goal !== null || r.options.length > 0)) hostFirstCall = { name: 'build_model_from_brief', args: { brief: message } };
         }
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');

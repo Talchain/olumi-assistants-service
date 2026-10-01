@@ -243,7 +243,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
   beforeEach(() => {
     nextScenario();
     script = []; steps = []; constructionReturns = 'ready'; conversationBodies = []; constructionBodies = []; durableRead = 'none';
-    readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS }) };
+    readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS, build: true }) };
     readingHold = null; readingCalls = 0;
   });
 
@@ -280,7 +280,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
   });
 
   it('v2: the frame carries the limits the user set, in their words; an uncued span never becomes one', async () => {
-    readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS, limits: ['£20k budget', 'monthly churn under 4%', 'within 6 months'] }) };
+    readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS, limits: ['£20k budget', 'monthly churn under 4%', 'within 6 months'], build: true }) };
     const { briefRead } = await firstBrief();
     expect(briefRead()).toHaveLength(1);
     expect(briefRead()[0]!.limits).toEqual(['£20k budget', 'monthly churn under 4%']);
@@ -293,7 +293,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
   });
 
   it('a span that is NOT in the user\'s message never reaches the wire; nothing verbatim → no frame at all', async () => {
-    readingReply = { status: 200, text: JSON.stringify({ goal: 'reach £100,000 MRR in six months', options: ['invest in additional advertising', 'Carry on as now'] }) };
+    readingReply = { status: 200, text: JSON.stringify({ goal: 'reach £100,000 MRR in six months', options: ['invest in additional advertising', 'Carry on as now'], build: true }) };
     const a = await firstBrief();
     expect(a.briefRead()).toEqual([expect.objectContaining({ goal: null, options: ['invest in additional advertising'] })]);
     nextScenario(); steps = [];
@@ -366,7 +366,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
   });
 
   it('display-only: the reading reaches neither the COMPLETE body nor any model call\'s input', async () => {
-    readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: ['invest in additional advertising'] }) };
+    readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: ['invest in additional advertising'], build: true }) };
     const { body, briefRead } = await firstBrief();
     expect(briefRead(), 'control: the frame was emitted').toHaveLength(1);
     expect(deepKeys(body).some((k) => /brief_read|BRIEF_READ/i.test(k))).toBe(false);
@@ -442,6 +442,17 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       todaysPath('limit only');
     });
 
+    it('CONTRAST (Codex pre-review P1): the user asks to hold off — a goal span with `build: false` → today\'s path, nothing built', async () => {
+      const msg = 'We want to reach £100k MRR within 6 months. Do not create a model yet; just challenge that goal.';
+      readingReply = { status: 200, text: JSON.stringify({ goal: 'reach £100k MRR within 6 months', options: [], limits: [], build: false }) };
+      script = [say('Before we model it: what makes six months the right horizon?')];
+      const body = await buffered({ message: msg });
+      expect(readingCalls, 'control: the reading ran and kept the goal').toBe(1);
+      expect(body._agent.tool_calls).toEqual([]);
+      expect(atOf()).not.toContain('construction');
+      todaysPath('hold off');
+    });
+
     it('CONTRAST: a failed reading → today\'s path', async () => {
       readingReply = { status: 500, text: '' };
       script = [callTool('build_model_from_brief', { brief: BRIEF })];
@@ -499,7 +510,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       await buffered({ message: 'Can we keep monthly churn under 4%?' });
       expect(readingCalls, 'control: turn 1 read').toBe(1);
       steps = []; conversationBodies = [];
-      readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS }) };
+      readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS, build: true }) };
       script = [callTool('build_model_from_brief', { brief: BRIEF })];
       const body = await buffered({ message: BRIEF });
       expect(body._agent.tool_calls, 'control: still an empty model, it built').toMatchObject([{ name: 'build_model_from_brief', ok: true }]);

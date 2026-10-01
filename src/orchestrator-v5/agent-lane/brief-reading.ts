@@ -29,13 +29,17 @@ export const BRIEF_READING_INSTRUCTIONS = [
   'limits: the words that state each limit the user must stay within (a cap, a floor, a budget, a deadline they set). Omit context facts that are not limits.',
   'options: the words naming each course of action the user says they are choosing between, exactly as the user wrote them. Never add an option the user did not write, including "carry on as now" or "do nothing".',
   'Do not rank, compare, recommend or judge the options.',
+  // T1 (a), Codex pre-review on the first-brief route: the span lines above are unchanged; this one typed judgement decides
+  // whether a first brief may go straight to the Constructor. It can carry no words, so it can carry no claim.
+  'build: true when the message describes a decision of the user\'s that they want help with; false when they ask you not to build or create anything yet, or the message describes no decision of theirs.',
 ].join('\n');
 
 export const BRIEF_READING_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
-  required: ['goal', 'limits', 'options'],
+  required: ['goal', 'limits', 'options', 'build'],
   properties: {
+    build: { type: 'boolean' },
     goal: { type: ['string', 'null'] },
     limits: { type: 'array', items: { type: 'string' } },
     options: { type: 'array', items: { type: 'string' } },
@@ -62,6 +66,11 @@ export interface BriefReading {
   readonly options: readonly string[];
   /** v2: the user's own words for each limit that carries a comparator cue; never a goal's or an option's words. */
   readonly limits: readonly string[];
+  /**
+   * T1 (a): the reader's typed judgement that the message is a decision the user wants help with, and does not ask to
+   * hold off building. Present ONLY when the reader said `true`: absent (false, missing, malformed) never routes.
+   */
+  readonly build?: true;
 }
 
 /**
@@ -75,7 +84,7 @@ export function gateBriefReading(message: string, text: string): BriefReading | 
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { return null; }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const r = raw as { goal?: unknown; options?: unknown; limits?: unknown };
+  const r = raw as { goal?: unknown; options?: unknown; limits?: unknown; build?: unknown };
   const span = (v: unknown): string | null => {
     if (typeof v !== 'string') return null;
     const t = v.trim();
@@ -103,7 +112,8 @@ export function gateBriefReading(message: string, text: string): BriefReading | 
   // Overlapping limits ("budget is £200,000" inside "budget is £200,000, but we'd like to spend less"): the longer only.
   const limits = cued.filter((t) => !cued.some((o) => o !== t && o.includes(t)));
   const shownLimits = limits.length > MAX_LIMITS ? [] : limits;
-  return goal === null && kept.length === 0 && shownLimits.length === 0 ? null : { goal, options: kept, limits: shownLimits };
+  return goal === null && kept.length === 0 && shownLimits.length === 0 ? null
+    : { goal, options: kept, limits: shownLimits, ...(r.build === true ? { build: true as const } : {}) };
 }
 
 /** The one model call, injected by the route (provider policy, usage ledger, timeout). Returns the output text. */
