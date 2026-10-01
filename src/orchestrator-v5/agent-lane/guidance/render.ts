@@ -21,7 +21,8 @@ export function renderCopy(selected: RowIdentity, signals: GuidanceSignals): Ren
   const row = POLICY.rows.find(r => r.policy_id === selected.policy_id)!;
   const options = signals['model.non_sq_option_ids'] ?? [];
   const labels = signals['model.option_labels'] ?? {};
-  const fills: Record<string, string | undefined> = { goal_label: signals['model.goal_label'] };
+  // #2465 types the goal label `string | null`; null is "no label", never a value to render (HARNESS 5938345968 note 3).
+  const fills: Record<string, string | undefined> = { goal_label: signals['model.goal_label'] ?? undefined };
   const link = signals['model.goal_path_links']?.find(l => l.link_id === selected.item);
   const factor = signals['model.goal_path_factors']?.find(f => f.factor_id === selected.item);
   if (link) Object.assign(fills, { from_label: link.from_label, to_label: link.to_label,
@@ -40,16 +41,20 @@ export function renderCopy(selected: RowIdentity, signals: GuidanceSignals): Ren
     fills.edit_count = String(edits.edits.length);
     if (edits.edits.every(e => e.label)) fills.edit_summary = edits.edits.map(e => e.label).join(', ');
   }
+  /**
+   * ONE pass over the TEMPLATE's own placeholders. A user's label is inserted verbatim and never re-scanned, so a label
+   * that itself contains `{…}` neither blanks the copy nor pulls in another field (HARNESS 5938345968 note 4). Any
+   * placeholder without a value makes the whole field null: never an unresolved template.
+   */
   function fill(template?: string): string | null {
     if (template === undefined) return null;
-    let out = template;
-    for (const [key, value] of Object.entries(fills)) {
-      if (value === undefined) continue;
-      const replacement = ['option_label', 'plan_label', 'leader_label'].includes(key) ? `‘${cut(value)}’`
-        : cut(out.startsWith(`{${key}}`) ? value : midSentence(value));
-      out = out.split(`{${key}}`).join(replacement);
-    }
-    return /\{[^}]+\}/u.test(out) ? null : out;
+    let missing = false;
+    const out = template.replace(/\{([a-z_]+)\}/gu, (_match, key: string, offset: number) => {
+      const value = fills[key];
+      if (value === undefined) { missing = true; return ''; }
+      return ['option_label', 'plan_label', 'leader_label'].includes(key) ? `‘${cut(value)}’` : cut(offset === 0 ? value : midSentence(value));
+    });
+    return missing ? null : out;
   }
   let question = pick(row.reasoning_question, selected.variant);
   if (selected.policy_id === 'RC-PREMORTEM') question = pick(row.reasoning_question, fills.horizon ? 'dated' : 'undated');

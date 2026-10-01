@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ a00cb9c817f5938f0cb5c79b4f196c2ef779ed83.
+// programme-docs @ ebdd5110fafc7124524e8422ff7a07d38f785c9f.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -756,6 +756,12 @@ export const POLICY = {
           }
         ],
         "owner": "SCIENCE/DSK owns applicability and the badge; RC owns the method shape, checks and fallback; AI HARNESS composes (PTL 5933036532 owner split)."
+      },
+      "label_masking": {
+        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked: case-insensitive, curly quotes folded, longest label first. RC-PREMORTEM: supplied_items labels + plan_label + current_option_labels. RERUN-EXPLANATION: change_labels + current_option_labels. RC-WHAT-CHANGES / RC-STRENGTHEN-ITEM / RC-COACH-EDITS: factor_label / item_labels / edited_labels.",
+        "why": "A label the user wrote is grounding, not a claim. Served D1 (the investor decision) has the factor 'Enterprise prospect signing likelihood': without masking every grounded pre-mortem failed PM-NO-PROB and fell back (SCIENCE/DSK 5938372911).",
+        "never": "Mask Olumi's own words: only labels the inputs supply.",
+        "reference": "tools/check_method_turn.py masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM"
       }
     },
     "RC-PREMORTEM": {
@@ -782,11 +788,11 @@ export const POLICY = {
         },
         {
           "id": "PM-NO-PROB",
-          "rule": "no '%' and no /\\b(likely|likelihood|chance|probability|probable|odds)\\b/i anywhere"
+          "rule": "no '%' and no /\\b(likely|likelihood|chance|probability|probable|odds)\\b/i anywhere (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "PM-NO-PREDICTION",
-          "rule": "no /\\b(will|is going to|are going to) fail\\b/i"
+          "rule": "no /\\b(will|is going to|are going to) fail\\b/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "PM-PLAN-ONLY",
@@ -893,11 +899,11 @@ export const POLICY = {
         },
         {
           "id": "WC-NO-NOTHING",
-          "rule": "no /nothing would change|no single (assumption|factor)/i"
+          "rule": "no /nothing would change|no single (assumption|factor)/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "WC-BANNED",
-          "rule": "no /\\b(EVPI|EVPPI|sensitivity score|elasticity)\\b/i and no '%'"
+          "rule": "no /\\b(EVPI|EVPPI|sensitivity score|elasticity)\\b/i and no '%' (on the label-masked reply, shared.label_masking)"
         }
       ],
       "fallback": "Deterministic: the row's reasoning_question with the 'Give your estimate' action.",
@@ -936,7 +942,7 @@ export const POLICY = {
         },
         {
           "id": "ST-BANNED",
-          "rule": "no /\\b(placeholder|edge|node|default strength)\\b/i"
+          "rule": "no /\\b(placeholder|edge|node|default strength)\\b/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "ST-NO-NEW-FIGURES",
@@ -981,7 +987,7 @@ export const POLICY = {
         },
         {
           "id": "CE-NO-RESULT-CLAIM",
-          "rule": "no /\\b(the result (has )?changed|now leads|is now ahead|the answer is now)\\b/i"
+          "rule": "no /\\b(the result (has )?changed|now leads|is now ahead|the answer is now)\\b/i (on the label-masked reply, shared.label_masking)"
         }
       ],
       "fallback": "Deterministic: 'You changed {edit list}. That changes {assumption}. ' + the stale line when stale.",
@@ -1014,19 +1020,19 @@ export const POLICY = {
         },
         {
           "id": "RX-NO-CAUSE-UNPAIRED",
-          "rule": "if attribution_case != C1_attributable: no /\\b(because (you|of your)|caused|due to your|as a result of your|led to)\\b/i"
+          "rule": "if attribution_case != C1_attributable: no /\\b(because (you|of your)|caused|due to your|as a result of your|led to)\\b/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "RX-NO-LEADER-UNLICENSED",
-          "rule": "if run.leader_licensed is false: no current option label appears together with /\\b(leads|ahead|best|wins|now first)\\b/i in the same sentence"
+          "rule": "if run.leader_licensed is false: no current option label appears together with /\\b(leads|ahead|best|wins|now first)\\b/i in the same sentence (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "RX-NOISE",
-          "rule": "if leader.noise_verdict is not_noise_qualified: no /\\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\\b/i"
+          "rule": "if leader.noise_verdict is not_noise_qualified: no /\\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\\b/i (on the label-masked reply, shared.label_masking)"
         },
         {
           "id": "RX-NO-MOVEMENT-WITHOUT-PRIOR",
-          "rule": "if prior_withheld OR no_matched_figures: no /\\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\\b/i"
+          "rule": "if prior_withheld OR no_matched_figures: no /\\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\\b/i (on the label-masked reply, shared.label_masking)"
         }
       ],
       "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD: 'That was what held the comparison back, so Olumi can now compare the options.' | C2: 'This run also used a new draw, so the difference can't be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
@@ -1056,4 +1062,4 @@ export const POLICY = {
   }
 } as const;
 
-export const SPEC_SHA = "a00cb9c817f5938f0cb5c79b4f196c2ef779ed83";
+export const SPEC_SHA = "ebdd5110fafc7124524e8422ff7a07d38f785c9f";

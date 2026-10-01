@@ -54,7 +54,7 @@ export interface GuidanceSignals {
     readonly most_sensitive?: { readonly factor_id: string; readonly label: string; readonly range?: 'olumi_assumed' | 'yours' };
   };
   readonly 'model.goal_present'?: boolean;
-  readonly 'model.goal_label'?: string;
+  readonly 'model.goal_label'?: string | null;
   readonly 'model.goal_horizon'?: { readonly deadline?: string; readonly months?: number } | null;
   readonly 'model.status_quo_option_id'?: string | null;
   readonly 'model.non_sq_option_ids'?: readonly string[];
