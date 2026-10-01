@@ -207,6 +207,33 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(b.suggested_actions.map((c) => c.id)).toEqual(['agent-talk-it-through']);
   });
 
+  /** DL follow-up on #2480 (5941358217): the answer row records the LLM calls the turn MADE, read off the provider ledger. */
+  const callsOnRow = (turnId: string): number => rows.get(`${SCENARIO}:${turnId}`)!.llm_calls_used;
+  it('ROW R12 RED: a press that never calls the model records 0 calls on its answer row (the old estimate said 1)', async () => {
+    const t = randomUUID();
+    await press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?', t);
+    expect(sent, 'precondition: no model call').toHaveLength(0);
+    expect(callsOnRow(t)).toBe(0);
+  });
+  it('ROW R12 RED: the "can\'t run" reply (read failed) records 0 calls', async () => {
+    failRead = true;
+    const t = randomUUID();
+    await press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?', t);
+    expect(sent).toHaveLength(0);
+    expect(callsOnRow(t)).toBe(0);
+  });
+  it('ROW R12 CONTROL: a pick records exactly the calls it made (1); an ordinary question records its own count', async () => {
+    const t = randomUUID();
+    await pick(PLAN, t);
+    expect(callsOnRow(t)).toBe(sent.length);
+    expect(sent).toHaveLength(1);
+    sent = [];
+    const t2 = randomUUID();
+    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: 'What do you make of this?', turn_id: t2 } });
+    expect(res.statusCode).toBe(200);
+    expect(sent.length, 'vacuity: the question called the model').toBeGreaterThan(0);
+    expect(callsOnRow(t2)).toBe(sent.length);
+  });
   it('ROW R8 (round 2 (2)): a model that answers with a tool call still makes exactly ONE call; nothing runs and the fallback is sent', async () => {
     output = [{ type: 'function_call', name: 'get_canonical_state', call_id: 'c1', arguments: '{}' }];
     const b = await pick();
