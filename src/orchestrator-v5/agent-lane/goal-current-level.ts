@@ -58,7 +58,7 @@ import { sameUnit } from '../../utils/currency-alphabet.js';
 import { admitStatedGoalLevel, admitStatedGoalLevelOnScale } from './admit-model.js';
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { retireNormalisingGoalFrame } from './normalising-goal-frame.js';
-import { figureTheUserWrote } from './stated-by-user.js';
+import { figureTheUserWrote, figureTheUserWroteFor, quantityScope } from './stated-by-user.js';
 import { isAmountStatedInBrief, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
 import { unitPhraseFamily, unitPhraseHead, unitPhraseTail, unitsConflict } from './unit-conflict.js';
@@ -561,6 +561,27 @@ export async function proposeGoalCurrentLevel(
   const stated = inWords;
   const raw = inWords.raw;
   const statedUnit = inWords.statedUnit;
+  /**
+   * ── WRITTEN ABOUT THE GOAL? (DL 380e54 on #2462, 5933850040; the overflow reviewer 5933849652: "grounding verifies
+   * amount/currency, not the stated metric"). The words rule above grounds the AMOUNT in its currency anywhere in what the
+   * user typed, so "Our marketing spend is £100,000 a quarter." carded £100,000 as today's quarterly revenue. The figure must
+   * ALSO be written about this goal, by the door the goal's other cards already read (`figureTheUserWroteFor`, the model's own
+   * labels, no word list; DL #72 5862394804: "300 Pro paying subscribers" is never MRR's £300 target) with the scope the
+   * goal's TARGET card reads its figure with (`scopeIn`, agent-capabilities.ts): the nearest label word decides, and a
+   * clause naming no quantity is the user's figure for what they are asking about. Not the STRICT reading the target card
+   * gives a level stated beside a target: on its own a level is often a correction with nothing named ("Sorry, it is
+   * £13,000 now."), which strict refuses among two figures. The goal's own unit is passed, so its words ("quarter" in
+   * "GBP per quarter") name no entity. A figure written about a quantity the model does not hold is not caught here.
+   */
+  if (!figureTheUserWroteFor(raw, goalUnit ?? statedUnit, ctx.user_text, quantityScope(g.nodes, goal.label))) {
+    const asWritten = sayFigureExactly(value, statedUnit) ?? `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
+    return refuse(
+      'figure_not_about_the_goal',
+      `${asWritten} is not written about "${goal.label}" in the user's words, so it is never recorded as its current level. ` +
+      `Nothing was prepared. Never record a figure given for something else as the goal's level; ask the user for today's ` +
+      `figure for "${goal.label}" itself.`,
+    );
+  }
 
   if (isChange) return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit, adoptedUnit, storedUnit);
 

@@ -27,8 +27,22 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 type Rec = Record<string, any>;
 type Graph = { nodes: Rec[]; edges: Rec[] } & Rec;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
-const goalOf = (g: Graph): Rec => g.nodes.find((n) => n.kind === 'goal')!;
-const edgeInto = (g: Graph, from: string): Rec => g.edges.find((e) => e.from === from && e.to === goalOf(g).id)!;
+/**
+ * ⛔ THE GOAL BY ITS ID, NEVER BY KIND OR POSITION (trap 19; DL 380e54 on #2462, 5933850040): exactly one node holds the
+ * id, and it is the goal. Construction ids Paul's goal "Quarterly revenue" `quarterly_revenue`; his stored pricing model's is `mrr`.
+ */
+const D1_GOAL_ID = 'quarterly_revenue';
+const goalIn = (g: Graph, id: string): Rec => {
+  const hits = g.nodes.filter((n) => n.id === id);
+  expect(hits.map((n) => n.kind), `exactly one node "${id}", and it is the goal`).toEqual(['goal']);
+  return hits[0]!;
+};
+const goalOf = (g: Graph): Rec => goalIn(g, D1_GOAL_ID);
+const edgeInto = (g: Graph, from: string): Rec => {
+  const hits = g.edges.filter((e) => e.from === from && e.to === D1_GOAL_ID);
+  expect(hits, `exactly one link ${from} → ${D1_GOAL_ID}`).toHaveLength(1);
+  return hits[0]!;
+};
 
 const TOOL = 'propose_goal_current_level';
 const SCENARIO = '550e8400-e29b-41d4-a716-4466554400d1';
@@ -126,12 +140,15 @@ function setup(initial: Graph, said: string) {
 async function levelCarded(built: Graph): Promise<{ s: ReturnType<typeof setup>; proposed: Rec }> {
   const s = setup(built, SAID_1);
   const proposed = await s.call(TOOL, { goal_label: 'Quarterly revenue', value: 100000, unit: '£', user_stated: true }) as Rec;
+  // The card is bound to the goal node by its id: the held proposal's one operation addresses it.
+  expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+  expect(s.proposals.get(String(proposed.proposal_id))?.operations.map((o) => o.path)).toEqual([D1_GOAL_ID]);
   return { s, proposed };
 }
 
 /** (2) the target through the target writer (the approved card's `goal_target_edit` → `add_constraint`). */
-async function targetWritten(g: Graph, raw: number, unit: string = UNIT): Promise<Graph> {
-  const event = { kind: 'goal_target_edit', goal_node_id: goalOf(g).id, constraint_type: 'at_least', raw_value: raw, unit,
+async function targetWritten(g: Graph, raw: number, unit: string = UNIT, goalId: string = D1_GOAL_ID): Promise<Graph> {
+  const event = { kind: 'goal_target_edit', goal_node_id: goalIn(g, goalId).id, constraint_type: 'at_least', raw_value: raw, unit,
     base_graph_hash: computeAnalysisAffectingGraphHash(g as never) };
   const r = await applyGoalTargetEdit({
     payload: { kind: 'system_event', scenario_id: SCENARIO, turn_id: 'turn-d1-target', stage: 'frame', event } as never,
@@ -227,7 +244,7 @@ describe('(ii) then the target, through the target writer: the level is kept on 
 // ── (iii)/(iv)/(v) on Paul's stored pricing model (`cbd15f83`): goal `mrr`, target 20000 "GBP MRR", cap 25000 ─────────
 const paul = JSON.parse(readFileSync(new URL('./fixtures/paul-cbd15f83-stored-graph.json', import.meta.url), 'utf8')) as Graph;
 const CAP = 25000;
-const mrr = (g: Graph): Rec => g.nodes.find((n) => n.id === 'mrr')!;
+const mrr = (g: Graph): Rec => goalIn(g, 'mrr');
 const T = { goal_label: 'MRR', unit: 'GBP', user_stated: true };
 
 describe('(iii) beside a target, a level needs no comparator: the held one when there is one, else the scale rule alone', () => {
@@ -341,26 +358,26 @@ describe('(v) the target writer rescales ONLY a stored figure, and only when the
     const g = clone(paul);
     const olumis = { value: 0.5, baseline: 0.5, source: 'cee_inference', cap: CAP };
     mrr(g).observed_state = { ...olumis };
-    const out = await targetWritten(g, 40000, 'GBP MRR');
-    expect(goalOf(out).goal_threshold_cap).toBe(50000);
-    expect(goalOf(out).observed_state).toStrictEqual(olumis);
+    const out = await targetWritten(g, 40000, 'GBP MRR', 'mrr');
+    expect(mrr(out).goal_threshold_cap).toBe(50000);
+    expect(mrr(out).observed_state).toStrictEqual(olumis);
   });
 
   it('CONTROL: a level already on the target\'s cap (a lower target inherits cap 25,000) is not touched', async () => {
     const g = clone(paul);
     const level = { value: 12000 / CAP, baseline: 12000 / CAP, unit: 'GBP MRR', source: USER_EDIT_SOURCE, raw_value: 12000, cap: CAP };
     mrr(g).observed_state = { ...level };
-    const out = await targetWritten(g, 22000, 'GBP MRR');
-    expect(goalOf(out).goal_threshold_cap).toBe(CAP);
-    expect(goalOf(out).observed_state).toStrictEqual(level);
+    const out = await targetWritten(g, 22000, 'GBP MRR', 'mrr');
+    expect(mrr(out).goal_threshold_cap).toBe(CAP);
+    expect(mrr(out).observed_state).toStrictEqual(level);
   });
 
   it('RED: a user level on cap 25,000 and a target raised past it (£40,000 → cap 50,000) → the level moves onto 50,000 with it', async () => {
     const g = clone(paul);
     mrr(g).observed_state = { value: 12000 / CAP, baseline: 12000 / CAP, unit: 'GBP MRR', source: USER_EDIT_SOURCE, raw_value: 12000, cap: CAP };
-    const out = await targetWritten(g, 40000, 'GBP MRR');
-    expect(goalOf(out).goal_threshold).toBe(40000 / 50000);
-    expect(goalOf(out).observed_state).toStrictEqual({
+    const out = await targetWritten(g, 40000, 'GBP MRR', 'mrr');
+    expect(mrr(out).goal_threshold).toBe(40000 / 50000);
+    expect(mrr(out).observed_state).toStrictEqual({
       value: 12000 / 50000, baseline: 12000 / 50000, unit: 'GBP MRR', source: USER_EDIT_SOURCE, raw_value: 12000, cap: 50000,
     });
     // No user-sized link into this goal: Olumi's placeholders keep their β (never in natural units).
@@ -381,5 +398,93 @@ describe('R3 F5 I1.1 (#85 5933250962): the TOOL the model sees takes a level wit
   });
   it('CONTROL: the four comparators are still the only values it takes', () => {
     expect((tool().parameters.properties.goal_is as { enum?: unknown }).enum).toEqual(['at_least', 'above', 'at_most', 'below']);
+  });
+});
+
+// ── (vi) DL 380e54's follow-ups on #2462 (5933850040; overflow reviewer 5933849652: "grounding verifies amount/currency, not
+// the stated metric or period. Add same-currency wrong-goal and month/quarter negatives.") ──────────────────────────────────
+const SERVED_D1 = JSON.parse(readFileSync(new URL('./fixtures/f5-d1-6bc6cae6-served-graph-20261001.json', import.meta.url), 'utf8')) as Graph;
+const SERVED_GOAL_ID = 'quarterly_revenue';
+const BRIEF_MARKETING = `${BRIEF} We could also raise our marketing spend.`;
+
+/** Paul's D1 draft plus a same-currency quantity the user can state a figure for: "Marketing spend", £ per quarter. */
+function draftWithMarketing() {
+  const d = draft();
+  d.factors.push({ label: 'Marketing spend', role: 'controllable', baseline_known: false, baseline_value: null as unknown as number, unit: UNIT, provenance: 'inferred', plausible_max: 500000 });
+  d.links.push(link('Marketing spend', 'New enterprise customers'));
+  return d;
+}
+
+/** Refused with nothing behind it: no card held, nothing registered, the goal node byte for byte as it was. */
+async function levelRefused(initial: Graph, goalId: string, said: string, args: Rec): Promise<Rec> {
+  const s = setup(initial, said);
+  const before = clone(goalIn(initial, goalId));
+  const r = await s.call(TOOL, { user_stated: true, ...args }) as Rec;
+  expect(r.ok, JSON.stringify(r)).toBe(false);
+  expect(r.mutated).toBe(false);
+  expect(r).not.toHaveProperty('proposal_id');
+  expect(s.proposals.outstanding(SCENARIO, null)).toEqual([]);
+  expect(s.registers).toEqual([]);
+  expect(goalIn(s.graph(), goalId)).toStrictEqual(before);
+  return r;
+}
+
+describe('(vi-a) a same-currency figure written about ANOTHER quantity is never the goal\'s current level', () => {
+  it('RED (the reviewer\'s row): "Our marketing spend is £100,000 a quarter." → the revenue goal\'s level is refused, nothing prepared', async () => {
+    const built = await build(draftWithMarketing(), BRIEF_MARKETING);
+    expect(built.nodes.filter((n) => n.label === 'Marketing spend' && n.kind === 'factor'), 'precondition: the model holds the other quantity').toHaveLength(1);
+    const r = await levelRefused(built, D1_GOAL_ID, 'Our marketing spend is £100,000 a quarter.', { goal_label: 'Quarterly revenue', value: 100000, unit: '£' });
+    expect(r.refusal).toBe('figure_not_about_the_goal');
+  });
+
+  it('RED (Paul\'s served D1 graph, sibling "revenue" outcomes): "Our enterprise deal revenue is £100,000 a quarter." → refused for "quarterly revenue"', async () => {
+    const r = await levelRefused(SERVED_D1, SERVED_GOAL_ID, 'Our enterprise deal revenue is £100,000 a quarter.', { goal_label: 'quarterly revenue', value: 100000, unit: '£' });
+    expect(r.refusal).toBe('figure_not_about_the_goal');
+  });
+
+  it('CONTROL (same graphs, same run): "Our quarterly revenue is £100,000." is still carded on both', async () => {
+    const built = await build(draftWithMarketing(), BRIEF_MARKETING);
+    for (const [g, label, id] of [[built, 'Quarterly revenue', D1_GOAL_ID], [SERVED_D1, 'quarterly revenue', SERVED_GOAL_ID]] as const) {
+      const s = setup(g, SAID_1);
+      const r = await s.call(TOOL, { goal_label: label, value: 100000, unit: '£', user_stated: true }) as Rec;
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(s.proposals.get(String(r.proposal_id))?.operations.map((o) => o.path)).toEqual([id]);
+    }
+  });
+
+  it('CONTROL (binds by entity, not by amount): one message, two £ figures — the goal\'s carded, the marketing figure refused', async () => {
+    const built = await build(draftWithMarketing(), BRIEF_MARKETING);
+    const said = 'Our quarterly revenue is £100,000 and our marketing spend is £40,000 a quarter.';
+    const s = setup(built, said);
+    const ok = await s.call(TOOL, { goal_label: 'Quarterly revenue', value: 100000, unit: '£', user_stated: true }) as Rec;
+    expect(ok.ok, JSON.stringify(ok)).toBe(true);
+    expect(s.proposals.get(String(ok.proposal_id))?.operations.map((o) => o.path)).toEqual([D1_GOAL_ID]);
+    const r = await levelRefused(built, D1_GOAL_ID, said, { goal_label: 'Quarterly revenue', value: 40000, unit: '£' });
+    expect(r.refusal).toBe('figure_not_about_the_goal');
+  });
+});
+
+describe('(vi-b) a figure stated per MONTH is never recorded as the per-QUARTER goal\'s level', () => {
+  const MONTHLY = 'Our monthly revenue is £100,000.';
+  it.each(['£ per month', '£/month', 'GBP per month', 'GBP monthly'])('CONTROL (typed period): unit %j on "GBP per quarter" → unit_mismatch, nothing prepared', async (unit) => {
+    const built = await build(draft(), BRIEF);
+    const r = await levelRefused(built, D1_GOAL_ID, MONTHLY, { goal_label: 'Quarterly revenue', value: 100000, unit });
+    expect(r.refusal).toBe('unit_mismatch');
+  });
+
+  it('CONTROL (typed period, unnamed-currency goal "currency/quarter"): "£ per month" → unit_mismatch, no currency adopted', async () => {
+    const r = await levelRefused(SERVED_D1, SERVED_GOAL_ID, MONTHLY, { goal_label: 'quarterly revenue', value: 100000, unit: '£ per month' });
+    expect(r.refusal).toBe('unit_mismatch');
+  });
+
+  /**
+   * ⛔ KNOWN GAP, DECISION PENDING (MG / DL 380e54): with the period untyped (unit "£"), the door takes the goal's own period,
+   * so a monthly £100,000 is carded as £100,000 per quarter. No typed evidence tells "monthly" from "quarterly" here: the
+   * Agent's "£" is silent, the goal's label and unit are the goal's, and the written-about door reads entities, not periods.
+   * `it.fails` pins it RED: whoever closes it flips this to `it`.
+   */
+  it.fails('KNOWN GAP (the period untyped): unit "£" for "Our monthly revenue is £100,000." → never a card recording £100,000 per quarter', async () => {
+    const built = await build(draft(), BRIEF);
+    await levelRefused(built, D1_GOAL_ID, MONTHLY, { goal_label: 'Quarterly revenue', value: 100000, unit: '£' });
   });
 });
