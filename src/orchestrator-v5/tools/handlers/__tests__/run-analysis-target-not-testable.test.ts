@@ -163,3 +163,48 @@ describe('AIQ\'s chain: an earlier per-option withhold never leaves another opti
     expect(withholdGoalFiguresForUntestableTarget(allGone, M1.graph)).toBe(allGone);
   });
 });
+
+/**
+ * ⭐ F1b [R1] YES (DL 5930827933): when every failure is about how the TARGET is stated (P2–P4), each option keeps its
+ * outcome distribution (centre AND spread); the goal chance, joint, downside and shares still go, and the warning says
+ * exactly which claims went (`withheld_claims`). P5 (a path resting on a guess) still withholds the outcome.
+ */
+describe('F1b [R1]: an off-scale target withholds the claims against it, not the options\' outcomes', () => {
+  /** The user sized the route (the CONTROL above: testable), then the target is set off the level scale (P2 only). */
+  const offScale = (): Json => {
+    const g = clone(M1.graph);
+    for (const e of g.edges as Json[]) {
+      if ((e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months') && (e.defaulted === true || String(e.provenance?.magnitude ?? '').startsWith('olumi_'))) {
+        e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' };
+      }
+    }
+    const goal = (g.nodes as Json[]).find((n) => n.kind === 'goal')!;
+    goal.goal_threshold = 1.5;
+    return g;
+  };
+  const outcomeOf = (result: Json, id: string): Json | undefined =>
+    (result.option_comparison as Json[] | undefined)?.find((o) => (o.option_id ?? o.id) === id)?.outcome;
+
+  it('PRECONDITION: the off-scale graph fails P2 alone, and the served body carries £59\'s outcome', async () => {
+    const { targetTestabilityOf } = await import('../../../admission/target-testability.js');
+    const v = targetTestabilityOf(offScale());
+    expect(v.kind === 'not_testable' && v.failures.map((f) => f.precondition)).toEqual(['P2']);
+    expect(typeof outcomeOf(M1.plot_body, '59_price')?.mean).toBe('number');
+  });
+
+  it('RED: P2 → no goal chance, but every option keeps its outcome centre and spread; the warning names the claims withheld', () => {
+    const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), offScale()) as Json;
+    expect(chances(after)).toEqual({});
+    const o = outcomeOf(after, '59_price')!;
+    expect(o).toMatchObject({ mean: outcomeOf(M1.plot_body, '59_price')!.mean, p10: expect.any(Number), p90: expect.any(Number) });
+    const w = warningsOf(after).find((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)!;
+    expect(w.withheld_claims).toEqual(['goal_probability', 'joint_probability', 'downside', 'win_share']);
+    expect(((after.option_comparison as Json[])[0]!).win_probability).toBeUndefined();
+  });
+
+  it('CONTROL: P5 (m1 as served: a path resting on Olumi\'s guess) still withholds the outcome, and records every claim', () => {
+    const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), M1.graph) as Json;
+    expect(outcomeOf(after, '59_price')?.mean).toBeUndefined();
+    expect(warningsOf(after).find((x) => x.code === GOAL_FIGURES_TARGET_NOT_TESTABLE)).not.toHaveProperty('withheld_claims');
+  });
+});

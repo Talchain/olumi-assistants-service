@@ -280,3 +280,30 @@ describe('the one exact link: an operand INTO an identity this run evaluated', (
     expect(placeholderGoalPaths(g0(), [SWITCH, PHASE], [{ node_id: 'monthly_cloud_spend', evaluated: false }]).map((p) => p.option_id).sort()).toEqual([PHASE, SWITCH]);
   });
 });
+
+/**
+ * ⭐ DL [R2] (5930827933): the row's ONE click, "Accept starting strength", is offered only for links whose size can make
+ * the figure right — exactly the links the sentence asks about (`acceptable_links`). A guessed mechanism (a link out of a
+ * limit-watched node into the goal) or a link from a node with no level is never offered.
+ */
+describe('[R2] acceptable_links: the offer gate is the ask', () => {
+  it('RED: without the downtime limit the levelled downtime → spend link is asked for AND offered', () => {
+    const g = clone(F.graph);
+    g.goal_constraints = [];
+    const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w.acceptable_links).toContainEqual({ from: 'migration_downtime', to: 'monthly_cloud_spend' });
+  });
+
+  it('CONTROL: the limit-watched guess is named but never offered', () => {
+    const g = clone(F.graph);
+    const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w.acceptable_links ?? []).not.toContainEqual({ from: 'migration_downtime', to: 'monthly_cloud_spend' });
+  });
+
+  it('CONTROL: no source level → nothing asked, nothing offered', () => {
+    const g = clone(F.graph);
+    delete (g.nodes as Json[]).find((n) => n.id === 'migration_downtime')!.observed_state;
+    const w = placeholderGoalWarning(g, placeholderGoalPaths(g, [REMAIN, SWITCH, PHASE]), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(w).not.toHaveProperty('acceptable_links');
+  });
+});

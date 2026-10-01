@@ -226,6 +226,15 @@ export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<s
 const GOAL_OUTCOME_FIGURES = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
 
 /**
+ * ⭐ F1b PER-CLAIM WITHHOLDING (contract §2, programme-docs `s1/f1b-contract`): the claim classes a goal-figure withhold
+ * removes. A withhold that keeps some carries them on its warning as `withheld_claims`, so every reader strips EXACTLY
+ * these for EXACTLY `option_ids`. ABSENT = every class: the record every pre-F1b Run (and every other withhold) carries.
+ */
+export type WithheldGoalClaim = 'goal_probability' | 'joint_probability' | 'outcome' | 'downside' | 'win_share';
+/** Everything but the option's own outcome distribution. `downside` goes: its `expected_regret` compares options. */
+export const OUTCOME_KEPT_CLAIMS: readonly WithheldGoalClaim[] = ['goal_probability', 'joint_probability', 'downside', 'win_share'];
+
+/**
  * Leader and flip facts computed from the same comparison as the withheld figures (PLoT #416's list, R3 5888737291):
  * which option does best when, how close it is, and what would flip it. Withheld with them.
  */
@@ -243,7 +252,11 @@ const SUMMARY_LEADER_KEYS = ['goal_fit', 'win_probability', 'leading_option', 'r
  * display verdict then reads `not_assessed`). `warning` is appended to `inference_warnings`, the carrier every reader of
  * a withheld run keys on (`GOAL_FIGURES_WITHHELD_CODES`). Returns `envelope` itself when nothing is withheld. Pure.
  */
-export function withholdOptionGoalFigures<E>(envelope: E, withheld: ReadonlySet<string>, warning: Record<string, unknown>): E {
+export function withholdOptionGoalFigures<E>(
+  envelope: E, withheld: ReadonlySet<string>, warning: Record<string, unknown>,
+  /** Keep each withheld option's outcome distribution (F1b [R1]): only the claims AGAINST the target go. */
+  opts: { readonly keepOutcome?: boolean } = {},
+): E {
   if (withheld.size === 0 || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
   const stripEntry = (entry: unknown): unknown => {
     const r = readRecord(entry);
@@ -257,7 +270,7 @@ export function withholdOptionGoalFigures<E>(envelope: E, withheld: ReadonlySet<
       delete out.probability_of_joint_goal;
       delete out.downside;
       const outcome = readRecord(r.outcome);
-      if (outcome !== null) {
+      if (outcome !== null && opts.keepOutcome !== true) {
         const kept: Record<string, unknown> = { ...outcome };
         for (const k of GOAL_OUTCOME_FIGURES) delete kept[k];
         out.outcome = kept;
@@ -293,7 +306,8 @@ export function withholdOptionGoalFigures<E>(envelope: E, withheld: ReadonlySet<
   }
   for (const k of COMPARISON_DERIVED_KEYS) delete out[k];
   if (readRecord(env.robustness) !== null) out.robustness = { fragile_edges: [], robust_edges: [] };
-  out.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), warning];
+  const recorded = opts.keepOutcome === true ? { ...warning, withheld_claims: [...OUTCOME_KEPT_CLAIMS] } : warning;
+  out.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), recorded];
   return out as E;
 }
 

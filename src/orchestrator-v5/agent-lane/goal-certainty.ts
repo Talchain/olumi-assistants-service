@@ -437,7 +437,7 @@ export function placeholderGoalWarning(
   graph: unknown,
   paths: readonly PlaceholderGoalPath[],
   code: string,
-): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[] } {
+): { code: string; message: string; severity: 'warning'; node_ids: string[]; option_ids: string[]; acceptable_links?: Array<{ from: string; to: string }> } {
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const byId = new Map(nodes.map((n) => [n.id, n] as const));
   const label = (id: unknown): string => `‘${text(byId.get(id)?.label) ?? String(id)}’`;
@@ -489,5 +489,9 @@ export function placeholderGoalWarning(
     severity: 'warning',
     node_ids: [...new Set(links.flatMap((l) => [l.from, l.to]))],
     option_ids: paths.map((p) => p.option_id),
+    // ⭐ DL [R2] (5930827933): the links the row may offer as ONE click, "Accept starting strength", through the
+    // approval that sizes a placeholder (#2446 `approvalSizes`). Only the ones whose size can make the figure right — the
+    // SAME set the sentence asks about (a levelled source, not a guessed mechanism): the offer gate (V4).
+    ...(asked.length > 0 ? { acceptable_links: asked.map((l) => ({ from: l.from, to: l.to })) } : {}),
   };
 }
