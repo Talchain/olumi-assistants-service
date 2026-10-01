@@ -25,7 +25,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
-import { resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitOf, type LinkSizeProblem, type MagnitudeNode } from '../../cee/magnitude/link-effect.js';
+import { resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitOf, type LinkSizeProblem } from '../../cee/magnitude/link-effect.js';
 import { createHash } from 'node:crypto';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -131,38 +131,6 @@ export function linkEffectReadingToken(reading: {
 const refuse = (reason: LinkEffectRefusal): LinkEffectEditResult => ({ kind: 'refused', reason });
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 
-/**
- * ⭐ A COUNT OUTCOME'S PLURAL HEAD NOUN IS ITS UNIT (R3 #75 5926215496 + amendment 5926280368; DL 5926238562). The persisted
- * outcome keeps no `unit` (the drafter's units live only in the construction path's `natural_effect`), so "per
- * conversation" could never match "Angel investor conversations". For an outcome or factor with NO unit and a stored
- * frame, the HEAD noun is what it counts: the last word before the first preposition, trailing participles dropped
- * ("Investment-firm deals closed" → deals); "Number of <plurals>" takes the plural after "of". It must be plural and
- * never a money, percent or time word ("Revenue from renewals" counts revenue, not renewals → none), and a label with a
- * period ("Warm conversations per week") is a RATE, never one count. None → undefined.
- */
-const PREPOSITION = /^(?:of|from|on|in|for|per|with|to|by|at)$/;
-const PARTICIPLE = /^(?:\p{L}+ed|won|lost|made|sent|held|done|given|taken|seen|met|kept)$/u;
-const NOT_A_COUNT = new RegExp('^(?:revenues|fundings|prices|costs|spends|percentages|rates|shares|times|hours|days|weeks|months|years|minutes|seconds'
-  // R3 5926374414: a MONEY plural is never a count — "per payment" on a unitless £ node would be a false scale.
-  + '|fees|payments|savings|expenses|funds|earnings|profits|proceeds|salaries|wages|margins|budgets|losses|donations|receipts|returns)$');
-/** Heads that are a count only as EVENTS ("Angel investments closed"), money otherwise ("Sales", "Bookings"): R3 5926374414. */
-const COUNT_ONLY_AS_EVENT = /^(?:sales|bookings|investments)$/;
-/** A period anywhere in the label makes it a RATE (AIQ 5926286558 / R3 5926308694): its unit is the head PER period. */
-const PERIOD = /^(?:day|days|daily|week|weeks|weekly|month|months|monthly|quarter|quarters|quarterly|year|years|yearly|annual|annually|hour|hours|hourly)$/;
-function countNounOf(node: MagnitudeNode): string | undefined {
-  if (unitOf(node) !== undefined || (node.kind !== 'outcome' && node.kind !== 'factor') || resolveMagnitudeFrame(node) === undefined) return undefined;
-  const words = node.label.toLowerCase().split(/[^\p{L}]+/u).filter((w) => w !== '');
-  if (words.some((w) => PERIOD.test(w))) return undefined;
-  const from = words[0] === 'number' && words[1] === 'of' ? 2 : 0;
-  const stop = words.findIndex((w, k) => k >= from && PREPOSITION.test(w));
-  let span = words.slice(from, stop < 0 ? words.length : stop);
-  const before = span.length;
-  while (span.length > 0 && PARTICIPLE.test(span[span.length - 1]!)) span = span.slice(0, -1);
-  const head = span[span.length - 1];
-  if (head !== undefined && COUNT_ONLY_AS_EVENT.test(head) && span.length === before) return undefined;
-  return head !== undefined && head.length >= 4 && /[^siu]s$/.test(head) && !NOT_A_COUNT.test(head) ? head : undefined;
-}
-
 export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffectEditResult {
   const { from, to, effect, expected } = params;
   if (typeof params.quote !== 'string' || params.quote.trim() === '' || params.quote.length > QUOTE_MAX) return refuse('quote_invalid');
@@ -197,11 +165,8 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // "percentage points", a yes/no source as "switch") — the same key `sizeLink` says the natural effect back in.
   const same = (stated: string, ...own: (string | undefined)[]) => unitComparisonKey(stated) !== undefined
     && own.some((u) => u !== undefined && u !== '' && unitComparisonKey(stated) === unitComparisonKey(u));
-  const countNoun = countNounOf(sourceNode);
-  // The count noun or its singular ("conversations" / "conversation") — `unitComparisonKey` keeps plurals apart.
-  const perCount = countNoun !== undefined && [countNoun, countNoun.slice(0, -1)].includes(effect.per_source_change_unit.trim().toLowerCase());
   if (!same(effect.amount_unit, unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))
-    || !(perCount || same(effect.per_source_change_unit, unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode))))) {
+    || !same(effect.per_source_change_unit, unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)))) {
     return refuse('unit_mismatch');
   }
   if (!finite(effect.amount) || !finite(effect.per_source_change) || effect.per_source_change === 0 || effect.amount === 0) {
@@ -234,10 +199,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const { reasoning: _olumisWhy, natural_effect: _oldSize, clamped_from: _oldClamp, ...keptProvenance } = provenance;
   edge.strength = { ...strength, mean: sizing.mean, std: sizing.std };
   edge.effect_direction = direction;
-  // A unitless count source is said in its count noun, never '' (the size the card read back is "per conversation").
-  const naturalEffect = sizing.natural_effect.per_source_change_unit === '' && countNoun !== undefined
-    ? { ...sizing.natural_effect, per_source_change_unit: countNoun } : sizing.natural_effect;
-  edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect };
+  edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: sizing.natural_effect };
   edge.provenance_display = 'user_set';
   // A6e: `defaulted` is whole-edge; the statement sizes the strength only, so existence stays Olumi's per field.
   if (edge.defaulted === true) edge.exists_defaulted = true;
