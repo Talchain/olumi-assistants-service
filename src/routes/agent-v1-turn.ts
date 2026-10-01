@@ -63,7 +63,7 @@ import { onceMoreOnTransportFailure } from '../orchestrator-v5/agent-lane/runtim
 import { ProposalStore } from '../orchestrator-v5/agent-lane/proposal.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/analysis-ready-helper.js';
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
-import { budgetFor, conversationBudgetFor, type CallBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
+import { budgetFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, textAtRest, withA7AfterGate } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
@@ -1094,6 +1094,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       purpose: 'conversation',
       ...agentRequestIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), sentBody),
     });
+    const deadlineMs = (req as { deadline_ms?: unknown }).deadline_ms;
     const r = await fetch(OPENAI_RESPONSES_URL, {
       method: 'POST',
       headers: {
@@ -1101,6 +1102,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         'content-type': 'application/json',
       },
       body: JSON.stringify(sentBody),
+      // 2a: a caller-set deadline aborts the call; `onceMoreOnTransportFailure` does not retry an abort.
+      ...(typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
     });
     if (!r.ok) {
       const text = await r.text();
@@ -1970,7 +1973,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (outcome !== undefined) { runOutcomeChips = outcome.chips.map((c) => ({ ...c })); runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
       runInterpreted = ran.refusal !== 'run_failed' && outcome === undefined;
       if (runInterpreted) try {
-        const resp = await callModelFor(budget)({
+        // 2a: the interpret role's measured budget (Sol, effort low) and a deadline; the Run stands whatever happens here.
+        const interpret = interpretBudget();
+        const resp = await callModelFor(interpret)({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
           instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: priorAndRun,
@@ -1978,8 +1983,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // are spent on tools it may not use). Measured against the live API: accepted with the
           // server-recorded run pair in history.
           tools: [],
-          max_output_tokens: budget.max_output_tokens,
+          max_output_tokens: interpret.max_output_tokens,
           tool_choice: 'none',
+          deadline_ms: INTERPRET_DEADLINE.ms,
           ...(askView ? { text: { format: RUN_INTERPRETATION_FORMAT } } : {}),
         } as never);
         const out = (resp.output ?? []) as { type?: string; content?: { type?: string; text?: string }[] }[];

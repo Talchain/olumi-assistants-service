@@ -12,7 +12,7 @@
 
 export interface CallBudget {
   readonly model: string;
-  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation';
+  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation' | 'interpret';
   readonly max_output_tokens: number;
   /** Omitted means "model default", which is what the banked sessions used. */
   readonly reasoning_effort?: 'low' | 'medium' | 'high';
@@ -115,6 +115,20 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
       'no evidence supports a 16000 cap. Exact prompt/config handoff #78 5915316114.',
   },
   {
+    model: 'gpt-6.1-sol',
+    role: 'interpret',
+    max_output_tokens: 3400,
+    // AI HARNESS 2a (programme-docs#85; Paul 1 Oct: Run turns took 55–90 s, PLoT ~5 s of it): the Run button's ONE
+    // interpreting call (`tool_choice: 'none'`), same instructions and input as before, effort only.
+    reasoning_effort: 'low',
+    evidence:
+      'AI HARNESS 2a, 1 Oct, live API, Paul\'s frozen Run turn (bundle 2bb071fe, scenario 96c6f5f4; withheld leader, typed view), ' +
+      'identical instructions + full history, 3 reps per arm: effort high 28.7/41.8/38.3 s (median 38.3 s, ~1,000 reasoning ' +
+      'tokens) vs low 9.4/9.4/7.7 s (median 9.4 s, 0 reasoning). Truth content equal: leader asserted 0/6, typed view 6/6, ' +
+      'withheld reason, quoted target, Olumi-supplied count and "sensitivity not measured" kept in every reply. Trimming ' +
+      'history to the last 4 turns saved ~0.5 s more and was NOT taken (prompt rules and cache unchanged).',
+  },
+  {
     model: 'gpt-5.6-sol',
     role: 'conversation',
     max_output_tokens: 3400,
@@ -147,3 +161,14 @@ export function budgetFor(model: string, role: CallBudget['role']): CallBudget {
 export function conversationBudgetFor(knownEmptyModel: boolean): CallBudget {
   return budgetFor(knownEmptyModel ? 'gpt-5.6-terra' : 'gpt-6.1-sol', 'conversation');
 }
+
+/** The Run button's one interpreting call (fast path 3, and the result-first follow-up that explains a Run). */
+export function interpretBudget(): CallBudget {
+  return budgetFor('gpt-6.1-sol', 'interpret');
+}
+
+/**
+ * The interpreting call's deadline. The result already stands when it is made, so a slow explanation is replaced by
+ * the honest fallback instead of holding the Run open (AI HARNESS 2a). Mutable for tests only.
+ */
+export const INTERPRET_DEADLINE = { ms: 30_000 };
