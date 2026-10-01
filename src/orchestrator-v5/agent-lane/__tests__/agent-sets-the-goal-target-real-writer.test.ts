@@ -424,22 +424,34 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
 
   // The SERVED shape (`train-0341Z`, CEE ff5453bd): the A4f draft's sibling outcomes "Investment-firm funding secured" /
   // "Angel funding secured" take both of the goal's words, so the strict scope cannot bind "secured £0 so far".
-  const servedSiblingsSeed = () => {
+  const servedSiblingsSeed = (goal = 'Funding secured') => {
     const g = fundingSeed();
     return { ...g, nodes: [
-      ...g.nodes.map((n) => (n.id === 'goal_mrr' ? { ...n, label: 'Funding secured' } : n)),
+      ...g.nodes.map((n) => (n.id === 'goal_mrr' ? { ...n, label: goal } : n)),
       { id: 'out_firm', kind: 'outcome', label: 'Investment-firm funding secured' },
       { id: 'out_angel', kind: 'outcome', label: 'Angel funding secured' },
     ] };
   };
-  it('RED (served E1): siblings "…funding secured" → his £0 cannot be bound, so it is left out — the £1m card STILL goes out, and the reply says the £0 was not recorded', async () => {
+  // ⭐ #2430 rival-qualifier door (R3 #75 5924459372, DL 5924457753): "Funding secured" is the GENERAL form of both siblings
+  // and his sentence writes neither sibling's own words ("investment-firm", "angel"), so his £0 is the goal's level.
+  it('served E1 (#2430): the goal is the siblings\' general form and no sibling qualifier is written → his £0 binds and rides the £1m card', async () => {
     graphOf.set(SCENARIO, servedSiblingsSeed());
     const t1 = await proposeFunding(0);
     const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
     expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     expect(approveChipOf(t1), JSON.stringify(t1.suggested_actions)).toHaveLength(1);
+    expect(t1.assistant_text).not.toContain('as today\'s level of');
+    expect(t1.assistant_text).not.toContain('Not included in this proposal');
+  }, 180_000);
+  // The left-out path still holds where the door cannot choose: the goal's own word ("Total") is not in his sentence either.
+  it('RED (E1 left-out path): goal "Total funding secured" + siblings "…funding secured" → his £0 cannot be bound, so it is left out — the £1m card STILL goes out, and the reply says the £0 was not recorded', async () => {
+    graphOf.set(SCENARIO, servedSiblingsSeed('Total funding secured'));
+    const t1 = await proposeFunding(0);
+    const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+    expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(approveChipOf(t1), JSON.stringify(t1.suggested_actions)).toHaveLength(1);
     // AIQ words 5924376899: DGAI's producer opener, the verbatim span, the rivals the door found, no question.
-    const LINE = 'Not included in this proposal: "£0" as today\'s level of "Funding secured". It could belong to more than one figure in this model ("Investment-firm funding secured", "Angel funding secured"), so it isn’t recorded. Approving sets only the target.';
+    const LINE = 'Not included in this proposal: "£0" as today\'s level of "Total funding secured". It could belong to more than one figure in this model ("Investment-firm funding secured", "Angel funding secured"), so it isn’t recorded. Approving sets only the target.';
     expect(t1.assistant_text, t1.assistant_text).toContain(LINE);
     expect(t1.assistant_text.split('Not included in this proposal: "').length - 1, 'said once').toBe(1);
     // ≤1 ask (AIQ CR 5924479737): the whole host paragraph is the line — no ask beside the card.
