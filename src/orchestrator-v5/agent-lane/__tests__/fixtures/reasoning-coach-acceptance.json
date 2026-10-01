@@ -6542,6 +6542,544 @@
    ]
   },
   {
+   "id": "MT-PREMORTEM-D1-OWN-LABEL-GOOD",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-STRENGTHEN-PLACEHOLDER-P1 (D1, served labels)",
+   "inputs": {
+    "plan_label": "AI Reporting Module Sprint",
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Split Sprint Capacity"
+    ],
+    "supplied_items": [
+     {
+      "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "kind": "link",
+      "labels": [
+       "AI reporting module availability",
+       "Enterprise prospect signing likelihood"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "kind": "link",
+      "labels": [
+       "Integration-step bug resolution",
+       "Trial profile abandonment rate"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "kind": "link",
+      "labels": [
+       "Sprint capacity for AI reporting",
+       "AI reporting module availability"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "kind": "link",
+      "labels": [
+       "Sprint capacity for integration fix",
+       "Integration-step bug resolution"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "enterprise_prospect_signing_likelihood",
+      "kind": "factor",
+      "labels": [
+       "Enterprise prospect signing likelihood"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "ai_reporting_module_availability",
+      "kind": "factor",
+      "labels": [
+       "AI reporting module availability"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "sprint_capacity_for_ai_reporting",
+      "kind": "factor",
+      "labels": [
+       "Sprint capacity for AI reporting"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "sprint_capacity_for_integration_fix",
+      "kind": "factor",
+      "labels": [
+       "Sprint capacity for integration fix"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "revenue_lost_to_trial_abandonment",
+      "kind": "risk",
+      "labels": [
+       "Revenue lost to trial abandonment"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": []
+   },
+   "reply": "1. A quarter later ‘AI Reporting Module Sprint’ went badly: AI reporting module availability came later than planned, so Enterprise prospect signing likelihood never improved. Watch for: the module still not demo-ready at mid-sprint. Mitigate: agree a demo date with sales first.\n2. Sprint capacity for AI reporting was pulled into firefighting. Watch for: unplanned tickets in week one. Mitigate: ring-fence two engineers.\nOutside the model: what could blindside this sprint that none of these figures covers, such as a key customer churning for an unrelated reason?",
+   "expect": "pass",
+   "expect_targets": [
+    "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+    "sprint_capacity_for_ai_reporting"
+   ],
+   "note": "The user's own label 'Enterprise prospect signing likelihood' is grounding, not a probability claim: text bans run with supplied/plan/option labels masked (shared.label_masking; SCIENCE/DSK 5938372911)."
+  },
+  {
+   "id": "MT-PREMORTEM-D1-OWN-LABEL-BAD-CLAIM",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-STRENGTHEN-PLACEHOLDER-P1 (D1, served labels)",
+   "inputs": {
+    "plan_label": "AI Reporting Module Sprint",
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Split Sprint Capacity"
+    ],
+    "supplied_items": [
+     {
+      "id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "kind": "link",
+      "labels": [
+       "AI reporting module availability",
+       "Enterprise prospect signing likelihood"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "kind": "link",
+      "labels": [
+       "Integration-step bug resolution",
+       "Trial profile abandonment rate"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "kind": "link",
+      "labels": [
+       "Sprint capacity for AI reporting",
+       "AI reporting module availability"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "kind": "link",
+      "labels": [
+       "Sprint capacity for integration fix",
+       "Integration-step bug resolution"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "enterprise_prospect_signing_likelihood",
+      "kind": "factor",
+      "labels": [
+       "Enterprise prospect signing likelihood"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "ai_reporting_module_availability",
+      "kind": "factor",
+      "labels": [
+       "AI reporting module availability"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "sprint_capacity_for_ai_reporting",
+      "kind": "factor",
+      "labels": [
+       "Sprint capacity for AI reporting"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "sprint_capacity_for_integration_fix",
+      "kind": "factor",
+      "labels": [
+       "Sprint capacity for integration fix"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "revenue_lost_to_trial_abandonment",
+      "kind": "risk",
+      "labels": [
+       "Revenue lost to trial abandonment"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": []
+   },
+   "reply": "1. A quarter later ‘AI Reporting Module Sprint’ went badly: AI reporting module availability came later than planned, so Enterprise prospect signing likelihood never improved. Watch for: the module still not demo-ready at mid-sprint. Mitigate: agree a demo date with sales first.\n2. Sprint capacity for AI reporting is likely to be pulled into firefighting. Watch for: unplanned tickets in week one. Mitigate: ring-fence two engineers.\nOutside the model: what could blindside this sprint that none of these figures covers, such as a key customer churning for an unrelated reason?",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-NO-PROB"
+   ],
+   "expect_targets": [
+    "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+    "sprint_capacity_for_ai_reporting"
+   ],
+   "note": "Discriminating pair with MT-PREMORTEM-D1-OWN-LABEL-GOOD: masking blanks only the user's labels; Olumi's own 'likely' still fails."
+  },
+  {
+   "id": "MT-RERUN-MODEL-LABEL-GOOD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served labels: CEE fixtures (factor \"Qualified leads per month\", option \"Move 30% to LinkedIn\")",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Qualified leads per month"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "prior_withheld": false,
+    "no_matched_figures": true,
+    "current_option_labels": [
+     "Move 30% to LinkedIn",
+     "Keep current channel mix"
+    ],
+    "model_labels": [
+     "Grow MRR",
+     "Qualified leads per month",
+     "LinkedIn Qualified Leads",
+     "Move 30% to LinkedIn",
+     "Keep current channel mix",
+     "Churn above 4%"
+    ]
+   },
+   "reply": "You changed Qualified leads per month.\n- Qualified leads per month: Olumi's estimate → yours.\n'Move 30% to LinkedIn' and 'Keep current channel mix' have no figures from both runs to compare yet, and Churn above 4% is still a limit. 'Move 30% to LinkedIn' works through LinkedIn Qualified Leads.",
+   "expect": "pass",
+   "note": "A model label ('…leads…', '30%', '4%') is the user's word, not a leader or probability claim: every text ban masks model_labels (shared.label_masking; RC served-label scan 1,440 labels / 305 graphs)."
+  },
+  {
+   "id": "MT-RERUN-MODEL-LABEL-BAD-LEADER",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served labels: CEE fixtures",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Qualified leads per month"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "prior_withheld": false,
+    "no_matched_figures": true,
+    "current_option_labels": [
+     "Move 30% to LinkedIn",
+     "Keep current channel mix"
+    ],
+    "model_labels": [
+     "Grow MRR",
+     "Qualified leads per month",
+     "LinkedIn Qualified Leads",
+     "Move 30% to LinkedIn",
+     "Keep current channel mix",
+     "Churn above 4%"
+    ]
+   },
+   "reply": "You changed Qualified leads per month.\n- Qualified leads per month: Olumi's estimate → yours.\n'Move 30% to LinkedIn' now leads.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-LEADER-UNLICENSED"
+   ],
+   "note": "Discriminating pair with MT-RERUN-MODEL-LABEL-GOOD: Olumi saying an option leads, unlicensed, still fails."
+  },
+  {
+   "id": "MT-PREMORTEM-SHORT-LABEL-GOOD",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3) with options labelled A / B",
+   "inputs": {
+    "plan_label": "A",
+    "current_option_labels": [
+     "A",
+     "B"
+    ],
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": [],
+    "model_labels": [
+     "A",
+     "B"
+    ]
+   },
+   "reply": "1. It is a year later and ‘Switch to GCP’ went badly because a bigger GCP workload share early on drove monthly cloud overspend during migration for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled halfway. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\nOutside the model: what could blindside this move that none of these figures covers, such as a key engineer leaving or a contract you can't exit?",
+   "expect": "pass",
+   "expect_targets": [
+    "gcp_workload_share->monthly_cloud_overspend_during_migration",
+    "migration_preparation_effort"
+   ],
+   "note": "Options labelled 'A' / 'B' (realistic): masking and label matching are WHOLE-TOKEN, so the label 'B' is not found inside other words (HARNESS #2478 P1)."
+  },
+  {
+   "id": "MT-PREMORTEM-SHORT-LABEL-BAD",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3) with options labelled A / B",
+   "inputs": {
+    "plan_label": "A",
+    "current_option_labels": [
+     "A",
+     "B"
+    ],
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": [],
+    "model_labels": [
+     "A",
+     "B"
+    ]
+   },
+   "reply": "1. It is a year later and ‘Switch to GCP’ went badly because a bigger GCP workload share early on drove monthly cloud overspend during migration for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled halfway. There is a high probability of this. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\nOutside the model: what could blindside this move that none of these figures covers, such as a key engineer leaving or a contract you can't exit?",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-NO-PROB"
+   ],
+   "expect_targets": [
+    "gcp_workload_share->monthly_cloud_overspend_during_migration",
+    "migration_preparation_effort"
+   ],
+   "note": "Discriminating pair: substring masking of the label 'A' blanked the 'a' inside 'probability' and passed Olumi's own claim (HARNESS #2478 P1 probe)."
+  },
+  {
+   "id": "MT-PREMORTEM-COMMON-WORD-LABEL-BAD",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3) with a node labelled Will",
+   "inputs": {
+    "plan_label": "Switch to GCP",
+    "current_option_labels": [
+     "Switch to GCP",
+     "Stay on AWS",
+     "Phased GCP migration"
+    ],
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": [],
+    "model_labels": [
+     "Will",
+     "A",
+     "Go"
+    ]
+   },
+   "reply": "1. It is a year later and ‘Switch to GCP’ went badly because a bigger GCP workload share early on drove monthly cloud overspend during migration for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled halfway. This plan will fail. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\nOutside the model: what could blindside this move that none of these figures covers, such as a key engineer leaving or a contract you can't exit?",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-NO-PREDICTION"
+   ],
+   "expect_targets": [
+    "gcp_workload_share->monthly_cloud_overspend_during_migration",
+    "migration_preparation_effort"
+   ],
+   "note": "Masking is PER BAN: a label is blanked only for a ban it trips itself. Masking every label let the unrelated label 'Will' hide 'This plan will fail' (CODEX_CLI_OVERFLOW on CEE #2480 P1 #4). Control: MT-PREMORTEM-D1-OWN-LABEL-GOOD still passes."
+  },
+  {
+   "id": "MT-RERUN-BARE-BAN-LABEL-BAD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served labels: CEE fixtures, with a factor labelled just Leads",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Qualified leads per month"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "prior_withheld": false,
+    "no_matched_figures": true,
+    "current_option_labels": [
+     "Move 30% to LinkedIn",
+     "Keep current channel mix"
+    ],
+    "model_labels": [
+     "Grow MRR",
+     "Qualified leads per month",
+     "Leads",
+     "Move 30% to LinkedIn",
+     "Keep current channel mix"
+    ]
+   },
+   "reply": "You changed Qualified leads per month.\n- Qualified leads per month: Olumi's estimate → yours.\n'Move 30% to LinkedIn' now leads.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-LEADER-UNLICENSED"
+   ],
+   "note": "A label that is nothing but banned words ('Leads') is never blanked: the check cannot tell the user's word from Olumi's claim, so it fails closed (fallback copy). 0 of 1,074 served labels / 359 CEE fixture graphs are wholly a ban token."
+  },
+  {
    "id": "MT-PREMORTEM-BAD-UNGROUNDED",
    "policy_id": "RC-PREMORTEM",
    "grounded_on": "A-PREMORTEM-LICENSED (D3)",
@@ -6804,7 +7342,8 @@
    "reply": "You accepted Olumi's estimate for how much sprint capacity for integration fix changes integration step bug resolution, and ‘AI Reporting Module Sprint’ rose to the top.",
    "expect": "fail",
    "failing_checks": [
-    "RX-NO-MOVEMENT-WITHOUT-PRIOR"
+    "RX-NO-MOVEMENT-WITHOUT-PRIOR",
+    "RX-UNWITHHELD-LINE"
    ],
    "note": "The earlier run had no figures, so nothing \"rose\": the comparison appeared for the first time."
   },
@@ -6833,6 +7372,56 @@
     "RX-NO-MOVEMENT-WITHOUT-PRIOR"
    ],
    "note": "With no matched figures nothing can be said to have moved, whatever the cause; the typed prior_withheld is not needed for this check."
+  },
+  {
+   "id": "MT-RERUN-CONTRARY-SAME-BAD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "MT-RERUN-GOOD inputs (D2)",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Hours per week on investment-firm cold emails",
+     "securing funding"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ]
+   },
+   "reply": "Two things changed since the last run.\n- Hours per week on investment-firm cold emails: 8 → 5 hours a week.\n- Securing funding: you set the target to at least £1,000,000.\nThis run also used a new draw, so the difference can't be put down to your edits alone. You ran it with the same input values.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-CONTRARY-SAME"
+   ],
+   "note": "A recorded change is never 'same input values' / 'nothing in your model changed' (MG 5939414835; served interim words). Control: MT-RERUN-GOOD."
+  },
+  {
+   "id": "MT-RERUN-UNWITHHELD-BAD-NO-LINE",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "MT-RERUN-UNWITHHELD-GOOD inputs (D1)",
+   "inputs": {
+    "attribution_case": "C1_attributable",
+    "prior_withheld": true,
+    "leader_licensed": true,
+    "noise_verdict": "not_noise_qualified",
+    "change_labels": [
+     "Sprint capacity for integration fix",
+     "Integration step bug resolution"
+    ],
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Continue Current Plan"
+    ]
+   },
+   "reply": "You accepted Olumi's estimate for how much sprint capacity for integration fix changes integration step bug resolution.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-UNWITHHELD-LINE"
+   ],
+   "note": "prior_withheld: the reply must say Olumi can now compare the options (MG 5939414835). Control: MT-RERUN-UNWITHHELD-GOOD."
   }
  ]
 }

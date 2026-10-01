@@ -16,17 +16,17 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
 };
 
 describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
-  it('imports all 35 cases and all 14 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(14);
+  it('imports all 35 cases and all 24 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(24);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('a00cb9c817f5938f0cb5c79b4f196c2ef779ed83');
+    expect(SPEC_SHA).toBe('aeefbb3d2fe392d31e77977b321c5ab255ede9b7');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('dd45350f1e0ac06fd2ec8fb12dfc9f02619a0790e3bd7cd75e8a89354d56ec14');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('9fb6de2e3e0e56c3a07e0bf23f9446e2acad071929831da4e2e6a5b982679788');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('a23e827cf4f5298c126126f6527a420a5cb410512980f049ae4358c94e73e6a8');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('08a978c3160cdeb6ded7a2bc4366608271634e6f420846c7d34bb8d2814c0dce');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });
@@ -163,6 +163,29 @@ describe('discriminating controls for selector and rendering', () => {
     const state = stateOf('A-PREMORTEM-LICENSED');
     expect(rowsOf({ ...state, 'model.non_sq_option_ids': [...state['model.non_sq_option_ids']!].reverse() }).selection).toEqual(rowsOf(state).selection);
   });
+  it('a null goal label (as #2465 types it) is "no label": silent copy, never a throw', () => {
+    const state = { ...stateOf('A-PREMORTEM-LICENSED'), 'model.goal_label': null };
+    expect(() => rowsOf(state)).not.toThrow();
+    expect(() => renderCopy({ policy_id: 'RC-WIDEN', variant: 'W6' }, state)).not.toThrow();
+    for (const row of rowsOf(state).rows) for (const field of Object.values(row.copy)) expect(field ?? '').not.toMatch(/\{|null/u);
+  });
+  it('W7 and W2Z with a null goal label: null copy fields, never a throw (note 3 guard)', () => {
+    const state = { ...stateOf('A-PREMORTEM-LICENSED'), 'model.goal_label': null };
+    // The field whose template names {goal_label} is null; the rest render (W7: title; W2Z: question).
+    for (const [variant, field] of [['W7', 'title'], ['W2Z', 'question']] as const) {
+      expect(() => renderCopy({ policy_id: 'RC-WIDEN', variant }, state)).not.toThrow();
+      expect(renderCopy({ policy_id: 'RC-WIDEN', variant }, state)[field]).toBeNull();
+    }
+  });
+  it('a user label is inserted verbatim: braces in it neither blank the copy nor pull in another field', () => {
+    const state = stateOf('A-PREMORTEM-LICENSED');
+    const plan = state['run.leader_option_id']!;
+    const braces = renderCopy({ policy_id: 'RC-PREMORTEM' }, { ...state, 'model.option_labels': { ...state['model.option_labels'], [plan]: 'Sprint capacity {AI}' } });
+    expect(braces.title).toContain('‘Sprint capacity {AI}’');
+    const injected = renderCopy({ policy_id: 'RC-PREMORTEM' }, { ...state, 'model.option_labels': { ...state['model.option_labels'], [plan]: 'Plan {goal_label}' } });
+    expect(injected.title).toContain('‘Plan {goal_label}’');
+    expect(injected.title).not.toContain(state['model.goal_label']!);
+  });
   it('copy handles one-month/deadline horizons, curly quotes, acronyms and Unicode truncation', () => {
     const state = stateOf('A-PREMORTEM-LICENSED');
     expect(renderCopy({ policy_id: 'RC-PREMORTEM' }, { ...state, 'model.goal_horizon': { months: 1 } }).question).toContain('a month from now');
@@ -204,6 +227,38 @@ describe('all deterministic text post-check ids, including methods without vendo
     expect(checkMethodTurn('RC-PREMORTEM', text.replace('F2', 'F20'), inputs).failed).toContain('PM-GROUNDED');
     expect(checkMethodTurn('RC-PREMORTEM', text.replace('F2', 'Beta F2'), inputs).failed).toContain('PM-PLAN-ONLY');
     expect(checkMethodTurn('RC-PREMORTEM', text.replace('Mitigate:', 'Next:'), inputs).failed).toContain('PM-WATCH-MITIGATE');
+  });
+  it('shared.label_masking: a ban word inside the user\u2019s own label is grounding; the same word in Olumi\u2019s text still fails', () => {
+    expect(checkMethodTurn('RC-STRENGTHEN-ITEM', 'Edge compute cost changes revenue.', { item_labels: ['Edge compute cost', 'Revenue'] }).failed).not.toContain('ST-BANNED');
+    expect(checkMethodTurn('RC-STRENGTHEN-ITEM', 'Edge compute cost changes revenue on this edge.', { item_labels: ['Edge compute cost', 'Revenue'] }).failed).toContain('ST-BANNED');
+    const rx = { change_labels: ['Churn rose to plan'], attribution_case: 'C2_unpaired' as const, prior_withheld: true, current_option_labels: ['Best-of-breed vendor'], leader_licensed: false };
+    const line = ' That was what held the comparison back, so Olumi can now compare the options.';
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor is one option.' + line, rx)).toEqual({ pass: true, failed: [], targets: [] });
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor wins and churn rose.' + line, rx).failed.sort()).toEqual(['RX-NO-LEADER-UNLICENSED', 'RX-NO-MOVEMENT-WITHOUT-PRIOR']);
+    // RX-UNWITHHELD-LINE (MG 5939414835): without the line, the un-withheld transition fails.
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan.', rx).failed).toContain('RX-UNWITHHELD-LINE');
+  });
+  it('masking and label matching are WHOLE-TOKEN: short labels never hide Olumi\u2019s own words (HARNESS #2478 P1 probes)', () => {
+    const go = { current_option_labels: ['Go', 'No go'], model_labels: ['Go', 'No go'] };
+    expect(checkMethodTurn('RC-PREMORTEM', 'The launch is going to fail.', go).failed).toContain('PM-NO-PREDICTION');
+    expect(checkMethodTurn('RC-PREMORTEM', 'There is a high probability of this.', { current_option_labels: ['A'], model_labels: ['A'] }).failed).toContain('PM-NO-PROB');
+    const lead = { current_option_labels: ['Raise price'], model_labels: ['Lead', 'Raise price'], leader_licensed: false };
+    expect(checkMethodTurn('RERUN-EXPLANATION', '\u2018Raise price\u2019 now leads.', lead).failed).toContain('RX-NO-LEADER-UNLICENSED');
+    // Control: the whole label is still masked.
+    expect(checkMethodTurn('RERUN-EXPLANATION', '\u2018Raise price\u2019 changes Lead.', lead).failed).not.toContain('RX-NO-LEADER-UNLICENSED');
+  });
+  it('masking is PER BAN: a label is blanked only for a ban it trips itself, never when it is only banned words (#2480 CR P1 #4)', () => {
+    // The CR probe: an unrelated label 'Will' must not hide Olumi's prediction.
+    expect(checkMethodTurn('RC-PREMORTEM', 'This plan will fail.', { model_labels: ['Will'] }).failed).toContain('PM-NO-PREDICTION');
+    // A label that IS the banned word fails closed; 'Odd' never matches inside 'odds'.
+    expect(checkMethodTurn('RC-PREMORTEM', 'The odds are poor.', { model_labels: ['Odds'] }).failed).toContain('PM-NO-PROB');
+    expect(checkMethodTurn('RC-PREMORTEM', 'The odds are poor.', { model_labels: ['Odd'] }).failed).toContain('PM-NO-PROB');
+    expect(checkMethodTurn('RERUN-EXPLANATION', '\u2018Raise price\u2019 now leads.', { current_option_labels: ['Raise price'], model_labels: ['Leads', 'Raise price'], leader_licensed: false }).failed).toContain('RX-NO-LEADER-UNLICENSED');
+    // Controls: a longer label carrying the ban is still the user's word.
+    expect(checkMethodTurn('RC-PREMORTEM', 'Enterprise prospect signing likelihood stayed flat.', { model_labels: ['Will', 'Enterprise prospect signing likelihood'] }).failed).not.toContain('PM-NO-PROB');
+    expect(checkMethodTurn('RC-PREMORTEM', 'Cut Burn Rate by 30% slipped.', { model_labels: ['Cut Burn Rate by 30%'] }).failed).not.toContain('PM-NO-PROB');
+    expect(checkMethodTurn('RC-WHAT-CHANGES', 'Price elasticity of demand decides it.', { factor_label: 'Price elasticity of demand' }).failed).not.toContain('WC-BANNED');
+    expect(checkMethodTurn('RC-WHAT-CHANGES', 'Price elasticity of demand decides it; elasticity is high.', { factor_label: 'Price elasticity of demand' }).failed).toContain('WC-BANNED');
   });
   it('Coach edits requires the stale line only for a stale run', () => {
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);
