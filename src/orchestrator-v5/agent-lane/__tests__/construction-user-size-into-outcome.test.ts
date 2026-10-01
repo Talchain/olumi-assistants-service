@@ -34,7 +34,8 @@ const link = (from: string, to: string, size?: { amount: number; per: number; by
 });
 
 /** raw-1's retry draft (`/private/tmp/mgc-resume/raw-1/call-2.json`), trimmed: the £ size lands on an intermediate £ outcome. */
-function draft(o: { dealsMax?: number; fundingMax?: number } = {}) {
+function draft(o: { dealsMax?: number; fundingMax?: number; fundingAsFactor?: boolean } = {}) {
+  const funding = { label: 'Funding from investment firms', provenance: 'inferred', unit: '£', plausible_max: o.fundingMax ?? 5000000 };
   return {
     goal: {
       metric: 'Funding secured', operator: '>=', target_stated: false, frame: 'level', value: null, unit: '£', horizon_months: 2,
@@ -50,12 +51,13 @@ function draft(o: { dealsMax?: number; fundingMax?: number } = {}) {
     factors: [
       { label: 'Hours per week on investment-firm outreach', role: 'controllable', baseline_known: true, baseline_value: 15, unit: 'hours/week', provenance: 'ai_proposed', plausible_max: 60 },
       { label: 'Hours per week on angel outreach', role: 'controllable', baseline_known: true, baseline_value: 0, unit: 'hours/week', provenance: 'ai_proposed', plausible_max: 40 },
+      ...(o.fundingAsFactor ? [{ ...funding, role: 'external', baseline_known: false, baseline_value: null }] : []),
     ],
     risks: [],
     outcomes: [
       { label: 'Qualified investment-firm conversations', provenance: 'inferred', unit: 'qualified investment-firm conversations', plausible_max: 100 },
       { label: 'Investment-firm deals closed', provenance: 'inferred', unit: 'deals', plausible_max: o.dealsMax ?? 10 },
-      { label: 'Funding from investment firms', provenance: 'inferred', unit: '£', plausible_max: o.fundingMax ?? 5000000 },
+      ...(o.fundingAsFactor ? [] : [funding]),
       { label: 'Funding from angel investors', provenance: 'inferred', unit: '£', plausible_max: 1000000 },
     ],
     links: [
@@ -115,9 +117,17 @@ describe('A4f: the user\'s £ size into an intermediate £ outcome fits that out
     expect(questionsOf(out).some((q) => q.startsWith('Olumi estimated that') && q.includes(NOT_REPRESENTABLE))).toBe(true);
   });
 
-  it('control: a widen that would cut the outcome\'s own out-link is refused — the size stays cut and the question is still asked', async () => {
+  it('CASCADE (fresh draft a4b2-p3\'s shape): deals max 100 → the outcome AND the goal widen, every |β| ≤ 1, never asked as "cut short"', async () => {
     const { g, out } = await build(draft({ dealsMax: 100 }));
-    expect(frame(g, DEAL[1])).toBe(5000000);
+    expect(frame(g, DEAL[1])).toBe(100000000);
+    expect(frame(g, 'funding_secured')).toBeGreaterThanOrEqual(100000000);
+    for (const e of g.edges.filter((x: Rec) => typeof x.strength?.mean === 'number')) expect(Math.abs(e.strength.mean)).toBeLessThanOrEqual(1);
+    expect(edge(g, ...DEAL).provenance.natural_effect.amount).toBe(1000000);
+    expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(false);
+  });
+
+  it('control: the same size into a FACTOR is never widened — it stays cut and the question is still asked', async () => {
+    const { g, out } = await build(draft({ fundingAsFactor: true }));
     expect(Math.abs(edge(g, ...DEAL).strength.mean)).toBeGreaterThan(1);
     expect(questionsOf(out).some((q) => q.includes(NOT_REPRESENTABLE))).toBe(true);
   });
@@ -158,6 +168,25 @@ describe('A4f on the served paul-1 graph (0 LLM)', () => {
     expect(r.graph.edges[2].provenance.natural_effect.amount).toBe(1000000);
     expect(r.graph.edges[2].provenance.natural_effect.strength_mean).toBe(1);
     expect(r.graph.nodes[0]).toEqual(before.nodes[0]); // the goal is untouched
+  });
+
+  it('CASCADE on the a4b2-p3 shape: outcome £3m holds β 3.33 → outcome £10m and goal £5m → £10m, β 1 / 1, natural sizes held', () => {
+    const before = servedPaul1();
+    before.nodes[4].scale_frame = 3000000; before.nodes[0].scale_frame = 5000000;
+    before.edges[2].strength.mean = 10 / 3; before.edges[3].strength.mean = 0.6;
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refits.map((x: Rec) => [x.node, x.from, x.to])).toEqual([['investment_firm_funding_secured', 3000000, 10000000], ['securing_funding', 5000000, 10000000]]);
+    expect(r.graph.edges.map((e: Rec) => Number(e.strength.mean.toFixed(9)))).toEqual([0.4, 0.5, 1, 1]);
+    expect(natural(r.graph).map((x) => Number(x.toFixed(6)))).toEqual(natural(before).map((x) => Number(x.toFixed(6))));
+  });
+
+  it('control: the cascade obeys every guard — a goal its limit rows name is not widened, so the widen is refused (new_cut)', () => {
+    const before = { ...servedPaul1(), goal_constraints: [{ node_id: 'securing_funding', operator: '>=', value: 2000000 }] };
+    before.nodes[4].scale_frame = 3000000; before.nodes[0].scale_frame = 5000000;
+    before.edges[2].strength.mean = 10 / 3; before.edges[3].strength.mean = 0.6;
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refused).toEqual([{ link: 'investment_firm_deals_closed→investment_firm_funding_secured', reason: 'new_cut', detail: 'investment_firm_funding_secured→securing_funding' }]);
+    expect(r.graph).toBe(before);
   });
 
   it('control: an OUTCOME that holds a sampled level (Olumi\'s, no std) keeps the spread guard — refused, the graph as it came', () => {

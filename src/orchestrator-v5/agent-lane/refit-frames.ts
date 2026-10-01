@@ -161,27 +161,53 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
     const target = (g.nodes as Rec[]).find((n) => n.id === e.to);
     const Fold = frameOf(target);
     if (target === undefined || Fold === undefined) { refused.push({ link: key(e), reason: 'no_frame' }); continue; }
-    // ⛔ PR Review CR on #2314 @ 72b9daed: a FACTOR's frame is never widened. A factor's level with no `std` is sampled by
-    // PLoT with a normal spread (`max(0.1, 0.15·|value|)` of its frame), so widening a factor would move its natural
-    // uncertainty while holding its link size; a factor target stays clamped.
-    // ⭐ A4f (R3 #75 5923240262, DL 5923244548): an OUTCOME or a RISK is computed from its parents, so widening one is a pure
-    // change of units. Served paul-1 (`d23f5df1`): the user's £1,000,000 per deal landed on "Investment-firm funding
-    // secured" (frame £5m, deals frame 10), β 2, cut, and the reply said the run could not use it at full size.
-    if (target.kind === 'factor') { refused.push({ link: key(e), reason: 'not_the_goal' }); continue; }
-    const setByOption = (g.nodes as Rec[]).some((n) => n.kind === 'option' && n.interventions !== null && typeof n.interventions === 'object'
-      && Object.prototype.hasOwnProperty.call(n.interventions, target.id));
-    const namedByLimit = !(opts.goalOwnRows === true && target.kind === 'goal')
-      && Array.isArray(g.goal_constraints) && g.goal_constraints.some((c: Rec) => c?.node_id === target.id);
-    if (setByOption || namedByLimit) { refused.push({ link: key(e), reason: 'levels_set_on_node' }); continue; }
     const F = niceFrameAtLeast(Math.abs(e.strength.mean) * Fold);
-    const top = naturalTop(target);
-    if (top !== undefined && F > top * (1 + TOL)) { refused.push({ link: key(e), reason: 'bounded_scale' }); continue; }
-    if (spreadWouldMove(target, Fold, F)) { refused.push({ link: key(e), reason: 'spread_would_move' }); continue; }
-    const next = reframed(g, target.id, F);
-    const newCut = cuts(next).find((x) => !cuts(g).some((y) => key(y) === key(x)));
+    const why = widenRefusal(g, target, Fold, F, opts);
+    if (why !== undefined) { refused.push({ link: key(e), reason: why }); continue; }
+    let next = reframed(g, target.id, F);
+    const chain: FrameRefit[] = [{ node: target.id, from: Fold, to: F, for_link: key(e) }];
+    /**
+     * ⭐ A4f CASCADE (R3's named follow-up at the cut line; MG #75 5923704064). Widening a node moves its OUT-links up by
+     * the same factor, so a widen can cut the very link that carries the user's size on. Fresh draft `a4b2-p3`: deals 10 →
+     * outcome £3m held £1m per deal at β 3.33; the outcome at £10m put its definitional out-link into the £5m goal at β 2,
+     * and v1 refused it, so the user's size stayed cut. A new cut on a widened node's out-link is fitted by widening ITS
+     * target the same way, by the same guards (`widenRefusal`); accepted only when no new cut is left.
+     */
+    let newCut: Rec | undefined;
+    for (let i = 0; i <= (g.nodes as Rec[]).length; i++) {
+      newCut = cuts(next).find((x) => !cuts(g).some((y) => key(y) === key(x)));
+      if (newCut === undefined || !chain.some((c) => c.node === newCut!.from)) break;
+      const down = (next.nodes as Rec[]).find((n) => n.id === newCut!.to);
+      const Fd = frameOf(down);
+      if (down === undefined || Fd === undefined) break;
+      const Fn = niceFrameAtLeast(Math.abs(newCut.strength.mean) * Fd);
+      if (widenRefusal(next, down, Fd, Fn, opts) !== undefined) break;
+      next = reframed(next, down.id, Fn);
+      chain.push({ node: down.id, from: Fd, to: Fn, for_link: key(newCut) });
+    }
     if (newCut !== undefined) { refused.push({ link: key(e), reason: 'new_cut', detail: key(newCut) }); continue; }
     g = next;
-    refits.push({ node: target.id, from: Fold, to: F, for_link: key(e) });
+    refits.push(...chain);
   }
   return { graph: g, refits, refused };
+}
+
+/** Why `target` may not be widened from `Fold` to `F` (v1's guards, one per node, the cascade's included), else undefined. */
+function widenRefusal(g: Rec, target: Rec, Fold: number, F: number, opts: { readonly goalOwnRows?: boolean }): FrameRefusal['reason'] | undefined {
+  // ⛔ PR Review CR on #2314 @ 72b9daed: a FACTOR's frame is never widened. A factor's level with no `std` is sampled by
+  // PLoT with a normal spread (`max(0.1, 0.15·|value|)` of its frame), so widening a factor would move its natural
+  // uncertainty while holding its link size; a factor target stays clamped.
+  // ⭐ A4f (R3 #75 5923240262, DL 5923244548): an OUTCOME or a RISK is computed from its parents, so widening one is a pure
+  // change of units. Served paul-1 (`d23f5df1`): the user's £1,000,000 per deal landed on "Investment-firm funding
+  // secured" (frame £5m, deals frame 10), β 2, cut, and the reply said the run could not use it at full size.
+  if (target.kind === 'factor') return 'not_the_goal';
+  const setByOption = (g.nodes as Rec[]).some((n) => n.kind === 'option' && n.interventions !== null && typeof n.interventions === 'object'
+    && Object.prototype.hasOwnProperty.call(n.interventions, target.id));
+  const namedByLimit = !(opts.goalOwnRows === true && target.kind === 'goal')
+    && Array.isArray(g.goal_constraints) && g.goal_constraints.some((c: Rec) => c?.node_id === target.id);
+  if (setByOption || namedByLimit) return 'levels_set_on_node';
+  const top = naturalTop(target);
+  if (top !== undefined && F > top * (1 + TOL)) return 'bounded_scale';
+  if (spreadWouldMove(target, Fold, F)) return 'spread_would_move';
+  return undefined;
 }
