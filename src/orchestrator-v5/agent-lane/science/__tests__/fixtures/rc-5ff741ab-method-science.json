@@ -4,9 +4,9 @@
     "contract": {
       "repo": "Talchain/olumi-programme-docs",
       "dir": "output/reasoning-coach",
-      "commit": "48c46033b4c7a653d587ed5ba25a7c31dd94eb2c",
-      "acceptance_cases_sha256": "4b388f0fdffc9c4980c72860cdcef2c0a16dcb101c968912f487282d2f1bdb94",
-      "interventions_sha256": "a5ac0ec60f36763449a13e12982305dcc8f6668ab320ee20f1cdb3c3c3a39c18"
+      "commit": "5ff741abff8007794a73c81711f8772751f3fb2e",
+      "acceptance_cases_sha256": "8ee7da114ad0ebfe5dd59125f14dfe10600400d035acd3c3c16b485cfe00854d",
+      "interventions_sha256": "9212ce30074ec6714b63634dd77dfa84a821a14f4728a5254ce8015d3e66d440"
     },
     "captures": {
       "d3-cost-1156Z-03-s1-run.json": [
@@ -4936,7 +4936,7 @@
           "Monthly cloud overspend during migration",
           "Monthly spend"
         ],
-        "card": "propose_link_strength"
+        "card": "propose_link_strengths"
       },
       {
         "id": "monthly_cloud_savings->monthly_spend",
@@ -4945,7 +4945,7 @@
           "Monthly cloud savings",
           "Monthly spend"
         ],
-        "card": "propose_link_strength"
+        "card": "propose_link_strengths"
       },
       {
         "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
@@ -4954,7 +4954,7 @@
           "GCP workload share",
           "Monthly cloud overspend during migration"
         ],
-        "card": "propose_link_strength"
+        "card": "propose_link_strengths"
       },
       {
         "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
@@ -4963,7 +4963,7 @@
           "Migration preparation effort",
           "Monthly cloud overspend during migration"
         ],
-        "card": "propose_link_strength"
+        "card": "propose_link_strengths"
       },
       {
         "id": "migration_preparation_effort",

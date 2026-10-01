@@ -87,8 +87,13 @@ export interface MethodScienceInput {
   readonly graph?: unknown;
 }
 
-/** The existing agent tool that prepares the ONE change card for an item (`agent-lane/runtime/agent-tools.ts`). */
-export type ItemCard = 'propose_link_strength' | 'propose_assumptions' | 'propose_new_risk';
+/**
+ * The existing agent tool that prepares the ONE change card for an item (`agent-lane/runtime/agent-tools.ts`). A link
+ * item is a link only Olumi sized, so its door is `propose_link_strengths` (plural), which records Olumi's band for the
+ * user to approve. The singular `propose_link_strength` records a band the USER stated and refuses one they didn't
+ * (RC 5934628210; DL 5933929583).
+ */
+export type ItemCard = 'propose_link_strengths' | 'propose_assumptions' | 'propose_new_risk';
 
 /**
  * A model item a method's claims may rest on. The shape is REASONING COACH's `supplied_items` entry, so the harness
@@ -196,7 +201,7 @@ function choosePlan(
 
 /**
  * The pre-mortem's items in REASONING COACH's action-priority order (`method_turns.RC-PREMORTEM.inputs`, reference
- * `tools/build-cases.py` `pm_items` @ 48c46033):
+ * `tools/build-cases.py` `pm_items` @ 5ff741ab):
  *   (1) links on the plan's path that only Olumi sized (placeholder or estimate), nearest the goal first;
  *   (2) factors on those paths whose value is Olumi's estimate;
  *   (3) risks at either end of a link on the plan's path;
@@ -232,7 +237,7 @@ function premortemItems(s: MethodScienceSignals, planId: string, graph: unknown)
   return [
     ...ordered([...links.keys()]).map((id): SuppliedItem => {
       const l = links.get(id)!;
-      return { id, kind: 'link', labels: [l.from_label, l.to_label], card: 'propose_link_strength' };
+      return { id, kind: 'link', labels: [l.from_label, l.to_label], card: 'propose_link_strengths' };
     }),
     ...ordered([...factors.keys()]).map((id): SuppliedItem => ({
       id, kind: 'factor', labels: [factors.get(id)!.label], card: 'propose_assumptions',

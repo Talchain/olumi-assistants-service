@@ -4,7 +4,7 @@
  *
  * ⭐ OUTSIDE CORPUS. Every state below is REASONING COACH's derivation of R3's served captures, and the expected
  * pre-mortem items are RC's own reference (`MT-PREMORTEM-GOOD`), extracted unchanged into
- * `fixtures/rc-48c46033-method-science.json` with the contract commit and every capture's sha256. Rows marked
+ * `fixtures/rc-5ff741ab-method-science.json` with the contract commit and every capture's sha256. Rows marked
  * CONSTRUCTED change ONE named field of a served state, to reach a clause no served state reaches.
  */
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -25,7 +25,7 @@ import {
 } from '../method-science-context.js';
 
 const FIXTURE = JSON.parse(
-  readFileSync(new URL('./fixtures/rc-48c46033-method-science.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('./fixtures/rc-5ff741ab-method-science.json', import.meta.url), 'utf8'),
 ) as {
   states: Record<string, MethodScienceSignals>;
   premortem_reference: { plan_label: string; current_option_labels: string[]; supplied_items: unknown[] };
