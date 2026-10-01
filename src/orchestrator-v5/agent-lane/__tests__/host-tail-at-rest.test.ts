@@ -80,12 +80,21 @@ describe('served paul-1: the held-fixed fact stays at rest, short; its ask moves
     expect(narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [r as never]).status).not.toContain('Held fixed');
   });
 
-  it('a held-fixed factor with NO parked question: the ask alone goes behind the toggle, the fact stays at rest', () => {
-    const s = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [built({ open_questions: [], treated_as_context: ['Recruitment fee'] }) as never]).status!;
+  it('CODEX smallest pair: a held-fixed factor with ZERO parked questions → ONE ask in the text AND the wire list; the fact at rest', () => {
+    const r = built({ open_questions: [], treated_as_context: ['Recruitment fee'] });
+    const s = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [r as never]).status!;
     const sp = splitServerOpenQuestions(reply(s));
     expect(sp).not.toBeNull();
     expect(sp!.atRest.endsWith('Held fixed (no option changes it): Recruitment fee.')).toBe(true);
     expect(sp!.questions).toBe('Should one of the options change Recruitment fee?');
+    expect(openQuestionsForReply(r as never), 'the wire list the toggle renders').toEqual(['Should one of the options change Recruitment fee?']);
+    expect(s.split('Should one of the options change').length - 1, 'said once in the text').toBe(1);
+  });
+
+  it('the ask is never repeated: once in the wire list, and the text count includes it once', () => {
+    const list = openQuestionsForReply(built() as never);
+    expect(list.filter((q) => q.startsWith('Should one of the options change')).length).toBe(1);
+    expect(list).toHaveLength(FX.open_questions.length + 1);
   });
 });
 
