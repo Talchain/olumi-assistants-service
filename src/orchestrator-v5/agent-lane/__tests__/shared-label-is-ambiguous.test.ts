@@ -41,7 +41,8 @@ const EDGES = [
   { from: 'raise', to: 'churn_pricing' },
   { from: 'raise', to: 'churn_support' },
   { from: 'raise', to: 'price' },
-];
+// Every stored edge carries these (GraphV3): the value proposal is withheld on a base the writer would refuse (52f8cd).
+].map((e) => ({ ...e, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' as const }));
 
 function product() {
   let nodes = NODES.map((n) => ({ ...n }));

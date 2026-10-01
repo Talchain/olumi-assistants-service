@@ -27,6 +27,7 @@
 
 import type { ToolResult } from './runtime/agent-tools.js';
 import { proposalsAwaitingApproval } from './approval-chips.js';
+import { sayFigureExactly, sayFigureRead } from './say-figure.js';
 
 /** Tools whose result is a WRITE to the user's model. Proposers change nothing. */
 export const WRITE_TOOLS: readonly string[] = ['authorise_change', 'build_model_from_brief'];
@@ -173,6 +174,37 @@ const PART_NAMES: Record<string, readonly [string, string]> = {
 };
 const UNNAMED_PART: readonly [string, string] = ['change', 'changes'];
 
+/** One value a refused approval did not save, and the figure the model still holds (`valuesNotSaved`). */
+export interface NotSavedValue {
+  readonly label: string;
+  readonly value: number;
+  readonly unit: string;
+  /** The figure not saved was the user's own (`user_stated`); else Olumi's suggestion. */
+  readonly yours: boolean;
+  readonly still?: { readonly value: number; readonly unit: string; readonly owner: 'yours' | 'brief' | 'olumi' | 'olumi_accepted' };
+  /** The model could not be read after the refusal: what it holds now is not said (never inferred). */
+  readonly unconfirmed?: true;
+}
+
+const figureWords = (value: number, unit: string): string => sayFigureExactly(value, unit) ?? `${value}${unit !== '' ? ` ${unit}` : ''}`;
+
+/**
+ * ⛔ AIQ 5924015300's MINIMUM, for every value an approval did not save: the figure not saved, named, and whose it is;
+ * what the model still uses, and whose THAT is; the reason only when it is known (never a guessed one). "Not saved: the
+ * starting value." named neither, and Paul could believe his 3 a month was in the model while the Run used Olumi's 5.
+ */
+function notSavedValueLine(x: NotSavedValue, why: string): string {
+  const head = `${x.yours ? 'Your' : 'Olumi\u2019s suggested'} ${figureWords(x.value, x.unit)} for \u201c${x.label}\u201d wasn\u2019t saved${why}.`;
+  if (x.unconfirmed === true) return `${head} Olumi couldn\u2019t confirm which figure the model uses now.`;
+  if (x.still === undefined) return `${head} The model still has no figure for it.`;
+  // A figure this approval does not write is said the estate's way: exact, else "about" (`sayFigureRead`; AIQ 5924240860).
+  const held = sayFigureRead(x.still.value, x.still.unit);
+  const still = x.still.owner === 'yours' ? `your figure of ${held}`
+    : x.still.owner === 'brief' ? `the figure from your brief, ${held}`
+      : x.still.owner === 'olumi_accepted' ? `Olumi\u2019s estimate of ${held}, which you accepted` : `Olumi\u2019s estimate of ${held}`;
+  return `${head} The model still uses ${still}.`;
+}
+
 /**
  * A compound approval (#1712) reports each part: what was recorded, out of how
  * many, and with which receipts. State exactly that — "Saved 6 of 6 starting
@@ -196,6 +228,9 @@ function partsLine(r: ToolResult): string | null {
     // A reason nobody has worded is left out rather than shown as a code.
     const words = REFUSAL_WORDS[String(p.reason ?? p.refusal ?? '')];
     const why = words !== undefined ? ` (${words})` : '';
+    if (p.part === 'values' && Array.isArray(p.not_saved) && p.not_saved.length > 0) {
+      return (p.not_saved as NotSavedValue[]).map((x) => notSavedValueLine(x, why)).join(' ');
+    }
     if (rec === null || req === null) return `Not saved: ${many}${why}.`;
     const missing = req - rec;
     if (rec > 0) {
