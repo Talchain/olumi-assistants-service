@@ -1358,7 +1358,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           answerKind: 'substantive',
         });
         return reply.code(200).send({
-          ...finaliseV5Response(composedRefusal, { scenarioId }),
+          ...finaliseV5Response(composedRefusal, { scenarioId, runDeltaBoundByCaller: true }),
           _agent: { session_id: sessionId, mode, tool_calls: [], mutated: false, hops: 0, stopped_reason: 'read_only_preview' },
           _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
@@ -1553,7 +1553,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         }),
       });
       const replayBody = {
-        ...finaliseV5Response(composedReplay, { scenarioId }),
+        ...finaliseV5Response(composedReplay, { scenarioId, runDeltaBoundByCaller: true }),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
         ...(state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
         ...(state.analysisState !== undefined ? { analysis_state: state.analysisState } : {}),
@@ -2547,7 +2547,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // conventional exit uses — built INTO the finalised response, never appended raw.
       blocks: coachingBlocks as OlumiResponse['blocks'],
     });
-    const finalised = finaliseV5Response(composed, { scenarioId });
+    const finalised = finaliseV5Response(composed, { scenarioId, runDeltaBoundByCaller: true });
 
     const existingBlocks = Array.isArray((finalised as { blocks?: unknown[] }).blocks)
       ? (finalised as { blocks: unknown[] }).blocks
