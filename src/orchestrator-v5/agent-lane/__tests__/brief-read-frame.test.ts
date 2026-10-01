@@ -44,7 +44,7 @@ const hashOf = (s: Scenario) => `rev-${s.revision}`;
 type Step = { at: 'model' } | { at: 'prewarm' } | { at: 'construction' } | { at: 'reading' } | { at: 'run' } | { at: 'frame'; kind: PipelineStageEvent['kind'] };
 let steps: Step[] = [];
 /** T1: every conversation call's sent body (the prewarm included), in order, and every construction call's. */
-type SentBody = { instructions?: string; input?: unknown[]; tools?: { name: string }[]; max_output_tokens?: number; prompt_cache_key?: string };
+type SentBody = { instructions?: string; input?: unknown[]; tools?: { name: string }[]; max_output_tokens?: number };
 let conversationBodies: SentBody[] = [];
 let constructionBodies: Record<string, unknown>[] = [];
 /** The prewarm's output cap (`PREWARM_OUTPUT_TOKENS`): the stub tells it apart by that alone, as the ledger does. */
@@ -416,34 +416,18 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       expect(answering()).toHaveLength(1);
     });
 
-    it('RED: the prewarm IS the answering call\'s prefix (same instructions, tools, key, leading items); then the host\'s call with the user\'s words verbatim', async () => {
+    it('RED: the prewarm IS the answering call\'s prefix (same instructions, tools, leading items); then the host\'s call with the user\'s words verbatim', async () => {
       await buffered({ message: BRIEF });
       const [pre] = prewarms();
       const [ans] = answering();
       expect(pre, 'control: a prewarm was sent').toBeDefined();
       expect(ans!.instructions).toBe(pre!.instructions);
       expect(ans!.tools).toEqual(pre!.tools);
-      expect(ans!.prompt_cache_key).toBe(pre!.prompt_cache_key);
       expect(ans!.input!.slice(0, pre!.input!.length)).toEqual(pre!.input);
       const call = ans!.input![pre!.input!.length] as { type?: string; name?: string; call_id?: string; arguments?: string };
       expect(call).toMatchObject({ type: 'function_call', name: 'build_model_from_brief' });
       expect(JSON.parse(call.arguments!)).toEqual({ brief: BRIEF });
       expect(call.call_id).toMatch(/^host_first_call_[0-9a-f-]{36}$/);
-    });
-
-    it('RED: every conversation call carries ONE per-scenario prompt_cache_key — hashed, never the scenario id; another scenario gets another', async () => {
-      await buffered({ message: BRIEF });
-      await buffered({ message: 'What drives MRR most?' });
-      const keys = new Set(conversationBodies.map((b) => b.prompt_cache_key));
-      expect(conversationBodies.length, 'control: prewarm + 2 answering calls').toBeGreaterThanOrEqual(3);
-      expect([...keys]).toHaveLength(1);
-      const [key] = [...keys];
-      expect(key).toMatch(/^agent:[0-9a-f]{32}$/);
-      expect(key).not.toContain(SID);
-      nextScenario(); conversationBodies = [];
-      await buffered({ message: BRIEF });
-      expect(conversationBodies[0]!.prompt_cache_key).toMatch(/^agent:[0-9a-f]{32}$/);
-      expect(conversationBodies[0]!.prompt_cache_key).not.toBe(key);
     });
 
     it('CONTRAST: a first message that names no goal and no option (a question with only a limit) → today\'s path', async () => {

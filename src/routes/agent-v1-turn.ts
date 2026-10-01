@@ -1157,8 +1157,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // A pressed chip that names its tool (`firstCallTool`, the loop's first call only): sent only when that tool is
       // among the tools this call declares, so a forced call can never name a tool the turn does not carry.
       ...(forcedToolOf(req) !== undefined ? { tool_choice: { type: 'function', name: forcedToolOf(req) } } : {}),
-      // T1 (b): one scenario's calls route to where their static prefix is cached (`AgentTurnInput.promptCacheKey`).
-      ...(typeof req.prompt_cache_key === 'string' ? { prompt_cache_key: req.prompt_cache_key } : {}),
       // C5b: on a withheld run that one call answers in a typed shape (`RUN_INTERPRETATION_FORMAT`).
       ...((req as { text?: unknown }).text !== undefined ? { text: (req as { text?: unknown }).text } : {}),
       // PJ-C1 (batch 5): the conversation budget's own effort, as construction already sends its budget's (L~1222).
@@ -2384,8 +2382,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(methodTurn?.kind === 'run' ? { maxHops: 1 } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
-          // T1 (b): a per-scenario key, hashed (no internal id leaves for the provider).
-          promptCacheKey: `agent:${createHash('sha256').update(scenarioId).digest('hex').slice(0, 32)}`,
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
           composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
           // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).

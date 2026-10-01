@@ -36,8 +36,6 @@ export interface ModelCallRequest {
   readonly max_output_tokens: number;
   /** The ONE tool this call must make (`AgentTurnInput.firstCallTool`), sent only on the turn's first call. */
   readonly tool_choice?: { readonly type: 'function'; readonly name: string };
-  /** T1 (b): the provider's cache-routing key (`AgentTurnInput.promptCacheKey`), on every call of the turn. */
-  readonly prompt_cache_key?: string;
   /** A caller-set deadline: the call aborts at it and is never retried (`withTransportRetry`). */
   readonly deadline_ms?: number;
   /** T1 (b): the ledger's purpose for a cache prewarm (`PREWARM_OUTPUT_TOKENS`); never sent to the provider. */
@@ -138,19 +136,15 @@ export interface AgentTurnInput {
    * otherwise hop 0 calls the model as before. Absent ⇒ exactly as before.
    */
   readonly hostFirstCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>> };
-  /**
-   * ⭐ T1 (b): the provider's prompt-cache routing key, sent on every model call this turn makes (and its prewarm), so
-   * one scenario's calls land where its static prefix (instructions + tools, which lead every request) is cached.
-   * Absent ⇒ exactly as before.
-   */
-  readonly promptCacheKey?: string;
 }
 
 /**
  * ⭐ T1 (b): THE CALL THE HOST REPLACED STILL WARMS THE CACHE. When the host makes the first call (`hostFirstCall`), the
  * model call it replaces is still SENT, capped and never awaited: its prompt (instructions + tools + this turn's items)
  * is the exact prefix of the next hop's call, so that call reads it from the provider's cache as it did when the model
- * made the first call (~14k cached tokens served). Nothing reads its output; a failure costs nothing. It is a real
+ * made the first call (~14k cached tokens served). No `prompt_cache_key`: the static prefix is already shared ACROSS
+ * scenarios by prefix routing (served 2 Oct: a new scenario's first call read 14,116 cached tokens another scenario
+ * wrote), and a per-scenario key would route each scenario apart. Nothing reads its output; a failure costs nothing. It is a real
  * provider call, so it is on the turn's ledger under its own purpose (`prewarm`) and counts in `llm_calls_used` (DL).
  */
 export const PREWARM_OUTPUT_TOKENS = 16;
@@ -404,7 +398,6 @@ export async function runAgentTurn(
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
-      ...(input.promptCacheKey !== undefined ? { prompt_cache_key: input.promptCacheKey } : {}),
     };
     if (hostCall !== undefined) {
       void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
