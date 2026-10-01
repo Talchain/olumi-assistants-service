@@ -40,7 +40,7 @@
      "angel_investor_outreach": "Angel investor outreach",
      "angel_outreach_pilot": "Angel outreach pilot"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "distraction_from_investment_firm_fundraising"
     ],
@@ -53,6 +53,7 @@
       "from_label": "Hours per week on angel outreach",
       "to_label": "Qualified angel investor conversations",
       "link_sizing": "olumi_estimate",
+      "value_hash": "0389894aa4dd",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -64,6 +65,7 @@
       "from_label": "Qualified angel investor conversations",
       "to_label": "securing funding",
       "link_sizing": "unmarked",
+      "value_hash": "cabb40dcfb3b",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -75,6 +77,7 @@
       "from_label": "Hours per week on angel outreach",
       "to_label": "Angel fundraising admin time",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -86,6 +89,7 @@
       "from_label": "Angel fundraising admin time",
       "to_label": "Distraction from investment-firm fundraising",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -97,6 +101,7 @@
       "from_label": "Distraction from investment-firm fundraising",
       "to_label": "securing funding",
       "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -110,6 +115,7 @@
       "factor_id": "hours_per_week_on_angel_outreach",
       "label": "Hours per week on angel outreach",
       "value_authorship": "olumi_estimate",
+      "value_hash": "4abdd9dcea42",
       "goal_distance": 2
      }
     ],
@@ -189,7 +195,7 @@
      "angel_investor_outreach": "Angel investor outreach",
      "angel_outreach_pilot": "Angel outreach pilot"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "distraction_from_investment_firm_fundraising"
     ],
@@ -202,6 +208,7 @@
       "from_label": "Hours per week on angel outreach",
       "to_label": "Qualified angel investor conversations",
       "link_sizing": "olumi_estimate",
+      "value_hash": "0389894aa4dd",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -213,6 +220,7 @@
       "from_label": "Qualified angel investor conversations",
       "to_label": "securing funding",
       "link_sizing": "unmarked",
+      "value_hash": "cabb40dcfb3b",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -224,6 +232,7 @@
       "from_label": "Hours per week on angel outreach",
       "to_label": "Angel fundraising admin time",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -235,6 +244,7 @@
       "from_label": "Angel fundraising admin time",
       "to_label": "Distraction from investment-firm fundraising",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -246,6 +256,7 @@
       "from_label": "Distraction from investment-firm fundraising",
       "to_label": "securing funding",
       "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -259,6 +270,7 @@
       "factor_id": "hours_per_week_on_angel_outreach",
       "label": "Hours per week on angel outreach",
       "value_authorship": "olumi_estimate",
+      "value_hash": "4abdd9dcea42",
       "goal_distance": 2
      }
     ],
@@ -268,7 +280,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "dismissed",
-      "state_key_fields": {
+      "state_key_hash": "fcf8c3b833f9",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W1",
        "target": "options",
        "non_sq_option_ids": [
@@ -353,7 +367,7 @@
      "angel_outreach_pilot": "Angel outreach pilot",
      "user_added_option": "Revenue-based financing"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "distraction_from_investment_firm_fundraising"
     ],
@@ -366,6 +380,7 @@
       "from_label": "Hours per week on angel outreach",
       "to_label": "Qualified angel investor conversations",
       "link_sizing": "olumi_estimate",
+      "value_hash": "0389894aa4dd",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -377,6 +392,7 @@
       "from_label": "Qualified angel investor conversations",
       "to_label": "securing funding",
       "link_sizing": "unmarked",
+      "value_hash": "cabb40dcfb3b",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -388,6 +404,7 @@
       "from_label": "Hours per week on angel outreach",
       "to_label": "Angel fundraising admin time",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -399,6 +416,7 @@
       "from_label": "Angel fundraising admin time",
       "to_label": "Distraction from investment-firm fundraising",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -410,6 +428,7 @@
       "from_label": "Distraction from investment-firm fundraising",
       "to_label": "securing funding",
       "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -423,6 +442,7 @@
       "factor_id": "hours_per_week_on_angel_outreach",
       "label": "Hours per week on angel outreach",
       "value_authorship": "olumi_estimate",
+      "value_hash": "4abdd9dcea42",
       "goal_distance": 2
      }
     ],
@@ -432,7 +452,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "dismissed",
-      "state_key_fields": {
+      "state_key_hash": "fcf8c3b833f9",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W1",
        "target": "options",
        "non_sq_option_ids": [
@@ -506,7 +528,7 @@
      "split_sprint_capacity": "Split Sprint Capacity",
      "continue_current_plan": "Continue Current Plan"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "revenue_lost_to_trial_abandonment"
     ],
@@ -524,6 +546,7 @@
       "from_label": "Sprint capacity for AI reporting",
       "to_label": "AI reporting module availability",
       "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -536,6 +559,7 @@
       "from_label": "AI reporting module availability",
       "to_label": "Enterprise prospect signing likelihood",
       "link_sizing": "olumi_estimate",
+      "value_hash": "a15e560f12c6",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -548,6 +572,7 @@
       "from_label": "Enterprise prospect signing likelihood",
       "to_label": "Quarterly revenue",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -560,6 +585,7 @@
       "from_label": "Sprint capacity for integration fix",
       "to_label": "Integration-step bug resolution",
       "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -572,6 +598,7 @@
       "from_label": "Integration-step bug resolution",
       "to_label": "Trial profile abandonment rate",
       "link_sizing": "olumi_estimate",
+      "value_hash": "c45eb1863631",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -584,6 +611,7 @@
       "from_label": "Trial profile abandonment rate",
       "to_label": "Revenue lost to trial abandonment",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -596,6 +624,7 @@
       "from_label": "Revenue lost to trial abandonment",
       "to_label": "Quarterly revenue",
       "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -613,36 +642,42 @@
       "factor_id": "ai_reporting_module_availability",
       "label": "AI reporting module availability",
       "value_authorship": "olumi_estimate",
+      "value_hash": "122252665456",
       "goal_distance": 2
      },
      {
       "factor_id": "enterprise_prospect_signing_likelihood",
       "label": "Enterprise prospect signing likelihood",
       "value_authorship": "olumi_estimate",
+      "value_hash": "42eee60b42b2",
       "goal_distance": 1
      },
      {
       "factor_id": "integration_step_bug_resolution",
       "label": "Integration-step bug resolution",
       "value_authorship": "unknown",
+      "value_hash": "122252665456",
       "goal_distance": 3
      },
      {
       "factor_id": "sprint_capacity_for_ai_reporting",
       "label": "Sprint capacity for AI reporting",
       "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
       "goal_distance": 3
      },
      {
       "factor_id": "sprint_capacity_for_integration_fix",
       "label": "Sprint capacity for integration fix",
       "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
       "goal_distance": 4
      },
      {
       "factor_id": "trial_profile_abandonment_rate",
       "label": "Trial profile abandonment rate",
       "value_authorship": "unknown",
+      "value_hash": "6071899f4e59",
       "goal_distance": 2
      }
     ],
@@ -727,7 +762,7 @@
      "split_sprint_capacity": "Split Sprint Capacity",
      "continue_current_plan": "Continue Current Plan"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "revenue_lost_to_trial_abandonment"
     ],
@@ -745,6 +780,7 @@
       "from_label": "Sprint capacity for AI reporting",
       "to_label": "AI reporting module availability",
       "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -757,6 +793,7 @@
       "from_label": "AI reporting module availability",
       "to_label": "Enterprise prospect signing likelihood",
       "link_sizing": "olumi_estimate",
+      "value_hash": "a15e560f12c6",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -769,6 +806,7 @@
       "from_label": "Enterprise prospect signing likelihood",
       "to_label": "Quarterly revenue",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -781,6 +819,7 @@
       "from_label": "Sprint capacity for integration fix",
       "to_label": "Integration-step bug resolution",
       "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -793,6 +832,7 @@
       "from_label": "Integration-step bug resolution",
       "to_label": "Trial profile abandonment rate",
       "link_sizing": "olumi_estimate",
+      "value_hash": "c45eb1863631",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -805,6 +845,7 @@
       "from_label": "Trial profile abandonment rate",
       "to_label": "Revenue lost to trial abandonment",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -817,6 +858,7 @@
       "from_label": "Revenue lost to trial abandonment",
       "to_label": "Quarterly revenue",
       "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -834,36 +876,42 @@
       "factor_id": "ai_reporting_module_availability",
       "label": "AI reporting module availability",
       "value_authorship": "olumi_estimate",
+      "value_hash": "122252665456",
       "goal_distance": 2
      },
      {
       "factor_id": "enterprise_prospect_signing_likelihood",
       "label": "Enterprise prospect signing likelihood",
       "value_authorship": "olumi_estimate",
+      "value_hash": "42eee60b42b2",
       "goal_distance": 1
      },
      {
       "factor_id": "integration_step_bug_resolution",
       "label": "Integration-step bug resolution",
       "value_authorship": "unknown",
+      "value_hash": "122252665456",
       "goal_distance": 3
      },
      {
       "factor_id": "sprint_capacity_for_ai_reporting",
       "label": "Sprint capacity for AI reporting",
       "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
       "goal_distance": 3
      },
      {
       "factor_id": "sprint_capacity_for_integration_fix",
       "label": "Sprint capacity for integration fix",
       "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
       "goal_distance": 4
      },
      {
       "factor_id": "trial_profile_abandonment_rate",
       "label": "Trial profile abandonment rate",
       "value_authorship": "unknown",
+      "value_hash": "6071899f4e59",
       "goal_distance": 2
      }
     ],
@@ -871,12 +919,16 @@
      "status": "pending"
     },
     "guidance": {
-     "RC-STRENGTHEN-ITEM:sprint_capacity_for_ai_reporting->ai_reporting_module_availability": {
+     "RC-STRENGTHEN-ITEM:aee54496349d": {
       "status": "dismissed",
-      "state_key_fields": {
+      "state_key_hash": "d4e5d6b64180",
+      "turn_id": null,
+      "debug_fields": {
        "item_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
-       "link_sizing": "placeholder"
-      }
+       "link_sizing": "placeholder",
+       "value_hash": "a17a82c15926"
+      },
+      "debug_item_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability"
      }
     },
     "user.explicit_request": null
@@ -907,6 +959,247 @@
       "title": "The comparison rests on a link nobody has sized yet.",
       "why": "Until it is sized, Olumi can't compare the options on your goal.",
       "question": "How much does sprint capacity for integration fix really change integration-step bug resolution? The comparison turns on it."
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-STRENGTHEN-ITEM-RETURNS-ON-NEW-ESTIMATE",
+   "kind": "constructed",
+   "note": "value_hash in the item key (RC ruling for AI HARNESS 5936122586): a dismissed \"Olumi’s guess\" returns only when Olumi’s estimate itself changed.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d1-sprint-1149Z-11-s5-run.json",
+    "sha256": "eeeff8b46bc4bbcae7669ca52118b6a6880c5270f0a1010f3ee4de2159f5473f",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as A-STRENGTHEN-ITEM-FALLS-THROUGH, but the dismissal was recorded against a different stored value of sprint_capacity_for_ai_reporting->ai_reporting_module_availability"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "separation_unavailable",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Quarterly revenue",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_plan",
+    "model.non_sq_option_ids": [
+     "ai_reporting_module_sprint",
+     "integration_bug_fix_sprint"
+    ],
+    "model.option_labels": {
+     "ai_reporting_module_sprint": "AI Reporting Module Sprint",
+     "integration_bug_fix_sprint": "Integration Bug Fix Sprint",
+     "split_sprint_capacity": "Split Sprint Capacity",
+     "continue_current_plan": "Continue Current Plan"
+    },
+    "model.same_lever": false,
+    "model.risk_ids": [
+     "revenue_lost_to_trial_abandonment"
+    ],
+    "model.goal_path_factor_ids": [
+     "ai_reporting_module_availability",
+     "enterprise_prospect_signing_likelihood",
+     "integration_step_bug_resolution",
+     "sprint_capacity_for_ai_reporting",
+     "sprint_capacity_for_integration_fix",
+     "trial_profile_abandonment_rate"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "from_label": "Sprint capacity for AI reporting",
+      "to_label": "AI reporting module availability",
+      "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "from_label": "AI reporting module availability",
+      "to_label": "Enterprise prospect signing likelihood",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "a15e560f12c6",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "enterprise_prospect_signing_likelihood->quarterly_revenue",
+      "from_label": "Enterprise prospect signing likelihood",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "from_label": "Sprint capacity for integration fix",
+      "to_label": "Integration-step bug resolution",
+      "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 3
+     },
+     {
+      "link_id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "from_label": "Integration-step bug resolution",
+      "to_label": "Trial profile abandonment rate",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "c45eb1863631",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+      "from_label": "Trial profile abandonment rate",
+      "to_label": "Revenue lost to trial abandonment",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "revenue_lost_to_trial_abandonment->quarterly_revenue",
+      "from_label": "Revenue lost to trial abandonment",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [
+     "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+     "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+    ],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "ai_reporting_module_availability",
+      "label": "AI reporting module availability",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "122252665456",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "enterprise_prospect_signing_likelihood",
+      "label": "Enterprise prospect signing likelihood",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "42eee60b42b2",
+      "goal_distance": 1
+     },
+     {
+      "factor_id": "integration_step_bug_resolution",
+      "label": "Integration-step bug resolution",
+      "value_authorship": "unknown",
+      "value_hash": "122252665456",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_ai_reporting",
+      "label": "Sprint capacity for AI reporting",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_integration_fix",
+      "label": "Sprint capacity for integration fix",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
+      "goal_distance": 4
+     },
+     {
+      "factor_id": "trial_profile_abandonment_rate",
+      "label": "Trial profile abandonment rate",
+      "value_authorship": "unknown",
+      "value_hash": "6071899f4e59",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-STRENGTHEN-ITEM:aee54496349d": {
+      "status": "dismissed",
+      "state_key_hash": "7ffb600a2c65",
+      "turn_id": null,
+      "debug_fields": {
+       "item_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+       "link_sizing": "placeholder",
+       "value_hash": "ffffffffffff"
+      },
+      "debug_item_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability"
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S1",
+      "priority": "P1",
+      "slot": 1,
+      "item_one_of": [
+       "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+       "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+      ],
+      "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability"
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES",
+     "RC-PREMORTEM",
+     "RC-WIDEN"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S1",
+      "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "title": "The comparison rests on a link nobody has sized yet.",
+      "why": "Until it is sized, Olumi can't compare the options on your goal.",
+      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it."
      }
     ]
    }
@@ -950,7 +1243,7 @@
      "split_sprint_capacity": "Split Sprint Capacity",
      "continue_current_plan": "Continue Current Plan"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "revenue_lost_to_trial_abandonment"
     ],
@@ -968,6 +1261,7 @@
       "from_label": "Sprint capacity for AI reporting",
       "to_label": "AI reporting module availability",
       "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -980,6 +1274,7 @@
       "from_label": "AI reporting module availability",
       "to_label": "Enterprise prospect signing likelihood",
       "link_sizing": "olumi_estimate",
+      "value_hash": "a15e560f12c6",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -992,6 +1287,7 @@
       "from_label": "Enterprise prospect signing likelihood",
       "to_label": "Quarterly revenue",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -1004,6 +1300,7 @@
       "from_label": "Sprint capacity for integration fix",
       "to_label": "Integration-step bug resolution",
       "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -1016,6 +1313,7 @@
       "from_label": "Integration-step bug resolution",
       "to_label": "Trial profile abandonment rate",
       "link_sizing": "olumi_estimate",
+      "value_hash": "c45eb1863631",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -1028,6 +1326,7 @@
       "from_label": "Trial profile abandonment rate",
       "to_label": "Revenue lost to trial abandonment",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -1040,6 +1339,7 @@
       "from_label": "Revenue lost to trial abandonment",
       "to_label": "Quarterly revenue",
       "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -1057,36 +1357,42 @@
       "factor_id": "ai_reporting_module_availability",
       "label": "AI reporting module availability",
       "value_authorship": "olumi_estimate",
+      "value_hash": "122252665456",
       "goal_distance": 2
      },
      {
       "factor_id": "enterprise_prospect_signing_likelihood",
       "label": "Enterprise prospect signing likelihood",
       "value_authorship": "olumi_estimate",
+      "value_hash": "42eee60b42b2",
       "goal_distance": 1
      },
      {
       "factor_id": "integration_step_bug_resolution",
       "label": "Integration-step bug resolution",
       "value_authorship": "unknown",
+      "value_hash": "122252665456",
       "goal_distance": 3
      },
      {
       "factor_id": "sprint_capacity_for_ai_reporting",
       "label": "Sprint capacity for AI reporting",
       "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
       "goal_distance": 3
      },
      {
       "factor_id": "sprint_capacity_for_integration_fix",
       "label": "Sprint capacity for integration fix",
       "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
       "goal_distance": 4
      },
      {
       "factor_id": "trial_profile_abandonment_rate",
       "label": "Trial profile abandonment rate",
       "value_authorship": "unknown",
+      "value_hash": "6071899f4e59",
       "goal_distance": 2
      }
     ],
@@ -1104,6 +1410,652 @@
      "RC-STRENGTHEN-ITEM",
      "RC-PREMORTEM",
      "RC-COACH-EDITS"
+    ]
+   }
+  },
+  {
+   "id": "A-D1-AFTER-M1-NOT-SAME-LEVER",
+   "kind": "constructed",
+   "note": "Investor journey after M1 (PTL 5933452605): the AI-module sprint and the bug-fix sprint are a trade-off, not one lever.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d1-sprint-1149Z-11-s5-run.json",
+    "sha256": "eeeff8b46bc4bbcae7669ca52118b6a6880c5270f0a1010f3ee4de2159f5473f",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "D1 with both placeholder links accepted (M1 done twice); same_lever stays false (opposite capacity allocations)"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "separation_unavailable",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Quarterly revenue",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_plan",
+    "model.non_sq_option_ids": [
+     "ai_reporting_module_sprint",
+     "integration_bug_fix_sprint"
+    ],
+    "model.option_labels": {
+     "ai_reporting_module_sprint": "AI Reporting Module Sprint",
+     "integration_bug_fix_sprint": "Integration Bug Fix Sprint",
+     "split_sprint_capacity": "Split Sprint Capacity",
+     "continue_current_plan": "Continue Current Plan"
+    },
+    "model.same_lever": false,
+    "model.risk_ids": [
+     "revenue_lost_to_trial_abandonment"
+    ],
+    "model.goal_path_factor_ids": [
+     "ai_reporting_module_availability",
+     "enterprise_prospect_signing_likelihood",
+     "integration_step_bug_resolution",
+     "sprint_capacity_for_ai_reporting",
+     "sprint_capacity_for_integration_fix",
+     "trial_profile_abandonment_rate"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "from_label": "Sprint capacity for AI reporting",
+      "to_label": "AI reporting module availability",
+      "link_sizing": "olumi_accepted",
+      "value_hash": "a17a82c15926",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "from_label": "AI reporting module availability",
+      "to_label": "Enterprise prospect signing likelihood",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "a15e560f12c6",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "enterprise_prospect_signing_likelihood->quarterly_revenue",
+      "from_label": "Enterprise prospect signing likelihood",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "from_label": "Sprint capacity for integration fix",
+      "to_label": "Integration-step bug resolution",
+      "link_sizing": "olumi_accepted",
+      "value_hash": "a17a82c15926",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 3
+     },
+     {
+      "link_id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "from_label": "Integration-step bug resolution",
+      "to_label": "Trial profile abandonment rate",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "c45eb1863631",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+      "from_label": "Trial profile abandonment rate",
+      "to_label": "Revenue lost to trial abandonment",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "revenue_lost_to_trial_abandonment->quarterly_revenue",
+      "from_label": "Revenue lost to trial abandonment",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "ai_reporting_module_availability",
+      "label": "AI reporting module availability",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "122252665456",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "enterprise_prospect_signing_likelihood",
+      "label": "Enterprise prospect signing likelihood",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "42eee60b42b2",
+      "goal_distance": 1
+     },
+     {
+      "factor_id": "integration_step_bug_resolution",
+      "label": "Integration-step bug resolution",
+      "value_authorship": "unknown",
+      "value_hash": "122252665456",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_ai_reporting",
+      "label": "Sprint capacity for AI reporting",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_integration_fix",
+      "label": "Sprint capacity for integration fix",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
+      "goal_distance": 4
+     },
+     {
+      "factor_id": "trial_profile_abandonment_rate",
+      "label": "Trial profile abandonment rate",
+      "value_authorship": "unknown",
+      "value_hash": "6071899f4e59",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "not_offered": [
+     "RC-WHAT-CHANGES"
+    ],
+    "copy_must_not_contain": [
+     "same lever",
+     "same factors"
+    ],
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W6",
+      "priority": "P3",
+      "slot": 1
+     }
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W6",
+      "item": null,
+      "title": "Only one risk is on the map. What else could go wrong?",
+      "why": "The model has at most one risk.",
+      "question": "What else could stop this working?"
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-PREMORTEM-ASKED-CHOOSE-PLAN-D1",
+   "kind": "constructed",
+   "note": "One investor decision carries M1 and M3 (DL 5933799344 #1): the pre-mortem is user-pressed and never picks the plan for the user.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d1-sprint-1149Z-11-s5-run.json",
+    "sha256": "eeeff8b46bc4bbcae7669ca52118b6a6880c5270f0a1010f3ee4de2159f5473f",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "D1 served state; the user presses \"Run a pre-mortem\""
+   },
+   "state": {
+    "turn.request": "method",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "separation_unavailable",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Quarterly revenue",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_plan",
+    "model.non_sq_option_ids": [
+     "ai_reporting_module_sprint",
+     "integration_bug_fix_sprint"
+    ],
+    "model.option_labels": {
+     "ai_reporting_module_sprint": "AI Reporting Module Sprint",
+     "integration_bug_fix_sprint": "Integration Bug Fix Sprint",
+     "split_sprint_capacity": "Split Sprint Capacity",
+     "continue_current_plan": "Continue Current Plan"
+    },
+    "model.same_lever": false,
+    "model.risk_ids": [
+     "revenue_lost_to_trial_abandonment"
+    ],
+    "model.goal_path_factor_ids": [
+     "ai_reporting_module_availability",
+     "enterprise_prospect_signing_likelihood",
+     "integration_step_bug_resolution",
+     "sprint_capacity_for_ai_reporting",
+     "sprint_capacity_for_integration_fix",
+     "trial_profile_abandonment_rate"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "from_label": "Sprint capacity for AI reporting",
+      "to_label": "AI reporting module availability",
+      "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "from_label": "AI reporting module availability",
+      "to_label": "Enterprise prospect signing likelihood",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "a15e560f12c6",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "enterprise_prospect_signing_likelihood->quarterly_revenue",
+      "from_label": "Enterprise prospect signing likelihood",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "from_label": "Sprint capacity for integration fix",
+      "to_label": "Integration-step bug resolution",
+      "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 3
+     },
+     {
+      "link_id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "from_label": "Integration-step bug resolution",
+      "to_label": "Trial profile abandonment rate",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "c45eb1863631",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+      "from_label": "Trial profile abandonment rate",
+      "to_label": "Revenue lost to trial abandonment",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "revenue_lost_to_trial_abandonment->quarterly_revenue",
+      "from_label": "Revenue lost to trial abandonment",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [
+     "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+     "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+    ],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "ai_reporting_module_availability",
+      "label": "AI reporting module availability",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "122252665456",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "enterprise_prospect_signing_likelihood",
+      "label": "Enterprise prospect signing likelihood",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "42eee60b42b2",
+      "goal_distance": 1
+     },
+     {
+      "factor_id": "integration_step_bug_resolution",
+      "label": "Integration-step bug resolution",
+      "value_authorship": "unknown",
+      "value_hash": "122252665456",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_ai_reporting",
+      "label": "Sprint capacity for AI reporting",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_integration_fix",
+      "label": "Sprint capacity for integration fix",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
+      "goal_distance": 4
+     },
+     {
+      "factor_id": "trial_profile_abandonment_rate",
+      "label": "Trial profile abandonment rate",
+      "value_authorship": "unknown",
+      "value_hash": "6071899f4e59",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": "RC-PREMORTEM"
+   },
+   "expect": {
+    "runs_method": "RC-PREMORTEM",
+    "mode": "choose_plan",
+    "choices": [
+     "ai_reporting_module_sprint",
+     "integration_bug_fix_sprint"
+    ],
+    "offered": [],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES",
+     "RC-STRENGTHEN-ITEM"
+    ]
+   }
+  },
+  {
+   "id": "A-PREMORTEM-PLAN-CHOSEN-D1",
+   "kind": "constructed",
+   "note": "The pick is carried as user.selected_option_id (= SCIENCE/DSK user_selected_option_id, #2466); without it the method would ask again forever.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d1-sprint-1149Z-11-s5-run.json",
+    "sha256": "eeeff8b46bc4bbcae7669ca52118b6a6880c5270f0a1010f3ee4de2159f5473f",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as A-PREMORTEM-ASKED-CHOOSE-PLAN-D1 after the user picked AI Reporting Module Sprint"
+   },
+   "state": {
+    "turn.request": "method",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "separation_unavailable",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "not_measured"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Quarterly revenue",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "continue_current_plan",
+    "model.non_sq_option_ids": [
+     "ai_reporting_module_sprint",
+     "integration_bug_fix_sprint"
+    ],
+    "model.option_labels": {
+     "ai_reporting_module_sprint": "AI Reporting Module Sprint",
+     "integration_bug_fix_sprint": "Integration Bug Fix Sprint",
+     "split_sprint_capacity": "Split Sprint Capacity",
+     "continue_current_plan": "Continue Current Plan"
+    },
+    "model.same_lever": false,
+    "model.risk_ids": [
+     "revenue_lost_to_trial_abandonment"
+    ],
+    "model.goal_path_factor_ids": [
+     "ai_reporting_module_availability",
+     "enterprise_prospect_signing_likelihood",
+     "integration_step_bug_resolution",
+     "sprint_capacity_for_ai_reporting",
+     "sprint_capacity_for_integration_fix",
+     "trial_profile_abandonment_rate"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+      "from_label": "Sprint capacity for AI reporting",
+      "to_label": "AI reporting module availability",
+      "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+      "from_label": "AI reporting module availability",
+      "to_label": "Enterprise prospect signing likelihood",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "a15e560f12c6",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "enterprise_prospect_signing_likelihood->quarterly_revenue",
+      "from_label": "Enterprise prospect signing likelihood",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "sprint_capacity_for_integration_fix->integration_step_bug_resolution",
+      "from_label": "Sprint capacity for integration fix",
+      "to_label": "Integration-step bug resolution",
+      "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 3
+     },
+     {
+      "link_id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+      "from_label": "Integration-step bug resolution",
+      "to_label": "Trial profile abandonment rate",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "c45eb1863631",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 2
+     },
+     {
+      "link_id": "trial_profile_abandonment_rate->revenue_lost_to_trial_abandonment",
+      "from_label": "Trial profile abandonment rate",
+      "to_label": "Revenue lost to trial abandonment",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "revenue_lost_to_trial_abandonment->quarterly_revenue",
+      "from_label": "Revenue lost to trial abandonment",
+      "to_label": "Quarterly revenue",
+      "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
+      "option_ids": [
+       "ai_reporting_module_sprint",
+       "integration_bug_fix_sprint",
+       "split_sprint_capacity"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [
+     "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+     "sprint_capacity_for_integration_fix->integration_step_bug_resolution"
+    ],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "ai_reporting_module_availability",
+      "label": "AI reporting module availability",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "122252665456",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "enterprise_prospect_signing_likelihood",
+      "label": "Enterprise prospect signing likelihood",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "42eee60b42b2",
+      "goal_distance": 1
+     },
+     {
+      "factor_id": "integration_step_bug_resolution",
+      "label": "Integration-step bug resolution",
+      "value_authorship": "unknown",
+      "value_hash": "122252665456",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_ai_reporting",
+      "label": "Sprint capacity for AI reporting",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
+      "goal_distance": 3
+     },
+     {
+      "factor_id": "sprint_capacity_for_integration_fix",
+      "label": "Sprint capacity for integration fix",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
+      "goal_distance": 4
+     },
+     {
+      "factor_id": "trial_profile_abandonment_rate",
+      "label": "Trial profile abandonment rate",
+      "value_authorship": "unknown",
+      "value_hash": "6071899f4e59",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": "RC-PREMORTEM",
+    "user.selected_option_id": "ai_reporting_module_sprint"
+   },
+   "expect": {
+    "runs_method": "RC-PREMORTEM",
+    "mode": null,
+    "offered": [],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES",
+     "RC-STRENGTHEN-ITEM"
     ]
    }
   },
@@ -1143,7 +2095,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -1157,6 +2109,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1168,6 +2121,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1179,6 +2133,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1190,6 +2145,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1201,6 +2157,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1214,12 +2171,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -1255,6 +2214,311 @@
       "why": "There is one option besides carrying on as now.",
       "question": "Is it really just ‘Switch to GCP’ or carry on as now? What other routes are there?"
      }
+    ]
+   }
+  },
+  {
+   "id": "A-WIDEN-NO-OPTIONS",
+   "kind": "constructed",
+   "note": "W2 with 0 options had no option to name; W2Z asks for the routes instead.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "no user option besides the status quo (goal-only brief / all options taken out)"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": false,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2Z",
+      "priority": "P1",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES"
+    ],
+    "copy_must_not_contain": [
+     "{option_label}",
+     "‘’"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W2Z",
+      "item": null,
+      "title": "No options on the table yet. What could you do?",
+      "why": "The model has a goal but no option besides carrying on as now.",
+      "question": "What could you actually do about monthly spend? Name the routes you are weighing."
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-WHAT-CHANGES-ASKED-HONEST-LIMIT",
+   "kind": "constructed",
+   "note": "DL moment (b) \"or an honest limit\": fixed text, no LLM; its action is the inline edit on the item (moment (a)).",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "user asks \"what would change the decision?\" (menu/chip) on the served D3 s1 state (EVPPI below resolution)"
+   },
+   "state": {
+    "turn.request": "method",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": true,
+    "run.withheld_reason": null,
+    "run.leader_option_id": "switch_to_gcp",
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": false,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": "RC-WHAT-CHANGES"
+   },
+   "expect": {
+    "runs_method": "RC-WHAT-CHANGES",
+    "mode": "honest_limit",
+    "item": "monthly_cloud_overspend_during_migration->monthly_spend",
+    "offered": [],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-PREMORTEM",
+     "RC-STRENGTHEN-ITEM"
+    ],
+    "rendered_honest_limit": "Olumi can't yet measure what would change this choice in this model. The most useful thing to check meanwhile is how much monthly cloud overspend during migration affects monthly spend: it is Olumi's estimate and it sits on the path to your goal.",
+    "copy_must_not_contain": [
+     "No single assumption",
+     "nothing would change",
+     "robust",
+     "safe"
     ]
    }
   },
@@ -1295,7 +2559,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -1309,6 +2573,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1320,6 +2585,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1331,6 +2597,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1342,6 +2609,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1353,6 +2621,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1366,12 +2635,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -1450,6 +2721,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1461,6 +2733,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1472,6 +2745,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1483,6 +2757,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1494,6 +2769,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1507,12 +2783,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -1550,6 +2828,172 @@
       "title": "GCP savings at full migration could change which option leads.",
       "why": "The analysis found that the answer is sensitive to GCP savings at full migration.",
       "question": "Do you know GCP savings at full migration more precisely? Within Olumi's assumed range it could change which option leads."
+     }
+    ]
+   }
+  },
+  {
+   "id": "A-WHAT-CHANGES-UNLICENSED-SILENT",
+   "kind": "constructed",
+   "note": "Measured sensitivity alone never licenses \"what would change the decision\": it needs a licensed leader. Same-lever W3 is next.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-03-s1-run.json",
+    "sha256": "36440acd13a081fc5666838c4ad80dade6c5bd84606636ab9114f395b060dcd2",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as A-WHAT-CHANGES-MEASURED with run.leader_licensed false"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": null,
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "measured",
+     "most_sensitive": {
+      "factor_id": "gcp_savings_at_full_migration",
+      "label": "GCP savings at full migration",
+      "range": "olumi_assumed"
+     }
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "phased_gcp_migration",
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": true,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": null
+   },
+   "expect": {
+    "offered": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W3",
+      "priority": "P3",
+      "slot": 1
+     }
+    ],
+    "not_offered": [
+     "RC-WHAT-CHANGES",
+     "RC-PREMORTEM"
+    ],
+    "copy_must_not_contain": [
+     "would change the result",
+     "EVPPI",
+     "%"
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-WIDEN",
+      "variant": "W3",
+      "item": null,
+      "title": "These options all work through the same lever. A different mechanism?",
+      "why": "Most of the options change the same factors.",
+      "question": "These options all pull the same lever. Is there a different way to reach the goal?"
      }
     ]
    }
@@ -1606,6 +3050,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1617,6 +3062,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1628,6 +3074,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1639,6 +3086,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1650,6 +3098,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1663,12 +3112,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -1678,7 +3129,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "8e22e4667bc4",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W3",
        "target": "options",
        "non_sq_option_ids": [
@@ -1772,6 +3225,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1783,6 +3237,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1794,6 +3249,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1805,6 +3261,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1816,6 +3273,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1829,12 +3287,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -1844,7 +3304,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "8e22e4667bc4",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W3",
        "target": "options",
        "non_sq_option_ids": [
@@ -1938,6 +3400,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1949,6 +3412,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1960,6 +3424,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1971,6 +3436,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1982,6 +3448,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -1995,12 +3462,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -2010,7 +3479,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "8e22e4667bc4",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W3",
        "target": "options",
        "non_sq_option_ids": [
@@ -2021,7 +3492,9 @@
      },
      "RC-PREMORTEM": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "c9e253755ef3",
+      "turn_id": null,
+      "debug_fields": {
        "plan_option_id": "switch_to_gcp",
        "non_sq_option_ids": [
         "phased_gcp_migration",
@@ -2121,6 +3594,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2132,6 +3606,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2143,6 +3618,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2154,6 +3630,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2165,6 +3642,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2178,12 +3656,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -2193,7 +3673,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "8e22e4667bc4",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W3",
        "target": "options",
        "non_sq_option_ids": [
@@ -2204,7 +3686,9 @@
      },
      "RC-PREMORTEM": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "c9e253755ef3",
+      "turn_id": null,
+      "debug_fields": {
        "plan_option_id": "switch_to_gcp",
        "non_sq_option_ids": [
         "phased_gcp_migration",
@@ -2298,6 +3782,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2309,6 +3794,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2320,6 +3806,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2331,6 +3818,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2342,6 +3830,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2355,12 +3844,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -2370,7 +3861,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "8e22e4667bc4",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W3",
        "target": "options",
        "non_sq_option_ids": [
@@ -2381,7 +3874,9 @@
      },
      "RC-PREMORTEM": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "c9e253755ef3",
+      "turn_id": null,
+      "debug_fields": {
        "plan_option_id": "switch_to_gcp",
        "non_sq_option_ids": [
         "phased_gcp_migration",
@@ -2440,7 +3935,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -2454,6 +3949,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2465,6 +3961,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2476,6 +3973,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2487,6 +3985,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2498,6 +3997,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2511,12 +4011,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -2526,7 +4028,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "pressed",
-      "state_key_fields": {
+      "state_key_hash": "6a75b09aef84",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W2",
        "target": "options",
        "non_sq_option_ids": [
@@ -2601,7 +4105,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -2615,6 +4119,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2626,6 +4131,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2637,6 +4143,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2648,6 +4155,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2659,6 +4167,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2672,12 +4181,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -2687,7 +4198,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "dismissed",
-      "state_key_fields": {
+      "state_key_hash": "6a75b09aef84",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W2",
        "target": "options",
        "non_sq_option_ids": [
@@ -2726,6 +4239,292 @@
    }
   },
   {
+   "id": "A-PREMORTEM-GENERIC-PRESS-SINGLE-OPTION-ASKS",
+   "kind": "constructed",
+   "note": "Never auto-name an unlicensed lone option as the method plan (PTL #5; SCIENCE/DSK 5937084931). A press of the ROW that names it sets user.selected_option_id instead.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-10-s4-run.json",
+    "sha256": "950d30c4ab7f8e647b32bffeaa5632840544e02d26b2e7920f1963dfd5ff2803",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "D3 s4 served state; generic \"Run a pre-mortem\" press (static chip/menu), no pick yet"
+   },
+   "state": {
+    "turn.request": "method",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "constraint_verdict_withheld",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": false,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": "RC-PREMORTEM"
+   },
+   "expect": {
+    "runs_method": "RC-PREMORTEM",
+    "mode": "choose_plan",
+    "choices": [
+     "switch_to_gcp"
+    ],
+    "offered": [],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES",
+     "RC-STRENGTHEN-ITEM"
+    ]
+   }
+  },
+  {
+   "id": "A-PREMORTEM-ROW-PRESS-SINGLE-OPTION-RUNS",
+   "kind": "constructed",
+   "note": "The row press carries the pick, so the method runs at once with no one-button question.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-10-s4-run.json",
+    "sha256": "950d30c4ab7f8e647b32bffeaa5632840544e02d26b2e7920f1963dfd5ff2803",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as above after a press of the row naming the option (= the explicit pick)"
+   },
+   "state": {
+    "turn.request": "method",
+    "open.decision_point": false,
+    "run.kind": "complete_current",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "constraint_verdict_withheld",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": false,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {},
+    "user.explicit_request": "RC-PREMORTEM",
+    "user.selected_option_id": "switch_to_gcp"
+   },
+   "expect": {
+    "runs_method": "RC-PREMORTEM",
+    "mode": null,
+    "offered": [],
+    "not_offered": [
+     "RC-WIDEN",
+     "RC-WHAT-CHANGES",
+     "RC-STRENGTHEN-ITEM"
+    ]
+   }
+  },
+  {
    "id": "A-DECISION-POINT-SUPPRESSES",
    "kind": "served",
    "note": "Served: agent-approve-proposal + agent-amend-proposal (the existing offeredSpecific gate already suppresses the static chips).",
@@ -2760,7 +4559,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -2774,6 +4573,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2785,6 +4585,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2796,6 +4597,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2807,6 +4609,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2818,6 +4621,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2831,12 +4635,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -2906,6 +4712,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2917,6 +4724,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2928,6 +4736,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2939,6 +4748,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2950,6 +4760,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -2963,12 +4774,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -2985,6 +4798,186 @@
      "RC-PREMORTEM",
      "RC-WIDEN",
      "RC-STRENGTHEN-ITEM"
+    ]
+   }
+  },
+  {
+   "id": "A-STALE-NO-DECISION-POINT",
+   "kind": "constructed",
+   "note": "Discriminates staleness: the same state with a current Run offers the pre-mortem (A-D3-S4-AFTER-WIDEN-DISMISSED). Strengthen does not need a current Run.",
+   "source": {
+    "capture": "output/reasoning-coach/captures/d3-cost-1156Z-10-s4-run.json",
+    "sha256": "950d30c4ab7f8e647b32bffeaa5632840544e02d26b2e7920f1963dfd5ff2803",
+    "served_on": "staging 1 Oct 11:49-12:59Z (R3 F5 d1/d3 runs)",
+    "served_chips_today": [
+     "agent-next-pre-mortem",
+     "agent-next-what-would-change",
+     "agent-next-strengthen"
+    ],
+    "variation": "as A-D3-S4-AFTER-WIDEN-DISMISSED with run.kind complete_stale (analysis_out_of_date) and no decision point"
+   },
+   "state": {
+    "turn.request": "narration",
+    "open.decision_point": false,
+    "run.kind": "complete_stale",
+    "run.leader_licensed": false,
+    "run.withheld_reason": "analysis_out_of_date",
+    "run.leader_option_id": null,
+    "run.decision_sensitivity": {
+     "status": "none_measurable"
+    },
+    "model.goal_present": true,
+    "model.goal_label": "Monthly spend",
+    "model.goal_horizon": null,
+    "model.status_quo_option_id": "stay_on_aws",
+    "model.non_sq_option_ids": [
+     "switch_to_gcp"
+    ],
+    "model.option_labels": {
+     "switch_to_gcp": "Switch to GCP",
+     "stay_on_aws": "Stay on AWS",
+     "phased_gcp_migration": "Phased GCP migration"
+    },
+    "model.same_lever": false,
+    "model.risk_ids": [
+     "monthly_cloud_overspend_during_migration"
+    ],
+    "model.goal_path_factor_ids": [
+     "gcp_workload_share",
+     "migration_preparation_effort"
+    ],
+    "model.goal_path_links": [
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_savings",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud savings",
+      "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_savings->monthly_spend",
+      "from_label": "Monthly cloud savings",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     },
+     {
+      "link_id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "from_label": "GCP workload share",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "from_label": "Migration preparation effort",
+      "to_label": "Monthly cloud overspend during migration",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 1
+     },
+     {
+      "link_id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "from_label": "Monthly cloud overspend during migration",
+      "to_label": "Monthly spend",
+      "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
+      "option_ids": [
+       "phased_gcp_migration",
+       "switch_to_gcp"
+      ],
+      "goal_distance": 0
+     }
+    ],
+    "model.placeholder_goal_links": [],
+    "model.goal_path_factors": [
+     {
+      "factor_id": "gcp_workload_share",
+      "label": "GCP workload share",
+      "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
+      "goal_distance": 2
+     },
+     {
+      "factor_id": "migration_preparation_effort",
+      "label": "Migration preparation effort",
+      "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
+      "goal_distance": 2
+     }
+    ],
+    "since_run.goal_path_user_edits": {
+     "status": "pending"
+    },
+    "guidance": {
+     "RC-WIDEN": {
+      "status": "dismissed",
+      "state_key_hash": "6a75b09aef84",
+      "turn_id": null,
+      "debug_fields": {
+       "variant_id": "W2",
+       "target": "options",
+       "non_sq_option_ids": [
+        "switch_to_gcp"
+       ]
+      }
+     }
+    },
+    "user.explicit_request": null
+   },
+   "expect": {
+    "not_offered": [
+     "RC-WHAT-CHANGES",
+     "RC-PREMORTEM",
+     "RC-WIDEN"
+    ],
+    "copy_must_not_contain": [
+     "%",
+     "leads"
+    ],
+    "offered": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S3L",
+      "priority": "P5",
+      "item": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "item_one_of": [
+       "monthly_cloud_overspend_during_migration->monthly_spend",
+       "monthly_cloud_savings->monthly_spend",
+       "gcp_workload_share->monthly_cloud_overspend_during_migration",
+       "migration_preparation_effort->monthly_cloud_overspend_during_migration"
+      ],
+      "slot": 1
+     }
+    ],
+    "rendered_example": [
+     {
+      "policy_id": "RC-STRENGTHEN-ITEM",
+      "variant": "S3L",
+      "item": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "title": "The effect of monthly cloud overspend during migration is Olumi's guess.",
+      "why": "It sits on the path to your goal.",
+      "question": "Does monthly cloud overspend during migration really move monthly spend as much as Olumi assumed?"
+     }
     ]
    }
   },
@@ -3025,7 +5018,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -3039,6 +5032,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3050,6 +5044,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3061,6 +5056,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3072,6 +5068,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3083,6 +5080,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3096,12 +5094,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -3180,7 +5180,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -3194,6 +5194,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3205,6 +5206,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3216,6 +5218,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3227,6 +5230,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3238,6 +5242,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3251,12 +5256,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -3329,7 +5336,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -3343,6 +5350,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3354,6 +5362,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3365,6 +5374,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3376,6 +5386,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3387,6 +5398,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3400,12 +5412,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -3423,7 +5437,9 @@
     "guidance": {
      "RC-COACH-EDITS": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "61753e73ec24",
+      "turn_id": null,
+      "debug_fields": {
        "edits": [
         {
          "kind": "factor_value_edit",
@@ -3506,6 +5522,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "user",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3517,6 +5534,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "user",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3528,6 +5546,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "user",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3539,6 +5558,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "user",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3550,6 +5570,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "user",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -3563,12 +5584,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "yours",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "yours",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -3578,7 +5601,9 @@
     "guidance": {
      "RC-WIDEN": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "8e22e4667bc4",
+      "turn_id": null,
+      "debug_fields": {
        "variant_id": "W3",
        "target": "options",
        "non_sq_option_ids": [
@@ -3589,7 +5614,9 @@
      },
      "RC-PREMORTEM": {
       "status": "completed",
-      "state_key_fields": {
+      "state_key_hash": "c9e253755ef3",
+      "turn_id": null,
+      "debug_fields": {
        "plan_option_id": "switch_to_gcp",
        "non_sq_option_ids": [
         "phased_gcp_migration",
@@ -3649,7 +5676,7 @@
      "split_sprint_capacity": "Split Sprint Capacity",
      "continue_current_plan": "Continue Current Plan"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "revenue_lost_to_trial_abandonment"
     ],
@@ -3667,6 +5694,7 @@
       "from_label": "Sprint capacity for AI reporting",
       "to_label": "AI reporting module availability",
       "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -3679,6 +5707,7 @@
       "from_label": "AI reporting module availability",
       "to_label": "Enterprise prospect signing likelihood",
       "link_sizing": "olumi_estimate",
+      "value_hash": "a15e560f12c6",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -3691,6 +5720,7 @@
       "from_label": "Enterprise prospect signing likelihood",
       "to_label": "Quarterly revenue",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -3703,6 +5733,7 @@
       "from_label": "Sprint capacity for integration fix",
       "to_label": "Integration-step bug resolution",
       "link_sizing": "placeholder",
+      "value_hash": "a17a82c15926",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -3715,6 +5746,7 @@
       "from_label": "Integration-step bug resolution",
       "to_label": "Trial profile abandonment rate",
       "link_sizing": "olumi_estimate",
+      "value_hash": "c45eb1863631",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -3727,6 +5759,7 @@
       "from_label": "Trial profile abandonment rate",
       "to_label": "Revenue lost to trial abandonment",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -3739,6 +5772,7 @@
       "from_label": "Revenue lost to trial abandonment",
       "to_label": "Quarterly revenue",
       "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
       "option_ids": [
        "ai_reporting_module_sprint",
        "integration_bug_fix_sprint",
@@ -3756,36 +5790,42 @@
       "factor_id": "ai_reporting_module_availability",
       "label": "AI reporting module availability",
       "value_authorship": "olumi_estimate",
+      "value_hash": "122252665456",
       "goal_distance": 2
      },
      {
       "factor_id": "enterprise_prospect_signing_likelihood",
       "label": "Enterprise prospect signing likelihood",
       "value_authorship": "olumi_estimate",
+      "value_hash": "42eee60b42b2",
       "goal_distance": 1
      },
      {
       "factor_id": "integration_step_bug_resolution",
       "label": "Integration-step bug resolution",
       "value_authorship": "unknown",
+      "value_hash": "122252665456",
       "goal_distance": 3
      },
      {
       "factor_id": "sprint_capacity_for_ai_reporting",
       "label": "Sprint capacity for AI reporting",
       "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
       "goal_distance": 3
      },
      {
       "factor_id": "sprint_capacity_for_integration_fix",
       "label": "Sprint capacity for integration fix",
       "value_authorship": "olumi_estimate",
+      "value_hash": "3f594c9e7a48",
       "goal_distance": 4
      },
      {
       "factor_id": "trial_profile_abandonment_rate",
       "label": "Trial profile abandonment rate",
       "value_authorship": "unknown",
+      "value_hash": "6071899f4e59",
       "goal_distance": 2
      }
     ],
@@ -3887,7 +5927,7 @@
      "angel_investor_outreach": "Angel investor outreach",
      "angel_outreach_pilot": "Angel outreach pilot"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "distraction_from_investment_firm_fundraising"
     ],
@@ -3900,6 +5940,7 @@
       "from_label": "Hours per week on angel outreach",
       "to_label": "Qualified angel investor conversations",
       "link_sizing": "olumi_estimate",
+      "value_hash": "0389894aa4dd",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -3911,6 +5952,7 @@
       "from_label": "Qualified angel investor conversations",
       "to_label": "securing funding",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -3922,6 +5964,7 @@
       "from_label": "Hours per week on angel outreach",
       "to_label": "Angel fundraising admin time",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -3933,6 +5976,7 @@
       "from_label": "Angel fundraising admin time",
       "to_label": "Distraction from investment-firm fundraising",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -3944,6 +5988,7 @@
       "from_label": "Distraction from investment-firm fundraising",
       "to_label": "securing funding",
       "link_sizing": "unmarked",
+      "value_hash": "5c0cc5a1b253",
       "option_ids": [
        "angel_investor_outreach",
        "angel_outreach_pilot"
@@ -3957,6 +6002,7 @@
       "factor_id": "hours_per_week_on_angel_outreach",
       "label": "Hours per week on angel outreach",
       "value_authorship": "olumi_estimate",
+      "value_hash": "4abdd9dcea42",
       "goal_distance": 2
      }
     ],
@@ -4048,7 +6094,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -4062,6 +6108,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud savings",
       "link_sizing": "unmarked",
+      "value_hash": "418f7c35e334",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -4073,6 +6120,7 @@
       "from_label": "Monthly cloud savings",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "07739f5e01e9",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -4084,6 +6132,7 @@
       "from_label": "GCP workload share",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "624fd7414ec1",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -4095,6 +6144,7 @@
       "from_label": "Migration preparation effort",
       "to_label": "Monthly cloud overspend during migration",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b964d18921c0",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -4106,6 +6156,7 @@
       "from_label": "Monthly cloud overspend during migration",
       "to_label": "Monthly spend",
       "link_sizing": "olumi_estimate",
+      "value_hash": "b090987d250b",
       "option_ids": [
        "phased_gcp_migration",
        "switch_to_gcp"
@@ -4119,12 +6170,14 @@
       "factor_id": "gcp_workload_share",
       "label": "GCP workload share",
       "value_authorship": "unknown",
+      "value_hash": "aa5b7d0fbdbe",
       "goal_distance": 2
      },
      {
       "factor_id": "migration_preparation_effort",
       "label": "Migration preparation effort",
       "value_authorship": "olumi_estimate",
+      "value_hash": "9da9f878eb6a",
       "goal_distance": 2
      }
     ],
@@ -4187,20 +6240,227 @@
      "Stay on AWS",
      "Phased GCP migration"
     ],
-    "supplied_labels": [
-     "Switch to GCP",
-     "Monthly cloud overspend during migration",
-     "Migration preparation effort",
-     "Monthly cloud savings",
-     "Monthly spend"
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
     ],
-    "supplied_figures": [
-     "45,000",
-     "2"
-    ]
+    "supplied_figures": []
    },
-   "reply": "Three ways this could go wrong, so you can watch for them early.\n1. It is a year later and ‘Switch to GCP’ went badly because monthly cloud overspend during migration ran on for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\n3. The monthly cloud savings never showed up in monthly spend because egress charges ate them. Watch for: the first GCP invoice. Mitigate: get egress pricing in writing.",
-   "expect": "pass"
+   "reply": "Two ways this could go wrong, so you can watch for them early.\n1. It is a year later and ‘Switch to GCP’ went badly because a bigger GCP workload share early on drove monthly cloud overspend during migration for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled halfway. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\nOutside the model: what could blindside this move that none of these figures covers, such as a key engineer leaving or a contract you can't exit?",
+   "expect": "pass",
+   "expect_targets": [
+    "gcp_workload_share->monthly_cloud_overspend_during_migration",
+    "migration_preparation_effort"
+   ],
+   "note": "action_target = the story target with the lowest supplied index = the Olumi-sized link, so the ONE card is propose_link_strengths on it (the same door as the M1 S1 card)."
+  },
+  {
+   "id": "MT-PREMORTEM-BAD-BLINDSPOT-AS-STORY",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3)",
+   "inputs": {
+    "plan_label": "Switch to GCP",
+    "current_option_labels": [
+     "Switch to GCP",
+     "Stay on AWS",
+     "Phased GCP migration"
+    ],
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": []
+   },
+   "reply": "1. It is a year later and ‘Switch to GCP’ went badly because a bigger GCP workload share early on drove monthly cloud overspend during migration for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled halfway. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\n3. A key engineer left mid-migration and nobody else knew the setup. Watch for: resignations in the platform team. Mitigate: write the runbooks first.",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-BLINDSPOT",
+    "PM-GROUNDED"
+   ],
+   "expect_targets": [
+    "gcp_workload_share->monthly_cloud_overspend_during_migration",
+    "migration_preparation_effort",
+    null
+   ],
+   "note": "Discriminating pair with MT-PREMORTEM-GOOD: the same outside-the-model idea told as a numbered story pretends to be model-grounded (PTL 5933036532 #4)."
+  },
+  {
+   "id": "MT-PREMORTEM-BAD-BLINDSPOT-ASSERTED",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3)",
+   "inputs": {
+    "plan_label": "Switch to GCP",
+    "current_option_labels": [
+     "Switch to GCP",
+     "Stay on AWS",
+     "Phased GCP migration"
+    ],
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": []
+   },
+   "reply": "1. It is a year later and ‘Switch to GCP’ went badly because a bigger GCP workload share early on drove monthly cloud overspend during migration for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled halfway. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\nOutside the model: a key engineer leaves and the migration stalls.",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-BLINDSPOT"
+   ],
+   "expect_targets": [
+    "gcp_workload_share->monthly_cloud_overspend_during_migration",
+    "migration_preparation_effort"
+   ],
+   "note": "The blind spot is ASKED, never asserted: Olumi has no evidence for it."
   },
   {
    "id": "MT-PREMORTEM-BAD-PREDICTION",
@@ -4210,20 +6470,75 @@
     "plan_label": "Switch to GCP",
     "current_option_labels": [
      "Switch to GCP",
-     "Stay on AWS"
+     "Stay on AWS",
+     "Phased GCP migration"
     ],
-    "supplied_labels": [
-     "Switch to GCP",
-     "Monthly cloud overspend during migration"
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
     ],
     "supplied_figures": []
    },
-   "reply": "1. ‘Switch to GCP’ will fail if monthly cloud overspend during migration lasts. There is a 40% chance of that. Watch for: double bills. Mitigate: a cut-over date.\n2. It is also likely to overrun. Watch for: slipping dates. Mitigate: build in a buffer.",
+   "reply": "1. ‘Switch to GCP’ will fail if monthly cloud overspend during migration lasts. There is a 40% chance of that. Watch for: double bills. Mitigate: a cut-over date.\n2. It is also likely to overrun. Watch for: slipping dates. Mitigate: build in a buffer.\nOutside the model: what could blindside this move that none of these figures covers, such as a key engineer leaving or a contract you can't exit?",
    "expect": "fail",
    "failing_checks": [
     "PM-GROUNDED",
     "PM-NO-PROB",
     "PM-NO-PREDICTION"
+   ],
+   "expect_targets": [
+    "monthly_cloud_overspend_during_migration",
+    null
    ]
   },
   {
@@ -4234,19 +6549,75 @@
     "plan_label": "Switch to GCP",
     "current_option_labels": [
      "Switch to GCP",
-     "Stay on AWS"
+     "Stay on AWS",
+     "Phased GCP migration"
     ],
-    "supplied_labels": [
-     "Switch to GCP",
-     "Monthly cloud overspend during migration"
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
     ],
     "supplied_figures": []
    },
-   "reply": "1. It is a year later and the project went badly because of poor communication. Watch for: missed meetings. Mitigate: a weekly sync.\n2. Leadership lost interest and moved on. Watch for: fewer updates. Mitigate: name a sponsor.",
+   "reply": "1. It is a year later and ‘Switch to GCP’ went badly because of poor communication. Watch for: missed meetings. Mitigate: a weekly sync.\n2. Leadership lost interest and moved on. Watch for: fewer updates. Mitigate: name a sponsor.\nOutside the model: what could blindside this move that none of these figures covers, such as a key engineer leaving or a contract you can't exit?",
    "expect": "fail",
    "failing_checks": [
     "PM-GROUNDED"
-   ]
+   ],
+   "expect_targets": [
+    null,
+    null
+   ],
+   "note": "Naming the plan alone is not grounding: the plan is not a supplied item."
   },
   {
    "id": "MT-WIDEN-GOOD",
@@ -4344,6 +6715,124 @@
     "WD-NO-NEW-FIGURES",
     "WD-W1-NO-MEETS"
    ]
+  },
+  {
+   "id": "MT-RERUN-GOOD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served D2 run 2 (C2_unpaired, leader withheld)",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Hours per week on investment-firm cold emails",
+     "securing funding"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ]
+   },
+   "reply": "Two things changed since the last run.\n- Hours per week on investment-firm cold emails: 8 → 5 hours a week.\n- Securing funding: you set the target to at least £1,000,000.\nThis run also used a new draw, so the difference can't be put down to your edits alone.",
+   "expect": "pass"
+  },
+  {
+   "id": "MT-RERUN-BAD-CAUSE",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served D2 run 2 (C2_unpaired, leader withheld)",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Hours per week on investment-firm cold emails",
+     "securing funding"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "current_option_labels": [
+     "Continue current outreach",
+     "Angel investor outreach"
+    ]
+   },
+   "reply": "Because you cut hours per week on investment-firm cold emails, Angel investor outreach now leads on securing funding.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-CAUSE-UNPAIRED",
+    "RX-NO-LEADER-UNLICENSED"
+   ]
+  },
+  {
+   "id": "MT-RERUN-UNWITHHELD-GOOD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served D1 seed c77d9373, Accept #2 -> Run (R3 5936720411: C1, comparison appears for the first time)",
+   "inputs": {
+    "attribution_case": "C1_attributable",
+    "prior_withheld": true,
+    "leader_licensed": true,
+    "noise_verdict": "not_noise_qualified",
+    "change_labels": [
+     "Sprint capacity for integration fix",
+     "Integration step bug resolution"
+    ],
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Continue Current Plan"
+    ]
+   },
+   "reply": "You accepted Olumi's estimate for how much sprint capacity for integration fix changes integration step bug resolution.\nThat was what held the comparison back, so Olumi can now compare the options: ‘AI Reporting Module Sprint’ leads, provisionally.",
+   "expect": "pass"
+  },
+  {
+   "id": "MT-RERUN-UNWITHHELD-BAD-MOVED",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served D1 seed c77d9373, Accept #2 -> Run (R3 5936720411)",
+   "inputs": {
+    "attribution_case": "C1_attributable",
+    "prior_withheld": true,
+    "leader_licensed": true,
+    "noise_verdict": "not_noise_qualified",
+    "change_labels": [
+     "Sprint capacity for integration fix",
+     "Integration step bug resolution"
+    ],
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Continue Current Plan"
+    ]
+   },
+   "reply": "You accepted Olumi's estimate for how much sprint capacity for integration fix changes integration step bug resolution, and ‘AI Reporting Module Sprint’ rose to the top.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-MOVEMENT-WITHOUT-PRIOR"
+   ],
+   "note": "The earlier run had no figures, so nothing \"rose\": the comparison appeared for the first time."
+  },
+  {
+   "id": "MT-RERUN-NO-MATCH-BAD-MOVED",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served D1 seed c77d9373, Accept #2 -> Run, BEFORE 52f8cd types the reason (only an empty win_probabilities)",
+   "inputs": {
+    "attribution_case": "C1_attributable",
+    "no_matched_figures": true,
+    "leader_licensed": true,
+    "noise_verdict": "not_noise_qualified",
+    "change_labels": [
+     "Sprint capacity for integration fix",
+     "Integration step bug resolution"
+    ],
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Continue Current Plan"
+    ]
+   },
+   "reply": "You accepted Olumi's estimate for how much sprint capacity for integration fix changes integration step bug resolution, and ‘Integration Bug Fix Sprint’ dropped behind.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-MOVEMENT-WITHOUT-PRIOR"
+   ],
+   "note": "With no matched figures nothing can be said to have moved, whatever the cause; the typed prior_withheld is not needed for this check."
   }
  ]
 }

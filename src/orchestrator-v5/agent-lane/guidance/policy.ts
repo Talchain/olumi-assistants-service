@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ 6c4fbffdb4a7f783de9efbfb9eb2f2a25a73079b.
+// programme-docs @ a00cb9c817f5938f0cb5c79b4f196c2ef779ed83.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -31,9 +31,12 @@ export const POLICY = {
     ],
     "method_turn_rule": "On a 'method' turn, offer no other method. Offer only that method's own follow-up actions.",
     "cooldown_default": "A row (or item) with guidance status pressed, dismissed or completed is not offered while its current state_key_hash equals the recorded one. user.explicit_request bypasses this.",
-    "state_key_persistence": "Persist state_key as a SHA-256 hex prefix (12 chars) of the canonical JSON of its fields. Never persist raw values (coaching_state is content-free).",
+    "state_key_persistence": "On disk (coaching_state, CEE #2459 agent_guidance envelope) an entry is {status, state_key_hash, turn_id}. state_key_hash = computeResponseHash(fields) (CEE utils/response-hash.ts; identical to #2459 stateKeyHash): sha256(JSON.stringify(canonical(fields))) first 12 hex, canonical = object keys sorted, ARRAY ORDER KEPT. Never persist raw values (coaching_state is content-free).",
     "cold_reload": "Guidance must round-trip through coaching_state: a pressed or dismissed row stays hidden after a cold reload with an unchanged state_key (#2388 two-load lesson).",
-    "cooldown_scope": "Variant rows (RC-WIDEN): pick the first variant that holds, THEN apply cooldown to that pick; a row in cooldown does NOT fall through to its later variants (case A-WIDEN-SAME-KEY-HIDDEN: W1 dismissed, W2 also holds, RC-WIDEN stays hidden). Item rows (RC-STRENGTHEN-ITEM): cooldown is per item, so a cooled item falls through to the next candidate in pick order, and across variants (S1, then S2, S3L, S3V)."
+    "cooldown_scope": "Variant rows (RC-WIDEN): pick the first variant that holds, THEN apply cooldown to that pick; a row in cooldown does NOT fall through to its later variants (case A-WIDEN-SAME-KEY-HIDDEN: W1 dismissed, W2 also holds, RC-WIDEN stays hidden). Item rows (RC-STRENGTHEN-ITEM): cooldown is per item, so a cooled item falls through to the next candidate in pick order, and across variants (S1, then S2, S3L, S3V).",
+    "state_key_rule": "Each row's state_key.shape gives the exact fields. Build them with arrays in the stated order (ids sorted ascending; edits sorted by entity_id, then field) and OMIT any null or absent field (JS canonical keeps null, so a null would change the hash). The selector compares stateKeyHash(current fields) with the entry's state_key_hash. Verified: tools/select_ref.state_key_hash equals #2459 stateKeyHash on all 18 case entries + a non-ASCII control (RC, 1 Oct 14:3xZ).",
+    "reference": "tools/select_ref.py is the reference selector. build-cases.py refuses to write the cases if any case disagrees with it, or if any of its MUTANTS survives every case.",
+    "entry_key": "The policy id, or for a per-item row `RC-STRENGTHEN-ITEM:` + stateKeyHash({item_id}). Never the raw item id: node ids carry the user's words, and '->' in a link id fails the envelope KEY pattern /^[A-Za-z0-9_.:-]{1,128}$/, so a raw link key would be dropped on read and the item's cooldown lost after reload."
   },
   "rows": [
     {
@@ -58,10 +61,16 @@ export const POLICY = {
             "when": "run.kind == complete_current AND run.withheld_reason in [no_option_meets_limit, every_option_likely_breaks_limit]"
           },
           {
+            "id": "W2Z",
+            "target": "options",
+            "priority": "P1",
+            "when": "len(model.non_sq_option_ids) == 0"
+          },
+          {
             "id": "W2",
             "target": "options",
             "priority": "P1",
-            "when": "len(model.non_sq_option_ids) <= 1"
+            "when": "len(model.non_sq_option_ids) == 1"
           },
           {
             "id": "W3",
@@ -119,7 +128,7 @@ export const POLICY = {
         "guidance[RC-WIDEN] is pressed, dismissed or completed with an unchanged state_key",
         "the only reason would be to reach a count; never add items for their own sake"
       ],
-      "priority": "per variant (W1, W2 = P1; W3-W6 = P3; W7 = P5)",
+      "priority": "per variant (W1, W2Z, W2 = P1; W3-W6 = P3; W7 = P5)",
       "reasoning_question": {
         "W1": "None of these looks likely to stay within your limit. Is there another way to get there?",
         "W2": "Is it really just {option_label} or carry on as now? What other routes are there?",
@@ -127,7 +136,8 @@ export const POLICY = {
         "W4": "Would carrying on as now be a real option worth comparing against?",
         "W5": "These options come out about the same. Is there a hybrid that takes the best of each?",
         "W6": "What else could stop this working?",
-        "W7": "What else really drives {goal_label}?"
+        "W7": "What else really drives {goal_label}?",
+        "W2Z": "What could you actually do about {goal_label}? Name the routes you are weighing."
       },
       "short_copy": {
         "W1": "Every option looks likely to break your limit. Worth finding another route?",
@@ -136,7 +146,8 @@ export const POLICY = {
         "W4": "Comparing against 'carry on as now' shows what each change really adds.",
         "W5": "The options come out close. A hybrid might beat both.",
         "W6": "Only one risk is on the map. What else could go wrong?",
-        "W7": "Few drivers are mapped for {goal_label}. What else moves it?"
+        "W7": "Few drivers are mapped for {goal_label}. What else moves it?",
+        "W2Z": "No options on the table yet. What could you do?"
       },
       "why_now": {
         "W1": "The analysis checked your limit and no option clears it.",
@@ -145,7 +156,8 @@ export const POLICY = {
         "W4": "There is no 'carry on as now' option to compare with.",
         "W5": "The analysis could not separate the options.",
         "W6": "The model has at most one risk.",
-        "W7": "Two or fewer factors lead to the goal."
+        "W7": "Two or fewer factors lead to the goal.",
+        "W2Z": "The model has a goal but no option besides carrying on as now."
       },
       "primary_action": {
         "label": {
@@ -184,7 +196,8 @@ export const POLICY = {
           "run.withheld_reason (W1 and W5 only)",
           "sorted(model.risk_ids) (target risks only)"
         ],
-        "note": "W2-W4 and W7 keys exclude withheld_reason, so a new limit verdict alone does not bring the row back. Options added through this method change the key; the row returns only while a variant still holds."
+        "note": "W2-W4 and W7 keys exclude withheld_reason, so a new limit verdict alone does not bring the row back. Options added through this method change the key; the row returns only while a variant still holds.",
+        "shape": "{variant_id, target, non_sq_option_ids (sorted)} + withheld_reason for W1/W5 + risk_ids (sorted) for target risks"
       },
       "cooldown_rule": "Default cooldown (selection.cooldown_default).",
       "reentry_rule": "Returns only when the option set (or risk set for W6) or withheld_reason changes AND a variant still holds.",
@@ -203,8 +216,8 @@ export const POLICY = {
           "Samuelson & Zeckhauser (1988) status quo bias"
         ],
         "dsk": [
-          "DSK-P-004 (opportunity cost prompting, elicit_options)",
-          "DSK-B-007 (option-set size)"
+          "DSK-B-007 (option-set size)",
+          "DSK-P-004 (opportunity cost prompting, elicit_options): frame|ideate only, never for go/no-go; badge only via MethodScienceContext (method_turns.shared.dsk_provenance)"
         ]
       },
       "replaces": [
@@ -217,7 +230,8 @@ export const POLICY = {
         "A-WIDEN-REENTERS-ON-NEW-OPTION-SET",
         "A-WHAT-CHANGES-NONE-MEASURABLE-SILENT",
         "A-DECISION-POINT-SUPPRESSES",
-        "A-TWO-LOAD-HIDDEN-AFTER-RELOAD"
+        "A-TWO-LOAD-HIDDEN-AFTER-RELOAD",
+        "A-WIDEN-NO-OPTIONS"
       ]
     },
     {
@@ -285,7 +299,8 @@ export const POLICY = {
           "run.run_key",
           "run.decision_sensitivity.most_sensitive.factor_id",
           "run.decision_sensitivity.most_sensitive.range"
-        ]
+        ],
+        "shape": "{run_key, factor_id, range}"
       },
       "cooldown_rule": "Default cooldown.",
       "reentry_rule": "Returns after a new Run whose most sensitive factor differs, or after that factor's value or authorship changed.",
@@ -317,7 +332,8 @@ export const POLICY = {
         "A-WHAT-CHANGES-MEASURED",
         "A-WHAT-CHANGES-NONE-MEASURABLE-SILENT",
         "A-D2-RUN2-WIDEN-P1",
-        "A-STALE-SILENT"
+        "A-STALE-SILENT",
+        "A-WHAT-CHANGES-ASKED-HONEST-LIMIT"
       ],
       "note": "Expect this row to fire rarely today: factor_evppi is structurally flat in additive lever models (P3C A2), and every served run read on 1 Oct had EVPPI empty or below resolution and every flip_thresholds row no_flip_in_range. Silence is the correct output there. It fires once identity kinds (product, stock-flow) make a factor interact with a lever."
     },
@@ -421,13 +437,15 @@ export const POLICY = {
       "state_key": {
         "fields": [
           "item_id",
-          "item value or strength band (hashed)",
-          "model.link_sizing(item) or model.value_authorship(item)"
+          "link_sizing (links) | value_authorship (factors)",
+          "value_hash"
         ],
-        "scope": "per item: dismissing X does not block Y"
+        "shape": "{item_id, link_sizing, value_hash} for a link; {item_id, value_authorship, value_hash} for a factor (exact JSON, as acceptance-cases records it)",
+        "scope": "per item: dismissing X does not block Y",
+        "note": "Content-free: value_hash is computeResponseHash of the STORED value (link {strength, exists_probability, effect_direction}; factor observed_state {value, raw_value, unit, baseline, cap}), never the value itself. A user edit makes the item yours, which ends its eligibility; a changed Olumi estimate brings a dismissed item back (RC ruling for AI HARNESS 5936122586)."
       },
       "cooldown_rule": "Default cooldown, per item. At most one RC-STRENGTHEN-ITEM offer per turn.",
-      "reentry_rule": "Item X returns only if its value, strength or authorship changes, or it becomes S1/S2 after a new Run.",
+      "reentry_rule": "Item X returns only if its sizing, authorship or stored value (value_hash) changes, or it becomes S1/S2 after a new Run.",
       "completion_rule": "Completed when X's authorship changes (user or olumi_accepted) or the method turn answers.",
       "truth_dependencies": [
         "linkSizing (F1b, #2446)",
@@ -475,7 +493,10 @@ export const POLICY = {
           "run.leader_licensed == true",
           "len(model.non_sq_option_ids) == 1 AND len(model.risk_ids) >= 1"
         ],
-        "explicit_request": "On user.explicit_request with a goal and at least one option, run it at any stage. With no current Run, use the qualitative protocol: no invented winner, probability or figure (SCI-09)."
+        "explicit_request": "On user.explicit_request with a goal and at least one option, run it at any stage. The plan is the licensed leader, else the single user option; with no licensed leader and 2+ user options the method first asks which option to stress-test (mode choose_plan: one button per user option + 'Talk it through'; the pick is user-selected, PTL 5933036532 #5), then runs on it. With no current Run, use the qualitative protocol: no invented winner, probability or figure (SCI-09).",
+        "none": [
+          "run.withheld_reason in [no_option_meets_limit, every_option_likely_breaks_limit]"
+        ]
       },
       "required_typed_signals": [
         "model.goal_horizon",
@@ -484,7 +505,8 @@ export const POLICY = {
         "model.risk_ids",
         "run.kind",
         "run.leader_licensed",
-        "turn.request"
+        "turn.request",
+        "user.selected_option_id"
       ],
       "forbidden_without": [
         "model.goal_present",
@@ -494,6 +516,7 @@ export const POLICY = {
         "open.decision_point",
         "turn.request == run_result",
         "guidance[RC-PREMORTEM] completed with an unchanged state_key (never rerun without new cause, SCI-08)",
+        "run.withheld_reason in [no_option_meets_limit, every_option_likely_breaks_limit]: the analysis already shows every option likely misses a limit, so there is no plan to stress (DSK-P-001 needs an identified winning option); RC-WIDEN W1 is the move",
         "pre-structure: no goal or no option"
       ],
       "priority": "P4",
@@ -526,7 +549,8 @@ export const POLICY = {
           "leader option id if licensed else the single option id",
           "sorted(model.non_sq_option_ids)"
         ],
-        "note": "Deliberately excludes the risk set. Risks added by the pre-mortem itself must not make it come back (SCI-08)."
+        "note": "Deliberately excludes the risk set. Risks added by the pre-mortem itself must not make it come back (SCI-08).",
+        "shape": "{plan_option_id, non_sq_option_ids (sorted)}"
       },
       "cooldown_rule": "Default cooldown.",
       "reentry_rule": "Returns only when the plan under test (the leader) or the option set changes.",
@@ -550,7 +574,9 @@ export const POLICY = {
           "Klein (2007) Performing a project premortem, HBR"
         ],
         "dsk": [
-          "DSK-P-001 (Pre-mortem exercise)"
+          "DSK-P-001 (Pre-mortem exercise): evaluate|decide, not with one option and no meaningful alternatives; badge only via MethodScienceContext",
+          "DSK-TR-001 (re-grounded; see dsk_trigger_map)",
+          "DSK-T-001"
         ]
       },
       "replaces": [
@@ -607,8 +633,9 @@ export const POLICY = {
       "progressive_detail": "Each bullet expands to the specific item (O1 / F2 numbering) on click.",
       "state_key": {
         "fields": [
-          "sorted (entity_id, field, after-value hash) of uncoached edits"
-        ]
+          "edits: the uncoached goal-path edits, each {kind, entity_id, field, after_hash}"
+        ],
+        "shape": "{edits: [...]} compared as a set"
       },
       "cooldown_rule": "Default cooldown; a new edit makes a new key.",
       "reentry_rule": "Returns when there is at least one goal-path edit not in the last coached set.",
@@ -668,7 +695,7 @@ export const POLICY = {
     "label_case": "Option labels ({option_label}, {plan_label}, {leader_label}) are quoted in single curly quotes and keep their case: 'Imagine ‘Switch to GCP’ has failed.' Other mid-sentence labels lower-case their first letter unless the first word is an acronym or proper noun (second letter upper-case, e.g. 'GCP', 'AI'). A label that opens the sentence keeps its capital."
   },
   "method_turns": {
-    "purpose": "What a method must produce when pressed. Every post_check is a DETERMINISTIC text rule with an id (Ticket 1 implements all of them in checkMethodTurn). Rules that need structured output are listed under structured_checks; they are AI HARNESS's (method-turn output format) and are NOT part of the text checker. If a text check fails, send the deterministic fallback instead.",
+    "purpose": "What a method must produce when pressed. Every post_check is a DETERMINISTIC text rule with an id (Ticket 1 implements all of them in checkMethodTurn). Rules that need structured output are listed under structured_checks; they are AI HARNESS's (method-turn output format) and are NOT part of the text checker. The runtime checks the draft BEFORE it is sent (shared.runtime); if any check fails, it sends the deterministic fallback instead.",
     "shared": {
       "shape": "One-line insight, then the method's body, then ONE action (Grammar §3). Details collapsed.",
       "grounding": "Only the typed inputs listed per method plus the user's own words. Every specific claim names a supplied item by its label or ref (O1, F2, R1).",
@@ -680,24 +707,66 @@ export const POLICY = {
       ],
       "max_words": 180,
       "parsing": {
-        "numbered_items": "items start on a new line with /^\\s*[1-9]\\.\\s/ ; an item runs until the next numbered line or the end",
+        "numbered_items": "items start on a new line with /^\\s*[1-9]\\.\\s/ ; an item runs until the next numbered line, an 'Outside the model:' line, or the end",
         "bullet_items": "items start on a new line with /^\\s*-\\s/ ; the item NAME is the text before the first ':' on that line",
         "normalise": "lower-case, curly quotes to straight, strip punctuation and collapse whitespace",
         "label_match": "case-insensitive substring match of a supplied label after normalise, or a supplied ref (O1, F2, R1) as a whole word",
-        "number_tokens": "/(?<![A-Za-z])[£$€]?\\d[\\d,]*(\\.\\d+)?\\s*(%|k|m|bn)?/i, ignoring list markers at the start of a line; a token is 'supplied' if its digits appear in the inputs, the brief or the user's messages"
+        "number_tokens": "/(?<![A-Za-z])[£$€]?\\d[\\d,]*(\\.\\d+)?\\s*(%|k|m|bn)?/i, ignoring list markers at the start of a line; a token is 'supplied' if its digits appear in the inputs, the brief or the user's messages",
+        "blindspot_line": "a line matching /^\\s*Outside the model:\\s/ ; it is never part of a numbered item",
+        "item_match": "a supplied item {id, labels[], ref?} matches a text when its ref appears as a whole word, or when EVERY one of its labels label_matches (a link carries its two end labels, so the text must name both ends)",
+        "target": "per numbered item: the id of the FIRST supplied item, in supplied order, that matches it; null when none does"
+      },
+      "runtime": {
+        "rule": "The runtime calls checkMethodTurn on the draft reply BEFORE sending it. Any failed id: send the row's deterministic fallback instead. Never repair and resend, never a second LLM call, never a post-hoc score in place of the check.",
+        "never": [
+          "a method turn on request 1 of the two-request Run",
+          "an extra LLM call inside a Run"
+        ],
+        "source": "PTL 5933036532 #6, PTL 5933069264 #11-12"
+      },
+      "action_target": {
+        "rule": "Every grounded failure story (RC-PREMORTEM) or option gap (RC-WIDEN) carries the id of the node, link or option it rests on. The turn ends in ONE existing typed change card on one of those ids: confirm, the Run goes stale, rerun, then the Changes delta (RERUN-EXPLANATION states a cause only for C1_attributable). With no target the turn is discussion only, and it does not count as the investor moment.",
+        "cards": "The agent lane's propose_* card tools (src/orchestrator-v5/agent-lane/runtime/agent-tools.ts @ e3fb5090): propose_link_strengths (Olumi's band for the user to accept or edit; NEVER the singular propose_link_strength at :366, which is user-authored and refuses a band the user did not state, PTL 5933901307), propose_assumptions (:231, sets a factor to a stated assumption), propose_new_risk (:450), propose_new_option (:278; with a stored Olumi option's exact label it offers adoption, i.e. adopt_olumi_option), propose_new_factor (:484), propose_limit_change (:506). RC names the card; AI HARNESS composes it through the existing door. Nothing changes without Apply. Changing a limit to fit the plan is never a coaching action.",
+        "pass_condition": "Investor moment (DL 5933063973 addition 2): the user acted on the challenge and saw the consequence, in R3's same F5 capture (D2, D3). The PM-*/WD-* pass rate is secondary.",
+        "source": "DL 5933063973 additions 1-2",
+        "grounded_inputs_shape": "supplied_items = SCIENCE/DSK MethodScienceContext.grounded_inputs, passed unchanged: {id, kind: link|factor|risk|limit, labels[] (a link carries its two end labels), ref?, card} in ACTION-PRIORITY order. Labels and classes only, never a value. The reply names items by label; the checker returns the ids; an id never appears in the text."
+      },
+      "dsk_provenance": {
+        "rule": "RC never asserts a DSK badge. A method turn shows DSK provenance only when SCIENCE/DSK's MethodScienceContext returns an applicable protocol id (one canonical lifecycle stage + every contraindication). No canonical stage, no citation. run.kind is currentness, never a stage. Without a badge the method still runs as product coaching.",
+        "known_at_bundle_v1_0_0": [
+          {
+            "row": "RC-WIDEN W1/W5 after a Run (D2 run 2)",
+            "dsk": "none",
+            "why": "DSK-P-004 applies at frame|ideate only (DL 5933063973 (a))"
+          },
+          {
+            "row": "RC-WIDEN W2/W2Z (one option, or none, against the status quo)",
+            "dsk": "none at any stage",
+            "why": "DSK-P-004 contraindication: 'Do not run for binary go/no-go decisions'"
+          },
+          {
+            "row": "RC-PREMORTEM with one non-status-quo option",
+            "dsk": "none",
+            "why": "DSK-P-001 contraindication: only one option and no meaningful alternatives (PTL 5933036532 #3)"
+          },
+          {
+            "row": "RC-PREMORTEM on an explicit request before evaluate",
+            "dsk": "none",
+            "why": "DSK-P-001 applies at evaluate|decide only"
+          }
+        ],
+        "owner": "SCIENCE/DSK owns applicability and the badge; RC owns the method shape, checks and fallback; AI HARNESS composes (PTL 5933036532 owner split)."
       }
     },
     "RC-PREMORTEM": {
       "inputs": [
-        "plan: option label + ref (leader if licensed, else the single user option)",
+        "plan: option label (leader if licensed, else the single user option); NOT a supplied item, so naming it alone is not grounding",
         "goal label, target and horizon if set",
-        "risk nodes on the plan's path: label + ref",
-        "links on the plan's path with link_sizing placeholder or olumi_estimate: from/to labels",
-        "limits: label + verdict class (met | likely broken | not checked)",
+        "supplied_items (shared.action_target.grounded_inputs_shape) in ACTION-PRIORITY order: (1) links on the plan's path with link_sizing placeholder or olumi_estimate, nearest the goal first (card propose_link_strengths); (2) goal-path factors whose value authorship is olumi_estimate, label + class only (card propose_assumptions); (3) risks on the plan's path (card propose_new_risk); (4) limits: label + verdict class (card propose_new_risk, a new risk into the limit)",
         "figures the user stated (label + value)"
       ],
-      "body": "2-3 failure stories told in the past tense ('It is a year later and ‘Switch to GCP’ went badly because…'). Each story: one or two sentences, names at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action.",
-      "action": "'Add this as a risk' (a change card for one story's risk, nothing added without Apply) or 'Talk it through'.",
+      "body": "2 failure stories (at most 3) told in the past tense ('It is a year later and ‘Switch to GCP’ went badly because…'). Each story: one or two sentences, rests on at least one supplied item, then 'Watch for:' one early warning sign and 'Mitigate:' one action. Then ONE line 'Outside the model: …?': a blind spot the model does not capture (DSK-P-001 step 2), asked as a question, never asserted, never numbered.",
+      "action": "ONE change card on action_target, the story target with the lowest supplied index, using that item's card: propose_link_strengths (Olumi's current band to accept or edit, the same door as M1's S1 card) for a link, propose_assumptions (the S3V card) for a factor, propose_new_risk ('Add this as a risk': a new risk linked into the target, label proposed from the story and editable on the card) for a risk or limit. Secondary: 'Talk it through'. Nothing is added without Apply.",
       "post_checks": [
         {
           "id": "PM-COUNT",
@@ -705,7 +774,7 @@ export const POLICY = {
         },
         {
           "id": "PM-GROUNDED",
-          "rule": "every numbered item label_matches >= 1 supplied label or ref"
+          "rule": "every numbered item has a target (matches >= 1 supplied item); the plan label alone does not count"
         },
         {
           "id": "PM-WATCH-MITIGATE",
@@ -722,11 +791,28 @@ export const POLICY = {
         {
           "id": "PM-PLAN-ONLY",
           "rule": "no current option label other than the plan's label_matches"
+        },
+        {
+          "id": "PM-BLINDSPOT",
+          "rule": "exactly one blindspot_line; it ends with '?'; every numbered line comes before it"
         }
       ],
-      "fallback": "Deterministic, no LLM: 'Imagine ‘{plan}’ has gone badly. Start with {first risk or Olumi-estimated link}: how would you notice it early, and what would you do?' plus the 'Talk it through' action.",
-      "science": "Prospective hindsight (Mitchell, Russo & Pennington 1989; Klein 2007; DSK-P-001).",
-      "format": "Insight line, then 2-3 stories as a numbered list; each story contains 'Watch for:' and 'Mitigate:'."
+      "fallback": "Deterministic, no LLM: 'Imagine ‘{plan}’ has gone badly. Start with {first supplied item}: how would you notice it early, and what would you do?' with that item's card, plus 'Talk it through'.",
+      "science": "Prospective hindsight (Mitchell, Russo & Pennington 1989; Klein 2007). DSK-P-001 provenance only through MethodScienceContext (shared.dsk_provenance).",
+      "format": "Insight line, then 2-3 stories as a numbered list (each contains 'Watch for:' and 'Mitigate:'), then one 'Outside the model: …?' line.",
+      "targets": "checkMethodTurn returns targets[]: one per numbered item (parsing.target). The harness picks action_target from them.",
+      "wording_owner": "REASONING COACH owns the 'Outside the model: …?' wording and PM-BLINDSPOT (PTL 5933600218); PTL/DL may challenge.",
+      "choose_plan": {
+        "when": "user.explicit_request == RC-PREMORTEM AND the METHOD plan is unknown (no licensed leader, no user.selected_option_id) AND len(model.non_sq_option_ids) >= 1",
+        "copy": "Which option do you want to stress-test?",
+        "action_kind": "choose_1_of_3",
+        "choices": "one button per model.non_sq_option_ids label (curly quotes, case kept), then 'Talk it through'",
+        "never": "pick a plan for the user, or name a leader the Run did not license",
+        "why": "D1 (the investor decision) has 2 options and a withheld leader; without this step the pre-mortem has no plan (RC reference selector, 1 Oct 14:5xZ).",
+        "then": "The press sets user.selected_option_id; the next method turn runs on that option (no second ask). METHOD plan = licensed leader > user.selected_option_id (still in non_sq). It is never auto-named (PTL 5933036532 #5, merged in SCIENCE/DSK #2466; SCIENCE/DSK 5937084931).",
+        "row_press_is_a_pick": "Pressing the RC-PREMORTEM ROW whose copy names the user's single option ('Imagine ‘Switch to GCP’ has failed…') IS the explicit pick: HARNESS sets user.selected_option_id to that option, so there is no one-button question. Only a GENERIC press (the static chip or the menu, which names no option) gets the choose_plan buttons, even for one option.",
+        "row_subject": "The ROW's subject (copy + cooldown key) may name the single user option: that is not a leader claim. The METHOD plan sent to SCIENCE/DSK follows the precedence above."
+      }
     },
     "RC-WIDEN": {
       "inputs": [
@@ -738,7 +824,7 @@ export const POLICY = {
         "the brief, verbatim"
       ],
       "body": "Up to 3 items that work through a materially DIFFERENT mechanism from the current ones (options), or name a different way the plan could fail (risks), or a different driver of the goal (factors). Each item: a name of 6 words or fewer, then one line saying what it changes and why it might do better. Start with any Olumi-proposed option already left out of the comparison.",
-      "action": "Decision-point buttons: 'Add' per item, then 'Something else' (choose_1_of_3). Each Add lands as ONE change card.",
+      "action": "Decision-point buttons: 'Add' per item, then 'Something else' (choose_1_of_3). Each Add lands as ONE change card on the item's refs: propose_new_option (a left-out Olumi option by its exact label = adoption; a new lever via its new_factors) for target options; propose_new_risk for risks; propose_new_factor for factors.",
       "post_checks": [
         {
           "id": "WD-COUNT",
@@ -758,12 +844,12 @@ export const POLICY = {
         }
       ],
       "fallback": "Deterministic: list the Olumi-proposed options left out (if any) as Add buttons; else 'What other way could you reach {goal}? For example, a different lever, a smaller first step, or a mix of these options.' with 'Talk it through'.",
-      "science": "Generating alternatives before evaluating; 'whether or not' framing fails more often (Nutt 1999; Keeney 1992; DSK-P-004, DSK-B-007).",
+      "science": "Generating alternatives before evaluating; 'whether or not' framing fails more often (Nutt 1999; Keeney 1992; DSK-B-007). DSK-P-004 provenance only through MethodScienceContext (shared.dsk_provenance): never after a Run, never for go/no-go.",
       "format": "Insight line, then 1-3 items as bullets '- {name}: {one line on what it changes}'.",
       "structured_checks": {
         "owner": "AI HARNESS (method-turn output format); NOT in Ticket 1's text checker",
         "why": "A materially different option usually works through a lever that is not in the model yet, so free text cannot be checked against model factors.",
-        "requires": "the method turn returns items as {name, mechanism_kind: new_lever | hybrid | left_out_option | existing_factor, refs[]}",
+        "requires": "the method turn returns items as {name, mechanism_kind: new_lever | hybrid | left_out_option | existing_factor, refs[]}; refs are supplied ids (option, limit, shared-lever factor, risk or goal) that the gap rests on",
         "checks": [
           {
             "id": "WD-S-HYBRID",
@@ -780,6 +866,10 @@ export const POLICY = {
           {
             "id": "WD-S-NEWLEVER",
             "rule": "mechanism_kind new_lever: name and lever do not normalise-equal any shared-lever factor label"
+          },
+          {
+            "id": "WD-S-TARGET",
+            "rule": "every item has >= 1 ref and every ref is a supplied id (the gap it rests on; DL 5933063973 addition 1)"
           }
         ]
       }
@@ -812,7 +902,24 @@ export const POLICY = {
       ],
       "fallback": "Deterministic: the row's reasoning_question with the 'Give your estimate' action.",
       "science": "Value of information: attention goes to the input that can change the choice (Howard 1966).",
-      "format": "Insight line naming what was varied, up to 3 bullets on what would have to be true, then the question."
+      "format": "Insight line naming what was varied, up to 3 bullets on what would have to be true, then the question.",
+      "honest_limit": {
+        "when": "The user explicitly asks (menu, chip or user.explicit_request) AND run.decision_sensitivity.status in [none_measurable, not_measured]. The row is never OFFERED in this state; this is how the method answers when asked.",
+        "text": "Olumi can't yet measure what would change this choice in this model. The most useful thing to check meanwhile is {item_label}: it is Olumi's estimate and it sits on the path to your goal.",
+        "item": "The RC-STRENGTHEN-ITEM pick (S1, then S3L, then S3V). With no Olumi estimate on a goal path, drop the second sentence.",
+        "action": {
+          "label": "Give your estimate",
+          "action_kind": "edit_inline",
+          "target": "item"
+        },
+        "deterministic": "Fixed text: no LLM call. This is DL moment (b) 'or an honest limit', handing over to moment (a).",
+        "never": [
+          "'No single assumption measurably changes which option leads' or any rewording of it (AIQ P3C A2)",
+          "any claim that the choice is robust, safe or settled"
+        ],
+        "wording_owner": "REASONING COACH owns this copy (PTL 5933600218: AIQ is not a live lane); PTL/DL may challenge.",
+        "item_label": "link → 'how much {from} affects {to}'; factor → 'the figure for {label}' (label case rule applies)"
+      }
     },
     "RC-STRENGTHEN-ITEM": {
       "inputs": [
@@ -821,7 +928,7 @@ export const POLICY = {
         "options whose goal figures depend on it"
       ],
       "body": "Up to 3 bullets: what the figure means in plain words; one cheap way to pin it down (a number the user may already have, a quick test, someone to ask); what the user's own estimate would change for the comparison.",
-      "action": "'Give your estimate' (edit_inline), with 'Use Olumi's estimate' (confirm) as the secondary.",
+      "action": "ONE card per card_first (opens with the reply, no LLM): 'Give your estimate' (edit) with 'Use Olumi's estimate' (accept) as the secondary.",
       "post_checks": [
         {
           "id": "ST-NAMES-ITEM",
@@ -838,7 +945,22 @@ export const POLICY = {
       ],
       "fallback": "Deterministic: the row's reasoning_question with the inline edit.",
       "science": "Assumption-based planning (Dewar 2002).",
-      "format": "Up to 3 bullets: what the figure means, one cheap way to pin it down, what the user's estimate would change."
+      "format": "Up to 3 bullets: what the figure means, one cheap way to pin it down, what the user's estimate would change.",
+      "card_first": {
+        "rule": "Pressing the row opens ONE card for the item at once, deterministically, with no LLM call: the reply is the row's fixed copy (title + reasoning_question) plus the card. An LLM body (below) is optional, may follow, and never gates or delays the card.",
+        "card_by_variant": {
+          "S1 (placeholder link on the CURRENT Run's analysed options)": "HARNESS calls the existing propose_link_strengths door with ONE link, its current band and no from_words; the existing model-proposed/CAS/approval/readback logic owns the card. 'Edit the strength' (the amend chip) is a first-class choice (DL 5933793238 #3)."
+        },
+        "then": "Apply → Run goes stale → rerun → Changes delta + RERUN-EXPLANATION (a cause only for C1_attributable).",
+        "why": "R3 5933558156 (D1, CEE 62730d66): the static 'Strengthen the model' gave a GOOD grounded challenge but no card, so no typed action, a C0_identical rerun and 37.1 s. M1 must be actionable and fast (PTL 5933452605).",
+        "owner": "AI HARNESS composes the card through the existing door (T2/T3); RC owns this rule.",
+        "served_status": "UI for the S1 one-click is NOT served (DGAI #2408 open). The propose_link_strengths approval card renders today through the existing approval chips (agent-approve-proposal / agent-amend-proposal).",
+        "scope": "FAST PATH = S1 ONLY (PTL 5933844703 #2). S3L/S3V are still selected and offered, but their press runs the ordinary method turn: an Olumi-estimated link is not writable as a no-change accept through today's propose_link_strengths, and propose_assumptions keep:true needs the user to have said the estimate is right.",
+        "authorship": "Apply on accept records Olumi's estimate, accepted by you (olumi_accepted); never user_stated (DL 5933793238 #2). An edited strength is the user's.",
+        "pass_bar": "R3's investor row passes only if the rerun's Changes delta shows a moved or un-withheld figure (the R2 withhold lifts once the link is sized), not a provenance-only change (DL 5933793238 #3, 5933799344 #3).",
+        "one_picker": "The S1 target comes from ONE pure helper that T1's selector also imports (DL #1, PTL #1/#5). The fast path never re-implements the pick.",
+        "ui_path": "When T4 (PANEL) renders the RC-STRENGTHEN-ITEM row, its ONE action may invoke the SERVED Reasoning-tab controls for the row's item instead of a chat card: 'Accept Olumi's estimate' = #2408 proposeEdgeStrengthConfirmation, 'Edit the strength' = openEdgeStrengthEditor (first-class). Same authority, same olumi_accepted result, 0 LLM, no CEE press branch needed. The row (title + reasoning_question) is still required: it is M1's 'Olumi surfaced the challenge'; the option-row 'N links not sized yet' is a status control, not the challenge (DL script 5937131361)."
+      }
     },
     "RC-COACH-EDITS": {
       "inputs": [
@@ -865,8 +987,73 @@ export const POLICY = {
       "fallback": "Deterministic: 'You changed {edit list}. That changes {assumption}. ' + the stale line when stale.",
       "science": "Timely feedback on one's own change (Kahneman & Klein 2009); consider the implications (DSK-P-003).",
       "format": "Insight line, then up to 3 bullets (what changed, the assumption it touches, what may change), then the stale line only if stale."
+    },
+    "RERUN-EXPLANATION": {
+      "purpose": "DL moment (c): revise → rerun → explain the difference. The narration of a RERUN (request 2) follows this; owner AI HARNESS (narration), signals from run_delta (CEE, strict schema).",
+      "inputs": [
+        "run_delta.attribution_case: C0_identical | C1_attributable | C2_unpaired",
+        "run_delta.input_changes[]: label, field, before, after",
+        "run_delta.input_coverage",
+        "run_delta.leader.changed + noise_verdict",
+        "run.leader_licensed",
+        "no_matched_figures: run_delta.win_probabilities is empty (AVAILABLE today: 'no comparable pair', any cause)",
+        "prior_withheld: run_delta.win_probabilities_unavailable == 'prior_withheld' (schemas 0.70.0, 52f8cd 5937207590; PENDING until CEE emits it). While pending it is absent, so the UNWITHHELD wording is never used."
+      ],
+      "body": {
+        "C0_identical": "Same inputs as the last run; say the result is unchanged, nothing more.",
+        "C1_attributable": "Name each change (up to 3, before → after). Say what moved in the comparison. A cause may be stated, because the pair isolates the edit.",
+        "C2_unpaired": "Name each change. Say the two runs differ in more than your edit (a new draw), so Olumi can't attribute the difference to the edit alone. State no cause.",
+        "UNWITHHELD": "Only when prior_withheld is TRUE (typed; never inferred from an empty array): name each change, say that this is what held the comparison back, and that Olumi can now compare the options. Never describe a movement: the earlier run had no figures. Name a leader only if run.leader_licensed (with its caveat).",
+        "NO_MATCHED_FIGURES": "When no_matched_figures and prior_withheld is not true: name each change and describe no movement; say only what the run now shows (CANVAS's interim pill: 'This pair has no matched figures to compare.')."
+      },
+      "format": "One-line insight, then up to 3 bullets (one per change), then one line on what moved.",
+      "post_checks": [
+        {
+          "id": "RX-NAMES-CHANGES",
+          "rule": "label_matches every input_changes label (up to 3)"
+        },
+        {
+          "id": "RX-NO-CAUSE-UNPAIRED",
+          "rule": "if attribution_case != C1_attributable: no /\\b(because (you|of your)|caused|due to your|as a result of your|led to)\\b/i"
+        },
+        {
+          "id": "RX-NO-LEADER-UNLICENSED",
+          "rule": "if run.leader_licensed is false: no current option label appears together with /\\b(leads|ahead|best|wins|now first)\\b/i in the same sentence"
+        },
+        {
+          "id": "RX-NOISE",
+          "rule": "if leader.noise_verdict is not_noise_qualified: no /\\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\\b/i"
+        },
+        {
+          "id": "RX-NO-MOVEMENT-WITHOUT-PRIOR",
+          "rule": "if prior_withheld OR no_matched_figures: no /\\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\\b/i"
+        }
+      ],
+      "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD: 'That was what held the comparison back, so Olumi can now compare the options.' | C2: 'This run also used a new draw, so the difference can't be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
+      "change_label_templates": {
+        "accept_olumi_estimate": {
+          "when": "run_delta.input_changes[] row with field 'sizing', before 'placeholder', after 'olumi_accepted'",
+          "label": "You accepted Olumi's estimate for how much {from} changes {to}."
+        },
+        "user_estimate": {
+          "when": "run_delta.input_changes[] row with field 'sizing', after 'user' (linkSizing literal, CEE src/cee/magnitude/link-sizing.ts:30 @8ee43f7a; the 'Edit the strength' path)",
+          "label": "You gave your own estimate for how much {from} changes {to}."
+        },
+        "source": "@talchain/schemas 0.70.0 (additive; 52f8cd 5937207590 + 5937225976): snapshot links[].sizing + links[].band, RunInputField 'sizing' (raw linkSizing classes) and 'strength' (raw band words); a mean move inside one band and one sizing stays partial with no row. CEE emits only once the UI vendors 0.70.",
+        "why": "A provenance-only Accept or edit must still be named as a change (R3 5936613334; DL 5936679883 owner chain: 52f8cd producer, CANVAS words).",
+        "strength": {
+          "when": "run_delta.input_changes[] row with field 'strength' (band word before → after; 52f8cd addendum 5937225976)",
+          "label": "You changed how much {from} changes {to}: {before} → {after}."
+        },
+        "one_sentence_per_link": {
+          "rule": "A 'sizing' row and a 'strength' row for the SAME link (same label) are ONE change: one sentence, one bullet, and one entry in the up-to-3 count.",
+          "label": "You gave your own estimate for how much {from} changes {to}: {before} → {after}.",
+          "why": "'Edit the strength' writes both rows (sizing placeholder → user, band moved); two bullets for one edit reads as two edits."
+        }
+      },
+      "investor_moment": "M2 on the ruled seed (eeeff8b4): Accept both unsized links → Run → the comparison appears for the first time (R3 5936720411: provisional leader + win shares). This is the UNWITHHELD transition."
     }
   }
 } as const;
 
-export const SPEC_SHA = "6c4fbffdb4a7f783de9efbfb9eb2f2a25a73079b";
+export const SPEC_SHA = "a00cb9c817f5938f0cb5c79b4f196c2ef779ed83";

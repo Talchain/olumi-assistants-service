@@ -1,3 +1,4 @@
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ THE EXPLICIT RUN AFTER AN OPENAI APPROVAL (RC #63; Codex 5805970015: "served Agent
  * approval calls approvalChipsFor after authorise_change and that helper returns no chips").
@@ -67,7 +68,8 @@ describe('the explicit Run is offered after a change the canonical readiness adm
         graph: { nodes: [{ id: 'f1', kind: 'factor', label: 'Team size' }, { id: 'o1', kind: 'outcome', label: 'Velocity' }, { id: 'f2', kind: 'factor', label: 'Tooling' }], edges },
         graph_hash: `h${edges.length}`,
         analysis_ready: readiness,
-        analysis_state: analysisState,
+        analysis_state: runs > 0 ? { ...analysisState, run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' } } : analysisState,
+        ...(runs > 0 ? { analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } } } : {}),
       };
     });
     a.post('/orchestrate/v2/turn', async (req) => {
@@ -132,6 +134,9 @@ describe('the explicit Run is offered after a change the canonical readiness adm
       kind: 'message', scenario_id: SCENARIO, message: run.message, source: 'chip', chip: { id: run.id, action_type: run.action_type },
     } });
     expect((r.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path).toBe('run');
+    expect(runs).toBe(1);
+    expect(modelBodies).toHaveLength(0);
+    await explainRun(app, SCENARIO, r);
     expect(runs).toBe(1);
     expect(modelBodies.map((m) => m['tool_choice'])).toEqual(['none']);
   });
