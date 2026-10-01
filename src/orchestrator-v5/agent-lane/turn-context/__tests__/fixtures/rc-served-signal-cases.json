@@ -1,5 +1,5 @@
 {
- "source": "programme-docs rc/reasoning-coach-20261001 @d9d9e34069e23ba3ab78181f48acf7ecd7d64dcc acceptance-cases.json + captures/ (served Agent responses, R3 F5 runs, 1 Oct)",
+ "source": "programme-docs rc/reasoning-coach-20261001 @24883c2dbb2bc579ba4c76ff0e280a5bd119504e acceptance-cases.json + captures/ (served Agent responses, R3 F5 runs, 1 Oct)",
  "cases": [
   {
    "id": "A-D2-RUN2-WIDEN-P1",
@@ -1070,7 +1070,7 @@
      "angel_investor_outreach": "Angel investor outreach",
      "angel_outreach_pilot": "Angel outreach pilot"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "distraction_from_investment_firm_fundraising"
     ],
@@ -2207,7 +2207,7 @@
      "split_sprint_capacity": "Split Sprint Capacity",
      "continue_current_plan": "Continue Current Plan"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "revenue_lost_to_trial_abandonment"
     ],
@@ -3479,7 +3479,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -4690,7 +4690,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -6531,7 +6531,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
@@ -7680,7 +7680,7 @@
      "split_sprint_capacity": "Split Sprint Capacity",
      "continue_current_plan": "Continue Current Plan"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "revenue_lost_to_trial_abandonment"
     ],
@@ -9228,7 +9228,7 @@
      "angel_investor_outreach": "Angel investor outreach",
      "angel_outreach_pilot": "Angel outreach pilot"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "distraction_from_investment_firm_fundraising"
     ],
@@ -10386,7 +10386,7 @@
      "stay_on_aws": "Stay on AWS",
      "phased_gcp_migration": "Phased GCP migration"
     },
-    "model.same_lever": true,
+    "model.same_lever": false,
     "model.risk_ids": [
      "monthly_cloud_overspend_during_migration"
     ],
