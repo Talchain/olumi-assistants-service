@@ -88,7 +88,9 @@ const usersLevel = (n: Rec): boolean => {
 /** Whether a move of `n` from `Fold` to `F` would shift the spread PLoT samples for it, in natural units. */
 function spreadWouldMove(n: Rec, Fold: number, F: number): boolean {
   const os = n.observed_state;
-  if (n.kind !== 'factor' || os === undefined || !num(os.value)) return false;
+  // ⭐ A4f (R3 #75 5923477350): keyed on HOLDING a sampled level, not on kind: an outcome or risk that holds one keeps
+  // this guard once outcomes can be widened. The goal reads as before.
+  if (n.kind === 'goal' || os === undefined || !num(os.value)) return false;
   if (num(os.std) && os.std > 0) {
     const carried = (os.std * Fold) / F;
     return carried < MIN_STD || carried > MAX_STD || os.std < MIN_STD || os.std > MAX_STD;

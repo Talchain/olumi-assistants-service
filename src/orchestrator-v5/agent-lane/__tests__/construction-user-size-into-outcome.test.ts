@@ -160,6 +160,15 @@ describe('A4f on the served paul-1 graph (0 LLM)', () => {
     expect(r.graph.nodes[0]).toEqual(before.nodes[0]); // the goal is untouched
   });
 
+  it('control: an OUTCOME that holds a sampled level (Olumi\'s, no std) keeps the spread guard — refused, the graph as it came', () => {
+    const before = servedPaul1();
+    before.nodes[4].observed_state = { value: 0.4, raw_value: 2000000, source: 'cee_inference' };
+    delete before.nodes[4].scale_frame;
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refused).toEqual([{ link: 'investment_firm_deals_closed→investment_firm_funding_secured', reason: 'spread_would_move' }]);
+    expect(r.graph).toBe(before);
+  });
+
   it('control: the same size into a FACTOR is still refused, the graph returned as it came', () => {
     const before = servedPaul1('factor');
     const r = refitFramesForStatedEffects(before);
