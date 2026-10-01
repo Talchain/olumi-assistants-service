@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync } from 'node:fs';
-import { caveatOncePerRun, noteCaveatShown, resetCaveatRecordForTests, runAtOf } from '../caveat-once.js';
+import { caveatOncePerRun, noteCaveatShown, resetCaveatRecordForTests, runAtOf, type CaveatTurn } from '../caveat-once.js';
 import { PROVISIONAL_FIGURES_CAVEAT, PROVISIONAL_FIGURES_CAVEATS } from '../../compose/leading-option-wire-enforcement.js';
 
 type Rec = Record<string, unknown>;
@@ -21,7 +21,7 @@ const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const turn = (o: { ranThisTurn?: boolean; at?: string; scenarioId?: string; kind?: string } = {}) =>
   ({ scenarioId: o.scenarioId ?? 's-1', ranThisTurn: o.ranThisTurn ?? false, analysisState: { run_state: { kind: o.kind ?? 'complete_current', computed_at: o.at ?? RUN_AT } }, graph: G });
 /** As the route does it: decide, then record what is SENT. */
-const withCaveatOncePerRun = (text: string, t: ReturnType<typeof turn> & { blocks?: unknown }): string => {
+const withCaveatOncePerRun = (text: string, t: CaveatTurn): string => {
   const out = caveatOncePerRun(text, t);
   noteCaveatShown(out, t);
   return out;
