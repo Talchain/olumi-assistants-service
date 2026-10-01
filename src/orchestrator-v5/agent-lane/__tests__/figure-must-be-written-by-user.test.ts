@@ -229,8 +229,10 @@ describe('the Agent route binds the user\'s words to every tool it runs', () => 
     expect(route).toContain('if (typedNow !== null) histories.recordTyped(sessionId, typedNow);');
     expect(route).not.toContain('userWordsOf(history');
     expect(route).not.toContain('{ scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id }');
-    // Declared once; used at the four dispatch sites (incl. the route-issued confirm card, #2310) and the turn's state read (slice C1).
+    // Declared once; used at the five dispatch sites (incl. the route-issued confirm card, #2310, and the T3 method turn's
+    // ONE card) and the turn's state read (slice C1).
     expect(route).toContain("dispatchTool('propose_identity', '{}', toolCtx, capabilities, mode)");
-    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the four dispatch sites and the state read').toBe(6);
+    expect(route).toContain('await dispatchTool(card.tool, JSON.stringify(card.args), toolCtx, capabilities, mode)');
+    expect(route.match(/\btoolCtx\b/g)?.length, 'declared once, used at the five dispatch sites and the state read').toBe(7);
   });
 });
