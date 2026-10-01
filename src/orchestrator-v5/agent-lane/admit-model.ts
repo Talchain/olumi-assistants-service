@@ -4501,12 +4501,22 @@ function admitOnce(
       const beta = partFrame / totalFrame;
       if (!(beta > 0 && beta <= 1)) return e;
       const { defaulted: _projection, ...edge } = e;
-      const { reasoning: _guess, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
+      // The identity is OLUMI'S reading (`stated_in_brief: false`), so the link's source is too: a drafter's `explicit`
+      // (`brief_extraction`) would read, once `defaulted` is gone, as a user-stated material parameter (MG sweep N1).
+      const { reasoning: _guess, source: _drafted, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
       const natural_effect = { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: source.unit ?? unit,
         strength_mean: beta, strength_mean_frame: 'edge_strength' as const };
       return { ...edge, strength: { mean: beta, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,
-        provenance: { ...provenance, magnitude: 'olumi_estimate' as const, natural_effect, definitional: true as const } };
+        provenance: { ...provenance, source: 'cee_hypothesis', magnitude: 'olumi_estimate' as const, natural_effect, definitional: true as const } };
     });
+    // The sizer asked about each part's size BEFORE it became a definition ("Nobody has said, so Olumi uses a placeholder
+    // …"); that question is no longer true and is never shown (CODEX 5930239704, MG sweep C1). Only the rewritten edges.
+    const defined = new Set(finalEdges.filter((e) => e.provenance?.definitional === true && partsOf.get(e.to)?.has(e.from) === true)
+      .map((e) => `edges[${e.from}::${e.to}]`));
+    for (let i = loss.length - 1; i >= 0; i--) {
+      const at = /^(edges\[.*\])\.(?:magnitude_question|set_aside_estimate|magnitude_unconvertible)$/.exec(loss[i]!.field_path);
+      if (at !== null && defined.has(at[1]!)) loss.splice(i, 1);
+    }
   }
   const admittedNodes = carriers.size === 0
     ? levers.nodes

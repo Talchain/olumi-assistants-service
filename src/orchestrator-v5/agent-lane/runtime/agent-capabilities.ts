@@ -194,6 +194,7 @@ import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
 import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
+import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
@@ -1176,7 +1177,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
  * constant 0.8 on every headroom-derived cap), limits from `goal_constraints` as stored, link strength and
  * provenance as stored. Readiness is `readinessViewOf` — the route's own admission verdict, in plain words.
  */
-function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_ready'>): Record<string, unknown> {
+export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'analysis_state' | 'analysis_ready'>): Record<string, unknown> {
   const str = (v: unknown): v is string => typeof v === 'string' && v !== '';
   const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
   const labelOf = new Map(g.nodes.map((n) => [n.id, n.label] as const));
@@ -1242,6 +1243,7 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
    * proposes reads them. A link from an option that carries any other strength or existence keeps its full form.
    */
   const structuralFrom = new Set(g.nodes.filter((n) => n.kind === 'decision' || n.kind === 'option').map((n) => n.id));
+  const unitOfNode = nodeUnitOf(g.nodes);
   const links = g.edges.map((e) => {
     const source = (e.provenance !== null && typeof e.provenance === 'object') ? (e.provenance as { source?: unknown }).source : e.provenance;
     const st = (e.strength !== null && typeof e.strength === 'object') ? e.strength as { mean?: unknown; std?: unknown } : undefined;
@@ -1251,7 +1253,10 @@ function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw' | 'ana
     return {
       from: e.from,
       to: e.to,
-      ...(str(source) ? { source } : {}),
+      // ⛔ A link that HOLDS BY DEFINITION (checked: `holdsByDefinition`) is arithmetic, not "an assumption Olumi made":
+      // its source is said as `by_definition`, never `cee_hypothesis` (DL #2445 condition 1; MG sweep C5).
+      ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? { source: 'by_definition', holds_by_definition: true }
+        : str(source) ? { source } : {}),
       // R11: the user confirmed Olumi's strength for this link — still Olumi's figure, but not one to ask about again.
       ...(edgeReviewedByUser(e) ? { confirmed_by_user: true } : {}),
       ...(str(e.effect_direction) ? { direction: e.effect_direction } : {}),

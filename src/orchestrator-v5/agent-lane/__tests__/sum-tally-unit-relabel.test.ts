@@ -11,7 +11,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { findSumTallies } from '../admit-model.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
-import { PARTS_IDENTITY_UNMODELLED_REASON, placeholderPartsFinding } from '../../../orchestrator/context/placeholder-parts.js';
+import { PARTS_IDENTITY_UNMODELLED_REASON, placeholderPartsFinding, sizedLinkTest } from '../../../orchestrator/context/placeholder-parts.js';
+import { projectModelContext } from '../runtime/agent-capabilities.js';
+import { howStronglyWords } from '../strength-authorship-words.js';
 
 type Rec = Record<string, any>;
 const SERVED = (JSON.parse(readFileSync(new URL('./fixtures/served-paul-sprint-96c6f5f4.json', import.meta.url), 'utf8')) as { graph: Rec }).graph;
@@ -45,17 +47,20 @@ describe('R3-2 sum mint survives the limit-unit relabel', () => {
 const SEEDED = (JSON.parse(readFileSync(new URL('./fixtures/drafted-sprint-total-seeded.json', import.meta.url), 'utf8')) as { candidate: unknown }).candidate;
 const DRAFT_TOTAL = 'total_sprint_capacity_allocated';
 const DRAFT_PARTS = ['sprint_capacity_on_ai_reporting', 'sprint_capacity_on_integration_fix'];
-async function registered(): Promise<Rec> {
+async function registered(candidate: unknown = SEEDED): Promise<Rec> {
+  return (await built(candidate)).graph;
+}
+async function built(candidate: unknown = SEEDED): Promise<{ graph: Rec; result: Rec }> {
   let graph: Rec | null = null;
-  const fn = vi.fn(async () => ({ text: JSON.stringify(SEEDED) })) as unknown as CallStructuredModel;
+  const fn = vi.fn(async () => ({ text: JSON.stringify(candidate) })) as unknown as CallStructuredModel;
   const dispatch = (async (path: string, body: unknown) => {
     if (path.endsWith('/graph/register')) { graph = (body as { graph: Rec }).graph; return { status: 200, json: { model_version: { version_number: 1 } } }; }
     if (path.endsWith('/graph')) return { status: 200, json: { graph: { nodes: [] } } };
     return { status: 200, json: { versions: [] } };
   }) as unknown as InternalDispatch;
-  await buildModelFromBrief('96c6f5f4-0000-4000-8000-000000000001', 'sprint brief', dispatch, fn);
+  const result = await buildModelFromBrief('96c6f5f4-0000-4000-8000-000000000001', 'sprint brief', dispatch, fn) as unknown as Rec;
   if (graph === null) throw new Error('nothing registered');
-  return graph;
+  return { graph, result };
 }
 const optionsOf = (g: Rec): Rec[] => g.nodes.filter((n: Rec) => n.kind === 'option' && n.interventions && Object.keys(n.interventions).length > 0);
 
@@ -91,5 +96,76 @@ describe('construction: the total of the sprint levers is their SUM, and its lim
     const edges = g.edges.map((e: Rec) => (e.from === DRAFT_PARTS[0] && e.to === DRAFT_TOTAL
       ? { ...e, provenance: { ...e.provenance, definitional: undefined } } : e));
     expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, edges, [optionsOf(g)[0]])).toMatchObject({ reason: PARTS_IDENTITY_UNMODELLED_REASON });
+  });
+});
+
+// ── DL #2445 condition 1 (CODEX 5930239704; MG reader sweep output/mg-0ebb952a/cond1-readers.md): a definition is
+// arithmetic — never "Olumi's estimate", never a placeholder to ask about, never the user's own parameter. ──
+
+const PERCENT = JSON.parse(JSON.stringify(SEEDED).split('% of upcoming sprint capacity').join('%')) as Rec;
+const partEdges = (g: Rec): Rec[] => g.edges.filter((e: Rec) => e.to === DRAFT_TOTAL && DRAFT_PARTS.includes(e.from));
+const TOTAL_LABEL = 'Total sprint capacity allocated';
+
+describe('a part of a total is fixed by definition on every reader (DL #2445 condition 1)', () => {
+  it('RED (C1): no open question asks how much a part changes its total; the sum sentence stays (control)', async () => {
+    const { result } = await built();
+    const qs = (result.open_questions ?? []) as string[];
+    expect(qs.filter((q) => q.includes(`change "${TOTAL_LABEL}"`))).toEqual([]);
+    expect(qs.some((q) => q.includes(TOTAL_LABEL))).toBe(true);
+  });
+
+  it('RED (C2/C3): a total in plain "%" still scores its limit, and its parts read as sized', async () => {
+    const g = await registered(PERCENT);
+    expect(partEdges(g)).toHaveLength(2);
+    for (const e of partEdges(g)) expect(e.provenance).toMatchObject({ definitional: true, natural_effect: { amount_unit: '%' } });
+    for (const o of optionsOf(g)) expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, g.edges, [o])).toBeNull();
+    const sized = sizedLinkTest(g.nodes);
+    for (const e of partEdges(g)) expect(sized(e)).toBe(true);
+  });
+
+  it('control (C2/C3): the SAME link without the definition is still unsized, and the limit is withheld', async () => {
+    const g = await registered(PERCENT);
+    const edges = g.edges.map((e: Rec) => (partEdges(g).includes(e) ? { ...e, provenance: { ...e.provenance, definitional: undefined } } : e));
+    const sized = sizedLinkTest(g.nodes);
+    for (const e of edges.filter((x: Rec) => x.to === DRAFT_TOTAL && DRAFT_PARTS.includes(x.from))) expect(sized(e)).toBe(false);
+    expect(placeholderPartsFinding(DRAFT_TOTAL, g.nodes, edges, [optionsOf(g)[0]])).not.toBeNull();
+  });
+
+  it('RED (N1): a part link the drafter marked as stated in the brief is still Olumi\'s reading, not the user\'s', async () => {
+    const drafted = JSON.parse(JSON.stringify(SEEDED)) as Rec;
+    for (const l of drafted.links) if (l.to === TOTAL_LABEL) l.provenance = 'explicit';
+    const g = await registered(drafted);
+    expect(partEdges(g)).toHaveLength(2);
+    for (const e of partEdges(g)) expect(e.provenance).toMatchObject({ source: 'cee_hypothesis', definitional: true });
+  });
+
+  it('RED (C5): the Agent reads each part link as `by_definition`; an ordinary link keeps its own source (control)', async () => {
+    const g = await registered();
+    const ctx = projectModelContext({ nodes: g.nodes, edges: g.edges, raw: g, analysis_state: undefined, analysis_ready: undefined } as never) as Rec;
+    const links = ctx.links as Rec[];
+    const parts = links.filter((l) => l.to === DRAFT_TOTAL && DRAFT_PARTS.includes(l.from));
+    expect(parts).toHaveLength(2);
+    for (const l of parts) expect(l).toMatchObject({ source: 'by_definition', holds_by_definition: true });
+    const ordinary = links.filter((l) => l.to !== DRAFT_TOTAL && l.source !== undefined);
+    expect(ordinary.length).toBeGreaterThan(0);
+    for (const l of ordinary) expect(l.source).not.toBe('by_definition');
+  });
+});
+
+describe('howStronglyWords: who sized a link, with a definition as its own class (C4)', () => {
+  const def = { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate', definitional: true } };
+  const est = { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } };
+  const yours = { provenance: { source: 'user_specified', magnitude: 'user_stated' } };
+  const ph = { provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } };
+  it.each([
+    ['RED: a definition alone', [def], 'how strongly is fixed by definition: one for one.'],
+    ['control: an estimate alone', [est], 'how strongly is Olumi\'s estimate.'],
+    ['control: the user\'s own', [yours], 'how strongly is as you stated it.'],
+    ['control: a placeholder', [ph], 'how strongly is not known yet: Olumi used a placeholder strength, not an estimate.'],
+    ['RED: definition + estimate', [def, est], 'how strongly is partly fixed by definition and partly Olumi\'s estimate, not a measurement.'],
+    ['RED: the user\'s + a definition (nothing guessed)', [yours, def], 'how strongly is partly as you stated it and partly fixed by definition.'],
+    ['control: estimate + placeholder (unchanged words)', [est, ph], 'how strongly is partly Olumi\'s estimate and partly a placeholder, not a measurement.'],
+  ])('%s', (_name, edges, words) => {
+    expect(howStronglyWords(edges)).toBe(words);
   });
 });
