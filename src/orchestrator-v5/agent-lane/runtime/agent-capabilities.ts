@@ -2295,7 +2295,10 @@ export function createAgentCapabilities(
     const readAfterRefusal = valueOps.length > 0 && !valuesLanded ? await readGraph(ctx.scenario_id) : null;
     if (all) proposals.markApplied(parent.proposal_id, receipts);
     const parts = [
+      // A keep (its stored basis) records the user's acceptance of Olumi's unchanged figure: the receipt says that, never
+      // "starting values" (served 5a2290c, guest 02440e60: "Saved 1 of 1 starting values.").
       ...(valueOps.length > 0 ? [{ part: 'values', ok: valuesLanded, recorded_count: valuesLanded ? valueOps.length : 0, requested_count: valueOps.length,
+        ...(parent.provenance.basis === KEEP_PROPOSAL_BASIS ? { kept: true } : {}),
         ...(valuesLanded ? {} : { ...(stopReason !== undefined ? { reason: stopReason } : {}), not_saved: valuesNotSaved(valueOps, parent, readAfterRefusal, labelOf) }) }] : []),
       ...(linkOps.length > 0 ? [{ part: 'links', ok: linksAdded.length === linkOps.length, recorded_count: linksAdded.length, requested_count: linkOps.length }] : []),
       ...(levelOps.length > 0 ? [{ part: 'option_levels', ok: levelStop === null, recorded_count: levelsRecorded, requested_count: levelOps.length }] : []),

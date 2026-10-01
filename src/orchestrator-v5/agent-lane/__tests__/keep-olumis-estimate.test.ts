@@ -17,6 +17,9 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { earnsAuthorshipCredit, structureProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
 import { sayFigureRead } from '../say-figure.js';
 import { approvalChipsFor, figureInUserUnits } from '../approval-chips.js';
+import { narrateWriteOutcome } from '../write-outcome.js';
+import { levelsPortOver } from './fixtures/levels-port.js';
+import { readFileSync } from 'node:fs';
 
 const SCENARIO = '9390a1b4-ab29-4a16-b39c-64bc00cc4ed0';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: '4 hours a week is about right for me. Keep it.', user_turn_text: '4 hours a week is about right for me. Keep it.' };
@@ -244,5 +247,49 @@ describe('the button says what the Yes records — never "Set … to" for a figu
     const [approve] = approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: String(r.proposal_id) }], (id) => ({ proposal: store.get(id)!, result: r }) as never);
     expect(approve!.label).toBe(`Set Hours per week\u2026 to ${figureInUserUnits(6, 'hours/week')}`);
     expect(approve!.message).toBe('Yes, use those.');
+  });
+});
+
+/**
+ * The receipt through the COMPOUND door (the served path: `commitOptionLevels`) — served `5a2290c`, guest `02440e60`:
+ * a pressed keep read "Saved 1 of 1 starting values." It names the acceptance instead.
+ */
+describe('the receipt of a keep names the acceptance, never "starting values"', () => {
+  type SNode = { id: string; kind: string; label: string; observed_state?: Record<string, unknown> | null };
+  type SEdge = { from: string; to: string; strength?: { mean?: number; std?: number } };
+  const servedBase = JSON.parse(readFileSync(new URL('./fixtures/served-unwritable-base-61a8c07c.json', import.meta.url), 'utf8')) as { nodes: SNode[]; edges: SEdge[] };
+  // The served model with its one out-of-contract link inside [-1, 1] (the writable control of `value-not-saved-…`).
+  const writable = { ...servedBase, edges: servedBase.edges.map((e) => (Math.abs(e.strength?.mean ?? 0) > 1 ? { ...e, strength: { ...e.strength, mean: 1 } } : e)) };
+  const LABEL = 'Investment-firm warm connections pursued';
+  const sctx = { scenario_id: '61a8c07c-026a-45b3-8e13-1d859169df03', authenticated_user_id: null, request_id: 'r', user_text: 'That 5 is about right. Keep it.', user_turn_text: 'That 5 is about right. Keep it.' };
+  const compound = () => {
+    let nodes: SNode[] = structuredClone(writable.nodes);
+    let rev = 0;
+    const d: InternalDispatch = async (path, body) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      if (path.endsWith('/graph/register')) { nodes = (b as { graph: { nodes: SNode[] } }).graph.nodes; rev += 1; return { status: 200, json: { registered: true, graph_hash: `h${rev}` } }; }
+      return { status: 200, json: { graph: { nodes, edges: writable.edges }, graph_hash: `h${rev}` } };
+    };
+    const store = new ProposalStore();
+    return { caps: createAgentCapabilities(d, store, undefined, 'full', undefined, { commitOptionLevels: levelsPortOver(d) }), nodes: () => nodes };
+  };
+  const status = (out: unknown) => narrateWriteOutcome('', [{ name: 'authorise_change' }], [out as never], { versioned: false }).status ?? '';
+
+  it('RED: a pressed keep says "Recorded that you accept Olumi’s estimate."', async () => {
+    const { caps } = compound();
+    const r = await caps.proposeAssumptions(sctx, { assumptions: [{ factor_label: LABEL, value: 5, unit: 'connections/month', basis: 'the user agreed', keep: true }] } as never);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const out = await caps.authoriseChange(sctx, { proposal_id: String(r.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    expect(Array.isArray(out.parts), 'PRECONDITION: the compound door reports by part').toBe(true);
+    expect(status(out)).toBe('Recorded that you accept Olumi’s estimate.');
+  });
+
+  it('CONTROL: the user’s own revision through the same door keeps its existing receipt', async () => {
+    const { caps } = compound();
+    const c = { ...sctx, user_text: 'Make it 3 a month.', user_turn_text: 'Make it 3 a month.' };
+    const r = await caps.proposeAssumptions(c, { assumptions: [{ factor_label: LABEL, value: 3, unit: 'connections/month', basis: 'their figure', revise: true }] } as never);
+    const out = await caps.authoriseChange(c, { proposal_id: String(r.proposal_id) });
+    expect(status(out)).toBe('Saved 1 of 1 starting values.');
   });
 });

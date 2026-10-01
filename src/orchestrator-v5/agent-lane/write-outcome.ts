@@ -224,6 +224,10 @@ function partsLine(r: ToolResult): string | null {
     const rec = typeof p.recorded_count === 'number' ? p.recorded_count : null;
     const req = typeof p.requested_count === 'number' ? p.requested_count : null;
     const versions = versionPhrase(versionsOf(p));
+    // A keep changes no figure: what was saved is the user's acceptance of Olumi's estimate (#2436).
+    if (p.ok === true && p.part === 'values' && p.kept === true) {
+      return rec === 1 ? `Recorded that you accept Olumi\u2019s estimate${versions}.` : `Recorded that you accept Olumi\u2019s ${rec ?? ''} estimates${versions}.`.replace('  ', ' ');
+    }
     if (p.ok === true) return `Saved ${rec !== null && req !== null ? `${rec} of ${req} ` : ''}${many}${versions}.`;
     // A reason nobody has worded is left out rather than shown as a code.
     const words = REFUSAL_WORDS[String(p.reason ?? p.refusal ?? '')];
