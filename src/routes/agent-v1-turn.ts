@@ -97,6 +97,7 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
+import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
@@ -1921,7 +1922,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * status the user reads is composed from the result (`write-outcome`). Zero model
      * calls, no implicit analysis. Words alone never take this path.
      */
-    let fastPath: 'approve' | 'run' | 'explain' | 'research' | undefined;
+    let fastPath: 'approve' | 'run' | 'explain' | 'research' | 'strengthen' | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
     let narrationStatus: 'pending' | 'unavailable' | 'ready' | 'stale' | undefined;
@@ -2141,6 +2142,38 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         stopped_reason: 'answered',
         timing: { total_ms: ms, provider_ms: ms, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: providerCalls, tool_calls: 1, hops: 0 },
       };
+    }
+    /**
+     * ⭐ M1 — "STRENGTHEN THE MODEL" OPENS ONE CARD, WITH NO MODEL CALL (strengthen-press.ts; PTL 5938801653 #1). On a
+     * current Run: ONE held `propose_link_strengths` for the S1 link at its current band (Olumi's estimate), and RC's
+     * fixed copy. Its approve / amend chips come from this call, as for any proposal. No current Run, no S1 link or a
+     * refused proposal keeps today's answer.
+     */
+    if (result === undefined && approvedProposal === undefined
+      && (body['chip'] as { id?: unknown } | null | undefined)?.id === STRENGTHEN_PRESS_CHIP_ID) {
+      const fastStartedAt = Date.now();
+      const card = strengthenCardFor(await readBackState(readingDispatch, scenarioId));
+      const issued = card === null ? undefined
+        : await dispatchTool('propose_link_strengths', JSON.stringify(card.args), toolCtx, capabilities, mode);
+      if (card !== null && issued !== undefined && issued.ok === true && typeof issued.proposal_id === 'string') {
+        fastPath = 'strengthen';
+        const text = card.text;
+        const ms = Date.now() - fastStartedAt;
+        result = {
+          assistant_text: text,
+          items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: message }] },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }],
+          tool_calls: [{ name: 'propose_link_strengths', ok: true, mutated: false, proposal_id: issued.proposal_id }],
+          tool_results: [issued],
+          mutated: false,
+          hops: 0,
+          stopped_reason: 'answered',
+          timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 1, hops: 0 },
+        };
+      } else {
+        log.info({ scenario_id: scenarioId, s1_target: card !== null, refusal: issued?.refusal ?? null },
+          'agent-lane: strengthen press found no S1 card; today\'s answer');
+      }
     }
     /**
      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
@@ -2572,7 +2605,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
     const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
-    const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research'
+    const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen'
       ? { text, status: null as string | null, stripped: [] as string[] }
       : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
@@ -2825,7 +2858,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_id: null,
           request_hash: requestHash,
           response_emitted: true,
-          llm_calls_used: fastPath === 'approve' ? 0 : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? 1 : 0) : result.hops + 1,
+          llm_calls_used: fastPath === 'approve' || fastPath === 'strengthen' ? 0 : fastPath === 'run' || fastPath === 'explain' ? (runInterpreted ? 1 : 0) : result.hops + 1,
           duration_ms: Date.now() - startedAt,
           handler_facts: [],
           userMessage: message,
