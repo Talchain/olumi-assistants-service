@@ -95,6 +95,10 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     // The earlier run had no figures to move from (prior_withheld), or no option has figures in both runs.
     check('RX-NO-MOVEMENT-WITHOUT-PRIOR', !(inputs.prior_withheld === true || inputs.no_matched_figures === true)
       || !/\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu.test(own));
+    // A recorded change is never "no change" (MG 5939414835).
+    check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 || !/\b(same input values|nothing in your model changed)\b/iu.test(own));
+    // The un-withheld transition must say so (MG 5939414835).
+    check('RX-UNWITHHELD-LINE', inputs.prior_withheld !== true || labelMatches(reply, ['can now compare the options']));
   } else if (policy_id === 'RC-WIDEN') {
     const items = reply.split(/\r?\n/u).filter(line => /^\s*-\s/u.test(line)).map(line => line.trim().slice(1).trim());
     check('WD-COUNT', items.length >= 1 && items.length <= 3);
