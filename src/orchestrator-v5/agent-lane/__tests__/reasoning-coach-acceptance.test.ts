@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import acceptance from './fixtures/reasoning-coach-acceptance.json';
-import { checkMethodTurn, renderCopy, selectGuidance, stateKeyHash } from '../guidance/index.js';
+import { checkMethodTurn, entryKey, renderCopy, selectGuidance, stateKeyHash } from '../guidance/index.js';
 import { POLICY, SPEC_SHA } from '../guidance/policy.js';
-import type { GuidanceSignals, GuidanceState, MethodInputs, PolicyId, SelectedRow } from '../guidance/types.js';
+import { computeResponseHash } from '../../../utils/response-hash.js';
+import type { GuidanceSignals, GuidanceState, MethodInputs, MethodTurnId, PolicyId, SelectedRow } from '../guidance/types.js';
 
 const cases = acceptance.cases;
 const fixtures = acceptance.method_turn_fixtures;
@@ -14,18 +15,18 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
   return { selection, rows: [selection.slot1, selection.slot2].filter((r): r is SelectedRow => r !== undefined) };
 };
 
-describe('CODEX BUILDER: pinned reasoning-coach acceptance contract', () => {
-  it('imports all 25 cases and all 7 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(25); expect(fixtures).toHaveLength(7);
+describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
+  it('imports all 35 cases and all 14 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(14);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('6c4fbffdb4a7f783de9efbfb9eb2f2a25a73079b');
+    expect(SPEC_SHA).toBe('a00cb9c817f5938f0cb5c79b4f196c2ef779ed83');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('92935feb97293246b9e5ff2f25f68219f70012e5a838ff71e4a7cd7d2e19b7bc');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('227d93835372211940cb5e72de7c6d0e1e99bcfdf37727ad4e760f2400f8aed2');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('dd45350f1e0ac06fd2ec8fb12dfc9f02619a0790e3bd7cd75e8a89354d56ec14');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('9fb6de2e3e0e56c3a07e0bf23f9446e2acad071929831da4e2e6a5b982679788');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });
@@ -33,7 +34,7 @@ describe('CODEX BUILDER: pinned reasoning-coach acceptance contract', () => {
     const state = c.state as GuidanceSignals;
     const before = JSON.stringify(state);
     const { selection, rows } = rowsOf(state);
-    expect(rows.length).toBeLessThanOrEqual(2);
+    expect(rows.length).toBeLessThanOrEqual('max_chips' in c.expect ? c.expect.max_chips as number : 2);
     expect(rows.map(r => r.policy_id).sort()).toEqual(c.expect.offered.map(r => r.policy_id).sort());
     for (const offered of c.expect.offered) {
       const row = offered.slot === 1 ? selection.slot1 : selection.slot2;
@@ -41,10 +42,14 @@ describe('CODEX BUILDER: pinned reasoning-coach acceptance contract', () => {
       if ('variant' in offered) expect(row?.variant).toBe(offered.variant);
       if ('priority' in offered) expect(row?.priority).toBe(offered.priority);
       if ('item' in offered) expect(row?.item).toBe(offered.item);
+      if ('item_one_of' in offered) expect(row?.item).toBe((offered.item_one_of as string[])[0]);
       if ('primary_action_kind' in offered) expect(row?.primary_action.action_kind).toBe(offered.primary_action_kind);
     }
     if ('not_offered' in c.expect && c.expect.not_offered) for (const id of c.expect.not_offered) expect(rows.some(r => r.policy_id === id)).toBe(false);
     expect(selection.runs_method).toBe('runs_method' in c.expect ? c.expect.runs_method : undefined);
+    if ('mode' in c.expect) expect(selection.mode ?? null).toBe(c.expect.mode);
+    if ('choices' in c.expect) expect(selection.choices ?? null).toEqual(c.expect.choices);
+    if ('runs_method' in c.expect && 'item' in c.expect) expect(selection.item ?? null).toBe(c.expect.item);
     if ('rendered_example' in c.expect && c.expect.rendered_example) for (const example of c.expect.rendered_example) {
       const row = rows.find(r => r.policy_id === example.policy_id)!;
       const copy = renderCopy(row, state);
@@ -57,21 +62,41 @@ describe('CODEX BUILDER: pinned reasoning-coach acceptance contract', () => {
     expect(JSON.stringify(state)).toBe(before);
   });
   it.each(fixtures)('$id — real text checker, exact failed-id set', f => {
-    const result = checkMethodTurn(f.policy_id as PolicyId, f.reply, f.inputs as MethodInputs);
+    const result = checkMethodTurn(f.policy_id as MethodTurnId, f.reply, f.inputs as MethodInputs);
     expect(result.pass).toBe(f.expect === 'pass');
     expect(new Set(result.failed)).toEqual(new Set('failing_checks' in f ? f.failing_checks : []));
+    if ('expect_targets' in f) expect(result.targets).toEqual(f.expect_targets);
   });
-  it('cold reload preserves the complete selection using content-free hashes', () => {
+  it('cold reload preserves the complete selection from the on-disk (content-free) entries', () => {
     const state = stateOf('A-TWO-LOAD-HIDDEN-AFTER-RELOAD');
     const inMemory = selectGuidance(state, state.guidance!);
-    const hashes: GuidanceState = Object.fromEntries(Object.entries(state.guidance!).map(([id, record]) =>
-      [id, { status: record!.status, state_key_hash: stateKeyHash(record!.state_key_fields!) }]));
-    expect(selectGuidance(state, JSON.parse(JSON.stringify(hashes)))).toEqual(inMemory);
-    expect(JSON.stringify(hashes)).not.toContain('switch_to_gcp');
+    // What coaching_state persists (selection.state_key_persistence): {status, state_key_hash, turn_id}, nothing raw.
+    const onDisk: GuidanceState = Object.fromEntries(Object.entries(state.guidance!).map(([key, record]) =>
+      [key, { status: record!.status, state_key_hash: record!.state_key_hash, turn_id: record!.turn_id }]));
+    expect(selectGuidance(state, JSON.parse(JSON.stringify(onDisk)))).toEqual(inMemory);
+    expect(inMemory.slot1?.policy_id).not.toBe('RC-WIDEN');
+    expect(JSON.stringify(onDisk)).not.toContain('switch_to_gcp');
+  });
+  it('every guidance entry in the contract is on-disk form: envelope-safe key, hash only, no raw id', () => {
+    const KEY = /^[A-Za-z0-9_.:-]{1,128}$/u;
+    for (const c of cases) for (const [key, record] of Object.entries((c.state as GuidanceSignals).guidance ?? {})) {
+      expect(key).toMatch(KEY);
+      expect(key).not.toContain('->');
+      expect(Object.keys(record!).sort()).toEqual(expect.arrayContaining(['state_key_hash', 'status']));
+      expect(record).not.toHaveProperty('state_key_fields');
+    }
   });
 });
 
 describe('discriminating controls for selector and rendering', () => {
+  it('key builders omit a null member (selection.state_key_rule), so a null never changes the persisted hash', () => {
+    const state = stateOf('A-WHAT-CHANGES-MEASURED');
+    const most = state['run.decision_sensitivity']!.most_sensitive!;
+    const withNull = { ...state, 'run.decision_sensitivity': { status: 'measured' as const, most_sensitive: { ...most, range: null as unknown as undefined } } };
+    const row = rowsOf(withNull).rows.find(r => r.policy_id === 'RC-WHAT-CHANGES')!;
+    const fields = state['run.run_key'] === undefined ? { factor_id: most.factor_id } : { run_key: state['run.run_key'], factor_id: most.factor_id };
+    expect(row.state_key_hash).toBe(stateKeyHash(fields));
+  });
   it('a measured factor cannot license WHAT-CHANGES when the leader is unlicensed', () => {
     const state = { ...stateOf('A-WHAT-CHANGES-MEASURED'), 'run.leader_licensed': false };
     expect(rowsOf(state).rows.some(r => r.policy_id === 'RC-WHAT-CHANGES')).toBe(false);
@@ -105,15 +130,21 @@ describe('discriminating controls for selector and rendering', () => {
     const link = state['model.goal_path_links']!.find(l => l.link_id === first.item)!;
     const one = { ...state, 'model.goal_path_links': [link, ...otherLinks], 'model.placeholder_goal_links': [link.link_id],
       'model.goal_path_factors': [], 'model.same_lever': false, 'model.risk_ids': ['r1', 'r2'], 'model.goal_path_factor_ids': ['f1', 'f2', 'f3'] };
-    const guidance = { [`RC-STRENGTHEN-ITEM:${link.link_id}`]: { status: 'dismissed' as const, state_key_hash: first.state_key_hash } };
+    const guidance = { [entryKey('RC-STRENGTHEN-ITEM', link.link_id)]: { status: 'dismissed' as const, state_key_hash: first.state_key_hash } };
     expect(rowsOf(one, guidance).rows.some(r => r.policy_id === 'RC-STRENGTHEN-ITEM')).toBe(false);
-    expect(rowsOf({ ...one, 'model.goal_path_links': [{ ...link, strength_band_hash: 'new-strength' }, ...otherLinks] }, guidance).rows[0].item).toBe(link.link_id);
+    // The raw id is never the entry key: a raw-keyed record does not cool the item.
+    expect(rowsOf(one, { [`RC-STRENGTHEN-ITEM:${link.link_id}`]: guidance[entryKey('RC-STRENGTHEN-ITEM', link.link_id)] }).rows[0].item).toBe(link.link_id);
+    expect(rowsOf({ ...one, 'model.goal_path_links': [{ ...link, value_hash: 'new0estimate' }, ...otherLinks] }, guidance).rows[0].item).toBe(link.link_id);
   });
-  it('explicit pre-mortem at an earlier stage dispatches qualitatively without another offer', () => {
-    const state = { ...stateOf('A-EXPLICIT-REQUEST-BYPASSES-COOLDOWN'), 'run.kind': 'none', 'run.leader_licensed': false };
-    expect(rowsOf(state).rows).toEqual([]);
-    expect(rowsOf(state).selection.runs_method).toBe('RC-PREMORTEM');
-    expect(rowsOf({ ...state, 'model.goal_present': false }).selection.runs_method).toBeUndefined();
+  it('an asked pre-mortem with no licensed leader and no pick asks which option, offering nothing else', () => {
+    const state = { ...stateOf('A-EXPLICIT-REQUEST-BYPASSES-COOLDOWN'), 'run.kind': 'none', 'run.leader_licensed': false, 'user.selected_option_id': null };
+    const { rows, selection } = rowsOf(state);
+    expect(rows).toEqual([]);
+    expect(selection).toMatchObject({ runs_method: 'RC-PREMORTEM', mode: 'choose_plan', choices: [...state['model.non_sq_option_ids']!].sort() });
+    const pick = state['model.non_sq_option_ids']![0];
+    expect(rowsOf({ ...state, 'user.selected_option_id': pick }).selection.mode).toBeUndefined();
+    // A pick that is not one of the user's options (status quo, removed) is not a plan.
+    expect(rowsOf({ ...state, 'user.selected_option_id': 'not_an_option' }).selection.mode).toBe('choose_plan');
   });
   it('rename/position edits do not offer Coach my edits', () => {
     const state = stateOf('A-COACH-EDITS-OFFERED');
@@ -124,6 +155,11 @@ describe('discriminating controls for selector and rendering', () => {
     expect(stateKeyHash({ z: 1, a: { y: 2, x: 3 } })).toBe(stateKeyHash({ a: { x: 3, y: 2 }, z: 1 }));
     expect(stateKeyHash({ a: [1, 2] })).not.toBe(stateKeyHash({ a: [2, 1] }));
     expect(stateKeyHash({ a: 'private figure' })).toMatch(/^[a-f0-9]{12}$/u);
+    // selection.state_key_persistence: the same bytes as CEE computeResponseHash (persisted hashes must agree).
+    for (const fields of [{ item_id: 'a->b', link_sizing: 'placeholder', value_hash: '0123456789ab' }, { z: [3, 1, 2], a: { é: 'ü', b: null } },
+      { edits: [{ kind: 'factor_value_edit', entity_id: 'x', field: 'value', after_hash: 'h' }] }, { n: 0.1, m: -2, big: 1e21 }]) {
+      expect(stateKeyHash(fields)).toBe(computeResponseHash(fields));
+    }
     const state = stateOf('A-PREMORTEM-LICENSED');
     expect(rowsOf({ ...state, 'model.non_sq_option_ids': [...state['model.non_sq_option_ids']!].reverse() }).selection).toEqual(rowsOf(state).selection);
   });
@@ -150,27 +186,27 @@ describe('all deterministic text post-check ids, including methods without vendo
       failed: ['CE-NAMES-EDITS', 'CE-STALE-IFF', 'CE-NO-RESULT-CLAIM'] },
   ];
   it.each(textCases)('$id checks every text rule on a good and bad reply', c => {
-    expect(checkMethodTurn(c.id, c.good, c.inputs)).toEqual({ pass: true, failed: [] });
+    expect(checkMethodTurn(c.id, c.good, c.inputs)).toEqual({ pass: true, failed: [], targets: [] });
     expect(new Set(checkMethodTurn(c.id, c.bad, c.inputs).failed)).toEqual(new Set(c.failed));
     expect(new Set(c.failed)).toEqual(new Set(POLICY.method_turns[c.id].post_checks.map(c => c.id)));
   });
   it('list numbers are not invented figures; quoted/punctuated names normalise identically', () => {
     expect(checkMethodTurn('RC-WIDEN', '- ‘Angel-investor outreach’: more.', { current_option_labels: ['Angel investor outreach'] }).failed).toContain('WD-NO-DUP');
     const good = fixtures.find(f => f.id === 'MT-PREMORTEM-GOOD')!;
-    expect(checkMethodTurn('RC-PREMORTEM', good.reply, good.inputs as MethodInputs)).toEqual({ pass: true, failed: [] });
-    expect(checkMethodTurn('RC-WIDEN', '- New route: budget £45,000.', { brief: 'Budget £45,000' })).toEqual({ pass: true, failed: [] });
+    expect(checkMethodTurn('RC-PREMORTEM', good.reply, good.inputs as MethodInputs)).toMatchObject({ pass: true, failed: [] });
+    expect(checkMethodTurn('RC-WIDEN', '- New route: budget £45,000.', { brief: 'Budget £45,000' })).toEqual({ pass: true, failed: [], targets: [] });
     expect(checkMethodTurn('RC-WHAT-CHANGES', 'Annual cost is 10. The analysis is sensitive to it.', { factor_label: 'Annual cost', factor_current_value: 10 }).pass).toBe(true);
   });
-  it('pre-mortem grounding accepts whole-word refs, not prefixes or another plan', () => {
-    const text = '1. F2 fell short. Watch for: delays. Mitigate: a test.\n2. R1 happened. Watch for: invoices. Mitigate: a cap.';
-    const inputs = { supplied_refs: ['F2', 'R1'], plan_label: 'Alpha', current_option_labels: ['Alpha', 'Beta'] };
-    expect(checkMethodTurn('RC-PREMORTEM', text, inputs).pass).toBe(true);
+  it('pre-mortem grounding accepts whole-word refs, not prefixes or another plan; each story names its target', () => {
+    const text = '1. F2 fell short. Watch for: delays. Mitigate: a test.\n2. R1 happened. Watch for: invoices. Mitigate: a cap.\nOutside the model: what about suppliers?';
+    const inputs = { supplied_items: [{ id: 'f2', ref: 'F2' }, { id: 'r1', ref: 'R1' }], plan_label: 'Alpha', current_option_labels: ['Alpha', 'Beta'] };
+    expect(checkMethodTurn('RC-PREMORTEM', text, inputs)).toEqual({ pass: true, failed: [], targets: ['f2', 'r1'] });
     expect(checkMethodTurn('RC-PREMORTEM', text.replace('F2', 'F20'), inputs).failed).toContain('PM-GROUNDED');
     expect(checkMethodTurn('RC-PREMORTEM', text.replace('F2', 'Beta F2'), inputs).failed).toContain('PM-PLAN-ONLY');
     expect(checkMethodTurn('RC-PREMORTEM', text.replace('Mitigate:', 'Next:'), inputs).failed).toContain('PM-WATCH-MITIGATE');
   });
   it('Coach edits requires the stale line only for a stale run', () => {
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);
-    expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' })).toEqual({ pass: true, failed: [] });
+    expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' })).toEqual({ pass: true, failed: [], targets: [] });
   });
 });

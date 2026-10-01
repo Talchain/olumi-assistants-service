@@ -1,29 +1,35 @@
 # Guidance selector leaf — INERT
 
 Policy source: Talchain/olumi-programme-docs, rc/reasoning-coach-20261001 @
-`6c4fbffdb4a7f783de9efbfb9eb2f2a25a73079b` (board #85, Ticket 1).
+`a00cb9c817f5938f0cb5c79b4f196c2ef779ed83` (board #85; T1 re-pin, REASONING COACH lease 5937451355).
 
-The adjacent policy JSON and the acceptance fixture are byte-identical to that commit. `policy.ts`
-contains its typed selection, row, copy and method-turn constants; tests assert their equality.
-REASONING COACH's [ruling on #85](https://github.com/Talchain/olumi-programme-docs/issues/85#issuecomment-5933526864)
-clarifies `A-WIDEN-SAME-KEY-HIDDEN`: when every option fails the limit, there is no plan to stress,
-so pre-mortem is silent unless explicitly requested. This guard preserves the pinned behaviour case.
+The adjacent policy JSON and the acceptance fixture are byte-identical to that commit (35 cases, 14 checker
+fixtures). `policy.ts` contains its typed selection, row, copy and method-turn constants; tests assert their
+equality. The contract's reference implementations are `tools/select_ref.py` and `tools/check_method_turn.py` in the
+same commit: every case agrees with them, and each of their 16 mutants turns at least one case red.
 
 - `selectGuidance(signals, guidance)` returns at most two rows with copy, content-free state-key hashes,
-  suppression reasons, and an optional method dispatch description. It never runs a method.
+  suppression reasons, and an optional method dispatch description. It never runs a method. On a `method` turn it
+  returns `runs_method` plus, when the contract says so, `mode`:
+  - `honest_limit` (an asked What-changes with no measured factor) with the `item` to firm up;
+  - `choose_plan` (an asked pre-mortem with no licensed leader and no `user.selected_option_id`) with `choices`.
+    The plan is never chosen for the user.
+- `planOf` (the row's subject: licensed leader, else the user's pick, else the single option) and `methodPlanOf`
+  (the plan a pre-mortem method stresses: licensed leader, else the user's pick) live in `plan.ts`.
 - `renderCopy(row, signals)` uses typed labels. An unavailable field is null, never an invented label,
-  internal id, or unresolved template. Coach-edits can carry its fixed title before edit labels arrive.
-- `stateKeyHash(fields)` recursively sorts object keys and hashes canonical JSON to 12 hex characters.
-  The selector sorts the policy's unordered id/edit sets without modifying inputs.
-- `checkMethodTurn(policy_id, reply, inputs)` checks every deterministic text rule and returns failed ids.
-  Widen's structured `WD-S-*` mechanism checks are **not implemented** here; AI HARNESS owns them.
+  internal id, or unresolved template.
+- `stateKeyHash(fields)` hashes canonical JSON (object keys sorted, array order kept) to 12 hex characters, the same
+  bytes as `computeResponseHash`. Key builders omit null and absent members (`selection.state_key_rule`).
+- `entryKey(policy_id, item?)` is the `coaching_state` entry key: the policy id, or for a Strengthen item the policy id
+  + `:` + `stateKeyHash({item_id})`. Never the raw id (it carries the user's words, and `->` fails the envelope key
+  pattern). A Strengthen item's key includes its `value_hash`, so a changed estimate brings a dismissed item back.
+- `checkMethodTurn(id, reply, inputs)` checks every deterministic text rule and returns `{pass, failed, targets}`.
+  `targets` (pre-mortem only) names, per story, the first `supplied_items` entry it rests on. It also covers
+  `RERUN-EXPLANATION` (`RX-*`). Widen's structured `WD-S-*` mechanism checks are **not implemented** here; AI HARNESS
+  owns them.
 
-`GuidanceState` accepts content-free `state_key_hash` records, or `state_key_fields` for the contract
-fixtures. Only hashes leave the selector; this module neither stores nor reads conversation state.
-The fixture's additional `run.leader_option_id` is typed copy/key metadata. Optional `value_hash` and
-`strength_band_hash` in path descriptors let the caller signal item changes without passing raw values.
-Missing run/item key fields are omitted, as in the pinned fixtures; the wiring owner must supply them
-to distinguish subsequent runs and item values. A terminal guidance record with no key stays hidden.
+`GuidanceState` entries are the on-disk form `{status, state_key_hash, turn_id}`; `state_key_fields` is still read
+when present. Only hashes leave the selector; this module neither stores nor reads conversation state.
 
-There is no production caller. AI HARNESS owns signal construction, `coaching_state` persistence,
-method dispatch, and replacing the static chips after its wiring prerequisites land.
+There is no production caller. AI HARNESS owns signal construction (`turn-context/guidance-signals.ts`),
+`coaching_state` persistence, method dispatch, and replacing the static chips.
