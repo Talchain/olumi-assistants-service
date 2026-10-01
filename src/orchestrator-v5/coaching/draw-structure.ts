@@ -1,15 +1,16 @@
 /**
- * The DRAW STRUCTURE of a Run's recorded input — the ONE key that decides whether two Runs' Monte Carlo draws line up.
- * Read by C1 seed reuse (`seed-reuse.ts`, the producer) and by the attribution classifier (`build-run-delta.ts`), so
- * the two cannot disagree. Built only from `input_snapshot`s made by the ONE builder (`buildRunInputSnapshot`).
+ * The DRAW STRUCTURE of a Run — TWO keys with two jobs, so read the one you mean:
+ *   · `drawStructureKey(snapshot)`: CEE's cheap pre-filter for C1 seed reuse (`seed-reuse.ts`), built only from
+ *     `input_snapshot`s made by the ONE builder (`buildRunInputSnapshot`). A reuse is not a claim.
+ *   · `islDrawStructureKeyOfFact(fact)`: the CLAIM gate the classifier reads (`build-run-delta.ts`). It is PLoT's
+ *     `_meta.evidence.isl_draw_structure_key`, computed on the exact ISL request; CEE compares it, never recomputes it.
  *
- * R3 ruling #75 5920859011: a draw-structure change EXCLUDES C1 (it says C2). ISL draws each sample on one
- * stream in list order (ISL `robustness_analyzer_v2.py:1027-1037`): a Bernoulli per edge, then a Normal ONLY when the
- * edge exists — so a changed `exists_probability` changes which samples draw, and every later draw shifts. PLoT turns
- * a value of 0 into `point_mass` (no draw) and switches type on pinning (`translator-v3.ts:1560/1579`). So the key
- * holds: the option×factor settings (pinning) with any stated range, the factor/link id sets, each link's
- * `exists_probability`, and which values sit at 0. A mean or std that stays off 0 draws the same count and is NOT in the key — that is the edit C1
- * attributes. The SAME key gates the classifier (`build-run-delta.ts`), so reuse and C1 cannot disagree.
+ * R3 ruling #75 5920859011: a draw-structure change EXCLUDES C1 (it says C2). ISL draws each sample on one stream in
+ * list order (a Bernoulli per edge, then a draw only when the edge exists), so a changed `exists_probability`, a link
+ * added, a value moved to 0 or a pinning change shifts every later draw.
+ * ⛔ SCIENCE/DSK 5935983506 (overflow P1 on PLoT #430): ISL's truncated-normal sampler also consumes a VARYING number
+ * of draws when a strength mean or std changes, so today a strength edit does NOT keep later draws paired either.
+ * C1 on such an edit is established only once ISL draws synchronously (option 1′); until then #2410 is held.
  */
 import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrator';
 

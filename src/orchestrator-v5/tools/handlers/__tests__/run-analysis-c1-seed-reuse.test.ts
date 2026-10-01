@@ -30,6 +30,7 @@ import { buildRunDelta } from '../../../coaching/build-run-delta.js';
 import { priorRunForSeed } from '../../../coaching/seed-reuse.js';
 import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../../../run-analysis-snapshot-binding.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
+import { runIdFor, sentDigest } from '../run-input-snapshot.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'c96fc4bb-ccd1-4615-a6d9-52c652e3e0e4';
@@ -55,10 +56,13 @@ function harness() {
     pro_plan_price: { value: 0.245, raw_value: 49, unit: 'GBP/month', source: 'brief_extraction' },
   };
   const sentSeeds: unknown[] = [];
+  /** Every request PLoT received, in call order — the wire the Run's `sent_digest` must describe. */
+  const sentBodies: Rec[] = [];
   const plotClient = {
     validatePatch: vi.fn().mockResolvedValue({}),
     run: vi.fn(async (body: Rec) => {
       sentSeeds.push(body.seed);
+      sentBodies.push(structuredClone(body));
       const response = structuredClone(happy) as Rec;
       response.results = (body.options as Rec[]).map((o, index) => ({
         option_id: o.option_id, option_label: o.label,
@@ -118,7 +122,7 @@ function harness() {
     expect(built.kind, JSON.stringify(built).slice(0, 300)).toBe('ok');
     return (built as { delta: Rec }).delta;
   };
-  return { graph, sentSeeds, run, setPrice, caseOf };
+  return { graph, sentSeeds, sentBodies, run, setPrice, caseOf };
 }
 
 describe('C1 at the handler — the prior Run lends its seed to a same-structure rerun', () => {
@@ -176,6 +180,24 @@ describe('C1 at the handler — the prior Run lends its seed to a same-structure
     h.setPrice(60);
     await h.run('turn-b', true);
     expect(h.caseOf().attribution_case).toBe('C1_attributable');
+  });
+
+  // ⛔ #2410 overflow P2 (5935956450): the lent seed was set AFTER `sent_digest` was taken, so a reused-seed Run
+  // recorded a digest of a request PLoT never received. Each Run is bound to ITS request by turn identity (`run_id`).
+  it('H6 (P2): every Run records the digest of the request PLoT received for THAT turn — the lent seed included', async () => {
+    const h = harness();
+    const a = await h.run('turn-a', true);
+    h.setPrice(60);
+    const b = await h.run('turn-b', true);
+    expect(h.sentSeeds[1], 'precondition: Run B was sent a lent seed').toBe(a.result.enrichment.meta.seed_used);
+    for (const [fact, turnId, i] of [[a, 'turn-a', 0], [b, 'turn-b', 1]] as const) {
+      expect(fact.result.run_id, `${turnId}: the fact is this turn's Run`).toBe(
+        runIdFor({ scenarioId: SCENARIO, turnId, graphHashAtRun: fact.result.graph_hash_at_run ?? null }));
+      expect(fact.result.input_snapshot.sent_digest, `${turnId}: sent_digest = the request PLoT received`).toBe(sentDigest(h.sentBodies[i]!));
+    }
+    // Discriminating control: the same request WITHOUT its seed digests differently, so the row sees the seed.
+    const { seed: _seed, ...unseeded } = h.sentBodies[1]!;
+    expect(sentDigest(unseeded)).not.toBe(b.result.input_snapshot.sent_digest);
   });
 
   it('H4 (control): outside a bound turn nothing is lent — today\'s behaviour, and C2 on a value edit', async () => {

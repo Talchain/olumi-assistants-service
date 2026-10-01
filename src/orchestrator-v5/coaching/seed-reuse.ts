@@ -16,7 +16,8 @@
  * S3 — currentness stays the analysis hash; nothing here reads or writes freshness.
  * S4 — `n_equal` / `builds_equal` still gate C1 in `classifyAttribution`; unchanged.
  *
- * DRAW STRUCTURE: `draw-structure.ts` — the ONE key both this producer and the classifier read (R3 #75 5920859011).
+ * DRAW STRUCTURE: `draw-structure.ts` — this producer reads the SNAPSHOT key (a pre-filter); the classifier reads PLoT's
+ * recorded key (the claim gate). See that file's header (R3 #75 5920859011; SCIENCE/DSK 5935983506).
  */
 import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { orderSuccessfulRunAnalysisFactsNewestFirst } from '../context/freshness.js';
