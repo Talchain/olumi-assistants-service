@@ -1,0 +1,49 @@
+{
+  "source": "R3 accept-paul train-0258Z on served CEE eea49f5b (guest d1d22196, 1 Oct 02:5xZ): the goal node after the build (no stated target) and after Paul set at least £1,000,000 (cold reload)",
+  "goal_after_build": {
+    "id": "funding_secured",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Funding secured",
+    "provenance": "ai_inferred",
+    "scale_frame": 5000000,
+    "unit_reading": {
+      "unit": "GBP",
+      "source": "olumi_reading",
+      "source_quote": "We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK"
+    },
+    "goal_horizon_months": 2,
+    "goal_threshold_unit": "GBP",
+    "goal_threshold_frame": "level"
+  },
+  "goal_after_target": {
+    "id": "funding_secured",
+    "ref": "G1",
+    "kind": "goal",
+    "label": "Funding secured",
+    "provenance": "ai_inferred",
+    "unit_reading": {
+      "unit": "GBP",
+      "source": "olumi_reading",
+      "source_quote": "We've been focused on investment firms that do deals between £1-2 million, mostly based in the UK"
+    },
+    "goal_direction": ">=",
+    "goal_threshold": 0.8,
+    "observed_state": {
+      "cap": 1250000,
+      "unit": "£",
+      "value": 0,
+      "source": "user_override",
+      "baseline": 0,
+      "raw_value": 0
+    },
+    "threshold_source": "user",
+    "success_threshold": 1000000,
+    "goal_threshold_cap": 1250000,
+    "goal_threshold_raw": 1000000,
+    "goal_horizon_months": 2,
+    "goal_threshold_unit": "£",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+  }
+}

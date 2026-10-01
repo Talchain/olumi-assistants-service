@@ -1,0 +1,120 @@
+/**
+ * ⭐ OLUMI ASKS FOR THE DECISION INPUT IT LACKS (DL #75 5923918068: R3's dry run D1 "no ask for the minimum amount" + A7
+ * "the deadline neither asked nor scored"; lease 5923944336).
+ *
+ * Measured 0-LLM on R3's `accept-paul/train-0258Z` (served `eea49f5b`): the producer HAD the facts (its open questions name
+ * "the current amount of funding already secured is not stated" and "confirm the practical runway date"), but they sit behind
+ * the questions toggle, and the brief and Run replies asked NOTHING. After the build the goal holds a horizon
+ * (`goal_horizon_months`) and a unit but NO stated target; the user's answer later adds `goal_threshold_raw` /
+ * `success_threshold`. So, while the target is missing, the host asks once, at rest (an owed line, before the status line and
+ * its questions marker), and only when nothing at rest already asks (≤1 ask per turn, AIQ 5923232439): the model's words,
+ * and the host's own at-rest asks (#2420's full-toggle context ask, the levels ask) — CODEX 5923981385.
+ */
+
+import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
+import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
+
+type Rec = Record<string, unknown>;
+const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** The goal node of a persisted graph, when there is exactly one. */
+function goalOf(graph: unknown): Rec | undefined {
+  const nodes = recordOf(graph)?.nodes;
+  const goals = Array.isArray(nodes) ? nodes.map(recordOf).filter((n): n is Rec => n !== undefined && n.kind === 'goal') : [];
+  return goals.length === 1 ? goals[0] : undefined;
+}
+
+/** Whether the goal carries a target the user stated (any of the fields the goal-target writer sets). */
+export function goalHasStatedTarget(goal: Rec): boolean {
+  return finite(goal.goal_threshold_raw) || finite(goal.success_threshold) || finite(goal.goal_threshold);
+}
+
+export interface DecisionInputAskContext {
+  /**
+   * The reply AS IT RESTS ON SCREEN without these lines (`textAtRest` of the composed text: the model's words, the owed
+   * lines and the host status). Any ask there, the model's or the host's, is the turn's one ask (CODEX 5923981385).
+   */
+  readonly restingText: string;
+  /** The composed reply puts questions behind the toggle (`textAtRest` split it): A7's fact is already there. */
+  readonly questionsToggle: boolean;
+  /** A proposal awaits the user's yes: that card is the step, so nothing else is asked. */
+  readonly awaitingApproval: boolean;
+  /** This turn built the model or ran the analysis (the brief and Run turns). */
+  readonly builtOrRan: boolean;
+}
+
+/** A duration limit the analysis scores (a week/month/day constraint): then the deadline is answered, not just held. */
+function hasDurationLimit(graph: unknown): boolean {
+  const ks = recordOf(graph)?.goal_constraints;
+  return Array.isArray(ks) && ks.some((k) => /week|month|day/i.test(String(recordOf(k)?.unit ?? '')));
+}
+
+// ── DecisionGuideAI staging `69c05df1` `serverOpenQuestions.ts` (`splitServerOpenQuestions`), the consumer's predicate:
+// from the marker to the first producer sentence after it is behind the questions toggle; the rest is at rest. ──
+const QUESTIONS_MARKER = 'Questions this model does not answer yet:';
+const PRODUCER_SENTENCE =
+  String.raw`(?:No option changes |Not included in this proposal: |Saved\b|Not saved\b|Partly saved\b|That change was already saved\b|The model was |This model had already been built\b)`;
+const AFTER_THE_QUESTIONS = new RegExp(String.raw`[.?!)]\s+(?=${PRODUCER_SENTENCE})`);
+const NO_QUESTION_FIRST = new RegExp(String.raw`^\s*${PRODUCER_SENTENCE}`);
+
+/** The words a reply leaves on screen with the questions toggle closed (the whole text when the panel does not split it). */
+export function textAtRest(text: string): string {
+  const at = text.indexOf(QUESTIONS_MARKER);
+  if (at === -1 || text.indexOf(QUESTIONS_MARKER, at + 1) !== -1 || !/\s$/.test(text.slice(0, at))) return text;
+  const lead = text.slice(0, at).trimEnd();
+  const tail = text.slice(at + QUESTIONS_MARKER.length);
+  if (NO_QUESTION_FIRST.test(tail)) return text;
+  const end = tail.search(AFTER_THE_QUESTIONS);
+  const questions = (end === -1 ? tail : tail.slice(0, end + 1)).trim();
+  if (lead.length === 0 || questions.length === 0) return text;
+  const after = end === -1 ? '' : tail.slice(end + 1).trim();
+  return after ? `${lead} ${after}` : lead;
+}
+
+/** DL #75 5923219186 (R3 K4): words on screen per turn — the reply at rest plus the toggle's label. */
+export const AT_REST_WORD_BOUND = 160;
+const words = (s: string): number => s.split(/\s+/).filter(Boolean).length;
+/** The toggle's own label, "<N> questions this model does not answer yet" (DGAI `MessageBubble`): 7 words. */
+const TOGGLE_LABEL_WORDS = 7;
+
+const withinMonths = (goal: Rec): string => {
+  const m = goal.goal_horizon_months;
+  return finite(m) && m > 0 ? ` within ${m} ${m === 1 ? 'month' : 'months'}` : '';
+};
+
+/**
+ * The lines, in order (AIQ words 5923963470): A7, a TRUE line (the horizon is held but nothing scores it), then D1, the ONE
+ * ask (no stated target). Both are said at rest. A7 asks nothing, so it holds beside a pending proposal or the model's own
+ * question; D1 never does. When the reply on screen would pass `AT_REST_WORD_BOUND` and a questions toggle holds A7's
+ * fact, A7 stays behind it.
+ */
+export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext): string[] {
+  if (!ctx.builtOrRan) return [];
+  const goal = goalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  if (goal === undefined || label === '') return [];
+  const within = withinMonths(goal);
+  const a7 = within !== '' && !hasDurationLimit(graph) ? `This model doesn't yet say whether any option gets there${within}.` : null;
+  const ask = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
+  // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
+  const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
+    + ls.reduce((n, l) => n + (l === null ? 0 : words(l)), 0);
+  const keepA7 = a7 !== null && !(ctx.questionsToggle && onScreen([a7, ask]) > AT_REST_WORD_BOUND);
+  return [keepA7 ? a7 : null, ask].filter((l): l is string => l !== null);
+}
+
+/**
+ * The ask follows the goal's ONE direction authority (AIQ CR 5924149215 on #2426): a floor only where the goal reads
+ * increase, a ceiling where it is minimised, and neutral words otherwise — never "the least your costs must reach".
+ */
+function targetAsk(graph: unknown, goal: Rec, label: string, within: string): string {
+  if (deriveEmittedGoalDirection(graph, goal.id) === 'minimise') return `What is the most that "${label}" can be${within}? I'll propose it as your target.`;
+  if (deriveGoalIntent(label).direction === 'increase') return `What is the least that "${label}" must reach${within}? I'll propose it as your target.`;
+  return `What figure should "${label}" reach or stay under${within}? I'll propose it as your target.`;
+}
+
+/** The one ask (D1), or null. */
+export function decisionInputAsk(graph: unknown, ctx: DecisionInputAskContext): string | null {
+  return decisionInputLines(graph, ctx).find((l) => l.endsWith('as your target.')) ?? null;
+}
