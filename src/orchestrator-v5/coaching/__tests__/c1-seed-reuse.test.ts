@@ -16,7 +16,7 @@ import { RunDeltaSchema } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrator';
 
 import { buildRunDelta } from '../build-run-delta.js';
-import { drawStructureKey, islDrawStructureKey } from '../draw-structure.js';
+import { drawStructureKey, islDrawStructureKeyOfFact } from '../draw-structure.js';
 import { decideSeedReuse, priorRunForSeed } from '../seed-reuse.js';
 
 const snap = (edit: (s: RunInputSnapshot) => void = () => {}): RunInputSnapshot => {
@@ -41,25 +41,15 @@ type Mut = Record<string, any>;
 const link = (s: RunInputSnapshot) => ((s as unknown as Mut).links as Mut[])[0]!;
 const churn = (s: RunInputSnapshot) => ((s as unknown as Mut).factors as Mut[])[0]!;
 
-/** PLoT's recorded ISL request (the served shape of `enrichment._meta.payloads.isl_request`), with one edit applied. */
-const isl = (edit: (r: Mut) => void = () => {}): Mut => {
-  const r: Mut = {
-    seed: '777', n_samples: 10_000, analysis_types: ['comparison', 'sensitivity', 'robustness'], include_voi: true, include_e_values: true,
-    graph: {
-      nodes: [
-        { id: 'fac_price', kind: 'factor', epsilon_std: 0 }, { id: 'fac_churn', kind: 'factor', epsilon_std: 0 },
-        { id: 'fac_ads', kind: 'factor', epsilon_std: 0 }, { id: 'goal_mrr', kind: 'goal', epsilon_std: 0 },
-      ],
-      edges: [{ from: 'fac_price', to: 'fac_churn', exists_probability: 0.8, strength: { mean: 0.4, std: 0.1 } }],
-    },
-    options: [{ id: 'opt-a', interventions: { fac_price: 0.59 } }, { id: 'opt-b', interventions: { fac_price: 0.49 } }],
-    parameter_uncertainties: [{ node_id: 'fac_churn', distribution: 'normal', std: 0.01 }],
-  };
-  edit(r);
-  return r;
-};
+/**
+ * PLoT's ISL draw-structure keys (`_meta.evidence.isl_draw_structure_key`), opaque to CEE (DL 5934513210): PLoT owns
+ * what changes them, with its own rows (PLoT `tests/isl-draw-structure-key*.test.ts`: a mean edit keeps the key; a link,
+ * an `exists_probability`, an order, a distribution, a prior-only draw or a mean at 0 changes it). CEE only compares.
+ */
+const KEY_A = 'a'.repeat(64);
+const KEY_B = 'b'.repeat(64);
 
-function fact(o: { seed: string; hash: string; at: string; runId: string; snapshot?: RunInputSnapshot; islRequest?: Mut | null; underscoreMeta?: Mut }): HandlerFact {
+function fact(o: { seed: string; hash: string; at: string; runId: string; snapshot?: RunInputSnapshot; drawKey?: string | null; underscoreMeta?: Mut }): HandlerFact {
   return {
     fact_type: 'run_analysis',
     noop: false,
@@ -71,7 +61,7 @@ function fact(o: { seed: string; hash: string; at: string; runId: string; snapsh
           { option_id: 'opt-b', option_label: 'Hold', win_probability: 0.55 },
         ],
         meta: { seed_used: o.seed, n_samples: 10_000 },
-        _meta: o.underscoreMeta ?? { builds: { plot: 'p1', isl: 'i1' }, ...(o.islRequest === null ? {} : { payloads: { isl_request: o.islRequest ?? isl() } }) },
+        _meta: o.underscoreMeta ?? { builds: { plot: 'p1', isl: 'i1' }, ...(o.drawKey === null ? {} : { evidence: { isl_draw_structure_key: o.drawKey ?? KEY_A } }) },
       },
       computed_at: o.at,
       graph_hash_at_run: o.hash,
@@ -161,107 +151,82 @@ describe('the Run that lends its seed is the Run the next pair compares against'
   });
 });
 
-describe('the classifier: C1 only when both Runs\' RECORDED ISL requests show the same draw structure', () => {
-  const pair = (prior: Mut | null, current: Mut | null, snapshots = true, hashes: [string, string] = ['h1', 'h2']) => caseOf(
-    fact({ seed: '777', hash: hashes[0], at: A_AT, runId: 'r1', ...(snapshots ? { snapshot: snap() } : {}), islRequest: prior }),
-    fact({ seed: '777', hash: hashes[1], at: B_AT, runId: 'r2', ...(snapshots ? { snapshot: snap() } : {}), islRequest: current }),
+describe('the classifier: C1 only when both Runs\' PLoT draw-structure keys are equal', () => {
+  const pair = (prior: string | null, current: string | null, snapshots = true, hashes: [string, string] = ['h1', 'h2']) => caseOf(
+    fact({ seed: '777', hash: hashes[0], at: A_AT, runId: 'r1', ...(snapshots ? { snapshot: snap() } : {}), drawKey: prior }),
+    fact({ seed: '777', hash: hashes[1], at: B_AT, runId: 'r2', ...(snapshots ? { snapshot: snap() } : {}), drawKey: current }),
   );
-  it('R-a: equal (reused) seed, a same-side mean edit → C1_attributable', () => {
-    expect(pair(isl(), isl((r) => { r.graph.edges[0].strength.mean = 0.6; }))).toBe('C1_attributable');
+  it('equal (reused) seed, the SAME PLoT draw key (e.g. a mean edit, as PLoT judges it) → C1_attributable', () => {
+    expect(pair(KEY_A, KEY_A)).toBe('C1_attributable');
   });
-  it('CR 5921519604: a prior added to a factor with no observed value (PLoT adds a uniform draw) → C2_unpaired', () => {
-    expect(pair(isl(), isl((r) => { r.parameter_uncertainties.push({ node_id: 'fac_ads', distribution: 'uniform', range_min: 0.02, range_max: 0.04 }); })))
-      .toBe('C2_unpaired');
+  it('a DIFFERENT PLoT draw key (any structure change PLoT detects) with an EQUAL seed → C2_unpaired', () => {
+    expect(pair(KEY_A, KEY_B)).toBe('C2_unpaired');
   });
-  it('CONTROL: the same prior on both Runs, only its bounds moved → C1 (a uniform draw either way)', () => {
-    const withPrior = (hi: number) => isl((r) => { r.parameter_uncertainties.push({ node_id: 'fac_ads', distribution: 'uniform', range_min: 0.02, range_max: hi }); });
-    expect(pair(withPrior(0.04), withPrior(0.06))).toBe('C1_attributable');
+  it('FAIL CLOSED: a Run with no key cannot show its draws line up → C2, never C1', () => {
+    expect(pair(KEY_A, null)).toBe('C2_unpaired');
+    expect(pair(null, KEY_A)).toBe('C2_unpaired');
   });
-  it('a distribution change (normal → point_mass, a value crossing 0) → C2', () => {
-    expect(pair(isl(), isl((r) => { r.parameter_uncertainties[0] = { node_id: 'fac_churn', distribution: 'point_mass' }; }))).toBe('C2_unpaired');
+  it('a legacy pair (no input_snapshot) is judged on the same keys: equal → C1, different → C2 (AIQ 5921107442)', () => {
+    expect(pair(KEY_A, KEY_A, false)).toBe('C1_attributable');
+    expect(pair(KEY_A, KEY_B, false)).toBe('C2_unpaired');
   });
-  it('an exists_probability edit with an EQUAL seed → C2 (the draws no longer line up)', () => {
-    expect(pair(isl(), isl((r) => { r.graph.edges[0].exists_probability = 0.9; }))).toBe('C2_unpaired');
-  });
-  it('R-b: a link mean to 0 → C2', () => {
-    expect(pair(isl(), isl((r) => { r.graph.edges[0].strength.mean = 0; }))).toBe('C2_unpaired');
-  });
-  it('FAIL CLOSED: a Run with no recorded ISL request cannot show its draws line up → C2, never C1', () => {
-    expect(pair(isl(), null)).toBe('C2_unpaired');
-    expect(pair(null, isl())).toBe('C2_unpaired');
-  });
-  it('a legacy pair (no input_snapshot) is judged on the same recorded requests: equal → C1, a p edit → C2 (AIQ 5921107442)', () => {
-    expect(pair(isl(), isl((r) => { r.graph.edges[0].strength.mean = 0.6; }), false)).toBe('C1_attributable');
-    expect(pair(isl(), isl((r) => { r.graph.edges[0].exists_probability = 0.9; }), false)).toBe('C2_unpaired');
-  });
-  it('CONTROL: C0 is not downgraded — an equal analysis hash on an equal build is identical, recorded request or not', () => {
+  it('CONTROL: C0 is not downgraded — an equal analysis hash on an equal build with no recorded keys is identical', () => {
     expect(pair(null, null, true, ['h1', 'h1'])).toBe('C0_identical');
-  });
-  it('the ISL key keeps LIST ORDER and ignores the seed and non-structural values', () => {
-    expect(islDrawStructureKey(isl((r) => { r.seed = '999'; r.options[0].interventions.fac_price = 0.6; }))).toBe(islDrawStructureKey(isl()));
-    expect(islDrawStructureKey(isl((r) => { r.graph.nodes.reverse(); }))).not.toBe(islDrawStructureKey(isl()));
-    expect(islDrawStructureKey({ graph: {} })).toBeNull();
   });
 });
 
 /**
- * 52f8cd adopting #2410 (DL 5934109147).
- *   · P1 (AI EXPERIENCE BUILD CR 5922160590): a KNOWN draw-structure mismatch is an observed divergence. It outranks C0
- *     as well as C1, because an equal analysis hash (which sorts nodes and edges) does not imply an identical,
- *     list-ordered ISL request.
- *   · SCIENCE/DSK 5934059958: adding a link with the SAME seed shifts every later ISL draw → never C1.
+ * 52f8cd adopting #2410 (DL 5934109147; option (b) 5934513210).
+ *   · ONE typed reader of PLoT's `_meta.evidence.isl_draw_structure_key`. CEE never recomputes it; PLoT's rows own what
+ *     changes it (SCIENCE/DSK 5934059958's add-a-link case included).
+ *   · P1 (AI EXPERIENCE BUILD CR 5922160590): a KNOWN draw mismatch is an observed divergence. It outranks C0 as well as
+ *     C1, because an equal analysis hash (which sorts nodes and edges) does not imply an identical, list-ordered request.
  *   · Builds from PLoT's always-on `_meta.evidence` when `_meta.builds` is absent (staging: `UI_CANONICAL_META` off).
  */
-describe('#2410 adopted: a known draw mismatch outranks C0; add-a-link is unpaired; builds from _meta.evidence', () => {
-  const pairWith = (prior: Mut | null, current: Mut | null, hashes: [string, string] = ['h1', 'h2']) => caseOf(
-    fact({ seed: '777', hash: hashes[0], at: A_AT, runId: 'r1', snapshot: snap(), islRequest: prior }),
-    fact({ seed: '777', hash: hashes[1], at: B_AT, runId: 'r2', snapshot: snap(), islRequest: current }),
+describe('#2410 adopted: one typed reader; a known draw mismatch outranks C0; builds from _meta.evidence', () => {
+  const pairWith = (prior: string | null, current: string | null, hashes: [string, string] = ['h1', 'h2']) => caseOf(
+    fact({ seed: '777', hash: hashes[0], at: A_AT, runId: 'r1', snapshot: snap(), drawKey: prior }),
+    fact({ seed: '777', hash: hashes[1], at: B_AT, runId: 'r2', snapshot: snap(), drawKey: current }),
   );
+  const withEvidence = (evidence: Mut): HandlerFact => fact({ seed: '777', hash: 'h1', at: A_AT, runId: 'r1', underscoreMeta: { builds: { plot: 'p1', isl: 'i1' }, evidence } });
 
-  it('PRECONDITION: reversing the stochastic node list changes the recorded draw structure', () => {
-    expect(islDrawStructureKey(isl((r) => { r.graph.nodes.reverse(); }))).not.toBe(islDrawStructureKey(isl()));
+  it('RED (typed reader, DL condition 2): the key is read ONLY at `_meta.evidence.isl_draw_structure_key`, 64-hex', () => {
+    expect(islDrawStructureKeyOfFact(withEvidence({ isl_draw_structure_key: KEY_A }))).toBe(KEY_A);
+    // A renamed key, the old gated carrier, or a malformed value reads as UNRECORDED, never as a match.
+    expect(islDrawStructureKeyOfFact(withEvidence({ isl_draw_structure_digest: KEY_A }))).toBeNull();
+    expect(islDrawStructureKeyOfFact(fact({ seed: '7', hash: 'h', at: A_AT, runId: 'r', underscoreMeta: { payloads: { isl_request: { graph: { nodes: [], edges: [] } } } } }))).toBeNull();
+    for (const bad of ['A'.repeat(64), 'a'.repeat(63), 'zz', 42, null]) expect(islDrawStructureKeyOfFact(withEvidence({ isl_draw_structure_key: bad })), String(bad)).toBeNull();
   });
 
-  it('RED (P1): equal analysis hashes, equal seed and builds, but the recorded node ORDER differs → C2_unpaired, never C0', () => {
-    expect(pairWith(isl(), isl((r) => { r.graph.nodes.reverse(); }), ['h1', 'h1'])).toBe('C2_unpaired');
+  it('RED (P1, CR 5922160590): equal analysis hashes, equal seed and builds, but DIFFERENT draw keys → C2_unpaired, never C0', () => {
+    expect(pairWith(KEY_A, KEY_B, ['h1', 'h1'])).toBe('C2_unpaired');
   });
 
-  it('CONTROL (P1): equal hashes AND the same recorded request → C0_identical', () => {
-    expect(pairWith(isl(), isl(), ['h1', 'h1'])).toBe('C0_identical');
+  it('CONTROL (P1): equal hashes AND the same draw key → C0_identical', () => {
+    expect(pairWith(KEY_A, KEY_A, ['h1', 'h1'])).toBe('C0_identical');
   });
 
-  it('SCIENCE/DSK row (already held by #2410): ADD a link with the SAME seed → C2_unpaired, never C1', () => {
-    expect(pairWith(isl(), isl((r) => { r.graph.edges.push({ from: 'fac_ads', to: 'goal_mrr', exists_probability: 1, strength: { mean: 0.2, std: 0.1 } }); })))
-      .toBe('C2_unpaired');
-  });
-
-  it('CONTROL (SCIENCE/DSK): a strength-MEAN-only edit with the same seed → C1_attributable', () => {
-    expect(pairWith(isl(), isl((r) => { r.graph.edges[0].strength.mean = 0.6; }))).toBe('C1_attributable');
-  });
-
-  const evidenceOnly = (islRequest: Mut, plot: unknown, islBuild: unknown): Mut => ({ evidence: { plot_build: plot, isl_build: islBuild }, payloads: { isl_request: islRequest } });
+  const evidenceOnly = (key: string, plot: unknown, islBuild: unknown): Mut => ({ evidence: { plot_build: plot, isl_build: islBuild, isl_draw_structure_key: key } });
   const viaEvidence = (prior: Mut, current: Mut) => caseOf(
     fact({ seed: '777', hash: 'h1', at: A_AT, runId: 'r1', snapshot: snap(), underscoreMeta: prior }),
     fact({ seed: '777', hash: 'h2', at: B_AT, runId: 'r2', snapshot: snap(), underscoreMeta: current }),
   );
-  const edited = isl((r) => { r.graph.edges[0].strength.mean = 0.6; });
 
-  it('RED (builds, no flag): `_meta.builds` absent, equal PLoT + ISL builds on `_meta.evidence` → C1_attributable', () => {
-    expect(viaEvidence(evidenceOnly(isl(), '2f2427f', '04836e2'), evidenceOnly(edited, '2f2427f', '04836e2'))).toBe('C1_attributable');
+  it('RED (builds, no flag): `_meta.builds` absent, equal PLoT + ISL builds and draw keys on `_meta.evidence` → C1_attributable', () => {
+    expect(viaEvidence(evidenceOnly(KEY_A, '2f2427f', '04836e2'), evidenceOnly(KEY_A, '2f2427f', '04836e2'))).toBe('C1_attributable');
   });
 
   it('CONTROL: a different ISL build on `_meta.evidence` → C3_engine_drift', () => {
-    expect(viaEvidence(evidenceOnly(isl(), '2f2427f', '04836e2'), evidenceOnly(edited, '2f2427f', 'ffffff0'))).toBe('C3_engine_drift');
+    expect(viaEvidence(evidenceOnly(KEY_A, '2f2427f', '04836e2'), evidenceOnly(KEY_A, '2f2427f', 'ffffff0'))).toBe('C3_engine_drift');
   });
 
   it('CONTROL: PLoT\'s literal "unknown", or no ISL build, never makes two Runs look equal → no C1', () => {
     for (const [plot, islBuild] of [['unknown', '04836e2'], ['2f2427f', null], ['unknown', 'unknown']] as const) {
       const built = buildRunDelta({ priorFacts: [
-        fact({ seed: '777', hash: 'h1', at: A_AT, runId: 'r1', snapshot: snap(), underscoreMeta: evidenceOnly(isl(), plot, islBuild) }),
-        fact({ seed: '777', hash: 'h2', at: B_AT, runId: 'r2', snapshot: snap(), underscoreMeta: evidenceOnly(edited, plot, islBuild) }),
+        fact({ seed: '777', hash: 'h1', at: A_AT, runId: 'r1', snapshot: snap(), underscoreMeta: evidenceOnly(KEY_A, plot, islBuild) }),
+        fact({ seed: '777', hash: 'h2', at: B_AT, runId: 'r2', snapshot: snap(), underscoreMeta: evidenceOnly(KEY_A, plot, islBuild) }),
       ], mayNameLeadingOption: true });
       expect(built.kind === 'ok' ? (built as { delta: Mut }).delta.attribution_case : built.kind, `${plot}/${islBuild}`).not.toBe('C1_attributable');
     }
   });
 });
-

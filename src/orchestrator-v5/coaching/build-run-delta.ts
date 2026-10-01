@@ -403,7 +403,7 @@ function classifyAttribution(
     readonly n_equal: boolean;
   },
   /**
-   * Both Runs' RECORDED PLoT→ISL requests compared on draw structure (`draw-structure.ts` `islDrawStructureKey`):
+   * Both Runs' PLoT-recorded ISL draw-structure keys compared (`draw-structure.ts` `islDrawStructureKeyOfFact`; PLoT computes them):
    * `equal` / `unequal` when both were recorded, `unrecorded` when either was not.
    * C1 needs `equal`: the same seed on a different draw structure misaligns the draws, so the movement is not
    * attributable (R3 #75 5920859011). Fails CLOSED: an `unrecorded` pair cannot show its draws line up (AI EXPERIENCE

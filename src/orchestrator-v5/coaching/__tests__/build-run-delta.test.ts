@@ -35,8 +35,8 @@ interface FactSpec {
   readonly computedAt?: string;
   readonly builds?: Record<string, string | null> | null;
   readonly entitled?: boolean;
-  /** PLoT's recorded ISL request (`_meta.payloads.isl_request`) — what C1's draw-structure gate reads (#2410). */
-  readonly islRequest?: Record<string, unknown>;
+  /** PLoT's draw-structure key (`_meta.evidence.isl_draw_structure_key`): what C1's draw gate compares (#2410). */
+  readonly drawKey?: string;
 }
 
 /**
@@ -64,7 +64,7 @@ function fact(spec: FactSpec): HandlerFact {
     })),
     meta,
     ...(spec.builds !== undefined && spec.builds !== null
-      ? { _meta: { builds: spec.builds, ...(spec.islRequest !== undefined ? { payloads: { isl_request: spec.islRequest } } : {}) } }
+      ? { _meta: { builds: spec.builds, ...(spec.drawKey !== undefined ? { evidence: { isl_draw_structure_key: spec.drawKey } } : {}) } }
       : {}),
   };
 
@@ -93,15 +93,10 @@ const OPTIONS_CURRENT = [
 ] as const;
 
 /**
- * One recorded PLoT→ISL request, the SAME draw structure on both Runs of a C1 pair: C1 needs both Runs' recorded
- * requests to show the draws line up (#2410; R3 #75 5920859011). An edit to `std` keeps it; one to
- * `exists_probability` would not (ISL draws the strength only when the edge exists).
+ * PLoT's draw-structure key, the SAME on both Runs of a C1 pair: C1 needs both Runs' keys to show the draws line up
+ * (#2410; R3 #75 5920859011). PLoT owns it (`_meta.evidence.isl_draw_structure_key`, DL 5934513210); CEE only compares.
  */
-const RECORDED_ISL_REQUEST = {
-  graph: { nodes: [{ id: 'fac_cost', kind: 'factor', epsilon_std: 0 }], edges: [{ from: 'fac_cost', to: 'goal', exists_probability: 1, strength: { mean: 0.4, std: 0.1 } }] },
-  options: [{ id: 'opt-a', interventions: { fac_cost: 0.6 } }, { id: 'opt-b', interventions: { fac_cost: 0.4 } }],
-  parameter_uncertainties: [{ node_id: 'fac_cost', distribution: 'normal', std: 0.05 }],
-} as const;
+const RECORDED_DRAW_KEY = 'c'.repeat(64);
 
 /** Newest first, which is how the turn loader delivers `prior_facts`. */
 function pair(prior: HandlerFact, current: HandlerFact): HandlerFact[] {
@@ -210,8 +205,8 @@ describe('buildRunDelta — attribution is named only from an OBSERVED divergenc
    */
   it('an uncertainty-only edit WITH the builds echo present classifies C1_attributable', () => {
     const builds = { ui: null, cee: null, plot: 'plot-1', isl: 'isl-1' };
-    const prior = fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, islRequest: RECORDED_ISL_REQUEST, computedAt: '2026-06-06T00:00:00.000Z' });
-    const current = fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, islRequest: RECORDED_ISL_REQUEST, computedAt: '2026-06-07T00:00:00.000Z' });
+    const prior = fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, drawKey: RECORDED_DRAW_KEY, computedAt: '2026-06-06T00:00:00.000Z' });
+    const current = fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, drawKey: RECORDED_DRAW_KEY, computedAt: '2026-06-07T00:00:00.000Z' });
     const built = build(pair(prior, current));
     expect(built.kind).toBe('ok');
     if (built.kind !== 'ok') return;
@@ -489,8 +484,8 @@ describe('buildRunDelta — the contract polices the producer', () => {
       )),
       // C1_attributable (a std-only edit, builds echo riding, the same recorded ISL draw structure).
       build(pair(
-        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, islRequest: RECORDED_ISL_REQUEST, computedAt: '2026-06-06T00:00:00.000Z' }),
-        fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, islRequest: RECORDED_ISL_REQUEST, computedAt: '2026-06-07T00:00:00.000Z' }),
+        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, drawKey: RECORDED_DRAW_KEY, computedAt: '2026-06-06T00:00:00.000Z' }),
+        fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, drawKey: RECORDED_DRAW_KEY, computedAt: '2026-06-07T00:00:00.000Z' }),
       )),
       // C0_identical.
       build(pair(

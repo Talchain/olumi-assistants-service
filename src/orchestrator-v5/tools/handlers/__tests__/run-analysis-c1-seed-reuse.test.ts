@@ -69,8 +69,10 @@ function harness() {
       // PLoT `resolveSeed`: a caller seed wins, echoed as a string; else a digest of the graph's values.
       const derived = String(parseInt(createHash('sha256').update(JSON.stringify(body.graph)).digest('hex').slice(0, 7), 16));
       response.meta = { ...(response.meta as Rec), seed_used: body.seed !== undefined ? String(body.seed) : derived };
-      // PLoT's canonical meta also records the ISL request it sent (`_meta.payloads.isl_request`). This double mirrors
-      // only the draw-bearing shape: an observed factor → normal; a prior-only factor → uniform (PLoT's second pass).
+      // PLoT records the DRAW STRUCTURE of the ISL request it sent as an opaque key, always on
+      // (`_meta.evidence.isl_draw_structure_key`, PLoT `lib/isl-draw-structure-key.ts`). This double stands in for PLoT
+      // with the same definition on the draw-bearing shape only: an observed factor → normal; a prior-only factor →
+      // uniform (PLoT's second pass); edges by existence; options by lever set. Never levels, means or the seed.
       const g = body.graph as Rec;
       const uncertainties = (g.nodes as Rec[]).flatMap((n): Rec[] => {
         if (n.kind !== 'factor') return [];
@@ -78,14 +80,15 @@ function harness() {
         if (n.prior && typeof n.prior.range_min === 'number') return [{ node_id: n.id, distribution: 'uniform', range_min: n.prior.range_min, range_max: n.prior.range_max }];
         return [];
       });
+      const drawShape = {
+        nodes: (g.nodes as Rec[]).map((n) => `${n.id}|${n.kind}`),
+        edges: (g.edges as Rec[]).map((e) => `${e.from}->${e.to}@${e.exists_probability ?? 'default'}${e.strength?.mean === 0 ? '|mean0' : ''}`),
+        options: (body.options as Rec[]).map((o) => `${o.option_id ?? o.id}|${Object.keys(o.interventions ?? {}).sort().join(',')}`),
+        uncertainties: uncertainties.map((u) => `${u.node_id}:${u.distribution}`),
+      };
       response._meta = {
         builds: { plot: 'p1', isl: 'i1' },
-        payloads: { isl_request: {
-          seed: body.seed ?? 'derived', n_samples: 1000, analysis_types: ['comparison'],
-          graph: { nodes: (g.nodes as Rec[]).map((n) => ({ id: n.id, kind: n.kind, epsilon_std: 0 })), edges: g.edges },
-          options: (body.options as Rec[]).map((o) => ({ id: o.option_id ?? o.id, interventions: o.interventions ?? {} })),
-          parameter_uncertainties: uncertainties,
-        } },
+        evidence: { isl_draw_structure_key: createHash('sha256').update(JSON.stringify(drawShape)).digest('hex') },
       };
       return response as V2RunResponseEnvelope;
     }),
