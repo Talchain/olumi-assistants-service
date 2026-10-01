@@ -232,3 +232,16 @@ export function parseCardinalAmount(phrase: string | undefined): number | null {
   const value = total + group;
   return Number.isFinite(value) && value > 0 ? value : null;
 }
+
+/**
+ * ⛔ ONE TOKEN THAT WRITES A QUANTITY (CODEX #2443, numeric label collision): digits, a cardinal word,
+ * `CARDINAL_HUNDRED_WORD`, or a scale multiplier — read from this file's own vocabulary and the one magnitude alphabet, never
+ * a second list. A quantity qualifies no count noun ("10 conversations" is ten of them), even when the label holds it.
+ */
+export function isQuantityToken(token: string): boolean {
+  const t = token.toLowerCase();
+  return /\p{N}/u.test(t)
+    || Object.prototype.hasOwnProperty.call(CARDINAL_WORD_VALUES, t)
+    || t === CARDINAL_HUNDRED_WORD
+    || Object.prototype.hasOwnProperty.call(MAGNITUDE_MULTIPLIERS, t);
+}

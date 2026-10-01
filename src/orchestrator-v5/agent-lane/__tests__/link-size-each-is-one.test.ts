@@ -86,3 +86,24 @@ describe('R3 5925568501: a distributive word + the source names a change of one'
     expect(door('Every 2 extra conversations add about £20,000 to funding')).not.toBeNull();
   });
 });
+
+// ⛔ CODEX #2443 5929515612: a quantity in a NUMBERED label is still a quantity. "Every 100 investor conversations …" on the
+// source "100 investor conversations" is per 100, never per one (100× too strong), and a number word the same.
+describe('a numbered source label: the distributive walk never crosses a quantity', () => {
+  const numbered = { source: '100 investor conversations', target: 'Funding secured' };
+  const q = ['100 investor conversations', 'Funding secured'];
+  const per1 = { ...effect, per_source_change_unit: '100 investor conversations' };
+  it('CODEX hostile: "Every 100 investor conversations bring in about £20,000 of funding" is NOT stated at per 1', () => {
+    expect(linkEffectTheUserStated('Every 100 investor conversations bring in about £20,000 of funding', per1, numbered, { quantities: q })).not.toBeNull();
+  });
+  it('CODEX hostile: a number word too ("Each ten investor conversations …" on "Ten investor conversations")', () => {
+    expect(linkEffectTheUserStated('Each ten investor conversations bring in about £20,000 of funding', { ...effect, per_source_change_unit: 'ten investor conversations' },
+      { source: 'Ten investor conversations', target: 'Funding secured' }, { quantities: ['Ten investor conversations', 'Funding secured'] })).not.toBeNull();
+  });
+  it('control: the right reading, per 100 with the 100 written, is stated', () => {
+    expect(linkEffectTheUserStated('Every 100 investor conversations bring in about £20,000 of funding', { ...effect, per_source_change: 100 }, numbered, { quantities: q })).toBeNull();
+  });
+  it('control: "Each extra investor conversation brings in about £20,000 of funding" on that label → per 1', () => {
+    expect(linkEffectTheUserStated('Each extra investor conversation brings in about £20,000 of funding', effect, numbered, { quantities: q })).toBeNull();
+  });
+});

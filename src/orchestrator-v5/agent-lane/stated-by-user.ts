@@ -32,7 +32,7 @@
  */
 import { findStatedAmounts, findStatedRanges, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { NodeV3 } from '../../schemas/cee-v3.js';
-import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, parseCardinalAmount } from '../../utils/cardinal-words.js';
+import { CARDINAL_AMOUNT_SOURCE, CARDINAL_FRACTION_CONTINUATION, isQuantityToken, parseCardinalAmount } from '../../utils/cardinal-words.js';
 import { canonicalLabel, TODAY_LEVEL, TODAY_UNIT, type CandidateModel } from './admit-model.js';
 import { attestHorizon, type HorizonAttestation } from './horizon-attestation.js';
 import { unitPhraseFamily } from './unit-conflict.js';
@@ -995,7 +995,8 @@ function distributiveOneAt(q: string, ends: { readonly source: string; readonly 
     // conversation"), plus the source's own label words; "per quarter from … conversations" and "one more round of
     // conversations" count something else.
     let fillers = 0;
-    for (let j = from; j < tokens.length && (ONE_FILLER.test(tokens[j]!.w) || isLabel(tokens[j]!.w)); j += 1) {
+    // CODEX #2443 5929515612: a quantity is never crossed, even a label's own ("every 100 investor conversations" is per 100).
+    for (let j = from; j < tokens.length && !isQuantityToken(tokens[j]!.w) && (ONE_FILLER.test(tokens[j]!.w) || isLabel(tokens[j]!.w)); j += 1) {
       if (/[,;:()\u2013\u2014]/.test(q.slice(tokens[i]!.at, tokens[j]!.at))) break;
       if (own.some((x) => sameWord(x, tokens[j]!.w))) return j;
       if (!isLabel(tokens[j]!.w) && (fillers += 1) > 1) break;

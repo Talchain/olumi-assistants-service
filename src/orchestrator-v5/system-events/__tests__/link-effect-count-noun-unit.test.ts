@@ -82,6 +82,17 @@ describe('the step-2 unit wall: a unitless count outcome is counted in its plura
       expect(applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change: 1, per_source_change_unit: unit }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
     });
   }
+  // CODEX #2443 (numeric source-label collision): a number the LABEL holds is still a number in the unit.
+  for (const [label, unit] of [['Top 10 investor conversations', '10 conversations'], ['Top 10 investor conversations', '10 investor conversations'],
+    ['Top 10 investor conversations', 'top 10 conversations'], ['100 investor conversations', '100 investor conversations'], ['Ten investor conversations', 'ten investor conversations']]) {
+    it(`CODEX hostile: per 1 "${unit}" on "${label}" is refused`, () => {
+      expect(applyLinkEffectEdit(params(served(label), { ...EFFECT, per_source_change: 1, per_source_change_unit: unit }))).toMatchObject({ kind: 'refused', reason: 'unit_mismatch' });
+    });
+  }
+  it('CODEX control: "investor conversation" and "top investor conversation" on that label are written', () => {
+    expect(applyLinkEffectEdit(params(served('Top 10 investor conversations'), { ...EFFECT, per_source_change_unit: 'investor conversation' })).kind).toBe('mutated');
+    expect(applyLinkEffectEdit(params(served('Top 10 investor conversations'), { ...EFFECT, per_source_change_unit: 'top investor conversation' })).kind).toBe('mutated');
+  });
   it('AIQ control: per 100 "conversations" (the right reading) is written, 100× weaker than per 1', () => {
     const per100 = applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change: 100, per_source_change_unit: 'conversations' }));
     const per1 = applyLinkEffectEdit(params(served(), { ...EFFECT, per_source_change: 1, per_source_change_unit: 'conversations' }));

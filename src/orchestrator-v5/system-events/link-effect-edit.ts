@@ -21,6 +21,7 @@
  * the stored graph is never mutated. No schemas release: the stored shape is CEE's declared `EdgeProvenanceV3` and the
  * receipt is the existing `adjust_edge_strength` fact.
  */
+import { isQuantityToken } from '../../utils/cardinal-words.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
@@ -208,7 +209,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const sourceWords = sourceNode.label.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w !== '');
   const perCount = countNoun !== undefined && perWords.length > 0
     && [countNoun, countNoun.slice(0, -1)].includes(perWords[perWords.length - 1]!)
-    && perWords.slice(0, -1).every((w) => sourceWords.includes(w) || /^(?:extra|additional|more|new)$/.test(w));
+    // ⛔ CODEX #2443 5929515612: a quantity (digits or a number word) qualifies nothing, even one the label itself holds ("10 conversations" on "Top 10 investor
+    // conversations" is still ten of them): only a WORD of the label, or extra/additional/more/new, may stand before the count.
+    && perWords.slice(0, -1).every((w) => !isQuantityToken(w) && (sourceWords.includes(w) || /^(?:extra|additional|more|new)$/.test(w)));
   if (!same(effect.amount_unit, unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))
     || !(perCount || same(effect.per_source_change_unit, unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode))))) {
     return refuse('unit_mismatch');
