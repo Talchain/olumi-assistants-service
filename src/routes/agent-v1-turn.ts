@@ -97,6 +97,7 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
+import { agentChoiceChipsFrom, chosenOf, isAgentChoiceChipId } from '../orchestrator-v5/agent-lane/agent-choice.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
@@ -346,7 +347,10 @@ export function stillValidOffers(
   // next step after a blocked Run: after a restart the replay carries the words only).
   const nextSteps = offersNextSteps(now.analysisState) && now.outstandingProposalIds.size === 0
     ? offered.filter((a) => NEXT_STEP_CHIP_IDS.has(a.id)) : [];
-  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
+  // A refusal's choices stay on a replay: the press is re-derived by the tool from the graph THEN, so a choice the graph
+  // no longer offers refuses again and writes nothing (agent-choice.ts).
+  const choices = offered.filter((a) => isAgentChoiceChipId(a.id));
+  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...choices, ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
 }
 const sessions = new SessionBindingRegistry();
 
@@ -1901,7 +1905,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
     const pressedApproval = approvedProposal !== undefined
       ? { typed_approval_of: approvedProposal, ...(offeredCard !== undefined ? { typed_approval_words: message } : {}) } : {};
-    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    // ⭐ A pressed choice (agent-choice.ts): its reading comes from the chip id alone, and its tool is the first call.
+    const chosen = approvedProposal === undefined ? chosenOf(body) : undefined;
+    const toolCtx: AgentToolContext = { ...pressedApproval, ...(chosen !== undefined ? { chosen } : {}), scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     /**
@@ -2210,6 +2216,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
           ...((body['chip'] as { id?: unknown } | null | undefined)?.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
             ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
+          ...(chosen !== undefined ? { firstCallTool: chosen.tool } : {}),
         },
         capabilities,
         callModelFor(budget),
@@ -2449,6 +2456,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offeredSpecific: OfferedAction[] = firstOfEachId([
       ...approvals,
       ...carriedApproval,
+      // ⭐ A refusal the user settles by choosing: the tool's own ≤3 typed choices, one chip each (agent-choice.ts).
+      ...agentChoiceChipsFrom(result.tool_calls, result.tool_results),
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
       ...runOutcomeChips,
