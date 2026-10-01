@@ -7,7 +7,27 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.64.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.69.0.tgz` ← **THE CURRENT PIN** (MG, F1 T1)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** `npm publish` from `olumi-schemas` `main`
+> **`5b0ca7f5`** (schemas #78 merge; the registry's `gitHead` binds it), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.69.0/939f5c9ecfcb8cfc27329bf7bd94cf91adb1ad8c`.
+>
+> **761,983 bytes.** Verified against the registry's published metadata on 1 Oct:
+>
+> ```
+> npm shasum (sha1)  939f5c9ecfcb8cfc27329bf7bd94cf91adb1ad8c   ← matches
+> integrity (sha512) sha512-uj3eCrm41M/WZjW8hgAuxeCPDviP+Sh8v/bIEQdwBrNrGGGcZmTe2e260Ymvz5jaZQUM45jqV7cHGn9rfKIhjw==   ← matches
+> sha256             ebd1745c6581cf163242b7af5e68546dfbaac58b25596fbe427eda6234e2a5d4
+> ```
+>
+> **What 0.69.0 adds (additive, optional; no analysis-hash input moves):** NodeV3 `goal_period` / `goal_horizon` /
+> `goal_stated_as` / `option_status` / `count_noun` / `full_label`; the `option_status_edit` system event (required
+> `expected_status`); `goal_target_edit` optional period / horizon / stated figures with their expected values; Run
+> records `excluded_infeasible` / `excluded_removed` and not-sent `infeasible` / `removed` (UI-first: DGAI vendors first).
+
+
+### `talchain-schemas-0.64.0.tgz` (superseded)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >

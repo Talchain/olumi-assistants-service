@@ -239,7 +239,13 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // naming `edge_strength_edit` is identical (the same six files); `enums.*` and `turn-payload.js` are byte-unchanged.
     // Of the changed lines, 3 name a strength: an IMPORT LIST in `fixtures/index.js` (appends UnitReading/EntityRef/
     // RefHighWater schemas) and one SC-24 input-row fixture (`field: 'strength'`), neither the member nor its band.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.68.0');
+    //
+    // 0.68.0 → 0.69.0 (schemas #78, MG F1: semantic node fields, `option_status_edit`, goal_target_edit metadata; main
+    // `5b0ca7f5`), RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `5a401a9a…` → `939f5c9e…`): the FILE SET
+    // naming `edge_strength_edit` is identical (the same five dist files). Of the changed lines in them, 2 pairs name a
+    // strength: the `SystemEventKind` declaration (appends `option_status_edit` after `goal_target_edit`) and the
+    // fixtures IMPORT LIST (appends GoalHorizon/GoalStatedAs/CountNoun schemas) — neither the member nor its band.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.69.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
@@ -413,6 +419,8 @@ describe('schema 0.42 — pre-0.42 system-event corpus is byte-compatible', () =
       // 0.59.0 appends `goal_target_edit` the same way — proven append-only
       // by string equality at the vendored bytes (see the version pin above).
       'goal_target_edit',
+      // 0.69.0 appends `option_status_edit` (MG F1 T6) the same way.
+      'option_status_edit',
     ]);
   });
 

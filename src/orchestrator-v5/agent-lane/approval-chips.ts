@@ -41,6 +41,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_link_effect: { label: 'Record this reading', message: 'Yes, record that reading.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
+  // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
+  propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
   propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
   // PJ-E-FIG: new factors carrying the user's figures, held on the same seam as the add-risk (`gmh_`).

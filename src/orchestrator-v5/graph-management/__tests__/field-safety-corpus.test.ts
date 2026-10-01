@@ -107,6 +107,8 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
     const local = new Set<string>(OWNED_NAMES_REACHABLE_IN_THIS_REPO);
     const extra = [...PIPELINE_OWNED_ROOTS].filter((k) => !local.has(k)).sort();
     expect(extra).toEqual([
+      // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority — CEE-owned; no producer may add it.
+      'analysis_participation',
       'beliefexistssource',
       'directionsource',
       // G1 (27 Sep): the goal's stated direction and deadline — CEE-owned; construction writes them from the brief.
@@ -120,6 +122,8 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       'goal_sense_reading',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
       'interventionkeys',
+      'option_status',
+      'proposed_by',
       'starterid',
       'startertitle',
       'strengthstdsource',
@@ -165,6 +169,10 @@ const SIX_SMUGGLE_NAMES = [
   'goal_sense_reading',
   // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
   'goal_level_reading',
+  // F1 T6 (1 Oct, CODEX #2467 P1-1): an option's lifecycle authority (proposed_by / option_status / participation).
+  'proposed_by',
+  'option_status',
+  'analysis_participation',
 ] as const;
 
 describe('corpus B — the six (now eight) smuggle names, hand-written', () => {
