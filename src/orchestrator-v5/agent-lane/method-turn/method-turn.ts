@@ -213,7 +213,7 @@ export function methodTurnFromSignals(chipId: unknown, s: TurnSignals, graph: un
   if (plan === null || plan.option_id !== planId) return null;
   if (context.supplied_items.length === 0) return null;
   const ctx = { ...context, plan };
-  return { kind: 'run', context: ctx, directive: methodDirective(ctx), check_inputs: checkInputsOf(ctx) };
+  return { kind: 'run', context: ctx, directive: methodDirective(ctx), check_inputs: checkInputsOf(ctx, graph) };
 }
 
 const quote = (label: string): string => `‘${label}’`;
@@ -273,11 +273,22 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
   ].join('\n');
 }
 
-function checkInputsOf(ctx: RunMethodTurn['context']): MethodInputs {
+/** Every node label of the current model: the user's own words, masked before RC's text bans (`shared.label_masking`). */
+function modelLabelsOf(graph: unknown): string[] {
+  const nodes = rec(graph)?.nodes;
+  if (!Array.isArray(nodes)) return [];
+  return nodes.flatMap((n) => {
+    const label = rec(n)?.label;
+    return typeof label === 'string' && label !== '' ? [label] : [];
+  });
+}
+
+function checkInputsOf(ctx: RunMethodTurn['context'], graph: unknown): MethodInputs {
   return {
     plan_label: ctx.plan.label,
     current_option_labels: ctx.current_option_labels,
     supplied_items: ctx.supplied_items.map(({ id, labels }) => ({ id, labels })),
+    model_labels: modelLabelsOf(graph),
   };
 }
 

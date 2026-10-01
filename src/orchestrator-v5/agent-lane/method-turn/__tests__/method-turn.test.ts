@@ -272,6 +272,25 @@ describe('settle: the draft is checked BEFORE it is sent (RC method_turns.shared
     expect(claimed.failed).toContain('PM-NO-PROB');
   });
 
+  it('ROW M14 PAIR (served D1, RC label masking of EVERY model label): a story may name a model label that is not a supplied item; only the graph\'s labels excuse it', () => {
+    const out = turnFor(served('A-Q-D1-BUILD'), planPickChipId('ai_reporting_module_sprint'));
+    if (out?.kind !== 'run') throw new Error('expected a run');
+    const likelihood = 'Enterprise prospect signing likelihood';
+    expect(out.check_inputs.model_labels).toContain(likelihood);
+    // The same served turn with every item that carries the label withdrawn from the supplied set.
+    const items = out.context.supplied_items.filter((i) => !i.labels.includes(likelihood));
+    const withdrawn: RunMethodTurn = { ...out, context: { ...out.context, supplied_items: items },
+      check_inputs: { ...out.check_inputs, supplied_items: items.map(({ id, labels }) => ({ id, labels })) } };
+    const [a, b] = items;
+    const reply = ['Two ways this could go wrong.',
+      `1. ${a.labels[0]} came late, so ${a.labels[1]} slipped and ${likelihood} stalled. Watch for: a missed demo. Mitigate: protect the sprint.`,
+      `2. ${b.labels[0]} stayed thin and ${b.labels[1]} never moved. Watch for: quiet trials. Mitigate: fix the worst step first.`,
+      'Outside the model: what could blindside this that none of these figures covers?'].join('\n');
+    expect(settleMethodTurn(withdrawn, reply).failed).toEqual([]);
+    const unmasked: RunMethodTurn = { ...withdrawn, check_inputs: { ...withdrawn.check_inputs, model_labels: [] } };
+    expect(settleMethodTurn(unmasked, reply).failed).toContain('PM-NO-PROB');
+  });
+
   it('ROW M12: an empty or garbled draft is never sent', () => {
     const turn = turnOf(RC_REPLIES.find((f) => f.id === 'MT-PREMORTEM-GOOD')!);
     for (const draft of ['', '   ', 'Sure! Here is a pre-mortem.']) {
