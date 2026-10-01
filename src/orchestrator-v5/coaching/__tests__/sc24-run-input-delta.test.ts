@@ -33,12 +33,17 @@ import { RunDeltaSchema } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrator';
 
 import { buildRunDelta } from '../build-run-delta.js';
-import { diffRunInputSnapshots } from '../run-input-changes.js';
+import { diffRunInputs, diffRunInputSnapshots } from '../run-input-changes.js';
+import { olumiSpreadForMean } from '../../../cee/magnitude/olumi-spread.js';
 import { PRESENT_PAIR, runAnalysisFact } from '../../context/__tests__/run-delta-fixtures.js';
 
+// 0.71.0: every hand-built snapshot carries the SAME residual by default — "everything this snapshot does not record was
+// unchanged" — so these rows test the recorded fields. The residual's own rows (absent / different → partial) are below.
+const RESIDUAL = 'c'.repeat(64);
 const snap = (over: Partial<RunInputSnapshot> = {}, price = 59): RunInputSnapshot => ({
   snapshot_version: 1,
   sent_digest: 'a'.repeat(64),
+  residual_digest: RESIDUAL,
   goal: { node_id: 'goal_mrr', label: 'Pro MRR', target_raw: 55000, unit: 'GBP per month', operator: '>=' },
   options: [
     { option_id: 'opt-a', label: 'Raise price', settings: [{ factor_id: 'fac_price', label: 'Pro price', raw: price, unit: 'GBP', encoded: price }] },
@@ -357,5 +362,230 @@ describe('SC-24 · diffRunInputSnapshots', () => {
     expect(pair(withRange(20), withRange(30))).toEqual(['partial', []]);
     expect(pair(withRange(20), withRange(20, 'brief_extraction'))).toEqual(['complete', []]);
     expect(pair(withRange(20), withRange(20))).toEqual(['complete', []]);
+  });
+});
+
+/**
+ * ⭐ 0.70.0 (R3 DEFECT 3, #85 5936673643; DL 5937207590): a link's edit in the user's terms. Before 0.70.0 every link
+ * edit was `partial` with NO row — the engine numbers are never a row figure (AIQ 5918134795) — and accepting Olumi's
+ * estimate moved no number at all, so R3's Accept → Run pair showed nothing for it.
+ */
+describe('0.70.0 · link rows in the user\'s terms (band, who sized it)', () => {
+  const pairOf = (a: RunInputSnapshot, b: RunInputSnapshot) => {
+    const out = buildRunDelta({ priorFacts: [
+      fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: b }),
+      fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: a }),
+    ], mayNameLeadingOption: true });
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(RunDeltaSchema.safeParse(out.delta).success, 'the contract accepts the delta').toBe(true);
+    return out.delta;
+  };
+  type L = RunInputSnapshot['links'][number];
+  const withLink = (l: Partial<L>) => snap({ links: [{ from: 'fac_price', to: 'fac_churn', mean: 0.5, ...l }] });
+  const LINK = { entity_kind: 'link', entity_id: 'fac_price->fac_churn', link: { from: 'fac_price', to: 'fac_churn' } };
+
+  it('RED (the Accept step): placeholder → accepted, same β → ONE `sizing` row, coverage complete', () => {
+    const d = pairOf(withLink({ band: 'strong', sizing: 'placeholder' }), withLink({ band: 'strong', sizing: 'olumi_accepted' }));
+    expect(d.input_coverage).toBe('complete');
+    expect(d.input_changes).toEqual([{ ...LINK, field: 'sizing', before: { raw: 'placeholder' }, after: { raw: 'olumi_accepted' }, change: 'changed' }]);
+  });
+
+  it('RED: a band move (moderate → strong) is a `strength` row with the contract\'s band literals — never the β', () => {
+    // The spread that moves WITH the band is the writer's own (`olumiSpreadForMean`): 0.1 × 0.55 / 0.3.
+    const followed = olumiSpreadForMean({ oldMean: 0.3, oldStd: 0.1, newMean: 0.55 });
+    const d = pairOf(withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' }), withLink({ mean: 0.55, std: followed, band: 'strong', sizing: 'user' }));
+    expect(d.input_coverage).toBe('complete');
+    expect(d.input_changes).toEqual([{ ...LINK, field: 'strength', before: { raw: 'moderate' }, after: { raw: 'strong' }, change: 'changed' }]);
+    expect(JSON.stringify(d.input_changes)).not.toMatch(/0\.(3|55)\b/);
+  });
+
+  // ⭐ DL ruling #2482 (5939864517) P1 #1 — a band row states the move of the MEAN only; it never absorbs a sign flip or
+  // a spread the move does not explain. CODEX's two reproductions, then the fixture's own arbitrary spread.
+  it('RED (CODEX repro 1): a sign flip +0.30 → −0.55 across bands → the band row, but partial — never complete', () => {
+    const d = pairOf(withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' }),
+      withLink({ mean: -0.55, std: olumiSpreadForMean({ oldMean: 0.3, oldStd: 0.1, newMean: -0.55 }), band: 'strong', sizing: 'user' }));
+    expect(d.input_coverage).toBe('partial');
+    expect(d.input_changes?.map((r) => r.field)).toEqual(['strength']);
+  });
+
+  it('RED (CODEX repro 2): an independent spread 0.10 → 0.50 beside a band move → partial', () => {
+    const d = pairOf(withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' }), withLink({ mean: 0.55, std: 0.5, band: 'strong', sizing: 'user' }));
+    expect(d.input_coverage).toBe('partial');
+  });
+
+  it('CONTROL: a spread that is not the writer\'s own for the move (0.1 → 0.0866) → partial; the writer\'s own → complete', () => {
+    const before = withLink({ mean: 0.3, std: 0.1, band: 'moderate', sizing: 'user' });
+    expect(pairOf(before, withLink({ mean: 0.55, std: 0.0866, band: 'strong', sizing: 'user' })).input_coverage).toBe('partial');
+    expect(pairOf(before, withLink({ mean: 0.55, std: olumiSpreadForMean({ oldMean: 0.3, oldStd: 0.1, newMean: 0.55 }), band: 'strong', sizing: 'user' })).input_coverage).toBe('complete');
+  });
+
+  it('a user strength edit from a placeholder writes BOTH rows for the one link (band + who sized it; RC 5937295784)', () => {
+    const d = pairOf(withLink({ mean: 0.3, band: 'moderate', sizing: 'placeholder' }), withLink({ mean: 0.85, band: 'very_strong', sizing: 'user' }));
+    expect(d.input_changes?.map((r) => [r.field, r.before, r.after])).toEqual([
+      ['strength', { raw: 'moderate' }, { raw: 'very_strong' }],
+      ['sizing', { raw: 'placeholder' }, { raw: 'user' }],
+    ]);
+  });
+
+  it('CONTROL: β moving INSIDE one band (R3 DEFECT 1\'s 0.6 → 0.55) stays partial with no row — no engine number shown', () => {
+    const d = pairOf(withLink({ mean: 0.6, std: 0.3, band: 'strong', sizing: 'olumi_estimate' }), withLink({ mean: 0.55, std: 0.275, band: 'strong', sizing: 'olumi_estimate' }));
+    expect([d.input_coverage, d.input_changes]).toEqual(['partial', []]);
+  });
+
+  it('CONTROL: sizing on ONE Run only (an older Run) → partial, no sizing row; band unrecorded on one end + β move → partial', () => {
+    const oneSided = pairOf(withLink({ band: 'strong' }), withLink({ band: 'strong', sizing: 'olumi_accepted' }));
+    expect([oneSided.input_coverage, oneSided.input_changes]).toEqual(['partial', []]);
+    const oldBand = pairOf(withLink({ mean: 0.3 }), withLink({ mean: 0.55, band: 'strong' }));
+    expect([oldBand.input_coverage, oldBand.input_changes]).toEqual(['partial', []]);
+  });
+
+  it('CONTROL: an identical link with band and sizing recorded on both Runs is complete with no row', () => {
+    const d = pairOf(withLink({ band: 'strong', sizing: 'olumi_accepted' }), withLink({ band: 'strong', sizing: 'olumi_accepted' }));
+    expect([d.input_coverage, d.input_changes]).toEqual(['complete', []]);
+  });
+});
+
+/** ⭐ 0.70.0 (CANVAS 5936762171, RC 5936776917): WHY a pair has no win shares, typed — only when the cause is known. */
+// ⭐ 0.71.0 — `complete` means VERIFIED (DL ruling #2482 5939864517, P1 #2): the rows speak only for the recorded
+// fields, so the pair is complete only when both Runs carry an EQUAL residual digest (every unrecorded analysis input).
+describe('0.71.0 · input_coverage complete needs equal residuals', () => {
+  const coverageOf = (a: RunInputSnapshot, b: RunInputSnapshot) => {
+    const out = buildRunDelta({ priorFacts: [
+      fact({ seed: '8', hash: 'h-b', at: T2, runId: 'run-b', snapshot: b }),
+      fact({ seed: '7', hash: 'h-a', at: T1, runId: 'run-a', snapshot: a }),
+    ], mayNameLeadingOption: true });
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(RunDeltaSchema.safeParse(out.delta).success).toBe(true);
+    return [out.delta.input_coverage, out.delta.input_changes];
+  };
+  const noResidual = (s: RunInputSnapshot): RunInputSnapshot => {
+    const { residual_digest: _r, ...rest } = s;
+    return rest as RunInputSnapshot;
+  };
+
+  it('RED (CODEX repro: factor σ / encoded goal threshold): no recorded field moved but the residuals differ → partial, []', () => {
+    expect(coverageOf(snap(), snap({ residual_digest: 'd'.repeat(64) }))).toEqual(['partial', []]);
+  });
+
+  it('RED: a recorded edit with different residuals keeps its row but is partial', () => {
+    expect(coverageOf(snap({}, 59), snap({ residual_digest: 'd'.repeat(64) }, 60))[0]).toBe('partial');
+  });
+
+  it('RED (legacy): a residual on ONE end only, or on neither, is never complete', () => {
+    expect(coverageOf(noResidual(snap()), snap())).toEqual(['partial', []]);
+    expect(coverageOf(snap(), noResidual(snap()))).toEqual(['partial', []]);
+    expect(coverageOf(noResidual(snap()), noResidual(snap()))).toEqual(['partial', []]);
+  });
+
+  it('CONTROL: equal residuals → complete; the £59 → £60 row with equal residuals → complete with its row', () => {
+    expect(coverageOf(snap(), snap())).toEqual(['complete', []]);
+    const [cov, rows] = coverageOf(snap({}, 59), snap({}, 60));
+    expect(cov).toBe('complete');
+    expect((rows as Array<{ field: string }>).map((r) => r.field)).toEqual(['value']);
+  });
+});
+
+// ⭐ 0.72.0 (DL ruling #2482 r3, option A) — an AUTHORSHIP change (`authorship_digest`) is explained ONLY beside a sizing
+// row to `user` (the user's own write) or `placeholder` → `olumi_accepted` (the Accept); anything else is partial.
+describe('0.72.0 · a link\'s authorship change is explained pairwise, or the pair is partial', () => {
+  const D1 = '1'.repeat(64);
+  const D2 = '2'.repeat(64);
+  const withLink = (sizing: string, digest?: string) => snap({ links: [{
+    from: 'fac_price', to: 'fac_churn', mean: 0.4, band: 'strong', sizing, ...(digest !== undefined ? { authorship_digest: digest } : {}),
+  } as RunInputSnapshot['links'][number]] });
+  const coverageOf = (a: RunInputSnapshot, b: RunInputSnapshot) => diffRunInputs(a, b).complete;
+
+  it.each([
+    ['olumi_estimate', 'user', true],
+    ['placeholder', 'user', true],
+    ['placeholder', 'olumi_accepted', true],
+    ['olumi_estimate', 'olumi_accepted', false],
+    ['olumi_accepted', 'olumi_estimate', false],
+    ['user', 'olumi_estimate', false],
+    ['user', 'user', false],
+    ['olumi_estimate', 'olumi_estimate', false],
+  ])('authorship moved beside %s → %s → complete=%s', (from, to, complete) => {
+    expect(coverageOf(withLink(from, D1), withLink(to, D2))).toBe(complete);
+  });
+
+  it('CONTROL: authorship unchanged → complete whatever the sizing row (the review never enters the digest)', () => {
+    expect(coverageOf(withLink('olumi_estimate', D1), withLink('olumi_accepted', D1))).toBe(true);
+  });
+
+  it('a digest on ONE end only → partial (an older Run cannot say whether authorship moved)', () => {
+    expect(coverageOf(withLink('olumi_estimate'), withLink('user', D2))).toBe(false);
+  });
+});
+
+describe('0.70.0 · win_probabilities_unavailable', () => {
+  const at = (d: string) => `2026-06-0${d}T00:00:00.000Z`;
+  const reason = (facts: readonly HandlerFact[], mayName = true) => {
+    const out = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: mayName });
+    if (out.kind !== 'ok') throw new Error(out.reason);
+    expect(RunDeltaSchema.safeParse(out.delta).success).toBe(true);
+    return [out.delta.win_probabilities.length, out.delta.win_probabilities_unavailable];
+  };
+
+  it('RED (RC\'s unwithheld rerun): the earlier Run\'s shares withheld, this Run\'s shown → prior_withheld', () => {
+    expect(reason([
+      runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', at('7'), true),
+      runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), false),
+    ])).toEqual([0, 'prior_withheld']);
+  });
+
+  it('RED (DL r3 P1-3): an earlier Run with NO recorded verdict (neither stamp) → no reason — never a cause claim from absence', () => {
+    const unstamped = structuredClone(runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), true)) as { result: Record<string, any> };
+    delete unstamped.result.constraint_verdict;
+    for (const k of Object.keys(unstamped.result.enrichment ?? {})) if (/may_name|constraint_verdict/.test(k)) delete unstamped.result.enrichment[k];
+    expect(reason([
+      runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', at('7'), true),
+      unstamped as unknown as HandlerFact,
+    ])).toEqual([0, undefined]);
+  });
+
+  it('RED: both Runs show shares but no option is on both sides → no_matched_option', () => {
+    expect(reason([
+      runAnalysisFact([{ id: 'opt-c', win: 0.45 }, { id: 'opt-d', win: 0.55 }], '222', 'hash-b', at('7'), true),
+      runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), true),
+    ])).toEqual([0, 'no_matched_option']);
+  });
+
+  it('CONTROL: THIS Run\'s shares withheld (or the turn\'s) → no reason (cause-neutral words); shares present → no reason', () => {
+    expect(reason([
+      runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', at('7'), false),
+      runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), true),
+    ])).toEqual([0, undefined]);
+    expect(reason(PRESENT_PAIR, false)).toEqual([0, undefined]);
+    expect(reason(PRESENT_PAIR)).toEqual([2, undefined]);
+  });
+});
+
+/**
+ * ⭐ SERVED BYTES (R3 F5 journey-1, #85 5938917543): two Accepts on guest 2f2b6624 each turned a 0.25 placeholder into
+ * Olumi's accepted estimate, and NO figure moved. The served Changes pill read "Both runs used the same input values"
+ * and never named the Accept (`input_changes []`, coverage complete). Through the real snapshot builder and diff, the
+ * same before/after graphs now name both Accepts, by link, and nothing else.
+ */
+describe('0.70.0 · R3\'s served Accept pair (2f2b6624) names both Accepts', () => {
+  it('RED: two `sizing` rows placeholder → olumi_accepted, coverage complete, no other row', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { buildRunInputSnapshot } = await import('../../tools/handlers/run-input-snapshot.js');
+    const { diffRunInputs } = await import('../run-input-changes.js');
+    const fx = JSON.parse(readFileSync(new URL('./fixtures/served-2f2b6624-accept-pair.json', import.meta.url), 'utf8')) as
+      { before: { nodes: unknown[]; edges: unknown[] }; after: { nodes: unknown[]; edges: unknown[] } };
+    const snapOf = (g: { nodes: unknown[]; edges: unknown[] }) => buildRunInputSnapshot({
+      submittedOptions: [], rawObjectsPerOption: [], wirePerOption: [], heldFactorIdsByOptionId: new Map(), optionsNotSent: [],
+      wireGraph: g, plotPayload: { graph: g }, persistedEdges: g.edges,
+    })!;
+    const before = snapOf(fx.before);
+    const after = snapOf(fx.after);
+    expect(before, 'precondition: both snapshots recorded').not.toBeNull();
+    const { rows, complete } = diffRunInputs(before, after);
+    expect(complete).toBe(true);
+    expect(rows.map((r) => [r.field, r.link, r.before, r.after])).toEqual([
+      ['sizing', { from: 'sprint_capacity_for_ai_reporting', to: 'ai_reporting_module_availability' }, { raw: 'placeholder' }, { raw: 'olumi_accepted' }],
+      ['sizing', { from: 'sprint_capacity_for_integration_fix', to: 'integration_step_bug_resolution' }, { raw: 'placeholder' }, { raw: 'olumi_accepted' }],
+    ]);
   });
 });

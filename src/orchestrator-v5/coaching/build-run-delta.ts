@@ -53,6 +53,7 @@ import {
   type RunDeltaAttributionCaseLiteral,
   type RunDeltaBuildsEqualityLiteral,
   type RunDeltaNoiseVerdictLiteral,
+  type RunDeltaWinProbabilitiesUnavailableLiteral,
   type RunDeltaWinProbabilityDelta,
 } from '@talchain/schemas/boundary';
 
@@ -650,12 +651,31 @@ export function buildRunDelta(input: {
   }
   // Deterministic order so a captured wire body is byte-stable across replays.
   winProbabilities.sort((a, b) => a.option_id.localeCompare(b.option_id));
+  // ⭐ 0.70.0 (CANVAS 5936762171, RC 5936776917): WHY there are no shares, typed — only when the cause is known:
+  //   - `prior_withheld`: THIS Run may show its shares, the earlier Run's were withheld → "compared for the first time";
+  //   - `no_matched_option`: both Runs show shares, and no option has one on both sides.
+  // Any other empty list (this Run's own shares withheld, a Run with no shares recorded) carries no reason: the
+  // consumer keeps its cause-neutral words, never a reason it cannot back.
+  // ⛔ `prior_withheld` is a CAUSE CLAIM, so it needs the earlier Run's OWN recorded withhold verdict (its typed
+  // `constraint_verdict` says it may not name a leader) — never the absence of a stamp. A historical Run with no
+  // verdict recorded is "not entitled" here (fail closed) but its cause is unknown, so no reason travels
+  // (DL ruling #2482 r3 P1-3; CODEX reproduced the cause claim from missing evidence).
+  const priorWithholdRecorded = (() => {
+    const verdict = pair.prior.fact_type === 'run_analysis' ? (pair.prior.result as { constraint_verdict?: unknown }).constraint_verdict : undefined;
+    return verdict !== null && typeof verdict === 'object' && !Array.isArray(verdict)
+      && (verdict as { may_name_leading_option?: unknown }).may_name_leading_option === false;
+  })();
+  const winProbabilitiesUnavailable: RunDeltaWinProbabilitiesUnavailableLiteral | undefined = winProbabilities.length > 0 ? undefined
+    : currentEntitled && currentWins.size > 0 && !priorEntitled && priorWithholdRecorded ? 'prior_withheld'
+      : priorEntitled && currentEntitled && priorWins.size > 0 && currentWins.size > 0 ? 'no_matched_option'
+        : undefined;
 
   const candidate = {
     attribution_case: attributionCase,
     pair_provenance: pairProvenance,
     leader,
     win_probabilities: winProbabilities,
+    ...(winProbabilitiesUnavailable !== undefined ? { win_probabilities_unavailable: winProbabilitiesUnavailable } : {}),
     // ⭐ THE WITHHELD FLIP-THRESHOLD SLOT, TAKEN FROM THE CAGE — NEVER WRITTEN
     // HERE. `flip_thresholds` is a ratified Tier-3 deny key and
     // `claim-safety-cage.ts` is its sole owner, so this producer carries no

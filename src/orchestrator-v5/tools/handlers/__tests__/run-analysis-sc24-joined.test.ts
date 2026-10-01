@@ -32,6 +32,7 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { buildRunDelta } from '../../../coaching/build-run-delta.js';
 import { readScenarioAnalysis } from '../../../../routes/scenario-graph-analysis-read.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
+import { linkSizing } from '../../../../cee/magnitude/link-sizing.js';
 
 type Rec = Record<string, any>;
 const served = JSON.parse(readFileSync(new URL('../../../agent-lane/__tests__/fixtures/served-c96fc4bb-registered-graph-77afc7b.json', import.meta.url), 'utf8')) as { graph: Rec };
@@ -115,6 +116,17 @@ describe('SC-24 · Run A → £59 → £60 → Run B → the delta and the cold 
     expect(b.result.input_snapshot.goal).toEqual({
       node_id: 'mrr', label: expect.any(String), target_raw: 85000, unit: 'GBP/month', operator: '>', frame: 'level',
     });
+
+    // ── 0.70.0 (R3 DEFECT 3): each sent link also carries its band and WHO SIZED it, read through the real handler
+    //    from the graph the Run was built from (`persistedEdges`), never from the wire ──
+    const sentLinks = b.result.input_snapshot.links as Rec[];
+    expect(sentLinks.length, 'precondition: the Run sent links').toBeGreaterThan(0);
+    for (const l of sentLinks) {
+      expect(l.band).toMatch(/^(slight|moderate|strong|very_strong)$/);
+      const persistedPair = (graph.edges as Rec[]).filter((e) => e.from === l.from && e.to === l.to);
+      if (persistedPair.length === 1) expect(l.sizing, `${l.from}->${l.to}`).toBe(linkSizing(persistedPair[0]));
+    }
+    expect(sentLinks.filter((l) => l.sizing !== undefined).length, 'positive control: sizing recorded through the handler').toBeGreaterThan(0);
 
     // ── the producer: the pair's exact input change ──
     const turnDelta = buildRunDelta({ priorFacts: [...facts] as never, mayNameLeadingOption: true });

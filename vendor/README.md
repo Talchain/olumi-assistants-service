@@ -7,7 +7,61 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.69.0.tgz` ← **THE CURRENT PIN** (MG, F1 T1)
+### `talchain-schemas-0.72.0.tgz` ← **THE CURRENT PIN** (F1b 52f8cd, a link's `authorship_digest`)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`cd1e868e`** (schemas #82 merge; publish run 36935147076), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.72.0/fd389b22eebbedb4f7544d9dffa47c610a0c8487`.
+>
+> ```
+> npm shasum (sha1)  fd389b22eebbedb4f7544d9dffa47c610a0c8487   ← matches
+> integrity (sha512) sha512-xRsNlJYILXVmd/6galcPOKu0rhu4V+K5DoGRHoAe+99IV/FBXLkbDGM2ehHpmgmkdfEFOgdf2/CQzO4JzI6pQQ==   ← matches (pnpm-lock, written by pnpm)
+> sha256             c5ea5c57d26db4dd62f6c60c41e5def94db23ff7015eee51d0548c550a8067ff
+> ```
+>
+> **What 0.72.0 adds (additive, optional):** Run snapshot `links[].authorship_digest` — the link's authorship as sent, so an
+> authorship change is explained pairwise only beside a `sizing` row to `user` or `placeholder → olumi_accepted` (DL
+> ruling #2482 r3). `RunDelta` unchanged; the UI needs no re-vendor.
+
+### `talchain-schemas-0.71.0.tgz` (superseded) (F1b 52f8cd, `complete` means VERIFIED: `residual_digest`)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`56888181`** (schemas #81 merge; publish run 36923548214), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.71.0/c783076ef0b70d5036ce03a08ec40643d9862912`.
+>
+> **767,235 bytes.** Verified against the registry's published metadata on 1 Oct:
+>
+> ```
+> npm shasum (sha1)  c783076ef0b70d5036ce03a08ec40643d9862912   ← matches
+> integrity (sha512) sha512-xIsf5VttWdKT/cGn98KQhGJblmJ1oZ4Tpk9K5hXy6uZOiTepYWxO6glq3nm0YSCLzDq9TdbnkTMYtyrVer6cyg==   ← matches (pnpm-lock)
+> sha256             7be834c8d062b60f1e600947160332bdda282f8734eeefd6a2e0573ac140e593
+> ```
+>
+> **What 0.71.0 adds (additive, optional):** `RunInputSnapshot.residual_digest` — every analysis input the snapshot does
+> not record, digested; a pair is `input_coverage: 'complete'` only when both ends carry an equal one (DL ruling on
+> #2482, 5939864517). `RunDelta` is unchanged, so the UI needs no re-vendor. ⚠ The lock line is pnpm's own (`pnpm
+> install`), never hand-edited: a hand-edited `version: 0.69.0` beside the 0.70.0 tgz killed every CI install on #2482.
+
+### `talchain-schemas-0.70.0.tgz` (superseded) (F1b 52f8cd, R3 DEFECT 3 + typed empty win shares)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** `npm publish` from `olumi-schemas` `main`
+> **`cace462d`** (schemas #80 merge; the registry's `gitHead` binds it), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.70.0/a987224c3442bdf1bb1c9efe02e2f0f2470769e8`.
+>
+> **766,456 bytes.** Verified against the registry's published metadata on 1 Oct:
+>
+> ```
+> npm shasum (sha1)  a987224c3442bdf1bb1c9efe02e2f0f2470769e8   ← matches
+> integrity (sha512) sha512-+IUB15tcl7WCOUgJNkqTh1LEtzr4j+0pALo2a57uvb9DHqUPQWR33um8ywigiHOSAEOKA1AOAuOadpgYudRmlg==   ← matches
+> sha256             d7764a0067639b4b207234960eb6779c9a0d3e9d6f495f57c5fb723aebb1806e
+> ```
+>
+> **What 0.70.0 adds (additive, optional; no analysis-hash input moves):** Run snapshot `links[].band` / `links[].sizing`;
+> `RunInputField` `sizing`; `run_delta.win_probabilities_unavailable` (`prior_withheld | no_matched_option`, only beside
+> an empty list). **UI-first:** DGAI vendors 0.70.0 before CEE emits any of them (the `.strict()` RunDelta on 0.69
+> refuses every new member).
+
+### `talchain-schemas-0.69.0.tgz` (superseded) (MG, F1 T1)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** `npm publish` from `olumi-schemas` `main`
 > **`5b0ca7f5`** (schemas #78 merge; the registry's `gitHead` binds it), 2026-10-01. Registry download:

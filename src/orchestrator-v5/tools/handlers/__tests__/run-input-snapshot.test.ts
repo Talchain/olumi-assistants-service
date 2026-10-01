@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildRunInputSnapshot, runIdFor, sentDigest } from '../run-input-snapshot.js';
+import { linkAuthorshipDigest } from '../run-input-residual.js';
 import { normalizeRunGoalUnit } from '../../../context/run-goal-unit.js';
 
 const graph = {
@@ -79,7 +80,39 @@ describe('buildRunInputSnapshot — what the Run was sent', () => {
       { factor_id: 'fac_churn', label: 'Monthly churn', raw: 3.7, unit: '%', encoded: 0.037, source: 'cee_inference' },
     ]);
     expect(s?.constraints).toEqual([{ constraint_id: 'c1', node_id: 'fac_churn', label: 'Churn cap', operator: '<=', raw: 5, unit: '%' }]);
-    expect(s?.links).toEqual([{ from: 'fac_price', to: 'fac_churn', mean: 0.4, std: 0.1, exists_probability: 0.9 }]);
+    // 0.70.0: the band the sent strength sits in travels with it (0.4 is "strong" by CEE's cuts); no persisted edges
+    // given, so who sized it is NOT recorded (absent, never inferred).
+    expect(s?.links).toEqual([{
+      from: 'fac_price', to: 'fac_churn', mean: 0.4, std: 0.1, exists_probability: 0.9, band: 'strong',
+      // 0.72.0: the link's authorship as sent, by the ONE digest (`run-input-residual.ts`).
+      authorship_digest: linkAuthorshipDigest((graph as unknown as { edges: Record<string, unknown>[] }).edges[0]!),
+    }]);
+  });
+
+  describe('0.70.0 (R3 DEFECT 3): each link in the user\'s terms — its band and who sized it', () => {
+    const linkTo = (mean: number) => input({ wireGraph: { ...(input().wireGraph as Record<string, unknown>),
+      edges: [{ from: 'fac_price', to: 'fac_churn', strength: { mean, std: 0.1 }, exists_probability: 0.9 }] } });
+    it.each([[0.1, 'slight'], [-0.3, 'moderate'], [0.55, 'strong'], [0.85, 'very_strong']] as const)(
+      '|β| %s sits in the contract band %s', (mean, band) => {
+        expect(buildRunInputSnapshot(linkTo(mean))?.links[0]?.band).toBe(band);
+      });
+
+    const persisted = (provenance: Record<string, unknown>) => [{ from: 'fac_price', to: 'fac_churn', provenance }];
+    it.each([
+      [{ source: 'cee_hypothesis', magnitude: 'olumi_placeholder' }, 'placeholder'],
+      [{ source: 'cee_hypothesis', magnitude: 'olumi_estimate' }, 'olumi_estimate'],
+      [{ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm', at: '2026-10-01T18:00:00Z' } }, 'olumi_accepted'],
+      [{ source: 'user_specified' }, 'user'],
+      [{ source: 'cee_hypothesis' }, 'unmarked'],
+    ] as const)('RED: who sized it is read from the graph the Run was built from (%j → %s)', (provenance, sizing) => {
+      expect(buildRunInputSnapshot({ ...input(), persistedEdges: persisted(provenance) })?.links[0]?.sizing).toBe(sizing);
+    });
+
+    it('CONTROL: a pair the persisted graph holds twice, or not at all, records NO sizing (never a guess)', () => {
+      const twice = [...persisted({ magnitude: 'olumi_estimate' }), ...persisted({ source: 'user_specified' })];
+      expect(buildRunInputSnapshot({ ...input(), persistedEdges: twice })?.links[0]).not.toHaveProperty('sizing');
+      expect(buildRunInputSnapshot({ ...input(), persistedEdges: [] })?.links[0]).not.toHaveProperty('sizing');
+    });
   });
 
   it('the digest ignores request_id and key order, and moves with any input', () => {

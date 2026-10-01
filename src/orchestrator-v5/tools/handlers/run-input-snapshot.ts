@@ -25,6 +25,9 @@ import { createHash } from 'node:crypto';
 import { InterventionRangeSchema } from '@talchain/schemas';
 import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
+import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
+import { linkAuthorshipDigest, residualDigest } from './run-input-residual.js';
 
 type Rec = Record<string, unknown>;
 
@@ -82,6 +85,11 @@ export interface RunInputSnapshotInput {
   readonly wireGraph: unknown;
   /** The request PLoT received (goal_node_id, goal_constraints, goal_direction live here). */
   readonly plotPayload: Rec;
+  /**
+   * 0.70.0 (R3 DEFECT 3): the edges of the graph this Run was built from — who sized each link is provenance, never on
+   * the wire, so it is read here. Absent = sizing not recorded (an older caller); never inferred.
+   */
+  readonly persistedEdges?: ReadonlyArray<unknown>;
 }
 
 /** The snapshot, or `null` when it cannot be recorded honestly (over a bound, or refused by the contract). */
@@ -217,6 +225,15 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
   });
 
   // ── links ──────────────────────────────────────────────────────────────
+  // 0.70.0 (R3 DEFECT 3; AIQ 5918134795): a link's mean/std/exists_probability are the engine's numbers and never a
+  // row figure, so the link is also recorded in the user's terms: the BAND its sent strength sits in (CEE's cuts, the
+  // contract's literal) and WHO SIZED it (`linkSizing` on the graph this Run was built from — one edge per pair, or
+  // none recorded).
+  const persistedByPair = new Map<string, Rec | null>();
+  for (const pe of (input.persistedEdges ?? []).filter(isRec)) {
+    const k = `${String(pe.from)}\u0000${String(pe.to)}`;
+    persistedByPair.set(k, persistedByPair.has(k) ? null : pe);
+  }
   const links = edges.flatMap((e) => {
     const from = text(e.from);
     const to = text(e.to);
@@ -224,18 +241,22 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     const mean = finite(strength.mean);
     if (from === undefined || to === undefined || mean === undefined) return [];
     const p = finite(e.exists_probability);
+    const persisted = input.persistedEdges === undefined ? undefined : persistedByPair.get(`${from}\u0000${to}`) ?? undefined;
     return [{
       from,
       to,
       mean,
       ...(finite(strength.std) !== undefined ? { std: finite(strength.std) } : {}),
       ...(p !== undefined && p >= 0 && p <= 1 ? { exists_probability: p } : {}),
+      band: strengthBandFromEdgeBand(edgeBandFromMagnitude(Math.abs(mean))),
+      ...(persisted !== undefined ? { sizing: linkSizing(persisted) } : {}),
+      // 0.72.0 (DL ruling #2482 r3): the link's authorship as the request carried it, so the diff can tell pairwise
+      // whether an authorship change is the one a `sizing` row states (`run-input-residual.ts`).
+      authorship_digest: linkAuthorshipDigest(e),
     }];
   });
 
-  const candidate = {
-    snapshot_version: 1 as const,
-    sent_digest: sentDigest(input.plotPayload),
+  const recorded = {
     goal,
     options,
     options_not_sent: input.optionsNotSent.map((o) => ({
@@ -246,6 +267,15 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
     factors,
     constraints,
     links,
+  };
+  // 0.71.0 (DL ruling #2482 5939864517): every analysis input this snapshot does NOT record, digested
+  // (`run-input-residual.ts`) — a pair is `complete` only when both ends carry one and they are equal.
+  const residual = residualDigest(input.plotPayload, recorded);
+  const candidate = {
+    snapshot_version: 1 as const,
+    sent_digest: sentDigest(input.plotPayload),
+    ...(residual !== null ? { residual_digest: residual } : {}),
+    ...recorded,
   };
   // The contract's bounds and one-row-per-input rules decide; a refusal records NO snapshot (never a partial one).
   const parsed = RunInputSnapshotSchema.safeParse(candidate);
