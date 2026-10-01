@@ -56,6 +56,7 @@ import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-readi
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
 import { refitFramesForStatedEffects } from '../refit-frames.js';
+import { perOneLinksForConstantProducts } from '../per-one-product.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
 import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
@@ -1361,7 +1362,8 @@ export async function buildModelFromBrief(
         ...(cutOff !== undefined ? { incomplete_reason: cutOff, detail: `incomplete: ${cutOff}` } : {}),
       };
     }
-    candidate = JSON.parse(out.text) as CandidateModel;
+    // A4u: a drafted count × constant money-per-one product is read as the per-one link it is (`per-one-product.ts`).
+    candidate = perOneLinksForConstantProducts(JSON.parse(out.text) as CandidateModel);
   } catch (err) {
     if (cutOff !== undefined) {
       return { ok: false, mutated: false, refusal: 'construction_failed', incomplete_reason: cutOff, detail: `incomplete: ${cutOff}` };
@@ -1522,7 +1524,7 @@ export async function buildModelFromBrief(
         schema: strictForTheDrafter(retrySchemaPinningGoal(candidate.goal, candidate.decision_question)),
       });
       if (retry.text.length > 0) {
-        const retryApart = keepOptionsAndQuantitiesApart(JSON.parse(retry.text) as CandidateModel);
+        const retryApart = keepOptionsAndQuantitiesApart(perOneLinksForConstantProducts(JSON.parse(retry.text) as CandidateModel));
         const retryRaw = keepLimitedQuantityAuthor(
           neverTheLimitAsTodaysLevel(creditStatedFactorLevels(retryApart.model, brief), firstCandidate, preparation.baseline_gaps),
           firstCandidate, preparation.baseline_gaps,

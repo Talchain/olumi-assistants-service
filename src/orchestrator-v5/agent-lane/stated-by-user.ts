@@ -537,8 +537,39 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       if (at + m[0].length <= a.index) left.push(m[0].toLowerCase());
       else if (at >= amountEnd) right.push(m[0].toLowerCase());
     }
+    /**
+     * ⭐ STRICT: A RIVAL CLAIMS A SHARED WORD ONLY BY ITS OWN QUALIFIER (R3 #75 5924350620; MG A4u 5924448020). A word the
+     * target shares with another label names neither by itself ("deals" in "Investment-firm deals closed" and "Angel deals
+     * closed"; "secured" in "Funding secured" and "Angel funding secured"), so it was passed over, and on a draft with
+     * sibling labels nothing was left to bind: served 0258Z refused Paul's "£1-2 million" for the investment-firm deals,
+     * and 0341Z refused his "secured £0 so far" for the goal. The clause decides, rival by rival: the target holds the word
+     * when its OWN words (those that rival lacks) are written in the clause and the rival's own are not ("investment
+     * firms that do deals"); when neither's own is written, the more GENERAL label holds it (the one with no own words:
+     * "secured £0" is the goal's, never "Angel funding secured"'s). Anything else stays nobody's: under-claim.
+     */
+    const clauseWords = [...left, ...right];
+    const inClause = (ws: readonly string[]): boolean => ws.some((w) => w.length >= 3 && clauseWords.some((c) => sameWord(c, w)));
+    const labelWords = (labels: readonly string[]): string[][] => labels.map((l) => [...new Set(wordsOf(l))]);
+    const targetLabelWords = labelWords(scope.target);
+    const rivalLabelWords = labelWords(scope.rivals ?? scope.others);
+    const targetHoldsShared = (w: string): boolean => {
+      if (!strict || !targetWords.some((t) => sameWord(t, w))) return false;
+      const rivalsWithW = rivalLabelWords.filter((r) => r.some((x) => sameWord(x, w)));
+      if (rivalsWithW.length === 0) return false;
+      return rivalsWithW.every((r) => targetLabelWords.some((t) => {
+        if (!t.some((x) => sameWord(x, w))) return false;
+        const tOwn = t.filter((x) => !r.some((y) => sameWord(x, y)));
+        const rOwn = r.filter((y) => !t.some((x) => sameWord(x, y)));
+        const tIn = inClause(tOwn); const rIn = inClause(rOwn);
+        return (tIn && !rIn) || (!tIn && !rIn && tOwn.length === 0 && rOwn.length > 0);
+      }));
+    };
     const firstMention = (ws: readonly string[]): 'target' | 'other' | null => {
-      for (const w of ws) { const k = mentionOf(w, decisiveTarget); if (k !== null) return k; }
+      for (const w of ws) {
+        const k = mentionOf(w, decisiveTarget);
+        if (k !== null) return k;
+        if (w.length >= 3 && !unitWords.some((u) => sameWord(u, w)) && targetHoldsShared(w)) return 'target';
+      }
       return null;
     };
     // The figure's own RATE names no entity either (AI Conversation #70 5848429576): "£10 per month" on a factor with
