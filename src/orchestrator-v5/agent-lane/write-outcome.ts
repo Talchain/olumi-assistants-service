@@ -244,13 +244,27 @@ function contextFactorsOf(r: ToolResult | undefined): string[] {
 function contextFactorsLine(r: ToolResult): string {
   const labels = contextFactorsOf(r);
   if (labels.length === 0) return '';
-  return ` Held fixed (no option changes ${labels.length === 1 ? 'it' : 'them'}): ${labels.join('; ')}.`;
+  const fact = ` Held fixed (no option changes ${labels.length === 1 ? 'it' : 'them'}): ${labels.join('; ')}.`;
+  // The toggle is full: the ask stays at rest, beside its fact, rather than be clipped away (`contextAskOf`).
+  return askFitsBehindToggle(r) ? fact : `${fact} Should one of the options change ${labels.length === 1 ? 'it' : 'them'}?`;
 }
 
-/** The held-fixed factors' ask, as an open question the user can take up behind the toggle; null when none was held. */
+/**
+ * ⛔ THE TOGGLE SHOWS AT MOST 40 (CODEX #2420 CR 5923436781). DGAI's `readOpenQuestionList` keeps the first
+ * `OPEN_QUESTION_LIST_MAX` = 40 items of `_agent.open_questions` (DecisionGuideAI staging `69c05df1`,
+ * `src/canvas/conversation/serverOpenQuestions.ts`). Appended as item 41 the ask would be clipped there AND be absent from
+ * the reply's text, so it moves behind the toggle only while the build's own questions leave it room; otherwise it stays
+ * at rest beside its fact, and no science question is displaced.
+ */
+export const UI_OPEN_QUESTION_LIST_MAX = 40;
+function askFitsBehindToggle(r: ToolResult | undefined): boolean {
+  return openQuestionsOf(r).length < UI_OPEN_QUESTION_LIST_MAX;
+}
+
+/** The held-fixed factors' ask, as an open question the user can take up behind the toggle; null when none was held or no room. */
 function contextAskOf(r: ToolResult | undefined): string | null {
   const labels = contextFactorsOf(r);
-  return labels.length === 0 ? null : `Should one of the options change ${labels.join(' or ')}?`;
+  return labels.length === 0 || !askFitsBehindToggle(r) ? null : `Should one of the options change ${labels.join(' or ')}?`;
 }
 
 /**

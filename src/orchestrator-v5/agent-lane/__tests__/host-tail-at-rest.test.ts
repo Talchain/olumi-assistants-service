@@ -38,6 +38,13 @@ function splitServerOpenQuestions(text: string): { lead: string; questions: stri
   if (lead.length === 0 || questions.length === 0) return null;
   return { lead, questions, after, atRest: after ? `${lead} ${after}` : lead };
 }
+// DGAI staging 69c05df1 serverOpenQuestions.ts `readOpenQuestionList`, verbatim: the toggle keeps the first 40.
+const OPEN_QUESTION_LIST_MAX = 40;
+function readOpenQuestionList(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const items = raw.filter((q): q is string => typeof q === 'string' && q.trim().length > 0).slice(0, OPEN_QUESTION_LIST_MAX);
+  return items.length > 0 ? items : undefined;
+}
 // ──
 
 const words = (s: string): number => s.split(/\s+/).filter(Boolean).length;
@@ -95,6 +102,36 @@ describe('served paul-1: the held-fixed fact stays at rest, short; its ask moves
     const list = openQuestionsForReply(built() as never);
     expect(list.filter((q) => q.startsWith('Should one of the options change')).length).toBe(1);
     expect(list).toHaveLength(FX.open_questions.length + 1);
+  });
+});
+
+describe('CODEX CR 5923436781: the toggle shows at most 40 — the moved ask is never clipped away', () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => `Science question ${i + 1}?`);
+  const ASK = 'Should one of the options change Recruitment fee?';
+  const run = (n: number) => {
+    const r = built({ open_questions: many(n), treated_as_context: ['Recruitment fee'] });
+    const status = narrateWriteOutcome('', [{ name: 'build_model_from_brief' }], [r as never]).status!;
+    return { status, wire: openQuestionsForReply(r as never), shown: readOpenQuestionList(openQuestionsForReply(r as never))!, atRest: splitServerOpenQuestions(reply(status))!.atRest };
+  };
+
+  it('CONTROL: 39 build questions → the ask is item 40, which the UI keeps; nothing asks at rest', () => {
+    const { wire, shown, atRest } = run(39);
+    expect(wire).toHaveLength(40);
+    expect(shown.at(-1)).toBe(ASK);
+    expect(atRest).not.toMatch(/\?/);
+  });
+
+  it('RED: 40 build questions → no room behind the toggle, so the ask stays AT REST beside its fact; no science question displaced', () => {
+    const { wire, shown, atRest } = run(40);
+    expect(wire).toEqual(many(40));
+    expect(shown).toEqual(many(40));
+    expect(atRest.endsWith('Held fixed (no option changes it): Recruitment fee. Should one of the options change it?')).toBe(true);
+    expect(atRest.match(/\?/g)).toHaveLength(1);
+  });
+
+  it('the bound is the UI\'s own: write-outcome exports the same 40', async () => {
+    const { UI_OPEN_QUESTION_LIST_MAX } = await import('../write-outcome.js');
+    expect(UI_OPEN_QUESTION_LIST_MAX).toBe(OPEN_QUESTION_LIST_MAX);
   });
 });
 
