@@ -33,6 +33,7 @@ import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
 import collabRoundsRouteV1 from "./routes/collab.v1.rounds.js";
 import collabPacketRouteV1 from "./routes/collab.v1.packet.js";
 import ceeDecisionRecordsRouteV1 from "./routes/assist.v1.decision-records.js";
+import ceeScenarioCopyRouteV1 from "./routes/assist.v1.scenario-copy.js";
 import ceeUtilityWeightRouteV1 from "./routes/assist.v1.suggest-utility-weights.js";
 import ceeRiskToleranceRouteV1 from "./routes/assist.v1.elicit-risk-tolerance.js";
 import ceeEdgeFunctionRouteV1 from "./routes/assist.v1.suggest-edge-function.js";
@@ -1361,6 +1362,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   // per Paul's no-dark-launch / no-new-env-gate rulings. Its own always-on
   // Supabase-JWT verification is independent of CEE_REQUIRE_USER_JWT.
   await ceeDecisionRecordsRouteV1(app);
+  await ceeScenarioCopyRouteV1(app);
   await ceeUtilityWeightRouteV1(app);
   await ceeRiskToleranceRouteV1(app);
   await ceeEdgeFunctionRouteV1(app);

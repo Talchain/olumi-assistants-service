@@ -103,6 +103,10 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   // needs. Its bucket is keyed on the CLIENT, not the key id; see the route.
   CEE_SCENARIO_GRAPH_REGISTER_RATE_LIMIT_RPM: "coach",
 
+  // Guest → account COPY (ACCOUNTS B3): one RPC that INSERTS a new owned row. A write, so `coach` (fails CLOSED), not
+  // `read`. The UI calls it once per sign-in. Bucket keyed on the CLIENT, as the sibling scenario routes.
+  CEE_SCENARIO_COPY_RATE_LIMIT_RPM: "coach",
+
   // --- coach: medium coaching / analysis engines ---
   // RESERVED — no src reference yet, deliberately. The drift test reads this
   // marker (it is machine-read, not decoration: see the reverse assertion in
