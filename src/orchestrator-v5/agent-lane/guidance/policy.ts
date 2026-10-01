@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ 9c8943188b4b2f6053e7fa80fd94760923ac7829.
+// programme-docs @ aeefbb3d2fe392d31e77977b321c5ab255ede9b7.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -759,10 +759,10 @@ export const POLICY = {
         "owner": "SCIENCE/DSK owns applicability and the badge; RC owns the method shape, checks and fallback; AI HARNESS composes (PTL 5933036532 owner split)."
       },
       "label_masking": {
-        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked: case-insensitive, curly quotes folded, longest label first, WHOLE TOKENS ONLY (a label is blanked only where no letter, digit or '_' touches either end; label matching is whole-token too). The mask set is model_labels (EVERY node label in the current model: goal, options, factors, risks, outcomes) plus the method's own labels: RC-PREMORTEM supplied_items + plan_label + current_option_labels; RERUN-EXPLANATION change_labels + current_option_labels; RC-WHAT-CHANGES factor_label; RC-STRENGTHEN-ITEM item_labels; RC-COACH-EDITS edited_labels.",
-        "why": "A label the user wrote is grounding, not a claim. Served D1 (the investor decision) has the factor 'Enterprise prospect signing likelihood': without masking every grounded pre-mortem failed PM-NO-PROB and fell back (SCIENCE/DSK 5938372911). RC served-label scan (CEE staging fixtures, 1,440 labels / 305 graphs): goal labels with '%' ('Cut Burn Rate by 30%'), factor labels with 'leads' ('Qualified leads per month'), risk labels with '%' ('Churn above 4%'): none of them supplied items, so the mask set is every model label.",
-        "never": "Mask Olumi's own words: only labels the inputs supply, and only as whole tokens (option 'A' must never blank the 'a' in 'probability'; HARNESS #2478 P1).",
-        "reference": "tools/check_method_turn.py masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM, MT-RERUN-MODEL-LABEL-GOOD / -BAD-LEADER, MT-PREMORTEM-SHORT-LABEL-GOOD / -BAD",
+        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked, PER BAN: a ban blanks only the labels in which that same ban matches (they are the user's words: 'Enterprise prospect signing likelihood' for PM-NO-PROB, 'Qualified leads per month' for RX-NO-LEADER-UNLICENSED), never a label it does not match (an unrelated label 'Will' must not hide 'This plan will fail'), and never a label that is nothing but banned words ('Odds', 'Leads': the check fails closed). Blanking is case-insensitive, curly quotes folded, longest label first, WHOLE TOKENS ONLY (a label is blanked only where no letter, digit or '_' touches either end; label matching is whole-token too). The candidate labels are model_labels (EVERY node label in the current model: goal, options, factors, risks, outcomes) plus the method's own labels: RC-PREMORTEM supplied_items + plan_label + current_option_labels; RERUN-EXPLANATION change_labels + current_option_labels; RC-WHAT-CHANGES factor_label; RC-STRENGTHEN-ITEM item_labels; RC-COACH-EDITS edited_labels.",
+        "why": "A label the user wrote is grounding, not a claim. Served D1 (the investor decision) has the factor 'Enterprise prospect signing likelihood': without masking every grounded pre-mortem failed PM-NO-PROB and fell back (SCIENCE/DSK 5938372911). RC served-label scan (CEE staging fixtures, 1,440 labels / 305 graphs): goal labels with '%' ('Cut Burn Rate by 30%'), factor labels with 'leads' ('Qualified leads per month'), risk labels with '%' ('Churn above 4%'): none of them supplied items, so the mask set is every model label. PER BAN (CODEX_CLI_OVERFLOW on CEE #2480 P1 #4): blanking every label let a common-word label ('Will') erase Olumi's own 'will fail'. Re-scan at per-ban (1,074 labels / 359 CEE fixture graphs): 17 labels carry a ban hit (11 '%'/probability words, 5 'leads', 1 'significant'), all multi-word and still blanked; 0 are wholly a ban token, so failing closed costs no served label.",
+        "never": "Mask Olumi's own words: only labels the inputs supply, only for a ban the label itself trips, only as whole tokens (option 'A' must never blank the 'a' in 'probability', HARNESS #2478 P1; label 'Will' must never blank 'will fail', #2480 P1 #4).",
+        "reference": "tools/check_method_turn.py banned() + masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM, MT-RERUN-MODEL-LABEL-GOOD / -BAD-LEADER, MT-PREMORTEM-SHORT-LABEL-GOOD / -BAD, MT-PREMORTEM-COMMON-WORD-LABEL-BAD, MT-RERUN-BARE-BAN-LABEL-BAD",
         "input": "model_labels: string[] = every node label of the current model (the caller has the graph)."
       }
     },
@@ -1082,4 +1082,4 @@ export const POLICY = {
   }
 } as const;
 
-export const SPEC_SHA = "9c8943188b4b2f6053e7fa80fd94760923ac7829";
+export const SPEC_SHA = "aeefbb3d2fe392d31e77977b321c5ab255ede9b7";

@@ -6965,6 +6965,121 @@
    "note": "Discriminating pair: substring masking of the label 'A' blanked the 'a' inside 'probability' and passed Olumi's own claim (HARNESS #2478 P1 probe)."
   },
   {
+   "id": "MT-PREMORTEM-COMMON-WORD-LABEL-BAD",
+   "policy_id": "RC-PREMORTEM",
+   "grounded_on": "A-PREMORTEM-LICENSED (D3) with a node labelled Will",
+   "inputs": {
+    "plan_label": "Switch to GCP",
+    "current_option_labels": [
+     "Switch to GCP",
+     "Stay on AWS",
+     "Phased GCP migration"
+    ],
+    "supplied_items": [
+     {
+      "id": "monthly_cloud_overspend_during_migration->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud overspend during migration",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "monthly_cloud_savings->monthly_spend",
+      "kind": "link",
+      "labels": [
+       "Monthly cloud savings",
+       "Monthly spend"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "gcp_workload_share->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "GCP workload share",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort->monthly_cloud_overspend_during_migration",
+      "kind": "link",
+      "labels": [
+       "Migration preparation effort",
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_link_strengths"
+     },
+     {
+      "id": "migration_preparation_effort",
+      "kind": "factor",
+      "labels": [
+       "Migration preparation effort"
+      ],
+      "card": "propose_assumptions"
+     },
+     {
+      "id": "monthly_cloud_overspend_during_migration",
+      "kind": "risk",
+      "labels": [
+       "Monthly cloud overspend during migration"
+      ],
+      "card": "propose_new_risk"
+     }
+    ],
+    "supplied_figures": [],
+    "model_labels": [
+     "Will",
+     "A",
+     "Go"
+    ]
+   },
+   "reply": "1. It is a year later and ‘Switch to GCP’ went badly because a bigger GCP workload share early on drove monthly cloud overspend during migration for months. Watch for: both bills still running after the first month. Mitigate: agree a hard cut-over date before you start.\n2. Migration preparation effort was far bigger than planned and the team stalled halfway. This plan will fail. Watch for: the workload inventory still growing in week two. Mitigate: inventory everything before committing.\nOutside the model: what could blindside this move that none of these figures covers, such as a key engineer leaving or a contract you can't exit?",
+   "expect": "fail",
+   "failing_checks": [
+    "PM-NO-PREDICTION"
+   ],
+   "expect_targets": [
+    "gcp_workload_share->monthly_cloud_overspend_during_migration",
+    "migration_preparation_effort"
+   ],
+   "note": "Masking is PER BAN: a label is blanked only for a ban it trips itself. Masking every label let the unrelated label 'Will' hide 'This plan will fail' (CODEX_CLI_OVERFLOW on CEE #2480 P1 #4). Control: MT-PREMORTEM-D1-OWN-LABEL-GOOD still passes."
+  },
+  {
+   "id": "MT-RERUN-BARE-BAN-LABEL-BAD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "served labels: CEE fixtures, with a factor labelled just Leads",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "change_labels": [
+     "Qualified leads per month"
+    ],
+    "leader_licensed": false,
+    "noise_verdict": "not_noise_qualified",
+    "prior_withheld": false,
+    "no_matched_figures": true,
+    "current_option_labels": [
+     "Move 30% to LinkedIn",
+     "Keep current channel mix"
+    ],
+    "model_labels": [
+     "Grow MRR",
+     "Qualified leads per month",
+     "Leads",
+     "Move 30% to LinkedIn",
+     "Keep current channel mix"
+    ]
+   },
+   "reply": "You changed Qualified leads per month.\n- Qualified leads per month: Olumi's estimate → yours.\n'Move 30% to LinkedIn' now leads.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-LEADER-UNLICENSED"
+   ],
+   "note": "A label that is nothing but banned words ('Leads') is never blanked: the check cannot tell the user's word from Olumi's claim, so it fails closed (fallback copy). 0 of 1,074 served labels / 359 CEE fixture graphs are wholly a ban token."
+  },
+  {
    "id": "MT-PREMORTEM-BAD-UNGROUNDED",
    "policy_id": "RC-PREMORTEM",
    "grounded_on": "A-PREMORTEM-LICENSED (D3)",

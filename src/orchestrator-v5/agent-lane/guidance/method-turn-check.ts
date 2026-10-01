@@ -19,6 +19,17 @@ function masked(reply: string, labels: readonly (string | undefined)[]): string 
   for (const label of own) out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![\\p{L}\\p{N}_])`, 'giu'), ' ');
   return out;
 }
+/**
+ * shared.label_masking, PER BAN: does Olumi's OWN text hit `ban`? A label is blanked only for a ban it trips itself (it
+ * is the user's word), and never when it is nothing but banned words ('Odds', 'Leads': fails closed). An unrelated
+ * common-word label ('Will') can never hide Olumi's claim 'This plan will fail' (CEE #2480 CR P1 #4).
+ */
+function banned(text: string, ban: RegExp, labels: readonly (string | undefined)[]): boolean {
+  const whole = new RegExp(`^[^\\p{L}\\p{N}]*(?:${ban.source})[^\\p{L}\\p{N}]*$`, 'iu');
+  const own = labels.filter((label): label is string => typeof label === 'string'
+    && ban.test(foldQuotes(label)) && !whole.test(foldQuotes(label).trim()));
+  return ban.test(masked(text, own));
+}
 /** WHOLE-TOKEN match after normalise(): label 'B' never matches inside another word (HARNESS #2478 P1). */
 function labelMatches(text: string, labels: readonly string[]): boolean {
   const normal = ` ${normalise(text)} `;
@@ -75,28 +86,27 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('PM-COUNT', items.length >= 2 && items.length <= 3);
     check('PM-GROUNDED', items.length > 0 && targets.every(target => target !== null));
     check('PM-WATCH-MITIGATE', items.length > 0 && items.every(item => item.includes('Watch for:') && item.includes('Mitigate:')));
-    const own = masked(reply, [...model, ...(inputs.supplied_items ?? []).flatMap(item => item.labels ?? []), inputs.plan_label, ...(inputs.current_option_labels ?? [])]);
-    check('PM-NO-PROB', !own.includes('%') && !/\b(likely|likelihood|chance|probability|probable|odds)\b/iu.test(own));
-    check('PM-NO-PREDICTION', !/\b(will|is going to|are going to) fail\b/iu.test(own));
+    const labels = [...model, ...(inputs.supplied_items ?? []).flatMap(item => item.labels ?? []), inputs.plan_label, ...(inputs.current_option_labels ?? [])];
+    check('PM-NO-PROB', !banned(reply, /%|\b(likely|likelihood|chance|probability|probable|odds)\b/iu, labels));
+    check('PM-NO-PREDICTION', !banned(reply, /\b(will|is going to|are going to) fail\b/iu, labels));
     const otherOptions = (inputs.current_option_labels ?? []).filter(label => normalise(label) !== normalise(inputs.plan_label ?? ''));
     check('PM-PLAN-ONLY', !labelMatches(reply, otherOptions));
     check('PM-BLINDSPOT', blindspotOk(reply));
   } else if (policy_id === 'RERUN-EXPLANATION') {
     check('RX-NAMES-CHANGES', (inputs.change_labels ?? []).slice(0, 3).every(label => labelMatches(reply, [label])));
     const labels = [...model, ...(inputs.change_labels ?? []), ...(inputs.current_option_labels ?? [])];
-    const own = masked(reply, labels);
     check('RX-NO-CAUSE-UNPAIRED', inputs.attribution_case === 'C1_attributable'
-      || !/\b(because (you|of your)|caused|due to your|as a result of your|led to)\b/iu.test(own));
+      || !banned(reply, /\b(because (you|of your)|caused|due to your|as a result of your|led to)\b/iu, labels));
     const sentences = reply.split(/(?<=[.!?])\s+|\n/u);
     check('RX-NO-LEADER-UNLICENSED', inputs.leader_licensed === true || !sentences.some(sentence =>
-      labelMatches(sentence, inputs.current_option_labels ?? []) && /\b(leads|ahead|best|wins|now first)\b/iu.test(masked(sentence, labels))));
+      labelMatches(sentence, inputs.current_option_labels ?? []) && banned(sentence, /\b(leads|ahead|best|wins|now first)\b/iu, labels)));
     check('RX-NOISE', inputs.noise_verdict !== 'not_noise_qualified'
-      || !/\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\b/iu.test(own));
+      || !banned(reply, /\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\b/iu, labels));
     // The earlier run had no figures to move from (prior_withheld), or no option has figures in both runs.
     check('RX-NO-MOVEMENT-WITHOUT-PRIOR', !(inputs.prior_withheld === true || inputs.no_matched_figures === true)
-      || !/\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu.test(own));
+      || !banned(reply, /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu, labels));
     // A recorded change is never "no change" (MG 5939414835).
-    check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 || !/\b(same input values|nothing in your model changed)\b/iu.test(own));
+    check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 || !banned(reply, /\b(same input values|nothing in your model changed)\b/iu, labels));
     // The un-withheld transition must say so (MG 5939414835).
     check('RX-UNWITHHELD-LINE', inputs.prior_withheld !== true || labelMatches(reply, ['can now compare the options']));
   } else if (policy_id === 'RC-WIDEN') {
@@ -115,13 +125,13 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     const figures = [...(inputs.user_figures ?? []), ...(inputs.user_messages ?? []).flatMap(numberTokens),
       ...(inputs.factor_current_value === undefined ? [] : [String(inputs.factor_current_value)])];
     check('WC-NO-NEW-FIGURES', numberTokens(reply).every(token => supplied(token, figures)));
-    const own = masked(reply, [...model, inputs.factor_label]);
-    check('WC-NO-NOTHING', !/nothing would change|no single (assumption|factor)/iu.test(own));
-    check('WC-BANNED', !/\b(EVPI|EVPPI|sensitivity score|elasticity)\b/iu.test(own) && !own.includes('%'));
+    const labels = [...model, inputs.factor_label];
+    check('WC-NO-NOTHING', !banned(reply, /nothing would change|no single (assumption|factor)/iu, labels));
+    check('WC-BANNED', !banned(reply, /\b(EVPI|EVPPI|sensitivity score|elasticity)\b/iu, labels) && !banned(reply, /%/u, labels));
   } else if (policy_id === 'RC-STRENGTHEN-ITEM') {
     const labels = inputs.item_labels ?? [];
     check('ST-NAMES-ITEM', labels.length > 0 && labels.every(label => labelMatches(reply, [label])));
-    check('ST-BANNED', !/\b(placeholder|edge|node|default strength)\b/iu.test(masked(reply, [...model, ...labels])));
+    check('ST-BANNED', !banned(reply, /\b(placeholder|edge|node|default strength)\b/iu, [...model, ...labels]));
     const figures = [...(inputs.user_figures ?? []), ...(inputs.user_messages ?? []).flatMap(numberTokens),
       ...(inputs.item_current_value === undefined ? [] : [String(inputs.item_current_value)])];
     check('ST-NO-NEW-FIGURES', numberTokens(reply).every(token => supplied(token, figures)));
@@ -129,7 +139,7 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     const labels = (inputs.edited_labels ?? []).slice(0, 3);
     check('CE-NAMES-EDITS', labels.length > 0 && labels.every(label => labelMatches(reply, [label])));
     check('CE-STALE-IFF', /out of date/iu.test(reply) === (inputs['run.kind'] === 'complete_stale'));
-    check('CE-NO-RESULT-CLAIM', !/\b(the result (has )?changed|now leads|is now ahead|the answer is now)\b/iu.test(masked(reply, [...model, ...(inputs.edited_labels ?? [])])));
+    check('CE-NO-RESULT-CLAIM', !banned(reply, /\b(the result (has )?changed|now leads|is now ahead|the answer is now)\b/iu, [...model, ...(inputs.edited_labels ?? [])]));
   }
   // Fail immediately on implementation/policy drift, rather than quietly leaving a rule unchecked.
   const expected = POLICY.method_turns[policy_id].post_checks.map(rule => rule.id);
