@@ -57,8 +57,17 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     role: 'whole',
     // Was 6000: raised on a MEASURED truncation (see RAISED 27 Sep below), not on suspicion.
     max_output_tokens: 12000,
-    reasoning_effort: 'medium',
+    // AI HARNESS (programme-docs#85 5933181012, MG fidelity PASS 5933240506): medium → low. See LOWERED 1 Oct below.
+    reasoning_effort: 'low',
     evidence:
+      'LOWERED 1 Oct, medium -> low (AI HARNESS, DL 5932846526: <=8-call A/B, MG judges fidelity). Served first pass ' +
+      '(R3 5932840854, 20 brief turns): median 49.9 s, 1.0k-3.6k reasoning tokens; the share-build brief took 56.1 s + a ' +
+      '21.3 s range retry. Live A/B on that brief, the first pass sent exactly as served (BUILD_INSTRUCTIONS, ' +
+      'strictForTheDrafter(buildCandidateSchema()), 12000), n=3 per arm: medium 68.4/58.9/26.5 s (median 58.9 s, ' +
+      'reasoning 3.8k/2.7k/1.0k) vs low 50.1/36.2/39.8 s (median 39.8 s, reasoning 2.1k/1.5k/1.6k). Replayed through the ' +
+      'real buildModelFromBrief: 3/3 options and 1 risk in every draft at both efforts; MG fidelity PASS (A4 1/3 vs 1/3, ' +
+      'K3 0/3 vs 0/3, status quo kept). Bank: programme-docs harness/8e75e3-bank @a203785f output/ai-harness-8e75e3/' +
+      'construct-ab/. n=3 is a direction; medium is the fallback on a measured fidelity regression. ' +
       'EFFORT: MEDIUM per OpenAI Technical Architecture ruling (#63 5798194848), measured 23 Sep ' +
       'through the real buildModelFromBrief + admission on the compact builder (#1736): median ' +
       '40\u201344 s at medium vs 62\u201370 s at high on both canonical briefs, 0/8 structurally ' +

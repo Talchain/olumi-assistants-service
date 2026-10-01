@@ -90,9 +90,9 @@ describe('selected coach: populated conversation and Run use high; construction 
     expect(interpreting[0]!.max_output_tokens).toBe(3400);
   });
 
-  it('CONTROL: construction keeps its own measured effort (medium); only the conversation budget changed', async () => {
+  it('construction has its own measured effort (low since 1 Oct: first-pass median 58.9 → 39.8 s, MG fidelity PASS); the conversation budget is separate', async () => {
     const { budgetFor } = await import('../model-budgets.js');
-    expect(budgetFor('gpt-5.6-terra', 'whole').reasoning_effort).toBe('medium');
+    expect(budgetFor('gpt-5.6-terra', 'whole').reasoning_effort).toBe('low');
     expect(budgetFor('gpt-5.6-terra', 'conversation').reasoning_effort).toBe('low');
   });
 });
