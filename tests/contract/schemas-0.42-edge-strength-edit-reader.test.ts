@@ -245,7 +245,12 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // naming `edge_strength_edit` is identical (the same five dist files). Of the changed lines in them, 2 pairs name a
     // strength: the `SystemEventKind` declaration (appends `option_status_edit` after `goal_target_edit`) and the
     // fixtures IMPORT LIST (appends GoalHorizon/GoalStatedAs/CountNoun schemas) — neither the member nor its band.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.69.0');
+    //
+    // 0.69.0 → 0.70.0 (schemas #80, F1b: Run snapshot link band/sizing, `sizing` input row, typed empty win shares; main
+    // `cace462d`), RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `939f5c9e…` → `a987224c…`): the FILE SET
+    // naming `edge_strength_edit` is identical (the same five dist files); `enums.*` and `turn-payload.*` are
+    // byte-unchanged; the one changed file is `fixtures/index.js`, and 0 of its changed lines name a strength.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.70.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

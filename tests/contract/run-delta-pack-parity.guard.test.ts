@@ -49,7 +49,13 @@ const DELIBERATELY_OMITTED = 'flip_thresholds';
  * They serve the wire and the cold read; projecting them into the prompt waits for per-end provenance and its review.
  */
 const SC24_OMITTED: readonly string[] = ['endpoints', 'input_changes', 'input_coverage'];
-const OMITTED = new Set([DELIBERATELY_OMITTED, ...SC24_OMITTED]);
+/**
+ * 0.70.0 (F1b 52f8cd; CANVAS 5936762171, RC 5936776917): the typed reason for empty win shares serves the wire and the
+ * cold read — the UI says RC's bound sentence on it. Projecting it into the prompt would let the Agent word it freely,
+ * which waits for RC/AIQ wording and the Agent-context owner's review (the SC-24 precedent above).
+ */
+const V070_OMITTED: readonly string[] = ['win_probabilities_unavailable'];
+const OMITTED = new Set([DELIBERATELY_OMITTED, ...SC24_OMITTED, ...V070_OMITTED]);
 
 /**
  * `RunDeltaSchema` is a `ZodEffects` (it carries `refineRunDelta`), so it has no
