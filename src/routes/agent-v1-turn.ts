@@ -1928,7 +1928,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * status the user reads is composed from the result (`write-outcome`). Zero model
      * calls, no implicit analysis. Words alone never take this path.
      */
-    let fastPath: 'approve' | 'run' | 'explain' | 'research' | 'strengthen' | undefined;
+    let fastPath: 'approve' | 'run' | 'explain' | 'research' | 'strengthen' | 'method' | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
     let narrationStatus: 'pending' | 'unavailable' | 'ready' | 'stale' | undefined;
@@ -2195,11 +2195,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const rb = await readBackState(readingDispatch, scenarioId);
       methodGraph = rb.graph;
       methodTurn = methodTurnForReadback(pressedChipId, rb);
+      // ⭐ A RECOGNISED METHOD TURN IS TERMINAL (DL round 3 on #2480, 5940698000): what the method returns — the checked
+      // text and its own cards — is the answer. Every downstream composer below (the identity re-offer, write narration,
+      // disclosures, other proposals and chips, coaching blocks) reads `fastPath === 'method'` and stays out.
+      if (methodTurn !== null) fastPath = 'method';
       if (methodTurn !== null && methodTurn.kind !== 'run') {
         const text = methodTurn.reply;
         result = {
           assistant_text: text,
-          items: methodTurnItems(history, message, text),
+          // Never read: a method turn's history is written ONCE, from the final wire text (below, after the last gate).
+          items: [],
           tool_calls: [],
           tool_results: [],
           mutated: false,
@@ -2323,9 +2328,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (methodTurn?.kind === 'run') {
       const settled = settleMethodTurn(methodTurn, result.stopped_reason === 'answered' ? text : '');
       text = settled.reply;
-      // The turn's record is rebuilt at its explicit boundary: the history before it, the user's words, what was SENT.
-      // Nothing the call produced survives, and an earlier turn is never touched (CODEX_CLI_OVERFLOW P1 #3).
-      result = { ...result, assistant_text: text, items: methodTurnItems(history, message, text), tool_calls: [], tool_results: [] };
+      // Nothing the call produced survives: its record is rebuilt ONCE at its explicit boundary from the final wire text
+      // (below), and an earlier turn is never touched (CODEX_CLI_OVERFLOW P1 #3).
+      result = { ...result, assistant_text: text, items: [], tool_calls: [], tool_results: [] };
       const card = cardCallFor(settled.target, methodGraph);
       const issued = card === null ? undefined : await dispatchTool(card.tool, JSON.stringify(card.args), toolCtx, capabilities, mode);
       if (card !== null && issued !== undefined) {
@@ -2465,7 +2470,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : [];
     // Every retained Run output becomes a neutral marker. The next turn reads its facts from CURRENT MODEL STATE.
     // PJ-C1 tokens: a pair the prune stubbed carries nothing, so it leaves with its reasoning (`dropSupersededPairs`).
-    histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals)));
+    // A method turn's history is written once, from the wire (T3, terminal; below).
+    if (fastPath !== 'method') histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals)));
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
@@ -2551,7 +2557,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
-    const offeredSpecific: OfferedAction[] = firstOfEachId([
+    const offeredSpecific: OfferedAction[] = fastPath === 'method' && methodTurn !== null
+      // T3, terminal: the method's ONE card (its approval) and the method's own follow-ups (RC method_turn_rule), nothing else.
+      ? firstOfEachId([...approvals, ...(methodTurn.kind === 'run' ? [TALK_IT_THROUGH_CHIP] : methodTurn.actions)])
+      : firstOfEachId([
       ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
@@ -2567,8 +2576,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(startingAssumptions.length > 0 ? startingAssumptions
         : (runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
-      // T3: the method's own follow-ups only (RC method_turn_rule): the plan buttons, or 'Talk it through'.
-      ...(methodTurn === null ? [] : methodTurn.kind === 'run' ? [TALK_IT_THROUGH_CHIP] : methodTurn.actions),
       // The research control for each query the Agent offered THIS turn: the only way a query is ever sent.
       ...[...new Map(result.tool_results.flatMap((r) => {
         const chip = researchChipFor(String((r as { offered_query?: unknown } | undefined)?.offered_query ?? ''));
@@ -2672,7 +2679,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
     const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
-    const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen'
+    const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen' || fastPath === 'method'
       ? { text, status: null as string | null, stripped: [] as string[] }
       : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
@@ -2718,14 +2725,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // types (display-ids.ts). Applied here, before the answer row is written, so a
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
-      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)),
+      // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
+      assistant_text: fastPath === 'method' ? narration.text
+        : withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
       suggested_actions: offeredNow,
       // The run's coaching, ONLY when bound to this readback, through the same egress sanitiser the
       // conventional exit uses — built INTO the finalised response, never appended raw.
-      blocks: coachingBlocks as OlumiResponse['blocks'],
+      blocks: (fastPath === 'method' ? [] : coachingBlocks) as OlumiResponse['blocks'],
     });
     const finalised = finaliseV5Response(composed, { scenarioId, runDeltaBoundByCaller: true });
 
@@ -2759,7 +2768,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
     } as OlumiResponse & Record<string, unknown>;
     // What changed since the last run — the run turn's own block, or why it has none — only beside that same run.
-    wireBody = withRunDelta(wireBody, runDelta);
+    if (fastPath !== 'method') wireBody = withRunDelta(wireBody, runDelta);
     /**
      * ⛔ THE LEADER FOLLOWS THE TYPED PERMISSION, AT THE WIRE (Paul: "do NOT hard-code no leader").
      * The Agent is told to name a leader only when `leader_may_be_named`; this is the deterministic
@@ -2859,11 +2868,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
     // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
     // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
-    if (typeof wireBody.assistant_text === 'string') {
+    if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
       const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
     }
-    wireBody = withAnalysisAnswerShape(wireBody, {
+    if (fastPath !== 'method') wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
     });
@@ -2888,6 +2897,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const { _answer_shape: _stale, ...withoutShape } = finalEgress.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (finalEgress.proseEdited ? withoutShape : finalEgress.response) as OlumiResponse & Record<string, unknown>;
       }
+    }
+    // T3, terminal: the ONE history write for a method turn — the history before it, the user's words, and the FINAL SENT
+    // text (the wire after the last gate), never a pre-gate copy or anything the call produced.
+    if (fastPath === 'method') {
+      histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(methodTurnItems(history, message, String(wireBody.assistant_text ?? text)), [])));
     }
 
     /**

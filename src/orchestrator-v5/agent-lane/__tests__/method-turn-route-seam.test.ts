@@ -4,6 +4,7 @@
  * graph read exactly as the route reads it back. Every row counts the model calls and reads what the model was sent.
  */
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
@@ -42,6 +43,14 @@ const GOOD = [
   'Outside the model: what could blindside this that none of these figures covers?',
 ].join('\n');
 const BAD = 'This plan will fail. There is a 40% chance the sprint slips.';
+/** A passing draft whose words trip the WRITE narrator (CODEX_CLI_OVERFLOW 5940698000 P1 #2, reproduced on D1's labels). */
+const GOOD_ADDED = GOOD.replace(`stayed thin, so`, `was added too late, so`);
+
+/** R3's served MRR draft (950177e): its stored identity reading is unconfirmed and writable, so an ordinary turn re-offers it. */
+type G = { nodes: { id: string; kind: string }[]; edges: { from: string; to: string }[] };
+const IDENTITY = (JSON.parse(readFileSync(new URL('./fixtures/served-identity-draft-950177e-20260930.json', import.meta.url), 'utf8')) as { graph: G }).graph;
+const OPTION_IDS = new Set(IDENTITY.nodes.filter((x) => x.kind === 'option').map((x) => x.id));
+const IDENTITY_NO_OPTIONS: G = { ...IDENTITY, nodes: IDENTITY.nodes.filter((x) => !OPTION_IDS.has(x.id)), edges: IDENTITY.edges.filter((e) => !OPTION_IDS.has(e.from) && !OPTION_IDS.has(e.to)) };
 
 let n = 0;
 let SCENARIO = '';
@@ -53,9 +62,13 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
   /** When set, the model's raw output items for the next call(s), instead of one message carrying `reply`. */
   let output: unknown[] | null = null;
   let failRead = false;
+  /** When set, the graph read returns this model (no analysis) instead of D1. */
+  let served: G | null = null;
   let sent: Sent[] = [];
   let planPickChipId: (id: string) => string;
   let MUTATION_TOOLS: readonly string[];
+  let mt: typeof import('../method-turn/method-turn.js');
+  let hashOf: (g: unknown) => string | null;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Sent;
@@ -66,10 +79,12 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
     const route = await import('../../../routes/agent-v1-turn.js');
-    ({ planPickChipId } = await import('../method-turn/method-turn.js'));
+    mt = await import('../method-turn/method-turn.js');
+    ({ planPickChipId } = mt);
+    hashOf = (await import('../../context/graph-hash.js')).computeAnalysisAffectingGraphHash as never;
     ({ MUTATION_TOOLS } = await import('../runtime/agent-tools.js'));
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async (_req, res) => (failRead ? res.code(500).send({ error: 'read failed' }) : {
+    app.post('/assist/v1/scenarios/:id/graph', async (_req, res) => (failRead ? res.code(500).send({ error: 'read failed' }) : served !== null ? { graph: served, graph_hash: hashOf(served) } : {
       graph: D1.body.draft_graph,
       graph_hash: 'h-d1',
       analysis_ready: { status: 'ready', may_run: true },
@@ -82,10 +97,11 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { reply = GOOD; output = null; failRead = false; sent = []; nextScenario(); });
+  beforeEach(() => { reply = GOOD; output = null; failRead = false; served = null; sent = []; nextScenario(); });
 
-  const press = async (id: string, message: string): Promise<Body> => {
-    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, source: 'chip', chip: { id } } });
+  const press = async (id: string, message: string, turnId?: string): Promise<Body> => {
+    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, source: 'chip', chip: { id },
+      ...(turnId !== undefined ? { turn_id: turnId } : {}) } });
     expect(res.statusCode).toBe(200);
     return res.json() as Body;
   };
@@ -95,7 +111,7 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     return res.json() as Body;
   };
   const generic = () => press('agent-next-pre-mortem', 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?');
-  const pick = (id = PLAN) => press(planPickChipId(id), `Run a pre-mortem on ${q(label(id))}.`);
+  const pick = (id = PLAN, turnId?: string) => press(planPickChipId(id), `Run a pre-mortem on ${q(label(id))}.`, turnId);
   /** The ordinary turn's instructions, read off the wire (the route does not export them). */
   const baseInstructions = async (): Promise<string> => {
     const keep = reply;
@@ -215,5 +231,52 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(next).not.toContain('Draft part two');
     expect(next).toContain('Earlier answer from Olumi.');
     expect(next.match(/has gone badly/g)?.length, 'both method turns hold what was SENT').toBe(2);
+  });
+  /**
+   * ⭐ ROUND 3 (DL 5940698000): A RECOGNISED METHOD TURN IS TERMINAL. After the check the route returns exactly the checked text
+   * and the method's own cards; no downstream composer (identity re-offer, write narration, other proposals or chips) runs.
+   */
+  it('ROW R10 PAIR (round 3, P1 #1): on a model whose identity reading waits, the "can\'t run" reply and the plan buttons carry NO identity card; CONTROL: an ordinary question there re-offers it', async () => {
+    served = IDENTITY_NO_OPTIONS;
+    const u = await generic();
+    expect(sent, 'no model call').toHaveLength(0);
+    expect(u.assistant_text.startsWith('I can\u2019t run the pre-mortem')).toBe(true);
+    expect(u._agent.tool_calls.map((c) => c.name)).toEqual([]);
+    expect(u.suggested_actions.map((c) => c.id)).toEqual(['agent-talk-it-through']);
+    served = IDENTITY;
+    nextScenario();
+    const c = await generic();
+    expect(c.assistant_text).toBe('Which option do you want to stress-test?');
+    expect(c._agent.tool_calls.map((x) => x.name)).toEqual([]);
+    const ids = c.suggested_actions.map((x) => x.id);
+    expect(ids.filter((id) => id.startsWith('agent-approve-proposal:') || id === 'agent-amend-proposal')).toEqual([]);
+    expect(ids.at(-1)).toBe('agent-talk-it-through');
+    expect(ids.length, 'one button per own option + Talk it through').toBeGreaterThan(2);
+    nextScenario();
+    reply = 'In the current model, the link matters.';
+    const o = await ask('What do you make of this?');
+    expect(o._agent.tool_calls.map((x) => x.name), 'vacuity: this model re-offers its waiting reading on an ordinary turn').toContain('propose_identity');
+  });
+
+  it('ROW R11 PAIR (round 3, P1 #2): the WIRE is the checked text byte-for-byte (a passing draft the write narrator would rewrite; the fallback), and the next turn\'s history and the answer row hold exactly the wire', async () => {
+    const run = mt.planMethodTurn({ chipId: planPickChipId(PLAN), signalInputs: { offeredSpecific: [], graph: D1.body.draft_graph,
+      analysisState: D1.body.analysis_state, analysisResult: D1.body.analysis_result, optionParticipation: D1.body.option_participation, leaderLicensed: false } });
+    if (run?.kind !== 'run') throw new Error('expected a run');
+    expect(mt.settleMethodTurn(run, GOOD_ADDED).reply, 'vacuity: the check passes this draft as written').toBe(GOOD_ADDED);
+    for (const draft of [GOOD_ADDED, BAD]) {
+      const checked = mt.settleMethodTurn(run, draft).reply;
+      reply = draft;
+      sent = [];
+      nextScenario();
+      const turnId = randomUUID();
+      const b = await pick(PLAN, turnId);
+      expect(b.assistant_text, 'the wire is the checked text').toBe(checked);
+      reply = 'Fine.';
+      await ask('Tell me more.');
+      const said = (sent[1].input as { role?: string; content?: { text?: string }[] }[])
+        .filter((it) => it.role === 'assistant').flatMap((it) => (it.content ?? []).map((x) => x.text));
+      expect(said, 'history = wire').toEqual([b.assistant_text]);
+      expect(rows.get(`${SCENARIO}:${turnId}`)?.assistant_message, 'answer row = wire').toBe(b.assistant_text);
+    }
   });
 });
