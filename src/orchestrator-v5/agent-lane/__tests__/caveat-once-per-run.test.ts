@@ -72,6 +72,21 @@ describe('it is said again whenever it carries news (AIQ: "again only when the p
     }
   });
 
+  it('CODEX CR 5927188508: after a reply naming an option, a pronoun / former / latter + a bare comparison KEEPS it; the plain control drops it', () => {
+    const named = `${PROVISIONAL_FIGURES_CAVEAT}\n\nAngel investor outreach and the Angel outreach pilot differ mainly in hours.`;
+    for (const claim of ['That one is better.', 'It is better.', 'The former is stronger.', 'The latter looks better.', 'This one comes out on top.']) {
+      resetCaveatRecordForTests();
+      withCaveatOncePerRun(RUN_REPLY, turn({ ranThisTurn: true }));
+      expect(withCaveatOncePerRun(named, turn())).toBe(named); // the prior reply named options: kept, and sent
+      const reply = `${PROVISIONAL_FIGURES_CAVEAT}\n\n${claim}`;
+      expect(withCaveatOncePerRun(reply, turn()), claim).toBe(reply);
+    }
+    resetCaveatRecordForTests();
+    withCaveatOncePerRun(RUN_REPLY, turn({ ranThisTurn: true }));
+    withCaveatOncePerRun(named, turn());
+    expect(withCaveatOncePerRun(LATER, turn())).toBe('It is an Olumi-inferred positive link; its strength is a placeholder.');
+  });
+
   it('CONTROL: a turn that RAN keeps it even on the same Run with no option named', () => {
     withCaveatOncePerRun(LATER, turn({ ranThisTurn: true }));
     expect(withCaveatOncePerRun(LATER, turn({ ranThisTurn: true }))).toBe(LATER);

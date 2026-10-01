@@ -16,8 +16,7 @@
  */
 
 import { PROVISIONAL_FIGURES_CAVEATS } from '../compose/leading-option-wire-enforcement.js';
-import { splitIntoRedactableUnits } from '../compose/redactable-units.js';
-import { dropRankingSentences, OPTION_CUE, rankingLabelContext } from './withheld-leader-fail-closed.js';
+import { dropRankingSentences, rankingLabelContext } from './withheld-leader-fail-closed.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -51,15 +50,16 @@ function optionLabels(graph: unknown): string[] {
     : [];
 }
 
-/** Comparison words that, beside a reference to an option, make a sentence read as a claim about which leads. */
+/** Comparison words: any of them in a reply that may be read as ranking keeps the qualifier. */
 const COMPARATIVE = /\b(?:better|best|stronger|strongest|weaker|weakest|worse|worst|ahead|behind|wins?|winning|winner|leads?|leading|favou?r(?:s|ed|ite)?|prefer(?:s|red|able)?|outperforms?|beats?|top|edges?)\b/i;
 
 /**
  * ⛔ DL 5926719387: whether the reply may claim a leader is decided by the ENFORCER'S OWN detector — `dropRankingSentences`,
  * the gate that removes ranking sentences — never by an exact-label match. A partial label ("investment firms look
  * stronger"), an ordinal ("the first option comes out ahead") and a pronoun ("that one wins") all trip it. Two more keeps,
- * both in the safe direction: a reply that names one of the model's options, and a sentence that refers to an option (the
- * enforcer's own `OPTION_CUE`) beside a comparison word — the detector reads "The first option is better." as no ranking.
+ * both in the safe direction: a reply that names one of the model's options, and ANY comparison word (CODEX CR 5927188508:
+ * the detector reads "The first option is better." and, after a reply naming an option, "That one is better." / "The latter
+ * looks better." as no ranking — a pronoun or ordinal referent cannot be resolved here, so the comparison word alone keeps it).
  */
 function mayClaimALeader(text: string, graph: unknown, analysisReady: unknown): boolean {
   // No option roster to read the reply against: it cannot be judged, so it keeps its qualifier (CODEX 5926768178).
@@ -67,7 +67,7 @@ function mayClaimALeader(text: string, graph: unknown, analysisReady: unknown): 
   if (dropRankingSentences(text, rankingLabelContext(graph, analysisReady)).droppedSentences > 0) return true;
   const t = fold(text);
   if (optionLabels(graph).some((l) => new RegExp(`(?:^|[^a-z0-9])${escape(fold(l))}(?:$|[^a-z0-9])`).test(t))) return true;
-  return splitIntoRedactableUnits(text).some((u) => OPTION_CUE.test(u) && COMPARATIVE.test(u));
+  return COMPARATIVE.test(text);
 }
 
 /**
