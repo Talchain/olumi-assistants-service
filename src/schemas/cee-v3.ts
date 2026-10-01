@@ -17,7 +17,7 @@ import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
-import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
+import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS, GoalPeriod, GoalHorizonSchema, GoalStatedAsSchema, OptionStatus, CountNounSchema } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 import { OBSERVED_STATE_STATED_ROLES } from "../cee/context-integrity/stated-role-vocabulary.js";
@@ -270,6 +270,20 @@ export const NodeV3 = z.object({
     source: z.enum(['olumi_reading', 'user_stated']),
     source_quote: z.string().min(1).max(500),
   }).strict().optional().catch(undefined),
+  /**
+   * ⭐ F1 SEMANTIC MODEL FIELDS (`@talchain/schemas` 0.69.0, MG; spec `output/mg-0ebb952a/SEMANTIC-MODEL-SPEC.md`).
+   * Declared because `NodeV3` strips undeclared keys: without them a `goal_target_edit` (period / horizon / stated
+   * figures, T5), an `option_status_edit` (T6), construction's `count_noun` (T8) or the elision's `full_label` (T14)
+   * would be lost on the next re-parse — F5 I1.1 "held byte-equal after reload". The shapes ARE the contract's
+   * (imported, never re-typed). A malformed value is dropped, never a reason to refuse a stored graph. None is an
+   * analysis-hash input: an option's exclusion moves `analysis_participation`, which is.
+   */
+  goal_period: GoalPeriod.optional().catch(undefined),
+  goal_horizon: GoalHorizonSchema.optional().catch(undefined),
+  goal_stated_as: z.array(GoalStatedAsSchema).min(1).max(20).optional().catch(undefined),
+  option_status: OptionStatus.optional().catch(undefined),
+  count_noun: CountNounSchema.optional().catch(undefined),
+  full_label: z.string().min(1).max(500).optional().catch(undefined),
   /**
    * ⛔ WHO STATED THE GOAL TARGET, AND THE TARGET THEY STATED (goal nodes; written by the UI's register).
    *

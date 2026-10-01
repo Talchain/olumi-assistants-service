@@ -807,6 +807,9 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // writes a turn row and NO graph, so the target the user set would vanish on
   // the next reload.
   goal_target_edit: 'mutating',
+  // 0.69.0 (MG, F1 T6): the option lifecycle edit. `client_only` ONLY until T6 lands its writer (`mutating`); the UI
+  // emits it only after T6 deploys (reader-first, schemas #78), so nothing reaches this placeholder.
+  option_status_edit: 'client_only',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
