@@ -369,6 +369,34 @@ describe('the Agent sets the goal\'s success target the user stated, through the
     expect(String(r.detail)).toMatch(/could not be confirmed/);
   });
 
+  it('RED (CODEX 5932175508, R3 F5 I1.1): a writer that stores "£" for the approved "£ per quarter" is NOT confirmed — the read-back binds the whole unit', async () => {
+    const held = [{ id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold_unit: '£ per quarter' }];
+    const w = world(graphWith(held));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctx, { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+    expect(store.get(String(p.proposal_id))?.operations[0]?.value).toEqual(expect.objectContaining({ unit: '£ per quarter' }));
+    const lossy: InternalDispatch = async (path, body) => {
+      const r = await w.d(path, body);
+      if (!path.endsWith('/graph')) {
+        const g = w.graph();
+        for (const c of g.goal_constraints ?? []) c['unit'] = '£';
+        for (const n of g.nodes) if (n.id === 'mrr') (n as Record<string, unknown>)['goal_threshold_unit'] = '£';
+      }
+      return r;
+    };
+    const r = await createAgentCapabilities(lossy, store).authoriseChange(laterTurn, { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: true, refusal: 'not_confirmed' }));
+  });
+
+  it('CONTROL: the same write holding "£ per quarter" byte-equal IS confirmed (raw + operator + unit)', async () => {
+    const w = world(graphWith([{ id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold_unit: '£ per quarter' }]));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctx, { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+    const r = await createAgentCapabilities(w.d, store).authoriseChange(laterTurn, { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
+    expect(w.graph().nodes.find((n) => n.id === 'mrr')).toEqual(expect.objectContaining({ goal_threshold_unit: '£ per quarter', goal_threshold_raw: 60000 }));
+  });
+
   it('RED: the product refuses the write (422, no reason on the wire) → not saved, and its own sentence is relayed in plain words — never a code', async () => {
     const w = world(graphWith());
     const store = new ProposalStore();

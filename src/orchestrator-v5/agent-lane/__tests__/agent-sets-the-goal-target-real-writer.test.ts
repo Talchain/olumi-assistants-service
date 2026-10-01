@@ -241,6 +241,22 @@ describe('the Agent sets the goal\'s success target through the REAL typed write
     for (const b of [t1, t2]) for (const p of b._provider_calls ?? []) expect(p.provider).toBe('openai');
   }, 180_000);
 
+  it('RED (R3 F5 I1.1, #85 5932127058): the goal holds "£ per quarter", the card says "£" → the event, the goal and its row keep the period, byte-equal', async () => {
+    const seed = seedGraph();
+    (seed.nodes.find((x) => x.id === 'goal_mrr') as Record<string, unknown>).goal_threshold_unit = '£ per quarter';
+    graphOf.set(SCENARIO, seed);
+    const t1 = await proposeTarget();
+    const propose = t1._agent.tool_calls.find((c) => c.name === 'propose_goal_target');
+    expect(propose, JSON.stringify(t1._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(String(propose!.public_label ?? ''), 'the card names the period once').not.toMatch(/per quarter.*(a|per) quarter/);
+    const approve = approveChipOf(t1);
+    const t2 = await turn({ message: approve[0]!.message, source: 'chip', chip: { id: approve[0]!.id } });
+    expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
+    expect((systemEvents()[0]!['event'] as Record<string, unknown>)['unit']).toBe('£ per quarter');
+    expect(goalNow().goal_threshold_unit).toBe('£ per quarter');
+    expect(graphNow().goal_constraints?.filter((c) => c.node_id === 'goal_mrr').map((c) => c.unit)).toEqual(['£ per quarter']);
+  }, 180_000);
+
   it('RED: another writer moves the model between the approval and the write → the REAL stale-base gate refuses (409), the Agent says superseded, nothing of ours is written', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const approve = approveChipOf(await proposeTarget())[0]!;

@@ -209,7 +209,7 @@ import { checkProvisionalView, type LeaderStanding } from '../provisional-view.j
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { GoalHorizonSchema, GoalPeriod, GoalStatedAsSchema, type GoalHorizon, type GoalPeriodType, type GoalStatedAs } from '@talchain/schemas';
 import { z } from 'zod';
-import { askForGoalPeriodFigure, convertGoalFigure, GOAL_PERIOD_WORDS, periodsNamedIn } from '../../goal-target/goal-period.js';
+import { askForGoalPeriodFigure, convertGoalFigure, GOAL_PERIOD_WORDS, periodsNamedIn, unitKeepingHeldPeriod, unitNamesItsPeriod } from '../../goal-target/goal-period.js';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { approvalSizes } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
@@ -1608,9 +1608,10 @@ const targetFigure = (value: number, unit: string): string =>
 function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: SetGoalTargetValue): boolean {
   const operator = v.constraint_type === 'at_least' ? '>=' : '<=';
   const rows = (Array.isArray(raw.goal_constraints) ? raw.goal_constraints : [])
-    .filter((c): c is { node_id?: unknown; operator?: unknown; value?: unknown } => c !== null && typeof c === 'object')
+    .filter((c): c is { node_id?: unknown; operator?: unknown; value?: unknown; unit?: unknown } => c !== null && typeof c === 'object')
     .filter((c) => c.node_id === goalId && c.operator === operator);
-  if (rows.length !== 1 || rows[0]!.value !== v.raw_value) return false;
+  // ⛔ The WHOLE unit, byte-exact (CODEX 5932175508, R3 F5 I1.1): a row holding "£" is not the approved "£ per quarter".
+  if (rows.length !== 1 || rows[0]!.value !== v.raw_value || rows[0]!.unit !== v.unit) return false;
   const goal = (Array.isArray(raw.nodes) ? raw.nodes : []).find((n) => (n as { id?: unknown } | null)?.id === goalId) as Record<string, unknown> | undefined;
   // ⭐ F1 T5 `set_goal` (spec §7 "every written field, byte-exact"; P3/W4, the #2439 lesson): each of the goal's period,
   // horizon and stated figures the card wrote must be held exactly as approved — structurally, since the store re-orders
@@ -1619,7 +1620,7 @@ function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: SetGoa
   if (v.goal_horizon !== undefined && !isDeepStrictEqual(goal?.goal_horizon, v.goal_horizon)) return false;
   if (v.stated_as !== undefined && !isDeepStrictEqual(goal?.goal_stated_as, v.stated_as)) return false;
   if (v.constraint_type === 'at_most') return true;
-  return goal?.goal_threshold_raw === v.raw_value;
+  return goal?.goal_threshold_raw === v.raw_value && goal?.goal_threshold_unit === v.unit;
 }
 
 /**
@@ -1665,7 +1666,7 @@ function setGoalEvent(goalId: string, v: SetGoalTargetValue, baseGraphHash: stri
  */
 function goalTargetWords(v: Pick<SetGoalTargetValue, 'raw_value' | 'unit' | 'goal_period' | 'goal_horizon' | 'stated_as'>, heldPeriod?: GoalPeriodType): string {
   const period = v.goal_period ?? heldPeriod;
-  const per = period === undefined || period === 'none' ? '' : ` ${GOAL_PERIOD_WORDS[period]}`;
+  const per = period === undefined || period === 'none' || unitNamesItsPeriod(v.unit) ? '' : ` ${GOAL_PERIOD_WORDS[period]}`;
   const last = v.stated_as?.[v.stated_as.length - 1];
   const said = last !== undefined && convertedOnCard(v, heldPeriod)
     ? ` (${targetFigure(last.value, last.unit)}${last.period === 'none' ? '' : ` ${GOAL_PERIOD_WORDS[last.period]}`}, as you stated it)` : '';
@@ -3598,7 +3599,9 @@ export function createAgentCapabilities(
       }
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
       const setValue: SetGoalTargetValue = {
-        constraint_type: type, raw_value: setGoal.raw_value, unit,
+        constraint_type: type, raw_value: setGoal.raw_value,
+        // ⛔ R3 F5 I1.1: the goal's held "£ per quarter" survives a card that says "£" (`unitKeepingHeldPeriod`).
+        unit: unitKeepingHeldPeriod(unit, (goal as { goal_threshold_unit?: unknown }).goal_threshold_unit),
         ...(currentLevel !== undefined ? { current_level: currentLevel } : {}),
         ...(setGoal.goal_period !== undefined ? { goal_period: setGoal.goal_period } : {}),
         ...(setGoal.goal_horizon !== undefined ? { goal_horizon: setGoal.goal_horizon } : {}),

@@ -119,3 +119,22 @@ export function periodsNamedIn(text: string | null | undefined): ReadonlySet<Goa
   }
   return out;
 }
+
+/**
+ * ⛔ A TARGET WRITE NEVER DROPS THE PERIOD THE GOAL'S OWN UNIT CARRIES (R3 F5 I1.1, #85 5932127058, CEE `30d417d0`): the
+ * brief stored `goal_threshold_unit` "£ per quarter"; the approved "double that" card sent "£", and the writer replaced
+ * the unit, so the goal lost its period. When the card's unit is the goal's held unit WITHOUT its period, the held unit
+ * is written. Structural: it splits the STORED unit on its own " per " / "/" joint, never the user's words. Any other
+ * pair (a card that names its own period, a different base unit, no held unit) writes the card's unit, as before.
+ */
+const UNIT_PERIOD_JOINT = /\s+per\s+|\s*\/\s*/i;
+export function unitKeepingHeldPeriod(cardUnit: string, heldUnit: unknown): string {
+  if (typeof heldUnit !== 'string' || UNIT_PERIOD_JOINT.test(cardUnit)) return cardUnit;
+  const parts = heldUnit.split(UNIT_PERIOD_JOINT);
+  if (parts.length !== 2 || parts[1]!.trim() === '') return cardUnit;
+  return parts[0]!.trim().toLowerCase() === cardUnit.trim().toLowerCase() ? heldUnit : cardUnit;
+}
+/** Whether a unit already names its period ("£ per quarter", "£/month"), so no period word is appended to it. */
+export function unitNamesItsPeriod(unit: string): boolean {
+  return UNIT_PERIOD_JOINT.test(unit);
+}
