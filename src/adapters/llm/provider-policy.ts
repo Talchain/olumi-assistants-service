@@ -322,6 +322,18 @@ export function providerLedgerTruncated(): boolean {
   return store.getStore()?.truncated === true;
 }
 
+/**
+ * How many generative calls the current request actually SENT: the allowed attempts in its ledger, every choke point
+ * included (the Agent's own calls and any made beneath its tools). `undefined` outside a policy, or once the ledger
+ * dropped attempts at its cap: the count is then unknown here, and the caller chooses its own fallback (the Agent
+ * route's answer row keeps its per-path estimate for exactly that case).
+ */
+export function providerCallsMade(): number | undefined {
+  const policy = store.getStore();
+  if (policy === undefined || policy.truncated) return undefined;
+  return policy.calls.filter((c) => c.outcome === 'allowed').length;
+}
+
 /** The current request's ledger, or `[]` outside a policy. A copy — the wire must not alias it. */
 export function recordedProviderCalls(): GenerativeCall[] {
   return [...(store.getStore()?.calls ?? [])];
