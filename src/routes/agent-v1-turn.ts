@@ -1549,7 +1549,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           modelExists: state.draftGraph !== undefined,
         }),
       });
-      return {
+      const replayBody = {
         ...finaliseV5Response(composedReplay, { scenarioId }),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
         ...(state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
@@ -1560,6 +1560,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       };
+      // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
+      const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
+      return enforceLeaderLicenceAtFinalEgress(replayBody as unknown as OlumiResponse, {
+        requestId: String(req.id),
+        exitPath: 'agent_lane_v1_replay',
+        licence: leaderLicenceFromState(state.analysisState, state.analysisReady),
+        proseGateRan: false,
+        mayNameLeadingOption: replayClaim?.permitted === true,
+        separationEstablished: replayClaim?.separation === 'separated',
+        ...(typeof replayClaim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: replayClaim.withheld_reason } : {}),
+        graph: state.graph ?? null,
+        analysisReady: state.analysisReady,
+      }).response as unknown as typeof replayBody;
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
