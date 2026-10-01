@@ -1,8 +1,8 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { expect } from 'vitest';
 
 /** Press the actual offered control; never manufacture a current Run or its identity. */
-export async function explainRun(app: FastifyInstance, scenarioId: string, first: { statusCode: number; json(): unknown }) {
+export async function explainRun(app: FastifyInstance, scenarioId: string, first: { statusCode: number; json(): unknown }): Promise<LightMyRequestResponse> {
   expect(first.statusCode).toBe(200);
   const body = first.json() as { suggested_actions: { id: string; message: string }[]; _agent: { session_id: string; turn_id?: string } };
   const chip = body.suggested_actions.find((c) => c.id.startsWith('agent-explain-run:'));
