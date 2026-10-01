@@ -108,6 +108,12 @@ export interface AgentToolContext {
   readonly typed_approval_of?: string;
   /** That chip's words, bound only when a card for the proposal is on offer: a link-effect card's words carry its reading. */
   readonly typed_approval_words?: string;
+  /**
+   * ⭐ The choice THIS request's pressed `agent-choice:` chip carries (`chosenOf`, agent-choice.ts), parsed from the chip
+   * id alone by the route — never model output or free text. A tool reads it only when `chosen.tool` is itself, and
+   * accepts `value` for `field` only when it would offer that choice NOW, re-derived from the graph (MG 5933547779).
+   */
+  readonly chosen?: { readonly tool: string; readonly field: string; readonly value: string };
 }
 
 export interface ToolDefinition {
