@@ -18,7 +18,7 @@ const FX = JSON.parse(readFileSync(new URL('./fixtures/served-link-inspect-train
   message: string; served_assistant_text: string; model_text: string; graph: { nodes: Rec[]; edges: Rec[] };
 };
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
-const ASK = 'How much does one more "Qualified angel investor conversations" add to "securing funding", in £? I\'ll propose it as your figure.';
+const ASK = 'How much does one more "Qualified angel investor conversations" add to "securing funding", in £?';
 const at = (text: string) => ({ message: FX.message, restingText: textAtRest(text), awaitingApproval: false });
 const isAngel = (e: Rec) => e.from === 'qualified_angel_investor_conversations' && e.to === 'securing_funding';
 const withAngel = (patch: (e: Rec) => Rec, g = FX.graph) => {
@@ -43,6 +43,16 @@ describe('the served link (R3 train-0545Z step 05)', () => {
     expect(linkSizeAsk(FX.graph, at(FX.served_assistant_text))).toBe(ASK);
   });
 
+  it('AIQ CR 5925991084 (b): the ask promises nothing the link-size door cannot keep (it refuses a bare "About £20,000")', () => {
+    const nonCount = linkSizeAsk(withAngel((e) => ({ ...e, from: 'hours_per_week_on_angel_outreach' })),
+      { message: 'Tell me about the link from "Hours per week on angel outreach" to "securing funding".', restingText: '', awaitingApproval: false });
+    for (const ask of [linkSizeAsk(FX.graph, at('')), nonCount]) {
+      expect(ask).not.toBeNull();
+      expect(ask!).not.toMatch(/\bI['’]ll\b|\bpropose|\brecord|\bsave/i);
+      expect(ask!.endsWith('?')).toBe(true);
+    }
+  });
+
   it('CODEX smallest pair: the SAME link once sized (Olumi\'s natural effect, in the target\'s unit, for its mean) → no ask', () => {
     const sized = withAngel((e) => ({ ...e, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate',
       natural_effect: { amount: 20000, amount_unit: 'GBP', per_source_change: 1, strength_mean: (e.strength as Rec).mean, strength_mean_frame: 'edge_strength' } } }));
@@ -59,7 +69,7 @@ describe('the served link (R3 train-0545Z step 05)', () => {
 describe('AIQ 5925678816 (B): the words follow the link — direction, money, count, unit', () => {
   it('a NEGATIVE link into money → "change", never "add to"', () => {
     const g = withAngel((e) => ({ ...e, strength: { ...(e.strength as Rec), mean: -0.5 }, effect_direction: 'negative' }));
-    expect(linkSizeAsk(g, at(''))).toBe('How much does one more "Qualified angel investor conversations" change "securing funding", in £? I\'ll propose it as your figure.');
+    expect(linkSizeAsk(g, at(''))).toBe('How much does one more "Qualified angel investor conversations" change "securing funding", in £?');
   });
 
   it('a positive link into a NON-money target → "change", in that target\'s own unit (not the goal\'s)', () => {
@@ -68,7 +78,7 @@ describe('AIQ 5925678816 (B): the words follow the link — direction, money, co
     const g = withAngel((e) => ({ ...e, to: 'angel_fundraising_admin_time' }), g0);
     const msg = 'Tell me about the link from "Qualified angel investor conversations" to "Angel fundraising admin time".';
     expect(linkSizeAsk(g, { message: msg, restingText: '', awaitingApproval: false }))
-      .toBe('How much does one more "Qualified angel investor conversations" change "Angel fundraising admin time", in percentage points? I\'ll propose it as your figure.');
+      .toBe('How much does one more "Qualified angel investor conversations" change "Angel fundraising admin time", in percentage points?');
   });
 
   it('a NON-count source (hours/week) → "How much does <target> change when <source> goes up by one hour per week?"', () => {
@@ -76,7 +86,7 @@ describe('AIQ 5925678816 (B): the words follow the link — direction, money, co
     const msg = 'Tell me about the link from "Hours per week on angel outreach" to "securing funding".';
     // The real edge Hours → securing funding does not exist in the served graph: this one is the only link the message names.
     expect(linkSizeAsk(g, { message: msg, restingText: '', awaitingApproval: false }))
-      .toBe('How much does "securing funding" change when "Hours per week on angel outreach" goes up by one hour per week? I\'ll propose it as your figure.');
+      .toBe('How much does "securing funding" change when "Hours per week on angel outreach" goes up by one hour per week?');
   });
 
   it('a non-count source with no unit to say "one <unit>" in → no ask (words are never improvised)', () => {
@@ -180,13 +190,13 @@ describe('on the wire: the inspect turn says the ask at rest, once, and a replay
   it('CONTROL: the model asked its own question → no host ask (one "?" in the turn)', async () => {
     modelSays = `${FX.model_text}\n\nWhat would you put it at?`;
     const text = (await turn()).assistant_text;
-    expect(text).not.toContain('I\'ll propose it as your figure');
+    expect(text).not.toContain('How much does one more');
     expect(text.match(/\?/g) ?? []).toHaveLength(1);
   });
 
   it('CONTROL: the same turn on the sized link → no ask', async () => {
     graph = withAngel((e) => ({ ...e, provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate',
       natural_effect: { amount: 20000, amount_unit: 'GBP', per_source_change: 1, strength_mean: (e.strength as Rec).mean, strength_mean_frame: 'edge_strength' } } }));
-    expect((await turn()).assistant_text).not.toContain('I\'ll propose it as your figure');
+    expect((await turn()).assistant_text).not.toContain('How much does one more');
   });
 });

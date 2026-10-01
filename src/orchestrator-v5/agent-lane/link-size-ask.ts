@@ -118,10 +118,13 @@ const MEASURE_WORDS = /^(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?|
 const COUNT_NOUN = (w: string): boolean => /^[a-z]{3,}s$/i.test(w) && !/(?:ss|us|is|ics|ings|ws)$/i.test(w) && !MEASURE_WORDS.test(w);
 
 /**
- * AIQ 5925678816 (B), verbatim templates:
- *   count source:     How much does one more "<source>" add to "<target>", in <target unit>? I'll propose it as your figure.
+ * AIQ 5925678816 (B) templates, WITHOUT their closing promise (AIQ CR 5925991084 on #2437, option (b)):
+ *   count source:     How much does one more "<source>" add to "<target>", in <target unit>?
  *                     ("add to" only for a positive link into money; otherwise "change")
- *   non-count source: How much does "<target>" change when "<source>" goes up by one <source unit>? I'll propose it as your figure.
+ *   non-count source: How much does "<target>" change when "<source>" goes up by one <source unit>?
+ * ⛔ "I'll propose it as your figure." is NOT said: the link-size door (`linkEffectTheUserStated`) refuses the natural
+ * answer "About £20,000" (no per-one written), so the promise would end in "restate it" (the E1 dead end). It returns
+ * only when that door binds a bare amount answering THIS ask (MG/R3's door, HIGH).
  */
 export function linkSizeAsk(graph: unknown, ctx: LinkSizeAskContext): string | null {
   if (ctx.awaitingApproval || /\?/.test(ctx.restingText)) return null;
@@ -142,9 +145,9 @@ export function linkSizeAsk(graph: unknown, ctx: LinkSizeAskContext): string | n
     const inWords = targetUnit === undefined ? null : targetUnitWords(targetUnit);
     if (inWords === null) return null;
     const verb = direction === 1 && moneyUnit(targetUnit!) !== null ? 'add to' : 'change';
-    return `How much does one more ${quoted(s)} ${verb} ${quoted(t)}, in ${inWords}? I'll propose it as your figure.`;
+    return `How much does one more ${quoted(s)} ${verb} ${quoted(t)}, in ${inWords}?`;
   }
   const one = sourceUnit === undefined ? null : oneSourceUnit(sourceUnit);
   if (one === null) return null;
-  return `How much does ${quoted(t)} change when ${quoted(s)} goes up by one ${one}? I'll propose it as your figure.`;
+  return `How much does ${quoted(t)} change when ${quoted(s)} goes up by one ${one}?`;
 }
