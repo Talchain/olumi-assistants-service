@@ -41,7 +41,7 @@ import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/st
 import { admitCandidateLinks, definitionalLink, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
 import { bindOptionLabelToBrief, bindingEarnsBriefClaim } from '../../cee/provenance/brief-binding.js';
 import { resolveMagnitudeFrame, sizeLink, type LinkSizing, type MagnitudeNode, type StatedRangeEnd } from '../../cee/magnitude/link-effect.js';
-import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
+import { shapeSumParts, sumTalliesToHold, type SumTally } from './sum-totals.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
@@ -1073,66 +1073,11 @@ export function findPureLimitAsks(
 }
 
 /**
- * ⭐ R3-2 — A LIMITED SPEND TALLY IS THE SUM OF ITS LEVERS (AIQ #72 5867700610 (a), on MG 5867674734).
- *
- * Served journey C: "…keep the extra spend under £30k over six months". The drafter holds a tally ("Total investment
- * spend") fed ONLY by the options' spend levers, each linked at the placeholder 0.5 × 0.8, so the model's total is a
- * guess that dilutes the real sum about 2.5×, and the limit is checked against that guess. The total IS the sum.
- *
- * A node is minted `nonlinear_identity: { operation: 'sum', factor_ids: <its levers>, stated_in_brief: false }` when
- * ALL of these hold (terminal or not):
- *  · a ≤ LEVEL limit names it (`operator` `<=`, `value_frame` `level`), and it is a quantity (factor or outcome) other
- *    than the goal;
- *  · it has ≥ 2 parents and EVERY parent is a lever (a controllable factor an option acts on). An option edge straight
- *    into it (R3-2b: the operands would be incomplete), an observable driver, or any other cause → no mint;
- *  · every parent's unit EQUALS the limit's unit (its own level's unit; trimmed, case and spacing folded). £ levers
- *    under a headcount limit, or hires under a £ limit (journey E: the sum of engineers is not the salary bill) → no
- *    mint;
- *  · no parent is drafted to LOWER it (a `negative` link): the sum would reverse that sign.
- * A node already carrying a declared product keeps it. Operands are in model order.
- *
- * Said ONCE, as Olumi's reading (`sumIdentityOpenQuestions`, in `open_questions`): "Olumi reads "<tally>" as "<a>" +
- * "<b>": Olumi's reading, not your figure; tell me if it includes other costs." ISL evaluates a declared identity
- * in place of its linear equation (MG code-read, `robustness_analyzer_v2.py`), so what the tally feeds reads the real
- * total; PLoT withdraws an inferred identity it cannot frame (variant (b)) — that is PLoT's, not construction's.
+ * ⭐ R3-2 — A LIMITED SPEND TALLY IS THE SUM OF ITS LEVERS: `findSumTallies` and the definitional shaping of its parts
+ * live in `sum-totals.ts`, shared with the read-time repair of stored graphs (DL #85 5931658539 item 2), so construction
+ * and the read can never drift. Re-exported here for the callers that always imported it from admission.
  */
-export interface SumTally {
-  readonly node_id: string;
-  readonly label: string;
-  readonly factor_ids: readonly string[];
-}
-const unitKey = (u: unknown): string | null =>
-  typeof u === 'string' && u.trim() !== '' ? u.trim().toLowerCase().replace(/\s+/g, ' ') : null;
-export function findSumTallies(
-  nodes: readonly { id: string; kind?: string; label?: string; category?: string; observed_state?: unknown }[],
-  edges: readonly { from: string; to: string; effect_direction?: string }[],
-  goalConstraints: readonly { node_id?: string; operator?: string; value_frame?: string; unit?: string; provenance_unit_relabelled?: { pre_normalisation_unit?: unknown } }[],
-): SumTally[] {
-  const byId = new Map(nodes.map((n) => [n.id, n] as const));
-  const optionSet = new Set(edges.filter((e) => byId.get(e.from)?.kind === 'option').map((e) => e.to));
-  const out: SumTally[] = [];
-  for (const q of nodes) {
-    if (q.kind !== 'factor' && q.kind !== 'outcome') continue;
-    const limits = goalConstraints.filter((c) => c.node_id === q.id && c.operator === '<=' && c.value_frame === 'level');
-    if (limits.length === 0) continue;
-    const into = edges.filter((e) => e.to === q.id);
-    const parents = [...new Set(into.map((e) => e.from))];
-    if (parents.length < 2) continue;
-    // A lever drafted to LOWER the tally is not one of its addends: a sum would reverse that sign. No mint.
-    if (into.some((e) => e.effect_direction === 'negative')) continue;
-    if (!parents.every((p) => byId.get(p)?.kind === 'factor' && byId.get(p)?.category === 'controllable' && optionSet.has(p))) continue;
-    const unitOf = (id: string): string | null => unitKey((byId.get(id)?.observed_state as { unit?: unknown } | undefined)?.unit);
-    // ⛔ The sum is in the TALLY's own unit. Admission may relabel a percent limit's unit ("% of upcoming sprint" → "%",
-    // `agent_lane_limit_pct_of_level_v1`), so the limit matches the tally by its stored unit OR the unit it was written in
-    // (served 96c6f5f4: comparing the parts with the relabelled "%" minted nothing; joint RCA 5929651862 item 2).
-    const tallyUnit = unitOf(q.id) ?? unitKey(limits[0]!.unit);
-    const limitIsTallys = (c: (typeof limits)[number]): boolean => unitKey(c.unit) === tallyUnit
-      || unitKey(c.provenance_unit_relabelled?.pre_normalisation_unit) === tallyUnit;
-    if (tallyUnit === null || !limits.every(limitIsTallys) || !parents.every((p) => unitOf(p) === tallyUnit)) continue;
-    out.push({ node_id: q.id, label: q.label ?? q.id, factor_ids: nodes.filter((n) => parents.includes(n.id)).map((n) => n.id) });
-  }
-  return out;
-}
+export { findSumTallies, type SumTally } from './sum-totals.js';
 
 /** `"a" + "b"`, `"a" + "b" + "c"` — labels, never ids. */
 const plusList = (labels: readonly string[]): string => labels.map((l) => `"${l}"`).join(' + ');
@@ -4499,7 +4444,8 @@ function admitOnce(
   }
   // ⭐ R3-2: a limited spend tally fed only by its same-unit levers is held as their SUM (`findSumTallies`), on the FINAL
   // structure, as Olumi's reading — said once in `open_questions` (`sumIdentityOpenQuestions`). A declared product wins.
-  const sums = findSumTallies(levers.nodes, finalEdges, constraintResult.constraints).filter((t) => !carriers.has(t.node_id));
+  // ⛔ A total one of whose part links the USER sized is not held as a sum (`sumTalliesToHold`, shared with the read).
+  const sums = sumTalliesToHold(levers.nodes, finalEdges, constraintResult.constraints, (t) => carriers.has(t.node_id));
   for (const t of sums) {
     carriers.set(t.node_id, { operation: 'sum', factor_ids: [...t.factor_ids], stated_in_brief: false });
     loss.push({
@@ -4511,32 +4457,11 @@ function admitOnce(
     } as RepairEntry);
   }
   // ⭐ RCA item 2 (DL ruling (ii) 5929790081; SEMANTIC MODEL SPEC A2): a minted sum's parts are its DEFINITION, never
-  // causal guesses. Each part → total link is +1 per 1 in the shared unit: β = the part's frame ÷ the total's frame (one
-  // unit of the part is one unit of the total), certain (exists 1), at the spread floor and `definitional`. The sizer's
-  // domain judgement is NOT applied: it assumes Olumi's spread (σ = β/2), and whether the parts can overrun the total is
-  // exactly what the limit on the total checks. Even a Run that does not evaluate the identity then adds the parts up
-  // exactly, and the limit is scored on the parts (`placeholder-parts.ts`). No frame on either end → left as it was.
+  // causal guesses — +1 per 1, β = part frame ÷ total frame, certain, at the spread floor, `definitional`. The ONE shaping
+  // (`shapeSumParts`, `sum-totals.ts`), shared with the read-time repair of graphs saved before this (`repairSumTotals`).
   if (sums.length > 0) {
     const partsOf = new Map(sums.map((t) => [t.node_id, new Set(t.factor_ids)] as const));
-    finalEdges = finalEdges.map((e) => {
-      if (partsOf.get(e.to)?.has(e.from) !== true) return e;
-      const source = magnitudeNodeById.get(e.from);
-      const target = magnitudeNodeById.get(e.to);
-      if (source === undefined || target === undefined) return e;
-      const [partFrame, totalFrame] = [resolveMagnitudeFrame(source), resolveMagnitudeFrame(target)];
-      const unit = target.unit ?? source.unit;
-      if (typeof partFrame !== 'number' || typeof totalFrame !== 'number' || !(partFrame > 0) || !(totalFrame > 0) || typeof unit !== 'string') return e;
-      const beta = partFrame / totalFrame;
-      if (!(beta > 0 && beta <= 1)) return e;
-      const { defaulted: _projection, ...edge } = e;
-      // The identity is OLUMI'S reading (`stated_in_brief: false`), so the link's source is too: a drafter's `explicit`
-      // (`brief_extraction`) would read, once `defaulted` is gone, as a user-stated material parameter (MG sweep N1).
-      const { reasoning: _guess, source: _drafted, ...provenance } = e.provenance ?? { source: 'cee_hypothesis' };
-      const natural_effect = { amount: 1, amount_unit: unit, per_source_change: 1, per_source_change_unit: source.unit ?? unit,
-        strength_mean: beta, strength_mean_frame: 'edge_strength' as const };
-      return { ...edge, strength: { mean: beta, std: LLM_STRENGTH_STD_FLOOR }, exists_probability: 1, effect_direction: 'positive' as const,
-        provenance: { ...provenance, source: 'cee_hypothesis', magnitude: 'olumi_estimate' as const, natural_effect, definitional: true as const } };
-    });
+    finalEdges = shapeSumParts(finalEdges, sums, (id) => magnitudeNodeById.get(id));
     // The sizer asked about each part's size BEFORE it became a definition ("Nobody has said, so Olumi uses a placeholder
     // …"); that question is no longer true and is never shown (CODEX 5930239704, MG sweep C1). Only the rewritten edges.
     const defined = new Set(finalEdges.filter((e) => e.provenance?.definitional === true && partsOf.get(e.to)?.has(e.from) === true)

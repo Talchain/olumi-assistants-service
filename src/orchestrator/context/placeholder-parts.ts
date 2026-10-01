@@ -151,6 +151,14 @@ function usersOwn(carrier: unknown): boolean {
   return earnsAuthorshipCredit(classifyValueSource(carrier.source)) || carrier.source === 'user_assumption';
 }
 
+/**
+ * A level that is the user's own figure, by the same rule B6 reads a target's level with ({@link usersOwn}). Exported for
+ * the sum-total card (`sum-totals.ts`): a total whose own level is the user's figure is never overwritten by Σ its parts.
+ */
+export function usersOwnLevel(carrier: unknown): boolean {
+  return usersOwn(carrier);
+}
+
 const SIZED_MAGNITUDES: ReadonlySet<unknown> = new Set(['olumi_estimate', 'user_stated']);
 
 const norm = (u: unknown): string | undefined =>
@@ -252,10 +260,43 @@ export function placeholderMovedOptions(
  */
 /** A declared SUM whose every operand reaches it through a link that holds by definition (`holdsByDefinition`). */
 function definitionalSum(target: Rec, edges: readonly Rec[], unitOf: (id: unknown) => string | undefined): boolean {
-  const identity = target.nonlinear_identity as Rec;
+  const identity = isRec(target.nonlinear_identity) ? target.nonlinear_identity : {};
   const operands = Array.isArray(identity.factor_ids) ? identity.factor_ids : [];
   return identity.operation === 'sum' && operands.length >= 2 && operands.every((id) => edges.some((e) => e.from === id
     && e.to === target.id && holdsByDefinition(e, unitOf)));
+}
+
+/**
+ * ⭐ A3 — A TOTAL THAT IS A DEFINITIONAL SUM HAS A DERIVED LEVEL: Σ ITS PARTS' LEVELS (SEMANTIC MODEL SPEC §2 A3; DL #85
+ * 5931658539 item 2, carried by the sum-total card of DL 380e54 5932495794 item 1). Its own stored level is then neither
+ * the user's figure nor Olumi's: it is fixed by the parts, so whose figure it rests on is whose figures the PARTS are. The
+ * card (`sum-totals.ts` `detectSumTotalRepair`) writes Σ onto the total's level and keeps the level's source as stored
+ * (Olumi's), so it never stamps the user's authorship on arithmetic; this predicate is how B5/B6 read the OWNER instead.
+ * Returns the operand nodes when the target's level is derived, else `undefined`:
+ *  · the target holds a `sum` every operand of which reaches it through a link that holds by definition
+ *    (`definitionalSum`, checked on the stored edge every read);
+ *  · the target's own level is NOT the user's figure (`usersOwn`): a total the user set themselves keeps their figure,
+ *    and every reader keeps reading it as theirs;
+ *  · every operand carries a level (a finite `observed_state.value`): a sum with a part nobody levelled has no level to
+ *    derive, and the stored one is read as before.
+ * A pure read of the STORED graph: it changes no value, only whose figure a definitional total's level is read as.
+ */
+export function derivedSumParts(target: Rec | undefined, nodes: readonly Rec[], edges: readonly Rec[]): Rec[] | undefined {
+  if (target === undefined || !isRec(target.nonlinear_identity) || target.nonlinear_identity.operation !== 'sum') return undefined;
+  if (usersOwn(target.observed_state)) return undefined;
+  if (!definitionalSum(target, edges, nodeUnitOf(nodes))) return undefined;
+  const ids = target.nonlinear_identity.factor_ids as unknown[];
+  const parts = ids.map((id) => nodes.find((n) => n.id === id));
+  return parts.every((p): p is Rec => p !== undefined && isRec(p.observed_state) && finite(p.observed_state.value)) ? parts : undefined;
+}
+
+/** A3 under B6: a derived level rests on Olumi's guess exactly when some part's level does (non-zero, not the user's). */
+function derivedLevelIsOlumis(parts: readonly Rec[]): boolean {
+  return parts.some((p) => {
+    const os = p.observed_state as Rec;
+    const level = os.raw_value ?? os.value;
+    return typeof level === 'number' && level !== 0 && !usersOwn(os);
+  });
 }
 
 export function placeholderPartsFinding(
@@ -286,7 +327,12 @@ export function placeholderPartsFinding(
   // definition, not an estimate ((c); R3 5916179718). A target with no level at all is not this arm's trigger: B5's
   // own fold already says whose base an unlevelled limit has.
   const level = today?.raw_value ?? today?.value;
-  const levelIsOlumis = today !== undefined && typeof level === 'number' && level !== 0 && !usersOwn(today);
+  // A3: a total held as a definitional sum has the level of its parts, so it rests on Olumi's guess exactly when a part's
+  // level does (`derivedSumParts`): Paul's 10% + 50% are his, so the total's 60% is no guess of Olumi's.
+  const derivedFrom = derivedSumParts(target, nodes, edges);
+  const levelIsOlumis = derivedFrom !== undefined
+    ? derivedLevelIsOlumis(derivedFrom)
+    : today !== undefined && typeof level === 'number' && level !== 0 && !usersOwn(today);
   const movers = parts.size === 0 ? [] : options
     .map((o) => (isRec(o.interventions) ? o.interventions : {}))
     .filter((iv) => !setsLevel(iv[targetId]) && Object.keys(iv).some((k) => parts.has(k)));

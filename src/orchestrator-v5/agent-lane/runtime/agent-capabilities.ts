@@ -198,6 +198,7 @@ import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/pla
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
+import { applySumTotalRepair, isSumTotalRepairProposal, proposeSumTotalRepair, totalsNotSummed } from '../sum-total-card.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
@@ -1275,6 +1276,9 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     ...(goals.length === 1 ? { goal: goals[0] } : goals.length > 1 ? { goals } : {}),
     ...(limits.length > 0 ? { limits } : {}),
     links,
+    // ⭐ A saved total that should be the sum of its parts (`../sum-total-card.ts`): one line, only when one does, so the
+    // Agent can offer `propose_sum_total_repair`. The read itself is never changed (DL 380e54 #85 5932495794 item 1).
+    ...totalsNotSummed(g.raw),
     readiness: readinessViewOf(g.raw),
     ...(earlierAnalysisOf(g.analysis_state, g.analysis_ready) ?? {}),
   };
@@ -3042,6 +3046,15 @@ export function createAgentCapabilities(
     },
 
     /**
+     * ⭐ THE SUM-TOTAL CARD (DL 380e54 #85 5932495794 item 1; `../sum-total-card.ts`): a saved total that should be the sum
+     * of its parts, detected on the STORED graph and held as ONE proposal. Nothing is written here.
+     */
+    async proposeSumTotalRepair(ctx): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      return proposeSumTotalRepair({ readGraph, proposals }, ctx);
+    },
+
+    /**
      * ⭐ A SET OF LINK STRENGTHS, ONE APPROVAL (DL #72 5871594233; seam Canonical 5871633483, DL 5871661097). Paul's
      * production test (`64c5eccc`): he asked Olumi for "educated guesses", said "I'm aligned with these. Please make these
      * updates", then named the bands himself for eight links; four permissions recorded ONE link, because
@@ -4291,6 +4304,11 @@ export function createAgentCapabilities(
 
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
+
+      // ⭐ The sum-total card (`../sum-total-card.ts`): ONE registration, CAS-gated on the card's analysis hash.
+      if (isSumTotalRepairProposal(decision.proposal)) {
+        return applySumTotalRepair({ dispatch, readGraph, proposals, operationId: authorisationTurnId }, ctx, decision.proposal, before);
+      }
 
       if (ops.length === 1 && ops[0]!.op === 'adopt_olumi_option') {
         const op = ops[0]!;

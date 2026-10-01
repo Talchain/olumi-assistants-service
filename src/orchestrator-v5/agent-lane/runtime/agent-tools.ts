@@ -636,6 +636,19 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_sum_total_repair',
+    description:
+      'Offer to make a saved total the sum of its parts, when get_canonical_state returns `totals_not_summed`: the model was '
+      + 'saved before Olumi worked such totals out from their parts, so it does not add them up. When that field is present, '
+      + 'offer this card. It takes no arguments beyond your rationale: the total, its parts and the figure come from the stored '
+      + 'model. This does NOT change anything: it records ONE exact proposal and returns its `public_label`. Show the user those '
+      + 'words exactly, never the id, and call authorise_change only once they agree. It is refused when no total needs it.',
+    parameters: obj({
+      rationale: { type: 'string', description: 'One sentence: why you are offering it.' },
+    }, []),
+  },
+  {
+    type: 'function',
     name: 'offer_public_research',
     description:
       'Offer to search the public web when the user wants outside evidence the model does not hold (a benchmark, a ' +
@@ -691,7 +704,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'propose_identity', 'propose_sum_total_repair', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -815,6 +828,8 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** The user confirms Olumi's reading of their goal as a product (`../identity-card.ts`). Optional: absent ⇒ refused plainly. */
   proposeIdentity?(ctx: AgentToolContext): Promise<ToolResult>;
+  /** A saved total made the sum of its parts (`../sum-total-card.ts`). Optional: absent ⇒ refused plainly. */
+  proposeSumTotalRepair?(ctx: AgentToolContext): Promise<ToolResult>;
   /** C5: the Agent's own provisional view on a withheld turn (`../provisional-view.ts`). Optional: absent ⇒ refused plainly. */
   giveProvisionalView?(ctx: AgentToolContext, args: { view: string; reasoning: string; confirm_step: string }): Promise<ToolResult>;
 }
@@ -904,6 +919,10 @@ export async function dispatchTool(
       return caps.proposeIdentity !== undefined
         ? caps.proposeIdentity(ctx)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A reading of the goal cannot be offered here. Nothing was changed.' };
+    case 'propose_sum_total_repair':
+      return caps.proposeSumTotalRepair !== undefined
+        ? caps.proposeSumTotalRepair(ctx)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A total cannot be changed here. Nothing was changed.' };
     case 'give_provisional_view':
       return caps.giveProvisionalView !== undefined
         ? caps.giveProvisionalView(ctx, args as never)

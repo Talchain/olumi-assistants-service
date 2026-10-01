@@ -49,6 +49,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_limit_change: { label: 'Change this limit', message: 'Yes, change that limit.' },
   // The user confirms Olumi's reading of their goal as a product of two of their figures (`identity-card.ts`).
   propose_identity: { label: 'Yes, calculate it that way', message: 'Yes, calculate it that way.' },
+  // A saved total made the sum of its parts (`sum-total-card.ts`): the card's own words ride in `detail`.
+  propose_sum_total_repair: { label: 'Yes, make it the sum', message: 'Yes, make it the sum of its parts.' },
 };
 
 /** The proposers whose change is HELD on the product's own seam (`gmh_`): the button carries the product's own words. */
@@ -178,6 +180,13 @@ export function approvalChipsFor(
     const words = identityWordsFor(labelSourceFor?.(proposalId));
     return words === undefined ? []
       : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: identityApproveMessage(words), detail: words }, AMEND_CHIP];
+  }
+  // ⭐ The sum-total card: the button carries the STORED card's words, only when the proposer returned the same words.
+  if (tool === 'propose_sum_total_repair') {
+    const source = labelSourceFor?.(proposalId);
+    const words = source?.proposal !== undefined && source.result?.ok === true && source.result.proposal_id === proposalId
+      && source.result.public_label === source.proposal.public_label ? source.proposal.public_label : undefined;
+    return [{ id: approvalChipIdFor(proposalId), label: approve.label, message: approve.message, ...(words !== undefined ? { detail: words } : {}) }, AMEND_CHIP];
   }
   // ⛔ A link's stated effect is approvable ONLY on a card showing its exact reading (PR Review's fifth CR): none, no button.
   if (tool === 'propose_link_effect') {
