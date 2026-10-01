@@ -123,8 +123,8 @@ describe('controls: only a CONSTANT money-per-one in a two-quantity product is r
   });
 
   it('the GOAL\'s own product (C46: MRR = price × subscribers, price constant in this draft) is left exactly as drafted', () => {
-    const c = { ...base, goal: { ...base.goal, metric: 'MRR' }, identities: [{ outcome: 'MRR', operation: 'product',
-      factors: ['Investment-firm deals closed', 'Typical investment-firm funding per deal'], provenance: 'inferred' }] } as unknown as CandidateModel;
+    // The same deals × £-per-deal product, but on the goal itself: only the goal check stands between it and the fold.
+    const c = { ...base, goal: { ...base.goal, metric: 'Funding from investment firms' }, identities: [base.identities![0]!] } as unknown as CandidateModel;
     expect(perOneLinksForConstantProducts(c)).toBe(c);
   });
 
