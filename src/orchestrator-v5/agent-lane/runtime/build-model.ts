@@ -318,6 +318,10 @@ export const BUILD_INSTRUCTIONS = [
   // 1. Every rule below that limits how a risk is LINKED or SIZED had been read as a reason to leave the risk out.
   + 'and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could reverse the answer). '
   + 'ALWAYS KEEP AT LEAST ONE RISK: the downside that could reverse the answer is part of the decision the user must weigh. The rules below limit how a risk is LINKED or SIZED; none of them is a reason to leave a risk out. '
+  // K3 (R3 #75 5925627855, #85 5931851041; DL 380e54 5932372585: GO, generalised, never money-specific): a downside
+  // the user NAMES is theirs to weigh, so it is never traded away for one Olumi thought of (Paul's "we'll run out of
+  // money soon" was drawn 0/4 with A4b, 1/4 before).
+  + 'EVERY RISK THE USER NAMES IS DRAWN AS A RISK NODE: each downside the user states in their own words (for example that they will run out of money, lose a key customer, or miss a deadline) is its own risk, linked to what it threatens, even when you also draw a risk of your own. '
   + 'A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. '
   + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
   // ⛔ THE COUNT IS THE GATE'S (AIQ #70 5858990481 item 5: the first draft's budget is the truth-safe lever). The rule
