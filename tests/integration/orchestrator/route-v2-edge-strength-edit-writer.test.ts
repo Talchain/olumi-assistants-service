@@ -1790,26 +1790,30 @@ describe('M1 Accept receipt at the Agent card: whose figure is read off the stor
   let ProposalStore: typeof import('../../../src/orchestrator-v5/agent-lane/proposal.js').ProposalStore;
   let linkSizing: typeof import('../../../src/cee/magnitude/link-sizing.js').linkSizing;
   let acceptedOlumiEstimateSentence: typeof import('../../../src/orchestrator-v5/agent-lane/rerun-explanation.js').acceptedOlumiEstimateSentence;
+  let withoutAgentDirections: typeof import('../../../src/orchestrator-v5/agent-lane/write-outcome.js').withoutAgentDirections;
   beforeAll(async () => {
     app = Fastify(); await ceeOrchestratorRouteV2(app); await app.ready();
     ({ createAgentCapabilities } = await import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js'));
     ({ ProposalStore } = await import('../../../src/orchestrator-v5/agent-lane/proposal.js'));
     ({ linkSizing } = await import('../../../src/cee/magnitude/link-sizing.js'));
     ({ acceptedOlumiEstimateSentence } = await import('../../../src/orchestrator-v5/agent-lane/rerun-explanation.js'));
+    ({ withoutAgentDirections } = await import('../../../src/orchestrator-v5/agent-lane/write-outcome.js'));
   });
   afterAll(async () => { await app.close(); });
 
   const FROM = 'price_sensitivity';
   const TO = 'monthly_churn';
   // Codex's probe link: μ 0.85, σ 0.3 — "very strong" on CEE's cuts.
-  const graphWithLink = (provenance: Record<string, unknown>) => {
+  const graphWithLink = (provenance: Record<string, unknown>, labels: readonly [string, string] = ['Price sensitivity', 'Monthly churn']) => {
     const g = buildPersistedGraph() as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
-    g.nodes.push({ id: FROM, kind: 'factor', label: 'Price sensitivity' }, { id: TO, kind: 'factor', label: 'Monthly churn' });
+    g.nodes.push({ id: FROM, kind: 'factor', label: labels[0] }, { id: TO, kind: 'factor', label: labels[1] });
     g.edges.push({ from: FROM, to: TO, strength: { mean: 0.85, std: 0.3 }, exists_probability: 0.9, effect_direction: 'positive', provenance });
     return g;
   };
   const storedLink = () => ((persisted as { edges: Record<string, unknown>[] }).edges).find((e) => e.from === FROM && e.to === TO);
   const SAYS = 'Record that link as very strong, as my own estimate.';
+  /** What the one-click path SHOWS: `follow_up` through the route's boundary (`agent-v1-turn.ts` → `withoutAgentDirections`). */
+  const shown = (followUp: unknown) => withoutAgentDirections(String(followUp));
 
   beforeEach(() => {
     graphCasRpcEnforce = true;
@@ -1829,7 +1833,7 @@ describe('M1 Accept receipt at the Agent card: whose figure is read off the stor
   });
 
   /** The Agent's own dispatch, wired to the real route; the committed graph becomes the stored one the read-back reads. */
-  const approveOnTheCard = async () => {
+  const approveOnTheCard = async (labels: readonly [string, string] = ['Price sensitivity', 'Monthly churn']) => {
     const dispatch = async (path: string, body: unknown) => {
       if (path.endsWith('/graph')) return { status: 200, json: { graph: persisted, graph_hash: computeAnalysisAffectingGraphHash(persisted as never) } };
       const calls = appendMock.mock.calls.length;
@@ -1839,7 +1843,7 @@ describe('M1 Accept receipt at the Agent card: whose figure is read off the stor
     };
     const caps = createAgentCapabilities(dispatch as never, new ProposalStore());
     const ctx = { scenario_id: SCENARIO_ID, authenticated_user_id: null, request_id: 'r', user_text: SAYS, user_turn_text: SAYS };
-    const p = await caps.proposeLinkStrength!(ctx, { from_label: 'Price sensitivity', to_label: 'Monthly churn', strength: 'very strong', rationale: 'x' });
+    const p = await caps.proposeLinkStrength!(ctx, { from_label: labels[0], to_label: labels[1], strength: 'very strong', rationale: 'x' });
     expect(p, JSON.stringify(p)).toMatchObject({ ok: true, link: { keeps_current_strength: true } });
     const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toMatchObject({ ok: true, applied: true });
@@ -1853,8 +1857,9 @@ describe('M1 Accept receipt at the Agent card: whose figure is read off the stor
     expect(String(p.public_label)).not.toContain('your own');
     expect(String(p.note)).toContain('never the user’s own');
     expect(linkSizing(storedLink())).toBe('olumi_accepted');
-    expect(r.follow_up).toBe(acceptedOlumiEstimateSentence('Price sensitivity', 'Monthly churn'));
-    expect(r.follow_up).toBe('You accepted Olumi\'s estimate for how much Price sensitivity changes Monthly churn.');
+    expect(r.follow_up).toBe(acceptedOlumiEstimateSentence('"Price sensitivity"', '"Monthly churn"'));
+    expect(r.follow_up).toBe('You accepted Olumi\'s estimate for how much "Price sensitivity" changes "Monthly churn".');
+    expect(shown(r.follow_up)).toEqual({ text: r.follow_up, dropped: [] });
     expect(String(r.note)).toMatch(/^Recorded as the user’s review: the strength stays Olumi’s estimate/);
   });
 
@@ -1865,5 +1870,13 @@ describe('M1 Accept receipt at the Agent card: whose figure is read off the stor
     expect(linkSizing(storedLink())).toBe('user');
     expect(r.follow_up).toBe('Recorded "Price sensitivity" → "Monthly churn" as very strong, as your own estimate (its strength stays as it is).');
     expect(String(r.note)).toMatch(/^Recorded as the user’s own estimate\./);
+  });
+
+  it('⭐ RED (Codex pre-review 2 P2): labels that read as the user or a code — the accept sentence is SHOWN whole, never dropped by the boundary', async () => {
+    persisted = graphWithLink({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' }, ['Size of the user base', 'cost_per_hire']);
+    const { r } = await approveOnTheCard(['Size of the user base', 'cost_per_hire']);
+    expect(linkSizing(storedLink())).toBe('olumi_accepted');
+    expect(r.follow_up).toBe('You accepted Olumi\'s estimate for how much "Size of the user base" changes "cost_per_hire".');
+    expect(shown(r.follow_up)).toEqual({ text: r.follow_up, dropped: [] });
   });
 });

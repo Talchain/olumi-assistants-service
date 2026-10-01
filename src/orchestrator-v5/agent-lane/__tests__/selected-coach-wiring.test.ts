@@ -11,13 +11,17 @@ const sha256 = (text: string | Buffer) => createHash('sha256').update(text).dige
 const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c9ed66d';
 // AI HARNESS (1 Oct, DL 5936996041 on R3 DEFECT 2): the links sentence defines `sizing` (F1b's linkSizing) and no longer
 // says `defaulted` means unsized: 325bb61e… → 26f7e9c0…. The template sha above is unchanged.
-const HOST_SHA = '26f7e9c0eb6f2e6f9329f7d52be5db364ab86f3b7918be536f73769fe2530c49';
+// MODEL GENERATION (2 Oct, M1 Accept receipt; Codex pre-review 2 on CEE mg/accept-receipt-authorship): the link-set sentence
+// no longer says a user-named band is always "recorded as theirs" — a band the link already sits in records review and stays
+// Olumi's estimate (R11): 26f7e9c0… → 913872bf…, +210 bytes. The template sha above is unchanged.
+const HOST_SHA = '913872bf3d462f2ff3185c6c19a74825cf96d5a5b59a29dd60de9a34cdfbb9b7';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
 // Derived from the request the real route SENT (harness raw body), never computed by hand.
-const RENDERED_SHA = 'd335019efc728bf86348adaa8d4c9648ecd6eace1a725b8dab3370a24416b0df';
-const RENDERED_BYTES = 27_833;
+// + the link-set sentence above (MG, 2 Oct): 27,833 → 28,043 bytes.
+const RENDERED_SHA = 'b1049e78a74540041fb4c003d3ce0f94fa695402234b18d05847cf91da4ffc2b';
+const RENDERED_BYTES = 28_043;
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';

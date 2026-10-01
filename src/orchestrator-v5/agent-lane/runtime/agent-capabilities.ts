@@ -18,6 +18,7 @@ import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-cha
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
+import { acceptedOlumiEstimateSentence } from '../rerun-explanation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
@@ -2631,11 +2632,23 @@ export function createAgentCapabilities(
     }
     proposals.markApplied(parent.proposal_id, receipts);
     const olumis = sent.filter((l) => l.author === 'model_proposed').length;
+    /**
+     * ⭐ M1 ACCEPT RECEIPT (DL 5942097719; Codex pre-review 2 P1): whose figure each link holds is read off the STORED link
+     * after the write (`linkSizing`), never off the card. Every link stored `olumi_accepted` says RC's accept sentence (the
+     * one the system-event receipt and the M2 rerun line say); only a link stored as the user's is "your estimate"; any
+     * other claims nobody. Labels are quoted: this is shown through `withoutAgentDirections`, where an unquoted
+     * "Size of the user base" or `cost_per_hire` would drop the sentence.
+     */
+    const storedSizing = (l: { from: string; to: string }) => linkSizing(check!.edges.find((x) => x.from === l.from && x.to === l.to));
+    const quotedLabel = (id: string): string => `"${labelOf(id)}"`;
+    const parts = sent.map((l) => `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
+    const accepted = sent.filter((l) => storedSizing(l) === 'olumi_accepted').map((l) => acceptedOlumiEstimateSentence(quotedLabel(l.from), quotedLabel(l.to)));
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
-      follow_up: `${parent.public_label.replace(/^Record /, 'Recorded ')}.`
+      follow_up: `Recorded ${sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
+        + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
         + (olumis > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
@@ -4547,7 +4560,8 @@ export function createAgentCapabilities(
         const followUp = sizing === 'user'
           ? `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`
           : typeof fromLabel === 'string' && typeof toLabel === 'string'
-            ? formatEdgeStrengthConfirmed({ fromLabel, toLabel, sizing })
+            // Quoted: shown through `withoutAgentDirections`, where an unquoted label can drop the sentence (Codex P2).
+            ? formatEdgeStrengthConfirmed({ fromLabel: `"${fromLabel}"`, toLabel: `"${toLabel}"`, sizing })
             : 'Recorded your review of this link; its strength stays as it was.';
         const whoseNote = sizing === 'user'
           ? 'Recorded as the user’s own estimate.'
