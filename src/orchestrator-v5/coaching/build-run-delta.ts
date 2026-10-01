@@ -656,8 +656,17 @@ export function buildRunDelta(input: {
   //   - `no_matched_option`: both Runs show shares, and no option has one on both sides.
   // Any other empty list (this Run's own shares withheld, a Run with no shares recorded) carries no reason: the
   // consumer keeps its cause-neutral words, never a reason it cannot back.
+  // ⛔ `prior_withheld` is a CAUSE CLAIM, so it needs the earlier Run's OWN recorded withhold verdict (its typed
+  // `constraint_verdict` says it may not name a leader) — never the absence of a stamp. A historical Run with no
+  // verdict recorded is "not entitled" here (fail closed) but its cause is unknown, so no reason travels
+  // (DL ruling #2482 r3 P1-3; CODEX reproduced the cause claim from missing evidence).
+  const priorWithholdRecorded = (() => {
+    const verdict = pair.prior.fact_type === 'run_analysis' ? (pair.prior.result as { constraint_verdict?: unknown }).constraint_verdict : undefined;
+    return verdict !== null && typeof verdict === 'object' && !Array.isArray(verdict)
+      && (verdict as { may_name_leading_option?: unknown }).may_name_leading_option === false;
+  })();
   const winProbabilitiesUnavailable: RunDeltaWinProbabilitiesUnavailableLiteral | undefined = winProbabilities.length > 0 ? undefined
-    : currentEntitled && currentWins.size > 0 && !priorEntitled ? 'prior_withheld'
+    : currentEntitled && currentWins.size > 0 && !priorEntitled && priorWithholdRecorded ? 'prior_withheld'
       : priorEntitled && currentEntitled && priorWins.size > 0 && currentWins.size > 0 ? 'no_matched_option'
         : undefined;
 

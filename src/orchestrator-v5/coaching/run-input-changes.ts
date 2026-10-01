@@ -27,6 +27,7 @@
 import type { RunDeltaInputChange } from '@talchain/schemas/boundary';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
+import { edgeBandFromStrengthBand, edgeBandStd } from '../format/edge-strength-bands.js';
 
 type Value = { raw: number | string | boolean; unit?: string };
 type Row = RunDeltaInputChange;
@@ -85,16 +86,33 @@ export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInput
   return diffRunInputs(prior, current).rows;
 }
 
+const sameNumber = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a));
+
 /**
- * A link's new spread is EXPLAINED by its band move only when it is exactly the spread CEE's own writer derives for
- * that move from the prior Run's mean and spread (`olumiSpreadForMean`, `adjust-edge-strength.ts`). Anything else —
- * a stated spread, a spread on one Run only — is a change no row states.
+ * A link's new spread is EXPLAINED by its band move only when it is exactly a spread CEE's own writer derives for that
+ * move (`adjust-edge-strength.ts`): the TYPED band's own spread (`edgeBandStd` of the band the link moved into — the
+ * user named a band; DL ruling #2482 r3 P1-1), or, for an exact figure, Olumi's spread carried to the new mean
+ * (`olumiSpreadForMean` from the prior Run's mean and spread). Anything else — another stated spread, a spread on one
+ * Run only — is a change no row states.
  */
-function spreadFollowsBand(prior: { mean: number; std?: number }, current: { mean: number; std?: number }): boolean {
+function spreadFollowsBand(prior: { mean: number; std?: number }, current: { mean: number; std?: number; band?: RunInputSnapshot['links'][number]['band'] }): boolean {
   if (prior.std === current.std) return true;
   if (prior.std === undefined || current.std === undefined) return false;
-  const derived = olumiSpreadForMean({ oldMean: prior.mean, oldStd: prior.std, newMean: current.mean });
-  return Math.abs(derived - current.std) <= 1e-12 * Math.max(1, Math.abs(derived));
+  if (current.band !== undefined && sameNumber(edgeBandStd(edgeBandFromStrengthBand(current.band)), current.std)) return true;
+  return sameNumber(olumiSpreadForMean({ oldMean: prior.mean, oldStd: prior.std, newMean: current.mean }), current.std);
+}
+
+/**
+ * 0.72.0 (DL ruling #2482 r3, option A) — is a change in a link's AUTHORSHIP (`authorship_digest`) the one a `sizing`
+ * row states? Only two writers move authorship as part of an edit the pair shows: the user's own write (the link is now
+ * `user`) and the Accept (Olumi's `placeholder` → `olumi_accepted`). Any other authorship change — a source moving
+ * inside one sizing class (CODEX r2), a digest on one Run only — is unexplained.
+ */
+function authorshipExplained(prior: { sizing?: string; authorship_digest?: string }, current: { sizing?: string; authorship_digest?: string }): boolean {
+  if (prior.authorship_digest === current.authorship_digest) return true;
+  if (prior.authorship_digest === undefined || current.authorship_digest === undefined) return false;
+  if (prior.sizing === undefined || current.sizing === undefined || prior.sizing === current.sizing) return false;
+  return current.sizing === 'user' || (prior.sizing === 'placeholder' && current.sizing === 'olumi_accepted');
 }
 
 /** The rows, and `complete: false` when a sent input changed that no row states. */
@@ -234,6 +252,7 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     if (Math.sign(pl.mean) !== Math.sign(cl.mean)) complete = false;
     if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std)) complete = false;
     if (pl.exists_probability !== cl.exists_probability) complete = false;
+    if (!authorshipExplained(pl, cl)) complete = false;
   }
 
   return { rows, complete };

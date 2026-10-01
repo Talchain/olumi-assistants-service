@@ -7,7 +7,23 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.71.0.tgz` ← **THE CURRENT PIN** (F1b 52f8cd, `complete` means VERIFIED: `residual_digest`)
+### `talchain-schemas-0.72.0.tgz` ← **THE CURRENT PIN** (F1b 52f8cd, a link's `authorship_digest`)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`cd1e868e`** (schemas #82 merge; publish run 36935147076), 2026-10-01. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.72.0/fd389b22eebbedb4f7544d9dffa47c610a0c8487`.
+>
+> ```
+> npm shasum (sha1)  fd389b22eebbedb4f7544d9dffa47c610a0c8487   ← matches
+> integrity (sha512) sha512-xRsNlJYILXVmd/6galcPOKu0rhu4V+K5DoGRHoAe+99IV/FBXLkbDGM2ehHpmgmkdfEFOgdf2/CQzO4JzI6pQQ==   ← matches (pnpm-lock, written by pnpm)
+> sha256             c5ea5c57d26db4dd62f6c60c41e5def94db23ff7015eee51d0548c550a8067ff
+> ```
+>
+> **What 0.72.0 adds (additive, optional):** Run snapshot `links[].authorship_digest` — the link's authorship as sent, so an
+> authorship change is explained pairwise only beside a `sizing` row to `user` or `placeholder → olumi_accepted` (DL
+> ruling #2482 r3). `RunDelta` unchanged; the UI needs no re-vendor.
+
+### `talchain-schemas-0.71.0.tgz` (superseded) (F1b 52f8cd, `complete` means VERIFIED: `residual_digest`)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
 > **`56888181`** (schemas #81 merge; publish run 36923548214), 2026-10-01. Registry download:

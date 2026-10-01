@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildRunInputSnapshot, runIdFor, sentDigest } from '../run-input-snapshot.js';
+import { linkAuthorshipDigest } from '../run-input-residual.js';
 import { normalizeRunGoalUnit } from '../../../context/run-goal-unit.js';
 
 const graph = {
@@ -81,7 +82,11 @@ describe('buildRunInputSnapshot — what the Run was sent', () => {
     expect(s?.constraints).toEqual([{ constraint_id: 'c1', node_id: 'fac_churn', label: 'Churn cap', operator: '<=', raw: 5, unit: '%' }]);
     // 0.70.0: the band the sent strength sits in travels with it (0.4 is "strong" by CEE's cuts); no persisted edges
     // given, so who sized it is NOT recorded (absent, never inferred).
-    expect(s?.links).toEqual([{ from: 'fac_price', to: 'fac_churn', mean: 0.4, std: 0.1, exists_probability: 0.9, band: 'strong' }]);
+    expect(s?.links).toEqual([{
+      from: 'fac_price', to: 'fac_churn', mean: 0.4, std: 0.1, exists_probability: 0.9, band: 'strong',
+      // 0.72.0: the link's authorship as sent, by the ONE digest (`run-input-residual.ts`).
+      authorship_digest: linkAuthorshipDigest((graph as unknown as { edges: Record<string, unknown>[] }).edges[0]!),
+    }]);
   });
 
   describe('0.70.0 (R3 DEFECT 3): each link in the user\'s terms — its band and who sized it', () => {

@@ -19,11 +19,12 @@
  * Named exceptions, each recoverable from what IS recorded and compared:
  *   1. a SENT option's intervention objects on its graph node: PLoT normalises them away and filters option nodes; it
  *      computes on the request's options, whose numbers the snapshot records and compares per factor;
- *   2. a link's `provenance.magnitude`, only as `olumi_placeholder` (recorded sizing `placeholder`) or `olumi_estimate`
- *      (recorded `olumi_estimate` / `olumi_accepted`), and only when `source` (kept) is not `user_specified` — exactly
- *      the move the Accept writer makes, which the `sizing` row states;
- *   3. a link's `provenance.reviewed_by_user`, only when the recorded sizing is `olumi_accepted` (the review's intent is
- *      what that class records; the review is not an analysis input — graph-hash vocabulary, R11).
+ *   2. a recorded link's AUTHORSHIP members (exactly {@link LINK_AUTHORSHIP_MEMBERS}): 0.72.0 records them as the link's
+ *      `authorship_digest`, and the diff decides pairwise whether a change is the one a `sizing` row states (DL ruling
+ *      #2482 r3, option A);
+ *   3. REVIEW METADATA (`reviewed_by_user`), removed identically on every node and from every recorded link's authorship:
+ *      a review is not an analysis input (graph-hash vocabulary, R11); a link review's only analysis meaning, a confirm on
+ *      Olumi's size, is the `olumi_accepted` sizing the snapshot records (DL ruling #2482 r3 P1-2).
  *
  * Pure.
  */
@@ -60,15 +61,22 @@ interface Recorded {
   }>;
   readonly factors: ReadonlyArray<{ readonly factor_id: string; readonly raw?: number | string; readonly unit?: string; readonly encoded?: number }>;
   readonly constraints: ReadonlyArray<{ readonly constraint_id: string; readonly node_id: string; readonly operator: string; readonly raw: number; readonly unit?: string; readonly frame?: string }>;
-  readonly links: ReadonlyArray<{ readonly from: string; readonly to: string; readonly mean: number; readonly std?: number; readonly exists_probability?: number; readonly sizing?: string }>;
+  readonly links: ReadonlyArray<{ readonly from: string; readonly to: string; readonly mean: number; readonly std?: number; readonly exists_probability?: number; readonly sizing?: string; readonly authorship_digest?: string }>;
 }
 
-/** The magnitude literal each recorded sizing class pins (exception 2); a class absent here pins none. */
-const PINNED_MAGNITUDE: Readonly<Record<string, string>> = {
-  placeholder: 'olumi_placeholder',
-  olumi_estimate: 'olumi_estimate',
-  olumi_accepted: 'olumi_estimate',
-};
+/** The members of a link's AUTHORSHIP (schemas 0.72.0 `authorship_digest`), in one place: the digest and the strip. */
+export const LINK_AUTHORSHIP_MEMBERS = ['provenance', 'provenance_display', 'defaulted', 'exists_defaulted', 'std_defaulted'] as const;
+
+/**
+ * 0.72.0 — the canonical digest of a link's authorship as the request carried it: exactly {@link LINK_AUTHORSHIP_MEMBERS},
+ * with review metadata (`provenance.reviewed_by_user`) removed, absent members as `null`, keys sorted.
+ */
+export function linkAuthorshipDigest(edge: Rec): string {
+  const provenance = isRec(edge.provenance) ? (({ reviewed_by_user: _review, ...rest }) => rest)(edge.provenance) : edge.provenance;
+  const canonical: Rec = {};
+  for (const m of LINK_AUTHORSHIP_MEMBERS) canonical[m] = (m === 'provenance' ? provenance : edge[m]) ?? null;
+  return createHash('sha256').update(stableStringify(canonical)).digest('hex');
+}
 
 /**
  * The residual digest of `plotPayload` given what the snapshot `recorded` from it. `null` when the request carries no
@@ -87,6 +95,8 @@ export function residualDigest(plotPayload: Rec, recorded: Recorded): string | n
   for (const n of Array.isArray(graph.nodes) ? graph.nodes : []) {
     if (!isRec(n) || typeof n.id !== 'string') continue;
     const id = n.id;
+    // Exception 3: review metadata, identically on every node (a factor's `confirm_current` records only this).
+    if (isRec(n.observed_state)) delete n.observed_state.reviewed_by_user;
     // A factor's value as the diff compares it (`authoredPair`: raw, unit, encoded). Its `source` is recorded but not
     // compared, so it stays (CODEX r2: the source moving from Olumi's inference to the user's own, at the same value,
     // moved no row).
@@ -119,9 +129,9 @@ export function residualDigest(plotPayload: Rec, recorded: Recorded): string | n
       stripIfRecorded(e.strength, 'std', l.std);
     }
     stripIfRecorded(e, 'exists_probability', l.exists_probability);
-    if (l.sizing !== undefined && isRec(e.provenance) && e.provenance.source !== 'user_specified') {
-      stripIfRecorded(e.provenance, 'magnitude', PINNED_MAGNITUDE[l.sizing]); // exception 2
-      if (l.sizing === 'olumi_accepted') delete e.provenance.reviewed_by_user; // exception 3
+    // Exceptions 2 + 3: the authorship members, only when the snapshot recorded THIS edge's authorship digest.
+    if (l.authorship_digest !== undefined && l.authorship_digest === linkAuthorshipDigest(e)) {
+      for (const m of LINK_AUTHORSHIP_MEMBERS) delete e[m];
     }
   }
 

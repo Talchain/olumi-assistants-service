@@ -19,8 +19,12 @@
  *       both Runs, yet the placeholder-parts reader moves) → partial, [].
  *   R10 `observed_state.std_source` only (`olumi → user`, same σ; PLoT moves spread ownership) → partial, [].
  *   R11 a node label only (PLoT's binary classifier reads labels) → partial, [].
- *   R12 the REAL strength writer's band edit (`adjust-edge-strength.ts`: source → user_specified, natural_effect
- *       dropped) → BOTH rows, and partial: neither unrecorded member is verified (honest, not "complete").
+ * WRITER → RUN (DL ruling #2482 r3, schemas 0.72.0 `authorship_digest`) — the REAL `adjust_edge_strength` writer:
+ *   W1  the user names a band → the band's own σ + authorship → strength + sizing rows, complete (the investor step).
+ *   W2  the Accept of Olumi's placeholder → ONE sizing row, complete.
+ *   W3  the Accept of a PREVIOUSLY REVIEWED placeholder → ONE sizing row, complete (review metadata on neither end).
+ *   W4  a user-owned link confirmed as it is → only the review moves → complete, [].
+ *   W5  a factor confirmed as it is → complete, [].
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -34,6 +38,8 @@ import { loadScenarioSnapshotForRunAnalysis } from '../../../build-turn-context.
 import { diffRunInputs } from '../../../coaching/run-input-changes.js';
 import { olumiSpreadForMean } from '../../../../cee/magnitude/olumi-spread.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
+import { createAdjustEdgeStrengthHandler } from '../adjust-edge-strength.js';
+import { edgeBandStd } from '../../../format/edge-strength-bands.js';
 import { sentDigest } from '../run-input-snapshot.js';
 
 type Rec = Record<string, any>;
@@ -93,15 +99,38 @@ const base = () => {
 const node = (g: Rec, id: string) => g.nodes.find((n: Rec) => n.id === id)!;
 const edge = (g: Rec, from: string, to: string) => g.edges.find((e: Rec) => e.from === from && e.to === to)!;
 const LINK = ['pro_plan_price', 'monthly_churn'] as const;
+const LINK_ID = 'pro_plan_price->monthly_churn';
+const LINK_ENDS = { from: 'pro_plan_price', to: 'monthly_churn' };
 
 /** Two Runs: `edit` changes the stored graph between them. */
-async function pair(edit: (g: Rec) => void, setup: (g: Rec) => void = () => {}) {
+/** Two Runs: `edit` changes the stored graph between them (in place, or by returning the writer's new graph). */
+async function pair(edit: (g: Rec) => void | Rec | Promise<void | Rec>, setup: (g: Rec) => void = () => {}) {
   const g = base();
   setup(g);
   const a = await runOn(g, 'turn-a');
-  edit(g);
-  const b = await runOn(g, 'turn-b');
-  return { a, b, ...diffRunInputs(a.snapshot, b.snapshot), wireMoved: sentDigest(a.sent) !== sentDigest(b.sent) };
+  const written = await edit(g);
+  const bGraph = (written ?? g) as Rec;
+  const b = await runOn(bGraph, 'turn-b');
+  return { a, b, bGraph, ...diffRunInputs(a.snapshot, b.snapshot), wireMoved: sentDigest(a.sent) !== sentDigest(b.sent) };
+}
+
+/** The REAL strength writer on the served link (`approved-band-sizes-a-placeholder.test.ts`'s invocation shape). */
+async function writeStrength(g: Rec, strength: number, band?: 'very strong' | 'strong' | 'moderate' | 'weak'): Promise<Rec> {
+  const proposal = {
+    handler_id: 'adjust_edge_strength',
+    entity: { id: `${LINK[0]}→${LINK[1]}`, kind: 'edge', resolution_status: 'resolved', resolution_method: 'id_match' },
+    parameters: [{ name: 'strength', value: strength, operator: 'set', source: 'user_explicit' }],
+    cited_context_fields: [],
+  };
+  const invocation = {
+    context: { session_id: SCENARIO, stage: 'frame', request_id: 'req-w', prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null },
+    payload: { kind: 'message', scenario_id: SCENARIO, turn_id: '11111111-1111-4111-8111-111111111499', stage: 'frame', message: 'set that link' },
+    requestId: 'req-w', signal: new AbortController().signal, orientationText: '', proposal, graphForTurn: structuredClone(g),
+    ...(band !== undefined ? { edgeStrengthBandAuthority: band } : {}),
+  } as unknown as HandlerInvocation;
+  const outcome = await createAdjustEdgeStrengthHandler()(invocation);
+  expect(outcome.mutated_graph, 'the writer committed a graph').toBeDefined();
+  return outcome.mutated_graph as Rec;
 }
 
 describe('0.71.0 residual on the real wire — complete means verified', () => {
@@ -147,7 +176,9 @@ describe('0.71.0 residual on the real wire — complete means verified', () => {
     );
     expect(p.wireMoved, 'precondition: the magnitude literal reached PLoT').toBe(true);
     expect(p.complete).toBe(true);
-    expect(p.rows.map((r) => [r.field, r.before, r.after])).toEqual([['sizing', { raw: 'placeholder' }, { raw: 'olumi_accepted' }]]);
+    expect(p.rows.map((r) => [r.entity_id, r.link, r.field, r.before, r.after])).toEqual([
+      [LINK_ID, LINK_ENDS, 'sizing', { raw: 'placeholder' }, { raw: 'olumi_accepted' }],
+    ]);
   });
 
   it('R5: a band move with the writer\'s own spread (who sized it unchanged) → complete + ONE strength row', async () => {
@@ -156,7 +187,9 @@ describe('0.71.0 residual on the real wire — complete means verified', () => {
     });
     expect(p.wireMoved).toBe(true);
     expect(p.complete).toBe(true);
-    expect(p.rows.map((r) => [r.field, r.before, r.after])).toEqual([['strength', { raw: 'slight' }, { raw: 'strong' }]]);
+    expect(p.rows.map((r) => [r.entity_id, r.link, r.field, r.before, r.after])).toEqual([
+      [LINK_ID, LINK_ENDS, 'strength', { raw: 'slight' }, { raw: 'strong' }],
+    ]);
   });
 
   it('R6: £59 → £60 on an option → complete + ONE option_setting row', async () => {
@@ -166,7 +199,9 @@ describe('0.71.0 residual on the real wire — complete means verified', () => {
     });
     expect(p.wireMoved).toBe(true);
     expect(p.complete).toBe(true);
-    expect(p.rows.map((r) => [r.entity_kind, r.before?.raw, r.after?.raw])).toEqual([['option_setting', 59, 60]]);
+    expect(p.rows.map((r) => [r.entity_kind, r.option_id, r.entity_id, r.before?.raw, r.after?.raw])).toEqual([
+      ['option_setting', 'raise_price_to_59', 'pro_plan_price', 59, 60],
+    ]);
   });
 
   it('R7 (measured): a factor value edit (churn 3% → 4%) — one factor row; coverage as the wire supports', async () => {
@@ -174,7 +209,7 @@ describe('0.71.0 residual on the real wire — complete means verified', () => {
       node(g, 'monthly_churn').observed_state = { ...node(g, 'monthly_churn').observed_state, value: 0.04, raw_value: 4 };
     });
     expect(p.wireMoved).toBe(true);
-    expect(p.rows.map((r) => [r.entity_kind, r.before?.raw, r.after?.raw])).toEqual([['factor_value', 3, 4]]);
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id, r.before?.raw, r.after?.raw])).toEqual([['factor_value', 'monthly_churn', 3, 4]]);
     expect(p.complete).toBe(true);
   });
 
@@ -216,18 +251,42 @@ describe('0.71.0 residual on the real wire — complete means verified', () => {
     expect([p.complete, p.rows]).toEqual([false, []]);
   });
 
-  it('R12: the REAL strength writer\'s band edit (source → user_specified, natural_effect dropped) → both rows, partial', async () => {
-    const p = await pair((g) => {
-      const e = edge(g, ...LINK);
-      const { natural_effect: _ne, ...kept } = e.provenance;
-      e.provenance = { ...kept, source: 'user_specified' };
-      e.strength = { mean: 0.6, std: olumiSpreadForMean({ oldMean: 0.1, oldStd: 0.05, newMean: 0.6 }) };
-    });
-    expect(p.wireMoved).toBe(true);
-    expect(p.rows.map((r) => [r.field, r.before, r.after])).toEqual([
-      ['strength', { raw: 'slight' }, { raw: 'strong' }],
-      ['sizing', { raw: 'olumi_estimate' }, { raw: 'user' }],
+  // ⭐ WRITER → RUN (DL ruling #2482 r3): the REAL `adjust_edge_strength` writer edits the stored link, then the Run.
+  it('W1 (P1-1, the investor step): the user names a band ("strong") → band σ + authorship move with it → both rows, complete', async () => {
+    const p = await pair(async (g) => writeStrength(g, 0.6, 'strong'));
+    const after = edge(p.bGraph, ...LINK);
+    expect(after.strength.std, 'precondition: the writer set the typed band\'s own spread').toBe(edgeBandStd('strong'));
+    expect(after.provenance.source, 'precondition: the writer took authorship').toBe('user_specified');
+    expect(p.rows.map((r) => [r.entity_id, r.link, r.field, r.before, r.after])).toEqual([
+      [LINK_ID, LINK_ENDS, 'strength', { raw: 'slight' }, { raw: 'strong' }],
+      [LINK_ID, LINK_ENDS, 'sizing', { raw: 'olumi_estimate' }, { raw: 'user' }],
     ]);
-    expect(p.complete).toBe(false);
+    expect(p.complete).toBe(true);
+  });
+
+  it('W2 (the Accept): Olumi\'s placeholder approved at its own band → ONE sizing row, complete', async () => {
+    const p = await pair(async (g) => writeStrength(g, 0.1, 'weak'), (g) => { edge(g, ...LINK).provenance.magnitude = 'olumi_placeholder'; });
+    expect(p.rows.map((r) => [r.entity_id, r.field, r.before, r.after])).toEqual([[LINK_ID, 'sizing', { raw: 'placeholder' }, { raw: 'olumi_accepted' }]]);
+    expect(p.complete).toBe(true);
+  });
+
+  it('W3 (P1-2): Accept of a PREVIOUSLY REVIEWED placeholder (served 96c6f5f4 09:25 shape) → ONE sizing row, complete', async () => {
+    const p = await pair(async (g) => writeStrength(g, 0.1, 'weak'), (g) => {
+      edge(g, ...LINK).provenance = { ...edge(g, ...LINK).provenance, magnitude: 'olumi_placeholder', reviewed_by_user: { intent: 'confirm', at: '2026-10-01T09:25:10.219Z' } };
+    });
+    expect(p.rows.map((r) => [r.entity_id, r.field, r.before, r.after])).toEqual([[LINK_ID, 'sizing', { raw: 'placeholder' }, { raw: 'olumi_accepted' }]]);
+    expect(p.complete).toBe(true);
+  });
+
+  it('W4 (P1-2): a user-owned link confirmed as it is (confirm_current) → only the review moves → complete, []', async () => {
+    const p = await pair(async (g) => writeStrength(g, 0.1), (g) => { edge(g, ...LINK).provenance = { source: 'user_specified' }; });
+    expect(edge(p.bGraph, ...LINK).provenance.reviewed_by_user?.intent, 'precondition: the writer recorded the review').toBe('confirm');
+    expect([p.complete, p.rows]).toEqual([true, []]);
+  });
+
+  it('W5 (P1-2): a factor confirmed as it is (observed_state review only) → complete, []', async () => {
+    const p = await pair((g) => { node(g, 'monthly_churn').observed_state.reviewed_by_user = { intent: 'confirm_current', at: '2026-10-01T22:00:00.000Z' }; });
+    expect(p.wireMoved, 'precondition: the review reached PLoT').toBe(true);
+    expect([p.complete, p.rows]).toEqual([true, []]);
   });
 });

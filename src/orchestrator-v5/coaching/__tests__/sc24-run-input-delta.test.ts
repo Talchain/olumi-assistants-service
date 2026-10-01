@@ -33,7 +33,7 @@ import { RunDeltaSchema } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunInputSnapshot } from '@talchain/schemas/orchestrator';
 
 import { buildRunDelta } from '../build-run-delta.js';
-import { diffRunInputSnapshots } from '../run-input-changes.js';
+import { diffRunInputs, diffRunInputSnapshots } from '../run-input-changes.js';
 import { olumiSpreadForMean } from '../../../cee/magnitude/olumi-spread.js';
 import { PRESENT_PAIR, runAnalysisFact } from '../../context/__tests__/run-delta-fixtures.js';
 
@@ -486,6 +486,38 @@ describe('0.71.0 · input_coverage complete needs equal residuals', () => {
   });
 });
 
+// ⭐ 0.72.0 (DL ruling #2482 r3, option A) — an AUTHORSHIP change (`authorship_digest`) is explained ONLY beside a sizing
+// row to `user` (the user's own write) or `placeholder` → `olumi_accepted` (the Accept); anything else is partial.
+describe('0.72.0 · a link\'s authorship change is explained pairwise, or the pair is partial', () => {
+  const D1 = '1'.repeat(64);
+  const D2 = '2'.repeat(64);
+  const withLink = (sizing: string, digest?: string) => snap({ links: [{
+    from: 'fac_price', to: 'fac_churn', mean: 0.4, band: 'strong', sizing, ...(digest !== undefined ? { authorship_digest: digest } : {}),
+  } as RunInputSnapshot['links'][number]] });
+  const coverageOf = (a: RunInputSnapshot, b: RunInputSnapshot) => diffRunInputs(a, b).complete;
+
+  it.each([
+    ['olumi_estimate', 'user', true],
+    ['placeholder', 'user', true],
+    ['placeholder', 'olumi_accepted', true],
+    ['olumi_estimate', 'olumi_accepted', false],
+    ['olumi_accepted', 'olumi_estimate', false],
+    ['user', 'olumi_estimate', false],
+    ['user', 'user', false],
+    ['olumi_estimate', 'olumi_estimate', false],
+  ])('authorship moved beside %s → %s → complete=%s', (from, to, complete) => {
+    expect(coverageOf(withLink(from, D1), withLink(to, D2))).toBe(complete);
+  });
+
+  it('CONTROL: authorship unchanged → complete whatever the sizing row (the review never enters the digest)', () => {
+    expect(coverageOf(withLink('olumi_estimate', D1), withLink('olumi_accepted', D1))).toBe(true);
+  });
+
+  it('a digest on ONE end only → partial (an older Run cannot say whether authorship moved)', () => {
+    expect(coverageOf(withLink('olumi_estimate'), withLink('user', D2))).toBe(false);
+  });
+});
+
 describe('0.70.0 · win_probabilities_unavailable', () => {
   const at = (d: string) => `2026-06-0${d}T00:00:00.000Z`;
   const reason = (facts: readonly HandlerFact[], mayName = true) => {
@@ -500,6 +532,16 @@ describe('0.70.0 · win_probabilities_unavailable', () => {
       runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', at('7'), true),
       runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), false),
     ])).toEqual([0, 'prior_withheld']);
+  });
+
+  it('RED (DL r3 P1-3): an earlier Run with NO recorded verdict (neither stamp) → no reason — never a cause claim from absence', () => {
+    const unstamped = structuredClone(runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '111', 'hash-a', at('6'), true)) as { result: Record<string, any> };
+    delete unstamped.result.constraint_verdict;
+    for (const k of Object.keys(unstamped.result.enrichment ?? {})) if (/may_name|constraint_verdict/.test(k)) delete unstamped.result.enrichment[k];
+    expect(reason([
+      runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '222', 'hash-b', at('7'), true),
+      unstamped as unknown as HandlerFact,
+    ])).toEqual([0, undefined]);
   });
 
   it('RED: both Runs show shares but no option is on both sides → no_matched_option', () => {

@@ -27,7 +27,7 @@ import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas
 import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
-import { residualDigest } from './run-input-residual.js';
+import { linkAuthorshipDigest, residualDigest } from './run-input-residual.js';
 
 type Rec = Record<string, unknown>;
 
@@ -250,6 +250,9 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
       ...(p !== undefined && p >= 0 && p <= 1 ? { exists_probability: p } : {}),
       band: strengthBandFromEdgeBand(edgeBandFromMagnitude(Math.abs(mean))),
       ...(persisted !== undefined ? { sizing: linkSizing(persisted) } : {}),
+      // 0.72.0 (DL ruling #2482 r3): the link's authorship as the request carried it, so the diff can tell pairwise
+      // whether an authorship change is the one a `sizing` row states (`run-input-residual.ts`).
+      authorship_digest: linkAuthorshipDigest(e),
     }];
   });
 
