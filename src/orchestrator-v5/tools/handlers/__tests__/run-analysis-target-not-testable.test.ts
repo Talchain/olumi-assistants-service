@@ -226,7 +226,7 @@ describe('F1b [R1] condition (1): the Agent may describe a kept outcome, never r
     const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), g) as Json;
     const agent = goalChanceWithheldForAgent({ enrichment: after })!;
     expect(agent.note).toBe(OUTCOME_KEPT_NOTE);
-    expect(agent.note).toMatch(/Never rank or order the options by their outcomes, never name a leading or best option/);
+    expect(agent.note).toMatch(/you are not given those figures\. Never quote or estimate an option’s outcome, never rank or order the options by their outcomes, never name a leading or best option/);
     expect(agent.note).toMatch(/never say one option is better or worse/);
   });
 
@@ -236,3 +236,80 @@ describe('F1b [R1] condition (1): the Agent may describe a kept outcome, never r
     expect(goalChanceWithheldForAgent({ enrichment: after })!.note).toBe(GOAL_CHANCE_WITHHELD_NOTE);
   });
 });
+
+/**
+ * ⭐ DL #2448 item 1 (ii) (5931658539): the outcomes a P2–P4 withhold KEEPS are for the panel only. The Agent's view of the
+ * Run carries none of them, so the LLM cannot rank what it never sees. Whole-view VALUE scan, not a key list: every
+ * number the panel keeps (centre, spread, percentiles) must be absent from the projected result.
+ */
+describe('F1b [R1] condition 1(ii): the Agent\'s view of the Run carries no kept outcome figure', () => {
+  const offScaleSized = (): Json => {
+    const g = clone(M1.graph);
+    for (const e of g.edges as Json[]) {
+      if ((e.to === 'monthly_churn_rate' || e.to === 'paying_subscribers_at_12_months') && (e.defaulted === true || String(e.provenance?.magnitude ?? '').startsWith('olumi_'))) {
+        e.provenance = { ...(e.provenance ?? {}), source: 'user_specified' };
+      }
+    }
+    (g.nodes as Json[]).find((n) => n.kind === 'goal')!.goal_threshold = 1.5;
+    return g;
+  };
+  /** Every outcome figure the body carries for any option, wherever it sits. */
+  const outcomeFigures = (body: Json): number[] => {
+    const out: number[] = [];
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) { v.forEach(walk); return; }
+      if (v === null || typeof v !== 'object') return;
+      const r = v as Json;
+      for (const carrier of [r.outcome, r.expected_outcome]) {
+        if (carrier !== null && typeof carrier === 'object') {
+          for (const k of ['mean', 'std', 'p10', 'p50', 'p90']) if (typeof (carrier as Json)[k] === 'number') out.push((carrier as Json)[k]);
+        } else if (typeof carrier === 'number') out.push(carrier);
+      }
+      Object.values(r).forEach(walk);
+    };
+    walk(body);
+    // 0 and 1 are structural everywhere (flags, bounds); a figure the scan could confuse proves nothing.
+    return [...new Set(out)].filter((n) => n !== 0 && n !== 1);
+  };
+  const numbersIn = (v: unknown): Set<number> => {
+    const out = new Set<number>();
+    const walk = (x: unknown): void => {
+      if (typeof x === 'number') { out.add(x); return; }
+      if (Array.isArray(x)) { x.forEach(walk); return; }
+      if (x !== null && typeof x === 'object') Object.values(x).forEach(walk);
+    };
+    walk(v);
+    return out;
+  };
+
+  it('PRECONDITION: the P2 withhold keeps outcome figures for the panel (the scan has something to find)', () => {
+    const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), offScaleSized()) as Json;
+    expect(outcomeFigures(after).length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('RED: P2 → the Agent\'s view of the Run holds none of the kept outcome figures, for any option', async () => {
+    const { analysisResultForAgent } = await import('../../../agent-lane/decision-sensitivity.js');
+    const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), offScaleSized()) as Json;
+    const kept = outcomeFigures(after);
+    const seen = numbersIn(analysisResultForAgent({ enrichment: after }));
+    expect(kept.filter((n) => seen.has(n))).toEqual([]);
+  });
+
+  it('CONTROL: a Run nothing withheld → the Agent still sees every option\'s outcome figures', async () => {
+    const { analysisResultForAgent } = await import('../../../agent-lane/decision-sensitivity.js');
+    const body = clone(M1.plot_body);
+    const kept = outcomeFigures(body);
+    expect(kept.length).toBeGreaterThanOrEqual(6);
+    const seen = numbersIn(analysisResultForAgent({ enrichment: body }));
+    expect(kept.filter((n) => !seen.has(n))).toEqual([]);
+  });
+
+  it('CONTROL: a warning with no option list hides every option\'s outcome (fail closed)', async () => {
+    const { analysisResultForAgent } = await import('../../../agent-lane/decision-sensitivity.js');
+    const after = withholdGoalFiguresForUntestableTarget(clone(M1.plot_body), offScaleSized()) as Json;
+    for (const w of after.inference_warnings as Json[]) if (w.code === GOAL_FIGURES_TARGET_NOT_TESTABLE) delete w.option_ids;
+    const seen = numbersIn(analysisResultForAgent({ enrichment: after }));
+    expect(outcomeFigures(after).filter((n) => seen.has(n))).toEqual([]);
+  });
+});
+

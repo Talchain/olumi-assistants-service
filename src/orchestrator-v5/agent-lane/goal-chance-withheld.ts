@@ -72,10 +72,10 @@ export const PRODUCT_NOT_READ_NOTE =
  */
 export const OUTCOME_KEPT_NOTE =
   'This run withheld, for EVERY option, the chance of reaching the goal’s target and the share of runs in which it did best: '
-  + 'the target can’t be tested yet. Each option’s outcome for the goal (its centre and spread, in the goal’s units) is kept as '
-  + 'computed. You may describe one option’s own outcome range. Never rank or order the options by their outcomes, never name a '
-  + 'leading or best option, and never say one option is better or worse than another. Say `say` once, as written, when you '
-  + 'describe the run.';
+  + 'the target can’t be tested yet. Each option’s outcome for the goal (its centre and spread) is shown to the user on the '
+  + 'results panel; you are not given those figures. Never quote or estimate an option’s outcome, never rank or order the '
+  + 'options by their outcomes, never name a leading or best option, and never say one option is better or worse than another. '
+  + 'Say `say` once, as written, when you describe the run.';
 
 const recordOf = (v: unknown): Record<string, unknown> | undefined =>
   (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined);
