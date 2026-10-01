@@ -2808,6 +2808,8 @@ export async function dispatchOptionLevelsBatch(
     readonly linkEffect?: ApprovedLinkEffect;
     /** ⭐ One approved product confirmation (DL #72 5887510885; Canonical 5887564539): ONE commit, alone. */
     readonly identityConfirm?: ApprovedIdentityConfirm;
+    /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
+    readonly fenceRefusalReachesCaller?: boolean;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
@@ -2867,6 +2869,7 @@ export async function dispatchOptionLevelsBatch(
     requestHash: payload.requestHash,
     freshness,
     hasExistingAnalysis,
+    ...(batch.fenceRefusalReachesCaller === true ? { fenceRefusalReachesCaller: true } : {}),
   };
   // The single event keeps its own entry (itself the one-target form of the batch core); a batch — or a single
   // level whose approved links are declared — goes through the batch entry.
@@ -3234,6 +3237,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
   const r = await runWithApprovedLevelAdoptions(adoptions, () => dispatchOptionLevelsBatch(payload, {
     targets, base_graph_hash: input.base_graph_hash, expectedLinks: input.links.map(l => `${l.option_id}::${l.factor_id}`),
+    fenceRefusalReachesCaller: true,
     ...(input.values !== undefined && input.values.length > 0 ? { values: input.values.map(v => ({ factorId: v.factor_id, value: v.value,
       ...(v.unit !== undefined ? { unit: v.unit } : {}), ...(v.author === 'model_proposed' ? { adopted: true } : {}) })) } : {}),
     ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames.map(f => ({ factorId: f.factor_id, cap: f.cap })) } : {}),
@@ -3589,6 +3593,7 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
         priorFacts,
       }),
       reportRefusalReason: true,
+      fenceRefusalReachesCaller: true,
     },
     requestId,
     Date.now(),
@@ -4767,6 +4772,11 @@ async function dispatchAddConstraintEdit(
     readonly apply: (persistedGraph: unknown, priorFacts: readonly HandlerFact[]) => Promise<GoalTargetEditResult>;
     /** Carry the adapter's refusal reason on the result (the in-process limit edit only). */
     readonly reportRefusalReason?: boolean;
+    /**
+     * B8 (DL CR 5934735711): let a turn-fence refusal reach the caller (the in-process limit edit only), whose
+     * `runFencedInProcessWrite` maps every verdict. The wire event keeps its existing handling.
+     */
+    readonly fenceRefusalReachesCaller?: boolean;
   },
   requestId: string,
   startedAt: number,
@@ -4887,6 +4897,8 @@ async function dispatchAddConstraintEdit(
     persistedGraphBytes = commitResult.persistedGraph;
     committedResponse = commitResult.response;
   } catch (err) {
+    // The store refused before writing: nothing was saved, so this is never "commit failed, may have been saved".
+    if (spec.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
     if (err instanceof GraphStaleWriteError) {
       log.warn(
         {

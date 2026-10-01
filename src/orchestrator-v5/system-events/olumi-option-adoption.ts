@@ -17,6 +17,7 @@ import {
   loadPersistedGraphStrict,
 } from '../build-turn-context.js';
 import { commitDirectAnswer } from '../commit.js';
+import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
@@ -182,6 +183,9 @@ export async function commitOlumiOptionAdoptionInProcess(
     };
   } catch (err) {
     if (err instanceof GraphStaleWriteError) return { status: 'stale' };
+    // ⛔ B8 (CODEX CR 5934133792): a turn-fence verdict means the store wrote NOTHING. It is never "unconfirmed" (the
+    // Agent would say "may have been saved"); it reaches the fence wrapper, which maps it to `stale` / `refused`.
+    if (err instanceof TurnFenceRejectedError) throw err;
     return { status: 'unconfirmed' };
   }
 }
