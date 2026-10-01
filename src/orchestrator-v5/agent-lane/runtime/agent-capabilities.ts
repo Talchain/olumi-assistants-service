@@ -176,7 +176,7 @@ import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorWordsIn, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -3207,10 +3207,10 @@ export function createAgentCapabilities(
      */
     async proposeGoalTarget(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const type = args?.constraint_type;
+      const typed = args?.constraint_type;
       const value = args?.value;
       const unit = typeof args?.unit === 'string' ? args.unit.trim() : '';
-      if ((type !== 'at_least' && type !== 'at_most') || typeof value !== 'number' || !Number.isFinite(value) || unit === '') {
+      if ((typed !== 'at_least' && typed !== 'at_most') || typeof value !== 'number' || !Number.isFinite(value) || unit === '') {
         return { ok: false, mutated: false, refusal: 'unreadable_target',
           detail: 'A target needs the figure, its unit, and whether the goal must be at least or at most that figure. Nothing was prepared; ask the user for whichever is missing.' };
       }
@@ -3242,22 +3242,16 @@ export function createAgentCapabilities(
           detail: `${targetFigure(derived.base, unit)} is not a figure the user wrote, so nothing was prepared: a target derived from it would be recorded as theirs. Ask them for the figure.` };
       } else if (!figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
       /**
-       * ⭐ WHICH WAY IT BINDS (DL 380e54 on #2447, the product ruling 5930770727 kept): the Agent's typed `constraint_type` is
-       * its READING. Only the user's own literal comparator words can overrule it — when they CONTRADICT it, nothing is
-       * prepared (as before). When they are SILENT ("double that", "our target is £200k"), the card is prepared with the
-       * Agent's reading as the primary decision button and the other direction as the alternative; the user's click is
-       * the authorship. One path for neutral wording and an increase; no word list over the user's wording.
+       * ⭐ WHICH WAY IT BINDS (DL 380e54 on #2447, the product ruling 5930770727 kept; follow-up 5931593767): NO REFUSAL ON
+       * DIRECTION. The Agent's typed `constraint_type` is its READING; the user's own literal comparator words, when they
+       * read one way, are THEIRS. When the two agree, the card is the user's. Otherwise the card is a DECISION: the literal
+       * reading primary when there is one ("cut costs to £34k over the next year" reads `over`), the Agent's reading
+       * primary when the words are silent, asked, denied or both ways ("double that", "our target is £200k"); the other
+       * direction is the alternative button, and the user's click is the authorship. No word list over the user's wording.
        */
       const said = comparatorTheUserWrote(ctx.user_turn_text);
-      const silent = said === null && !comparatorWordsIn(ctx.user_turn_text);
-      if (said !== type && !silent) {
-        return { ok: false, mutated: false, refusal: 'direction_not_stated',
-          detail: (said === null
-            ? 'The user\u2019s words in this message are unclear on whether the goal must be at least or at most this figure (they asked, denied it, or said both), so nothing was prepared. '
-            : `The user said ${DIRECTION_WORDS[said]}, not ${DIRECTION_WORDS[type]}, so nothing was prepared. `)
-            + 'Ask them whether the goal must be at least or at most the figure, and never choose it for them.' };
-      }
-      const directionReadByAgent = silent;
+      const type: 'at_least' | 'at_most' = said ?? typed;
+      const directionIsADecision = said !== typed;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       // Exactly ONE goal: the event is id-addressed, and choosing between two goals would be a guess.
@@ -3372,7 +3366,7 @@ export function createAgentCapabilities(
         ...(levelLeftOut !== undefined ? { current_level_left_out: levelLeftOut } : {}),
         // ⭐ DL 380e54 (#2447): the user's words were silent on the direction, so the card is a DECISION — the Agent's
         // reading is the primary button, the other the alternative (`approval-chips.ts`); the user's click is the authorship.
-        ...(directionReadByAgent ? { direction_choice: { chosen: type, alternative: type === 'at_least' ? 'at_most' : 'at_least' } } : {}),
+        ...(directionIsADecision ? { direction_choice: { chosen: type, alternative: type === 'at_least' ? 'at_most' : 'at_least' } } : {}),
         note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
