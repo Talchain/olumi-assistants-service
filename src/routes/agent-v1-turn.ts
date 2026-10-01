@@ -330,7 +330,11 @@ export function stillValidOffers(
   const startingAssumptions = offered.some((a) => a.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id) && knownNotRunnable(now.analysisReady);
   // A rebuild stays offered only while there is still no model to build over.
   const rebuild = offered.some((a) => a.id === REBUILD_AFTER_TOO_LARGE_CHIP.id) && !now.modelExists;
-  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : [])];
+  // The next steps stay while the result is still current and no approval is waiting (process-local, like the
+  // next step after a blocked Run: after a restart the replay carries the words only).
+  const nextSteps = offersNextSteps(now.analysisState) && now.outstandingProposalIds.size === 0
+    ? offered.filter((a) => NEXT_STEP_CHIP_IDS.has(a.id)) : [];
+  return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
 }
 const sessions = new SessionBindingRegistry();
 
@@ -395,6 +399,33 @@ export const REBUILD_AFTER_TOO_LARGE_CHIP = {
   label: 'Build it again',
   message: 'Build the model again from my brief.',
 } as const;
+
+/**
+ * ⭐ A CURRENT RESULT OFFERS THE PRODUCT'S OWN NEXT STEPS (Paul's staging test, 1 Oct 00:1xZ: "the chips are gone
+ * (Run, pre-mortem…)"; DL #75 5922040401 + 5922121657). Measured 0-LLM on R3's stored funding trains: every brief and
+ * Run turn read back `complete_current` with `usable_for_chips: true` and shipped `suggested_actions: []`, because
+ * nothing here offered a step on a result that is already current (the Run chip rightly declines). The earlier "2
+ * chips" were the MRR brief's identity approval, never a next step.
+ * Plain text (no `action_type`): a press is the user typing it, and on a chip turn the loop withholds
+ * `authorise_change` and `run_analysis`, so it approves and runs nothing. Labels are option-neutral under every leader
+ * permission, carry no figure and no dash (AIQ 5922131997).
+ */
+export const NEXT_STEP_CHIPS = [
+  { id: 'agent-next-pre-mortem', label: 'Run a pre-mortem', message: 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?' },
+  { id: 'agent-next-what-would-change', label: 'What would change the result?', message: 'What would most likely change this result?' },
+  { id: 'agent-next-strengthen', label: 'Strengthen the model', message: 'What would most strengthen this model?' },
+] as const satisfies readonly OfferedAction[];
+
+const NEXT_STEP_CHIP_IDS: ReadonlySet<string> = new Set(NEXT_STEP_CHIPS.map((c) => c.id));
+
+/**
+ * The next steps are offered only on a result that is current and that the canonical state lets chips build on
+ * (`usable_for_chips`): never on a stale, blocked, absent or unread result, where Run or the repair is the step.
+ */
+export function offersNextSteps(analysisState: unknown): boolean {
+  const s = analysisState as { run_state?: { kind?: unknown }; usable_for_chips?: unknown } | null | undefined;
+  return s?.run_state?.kind === 'complete_current' && s.usable_for_chips === true;
+}
 
 /**
  * ⭐ "SUGGEST STARTING ASSUMPTIONS" — THE DETERMINISTIC AFFORDANCE (P-CORE #78 5911687135; DL 5912622789 item 5; Paul's
@@ -2298,7 +2329,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
-    const offeredNow: OfferedAction[] = firstOfEachId([
+    const offeredSpecific: OfferedAction[] = firstOfEachId([
       ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
@@ -2314,6 +2345,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return chip === null ? [] : [[chip.id, chip] as const];
       })).values()],
     ]);
+    // ⭐ Nothing specific to press, on a result that is current: the product's own next steps (NEXT_STEP_CHIPS). Never
+    // beside another control, and never while a proposal that would still execute waits for its yes (that is the step).
+    const offeredNow: OfferedAction[] = offeredSpecific.length === 0 && offersNextSteps(analysisState)
+      && executableWaitingProposal(scenarioId, userId, graphHash) === undefined
+      ? [...NEXT_STEP_CHIPS] : offeredSpecific;
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
     rememberResearchOffers(approveKey, offeredNow);
