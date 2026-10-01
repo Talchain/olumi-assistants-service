@@ -35,6 +35,8 @@ interface FactSpec {
   readonly computedAt?: string;
   readonly builds?: Record<string, string | null> | null;
   readonly entitled?: boolean;
+  /** PLoT's draw-structure key (`_meta.evidence.isl_draw_structure_key`): what C1's draw gate compares (#2410). */
+  readonly drawKey?: string;
 }
 
 /**
@@ -62,7 +64,7 @@ function fact(spec: FactSpec): HandlerFact {
     })),
     meta,
     ...(spec.builds !== undefined && spec.builds !== null
-      ? { _meta: { builds: spec.builds } }
+      ? { _meta: { builds: spec.builds, ...(spec.drawKey !== undefined ? { evidence: { isl_draw_structure_key: spec.drawKey } } : {}) } }
       : {}),
   };
 
@@ -89,6 +91,12 @@ const OPTIONS_CURRENT = [
   { id: 'opt-a', label: 'Offshore', win: 0.45 },
   { id: 'opt-b', label: 'Onshore', win: 0.55 },
 ] as const;
+
+/**
+ * PLoT's draw-structure key, the SAME on both Runs of a C1 pair: C1 needs both Runs' keys to show the draws line up
+ * (#2410; R3 #75 5920859011). PLoT owns it (`_meta.evidence.isl_draw_structure_key`, DL 5934513210); CEE only compares.
+ */
+const RECORDED_DRAW_KEY = 'c'.repeat(64);
 
 /** Newest first, which is how the turn loader delivers `prior_facts`. */
 function pair(prior: HandlerFact, current: HandlerFact): HandlerFact[] {
@@ -193,11 +201,12 @@ describe('buildRunDelta — attribution is named only from an OBSERVED divergenc
    * edit moves the hash and leaves the seed alone. With the builds echo riding,
    * that pair is genuinely C1. This test pins that, so a future lane cannot
    * "simplify" C1 away as dead code.
+   * #2410: C1 also needs both Runs' RECORDED ISL requests to show the same draw structure (a `std` edit keeps it).
    */
   it('an uncertainty-only edit WITH the builds echo present classifies C1_attributable', () => {
     const builds = { ui: null, cee: null, plot: 'plot-1', isl: 'isl-1' };
-    const prior = fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, computedAt: '2026-06-06T00:00:00.000Z' });
-    const current = fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, computedAt: '2026-06-07T00:00:00.000Z' });
+    const prior = fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, drawKey: RECORDED_DRAW_KEY, computedAt: '2026-06-06T00:00:00.000Z' });
+    const current = fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, drawKey: RECORDED_DRAW_KEY, computedAt: '2026-06-07T00:00:00.000Z' });
     const built = build(pair(prior, current));
     expect(built.kind).toBe('ok');
     if (built.kind !== 'ok') return;
@@ -473,10 +482,10 @@ describe('buildRunDelta — the contract polices the producer', () => {
         fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds: { ...builds, plot: 'plot-1' }, computedAt: '2026-06-06T00:00:00.000Z' }),
         fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-a', builds: { ...builds, plot: 'plot-2' }, computedAt: '2026-06-07T00:00:00.000Z' }),
       )),
-      // C1_attributable (uncertainty-only edit, builds echo riding).
+      // C1_attributable (a std-only edit, builds echo riding, the same recorded ISL draw structure).
       build(pair(
-        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, computedAt: '2026-06-06T00:00:00.000Z' }),
-        fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, computedAt: '2026-06-07T00:00:00.000Z' }),
+        fact({ options: OPTIONS_PRIOR, seed: '111', hash: 'hash-a', builds, drawKey: RECORDED_DRAW_KEY, computedAt: '2026-06-06T00:00:00.000Z' }),
+        fact({ options: OPTIONS_CURRENT, seed: '111', hash: 'hash-b', builds, drawKey: RECORDED_DRAW_KEY, computedAt: '2026-06-07T00:00:00.000Z' }),
       )),
       // C0_identical.
       build(pair(
