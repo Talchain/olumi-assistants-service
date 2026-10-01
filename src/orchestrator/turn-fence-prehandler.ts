@@ -51,6 +51,7 @@ import {
   currentTurnFenceSlot,
   errMessage,
   runWithPendingTurnFence,
+  TurnFenceRejectedError,
   unclaimedTurnFenceHandle,
 } from '../orchestrator-v5/session/turn-fence.js';
 import { log } from '../utils/telemetry.js';
@@ -146,5 +147,38 @@ export async function admitCurrentTurnFence(): Promise<void> {
       'V5 turn fence — the admission claim THREW; this turn is UNCLAIMED and any graph write it makes will be REFUSED at the commit',
     );
     slot.handle = unclaimedTurnFenceHandle(slot.scenarioId, slot.turnId);
+  }
+}
+
+/**
+ * ⭐ F1b B8 — AN IN-PROCESS GRAPH WRITE TAKES ITS PLACE IN THE FENCE (DL v2 §2: "the batch door has no fence handle";
+ * L4 trace 5929778726 (b)).
+ *
+ * The Agent route's in-process doors (`commitOptionLevelsInProcess` — levels, link strengths, a link effect, an identity
+ * confirm — `commitLimitEditInProcess`, `commitOlumiOptionAdoptionInProcess`) write `scenarios.graph` from inside
+ * `POST /agent/v1/turn`, which never passes `turnFencePreHandler`. Every such write reached the store with NO slot and
+ * proceeded through `no_ingress_fence` UNFENCED: a later canvas turn could be clobbered by an earlier Agent approval.
+ *
+ * The register route's two steps, for the door's OWN identity: bind the slot, then claim (the caller is already an
+ * authorised, scenario-owning request — the Agent route's pre-flight), then write. The store enforces it exactly as for a
+ * turn: `superseded` / `stopped` refuse (the dispatchers map that to a graph conflict → the door's `stale`), and a failed
+ * claim refuses fail-closed. The claim is idempotent on (scenario_id, turn_id), so a retried approval re-reads its own
+ * generation.
+ *
+ * A CONFLICT (`superseded` / `stopped`: a later turn claimed this scenario, or the user stopped) is the door's own
+ * `stale` (`onFenceConflict`): "the model changed after this was approved; nothing was written". An infrastructure refusal
+ * (`unclaimed` / `unavailable`) still throws — fail closed, exactly as for a turn.
+ */
+export async function runFencedInProcessWrite<T>(
+  scenarioId: string, turnId: string, write: () => Promise<T>, onFenceConflict: () => T,
+): Promise<T> {
+  try {
+    return await runWithPendingTurnFence(scenarioId, turnId, async () => {
+      await admitCurrentTurnFence();
+      return write();
+    });
+  } catch (err) {
+    if (err instanceof TurnFenceRejectedError && (err.verdict === 'superseded' || err.verdict === 'stopped')) return onFenceConflict();
+    throw err;
   }
 }
