@@ -18,6 +18,7 @@
  */
 import type { StageType } from '@talchain/schemas/boundary';
 
+import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import type { SuggestedAction } from '../../compose/types.js';
 import { deriveAuthoritativeStage } from '../../context/derive-stage.js';
 import type { AnalysisFreshness } from '../../context/freshness.js';
@@ -109,10 +110,12 @@ function guidanceStateOf(entries: Readonly<Record<string, unknown>>): GuidanceSt
 }
 
 /**
- * The ONE adapter from #2465's signals to RC's selector leaf: the same named signals, with the four fields whose
- * wire form differs narrowed to the leaf's types, and the press's pick as `user.selected_option_id`.
+ * The ONE adapter from #2465's signals to RC's selector leaf (AI HARNESS agreed, 5938348370): the same named signals,
+ * with the four fields whose wire form differs narrowed to the leaf's types (a null goal label is ABSENT: the leaf's
+ * copy renderer reads it as text), the press's pick as `user.selected_option_id`, and the Run's key when the caller has
+ * one (RC-WHAT-CHANGES keys on it; a method turn does not).
  */
-export function selectorSignalsOf(s: TurnSignals, pick: string | null): SelectorSignals {
+export function selectorSignalsOf(s: TurnSignals, pick: string | null, runKey?: string): SelectorSignals {
   const {
     'model.goal_label': goalLabel,
     'model.goal_horizon': horizon,
@@ -127,6 +130,7 @@ export function selectorSignalsOf(s: TurnSignals, pick: string | null): Selector
     guidance: guidanceStateOf(guidance),
     'user.explicit_request': typeof asked === 'string' && POLICY_IDS.has(asked) ? (asked as PolicyId) : null,
     'user.selected_option_id': pick,
+    ...(runKey !== undefined ? { 'run.run_key': runKey } : {}),
   };
 }
 
@@ -262,8 +266,8 @@ export function methodDirective(ctx: RunMethodTurn['context']): string {
     'Each story rests on at least one of these items from the user’s model, highest priority first. Name the item in '
       + 'its own words; for a link, name both ends:',
     ...ctx.supplied_items.map((item) => `- ${itemPhrase(item)} (${ITEM_CLASS[item.kind]})`),
-    `Name no option other than ${plan}. Use no percentage and none of these words: likely, likelihood, chance, `
-      + 'probability, probable, odds. Never say anything will fail: tell each story in the past tense.',
+    `Name no option other than ${plan}. Outside an item's own name, use no percentage and none of these words: likely, `
+      + 'likelihood, chance, probability, probable, odds. Never say anything will fail: tell each story in the past tense.',
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
     `At most ${POLICY.method_turns.shared.max_words} words.`,
   ].join('\n');
@@ -376,4 +380,57 @@ export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: str
     };
   }
   return null;
+}
+
+/** The agent route's graph readback (`readBackState`), as far as a method turn reads it. */
+export interface MethodReadback {
+  readonly graph?: unknown;
+  readonly analysisState?: unknown;
+  readonly analysisReady?: unknown;
+  readonly analysisResult?: unknown;
+  readonly optionParticipation?: unknown;
+  /** The SELECTED fact's evaluated identity carriers (`analysis_identity_evaluated_node_ids`). */
+  readonly identityEvaluated?: ReadonlySet<string>;
+}
+
+/** Whether this request's chip is a pre-mortem press at all: the route reads the state only then. */
+export function isMethodPress(chipId: unknown): boolean {
+  return chipId === PREMORTEM_PRESS_ID || (typeof chipId === 'string' && chipId.startsWith(PLAN_PICK_PREFIX));
+}
+
+/**
+ * The method turn for a press, from the route's own readback. The leader is licensed by the ONE licence
+ * (`leaderLicenceFromState`, PR-L1: anything but `withheld`); the identity carriers are projected to exactly the two
+ * fields `placeholderGoalPaths` reads (`node_id`, `evaluated`).
+ */
+export function methodTurnForReadback(chipId: unknown, rb: MethodReadback): MethodTurn | null {
+  if (!isMethodPress(chipId)) return null;
+  return planMethodTurn({
+    chipId,
+    signalInputs: {
+      offeredSpecific: [],
+      graph: rb.graph,
+      analysisState: rb.analysisState,
+      analysisResult: rb.analysisResult,
+      optionParticipation: rb.optionParticipation,
+      ...(rb.identityEvaluated !== undefined
+        ? { identityEvaluations: [...rb.identityEvaluated].map((node_id) => ({ node_id, evaluated: true })) } : {}),
+      leaderLicensed: leaderLicenceFromState(rb.analysisState, rb.analysisReady) !== 'withheld',
+    },
+  });
+}
+
+/**
+ * The turn's history with its LAST assistant message saying what was actually sent: a replaced draft never reaches the
+ * next turn as Olumi's words.
+ */
+export function withSentReply(items: readonly unknown[], text: string): unknown[] {
+  const sent = { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] };
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = rec(items[i]);
+    if (it?.role === 'assistant' && (it.type === 'message' || it.type === undefined)) {
+      return [...items.slice(0, i), sent, ...items.slice(i + 1)];
+    }
+  }
+  return [...items, sent];
 }

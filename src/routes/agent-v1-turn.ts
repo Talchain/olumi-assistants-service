@@ -89,7 +89,7 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit.js';
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
-import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { dispatchTool, MUTATION_TOOLS } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
@@ -97,6 +97,7 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
+import { cardCallFor, isMethodPress, methodTurnForReadback, settleMethodTurn, TALK_IT_THROUGH_CHIP, withSentReply, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
@@ -2136,6 +2137,34 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       };
     }
     /**
+     * ⭐ T3 — AN ASKED PRE-MORTEM RUNS THE REASONING COACH'S METHOD (DL 5937411688 / 5937503623; RC `method_turns`
+     * RC-PREMORTEM; `agent-lane/method-turn`). Read only on a pre-mortem press. No plan → the choose_plan buttons with
+     * no model call; otherwise ONE Agent call follows the method directive (this turn's instructions only, never the
+     * history) with every proposing tool withheld, and its draft is checked BEFORE it is sent (below).
+     */
+    let methodTurn: MethodTurn | null = null;
+    let methodGraph: unknown;
+    const pressedChipId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
+    if (result === undefined && approvedProposal === undefined && isMethodPress(pressedChipId)) {
+      const rb = await readBackState(readingDispatch, scenarioId);
+      methodGraph = rb.graph;
+      methodTurn = methodTurnForReadback(pressedChipId, rb);
+      if (methodTurn?.kind === 'choose_plan') {
+        const text = methodTurn.reply;
+        result = {
+          assistant_text: text,
+          items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: message }] },
+            { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }],
+          tool_calls: [],
+          tool_results: [],
+          mutated: false,
+          hops: 0,
+          stopped_reason: 'answered',
+          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
+        };
+      }
+    }
+    /**
      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
@@ -2200,10 +2229,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ctx: toolCtx,
           history,
           message,
-          instructions: AGENT_INSTRUCTIONS,
+          instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}` : AGENT_INSTRUCTIONS,
           maxOutputTokens: budget.max_output_tokens,
           mode,
-          withheldTools: withheldToolsOf(body),
+          withheldTools: methodTurn?.kind === 'run' ? [...new Set([...withheldToolsOf(body), ...MUTATION_TOOLS])] : withheldToolsOf(body),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
           composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
@@ -2238,6 +2267,31 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
         ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
         : result.assistant_text;
+
+    // ⭐ T3: the method turn's draft is checked BEFORE it is sent; a failed check sends RC's deterministic fallback
+    // (never a repair, never a second call). Then ONE card on the story's target, through the existing door, exactly as
+    // the identity card is issued below: `approvalChipsFor` offers its approve chip.
+    if (methodTurn?.kind === 'run') {
+      const settled = settleMethodTurn(methodTurn, result.stopped_reason === 'answered' ? text : '');
+      text = settled.reply;
+      result = { ...result, assistant_text: text, items: withSentReply(result.items, text) };
+      const card = cardCallFor(settled.target, methodGraph, message);
+      const issued = card === null ? undefined : await dispatchTool(card.tool, JSON.stringify(card.args), toolCtx, capabilities, mode);
+      if (card !== null && issued !== undefined) {
+        result = {
+          ...result,
+          tool_calls: [...result.tool_calls, { name: card.tool, ok: issued.ok === true, mutated: false,
+            ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
+          tool_results: [...result.tool_results, issued],
+        };
+      }
+      log.info({
+        scenario_id: scenarioId, dsk_protocol_id: methodTurn.context.dsk?.protocol_id ?? null,
+        dsk_not_cited: methodTurn.context.not_cited, plan_basis: methodTurn.context.plan.basis,
+        passed: settled.passed, failed: settled.failed, target_kind: settled.target.kind,
+        card: card?.tool ?? null, card_ok: issued?.ok === true, card_refusal: issued?.refusal,
+      }, 'agent-lane: method turn settled');
+    }
 
     // ⭐ `answerKind` is REQUIRED and load-bearing: route egress synthesises
     // `_answer_shape` only for 'substantive'. An Agent's conversational reply
@@ -2462,6 +2516,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(startingAssumptions.length > 0 ? startingAssumptions
         : (runBlocked && !runOutcomeSaid) || firstAnalysisBlocked || approvalLeftBlocked ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []),
       ...(offerRebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []),
+      // T3: the method's own follow-ups only (RC method_turn_rule): the plan buttons, or 'Talk it through'.
+      ...(methodTurn?.kind === 'choose_plan' ? methodTurn.actions : methodTurn?.kind === 'run' ? [TALK_IT_THROUGH_CHIP] : []),
       // The research control for each query the Agent offered THIS turn: the only way a query is ever sent.
       ...[...new Map(result.tool_results.flatMap((r) => {
         const chip = researchChipFor(String((r as { offered_query?: unknown } | undefined)?.offered_query ?? ''));
