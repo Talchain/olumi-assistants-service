@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { readFileSync } from 'node:fs';
-import { withCaveatOncePerRun, resetCaveatRecordForTests, runAtOf } from '../caveat-once.js';
+import { caveatOncePerRun, noteCaveatShown, resetCaveatRecordForTests, runAtOf } from '../caveat-once.js';
 import { PROVISIONAL_FIGURES_CAVEAT, PROVISIONAL_FIGURES_CAVEATS } from '../../compose/leading-option-wire-enforcement.js';
 
 type Rec = Record<string, unknown>;
@@ -19,8 +19,14 @@ const G = FX.cold_read.graph;
 const RUN_AT = FX.turns[0]!.run_at;
 const state = (at: string) => ({ run_state: { kind: 'complete_current', computed_at: at } });
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
-const turn = (o: { ranThisTurn?: boolean; at?: string; scenarioId?: string } = {}) =>
-  ({ scenarioId: o.scenarioId ?? 's-1', ranThisTurn: o.ranThisTurn ?? false, analysisState: state(o.at ?? RUN_AT), graph: G });
+const turn = (o: { ranThisTurn?: boolean; at?: string; scenarioId?: string; kind?: string } = {}) =>
+  ({ scenarioId: o.scenarioId ?? 's-1', ranThisTurn: o.ranThisTurn ?? false, analysisState: { run_state: { kind: o.kind ?? 'complete_current', computed_at: o.at ?? RUN_AT } }, graph: G });
+/** As the route does it: decide, then record what is SENT. */
+const withCaveatOncePerRun = (text: string, t: ReturnType<typeof turn> & { blocks?: unknown }): string => {
+  const out = caveatOncePerRun(text, t);
+  noteCaveatShown(out, t);
+  return out;
+};
 const RUN_REPLY = `${PROVISIONAL_FIGURES_CAVEAT}\n\nAngel investor outreach provisionally leads the comparison.`;
 const LATER = `${PROVISIONAL_FIGURES_CAVEAT}\n\nIt is an Olumi-inferred positive link; its strength is a placeholder.`;
 
@@ -30,7 +36,7 @@ describe('the served sequence (R3 train-0545Z): the caveat once, on the Run repl
   it('PRECONDITION: all five served replies open with the SAME caveat, for the SAME Run, and the four later ones name no option', () => {
     expect(FX.turns.map((t) => t.served_assistant_text.startsWith(PROVISIONAL_FIGURES_CAVEAT))).toEqual([true, true, true, true, true]);
     expect(new Set(FX.turns.map((t) => t.run_at)).size).toBe(1);
-    expect(runAtOf(FX.cold_read.analysis_state)).toBe(RUN_AT);
+    expect(runAtOf(FX.cold_read.analysis_state)).toBe(`complete_current|${RUN_AT}`);
     expect(words(PROVISIONAL_FIGURES_CAVEAT)).toBe(35);
   });
 
@@ -98,6 +104,26 @@ describe('it is said again whenever it carries news (AIQ: "again only when the p
     withCaveatOncePerRun(RUN_REPLY, turn({ ranThisTurn: true }));
     expect(withCaveatOncePerRun(RUN_REPLY, turn({ ranThisTurn: true }))).toBe(RUN_REPLY);
     expect(withCaveatOncePerRun(PROVISIONAL_FIGURES_CAVEAT, turn())).toBe(PROVISIONAL_FIGURES_CAVEAT);
+  });
+
+  it('CODEX 5926768178: blocks carrying a result or a leader keep it; no option roster keeps it; current → stale says it again', () => {
+    withCaveatOncePerRun(RUN_REPLY, turn({ ranThisTurn: true }));
+    // A leader-bearing block WITHOUT its own qualifier keeps the reply's caveat…
+    expect(caveatOncePerRun(LATER, { ...turn(), blocks: [{ type: 'analysis_result', leading_option_id: 'angel_investor_outreach', summary: 'Angel leads.' }] })).toBe(LATER);
+    expect(caveatOncePerRun(LATER, { ...turn(), blocks: [{ type: 'insight', leading_option_id: 'angel_investor_outreach' }] })).toBe(LATER);
+    // …the served card, whose summary opens with the same caveat, qualifies itself (R3 train-0545Z 05/06/08/09).
+    const served = { type: 'analysis_result', leading_option_id: 'angel_investor_outreach', summary: `${PROVISIONAL_FIGURES_CAVEAT}\n\nAngel leads.` };
+    expect(caveatOncePerRun(LATER, { ...turn(), blocks: [served] })).not.toContain(PROVISIONAL_FIGURES_CAVEAT);
+    expect(caveatOncePerRun(LATER, { ...turn(), graph: { nodes: G.nodes.filter((n) => n.kind !== 'option'), edges: [] } })).toBe(LATER);
+    expect(caveatOncePerRun(LATER, turn({ kind: 'complete_stale' }))).toBe(LATER);
+    expect(caveatOncePerRun(LATER, turn())).not.toContain(PROVISIONAL_FIGURES_CAVEAT); // the pair: same state, plain blocks
+  });
+
+  it('CODEX 5926768178: only what is SENT is recorded — a decided but unsent reply records nothing', () => {
+    expect(caveatOncePerRun(RUN_REPLY, turn({ ranThisTurn: true }))).toBe(RUN_REPLY); // decided, never sent (409 / replay)
+    expect(caveatOncePerRun(LATER, turn())).toBe(LATER);
+    noteCaveatShown(LATER, turn());
+    expect(caveatOncePerRun(LATER, turn())).not.toContain(PROVISIONAL_FIGURES_CAVEAT);
   });
 
   it('no Run on record → unchanged and nothing recorded', () => {

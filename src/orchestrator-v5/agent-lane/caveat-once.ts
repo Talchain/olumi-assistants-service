@@ -22,17 +22,21 @@ import { dropRankingSentences, OPTION_CUE, rankingLabelContext } from './withhel
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 
-/** Per scenario: the caveat last shown and the Run it was shown for. Bounded: the oldest scenario is forgotten first. */
-const shown = new Map<string, { readonly caveat: string; readonly runAt: string }>();
+/** Per scenario: the caveat last SENT and the Run (kind + computed_at) it was sent for. Oldest scenario forgotten first. */
+const shown = new Map<string, { readonly caveat: string; readonly run: string }>();
 const MAX_SCENARIOS = 5000;
 
 /** For tests only: forget every record. */
 export function resetCaveatRecordForTests(): void { shown.clear(); }
 
-/** The Run a readback's analysis state reports (`run_state.computed_at`), or null when none is on record. */
+/**
+ * The Run a readback's analysis state reports — its `run_state.computed_at` AND `kind`, so a currentness change
+ * (current → stale) reads as a new state and the caveat is said again (CODEX preflight 5926768178) — or null.
+ */
 export function runAtOf(analysisState: unknown): string | null {
-  const at = recordOf(recordOf(analysisState)?.run_state)?.computed_at;
-  return typeof at === 'string' && at.length > 0 ? at : null;
+  const rs = recordOf(recordOf(analysisState)?.run_state);
+  const at = rs?.computed_at;
+  return typeof at === 'string' && at.length > 0 ? `${typeof rs?.kind === 'string' ? rs.kind : '?'}|${at}` : null;
 }
 
 const fold = (s: string): string => s.toLowerCase().replace(/[“”"‘’'`]/g, '').replace(/\s+/g, ' ');
@@ -58,10 +62,28 @@ const COMPARATIVE = /\b(?:better|best|stronger|strongest|weaker|weakest|worse|wo
  * enforcer's own `OPTION_CUE`) beside a comparison word — the detector reads "The first option is better." as no ranking.
  */
 function mayClaimALeader(text: string, graph: unknown, analysisReady: unknown): boolean {
+  // No option roster to read the reply against: it cannot be judged, so it keeps its qualifier (CODEX 5926768178).
+  if (optionLabels(graph).length === 0) return true;
   if (dropRankingSentences(text, rankingLabelContext(graph, analysisReady)).droppedSentences > 0) return true;
   const t = fold(text);
   if (optionLabels(graph).some((l) => new RegExp(`(?:^|[^a-z0-9])${escape(fold(l))}(?:$|[^a-z0-9])`).test(t))) return true;
   return splitIntoRedactableUnits(text).some((u) => OPTION_CUE.test(u) && COMPARATIVE.test(u));
+}
+
+/**
+ * The turn's blocks may carry a leader of their own (CODEX 5926768178: the reply's words naming no option is not proof that
+ * the blocks name none). A leader-bearing block is fine only when it carries its OWN qualifier — the enforcer puts the same
+ * caveat first in each `analysis_result` summary (served R3 train-0545Z: every later reply's card did). Any block naming a
+ * leader without one keeps the reply's caveat.
+ */
+function blocksCarryAnUnqualifiedLeader(blocks: unknown): boolean {
+  if (!Array.isArray(blocks)) return false;
+  return blocks.some((b) => {
+    const rec = recordOf(b);
+    if (rec === undefined || !(rec.type === 'analysis_result' || /leading_option|leader/i.test(JSON.stringify(rec)))) return false;
+    const summary = typeof rec.summary === 'string' ? rec.summary : '';
+    return !PROVISIONAL_FIGURES_CAVEATS.some((c) => summary.startsWith(c));
+  });
 }
 
 export interface CaveatTurn {
@@ -74,24 +96,32 @@ export interface CaveatTurn {
   readonly graph: unknown;
   /** The readback's `analysis_ready` (the enforcer reads option labels from it too). */
   readonly analysisReady?: unknown;
+  /** The reply's blocks (a result or leader block keeps the qualifier). */
+  readonly blocks?: unknown;
 }
 
 /**
- * The reply with a repeated caveat dropped (see the module note), or unchanged. Records the caveat whenever the returned
- * reply still opens with it.
+ * The reply with a repeated caveat dropped (see the module note), or unchanged. Pure: nothing is recorded here — only
+ * what is finally SENT is recorded, by `noteCaveatShown` (CODEX 5926768178: never a draft later rewritten, nor a turn that
+ * answered 409 or replayed another request's row).
  */
-export function withCaveatOncePerRun(text: string, turn: CaveatTurn): string {
+export function caveatOncePerRun(text: string, turn: CaveatTurn): string {
   const caveat = PROVISIONAL_FIGURES_CAVEATS.find((c) => text.startsWith(c));
-  if (caveat === undefined) return text;
-  const runAt = runAtOf(turn.analysisState);
-  const rest = text.slice(caveat.length).replace(/^\s+/, '');
+  if (caveat === undefined || turn.ranThisTurn) return text;
+  const run = runAtOf(turn.analysisState);
   const prior = shown.get(turn.scenarioId);
-  const repeat = !turn.ranThisTurn && runAt !== null && prior !== undefined && prior.caveat === caveat && prior.runAt === runAt;
-  if (repeat && rest.length > 0 && !mayClaimALeader(rest, turn.graph, turn.analysisReady)) return rest;
-  if (runAt !== null) {
-    shown.delete(turn.scenarioId);
-    shown.set(turn.scenarioId, { caveat, runAt });
-    if (shown.size > MAX_SCENARIOS) shown.delete(shown.keys().next().value!);
-  }
-  return text;
+  if (run === null || prior === undefined || prior.caveat !== caveat || prior.run !== run) return text;
+  const rest = text.slice(caveat.length).replace(/^\s+/, '');
+  if (rest.length === 0 || blocksCarryAnUnqualifiedLeader(turn.blocks) || mayClaimALeader(rest, turn.graph, turn.analysisReady)) return text;
+  return rest;
+}
+
+/** Record the caveat the SENT reply opens with, for this scenario's Run. Call it with the exact bytes being sent. */
+export function noteCaveatShown(sentText: string, turn: Pick<CaveatTurn, 'scenarioId' | 'analysisState'>): void {
+  const caveat = PROVISIONAL_FIGURES_CAVEATS.find((c) => sentText.startsWith(c));
+  const run = runAtOf(turn.analysisState);
+  if (caveat === undefined || run === null) return;
+  shown.delete(turn.scenarioId);
+  shown.set(turn.scenarioId, { caveat, run });
+  if (shown.size > MAX_SCENARIOS) shown.delete(shown.keys().next().value!);
 }
