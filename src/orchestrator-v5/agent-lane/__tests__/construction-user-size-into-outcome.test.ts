@@ -181,7 +181,7 @@ describe('A4f on the served paul-1 graph (0 LLM)', () => {
   });
 
   it('control: the cascade obeys every guard — a goal its limit rows name is not widened, so the widen is refused (new_cut)', () => {
-    const before = { ...servedPaul1(), goal_constraints: [{ node_id: 'securing_funding', operator: '>=', value: 2000000 }] };
+    const before: Rec = { ...servedPaul1(), goal_constraints: [{ node_id: 'securing_funding', operator: '>=', value: 2000000 }] };
     before.nodes[4].scale_frame = 3000000; before.nodes[0].scale_frame = 5000000;
     before.edges[2].strength.mean = 10 / 3; before.edges[3].strength.mean = 0.6;
     const r = refitFramesForStatedEffects(before);
