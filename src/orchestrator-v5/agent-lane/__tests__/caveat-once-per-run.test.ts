@@ -17,7 +17,6 @@ const FX = JSON.parse(readFileSync(new URL('./fixtures/served-caveat-repeats-tra
 };
 const G = FX.cold_read.graph;
 const RUN_AT = FX.turns[0]!.run_at;
-const state = (at: string) => ({ run_state: { kind: 'complete_current', computed_at: at } });
 const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const turn = (o: { ranThisTurn?: boolean; at?: string; scenarioId?: string; kind?: string } = {}) =>
   ({ scenarioId: o.scenarioId ?? 's-1', ranThisTurn: o.ranThisTurn ?? false, analysisState: { run_state: { kind: o.kind ?? 'complete_current', computed_at: o.at ?? RUN_AT } }, graph: G });
