@@ -79,6 +79,28 @@ type ApproveChip = { readonly id: string; readonly label: string; readonly messa
  */
 const OFFERED_ON_THIS_ROW = 'offered_on_this_row';
 
+/**
+ * ⛔ THE CARD THE OFFER SHOWED RIDES WITH THE OFFER (#2480 Codex P2-2; DL overnight queue 5941571221). Most cards — the
+ * keep card, the user's own figure, the link-strength card, a goal target's reading — are composed from the stored
+ * proposal AND the proposer's own result, and the result is not persisted. So a replay or a restarted process put the
+ * approve button back WITHOUT the figure and target it approves. The exact `detail` the chip carried is stored beside
+ * the proposal it belongs to (same pending action, chip id bound to the proposal id) and shown again verbatim. Optional
+ * and additive: a row written before this carries none, and the older word-based readings still apply to it.
+ */
+const APPROVE_DETAIL = 'approve_detail';
+
+/** The chip a persisted carrier puts back: its words as offered, and the card it showed (persisted, else read from words). */
+function carriedChipOf(pa: PendingAction): ApproveChip | undefined {
+  const { public_label: label, public_message: message, inline_patch: patch } = pa.action as {
+    public_label?: unknown; public_message?: unknown; inline_patch?: Record<string, unknown> };
+  if (typeof label !== 'string' || typeof message !== 'string') return undefined;
+  const stored = patch?.[APPROVE_DETAIL];
+  const detail = (typeof stored === 'string' && stored.trim() !== '' ? stored : undefined)
+    // A link-effect or identity card's words carry its reading, so a row from before the stored card still shows it.
+    ?? readingOfLinkEffectApproval(message) ?? readingOfIdentityApproval(message);
+  return { id: pa.chip_id, label, message, ...(detail !== undefined ? { detail } : {}) };
+}
+
 /** The pending action that carries one offered proposal with its answer row. */
 export function proposalPendingAction(
   proposal: StructuredProposal,
@@ -97,6 +119,7 @@ export function proposalPendingAction(
       inline_patch: {
         agent_proposal: JSON.parse(JSON.stringify(proposal)) as Record<string, unknown>,
         ...(offeredOnThisRow ? { [OFFERED_ON_THIS_ROW]: true } : {}),
+        ...(typeof chip.detail === 'string' && chip.detail.trim() !== '' ? { [APPROVE_DETAIL]: chip.detail } : {}),
       },
       public_label: chip.label,
       public_message: chip.message,
@@ -126,11 +149,8 @@ function liveCarrierOf(pa: PendingAction, proposalId: string): LiveCarrier | und
   if (pa.action.kind !== 'apply_proposed_change') return undefined;
   const expires = Date.parse(pa.expires_at_iso);
   if (!Number.isFinite(expires)) return undefined;
-  const { public_label: label, public_message: message } = pa.action as { public_label?: unknown; public_message?: unknown };
-  if (typeof label !== 'string' || typeof message !== 'string') return undefined;
-  // A link-effect or identity card's words carry its reading, so the card put back shows exactly what the offer showed.
-  const detail = readingOfLinkEffectApproval(message) ?? readingOfIdentityApproval(message);
-  return { proposal_id: proposalId, chip: { id: pa.chip_id, label, message, ...(detail !== undefined ? { detail } : {}) }, expires_at_ms: expires };
+  const chip = carriedChipOf(pa);
+  return chip === undefined ? undefined : { proposal_id: proposalId, chip, expires_at_ms: expires };
 }
 
 /**
@@ -226,8 +246,9 @@ export function carrierForAnswerRow(input: {
  * the proposal's words with no way to approve them — although the row it replays had persisted the exact
  * chip beside the proposal.
  *
- * This returns only the chip's WORDS — its id, label and message exactly as the original answer offered
- * them — and only when THAT answer offered it (a carried-forward carrier returns nothing). Whether it is
+ * This returns the chip exactly as the original answer offered it — its id, label, message and the card it
+ * showed (`detail`, see {@link APPROVE_DETAIL}) — and only when THAT answer offered it (a carried-forward
+ * carrier returns nothing). Whether it is
  * still offered is not decided here: the caller applies the same predicate as every replay, which admits
  * it only while its proposal is the one awaiting a yes for this subject and the store would execute it on
  * today's revision. The store is refilled from the latest answer row BEFORE the replay, so a proposal
@@ -244,9 +265,8 @@ export function offeredApproveChipOnRow(
     const p = patch.agent_proposal;
     if (typeof p?.proposal_id !== 'string' || p.scenario_id !== subject.scenario_id || p.user_id !== subject.user_id) continue;
     if (pa.chip_id !== approvalChipIdFor(p.proposal_id)) continue;
-    const { public_label: label, public_message: message } = pa.action as { public_label?: unknown; public_message?: unknown };
-    if (typeof label !== 'string' || typeof message !== 'string') continue;
-    return { id: pa.chip_id, label, message };
+    const chip = carriedChipOf(pa);
+    if (chip !== undefined) return chip;
   }
   return undefined;
 }
