@@ -1949,10 +1949,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // `historyFromDurableTurns`. A failed read degrades to no history; it never
     // fails the turn.
     const held = histories.get(sessionId);
+    /** T1 (a): this conversation's earlier words are KNOWN — held in-process, or read durably. A failed or absent read leaves them unknown. */
+    let earlierWordsKnown = !needsDurableSeed(held);
     if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
       try {
         const durable = historyFromDurableTurns(await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ));
         if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
+        earlierWordsKnown = true;
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');
       }
@@ -2343,15 +2346,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const knownEmpty = st.ok === true && (st as { empty?: unknown }).empty === true;
         /**
          * ⭐ T1 (a) — A FIRST BRIEF GOES STRAIGHT TO THE CONSTRUCTOR (DL 5942371176; served map 5942431674). On a known-empty
-         * model, on the conversation's FIRST user message, with no chip and no method press, the first model call only ever
+         * model, on the conversation's PROVABLY first user message, typed (no chip, no retry), no method press, the first model call only ever
          * decided to call `build_model_from_brief` with the user's words (13.6–14k input tokens, ~4 s). The SAME brief
          * reading the stream shows decides it instead, from typed spans of the user's own message (`gateBriefReading`:
          * exact substrings, never a wording rule): a goal or at least one option → the host makes that call
          * (`hostFirstCall`) with the message verbatim, and one call answers from its result. No reading within
          * `BRIEF_ROUTE_WAIT_MS`, or neither → the Agent decides, exactly as before. A brief spread over earlier messages
-         * is never routed: only the Agent sees those words to combine them.
+         * is never routed, nor one whose earlier words could not be read (Codex pre-review): only the Agent combines them.
          */
-        const mayRouteBrief = knownEmpty && needsDurableSeed(history) && (body['chip'] === undefined || body['chip'] === null) && methodTurn === null;
+        const mayRouteBrief = knownEmpty && earlierWordsKnown && needsDurableSeed(history) && typedNow !== null && methodTurn === null;
         const reading = knownEmpty && (emitStage !== undefined || mayRouteBrief) ? readBrief(message, callBriefReading) : undefined;
         if (emitStage !== undefined && knownEmpty && reading !== undefined) {
           briefReadingOpen = true;

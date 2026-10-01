@@ -62,7 +62,10 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
 
 /** Durable answer rows by (scenario, turn): a same-turn_id retry takes the REAL replay path. */
 const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; pending_actions: unknown[] }>();
+/** T1 (a): the durable conversation read (`readRecent`): answers with no earlier turn, or fails. */
+let durableRead: 'none' | 'fail' = 'none';
 const store = {
+  readRecent: vi.fn(async () => { if (durableRead === 'fail') throw new Error('read failed'); return []; }),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
   append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[] }) => {
@@ -239,7 +242,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     nextScenario();
-    script = []; steps = []; constructionReturns = 'ready'; conversationBodies = []; constructionBodies = [];
+    script = []; steps = []; constructionReturns = 'ready'; conversationBodies = []; constructionBodies = []; durableRead = 'none';
     readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS }) };
     readingHold = null; readingCalls = 0;
   });
@@ -461,6 +464,27 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       expect(waited, 'it waited for the reading, up to the cap').toBeGreaterThanOrEqual(BRIEF_ROUTE_WAIT_MS - 50);
       expect(waited, 'and no longer').toBeLessThan(BRIEF_ROUTE_WAIT_MS + 5_000);
     }, 20_000);
+
+    it('CONTRAST (Codex pre-review): earlier words that could not be read → today\'s path (the follow-up is never built alone)', async () => {
+      durableRead = 'fail';
+      script = [callTool('build_model_from_brief', { brief: BRIEF })];
+      const body = await buffered({ message: BRIEF });
+      expect(store.readRecent, 'control: the durable read was attempted').toHaveBeenCalled();
+      expect(body._agent.tool_calls).toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
+      todaysPath('durable read failed');
+    });
+
+    it('CONTRAST (Codex pre-review): not typed by the user — a chip source with no chip object, a retry → no reading, today\'s path', async () => {
+      script = [say('Noted.')];
+      await buffered({ message: BRIEF, source: 'chip_click' });
+      expect(readingCalls).toBe(0);
+      todaysPath('chip source');
+      nextScenario(); steps = []; conversationBodies = [];
+      script = [say('Noted.')];
+      await buffered({ message: BRIEF, source: 'retry' });
+      expect(readingCalls).toBe(0);
+      todaysPath('retry');
+    });
 
     it('CONTRAST: a chip press on an empty model → no reading, today\'s path', async () => {
       script = [say('Noted.')];
