@@ -26,13 +26,20 @@
  *   authorship. `run.leader_licensed` is the ONE `leaderLicence` read (#2451); there is no second licence read here.
  * - The graph, ONLY for the limits on the plan's path (`goal_constraints`), which no signal carries.
  */
-import type { StageType } from '@talchain/schemas/boundary';
+import { ANALYSIS_RUN_STATE_KINDS, type StageType } from '@talchain/schemas/boundary';
 
 import type { LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { mapStageToDecisionStage } from '../../../dsk/stage-edge.js';
 import type { DecisionStage, DSKProtocol } from '../../../dsk/types.js';
 import { protocolDirectiveLines, literalProtocolSteps } from '../../coaching/typed-intent-directive.js';
 import { loadVerifiedDskBundle } from '../../compose/dsk-bundle-record.js';
+
+/**
+ * The served run state of a model that was never run, typed against the contract's own kinds (`ANALYSIS_RUN_STATE_KINDS`,
+ * emitted by `compose/analysis-state-v1.ts`). Not RC's example spelling "none": that is no served kind, so a gate on it
+ * never opened and P-004 could never be cited on the wire (found building T3, 1 Oct).
+ */
+const NEVER_RUN = 'never_run' satisfies (typeof ANALYSIS_RUN_STATE_KINDS)[number];
 
 /** The methods this context serves: the two reasoning methods with a DSK protocol on the served lane. */
 export type ScienceMethod = 'pre_mortem' | 'elicit_options';
@@ -314,7 +321,7 @@ function adjudicate(
     // P-004 is a frame|ideate exercise ("before we analyse further"): never after a Run, current or stale, whatever
     // stage is read (DL 5933063973 (a); CODEX_CLI_OVERFLOW 5934859876 P1). Only a model that was never run is eligible;
     // an unknown run state is not (fail closed).
-    if (s['run.kind'] !== 'none') return { citation: null, reason: 'run_exists' };
+    if (s['run.kind'] !== NEVER_RUN) return { citation: null, reason: 'run_exists' };
     // required_inputs[0] "current options in the model".
     if (Object.keys(s['model.option_labels']).length === 0) return { citation: null, reason: 'no_options' };
     // contraindications[0] "binary go/no-go": one own option (or none) against carrying on as now.

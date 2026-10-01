@@ -25,6 +25,7 @@
 
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
 import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
+import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
@@ -89,7 +90,7 @@ import { derivePendingActionsFromFinalizedChips } from '../orchestrator-v5/compo
 import { isPendingActionExpired, PENDING_ACTIONS_PER_TURN_CAP, type PendingAction } from '../orchestrator-v5/session/pending-action.js';
 import { computeSurvivingPriorPendingsDetailed } from '../orchestrator-v5/commit.js';
 import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
-import { dispatchTool } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
+import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
@@ -97,6 +98,7 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
+import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
@@ -1024,6 +1026,43 @@ export function agentTurnRequestHash(scenarioId: string, userId: string | null, 
   return `agent_turn:${digest}`;
 }
 
+/**
+ * ⛔ THE CHIP IS PART OF WHAT WAS ASKED, TOO (DL P2 on #2481; the class, not the one chip). The same words do different
+ * things with and without a chip, and with different chips: every chip turn withholds `authorise_change` and
+ * `run_analysis` (`withheldToolsOf`), and the Run, research, Strengthen and starting-assumptions chips each take their
+ * own path. So a reused turn_id carrying the same words with another chip, or none, is another request: it meets
+ * `TURN_ID_REUSED`, never the other's recorded answer. The approve and explanation chips keep their own operations
+ * (`approve:<id>`, the explanation id) inside the digest, unchanged.
+ *
+ * The chip rides as a SUFFIX (`#chip:<digest>`), not inside the digest, because the UI's own retry resends a turn's words
+ * under its turn_id WITHOUT the chip (DGAI `buildPayload.ts`: `chip` only on chip sources; `retryLast` sends
+ * `source: 'retry'`). `sameAgentTurnRequest` lets exactly that retry replay the recorded press (Codex pre-review P1).
+ */
+const CHIP_HASH_SEP = '#chip:';
+export function chipOperationOf(body: Record<string, unknown>): string | undefined {
+  const chip = body['chip'];
+  if (chip === null || typeof chip !== 'object') return undefined;
+  const { id, action_type: actionType } = chip as { id?: unknown; action_type?: unknown };
+  return `chip:${JSON.stringify([typeof id === 'string' ? id : null, typeof actionType === 'string' ? actionType : null])}`;
+}
+/** The turn's request hash with its chip bound, when it has one (see `chipOperationOf`). */
+export function withChipOperation(requestHash: string, chipOperation: string | undefined): string {
+  return chipOperation === undefined ? requestHash
+    : `${requestHash}${CHIP_HASH_SEP}${createHash('sha256').update(chipOperation).digest('hex').slice(0, 32)}`;
+}
+/** A UI retry: `source: 'retry'` and no chip (the UI drops it on a retry). */
+export function isChiplessRetry(body: Record<string, unknown>): boolean {
+  return body['source'] === 'retry' && (body['chip'] === undefined || body['chip'] === null);
+}
+/**
+ * Whether a recorded turn (`stored`) is this request. Exact, except that a chipless UI retry of the same words is the
+ * same request as the recorded chip press of those words: it is that press, resent without its chip.
+ */
+export function sameAgentTurnRequest(stored: string, requested: string, chiplessRetry: boolean): boolean {
+  if (stored === requested) return true;
+  return chiplessRetry && !requested.includes(CHIP_HASH_SEP) && stored.startsWith(`${requested}${CHIP_HASH_SEP}`);
+}
+
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   if (config.proxy.agentLaneEnabled !== true) return;
 
@@ -1536,8 +1575,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
 
     const approvedProposal = typedApprovalOf(body);
     const explanationId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
-    const requestHash = agentTurnRequestHash(scenarioId, userId, message, approvedProposal !== undefined ? `approve:${approvedProposal}`
-      : isRunExplanationChip(explanationId) ? explanationId : undefined);
+    const ownOperation = approvedProposal !== undefined ? `approve:${approvedProposal}` : isRunExplanationChip(explanationId) ? explanationId : undefined;
+    const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
+      ownOperation === undefined ? chipOperationOf(body) : undefined);
+    const chiplessRetry = isChiplessRetry(body);
     /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
     /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
     const liveHeldRefs = async (sid: string): Promise<string[]> => {
@@ -1706,7 +1747,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return reply.code(503).send({ error: 'TURN_STATE_UNVERIFIABLE', detail: 'Could not check whether this turn already ran. Nothing was run — please try again.' });
       }
       if (prior !== null) {
-        if (prior.request_hash !== requestHash) {
+        if (!sameAgentTurnRequest(prior.request_hash, requestHash, chiplessRetry)) {
           return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
         }
         return reply.code(200).send(await replayed(prior));
@@ -1744,7 +1785,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
       const claim = {
         won: owner.request_hash === claimHash,
-        sameRequest: requestHashOfClaim(owner.request_hash) === requestHash,
+        sameRequest: sameAgentTurnRequest(requestHashOfClaim(owner.request_hash), requestHash, chiplessRetry),
       };
       if (!claim.won && !claim.sameRequest) {
         return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
@@ -1757,7 +1798,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           let answer: CommittedTurnRecord | null = null;
           try { answer = await readAnswer(); } catch { answer = null; }
           if (answer !== null) {
-            if (answer.request_hash !== requestHash) {
+            if (!sameAgentTurnRequest(answer.request_hash, requestHash, chiplessRetry)) {
               return reply.code(409).send({ error: 'TURN_ID_REUSED', detail: 'That turn id was already used for a different message. Nothing was run or changed.' });
             }
             return reply.code(200).send(await replayed(answer));
@@ -1939,7 +1980,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * status the user reads is composed from the result (`write-outcome`). Zero model
      * calls, no implicit analysis. Words alone never take this path.
      */
-    let fastPath: 'approve' | 'run' | 'explain' | 'research' | 'strengthen' | undefined;
+    let fastPath: 'approve' | 'run' | 'explain' | 'research' | 'strengthen' | 'method' | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
     let narrationStatus: 'pending' | 'unavailable' | 'ready' | 'stale' | undefined;
@@ -2042,6 +2083,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }) }] }];
       const standingAfterRun = leaderStandingOf(st);
       const askView = standingAfterRun !== null && standingAfterRun.analysis_on_record && standingAfterRun.withheld;
+      // ⭐ M2 RERUN-EXPLANATION (MG; RC contract; DL ruling 5940472067): what changed between the two Runs is Olumi's own
+      // CODE LINE from the selected delta's TYPED rows; the model only says why, and its sentences pass RC's checker beside
+      // that line. `null` (no delta: a first Run) leaves this path exactly as it was.
+      const graphNodes = Array.isArray((st.graph as { nodes?: unknown } | null)?.nodes) ? (st.graph as { nodes: { id?: unknown; kind?: unknown; label?: unknown }[] }).nodes : [];
+      const rerunPlan = rerunExplanationPlan(currentRead?.run_delta,
+        (id) => { const n = graphNodes.find((x) => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; },
+        [...new Set([...graphNodes.filter((n) => n.kind === 'option' && typeof n.label === 'string').map((n) => n.label as string),
+          ...[...optionNameAliases(st.graph).values()].map((a) => a.display)])],
+        runToolOutputLicensesLeader(selectedRun),
+        graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''));
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
@@ -2051,7 +2102,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -2069,17 +2120,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // not the typed answer is never shown to the user (it is treated as no interpretation).
         const typed = askView ? readRunInterpretation(rawAnswer) : null;
         const answer = typed !== null ? typed.answer : askView && rawAnswer.trim().startsWith('{') ? '' : rawAnswer;
-        if (typed !== null) fastPathView = typed.view;
+        if (typed !== null) {
+          // M2: the typed view is the model's words too (Codex pre-review e1c7c788 P1) — not shown when it fails RC's bans.
+          const viewFailed = rerunPlan !== null && typed.view !== null ? rerunViewFailures(typed.view, rerunPlan) : [];
+          if (viewFailed.length > 0) log.info({ scenario_id: scenarioId, failed: viewFailed }, 'agent-lane: rerun provisional view failed RC checks — not shown');
+          fastPathView = viewFailed.length > 0 ? null : typed.view;
+        }
         // ⛔ THE REASONING ITEM TRAVELS WITH ITS MESSAGE (served `f828a61`, witness c9: every turn after a
         // Run was refused "Item 'msg_…' of type 'message' was provided without its required 'reasoning'
         // item", HTTP 502). Kept in output order, exactly as the Agent loop keeps its whole output.
         if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
         else if (answer.trim().length > 0) {
           explanationReady = true;
-          interpreted = typed !== null
+          // M2: Olumi's code line first, then the model's sentences that pass RC's checker (a hit drops that sentence only).
+          const composed = rerunPlan !== null ? composeRerunExplanation(answer, rerunPlan) : null;
+          if (composed !== null && composed.dropped.length > 0) log.info({ scenario_id: scenarioId, failed: composed.failed, dropped: composed.dropped.length }, 'agent-lane: rerun explanation sentences failed RC checks — dropped');
+          const said = composed?.text ?? answer;
+          interpreted = typed !== null || composed !== null
             // The history keeps the ANSWER, never the JSON: one id-less assistant message, which needs no reasoning item
-            // (the f828a61 refusal is for a message WITH its id and without its reasoning).
-            ? { answer, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer }] }] }
+            // (the f828a61 refusal is for a message WITH its id and without its reasoning). The same for a composed rerun text.
+            ? { answer: said, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }] }
             : { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
         }
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
@@ -2090,8 +2150,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       fastPath = 'explain';
       const ms = Date.now() - fastStartedAt;
       const providerMs = runInterpreted ? Math.min(Date.now() - providerStartedAt, ms) : 0;
+      // M2: with no interpretation, a rerun still says Olumi's code line rather than nothing about what changed.
       const text = interpreted?.answer ?? (matches
-        ? interpretationUnavailableText({ ok: true, ran: true }) : RUN_EXPLANATION_UNAVAILABLE_TEXT);
+        ? (rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true })) : RUN_EXPLANATION_UNAVAILABLE_TEXT);
       result = {
         assistant_text: text,
         items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
@@ -2193,6 +2254,41 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     /**
+     * ⭐ T3 — AN ASKED PRE-MORTEM RUNS THE REASONING COACH'S METHOD (DL 5937411688 / 5937503623; RC `method_turns`
+     * RC-PREMORTEM; `agent-lane/method-turn`). A recognised press ALWAYS gets the method's own answer, never ordinary
+     * generation (CODEX_CLI_OVERFLOW P1 on #2480; DL 5939415083 (1)): the choose_plan buttons, ONE "can't run the
+     * pre-mortem because …" reply, or the method turn itself — ONE model call with NO tool (below), its draft checked
+     * BEFORE it is sent.
+     */
+    let methodTurn: MethodTurn | null = null;
+    let methodGraph: unknown;
+    const pressedChipId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
+    if (result === undefined && approvedProposal === undefined && isMethodPress(pressedChipId)) {
+      const rb = await readBackState(readingDispatch, scenarioId);
+      methodGraph = rb.graph;
+      methodTurn = methodTurnForReadback(pressedChipId, rb);
+      // ⭐ A RECOGNISED METHOD TURN IS TERMINAL (DL round 3 on #2480, 5940698000): what the method returns — the checked
+      // text and its own cards — is the answer. Every downstream composer below (the identity re-offer, write narration,
+      // disclosures, other proposals and chips, coaching blocks) reads `fastPath === 'method'` and stays out.
+      if (methodTurn !== null) fastPath = 'method';
+      if (methodTurn !== null && methodTurn.kind !== 'run') {
+        const text = methodTurn.reply;
+        result = {
+          assistant_text: text,
+          // Never read: a method turn's history is written ONCE, from the final wire text (below, after the last gate).
+          items: [],
+          tool_calls: [],
+          tool_results: [],
+          mutated: false,
+          hops: 0,
+          stopped_reason: 'answered',
+          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
+        };
+        log.info({ scenario_id: scenarioId, method_turn: methodTurn.kind, ...(methodTurn.kind === 'unavailable' ? { reason: methodTurn.reason } : {}) },
+          'agent-lane: method turn answered without a model call');
+      }
+    }
+    /**
      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
@@ -2257,10 +2353,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ctx: toolCtx,
           history,
           message,
-          instructions: AGENT_INSTRUCTIONS,
+          instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}` : AGENT_INSTRUCTIONS,
           maxOutputTokens: budget.max_output_tokens,
           mode,
-          withheldTools: withheldToolsOf(body),
+          // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
+          withheldTools: methodTurn?.kind === 'run' ? toolsFor(mode).map((t) => t.name) : withheldToolsOf(body),
+          ...(methodTurn?.kind === 'run' ? { maxHops: 1 } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
           composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
@@ -2295,6 +2393,33 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
         ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
         : result.assistant_text;
+
+    // ⭐ T3: the method turn's draft is checked BEFORE it is sent; a failed check sends RC's deterministic fallback
+    // (never a repair, never a second call). Then ONE card on the story's target, through the existing door, exactly as
+    // the identity card is issued below: `approvalChipsFor` offers its approve chip.
+    if (methodTurn?.kind === 'run') {
+      const settled = settleMethodTurn(methodTurn, result.stopped_reason === 'answered' ? text : '');
+      text = settled.reply;
+      // Nothing the call produced survives: its record is rebuilt ONCE at its explicit boundary from the final wire text
+      // (below), and an earlier turn is never touched (CODEX_CLI_OVERFLOW P1 #3).
+      result = { ...result, assistant_text: text, items: [], tool_calls: [], tool_results: [] };
+      const card = cardCallFor(settled.target, methodGraph);
+      const issued = card === null ? undefined : await dispatchTool(card.tool, JSON.stringify(card.args), toolCtx, capabilities, mode);
+      if (card !== null && issued !== undefined) {
+        result = {
+          ...result,
+          tool_calls: [...result.tool_calls, { name: card.tool, ok: issued.ok === true, mutated: false,
+            ...(typeof issued.proposal_id === 'string' ? { proposal_id: issued.proposal_id } : {}) }],
+          tool_results: [...result.tool_results, issued],
+        };
+      }
+      log.info({
+        scenario_id: scenarioId, dsk_protocol_id: methodTurn.context.dsk?.protocol_id ?? null,
+        dsk_not_cited: methodTurn.context.not_cited, plan_basis: methodTurn.context.plan.basis,
+        passed: settled.passed, failed: settled.failed, target_kind: settled.target.kind,
+        card: card?.tool ?? null, card_ok: issued?.ok === true, card_refusal: issued?.refusal,
+      }, 'agent-lane: method turn settled');
+    }
 
     // ⭐ `answerKind` is REQUIRED and load-bearing: route egress synthesises
     // `_answer_shape` only for 'substantive'. An Agent's conversational reply
@@ -2417,7 +2542,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : [];
     // Every retained Run output becomes a neutral marker. The next turn reads its facts from CURRENT MODEL STATE.
     // PJ-C1 tokens: a pair the prune stubbed carries nothing, so it leaves with its reasoning (`dropSupersededPairs`).
-    histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals)));
+    // A method turn's history is written once, from the wire (T3, terminal; below).
+    if (fastPath !== 'method') histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals)));
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
@@ -2503,7 +2629,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
-    const offeredSpecific: OfferedAction[] = firstOfEachId([
+    const offeredSpecific: OfferedAction[] = fastPath === 'method' && methodTurn !== null
+      // T3, terminal: the method's ONE card (its approval) and the method's own follow-ups (RC method_turn_rule), nothing else.
+      ? firstOfEachId([...approvals, ...(methodTurn.kind === 'run' ? [TALK_IT_THROUGH_CHIP] : methodTurn.actions)])
+      : firstOfEachId([
       ...approvals,
       ...carriedApproval,
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
@@ -2622,7 +2751,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
       && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
     const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
-    const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen'
+    const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen' || fastPath === 'method'
       ? { text, status: null as string | null, stripped: [] as string[] }
       : narrateWriteOutcome(text, result.tool_calls, result.tool_results, { versioned: userId !== null });
     // The goal line leads the server's own lines (it outranks the save line), so it rides the status it precedes.
@@ -2668,14 +2797,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // types (display-ids.ts). Applied here, before the answer row is written, so a
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
-      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)),
+      // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
+      assistant_text: fastPath === 'method' ? narration.text
+        : withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
       suggested_actions: offeredNow,
       // The run's coaching, ONLY when bound to this readback, through the same egress sanitiser the
       // conventional exit uses — built INTO the finalised response, never appended raw.
-      blocks: coachingBlocks as OlumiResponse['blocks'],
+      blocks: (fastPath === 'method' ? [] : coachingBlocks) as OlumiResponse['blocks'],
     });
     const finalised = finaliseV5Response(composed, { scenarioId, runDeltaBoundByCaller: true });
 
@@ -2709,7 +2840,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(draftGraph !== undefined ? { draft_graph: draftGraph } : {}),
     } as OlumiResponse & Record<string, unknown>;
     // What changed since the last run — the run turn's own block, or why it has none — only beside that same run.
-    wireBody = withRunDelta(wireBody, runDelta);
+    if (fastPath !== 'method') wireBody = withRunDelta(wireBody, runDelta);
     /**
      * ⛔ THE LEADER FOLLOWS THE TYPED PERMISSION, AT THE WIRE (Paul: "do NOT hard-code no leader").
      * The Agent is told to name a leader only when `leader_may_be_named`; this is the deterministic
@@ -2809,11 +2940,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
     // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
     // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
-    if (typeof wireBody.assistant_text === 'string') {
+    if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
       const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
     }
-    wireBody = withAnalysisAnswerShape(wireBody, {
+    if (fastPath !== 'method') wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
     });
@@ -2856,6 +2987,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const { _answer_shape: _stale, ...withoutShape } = finalEgress.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (finalEgress.proseEdited ? withoutShape : finalEgress.response) as OlumiResponse & Record<string, unknown>;
       }
+    }
+    // T3, terminal: the ONE history write for a method turn — the history before it, the user's words, and the FINAL SENT
+    // text (the wire after the last gate), never a pre-gate copy or anything the call produced.
+    if (fastPath === 'method') {
+      histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(methodTurnItems(history, message, String(wireBody.assistant_text ?? text)), [])));
     }
 
     /**
