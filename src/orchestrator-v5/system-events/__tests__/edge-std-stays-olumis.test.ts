@@ -276,7 +276,11 @@ describe('(e) the analysis hash: the std change is IN it, `std_defaulted` is NOT
     if (result.kind !== 'mutated') throw new Error(result.reason);
     expect(persistedEdge(result).strength).toStrictEqual({ mean: USER_FIGURE, std: 0.00375 });
     expect(persistedEdge(result)).not.toHaveProperty('std_defaulted');
-    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(GraphV3.parse(base)));
+    // ⭐ L4 (DL 5929790081): this base is an Olumi PLACEHOLDER, and a confirm on a placeholder sizes it
+    // (`olumi_placeholder` → `olumi_estimate`), so the ONLY analysis input that moves is that sizing — never the std.
+    const sized = JSON.parse(JSON.stringify(base)) as RawGraph;
+    (sized.edges[0]!.provenance as Record<string, unknown>).magnitude = 'olumi_estimate';
+    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(computeAnalysisAffectingGraphHash(GraphV3.parse(sized)));
   });
 });
 
@@ -385,7 +389,8 @@ describe('(g) every exact-figure path rescales Olumi’s spread and flags it', (
     expect(edge.strength).toStrictEqual(CAPTURED_EDGE_17D1CD3A.strength);
     expect(edge).not.toHaveProperty('std_defaulted');
     expect(edge.defaulted).toBe(true);
-    expect(edge.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_placeholder', reviewed_by_user: { intent: 'confirm' } });
+    // L4 (DL 5929790081): the confirmed placeholder is sized — Olumi's estimate, accepted; its source stays Olumi's.
+    expect(edge.provenance).toMatchObject({ source: 'cee_hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } });
   });
 
   it('⭐ Agent approval whose band is NOT this write’s (restored proposal / another link): a figure', async () => {

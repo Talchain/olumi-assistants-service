@@ -21,6 +21,7 @@
  * into the goal hides every unsized path into it, so a certainty through it is unearned and has no figure (fail closed).
  * No engine run and no new carrier: everything is on CEE's own graph and the run's per-option P(goal). Pure.
  */
+import { isPlaceholderLink } from '../../cee/magnitude/link-sizing.js';
 import { sizedLinkTest } from '../../orchestrator/context/placeholder-parts.js';
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { sayFigure } from './say-figure.js';
@@ -329,8 +330,6 @@ function sayUnearned(
   return `${holds} ${outcome} ${change} ${verb} more than about ${pct}% of ${part}${count}. ${unsized}`;
 }
 
-/** The sizer's mark for a link it could not size (the magnitude contract). */
-const PLACEHOLDER_MAGNITUDE = 'olumi_placeholder';
 
 /** One option whose goal figures move with a link nobody sized, and every such link on its paths into the goal. */
 export interface PlaceholderGoalPath {
@@ -378,8 +377,8 @@ export function placeholderGoalPaths(
   const goalIdentity = isRec(goal.nonlinear_identity) ? goal.nonlinear_identity : undefined;
   if (goalIdentity !== undefined && goalIdentity.stated_in_brief === false && goalIdentity.operation === 'product' && !evaluated.has(goal.id)) return [];
   const placeholder = (e: Rec): boolean => {
-    const p = isRec(e.provenance) ? e.provenance : undefined;
-    if (p?.magnitude !== PLACEHOLDER_MAGNITUDE || p.source === 'user_specified') return false;
+    // ONE predicate (L4, `link-sizing.ts`): an accepted Olumi estimate sizes a link for goal figures (DL 5929790081 (i)).
+    if (!isPlaceholderLink(e)) return false;
     const to = byId.get(e.to);
     const id = isRec(to?.nonlinear_identity) && evaluated.has(String(to!.id)) ? to!.nonlinear_identity : undefined;
     return !(Array.isArray(id?.factor_ids) && id!.factor_ids.includes(e.from));

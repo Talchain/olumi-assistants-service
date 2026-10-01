@@ -1277,12 +1277,18 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(body.assistant_text).toContain('Confirmed the current strength');
       expect(committedEdge()).toMatchObject({
         strength: { mean: -0.4, std: 0.1 },
-        provenance: { source: 'cee_hypothesis', reasoning: 'Initial hypothesis', reviewed_by_user: { intent: 'confirm' } },
+        // L4 (DL 5929790081): Olumi's default, approved, is sized as Olumi's estimate — authorship kept.
+        provenance: { source: 'cee_hypothesis', reasoning: 'Initial hypothesis', magnitude: 'olumi_estimate', reviewed_by_user: { intent: 'confirm' } },
         provenance_display: 'ai_inferred',
         defaulted: true,
       });
       expect(committedEdge()).not.toHaveProperty('exists_defaulted');
-      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
+      // The analysis hash moves by that sizing ALONE (the Run correctly reads out of date), and by nothing else.
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).not.toBe(beforeHash);
+      const sizedOnly = structuredClone(persisted) as { edges: Array<{ from: string; to: string; provenance?: Record<string, unknown> }> };
+      const target = sizedOnly.edges.find((e) => e.from === 'f-demand' && e.to === 'g-growth')!;
+      target.provenance = { ...(target.provenance ?? {}), magnitude: 'olumi_estimate' };
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(computeAnalysisAffectingGraphHash(sizedOnly as never));
       expect(edgeOf(lastAppend().graph, 'f-price', 'g-growth'), 'contrast: an edge the user did not touch').toMatchObject({ defaulted: true });
     });
 
