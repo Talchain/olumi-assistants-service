@@ -57,25 +57,23 @@ import {
 const MAX_ID = 100;
 
 /**
- * ⛔ 33, AND THE NUMBER IS DERIVED, NOT CHOSEN.
+ * ⭐ 80: A BUDGET FOR SENTENCE-LENGTH DRAFTS, NEVER A CUT OF A BRIEF'S OWN LABEL (52f8cd; DL #75 5923299932).
  *
- * `structural_add_edge` builds its handler fact's `safe_summary` as
- * `Connected ${fromLabel} to ${toLabel}` (`structural-add-edge.ts:494`) and the
- * fact schema caps that string at **80**. "Connected " + " to " is 14, so the two
- * labels together must fit 66 — and a per-label cap of 33 guarantees ANY pair
- * composes.
+ * This used to be 33, derived from `structural_add_edge`'s `Connected ${from} to ${to}` summary and its 80-char fact
+ * cap: two labels over 33 once made a write fail `fact_invalid`, so the model became uneditable. That composition is
+ * now bounded where it is composed. Every structural summary builder falls back and clamps to
+ * `SAFE_SUMMARY_MAX_CHARS` itself (`buildAddEdgeSafeSummary`, `buildRenameSafeSummary`, `buildAddSafeSummary`,
+ * structural-delete's `buildSafeSummary`), and `recent-changes.ts` caps or withholds. So 33 had stopped protecting
+ * anything and only cut meaning: served paul-1/2 showed "Hours per week on…" for "Hours per week on investment-firm
+ * outreach" on every surface.
  *
- * Measured the hard way: an admitted model whose labels were 53 and 18 produced
- * `safe_summary` at 85 and CEE refused the write with
- * `refusal_reason: "fact_invalid"`, telling the user "I couldn't record that
- * properly, so I haven't changed the model." It committed the turn honestly and
- * wrote no graph. A long label does not degrade the model — it makes the model
- * UNEDITABLE.
- *
- * The full text is never discarded: it goes to `description`, which `NodeV3`
- * declares, and the shortening is recorded in the ledger.
+ * 80 is above every brief label measured (37–59 chars on R3's paul runs) and inside every other label bound (100 in
+ * `llmExtraction`/`working-set`, 200 on `NodeV3.label`). It still shortens the drafter's sentence-length option labels
+ * (config B, over 80). The UI applies its own budget per surface; card titles wrap, they are never cut (CANVAS
+ * 5923323565). The full text is never discarded: it goes to `description`, and the shortening is recorded in the
+ * ledger (`label-budget.test.ts` asserts the editable-model guarantee on the real builders).
  */
-const MAX_LABEL = 33;
+const MAX_LABEL = 80;
 
 export type CandidateNodeKind =
   | 'goal' | 'option' | 'factor' | 'risk' | 'outcome' | 'constraint' | 'decision';
@@ -3335,8 +3333,7 @@ function admitOnce(
         before: e.label,
         after: label,
         reason:
-          `The label was ${e.label.length} characters. Any structural edit composes two labels into ` +
-          `a summary capped at 80, so a label over ${MAX_LABEL} makes the model uneditable. The full ` +
+          `The label was ${e.label.length} characters, over the ${MAX_LABEL}-character label budget. The full ` +
           'text is preserved on the node description and here.',
         severity: 'info',
       });

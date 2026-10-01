@@ -727,6 +727,10 @@ export default async function route(app: FastifyInstance) {
         ...(analysis.analysis_goal_certainty !== undefined
           ? { analysis_goal_certainty: analysis.analysis_goal_certainty }
           : {}),
+        // 52f8cd: the Olumi options the selected Run left out of the comparison, and why — same fact, same gates.
+        ...(analysis.analysis_option_participation !== undefined
+          ? { analysis_option_participation: analysis.analysis_option_participation }
+          : {}),
         // C46 × R3-4: the carriers the selected fact's engine evaluated — same fact, same gates; absent when it records none.
         ...(analysis.analysis_identity_evaluated_node_ids !== undefined
           ? { analysis_identity_evaluated_node_ids: analysis.analysis_identity_evaluated_node_ids }

@@ -25,6 +25,7 @@
 
 import { withRunStateFreshness } from '../orchestrator-v5/agent-lane/analysis-ready-freshness.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
+import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/index.js';
@@ -64,7 +65,8 @@ import { buildCanonicalAnalysisReadyFromGraph } from '../orchestrator/tools/anal
 import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-binding.js';
 import { budgetFor, conversationBudgetFor, type CallBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
-import { narrateWriteOutcome, notAdoptedLine, openQuestionsOf, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
+import { decisionInputLines, textAtRest, withA7AfterGate } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -749,7 +751,7 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -783,6 +785,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let limitVerdicts: StoredLimitVerdicts | undefined;
   /** 0.63.0: the selected run's STORED goal certainty (`analysis_goal_certainty`), same fact and gates as `analysisResult`. */
   let goalCertainty: StoredGoalCertainty | undefined;
+  /** 52f8cd: the selected run's `analysis_option_participation`, same fact and gates as `analysisResult`. */
+  let optionParticipation: StoredOptionParticipation | undefined;
   /**
    * C46 × R3-4 (Canonical criterion 1): the carriers the selected run's engine evaluated
    * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
@@ -831,6 +835,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       limitVerdicts = readLimitVerdicts(after.json.analysis_limit_verdicts) ?? undefined;
       // 0.63.0: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
       goalCertainty = readStoredGoalCertainty(after.json.analysis_goal_certainty);
+      // 52f8cd: only an array the published contract accepts is carried (`[]` included): absent = not recorded.
+      optionParticipation = readStoredOptionParticipation(after.json.analysis_option_participation);
       // A product the run's engine evaluated is not one it "adds up": the Agent's view reads it from the SAME read.
       identityEvaluated = readEvaluatedIdentityNodeIds(after.json.analysis_identity_evaluated_node_ids);
       /**
@@ -959,7 +965,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2221,7 +2227,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty } = await readBackState(readingDispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = await readBackState(readingDispatch, scenarioId);
 
     // ⛔ This turn's approval results go with it ONLY on the approve chip's fast path: it puts no authorise_change in
     // the history (only its words and Olumi's status), so they are the only record of which proposal it applied
@@ -2471,13 +2477,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // the "can run" sentence goes; a "can't run yet" reason is always said.
     const firstPassRan = fa?.ran === true;
     const readinessLine = (staleLine !== null || firstPassRan) && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
+    // ⭐ D1 + A7 (DL #75 5923918068; AIQ words 5923963470): on the brief and Run turns, at rest — the deadline the model holds
+    // but cannot answer, said as a fact; and, while the goal has no stated target, ONE ask for it (`decision-input-ask.ts`).
+    const statusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine].filter((x): x is string => x !== null && x !== '').join(' ') || null;
+    const composedWithout = withWriteOutcome(withDisclosures(narration.text, owed), statusText);
+    const decisionTurn = {
+      awaitingApproval: offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
+        || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined,
+      // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
+      builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
+        || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)
+          || (c.name === 'run_analysis' && (result.tool_results[i] as { ran?: unknown } | undefined)?.ran === true)),
+    };
+    const decisionLines = decisionInputLines(readbackGraph, {
+      ...decisionTurn,
+      restingText: textAtRest(composedWithout),
+      questionsToggle: textAtRest(composedWithout) !== composedWithout,
+    });
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
       // types (display-ids.ts). Applied here, before the answer row is written, so a
       // replay returns exactly what the user first saw.
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
-      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, owed),
-        [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine].filter((x): x is string => x !== null && x !== '').join(' ') || null)),
+      assistant_text: withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
@@ -2608,6 +2630,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * for an approval: the route's own offer, or a proposal the chip rule left without a chip. Never on
      * a turn whose text the leader gate rewrote: its disclosure stays on the face.
      */
+    // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
+    // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
+    // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
+    if (typeof wireBody.assistant_text === 'string') {
+      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
+      if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
+    }
     wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
@@ -2707,6 +2736,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        */
       ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
       /**
+       * ⭐ 52f8cd (DL 5924731600; PANEL 5924723004): the Olumi options the Run left out of the comparison, and why, as a
+       * SIDECAR root key (the `goal_certainty` pattern; DGAI `storedOptionParticipation.ts` reads it). Without it the UI
+       * said "The analysis returned no result for this option" over an option CEE left out on purpose. `[]` = recorded,
+       * nothing left out; absent = not recorded.
+       */
+      ...(optionParticipation !== undefined ? { option_participation: optionParticipation } : {}),
+      /**
        * ⭐ SAY WHICH PATH SERVED THIS TURN.
        *
        * ⛔ MEASURED: the estate's `Live user journey against deployed staging`
@@ -2789,7 +2825,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         // ⭐ AX2: the reply shows two of the build's open questions; the whole list, in the producer's order, is here.
         ...(() => {
           const at = result.tool_calls.findIndex((c) => c.name === 'build_model_from_brief');
-          const qs = at >= 0 ? openQuestionsOf(result.tool_results[at] as Parameters<typeof openQuestionsOf>[0]) : [];
+          const qs = at >= 0 ? openQuestionsForReply(result.tool_results[at] as Parameters<typeof openQuestionsForReply>[0]) : [];
           return qs.length > 0 ? { open_questions: qs } : {};
         })(),
         /**

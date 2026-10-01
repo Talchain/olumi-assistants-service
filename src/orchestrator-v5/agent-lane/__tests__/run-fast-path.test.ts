@@ -65,8 +65,9 @@ describe('fast path 3: a typed Run chip runs the analysis and makes ONE interpre
       return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: 'h1',
         blocks: [{ type: 'analysis_result', data: { marker: 'the-run' } }], analysis_ready: { status: 'ready', options: [], blockers: [] } };
     });
+    // The goal carries a stated target, so D1's goal ask (`decision-input-ask.ts`, pinned there) stays out of these exact-text rows.
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
+      graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity', goal_threshold_raw: 100 }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
       graph_hash: 'h1',
       // The canonical verdict the interpreter must be GIVEN (Paul's case: a guardrail the engine could not score).
       analysis_state: failed

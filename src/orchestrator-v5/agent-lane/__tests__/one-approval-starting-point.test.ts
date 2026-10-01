@@ -304,8 +304,13 @@ describe('propose_starting_point', () => {
   it('the second level refuses → the user reads that NOTHING was saved — never "1 of 2", never the value alone (one commit or none)', async () => {
     const { caps, id } = await proposed({ failOn: ['hire_two::team_size'] });
     const out = await caps.authoriseChange(ctx, { proposal_id: id });
-    expect(narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status)
-      .toBe('Not saved: the starting value. Not saved: none of the 2 option levels.');
+    const status = narrateWriteOutcome('', [{ name: 'authorise_change' }], [out]).status ?? '';
+    // AIQ 5924015300 (52f8cd): the value not saved is NAMED with its owner; what the model still holds is read AFTER the
+    // refusal (CODEX 5924253824), so it describes this fake's per-event store, which is not atomic (the real door's one
+    // commit is pinned in `agent-compound-is-one-commit`). The intent pinned here: nothing reads as saved, never "1 of 2".
+    expect(status.startsWith('Olumi\u2019s suggested 40 index points (0-100) for \u201cCoordination load\u201d wasn\u2019t saved.'), status).toBe(true);
+    expect(status.endsWith('Not saved: none of the 2 option levels.'), status).toBe(true);
+    expect(status).not.toMatch(/1 of 2|Saved|Partly saved/);
   });
 
   /**

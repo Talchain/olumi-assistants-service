@@ -43,7 +43,19 @@ const SERVED_FACTOR_GC_FRAMED = (SERVED_FACTOR.goal_constraints as Record<string
  * GOAL is compared with exactly these three added, by value; every other node stays byte for byte.
  */
 const G1_HELD = { threshold_source: 'brief_extraction', goal_direction: '>=', goal_horizon_months: 12 } as const;
-const asServedNow = (n: Node | undefined): Node | undefined => (n?.kind === 'goal' ? { ...n, ...G1_HELD } : n);
+/**
+ * Served before the label budget moved from 33 to 80 (52f8cd, DL #75 5923299932): a label the old budget cut, whose
+ * full text the node's `description` carried and which fits 80, is now registered whole with no description.
+ */
+const withWholeLabel = (n: Node): Node => {
+  const { label, description } = n as Node & { description?: unknown };
+  if (typeof label !== 'string' || !label.endsWith('\u2026') || typeof description !== 'string' || description.length > 80) return n;
+  if (!description.startsWith(label.slice(0, -1).trimEnd())) return n;
+  const { description: _dropped, ...rest } = n as Node & { description?: unknown };
+  return { ...rest, label: description } as Node;
+};
+const asServedNow = (n: Node | undefined): Node | undefined =>
+  n === undefined ? n : withWholeLabel(n.kind === 'goal' ? { ...n, ...G1_HELD } : n);
 
 const BRIEF =
   'Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 10%, should we increase the '

@@ -10,6 +10,7 @@
  */
 import { isOlumiProposedOption } from '../../context/olumi-proposed-option.js';
 import { interventionFingerprint } from './analysis-ready-core.js';
+import type { OptionParticipationEntry } from './option-participation.js';
 
 type Rec = Record<string, unknown>;
 
@@ -17,6 +18,12 @@ export interface OlumiOptionFilterOutcome {
   /** The set to SUBMIT: the gate's submission, less Olumi's options when at least 2 of the user's remain. */
   readonly options: ReadonlyArray<Rec>;
   readonly keptOlumiProvisional: boolean;
+  /**
+   * The Run's record of each Olumi option outside the ordinary comparison (schemas 0.65 `option_participation`;
+   * 52f8cd, DL 5924731600): left out (`excluded_olumi_proposed`), or kept as provisional (`kept_olumi_provisional`).
+   * Empty when no Olumi suggestion was submitted. A user-owned option never appears.
+   */
+  readonly participation: readonly OptionParticipationEntry[];
 }
 
 /** The fewest options a comparison needs (PLoT's `/v2/run` requires 2). */
@@ -33,15 +40,18 @@ const optionIdOf = (o: Rec): string | null =>
 export function filterOlumiProposedOptions(input: {
   readonly submitted: ReadonlyArray<Rec>;
   readonly graph: unknown;
+  /** The options the analysable gate already excluded (no values): names WHY a provisional keep happened. */
+  readonly unanalysableOptionIds?: readonly string[];
 }): OlumiOptionFilterOutcome {
   const nodes = isRec(input.graph) && Array.isArray(input.graph.nodes) ? input.graph.nodes.filter(isRec) : [];
   // `proposed_by` records origin for life. A pressed adoption retains that origin and records
   // participation separately; the Run excludes only suggestions still awaiting that gesture.
   const proposedIds = new Set(nodes.filter((n) => isOlumiProposedOption(n) && n.analysis_participation !== 'included')
     .map((n) => n.id).filter((id): id is string => typeof id === 'string'));
-  if (proposedIds.size === 0) return { options: input.submitted, keptOlumiProvisional: false };
+  if (proposedIds.size === 0) return { options: input.submitted, keptOlumiProvisional: false, participation: [] };
   const isProposed = (o: Rec): boolean => { const id = optionIdOf(o); return id !== null && proposedIds.has(id); };
-  if (!input.submitted.some(isProposed)) return { options: input.submitted, keptOlumiProvisional: false };
+  if (!input.submitted.some(isProposed)) return { options: input.submitted, keptOlumiProvisional: false, participation: [] };
+  const olumiIds = [...new Set(input.submitted.filter(isProposed).map(optionIdOf).filter((id): id is string => id !== null))];
   const users = input.submitted.filter((o) => !isProposed(o));
   // The engine deduplicates identical intervention maps. Two user-labelled
   // submissions count only when two distinct comparisons would survive.
@@ -51,7 +61,13 @@ export function filterOlumiProposedOptions(input: {
       ? interventionFingerprint(interventions) : null;
   }).filter((fingerprint): fingerprint is string => fingerprint !== null));
   if (distinctUserMaps.size >= MIN_COMPARED) {
-    return { options: users, keptOlumiProvisional: false };
+    return { options: users, keptOlumiProvisional: false,
+      participation: olumiIds.map((option_id) => ({ option_id, state: 'excluded_olumi_proposed' as const })) };
   }
-  return { options: input.submitted, keptOlumiProvisional: true };
+  // WHY it stayed (schemas 0.65): the user's own options the gate could not analyse — present only when there are some;
+  // absent when the user simply named fewer than two (nothing may then be said to be unanalysable).
+  const unanalysable = [...new Set((input.unanalysableOptionIds ?? []).filter((id) => !proposedIds.has(id)))];
+  return { options: input.submitted, keptOlumiProvisional: true,
+    participation: olumiIds.map((option_id) => ({ option_id, state: 'kept_olumi_provisional' as const,
+      ...(unanalysable.length > 0 ? { unanalysable_user_option_ids: unanalysable } : {}) })) };
 }

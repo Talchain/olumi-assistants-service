@@ -109,7 +109,13 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
     const first = await run('turn-before');
     expect((plotBodies[0]!.options as Rec[]).map((o) => o.option_id))
       .toEqual(['keep_current_price', 'raise_price_to_59']);
-    expect((await read()).analysis_state?.run_state.kind).toBe('complete_current');
+    const firstRead = await read();
+    expect(firstRead.analysis_state?.run_state.kind).toBe('complete_current');
+    // ⭐ 52f8cd (DL 5924731600): the Run RECORDS the Olumi option it left out, and the cold read carries that record —
+    // without it the UI said "The analysis returned no result for this option" (served dafdc620).
+    const leftOut = [{ option_id: 'raise_price_to_54', state: 'excluded_olumi_proposed' }];
+    expect(first.result.option_participation).toEqual(leftOut);
+    expect(firstRead.analysis_option_participation).toEqual(leftOut);
     const option = graph.nodes.find((n: Rec) => n.id === 'raise_price_to_54')!;
     const hashes = computeExpectedGraphCasHashes(graph);
     const adoption = applyOlumiOptionAdoption(graph, {
@@ -141,6 +147,10 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
     });
     const reopened = await read();
     expect(reopened.analysis_state?.run_state.kind).toBe('complete_current');
+    // CONTROL: once adopted the option is IN the comparison, so the rerun RECORDS nothing left out — `[]`, never absent
+    // (schemas 0.65: absent = an older Run, not recorded; CODEX 5924967500) — and the read carries that `[]`.
+    expect(second.result.option_participation).toEqual([]);
+    expect(reopened.analysis_option_participation).toEqual([]);
     expect(reopened.analysis_result).toMatchObject({
       computed_against_hash: second.result.graph_hash_at_run,
       leading_option_id: null,

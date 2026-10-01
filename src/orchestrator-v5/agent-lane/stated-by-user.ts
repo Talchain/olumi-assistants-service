@@ -406,7 +406,7 @@ export interface EntityScope {
 }
 
 /** A label's words, lower-cased, three characters or more ("Pro plan price" → pro, plan, price; "MRR" → mrr). */
-const wordsOf = (label: string): string[] => label.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
+export const wordsOf = (label: string): string[] => label.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
 
 /** One word's plain stem: "developers" → developer, "hires"/"hired"/"hire" → hir, "pricing"/"price" → pric. */
 const stemOf = (w: string): string => {
@@ -415,7 +415,7 @@ const stemOf = (w: string): string => {
   return x.endsWith('e') && x.length >= 4 ? x.slice(0, -1) : x;
 };
 /** Two words name the same thing: equal stems, or one stem (four letters or more) begins the other ("month"/"monthly"). */
-const sameWord = (a: string, b: string): boolean => {
+export const sameWord = (a: string, b: string): boolean => {
   const x = stemOf(a);
   const y = stemOf(b);
   if (x === y) return true;
@@ -496,6 +496,9 @@ export function writtenRangeFor(
  * caller says which (`EntityScope.rivals`). `EntityScope.strict` reads rate owners and conjunctions, and refuses rule 4
  * among two figures or more. Every miss fails toward under-claiming: the figure is left unset or recorded as Olumi's, and said.
  */
+/** Words that widen a label to the same whole rather than narrowing it (R3 #75 5924889786). */
+const GENERALISERS = ['total', 'overall', 'combined', 'all'];
+
 export function figureTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope: EntityScope): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
   const family = unitPhraseFamily(unit);
@@ -537,8 +540,41 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       if (at + m[0].length <= a.index) left.push(m[0].toLowerCase());
       else if (at >= amountEnd) right.push(m[0].toLowerCase());
     }
+    /**
+     * ⭐ STRICT: A RIVAL CLAIMS A SHARED WORD ONLY BY ITS OWN QUALIFIER (R3 #75 5924350620; MG A4u 5924448020). A word the
+     * target shares with another label names neither by itself ("deals" in "Investment-firm deals closed" and "Angel deals
+     * closed"; "secured" in "Funding secured" and "Angel funding secured"), so it was passed over, and on a draft with
+     * sibling labels nothing was left to bind: served 0258Z refused Paul's written deal range for the investment-firm deals,
+     * and 0341Z refused his "secured £0 so far" for the goal. The clause decides, rival by rival: the target holds the word
+     * when its OWN words (those that rival lacks) are written in the clause and the rival's own are not ("investment
+     * firms that do deals"); when neither's own is written, the more GENERAL label holds it (the one with no own words:
+     * "secured £0" is the goal's, never "Angel funding secured"'s). Anything else stays nobody's: under-claim.
+     */
+    const clauseWords = [...left, ...right];
+    const inClause = (ws: readonly string[]): boolean => ws.some((w) => w.length >= 3 && clauseWords.some((c) => sameWord(c, w)));
+    const labelWords = (labels: readonly string[]): string[][] => labels.map((l) => [...new Set(wordsOf(l))]);
+    const targetLabelWords = labelWords(scope.target);
+    const rivalLabelWords = labelWords(scope.rivals ?? scope.others);
+    const targetHoldsShared = (w: string): boolean => {
+      if (!strict || !targetWords.some((t) => sameWord(t, w))) return false;
+      const rivalsWithW = rivalLabelWords.filter((r) => r.some((x) => sameWord(x, w)));
+      if (rivalsWithW.length === 0) return false;
+      return rivalsWithW.every((r) => targetLabelWords.some((t) => {
+        if (!t.some((x) => sameWord(x, w))) return false;
+        const tOwn = t.filter((x) => !r.some((y) => sameWord(x, y)));
+        const rOwn = r.filter((y) => !t.some((x) => sameWord(x, y)));
+        const tIn = inClause(tOwn); const rIn = inClause(rOwn);
+        // R3 5924889786: the target wins on GENERALITY only over a rival that NARROWS it (a source, segment or kind:
+        // "angel", "investment-firm", "monthly"). "Total"/"overall"/"combined"/"all" name the same whole: a duplicate total, a tie.
+        return (tIn && !rIn) || (!tIn && !rIn && tOwn.length === 0 && rOwn.some((y) => !GENERALISERS.some((g) => sameWord(g, y))));
+      }));
+    };
     const firstMention = (ws: readonly string[]): 'target' | 'other' | null => {
-      for (const w of ws) { const k = mentionOf(w, decisiveTarget); if (k !== null) return k; }
+      for (const w of ws) {
+        const k = mentionOf(w, decisiveTarget);
+        if (k !== null) return k;
+        if (w.length >= 3 && !unitWords.some((u) => sameWord(u, w)) && targetHoldsShared(w)) return 'target';
+      }
       return null;
     };
     // The figure's own RATE names no entity either (AI Conversation #70 5848429576): "£10 per month" on a factor with

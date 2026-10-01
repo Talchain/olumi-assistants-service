@@ -424,7 +424,8 @@ export function naturalEffectOf(
 }
 
 const HOW_MUCH = (s: MagnitudeNode, t: MagnitudeNode): string => `How much does "${s.label}" change "${t.label}"?`;
-const NOT_REPRESENTABLE = 'which is more than the analysis can represent on the ranges these two are measured on';
+/** The words a size the frames cannot hold is said in; `build-model.ts` drops its question once the frame refit makes it fit. */
+export const NOT_REPRESENTABLE = 'which is more than the analysis can represent on the ranges these two are measured on';
 
 /**
  * ⭐ D2–D8 FOR ONE LINK. The caller supplies both ends; nothing here reads the rest of the graph.
