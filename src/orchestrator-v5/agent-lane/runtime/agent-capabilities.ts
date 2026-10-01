@@ -154,7 +154,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
@@ -1704,6 +1704,11 @@ export function createAgentCapabilities(
      * and frame kept, stamped as the user's, ONE CAS commit with the base-hash gate. Absent ⇒ unavailable.
      */
     readonly commitLimitEdit?: (input: CommitLimitEditInput) => Promise<CommitLimitEditResult>;
+    /**
+     * ⭐ MG F1 T6 (#2471): the option-status door, in-process (`commitOptionStatusInProcess`), fenced like the limit door.
+     * It returns the WRITER's own typed outcome, the only evidence "applied" may rest on. Absent ⇒ never "applied".
+     */
+    readonly commitOptionStatus?: (input: CommitOptionStatusInput) => Promise<CommitOptionStatusResult>;
   } = {},
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
@@ -4513,53 +4518,46 @@ export function createAgentCapabilities(
       if (ops.length === 1 && ops[0]!.op === 'set_option_status') {
         const op = ops[0]!;
         const { status, expected_status } = op.value as { status: 'feasible' | 'infeasible' | 'removed'; expected_status: 'feasible' | 'infeasible' | 'removed' };
-        const operationId = authorisationTurnId(decision.proposal.proposal_id);
-        const res = await dispatch('/orchestrate/v2/turn', {
-          kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
-          event: { kind: 'option_status_edit', option_node_id: op.path, expected_status, status, base_graph_hash: decision.proposal.base_graph_identity_hash },
+        const pid = decision.proposal.proposal_id;
+        if (opts.commitOptionStatus === undefined) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            detail: 'The option cannot be changed here, so nothing was written. Tell the user plainly.' };
+        }
+        const operationId = authorisationTurnId(pid);
+        const res = await opts.commitOptionStatus({
+          scenario_id: ctx.scenario_id, turn_id: operationId, option_node_id: op.path, expected_status, status,
+          base_graph_hash: decision.proposal.base_graph_identity_hash,
         });
-        if (res.status === 409) {
-          return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,
+        // The CAS / expected-status conflict, or the turn fence's superseded/stopped verdict: nothing written.
+        if (res.status === 'stale') {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: pid,
             detail: 'The model changed just before this was written, so nothing was changed. Offer to prepare it again.' };
         }
-        if (res.status >= 400 && res.status < 500) {
-          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
+        // The turn fence refused before any write.
+        if (res.status === 'refused') {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
             detail: 'The option was not changed, and nothing on the model changed. Tell the user plainly and ask what they would like instead.' };
         }
         /**
-         * ⛔ OPERATION-BOUND EVIDENCE (CODEX overflow #2467 5935234950 P2). A refused event is committed honestly as a 200 with
-         * no write, and the model can hold the requested status for another reason (a concurrent client set it first), so a
-         * 200 plus a matching read-back is NOT "applied". Applied only when the committed response's own receipt names THIS
-         * operation's turn (`source_turn_id`, the estate's replay proof, `dispatch.ts`) AND the model holds the status. A retry
-         * of the same approval replays that receipt, so it recovers the original result instead of reading "superseded".
+         * ⛔ APPLIED ONLY ON THE WRITER'S OWN TYPED OUTCOME (CODEX overflow #2471 5937013605 + DL). Served b213138f said
+         * "could not be confirmed" on 4 of 4 presses that landed, because a guest's write mints no version and #2467
+         * required a receipt (R3 5936732295). Display bytes cannot stand in (a no-write replay carries them too). So:
+         * the writer says THIS attempt wrote (`written`), a minted version's receipt names THIS turn, and the model read
+         * back holds the status. Anything less is UNCONFIRMED — never "did not change" (CODEX delta P2-1).
          */
-        const receipt = receiptSummaryOf(res.json);
-        /**
-         * ⛔ A GUEST'S WRITE MINTS NO VERSION, SO IT HAS NO RECEIPT (R3 #85 5936732295, served b213138f: "could not be
-         * confirmed" on 4 of 4 presses that landed). The writer's OWN operation-bound evidence is the committed bytes it
-         * answers THIS request with (`draft_graph`, `dispatch.ts` option_status_edit): a refusal answers without them, and a
-         * replay answers with the stored bytes of this same turn id. So: the response's committed bytes hold the status, and a
-         * receipt, when one came, names THIS operation's turn (a receipt naming another turn is someone else's write).
-         */
-        const committedBytesHold = optionStatusHolds((res.json as { draft_graph?: unknown }).draft_graph, op.path, status);
-        const thisOperationWrote = res.status === 200 && committedBytesHold && !receipt.unreadable
-          && (receipt.summary === null || receipt.summary.source_turn_id === operationId);
-        // ⛔ A MISSING RECEIPT IS NOT EVIDENCE OF NO WRITE (CODEX overflow #2467 delta, P2-1; DL ruling). Without
-        // operation-bound evidence the outcome is UNCONFIRMED; "not changed" is said only on typed no-write evidence (the 409
-        // conflict and the 4xx refusals above).
+        const receipt = res.status === 'written' ? receiptSummaryOf({ model_version_receipt: res.model_version_receipt }) : null;
+        const receiptBindsThisTurn = res.status === 'written' && receipt !== null && !receipt.unreadable
+          && (res.version_minted ? receipt.summary !== null && receipt.summary.source_turn_id === operationId : receipt.summary === null);
         const after = await readGraph(ctx.scenario_id);
-        const landed = thisOperationWrote && after !== null && optionStatusHolds(after.raw, op.path, status);
+        const landed = receiptBindsThisTurn && after !== null && optionStatusHolds(after.raw, op.path, status);
         if (!landed) {
-          return { ok: false, mutated: res.status === 200, applied: false, refusal: res.status === 200 ? 'not_confirmed' : 'not_applied',
-            proposal_id: decision.proposal.proposal_id,
-            detail: res.status === 200
-              ? 'The change was sent but could not be confirmed in the saved model. Tell the user it could not be confirmed (never that it was saved, never that it failed) and offer to check.'
-              : 'The option was not changed. Tell the user plainly.' };
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
+            detail: 'The change was sent but could not be confirmed in the saved model. Tell the user it could not be confirmed (never that it was saved, never that it failed) and offer to check.' };
         }
         // The exact proposal is APPLIED (CODEX P2): it is no longer offered, and a retry reads "already applied", never "superseded".
-        const receipts = receipt.summary !== null ? [receipt.summary] : [];
-        proposals.markApplied(decision.proposal.proposal_id, receipts);
-        return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
+        const receipts = receipt!.summary !== null ? [receipt!.summary] : [];
+        proposals.markApplied(pid, receipts);
+        return { ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
           // The writer's own sentence, about the option the model now holds (one wording for the UI and the Agent).
           follow_up: optionStatusConfirmationText(String(after!.nodes.find((n) => n.id === op.path)?.label ?? ''), status),
           note: 'The last analysis no longer reflects the options compared. Offer to run the analysis again.' };
