@@ -1,15 +1,21 @@
 /**
- * ⭐ F1 T5 `set_goal` — THE AGENT'S `propose_goal_target` CARRIES THE GOAL'S PERIOD, HORIZON AND THE FIGURE AS STATED, ON
- * ONE CARD, INTO THE SAME `goal_target_edit` THE CANVAS CONTROL SENDS (MG; spec `output/mg-0ebb952a/SEMANTIC-MODEL-SPEC.md`
- * §1 G1, §7 P4).
+ * ⭐ F1 T5 `set_goal` — THE AGENT'S `propose_goal_target` CARRIES THE FIGURE AS THE USER STATED IT, ON ONE CARD, INTO THE
+ * SAME `goal_target_edit` THE CANVAS CONTROL SENDS (MG; spec `output/mg-0ebb952a/SEMANTIC-MODEL-SPEC.md` §1 G1, §7 P4).
  *
- * Paul (1 Oct): "£100k a quarter" against a monthly goal was dropped "because the units differ". The capability converts
- * it explicitly (÷3) with the ONE module the writer re-checks with (`goal-target/goal-period.ts`), keeps his words in
- * `stated_as`, and the read-back confirms every field the card wrote, byte-exact. A week / day figure is never converted.
+ * ⛔ SCOPE CUT (DL 380e54 on #2454, CODEX overflow 5935202003; MG owner decision B). In THIS PR the Agent's card:
+ *   · NEVER sets the goal's period or horizon (P1-4: the period-word attestation and the model-supplied horizon were
+ *     banned doors). An omitted field = unchanged; a passed one is refused with nothing prepared. The typed period /
+ *     horizon chip is the next PR.
+ *   · NEVER converts a figure between periods (B: the quote's period is a word read, so "£60k by the end of the month"
+ *     could pass as a monthly rate and be scaled). A figure stated per another period is refused with the ask. The
+ *     Canvas event door keeps conversion: its period is typed (`system-events/__tests__/set-goal-period-horizon.test.ts`).
+ *   · PINS the typed period it read (P1-1): `goal_period` + `expected_goal_period`, so a concurrent period change is
+ *     refused by the writer and the read-back binds it.
+ *   · never drops a stated figure to make room (P2): the 21st distinct one is refused.
  *
- * The writer below is a MODEL of the product's contract, with one switch: `keepsF1` (whether it stores the 0.69.0 fields).
- * The REAL writer is driven in `agent-sets-the-goal-target-real-writer.test.ts`. Every event sent is parsed by the REAL
- * boundary schema.
+ * The writer below is a MODEL of the product's contract (including its hash-blind `expected_*` refusal, as
+ * `goal-target-edit.ts` enforces it), with one switch: `keepsF1` (whether it stores the 0.69.0 fields). The REAL writer is
+ * driven in `agent-sets-the-goal-target-real-writer.test.ts`. Every event sent is parsed by the REAL boundary schema.
  */
 import { describe, it, expect } from 'vitest';
 import { SystemEventTurnPayloadSchema } from '@talchain/schemas/boundary';
@@ -17,6 +23,7 @@ import { createAgentCapabilities, projectModelContext, type InternalDispatch } f
 import { AGENT_TOOLS } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
 import { userWordsOf } from '../stated-by-user.js';
+import { askForGoalPeriodFigure } from '../../goal-target/goal-period.js';
 
 const SCENARIO = '550e8400-e29b-41d4-a716-446655440452';
 const ctxOf = (turn: string, earlier: readonly string[] = []) =>
@@ -44,6 +51,12 @@ function world(initial: Graph, keepsF1 = true) {
     const ev = (body as { event?: Record<string, unknown> }).event ?? {};
     if (ev['kind'] !== 'goal_target_edit') throw new Error(`unexpected dispatch ${path}`);
     if (ev['base_graph_hash'] !== `h${rev}`) return { status: 409, json: {} };
+    // The writer's hash-blind guard (`goal-target-edit.ts`, schemas 0.69.0 `expected_*`): each field SENT carries the value
+    // it was read with (null = none); a stored value that moved since refuses with nothing written (422).
+    const held = (g.nodes.find((n) => n.id === ev['goal_node_id']) ?? {}) as Record<string, unknown>;
+    for (const [field, expected, stored] of [['goal_period', 'expected_goal_period', 'goal_period'], ['goal_horizon', 'expected_goal_horizon', 'goal_horizon'], ['stated_as', 'expected_stated_as', 'goal_stated_as']] as const) {
+      if (ev[field] !== undefined && JSON.stringify(ev[expected] ?? null) !== JSON.stringify(held[stored] ?? null)) return { status: 422, json: {} };
+    }
     const operator = ev['constraint_type'] === 'at_least' ? '>=' : '<=';
     const row = { constraint_id: 'gc-1', node_id: ev['goal_node_id'], operator, value: ev['raw_value'], unit: ev['unit'], provenance: 'explicit', value_frame: 'level' };
     const f1 = keepsF1 ? {
@@ -67,49 +80,51 @@ const parsesOnTheWire = (body: Record<string, unknown>) => {
   expect(r.success, r.success ? '' : JSON.stringify(r.error.issues)).toBe(true);
 };
 
+/** Paul's figure in the goal's OWN period: what the card carries. */
+const MONTH_SAID = 'Our MRR goal is monthly. We need at least £40k MRR a month.';
+const MONTH = { value: 40000, unit: '£', period: 'month', quote: '£40k MRR a month' };
+/** Paul's figure in ANOTHER period: never converted on the card (B). */
 const PAUL = 'Our MRR goal is monthly. We need at least £100k MRR a quarter by the end of March.';
 const QUARTER = { value: 100000, unit: '£', period: 'quarter', quote: '£100k MRR a quarter' };
 
-describe('F1 T5: propose_goal_target → ONE card → ONE goal_target_edit carrying period, horizon and the figure as stated', () => {
-  it('declares the three optional parameters, the contract\'s periods, and leaves the required set as it was', () => {
+describe('F1 T5: propose_goal_target → ONE card → ONE goal_target_edit carrying the figure as the user stated it', () => {
+  it('RED (P1-4): the declaration carries NO period and NO horizon — only the figure as stated; the required set is as it was', () => {
     const t = AGENT_TOOLS.find((x) => x.name === 'propose_goal_target')!;
     const props = (t.parameters as { properties: Record<string, { enum?: unknown; properties?: Record<string, { enum?: unknown }>; required?: unknown }> }).properties;
-    expect(props.period?.enum).toEqual(['none', 'day', 'week', 'month', 'quarter', 'year']);
-    expect(Object.keys(props.horizon?.properties ?? {})).toEqual(['deadline', 'months']);
+    expect(props).not.toHaveProperty('period');
+    expect(props).not.toHaveProperty('horizon');
     expect(props.as_stated?.required).toEqual(['value', 'unit', 'period', 'quote']);
+    expect(props.as_stated?.properties?.period?.enum).toEqual(['none', 'day', 'week', 'month', 'quarter', 'year']);
     expect((t.parameters as { required?: unknown }).required).toEqual(['constraint_type', 'value', 'unit', 'rationale']);
   });
 
-  it('RED (c) Paul\'s case: a monthly goal, "£100k a quarter" → the card converts ÷3 and keeps his words; the approval sends them in the event; the read-back confirms each', async () => {
+  it('CONTROL: a figure stated in the goal\'s own period → ONE card, his words kept, the figure unchanged; the approval sends it and the read-back confirms', async () => {
     const w = world(graphWith({ goal_period: 'month' }));
     const store = new ProposalStore();
-    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(PAUL), {
-      constraint_type: 'at_least', value: 100000, unit: '£', rationale: 'Paul said so.', as_stated: QUARTER, horizon: { deadline: '2027-03-31' },
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(MONTH_SAID), {
+      constraint_type: 'at_least', value: 40000, unit: '£', rationale: 'Paul said so.', as_stated: MONTH,
     });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
-    expect(p.public_label).toBe('Set the goal "MRR" to at least £33,333.3333 a month (£100,000 a quarter, as you stated it) by 2027-03-31');
+    expect(p.public_label).toBe('Set the goal "MRR" to at least £40,000 a month');
     expect(w.sent, 'a proposal writes nothing').toEqual([]);
-    const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [PAUL]), { proposal_id: String(p.proposal_id) });
+    const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [MONTH_SAID]), { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
     expect(w.sent).toHaveLength(1);
     parsesOnTheWire(w.sent[0]!);
-    expect(JSON.stringify(w.sent[0]!['event'])).toBe(JSON.stringify({
-      kind: 'goal_target_edit', goal_node_id: 'mrr', constraint_type: 'at_least', raw_value: 100000 / 3, unit: '£', base_graph_hash: 'h1',
-      goal_horizon: { deadline: '2027-03-31' }, expected_goal_horizon: null, stated_as: [QUARTER], expected_stated_as: null,
-    }));
-    expect(r.follow_up).toBe('The goal "MRR" now has the target at least £33,333.3333 a month (£100,000 a quarter, as you stated it) by 2027-03-31.');
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ raw_value: 40000, unit: '£', stated_as: [MONTH], expected_stated_as: null }));
+    expect(r.follow_up).toBe('The goal "MRR" now has the target at least £40,000 a month, as you stated it.');
   });
 
   it('RED (read-back): a writer that stores the target but DROPS the stated figure → "could not be confirmed", never "set"', async () => {
     const w = world(graphWith({ goal_period: 'month' }), false);
     const store = new ProposalStore();
-    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(PAUL), { constraint_type: 'at_least', value: 100000, unit: '£', rationale: 'x', as_stated: QUARTER });
-    const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [PAUL]), { proposal_id: String(p.proposal_id) });
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(MONTH_SAID), { constraint_type: 'at_least', value: 40000, unit: '£', rationale: 'x', as_stated: MONTH });
+    const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [MONTH_SAID]), { proposal_id: String(p.proposal_id) });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: true, applied: false, refusal: 'not_confirmed' }));
-    expect((w.graph().nodes.find((n) => n.id === 'mrr') as Node).goal_threshold_raw, 'PRECONDITION: the target itself did land').toBe(100000 / 3);
+    expect((w.graph().nodes.find((n) => n.id === 'mrr') as Node).goal_threshold_raw, 'PRECONDITION: the target itself did land').toBe(40000);
   });
 
-  it('CONTROL: no F1 arguments → the event and card are exactly as before (no new keys, no period words)', async () => {
+  it('CONTROL: no F1 arguments on a goal with no typed period → the event and card are exactly as before (no new keys, no period words)', async () => {
     const said = 'We need at least £60k MRR by the end of the year.';
     const w = world(graphWith());
     const store = new ProposalStore();
@@ -119,66 +134,205 @@ describe('F1 T5: propose_goal_target → ONE card → ONE goal_target_edit carry
     expect(Object.keys(w.sent[0]!['event'] as object)).toEqual(['kind', 'goal_node_id', 'constraint_type', 'raw_value', 'unit', 'base_graph_hash']);
   });
 
-  it('the goal\'s period the user states rides the event; a period the words and the goal do not say is refused with an ask', async () => {
-    const said = 'We need at least £60k MRR a month.';
-    const w = world(graphWith());
-    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x', period: 'month' });
-    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, public_label: 'Set the goal "MRR" to at least £60,000 a month' }));
-    const q = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf('We need at least £60k MRR.'), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x', period: 'month' });
-    expect(q).toEqual(expect.objectContaining({ ok: false, refusal: 'goal_period_not_stated' }));
-    // `none` has no words to attest it: it never silently replaces a period the goal holds.
-    const held = world(graphWith({ goal_period: 'month' }));
-    const n = await createAgentCapabilities(held.d, new ProposalStore()).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x', period: 'none' });
-    expect(n).toEqual(expect.objectContaining({ ok: false, refusal: 'goal_period_not_stated' }));
+  it('nothing rides as the user\'s that the user did not say: an invented quote, a period the quote does not name, another figure', async () => {
+    const w = world(graphWith({ goal_period: 'month' }));
+    const caps = createAgentCapabilities(w.d, new ProposalStore());
+    const base = { constraint_type: 'at_least' as const, value: 40000, unit: '£', rationale: 'x' };
+    const refusalOf = async (extra: Record<string, unknown>) => (await caps.proposeGoalTarget!(ctxOf(MONTH_SAID), { ...base, ...extra } as never)).refusal;
+    expect(await refusalOf({ as_stated: { ...MONTH, quote: '£40k every month' } })).toBe('quote_not_users');
+    expect(await refusalOf({ as_stated: { ...MONTH, period: 'year' } })).toBe('stated_period_not_in_words');
+    expect(await refusalOf({ as_stated: { ...MONTH, value: 30000 } })).toBe('as_stated_not_the_target');
+    // CONTROL: the same card with his real quote is prepared.
+    expect(await refusalOf({ as_stated: MONTH })).toBeUndefined();
     expect(w.sent).toEqual([]);
   });
 
-  it('RED (e): "£25k a week" against a monthly goal is never converted → refused with the ask, nothing prepared', async () => {
-    const said = 'We need at least £25k MRR a week.';
-    const w = world(graphWith({ goal_period: 'month' }));
+  it('a stated figure appends to the goal\'s record, last — earlier figures are never dropped, an identical one is not repeated', async () => {
+    const earlier = { value: 35000, unit: '£', period: 'month', quote: '£35k a month' };
+    const w = world(graphWith({ goal_period: 'month', goal_stated_as: [earlier, MONTH] }));
     const store = new ProposalStore();
-    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said), {
-      constraint_type: 'at_least', value: 25000, unit: '£', rationale: 'x', as_stated: { value: 25000, unit: '£', period: 'week', quote: '£25k MRR a week' },
-    });
-    expect(p).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'period_not_convertible' }));
-    expect(String(p.detail)).toContain('Ask the user for the figure per month.');
-    expect(String(p.detail)).toContain('Nothing was changed.');
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(MONTH_SAID), { constraint_type: 'at_least', value: 40000, unit: '£', rationale: 'x', as_stated: MONTH });
+    await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [MONTH_SAID]), { proposal_id: String(p.proposal_id) });
+    expect((w.sent[0]!['event'] as { stated_as?: unknown }).stated_as).toEqual([earlier, MONTH]);
+  });
+});
+
+// ⛔ P1-4 (CODEX overflow 5935202003 :1745 / :1758; DL 380e54: DELETE, don't defer). The period-word attestation granted
+// period authority ("£60k … by the end of the month" read as a monthly rate) and a target-only message accepted a
+// model-supplied horizon. The card never sets either: a passed value is refused with nothing prepared.
+describe('P1-4: the Agent\'s card NEVER sets the goal\'s period or horizon — an omitted field is unchanged, a passed one is refused', () => {
+  it.each([
+    ['the CODEX period case: "by the end of the month" + period month', 'We need at least £60k MRR by the end of the month.', { period: 'month' }],
+    ['period none on a goal with no rate', 'We need at least £60k MRR.', { period: 'none' }],
+    ['the CODEX horizon case: a target-only message + a six-month horizon', 'We need at least £60k MRR.', { horizon: { months: 6 } }],
+    ['a deadline the user did give', 'We need at least £60k MRR by 2027-03-31.', { horizon: { deadline: '2027-03-31' } }],
+  ])('RED: %s → refused goal_period_or_horizon_not_settable, nothing prepared, nothing sent', async (_n, said, extra) => {
+    const w = world(graphWith());
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x', ...extra } as never);
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'goal_period_or_horizon_not_settable' }));
+    expect(String(p.detail)).toContain('Nothing was prepared');
+    expect(String(p.detail)).toContain('without');
     expect(p.proposal_id).toBeUndefined();
     expect(w.sent).toEqual([]);
   });
 
-  it('nothing rides as the user\'s that the user did not say: an invented quote, a period the quote does not name, another figure, an impossible date', async () => {
+  it('CONTROL: the same call without them (or with them null) → the card, and its event carries neither', async () => {
+    for (const extra of [{}, { period: null, horizon: null }]) {
+      const said = 'We need at least £60k MRR by the end of the month.';
+      const w = world(graphWith());
+      const store = new ProposalStore();
+      const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x', ...extra } as never);
+      expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, public_label: 'Set the goal "MRR" to at least £60,000' }));
+      await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [said]), { proposal_id: String(p.proposal_id) });
+      expect(w.sent[0]!['event']).not.toHaveProperty('goal_period');
+      expect(w.sent[0]!['event']).not.toHaveProperty('goal_horizon');
+    }
+  });
+
+  it('RED (the legacy carrier): the Agent\'s unit naming another period than a "£ per quarter" goal\'s → refused, never a re-period by unit', async () => {
+    const w = world(graphWith({ goal_threshold_unit: '£ per quarter' }));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf('We need at least £70k a month.'),
+      { constraint_type: 'at_least', value: 70000, unit: '£ per month', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'goal_period_conflicts_with_unit' }));
+    expect(w.sent).toEqual([]);
+  });
+});
+
+// ⛔ B (MG owner decision): the quote's period is a word read, so the card never converts. A figure stated per another
+// period than the goal's is refused with the ask; the Canvas event door, whose period is typed, keeps conversion.
+describe('B: the Agent\'s card never converts a figure between periods', () => {
+  it('RED: a monthly goal + "£100k a quarter" → refused stated_period_differs with the ask; nothing prepared, nothing sent', async () => {
     const w = world(graphWith({ goal_period: 'month' }));
-    const caps = createAgentCapabilities(w.d, new ProposalStore());
-    const base = { constraint_type: 'at_least' as const, value: 100000, unit: '£', rationale: 'x' };
-    const refusalOf = async (extra: Record<string, unknown>) => (await caps.proposeGoalTarget!(ctxOf(PAUL), { ...base, ...extra } as never)).refusal;
-    expect(await refusalOf({ as_stated: { ...QUARTER, quote: '£100k every three months' } })).toBe('quote_not_users');
-    expect(await refusalOf({ as_stated: { ...QUARTER, period: 'year' } })).toBe('stated_period_not_in_words');
-    expect(await refusalOf({ as_stated: { ...QUARTER, value: 90000 } })).toBe('as_stated_not_the_target');
-    expect(await refusalOf({ horizon: { deadline: '2027-02-31' } })).toBe('unreadable_horizon');
-    expect(await refusalOf({ horizon: { deadline: '2027-03-31', months: 6 } })).toBe('unreadable_horizon');
-    // CONTROL: the same card with his real quote is prepared.
-    expect(await refusalOf({ as_stated: QUARTER })).toBeUndefined();
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(PAUL), { constraint_type: 'at_least', value: 100000, unit: '£', rationale: 'x', as_stated: QUARTER });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'stated_period_differs' }));
+    expect(p.detail).toBe(askForGoalPeriodFigure('quarter', 'month'));
+    expect(p.proposal_id).toBeUndefined();
     expect(w.sent).toEqual([]);
   });
 
-  it('⛔ G1: today\'s level beside a CONVERTED target is left out (its period is unknown), and the card says so — never written in a period nobody stated', async () => {
-    const said = 'We have £20k MRR today and need at least £100k MRR a quarter.';
+  it('RED: "£25k a week" against a monthly goal → refused stated_period_differs, the ask names the period wanted', async () => {
+    const said = 'We need at least £25k MRR a week.';
     const w = world(graphWith({ goal_period: 'month' }));
     const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf(said), {
-      constraint_type: 'at_least', value: 100000, unit: '£', rationale: 'x', as_stated: QUARTER, current_level: { value: 20000, unit: '£' },
+      constraint_type: 'at_least', value: 25000, unit: '£', rationale: 'x', as_stated: { value: 25000, unit: '£', period: 'week', quote: '£25k MRR a week' },
     });
-    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, current_level_left_out: expect.objectContaining({ refusal: 'current_level_period_unknown' }) }));
-    expect(String(p.public_label)).not.toContain('Today:');
+    expect(p).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'stated_period_differs' }));
+    expect(String(p.detail)).toContain('Ask the user for the figure per month.');
+    expect(String(p.detail)).toContain('Nothing was changed.');
+    expect(w.sent).toEqual([]);
   });
 
-  it('a stated figure appends to the goal\'s record, last — earlier figures are never dropped, an identical one is not repeated', async () => {
-    const earlier = { value: 80000, unit: '£', period: 'quarter', quote: '£80k a quarter' };
-    const w = world(graphWith({ goal_period: 'month', goal_stated_as: [earlier, QUARTER] }));
+  it('RED: the LEGACY period counts too — "£70k a month" on a "£ per quarter" goal → refused, never ×3', async () => {
+    const w = world(graphWith({ goal_threshold_unit: '£ per quarter' }));
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf('We need at least £70k a month.'),
+      { constraint_type: 'at_least', value: 70000, unit: '£', rationale: 'x', as_stated: { value: 70000, unit: '£', period: 'month', quote: '£70k a month' } });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, refusal: 'stated_period_differs' }));
+    expect(p.detail).toBe(askForGoalPeriodFigure('month', 'quarter'));
+    expect(w.sent).toEqual([]);
+  });
+
+  it('CONTROL: the same period ("£200,000 a quarter" on a "£ per quarter" goal) → the card, at the figure stated', async () => {
+    const said = 'We need at least £200,000 a quarter.';
+    const w = world(graphWith({ goal_threshold_unit: '£ per quarter' }));
     const store = new ProposalStore();
-    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(PAUL), { constraint_type: 'at_least', value: 100000, unit: '£', rationale: 'x', as_stated: QUARTER });
-    await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [PAUL]), { proposal_id: String(p.proposal_id) });
-    expect((w.sent[0]!['event'] as { stated_as?: unknown }).stated_as).toEqual([earlier, QUARTER]);
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said),
+      { constraint_type: 'at_least', value: 200000, unit: '£', rationale: 'x', as_stated: { value: 200000, unit: '£', period: 'quarter', quote: '£200,000 a quarter' } });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+    expect(store.get(String(p.proposal_id))?.operations[0]?.value).toEqual(expect.objectContaining({ unit: '£ per quarter', raw_value: 200000 }));
+  });
+});
+
+// ⛔ P1-1 (CODEX overflow 5935202003 :1663): the period the card read is outside the analysis hash, so a concurrent period
+// change moved no `base_graph_hash`. The card now sends the typed period it read with its `expected_goal_period`.
+describe('P1-1: the card pins the TYPED period it read — the writer refuses a concurrent change, the read-back binds it', () => {
+  it('RED (wire): a goal typed month → the event sends goal_period month + expected_goal_period month, and parses', async () => {
+    const said = 'We need at least £60k MRR.';
+    const w = world(graphWith({ goal_period: 'month' }));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+    expect(p.public_label).toBe('Set the goal "MRR" to at least £60,000 a month');
+    const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [said]), { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    parsesOnTheWire(w.sent[0]!);
+    expect(w.sent[0]!['event']).toEqual(expect.objectContaining({ goal_period: 'month', expected_goal_period: 'month' }));
+  });
+
+  it('RED: the stored period moves month → quarter between the card\'s read and the write → NOT applied, nothing written', async () => {
+    const said = 'We need at least £60k MRR.';
+    const w = world(graphWith({ goal_period: 'month' }));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+    expect(p.ok).toBe(true);
+    // Another client re-periods the goal: outside the analysis hash, so the base hash does not move.
+    const racing: InternalDispatch = async (path, body) => {
+      if (!path.endsWith('/graph')) for (const n of w.graph().nodes) if (n.id === 'mrr') n['goal_period'] = 'quarter';
+      return w.d(path, body);
+    };
+    const r = await createAgentCapabilities(racing, store).authoriseChange(ctxOf('Yes.', [said]), { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: false, applied: false, refusal: 'not_applied' }));
+    const goal = w.graph().nodes.find((n) => n.id === 'mrr')!;
+    expect(goal.goal_threshold_raw, 'nothing written').toBeUndefined();
+    expect(w.graph().goal_constraints, 'no row written').toBeUndefined();
+    expect(goal.goal_period, 'the concurrent change stands').toBe('quarter');
+  });
+
+  it('CONTROL: no concurrent change → applied, the period held as read', async () => {
+    const said = 'We need at least £60k MRR.';
+    const w = world(graphWith({ goal_period: 'month' }));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+    const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [said]), { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    expect(w.graph().nodes.find((n) => n.id === 'mrr')).toEqual(expect.objectContaining({ goal_period: 'month', goal_threshold_raw: 60000 }));
+  });
+
+  it('RED (read-back): a writer that answers 200 but leaves another period → "could not be confirmed"', async () => {
+    const said = 'We need at least £60k MRR.';
+    const w = world(graphWith({ goal_period: 'month' }));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+    const lossy: InternalDispatch = async (path, body) => {
+      const r = await w.d(path, body);
+      if (!path.endsWith('/graph')) for (const n of w.graph().nodes) if (n.id === 'mrr') n['goal_period'] = 'quarter';
+      return r;
+    };
+    const r = await createAgentCapabilities(lossy, store).authoriseChange(ctxOf('Yes.', [said]), { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: true, refusal: 'not_confirmed' }));
+  });
+});
+
+// ⛔ P2 (CODEX overflow 5935202003 :1791): `.slice(-20)` silently deleted the first stated figure at the 21st. Refused instead.
+describe('P2: a goal records at most 20 figures the user stated — the 21st is refused, nothing dropped', () => {
+  const twenty = (n: number) => Array.from({ length: n }, (_, i) => ({ value: 1000 * (i + 1), unit: '£', period: 'month', quote: `£${i + 1}k a month` }));
+  const propose = async (held: unknown[]) => {
+    const w = world(graphWith({ goal_period: 'month', goal_stated_as: held }));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(MONTH_SAID), { constraint_type: 'at_least', value: 40000, unit: '£', rationale: 'x', as_stated: MONTH });
+    return { w, p, value: p.ok ? (store.get(String(p.proposal_id))?.operations[0]?.value as { stated_as?: unknown[] }) : undefined };
+  };
+
+  it('RED: 20 held + a new distinct figure → refused stated_figures_full; nothing prepared, nothing sent', async () => {
+    const { w, p } = await propose(twenty(20));
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'stated_figures_full' }));
+    expect(String(p.detail)).toContain('20');
+    expect(p.proposal_id).toBeUndefined();
+    expect(w.sent).toEqual([]);
+  });
+
+  it('CONTROL: 19 held → the 20th fits, every earlier figure kept, the new one last', async () => {
+    const held = twenty(19);
+    const { p, value } = await propose(held);
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+    expect(value?.stated_as).toEqual([...held, MONTH]);
+  });
+
+  it('CONTROL: 20 held, one of them identical to the new figure → no 21st, the card goes out with 20', async () => {
+    const held = [...twenty(19), MONTH];
+    const { p, value } = await propose(held);
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+    expect(value?.stated_as).toEqual(held);
   });
 });
 
@@ -202,45 +356,12 @@ describe('F1 T5: the Agent\'s model context shows the goal\'s period, horizon an
 });
 
 describe('ONE PERIOD CARRIER on the Agent\'s card (CODEX #2454 5932596768; R3 I1.1): a "£ per quarter" goal never gets a second period', () => {
-  const QUARTERLY = { goal_threshold_unit: '£ per quarter' };
-  const propose = async (said: string, args: Record<string, unknown>) => {
-    const w = world(graphWith(QUARTERLY));
+  it('CONTROL (I1.1): the card says "£" → the held "£ per quarter" is kept and no goal_period is written (none is typed)', async () => {
+    const w = world(graphWith({ goal_threshold_unit: '£ per quarter' }));
     const store = new ProposalStore();
-    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', unit: '£', rationale: 'x', ...args } as never);
-    return { w, store, p, value: p.ok ? (store.get(String(p.proposal_id))?.operations[0]?.value as Record<string, unknown>) : undefined };
-  };
-
-  it('RED (the CODEX case): "£70k a month" with period month → the card writes unit "£" + goal_period month — never "£ per quarter" + month', async () => {
-    const { w, store, p, value } = await propose('We need at least £70k a month.', { value: 70000, period: 'month' });
-    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
-    expect(value).toEqual(expect.objectContaining({ unit: '£', goal_period: 'month', raw_value: 70000 }));
-    const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.'), { proposal_id: String(p.proposal_id) });
-    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, applied: true }));
-    parsesOnTheWire(w.sent[0]!);
-    expect(w.graph().nodes.find((n) => n.id === 'mrr')).toEqual(expect.objectContaining({ goal_threshold_unit: '£', goal_period: 'month' }));
-  });
-
-  it('CONTROL (I1.1): no period on the card → the held "£ per quarter" is kept and no goal_period is written', async () => {
-    const { value } = await propose('We need at least £200,000.', { value: 200000 });
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf('We need at least £200,000.'), { constraint_type: 'at_least', value: 200000, unit: '£', rationale: 'x' });
+    const value = store.get(String(p.proposal_id))?.operations[0]?.value as Record<string, unknown>;
     expect(value).toEqual(expect.objectContaining({ unit: '£ per quarter' }));
-    expect(value).not.toHaveProperty('goal_period');
-  });
-
-  it('CONTROL: period quarter on the card → "£ per quarter" + quarter (the two carriers agree)', async () => {
-    const { value } = await propose('We need at least £200,000 a quarter.', { value: 200000, period: 'quarter' });
-    expect(value).toEqual(expect.objectContaining({ unit: '£ per quarter', goal_period: 'quarter' }));
-  });
-
-  it('REFUSED: the Agent\'s own unit names one period and its period arg another → nothing prepared', async () => {
-    const { p } = await propose('We need at least £70k a month.', { value: 70000, unit: '£ per quarter', period: 'month' });
-    expect(p).toEqual(expect.objectContaining({ ok: false, refusal: 'goal_period_conflicts_with_unit' }));
-  });
-
-  it('RED: G1 converts against the LEGACY period — "£70k a month" on a "£ per quarter" goal → £210,000 per quarter, his words kept', async () => {
-    const said = 'We need at least £70k a month.';
-    const { p, value } = await propose(said, { value: 70000, as_stated: { value: 70000, unit: '£', period: 'month', quote: '£70k a month' } });
-    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
-    expect(value).toEqual(expect.objectContaining({ unit: '£ per quarter', raw_value: 210000 }));
     expect(value).not.toHaveProperty('goal_period');
   });
 });

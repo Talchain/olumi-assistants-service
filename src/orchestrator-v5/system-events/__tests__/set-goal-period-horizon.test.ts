@@ -86,12 +86,22 @@ describe('F1 T5 G1: the ONE conversion module (`goal-period.ts`)', () => {
     expect(sameGoalFigure(0, 1e-12)).toBe(false);
   });
   it('the writer rule reads the LAST stated entry against the goal\'s period (the event\'s, else the one held)', () => {
-    expect(statedFigureHolds({ raw_value: 100000 / 3, goal_period: 'month', stated_as: [PAUL_QUARTER] })).toEqual({ ok: true });
-    expect(statedFigureHolds({ raw_value: 100000, goal_period: 'month', stated_as: [PAUL_QUARTER] }))
+    expect(statedFigureHolds({ raw_value: 100000 / 3, unit: '£', goal_period: 'month', stated_as: [PAUL_QUARTER] })).toEqual({ ok: true });
+    expect(statedFigureHolds({ raw_value: 100000, unit: '£', goal_period: 'month', stated_as: [PAUL_QUARTER] }))
       .toEqual({ ok: false, reason: 'goal_period_conversion_mismatch', expected: 100000 / 3 });
     // An earlier record in another period is history, never converted: only the last entry binds `raw_value`.
-    expect(statedFigureHolds({ raw_value: 40000, goal_period: 'month', stated_as: [PAUL_QUARTER, { value: 40000, unit: '£', period: 'month', quote: '£40k a month' }] })).toEqual({ ok: true });
-    expect(statedFigureHolds({ raw_value: 1, goal_period: undefined, stated_as: [PAUL_QUARTER] })).toEqual({ ok: true });
+    expect(statedFigureHolds({ raw_value: 40000, unit: '£', goal_period: 'month', stated_as: [PAUL_QUARTER, { value: 40000, unit: '£', period: 'month', quote: '£40k a month' }] })).toEqual({ ok: true });
+    expect(statedFigureHolds({ raw_value: 1, unit: '£', goal_period: undefined, stated_as: [PAUL_QUARTER] })).toEqual({ ok: true });
+  });
+  // ⛔ P1-2 (CODEX overflow 5935202003 :73): the base units are judged BEFORE any period arithmetic, even when the periods match.
+  it('RED (P1-2): the LAST stated entry\'s base unit must be the target\'s — same currency, else refused, whatever the periods', () => {
+    const dollars: GoalStatedAs = { value: 100000, unit: '$', period: 'quarter', quote: '$100k a quarter' };
+    expect(statedFigureHolds({ raw_value: 100000 / 3, unit: '£', goal_period: 'month', stated_as: [dollars] })).toEqual({ ok: false, reason: 'stated_unit_mismatch' });
+    expect(statedFigureHolds({ raw_value: 100000, unit: '£', goal_period: 'quarter', stated_as: [dollars] })).toEqual({ ok: false, reason: 'stated_unit_mismatch' });
+    expect(statedFigureHolds({ raw_value: 100000, unit: '£', goal_period: undefined, stated_as: [dollars] })).toEqual({ ok: false, reason: 'stated_unit_mismatch' });
+    // CONTROL: the same currency spelled another way, or with the period joined on, is the same unit.
+    expect(statedFigureHolds({ raw_value: 100000 / 3, unit: '£', goal_period: 'month', stated_as: [{ ...dollars, unit: 'GBP' }] })).toEqual({ ok: true });
+    expect(statedFigureHolds({ raw_value: 100000, unit: '£ per quarter', goal_period: 'quarter', stated_as: [{ ...dollars, unit: '£' }] })).toEqual({ ok: true });
   });
   it('the period words are the limit grammar\'s own: singular rates only, "today" is not a day', () => {
     expect([...periodsNamedIn('about £100k a quarter')]).toEqual(['quarter']);
@@ -187,6 +197,34 @@ describe('F1 T5: `goal_target_edit` writes the goal\'s period, horizon and state
     const r = await written(graphWith(), 5000, { goal_period: 'month' }, 'at_most');
     expect(goalOf(r.mutatedGraph).goal_period).toBe('month');
     expect(goalOf(r.mutatedGraph).goal_threshold_raw).toBeUndefined();
+  });
+});
+
+// ⛔ P1-2 (CODEX overflow 5935202003 :73): G1 never checked units, so `$100k/quarter` as stated passed as the source of a
+// `£33,333/month` target. The event door judges the base unit first; cross-currency is refused with nothing written.
+describe('P1-2: the event door checks the stated figure\'s base unit before any period arithmetic', () => {
+  const DOLLARS_QUARTER: GoalStatedAs = { value: 100000, unit: '$', period: 'quarter', quote: '$100k a quarter' };
+  it('RED: stated $100,000 per quarter + target £33,333.33… per month → refused stated_unit_mismatch, nothing written', async () => {
+    const g = graphWith();
+    const before = bytes(g);
+    const r = await send(g, 100000 / 3, { goal_period: 'month', stated_as: [DOLLARS_QUARTER] });
+    expect(r).toEqual({ kind: 'refused', reason: 'stated_unit_mismatch' });
+    expect(bytes(g)).toBe(before);
+  });
+  it('RED: the SAME period, another currency (stated $40,000 a month, target £40,000 a month) → refused, nothing written', async () => {
+    const g = graphWith({ goal_period: 'month' });
+    const before = bytes(g);
+    const r = await send(g, 40000, { goal_period: 'month', stated_as: [{ value: 40000, unit: '$', period: 'month', quote: '$40k a month' }] });
+    expect(r).toEqual({ kind: 'refused', reason: 'stated_unit_mismatch' });
+    expect(bytes(g)).toBe(before);
+  });
+  it.each([
+    ['£', '£'],
+    ['GBP (the same currency, spelled as a code)', 'GBP'],
+  ])('CONTROL: stated %s per quarter + target £33,333.33… per month → written, converted', async (_n, unit) => {
+    const r = await send(graphWith(), 100000 / 3, { goal_period: 'month', stated_as: [{ ...DOLLARS_QUARTER, unit, quote: '£100k a quarter' }] });
+    expect(r.kind, JSON.stringify(r).slice(0, 400)).toBe('mutated');
+    expect(goalOf(r.mutatedGraph)).toMatchObject({ goal_threshold_raw: 100000 / 3, goal_period: 'month' });
   });
 });
 

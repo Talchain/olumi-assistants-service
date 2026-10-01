@@ -241,13 +241,17 @@ export async function applyGoalTargetEdit(
   // reason (`goal_period_conflicts_with_unit`) reaches this event's refusal through the handler's declared reason_code.
   const g1 = statedFigureHolds({
     raw_value: event.raw_value,
+    // ⛔ P1-2: the stated figure's base unit is judged against the target's before any period arithmetic.
+    unit: event.unit,
     // The goal's period: the event's, else the one the goal holds — typed, or named by its stored unit (legacy).
     goal_period: event.goal_period ?? goalPeriodOf(matches[0] as { goal_period?: unknown; goal_threshold_unit?: unknown }),
     stated_as: event.stated_as,
   });
   if (!g1.ok) {
     log.info(
-      { ...logBase, event: `v5.system_event.goal_target_edit.${g1.reason}`, ...(g1.reason === 'goal_period_not_convertible' ? { from: g1.from, to: g1.to } : { expected: g1.expected, raw_value: event.raw_value }) },
+      { ...logBase, event: `v5.system_event.goal_target_edit.${g1.reason}`,
+        ...(g1.reason === 'stated_unit_mismatch' ? { stated_unit: event.stated_as?.at(-1)?.unit, unit: event.unit }
+          : g1.reason === 'goal_period_not_convertible' ? { from: g1.from, to: g1.to } : { expected: g1.expected, raw_value: event.raw_value }) },
       'goal_target_edit — the stated figure does not hold in the goal\'s period (G1); refusing without a write',
     );
     return refused(g1.reason);

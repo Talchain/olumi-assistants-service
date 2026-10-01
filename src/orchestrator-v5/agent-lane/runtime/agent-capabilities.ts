@@ -209,7 +209,7 @@ import { checkProvisionalView, type LeaderStanding } from '../provisional-view.j
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { GoalHorizonSchema, GoalPeriod, GoalStatedAsSchema, type GoalHorizon, type GoalPeriodType, type GoalStatedAs } from '@talchain/schemas';
 import { z } from 'zod';
-import { askForGoalPeriodFigure, convertGoalFigure, GOAL_PERIOD_WORDS, goalPeriodOf, goalUnitCollidesWithPeriod, periodNamedByUnit, periodsNamedIn, typedGoalPeriodOf, unitKeepingHeldPeriod, unitNamesItsPeriod, unitWithoutPeriod } from '../../goal-target/goal-period.js';
+import { askForGoalPeriodFigure, GOAL_PERIOD_WORDS, goalPeriodOf, goalUnitCollidesWithPeriod, periodNamedByUnit, periodsCollide, periodsNamedIn, typedGoalPeriodOf, unitKeepingHeldPeriod, unitNamesItsPeriod } from '../../goal-target/goal-period.js';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { approvalSizes } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
@@ -1632,7 +1632,8 @@ function goalTargetHolds(raw: Record<string, unknown>, goalId: string, v: SetGoa
 
 /**
  * The `set_goal_target` operation's value: the `goal_target_edit` event's own fields (0.69.0), plus today's level when it
- * rides the same card. `goal_period` / `goal_horizon` / `stated_as` are present only when this card writes them.
+ * rides the same card. `goal_period` / `goal_horizon` / `stated_as` are present only when this card sends them: the Agent's
+ * card sends `goal_period` only as the TYPED period it read, pinned (P1-1), and never a `goal_horizon` (P1-4).
  */
 type SetGoalTargetValue = {
   constraint_type: 'at_least' | 'at_most'; raw_value: number; unit: string;
@@ -1698,28 +1699,29 @@ function heldGoalSemantics(goal: unknown): { period?: GoalPeriodType; horizon?: 
   };
 }
 
-/** A calendar date that exists (the contract's regex admits 2027-02-31). */
-const realDate = (d: string): boolean => {
-  const t = Date.parse(`${d}T00:00:00Z`);
-  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === d;
-};
 const squash = (s: string): string => s.replace(/\s+/g, ' ').trim();
 
+/** The most figures a goal records as the user stated them (schemas 0.69.0 `goal_stated_as`, `.max(20)`). */
+const STATED_FIGURES_MAX = 20;
+
 /**
- * ⭐ F1 T5 `set_goal` (MG; spec §1 G1, §0 P1/P2/P5, §7) — THE GOAL'S PERIOD, ITS HORIZON AND THE FIGURE AS THE USER STATED
- * IT, read off `propose_goal_target`'s optional arguments for the ONE card and the ONE `goal_target_edit` that writes it.
+ * ⭐ F1 T5 `set_goal` (MG; spec §1 G1, §0 P1/P2/P5, §7) — THE FIGURE AS THE USER STATED IT, read off
+ * `propose_goal_target`'s optional `as_stated` for the ONE card and the ONE `goal_target_edit` that writes it. The user's
+ * figure is kept verbatim, last, in `stated_as` (appended to what the goal already holds: never dropped).
  *
- * G1: the target is held in the goal's OWN period. A figure stated per another period is converted HERE, by the ONE
- * module the writer re-checks every event with (`convertGoalFigure` → `statedFigureHolds`), and the user's figure is
- * kept verbatim, last, in `stated_as` (appended to what the goal already holds: never dropped). A day / week / none pair
- * is never converted: refused with an ask (`askForGoalPeriodFigure`).
+ * ⛔ SCOPE CUT (DL 380e54 on #2454; CODEX overflow 5935202003 P1-4 and P2; MG owner decision B):
+ *   · the card NEVER sets the goal's period or horizon. The period-word attestation and the model-supplied horizon were
+ *     banned doors (no free-text period authority; no prompt-only control). An omitted field is unchanged; a passed one is
+ *     refused with nothing prepared (`goal_period_or_horizon_not_settable`). The typed period / horizon chip is the next PR.
+ *   · the card NEVER converts. The quote's period is a word read ("£60k by the end of the month" could pass as a monthly
+ *     rate and be scaled ×3), so a figure stated per another period than the goal's own is refused with the ask
+ *     (`stated_period_differs`), never arithmetic. The Canvas event door, whose period is typed, keeps conversion.
+ *   · the goal's record of stated figures is never trimmed to make room: the 21st distinct one is refused.
  *
- * ⛔ NOTHING RIDES AS THE USER'S THAT THE USER DID NOT SAY (the `figureTheUserWrote` rule, applied to each new claim):
+ * ⛔ NOTHING RIDES AS THE USER'S THAT THE USER DID NOT SAY (the `figureTheUserWrote` rule; refusing guards only):
  *   · the stated figure is the target figure already attested above (`value`), in a non-conflicting unit;
  *   · its `quote` is the user's words VERBATIM and writes that figure;
- *   · the quote names exactly the period claimed for it (`periodsNamedIn`; `none` names none) — the period drives the
- *     arithmetic, so a period the words do not say would silently scale the target;
- *   · a goal period the goal does not already hold is one the user's words, or the goal's own name or unit, state.
+ *   · the quote names exactly the period claimed for it (`periodsNamedIn`; `none` names none).
  * Each miss refuses with nothing prepared, and the Agent asks.
  */
 function goalSemanticsFromArgs(
@@ -1729,42 +1731,17 @@ function goalSemanticsFromArgs(
   value: number,
   unit: string,
 ):
-  | { ok: true; raw_value: number; goal_period?: GoalPeriodType; goal_horizon?: GoalHorizon; stated_as?: GoalStatedAs[]; converted: boolean; held_period?: GoalPeriodType }
+  | { ok: true; stated_as?: GoalStatedAs[]; held_period?: GoalPeriodType }
   | { ok: false; refusal: ToolResult } {
   const refuse = (refusal: string, detail: string) => ({ ok: false as const, refusal: { ok: false, mutated: false, refusal, detail } });
+  // ── P1-4: the goal's period and horizon are never this card's to set ──
+  if ((args.period !== undefined && args.period !== null) || (args.horizon !== undefined && args.horizon !== null)) {
+    return refuse('goal_period_or_horizon_not_settable', 'This card never sets the goal’s period or its horizon: the goal keeps its own, and changing them is a later, typed choice. '
+      + 'Nothing was prepared. Call propose_goal_target again without period and horizon.');
+  }
   const held = heldGoalSemantics(goal);
-  // ── the goal's period ──
-  let goalPeriod: GoalPeriodType | undefined;
-  if (args.period !== undefined && args.period !== null) {
-    const p = GoalPeriod.safeParse(args.period);
-    if (!p.success) return refuse('unreadable_period', 'The goal’s period must be one of none, day, week, month, quarter or year. Nothing was prepared; ask the user what period the goal is per.');
-    // `none` (no rate) has no words to attest it, so it may only be written where no rate is held: it never silently
-    // replaces the goal's month or quarter. Any other period not already held must be named by the words or the goal.
-    const attested = p.data === held.period
-      || (p.data === 'none' ? held.period === undefined
-        : periodsNamedIn(userText).has(p.data) || periodsNamedIn(goal.label).has(p.data) || periodsNamedIn(String(goal.goal_threshold_unit ?? '')).has(p.data));
-    if (!attested) {
-      return refuse('goal_period_not_stated', `Neither the user’s words nor the goal "${goal.label}" say it is per ${p.data}, so nothing was prepared. Ask the user what period the goal is per, and never choose it for them.`);
-    }
-    goalPeriod = p.data;
-  }
-  const effectivePeriod = goalPeriod ?? held.period;
-  // ── the horizon: exactly one of the two, the contract's shape ──
-  let goalHorizon: GoalHorizon | undefined;
-  if (args.horizon !== undefined && args.horizon !== null) {
-    const h = args.horizon as { deadline?: unknown; months?: unknown };
-    const one = h.deadline !== undefined && h.months === undefined ? { deadline: h.deadline }
-      : h.months !== undefined && h.deadline === undefined ? { months: h.months } : undefined;
-    const parsed = GoalHorizonSchema.safeParse(one);
-    if (!parsed.success || ('deadline' in parsed.data && !realDate(parsed.data.deadline))) {
-      return refuse('unreadable_horizon', 'A horizon is ONE of a date (YYYY-MM-DD) or a number of months from 1 to 120. Nothing was prepared; ask the user when the target must be met.');
-    }
-    goalHorizon = parsed.data;
-  }
   // ── the figure as the user stated it ──
-  let rawValue = value;
   let statedAs: GoalStatedAs[] | undefined;
-  let converted = false;
   if (args.as_stated !== undefined && args.as_stated !== null) {
     const a = args.as_stated as { value?: unknown; unit?: unknown; period?: unknown; quote?: unknown };
     const entry = GoalStatedAsSchema.safeParse({
@@ -1782,18 +1759,18 @@ function goalSemanticsFromArgs(
     if (s.period === 'none' ? named.size > 0 : !(named.size === 1 && named.has(s.period))) {
       return refuse('stated_period_not_in_words', `The user’s words "${s.quote}" do not say the figure is per ${s.period}, so nothing was prepared. Ask the user what period their figure is per.`);
     }
-    if (effectivePeriod !== undefined && s.period !== effectivePeriod) {
-      const c = convertGoalFigure(s.value, s.period, effectivePeriod);
-      if (c.kind === 'not_convertible') return refuse('period_not_convertible', askForGoalPeriodFigure(c.from, c.to));
-      if (c.kind === 'converted') { rawValue = c.value; converted = true; }
+    // ⛔ B: never converted on this card — a figure per another period than the goal's own is asked for again.
+    if (held.period !== undefined && s.period !== held.period) return refuse('stated_period_differs', askForGoalPeriodFigure(s.period, held.period));
+    // Appended LAST (the writer reads the last entry); an identical earlier record is not repeated, and none is dropped.
+    const kept = (held.stated_as ?? []).filter((x) => !isDeepStrictEqual(x, s));
+    if (kept.length + 1 > STATED_FIGURES_MAX) {
+      return refuse('stated_figures_full', `The goal already records ${STATED_FIGURES_MAX} figures the user stated, so nothing was dropped and nothing was prepared. `
+        + 'Offer the target without the figure as stated (as_stated left out).');
     }
-    // Appended LAST (the writer converts from the last entry); an identical earlier record is not repeated.
-    statedAs = [...(held.stated_as ?? []).filter((x) => !isDeepStrictEqual(x, s)), s].slice(-20);
+    statedAs = [...kept, s];
   }
   return {
-    ok: true, raw_value: rawValue, converted,
-    ...(goalPeriod !== undefined ? { goal_period: goalPeriod } : {}),
-    ...(goalHorizon !== undefined ? { goal_horizon: goalHorizon } : {}),
+    ok: true,
     ...(statedAs !== undefined ? { stated_as: statedAs } : {}),
     ...(held.period !== undefined ? { held_period: held.period } : {}),
   };
@@ -3543,8 +3520,8 @@ export function createAgentCapabilities(
       }
       // ⛔ …and written ABOUT this goal (DL #72 5862394804): "300 Pro paying subscribers" is never a £300 MRR target.
       if (!figureTheUserWroteFor(derived?.base ?? value, unit, ctx.user_text, scopeIn(g, goal.label))) return targetNotStated;
-      // ⭐ F1 T5 `set_goal`: the goal's period, horizon and the figure as stated — attested, converted (G1) and carried on
-      // THIS card by `goalSemanticsFromArgs`; the writer re-checks the conversion with the same module before it writes.
+      // ⭐ F1 T5 `set_goal`: the figure as stated — attested and carried on THIS card by `goalSemanticsFromArgs`, in the
+      // goal's own period only (never converted here; never a period or horizon set here). The writer re-checks it (G1).
       const setGoal = goalSemanticsFromArgs(args as { period?: unknown; horizon?: unknown; as_stated?: unknown }, goal, ctx.user_text, value, unit);
       if (!setGoal.ok) return setGoal.refusal;
       /**
@@ -3598,52 +3575,46 @@ export function createAgentCapabilities(
         }
         }
       }
-      // ⛔ F1 T5 G1: today's level carries no period of its own on this card. Beside a target CONVERTED into the goal's
-      // period it could be per either one, so it is left out (said, never silently dropped) rather than written in a
-      // period nobody stated. Converting the level is its own op (spec §1 G1, a later ticket).
-      if (setGoal.converted && currentLevel !== undefined) {
-        currentLevel = undefined;
-        levelLeftOut = { refusal: 'current_level_period_unknown',
-          reason: `The target was converted into the goal’s own period (${setGoal.goal_period ?? setGoal.held_period}), and today’s level was not stated per that period.` };
-      }
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
       /**
        * ⛔ ONE PERIOD CARRIER (R3 F5 I1.1 #85 5932127058; CODEX #2454 5932596768). The goal's held "£ per quarter" survives
-       * a card that says "£" and writes no period (`unitKeepingHeldPeriod`). A card that WRITES a period writes the unit
-       * WITHOUT one when they differ, so the stored goal never says "per quarter" in its unit and "month" in
-       * `goal_period`. A card whose own unit names a period other than the one it writes is refused.
+       * a card that says "£" (`unitKeepingHeldPeriod`). This card never changes the goal's period (P1-4, DL 380e54), and a
+       * stored unit is a period carrier too (`goalPeriodOf`), so a card whose own unit names a period other than the
+       * goal's own — typed, or named by its legacy unit — is refused: it would re-period the goal by its unit.
        */
       const heldUnit = (goal as { goal_threshold_unit?: unknown }).goal_threshold_unit;
-      if (goalUnitCollidesWithPeriod(unit, setGoal.goal_period, goal as { goal_period?: unknown })) {
+      if (periodsCollide(unit, setGoal.held_period)) {
         return { ok: false, mutated: false, refusal: 'goal_period_conflicts_with_unit',
-          detail: `The unit "${unit}" says per ${periodNamedByUnit(unit)}, but the goal's period would be ${setGoal.goal_period ?? typedGoalPeriodOf(goal as { goal_period?: unknown })}, so nothing was prepared. `
-            + 'Send the unit without its period (for example "£") and the period on its own.' };
+          detail: `The unit "${unit}" says per ${periodNamedByUnit(unit)}, but the goal "${goal.label}" is per ${setGoal.held_period}, so nothing was prepared. `
+            + `This card never changes the goal's period: send the unit without its period (for example "£"), and ask the user for the figure per ${setGoal.held_period}.` };
       }
-      const cardUnit = setGoal.goal_period === undefined || setGoal.goal_period === periodNamedByUnit(heldUnit)
-        ? unitKeepingHeldPeriod(unit, heldUnit)
-        : unitWithoutPeriod(unit);
-      // …and against the period in force AFTER the write: an omitted period keeps the goal's typed one (CODEX 5933216093).
-      const periodAfter = setGoal.goal_period ?? typedGoalPeriodOf(goal as { goal_period?: unknown });
-      if (goalUnitCollidesWithPeriod(cardUnit, setGoal.goal_period, goal as { goal_period?: unknown })) {
+      const cardUnit = unitKeepingHeldPeriod(unit, heldUnit);
+      // …and the unit the goal will hold against the TYPED period it keeps (CODEX 5933216093): the shared writer's own rule.
+      const typedPeriod = typedGoalPeriodOf(goal as { goal_period?: unknown });
+      if (goalUnitCollidesWithPeriod(cardUnit, undefined, goal as { goal_period?: unknown })) {
         return { ok: false, mutated: false, refusal: 'goal_period_conflicts_with_unit',
-          detail: `The unit "${cardUnit}" says per ${periodNamedByUnit(cardUnit)}, but the goal "${goal.label}" is per ${periodAfter}, so nothing was prepared. `
-            + `Give the target per ${periodAfter} (convert it, keeping the user's figure as stated), or set the goal's period to ${periodNamedByUnit(cardUnit)} on this card.` };
+          detail: `The unit "${cardUnit}" says per ${periodNamedByUnit(cardUnit)}, but the goal "${goal.label}" is per ${typedPeriod}, so nothing was prepared. `
+            + `This card never changes the goal's period or converts a figure: ask the user for the target per ${typedPeriod}.` };
       }
       const setValue: SetGoalTargetValue = {
-        constraint_type: type, raw_value: setGoal.raw_value,
+        constraint_type: type, raw_value: value,
         unit: cardUnit,
         ...(currentLevel !== undefined ? { current_level: currentLevel } : {}),
-        ...(setGoal.goal_period !== undefined ? { goal_period: setGoal.goal_period } : {}),
-        ...(setGoal.goal_horizon !== undefined ? { goal_horizon: setGoal.goal_horizon } : {}),
+        /**
+         * ⛔ P1-1 (CODEX overflow 5935202003): the TYPED period this card was read in is pinned — sent unchanged with its
+         * expected value — because it is outside the analysis hash: a concurrent period change moves no base hash. The
+         * writer refuses a moved one (`expected_goal_metadata_mismatch`), and the read-back binds it (`goalTargetHolds`).
+         * A period named only by the legacy unit rides the unit itself, which the read-back binds byte-exact.
+         */
+        ...(typedPeriod !== undefined ? { goal_period: typedPeriod } : {}),
         ...(setGoal.stated_as !== undefined ? { stated_as: setGoal.stated_as } : {}),
         // The goal as THIS card read it (null = none recorded), for each field the card sends.
         expected: {
-          goal_period: ((goal as { goal_period?: GoalPeriodType }).goal_period ?? null),
-          goal_horizon: ((goal as { goal_horizon?: GoalHorizon }).goal_horizon ?? null),
+          goal_period: typedPeriod ?? null,
           stated_as: ((goal as { goal_stated_as?: GoalStatedAs[] }).goal_stated_as ?? null),
         },
       };
-      // The figure the card shows: the target in the goal's period, the user's own figure when converted, the horizon.
+      // The figure the card shows: the target, in the goal's own period.
       const cardFigure = goalTargetWords(setValue, setGoal.held_period);
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,

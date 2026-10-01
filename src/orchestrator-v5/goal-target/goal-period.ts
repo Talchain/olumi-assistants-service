@@ -11,13 +11,15 @@
  * target. Those pairs come back `not_convertible`; the caller writes nothing and asks for the figure per the goal's
  * own period (`askForGoalPeriodFigure`).
  *
- * ⭐ P5 — ONE MODULE, BOTH SURFACES. The Agent's `propose_goal_target` converts with `convertGoalFigure`, and the
- * `goal_target_edit` writer (the ONE op behind the Canvas control AND the Agent's approval) re-checks every event with
- * `statedFigureHolds` before anything is written — so the UI and the Agent can never disagree about what "£100k a
- * quarter" is per month.
+ * ⭐ P5 — ONE MODULE, BOTH SURFACES. The `goal_target_edit` writer (the ONE op behind the Canvas control AND the Agent's
+ * approval) checks every event with `statedFigureHolds` before anything is written. The Agent's `propose_goal_target`
+ * never converts (MG decision B on #2454: its period is a word read): a figure stated per another period than the goal's
+ * is refused there with `askForGoalPeriodFigure`. Conversion happens only on the Canvas door, whose period is typed.
  */
 import { GoalPeriod, type GoalPeriodType, type GoalStatedAs } from '@talchain/schemas';
 import { PERIOD_NAME } from '../agent-lane/admit-constraint.js';
+// ⛔ same-unit.ts must never import this module (no cycle): it reads only `cee/provenance/stated-amounts.ts`.
+import { sameUnit } from '../agent-lane/same-unit.js';
 
 /** Periods per year, for exactly the three periods G1 converts between. A day and a week are deliberately absent. */
 const PER_YEAR: Readonly<Record<'month' | 'quarter' | 'year', number>> = { month: 12, quarter: 4, year: 1 };
@@ -56,11 +58,26 @@ export function sameGoalFigure(a: number, b: number): boolean {
 
 export type StatedFigureCheck =
   | { readonly ok: true }
+  | { readonly ok: false; readonly reason: 'stated_unit_mismatch' }
   | { readonly ok: false; readonly reason: 'goal_period_not_convertible'; readonly from: GoalPeriodType; readonly to: GoalPeriodType }
   | { readonly ok: false; readonly reason: 'goal_period_conversion_mismatch'; readonly expected: number };
 
 /**
+ * ⛔ P1-2 (CODEX overflow 5935202003): whether a stated figure's unit and the target's are ONE base unit once each one's
+ * own period phrase is set aside ("£ per quarter" → "£"): the same string, or the same quantity as `sameUnit` reads it
+ * (money: the same currency code, period and denominator — "GBP" is "£", "$" never is). Structural over the two UNITS,
+ * never the user's words. Judged before any period arithmetic: ×3 of dollars is never pounds.
+ */
+export function statedUnitMatches(statedUnit: string, unit: string): boolean {
+  const a = unitWithoutPeriod(statedUnit).trim();
+  const b = unitWithoutPeriod(unit).trim();
+  return a === b || sameUnit(a, b);
+}
+
+/**
  * ⭐ THE WRITER'S G1 GATE (`goal_target_edit`, T5). The rule, kept deliberately simple (MG brief):
+ *   · FIRST, the units (P1-2): the LAST `stated_as` entry's base unit must be the target's (`statedUnitMatches`), whatever
+ *     the periods — else REFUSED (`stated_unit_mismatch`). No period arithmetic runs across two currencies.
  *   · the goal's period is the event's `goal_period`, else the one the goal ALREADY holds (G1 binds the target to the
  *     goal's own period either way; a client that omits it does not opt out). No period known → nothing to check.
  *   · the figure `raw_value` was taken from is the LAST `stated_as` entry (the client lists it last; earlier entries are
@@ -72,11 +89,14 @@ export type StatedFigureCheck =
  */
 export function statedFigureHolds(input: {
   readonly raw_value: number;
+  /** The event's target unit (what `raw_value` is written in). */
+  readonly unit: string;
   readonly goal_period: GoalPeriodType | undefined;
   readonly stated_as: readonly GoalStatedAs[] | undefined;
 }): StatedFigureCheck {
-  const { raw_value, goal_period, stated_as } = input;
+  const { raw_value, unit, goal_period, stated_as } = input;
   const last = stated_as !== undefined && stated_as.length > 0 ? stated_as[stated_as.length - 1]! : undefined;
+  if (last !== undefined && !statedUnitMatches(last.unit, unit)) return { ok: false, reason: 'stated_unit_mismatch' };
   if (goal_period === undefined || last === undefined || last.period === goal_period) return { ok: true };
   const c = convertGoalFigure(last.value, last.period, goal_period);
   if (c.kind === 'not_convertible') return { ok: false, reason: 'goal_period_not_convertible', from: c.from, to: c.to };
