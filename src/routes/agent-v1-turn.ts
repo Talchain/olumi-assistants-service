@@ -25,6 +25,7 @@
 
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
 import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
+import { guardRerunExplanation, rerunExplanationPlan } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
@@ -2030,6 +2031,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }) }] }];
       const standingAfterRun = leaderStandingOf(st);
       const askView = standingAfterRun !== null && standingAfterRun.analysis_on_record && standingAfterRun.withheld;
+      // ⭐ M2 RERUN-EXPLANATION (MG; RC contract a00cb9c8; lease #85 5939005849): a rerun's explanation names the user's
+      // change from the selected delta's TYPED rows and never claims a movement the pair cannot show. `null` (no delta, or
+      // no change rows) leaves this path exactly as it was.
+      const graphNodes = Array.isArray((st.graph as { nodes?: unknown } | null)?.nodes) ? (st.graph as { nodes: { id?: unknown; kind?: unknown; label?: unknown }[] }).nodes : [];
+      const rerunPlan = rerunExplanationPlan(currentRead?.run_delta,
+        (id) => { const n = graphNodes.find((x) => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; },
+        [...new Set([...graphNodes.filter((n) => n.kind === 'option' && typeof n.label === 'string').map((n) => n.label as string),
+          ...[...optionNameAliases(st.graph).values()].map((a) => a.display)])],
+        runToolOutputLicensesLeader(selectedRun));
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
@@ -2039,7 +2049,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const interpret = interpretBudget();
         const resp = await callModelFor(interpret)({
           // C5b's line goes BEFORE the interpret-only line, so the banked Interpreter v0.2 text stays last and byte-identical.
-          instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
+          instructions: `${AGENT_INSTRUCTIONS}\n\n${askView ? `${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n` : ''}${rerunPlan !== null ? `${rerunPlan.instruction}\n\n` : ''}${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`,
           input: explanationInput,
           // No tools at all: acting is structurally impossible on this call (and no schema tokens
           // are spent on tools it may not use). Measured against the live API: accepted with the
@@ -2064,10 +2074,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
         else if (answer.trim().length > 0) {
           explanationReady = true;
-          interpreted = typed !== null
+          // M2: RC's checks before send; a reply that fails them is replaced by RC's deterministic fallback (no repair call).
+          const guarded = rerunPlan !== null ? guardRerunExplanation(answer, rerunPlan) : null;
+          if (guarded !== null && !guarded.passed) log.info({ scenario_id: scenarioId, failed: guarded.failed }, 'agent-lane: rerun explanation failed RC checks — RC fallback sent');
+          const said = guarded?.text ?? answer;
+          interpreted = typed !== null || (guarded !== null && !guarded.passed)
             // The history keeps the ANSWER, never the JSON: one id-less assistant message, which needs no reasoning item
-            // (the f828a61 refusal is for a message WITH its id and without its reasoning).
-            ? { answer, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer }] }] }
+            // (the f828a61 refusal is for a message WITH its id and without its reasoning). The same for RC's fallback.
+            ? { answer: said, messages: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }] }
             : { answer, messages: out.filter((o) => o.type === 'reasoning' || o.type === 'message') as Record<string, unknown>[] };
         }
         else log.warn({ scenario_id: scenarioId }, 'agent-lane: fast-path interpretation was empty — answering from the run itself');
@@ -2078,8 +2092,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       fastPath = 'explain';
       const ms = Date.now() - fastStartedAt;
       const providerMs = runInterpreted ? Math.min(Date.now() - providerStartedAt, ms) : 0;
+      // M2: with no interpretation, a rerun still names the user's change (RC's fallback) rather than saying nothing about it.
       const text = interpreted?.answer ?? (matches
-        ? interpretationUnavailableText({ ok: true, ran: true }) : RUN_EXPLANATION_UNAVAILABLE_TEXT);
+        ? (rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true })) : RUN_EXPLANATION_UNAVAILABLE_TEXT);
       result = {
         assistant_text: text,
         items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],
