@@ -3160,7 +3160,9 @@ export type CommitOptionLevelsInput = {
   readonly link_effect?: {
     readonly from: string;
     readonly to: string;
-    readonly effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
+    readonly effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string;
+      /** The amount answers Olumi's own recorded link-size question (`LinkEffectStatement.answer_to_ask`). */
+      readonly answer_to_ask?: { readonly ask_id: string } };
     readonly edge_token: string;
     readonly quote: string;
     /**

@@ -47,6 +47,12 @@ export interface LinkEffectStatement {
   readonly per_source_change: number;
   /** The source's own unit, or the ask's words for it (`sourceUnitWords`: "switch" for a yes/no source). */
   readonly per_source_change_unit: string;
+  /**
+   * ⭐ The amount answers Olumi's OWN recorded link-size question (R3 #75 5926021003 (a), condition 5): the per-one, the
+   * ends and the direction are that question's, not words the user wrote. Stored beside the size it describes
+   * (`natural_effect.answer_to_ask`), so every writer that replaces the size drops it with it.
+   */
+  readonly answer_to_ask?: { readonly ask_id: string };
 }
 
 export interface ApplyLinkEffectEditParams {
@@ -244,8 +250,10 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // A unitless count source is said in the unit the PROPOSAL carried — exactly what the card showed — never '' and never
   // a respelling: `applyLinkEffect`'s read-back compares the stored unit with the proposed one (CODEX #85 5926859038:
   // storing "conversations" for a proposed "conversation" landed the write and then reported it not verified).
-  const naturalEffect = sizing.natural_effect.per_source_change_unit === '' && countNoun !== undefined
+  const sized = sizing.natural_effect.per_source_change_unit === '' && countNoun !== undefined
     ? { ...sizing.natural_effect, per_source_change_unit: effect.per_source_change_unit.trim() } : sizing.natural_effect;
+  const askId = typeof effect.answer_to_ask?.ask_id === 'string' ? effect.answer_to_ask.ask_id.trim() : '';
+  const naturalEffect = askId !== '' ? { ...sized, answer_to_ask: { ask_id: askId, per_source_change: 'from_question' as const } } : sized;
   edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect };
   edge.provenance_display = 'user_set';
   // A6e: `defaulted` is whole-edge; the statement sizes the strength only, so existence stays Olumi's per field.

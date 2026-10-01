@@ -655,6 +655,11 @@ export const EdgeProvenanceV3 = z.object({
     strength_mean_frame: z.literal("edge_strength"),
     /** A4: `amount` is one end of this range the user wrote ("£1-2m"); said with it, never alone. Malformed: dropped. */
     stated_range: z.object({ low: z.number().finite(), high: z.number().finite(), text: z.string().min(1), end: z.enum(["low", "high"]) }).optional().catch(undefined),
+    /**
+     * The amount is the user's answer to Olumi's own recorded link-size question (R3 #75 5926021003 (a)): the per-one
+     * came from that question, not from the user's words. Malformed: dropped.
+     */
+    answer_to_ask: z.object({ ask_id: z.string().min(1), per_source_change: z.literal("from_question") }).optional().catch(undefined),
   }).optional().catch(undefined),
   /**
    * The link holds BY DEFINITION, checked at construction (`definitionalLink`: ±1 in one unit, on the drafter's word; DL

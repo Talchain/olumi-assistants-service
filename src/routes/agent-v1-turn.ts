@@ -67,7 +67,7 @@ import { budgetFor, conversationBudgetFor, type CallBudget } from '../orchestrat
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
 import { decisionInputLines, textAtRest, withA7AfterGate } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
-import { linkSizeAskPendingAction, linkSizeAskRecord } from '../orchestrator-v5/agent-lane/link-size-ask.js';
+import { OpenLinkSizeAsks, linkSizeAskPendingAction, linkSizeAskRecord, openLinkSizeAskOnRow } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -280,6 +280,11 @@ function takeResearchOffer(key: string, id: unknown): boolean {
  */
 const LAST_APPROVE_MAX = 500;
 const lastApproveOffer = new Map<string, OfferedAction>();
+/**
+ * ⭐ The link-size question each answer asked (R3 #75 5926021003 (a)), per `${scenario}:${user}`: TAKEN by the very next turn,
+ * so it binds that turn's reply and no later one. After a restart the answer row's record is read instead.
+ */
+const openLinkSizeAsks = new OpenLinkSizeAsks();
 function rememberApprove(key: string, offered: readonly OfferedAction[]): void {
   const approve = offered.find((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined);
   if (approve === undefined) return;
@@ -1803,7 +1808,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
     const pressedApproval = approvedProposal !== undefined
       ? { typed_approval_of: approvedProposal, ...(offeredCard !== undefined ? { typed_approval_words: message } : {}) } : {};
-    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
+    // ⭐ R3 #75 5926021003 (a), condition 2: the question the PREVIOUS answer asked binds THIS typed turn only. It is taken (and
+    // so closed) on every turn, typed or not; the answer row is read only when this process holds no history (a restart).
+    const askKey = `${scenarioId}:${userId}`;
+    let linkSizeAskOpen = openLinkSizeAsks.take(askKey, Date.now());
+    if (linkSizeAskOpen === undefined && typedNow !== null && needsDurableSeed(held) && typeof store.readMostRecentPendingActions === 'function') {
+      try {
+        linkSizeAskOpen = openLinkSizeAskOnRow(await store.readMostRecentPendingActions(scenarioId), Date.now());
+      } catch {
+        linkSizeAskOpen = undefined;
+      }
+    }
+    const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow),
+      ...(linkSizeAskOpen !== undefined && typedNow !== null ? { link_size_ask: linkSizeAskOpen } : {}) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
     /**
@@ -2513,7 +2530,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // turn's bare "About £20,000" is read against THIS question — never re-parsed from the reply's words. Lowest priority
     // under the row cap (held changes and the approval carrier first); a turn that cannot carry it simply binds nothing.
     if (linkAskRecord?.record != null && graphHash !== undefined && durablePending.length < PENDING_ACTIONS_PER_TURN_CAP) {
-      durablePending.push(linkSizeAskPendingAction(linkAskRecord.record, { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, graph_hash: graphHash }));
+      const askPending = linkSizeAskPendingAction(linkAskRecord.record, { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, graph_hash: graphHash });
+      durablePending.push(askPending);
+      openLinkSizeAsks.hold(`${scenarioId}:${userId}`, askPending);
     }
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or

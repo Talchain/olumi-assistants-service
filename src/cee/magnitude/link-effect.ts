@@ -263,6 +263,8 @@ export interface NaturalEffect {
    * reader says the range beside the amount, never the amount alone as the user's figure (R3 C1, AIQ 5918523203).
    */
   readonly stated_range?: StatedRangeEnd;
+  /** The amount answers Olumi's own recorded link-size question; the per-one is that question's (R3 #75 5926021003 (a)). */
+  readonly answer_to_ask?: { readonly ask_id: string; readonly per_source_change: 'from_question' };
 }
 
 /** Why a stated size is not what the edge carries, or why it is asked about. */

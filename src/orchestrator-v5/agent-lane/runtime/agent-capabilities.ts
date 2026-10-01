@@ -176,9 +176,9 @@ import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, answerToLinkSizeAsk, linkEffectTheUserStated, linkSizeAnswerRefusalWords, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
-import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
+import { KEEP_PROPOSAL_BASIS, answeredAskReadingOf, figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from '../../tools/handlers/d1-shared/normalise-factor-value.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
@@ -2379,7 +2379,9 @@ export function createAgentCapabilities(
     }
     const from = { id: v.from, label: approvedRead.nodes.find((n) => n.id === v.from)?.label ?? v.from };
     const to = { id: v.to, label: approvedRead.nodes.find((n) => n.id === v.to)?.label ?? v.to };
-    const effect = { amount: e.amount, amount_unit: e.amount_unit, per_source_change: e.per_source_change, per_source_change_unit: e.per_source_change_unit };
+    const askId = typeof (e.answer_to_ask as { ask_id?: unknown } | undefined)?.ask_id === 'string' ? String((e.answer_to_ask as { ask_id: string }).ask_id) : undefined;
+    const effect = { amount: e.amount, amount_unit: e.amount_unit, per_source_change: e.per_source_change, per_source_change_unit: e.per_source_change_unit,
+      ...(askId !== undefined ? { answer_to_ask: { ask_id: askId } } : {}) };
     const res = await opts.commitOptionLevels({
       scenario_id: ctx.scenario_id,
       base_graph_hash: parent.base_graph_identity_hash,
@@ -2405,14 +2407,16 @@ export function createAgentCapabilities(
     const check = await readGraph(ctx.scenario_id);
     const stored = check?.edges.find((x) => x.from === v.from && x.to === v.to) as { provenance?: unknown } | undefined;
     const prov = (stored?.provenance ?? {}) as { source?: unknown; magnitude?: unknown;
-      natural_effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown } };
+      natural_effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown; answer_to_ask?: { ask_id?: unknown } } };
     // PR Review on #2275: the read-back proves THIS figure — the user's source, both numbers, and both units (by the
     // writer's own unit key: the sizer stores each end's unit words, which the writer accepted the stated unit as).
     const unitKey = (u: unknown): string | undefined => (typeof u === 'string' ? unitComparisonKey(u) : undefined);
     const sameUnit = (stored: unknown, stated: string): boolean => unitKey(stored) !== undefined && unitKey(stored) === unitKey(stated);
     const holds = prov.source === 'user_specified' && prov.magnitude === 'user_stated'
       && prov.natural_effect?.amount === effect.amount && prov.natural_effect?.per_source_change === effect.per_source_change
-      && sameUnit(prov.natural_effect?.amount_unit, effect.amount_unit) && sameUnit(prov.natural_effect?.per_source_change_unit, effect.per_source_change_unit);
+      && sameUnit(prov.natural_effect?.amount_unit, effect.amount_unit) && sameUnit(prov.natural_effect?.per_source_change_unit, effect.per_source_change_unit)
+      // An answer to Olumi's question is recorded as one (R3 condition 5): the read-back proves the marker landed with it.
+      && (askId === undefined || prov.natural_effect?.answer_to_ask?.ask_id === askId);
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
         detail: 'This link\u2019s size was sent, but reading the model back did not show it as recorded. Say exactly that; never say it was recorded or not recorded.' };
@@ -2941,24 +2945,45 @@ export function createAgentCapabilities(
       const statedEnds = { source: from.label, target: to.label };
       const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') };
       const miss = linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
-      if (miss === 'figures_not_in_statement') {
+      // ⭐ A BARE ANSWER TO OLUMI'S OWN QUESTION (R3 #75 5926021003 (a); lease 5926052489): the statement alone does not say
+      // it, but the route bound the link-size question Olumi asked on the PREVIOUS answer, for THIS link, on THIS revision.
+      // The reply (this turn's own words, never earlier ones) gives the amount; the question gives the per-one, the ends and
+      // the direction (`answerToLinkSizeAsk`). Anything else is the door's own refusal, as before.
+      const ask = ctx.link_size_ask;
+      const reply = typeof ctx.user_turn_text === 'string' ? ctx.user_turn_text.trim() : '';
+      const asked = miss === null || ask === undefined || from.id !== ask.from_id || to.id !== ask.to_id || reply === '' || !reply.includes(quote)
+        ? null : g.graph_hash !== ask.graph_hash ? 'model_changed' as const : answerToLinkSizeAsk(reply, ask, statedScope);
+      if (asked === 'model_changed') {
+        return { ok: false, mutated: false, refusal: 'model_changed_since_ask',
+          detail: 'Nothing was prepared: the model changed after Olumi asked about this link, so the reply is not recorded against that question. Say exactly that.' };
+      }
+      if (asked?.kind === 'miss' && linkSizeAnswerRefusalWords(asked.miss) !== null) {
+        return { ok: false, mutated: false, refusal: 'not_the_answer', why: asked.miss,
+          detail: `${linkSizeAnswerRefusalWords(asked.miss)} Tell the user exactly this, and ask nothing else beside it.` };
+      }
+      const answered = asked?.kind === 'bound' && ask !== undefined ? {
+        effect: { amount: asked.amount, amount_unit: ask.amount_unit, per_source_change: 1, per_source_change_unit: ask.per_unit,
+          answer_to_ask: { ask_id: ask.ask_id } },
+        figure_words: asked.figure_words,
+      } : null;
+      if (answered === null && miss === 'figures_not_in_statement') {
         return { ok: false, mutated: false, refusal: 'not_the_users_figure',
           detail: 'Nothing was prepared: the statement quoted does not write both figures. Ask the user how much the one moves the other, in numbers.' };
       }
-      if (miss !== null) {
+      if (answered === null && miss !== null) {
         return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss,
           detail: `Nothing was prepared: the words quoted do not state, as one statement of the user\u2019s, how much "${from.label}" moves `
             + `"${to.label}" (${miss.replace(/_/g, ' ')}). A figure is recorded as theirs only when they say it: ask them to say it as one `
             + 'statement naming both, which way, and both figures. Never fill in a figure or a direction for them.' };
       }
       // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
-      const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
+      const said = answered !== null ? reply : statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
       const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
       if (edgeToken === null) {
         return { ok: false, mutated: false, refusal: 'no_such_link',
           detail: `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.` };
       }
-      const effect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
+      const effect = answered !== null ? answered.effect : { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const dry = applyLinkEffectEdit({ persistedGraph: g.raw, from: from.id, to: to.id, effect,
         expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said,
         // A dry run of the reading the card will show: its own token, so every refusal it returns is about the write.
@@ -2973,10 +2998,12 @@ export function createAgentCapabilities(
         user_id: ctx.authenticated_user_id,
         base_graph_identity_hash: g.graph_hash,
         operations: [{ op: 'set_link_effect', path: `${from.id}::${to.id}`,
-          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken } }],
+          value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken,
+            ...(answered !== null ? { figure_words: answered.figure_words } : {}) } }],
         provenance: { authored_by: 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record your figure for how "${from.label}" moves "${to.label}": "${said}"`,
+        public_label: (answered !== null ? answeredAskReadingOf({ effect, figure_words: answered.figure_words }, from.label, to.label) : null)
+          ?? `Record your figure for how "${from.label}" moves "${to.label}": "${said}"`,
       });
       proposals.put(proposal);
       return {

@@ -1086,3 +1086,78 @@ function linkEffectInOneSentence(
   }
   return null;
 }
+
+/**
+ * ⭐ A BARE ANSWER TO OLUMI'S OWN LINK-SIZE QUESTION (R3 #75 5926021003 (a); AIQ words 5926045839; MG lease 5926052489).
+ * The host asked, at rest, "How much does one more "<source>" add to "<target>", in £?" and recorded WHAT it asked
+ * (`elicit_link_size`, `link-size-ask.ts`). The very next typed reply "About £20,000" writes ONE figure: the user's amount.
+ * The per-one, both ends and the direction are the QUESTION's, never re-read from the reply's words (R3 conditions 1, 5).
+ * The reply binds only when it (R3 conditions 3, 4):
+ *   · states, not asks, and denies nothing ("not sure" binds nothing);
+ *   · writes EXACTLY one figure, in the unit the question asked for, and no range (a range keeps the #2409 door);
+ *   · names no word of another quantity in the model (the rival rule: "£20k from the seed round" is about something else);
+ *   · says no movement against the link's direction ("it costs us £20k" on an "add to" question).
+ * Every miss under-claims: nothing is prepared, and the one-line refusal says why.
+ */
+export interface OpenLinkSizeAsk {
+  /** The answer row's pending-action id of the ask. */
+  readonly ask_id: string;
+  readonly from_id: string;
+  readonly to_id: string;
+  readonly source_label: string;
+  readonly target_label: string;
+  /** What one more of the source is ("conversations"), and the unit the answer was asked in ("GBP"). */
+  readonly per_unit: string;
+  readonly amount_unit: string;
+  readonly direction: 1 | -1;
+  /** The model revision the question was asked on. */
+  readonly graph_hash: string;
+}
+export type LinkSizeAnswerMiss = 'question' | 'denied' | 'no_figure' | 'several_figures' | 'range'
+  | 'not_in_the_asked_unit' | 'other_quantity_named' | 'direction_contradicts';
+export type LinkSizeAnswer =
+  | { readonly kind: 'bound'; readonly amount: number; readonly figure_words: string }
+  | { readonly kind: 'miss'; readonly miss: LinkSizeAnswerMiss };
+const HEDGE = /^(?:about|around|roughly|approximately|approx|nearly|almost|maybe|perhaps|probably|some|circa)$/;
+export function answerToLinkSizeAsk(reply: string, ask: OpenLinkSizeAsk, scope: { readonly quantities: readonly string[] }): LinkSizeAnswer {
+  const miss = (m: LinkSizeAnswerMiss): LinkSizeAnswer => ({ kind: 'miss', miss: m });
+  const r = reply.trim();
+  if (r.includes('?') || (AUXILIARY_FIRST.test(r) && !REQUEST_FORM.test(r))) return miss('question');
+  if (NEGATOR.test(r)) return miss('denied');
+  const amounts = findStatedAmounts(r);
+  const inWords = countsInWords(r);
+  if (amounts.length + inWords.length === 0) return miss('no_figure');
+  if (findStatedRanges(r).length > 0) return miss('range');
+  if (amounts.length !== 1 || inWords.length !== 0) return miss('several_figures');
+  const a = amounts[0]!;
+  const value = a.magnitude / moneyUnitScale(ask.amount_unit);
+  if (!Number.isFinite(value) || value <= 0 || !amountIs(a, value, ask.amount_unit, unitPhraseFamily(ask.amount_unit), r)) return miss('not_in_the_asked_unit');
+  const own = [ask.source_label, ask.target_label, ask.per_unit, ask.amount_unit].flatMap(wordsOf);
+  const replyWords = wordsOf(r);
+  const rival = scope.quantities.filter((l) => l !== ask.source_label && l !== ask.target_label)
+    .some((l) => wordsOf(l).some((w) => !own.some((o) => sameWord(o, w)) && replyWords.some((t) => sameWord(t, w))));
+  if (rival) return miss('other_quantity_named');
+  const tokens = r.toLowerCase().match(/\p{L}+/gu) ?? [];
+  let up = false; let down = /[-−]\s*$/.test(r.slice(0, a.index ?? 0));
+  tokens.forEach((t, i) => {
+    if (/^(?:bring|brings|bringing|brought)$/.test(t) && tokens[i + 1] === 'in') up = true;
+    else if (TARGET_DOWN.test(t) || MOVE_DOWN.test(t)) down = true;
+    else if (TARGET_UP.test(t) || MOVE_UP.test(t)) up = true;
+  });
+  if ((ask.direction === 1 && down) || (ask.direction === -1 && up)) return miss('direction_contradicts');
+  const before = /(\p{L}+)\s*$/u.exec(r.slice(0, a.index ?? 0).toLowerCase())?.[1];
+  const hedge = before !== undefined && HEDGE.test(before) ? `${before} ` : '';
+  return { kind: 'bound', amount: ask.direction * value, figure_words: `${hedge}${a.matchedText.trim()}` };
+}
+
+/** The one line a refusal says (AIQ 5926045839): what was not recorded and why, never a second ask beside it. */
+export function linkSizeAnswerRefusalWords(m: LinkSizeAnswerMiss): string | null {
+  switch (m) {
+    case 'question': case 'denied': case 'no_figure': return null;
+    case 'several_figures': return 'Not recorded: your reply names another figure as well, so I can’t tell which answers the question.';
+    case 'range': return 'Not recorded: your reply gives a range, and this question records one figure.';
+    case 'not_in_the_asked_unit': return 'Not recorded: your figure isn’t in the unit the question asked for.';
+    case 'other_quantity_named': return 'Not recorded: your reply names another part of the model, so I can’t tell it answers this question.';
+    case 'direction_contradicts': return 'Not recorded: your reply says it moves the other way from this link, so I haven’t recorded it.';
+  }
+}
