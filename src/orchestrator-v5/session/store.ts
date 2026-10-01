@@ -25,6 +25,7 @@ import type {
 } from '../types/handler-fact.js';
 import type { CoachingState } from '../coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from '../coaching/coaching-state-snapshot.js';
+import type { AgentGuidanceRecord } from '../coaching/agent-guidance-snapshot.js';
 import type { SessionTurnWithContent } from './conversation-content.js';
 // Type-only, and deliberately so: `turn-fence.ts` imports
 // `StateCommitFailedError` from THIS file, and a value import here would close
@@ -208,6 +209,13 @@ export interface SessionTurnWrite {
    * signal codes + SHA-prefix hashes are persisted, never raw user content.
    */
   readonly coaching_state?: CoachingState | null;
+  /**
+   * AI HARNESS G1: the Agent lane's guidance record (what it offered, what the user pressed, per Reasoning Coach
+   * policy id), written into the SAME `coaching_state` column under an `agent_guidance` envelope when this row
+   * carries no `coaching_state` (the Agent's answer row never does). Content-free. Read back by
+   * `readMostRecentAgentGuidance`; never seen by `readMostRecentCoachingState`.
+   */
+  readonly agent_guidance?: AgentGuidanceRecord | null;
   /**
    * V5 Conversation Context Reliability: the user's verbatim turn message
    * (boundary `payload.message`), persisted to
@@ -726,6 +734,13 @@ export interface SessionStore {
    * (`SupabaseSessionStore`) always implements it.
    */
   readMostRecentCoachingState?(scenarioId: string): Promise<CoachingStateSnapshot | null>;
+  /**
+   * AI HARNESS G1: the newest Agent guidance record for the scenario (`coaching_state` rows whose envelope is
+   * `agent_guidance`), or `null` when none exists. Same bounded shape as `readMostRecentCoachingState`
+   * (`ORDER BY created_at DESC LIMIT 1`). Read failures throw `SessionReadError`; the caller degrades to empty.
+   * Optional so existing test doubles need not implement it.
+   */
+  readMostRecentAgentGuidance?(scenarioId: string): Promise<AgentGuidanceRecord | null>;
   /**
    * V5 Signature Loop — refresh-continuation discriminator. Returns `true` iff
    * the scenario already has at least one committed turn. Cheapest possible

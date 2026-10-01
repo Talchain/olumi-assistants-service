@@ -37,6 +37,8 @@ import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
 import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
+import { EMPTY_AGENT_GUIDANCE, type AgentGuidanceRecord } from '../orchestrator-v5/coaching/agent-guidance-snapshot.js';
+import { nextStepStateKey, recordOffers, recordPress, withoutSettledNextSteps } from '../orchestrator-v5/agent-lane/guidance/next-step-guidance.js';
 import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-context.js';
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
@@ -442,6 +444,21 @@ export const NEXT_STEP_CHIPS = [
 ] as const satisfies readonly OfferedAction[];
 
 const NEXT_STEP_CHIP_IDS: ReadonlySet<string> = new Set(NEXT_STEP_CHIPS.map((c) => c.id));
+
+/**
+ * AI HARNESS G1: the scenario's guidance record, or empty. A store without the reader (a test double) reads as empty.
+ * A FAILED read is not an absent record: it reads as empty for this turn's offers, but `readable: false` stops this
+ * turn persisting a record built on it, which would shadow the presses the store still holds (CODEX_CLI_OVERFLOW P1).
+ */
+export async function readAgentGuidance(store: { readMostRecentAgentGuidance?: (scenarioId: string) => Promise<AgentGuidanceRecord | null> }, scenarioId: string): Promise<{ readonly record: AgentGuidanceRecord; readonly readable: boolean }> {
+  if (typeof store.readMostRecentAgentGuidance !== 'function') return { record: EMPTY_AGENT_GUIDANCE, readable: true };
+  try {
+    return { record: (await store.readMostRecentAgentGuidance(scenarioId)) ?? EMPTY_AGENT_GUIDANCE, readable: true };
+  } catch (err) {
+    log.warn({ event: 'agent_lane.guidance_read_failed', scenario_id: scenarioId, err: err instanceof Error ? err.message : String(err) }, 'agent-lane: the guidance record could not be read; every next step is eligible this turn and nothing is persisted');
+    return { record: EMPTY_AGENT_GUIDANCE, readable: false };
+  }
+}
 
 /**
  * The next steps are offered only on a result that is current and that the canonical state lets chips build on
@@ -1541,7 +1558,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         assistant_text: prior.assistant_message ?? 'That request was already completed.',
         stage: 'frame',
         answerKind: 'substantive',
-        suggested_actions: stillValidOffers(offered, {
+        // ⭐ G1: a replay offers no next step settled since the row was written (offer A → press on B → retry A).
+        suggested_actions: withoutSettledNextSteps(stillValidOffers(offered, {
           outstandingProposalIds: new Set([
             ...((id) => (id !== undefined ? [id] : []))(executableWaitingProposal(scenarioId, userId, state.graphHash)),
             ...(await liveHeldRefs(scenarioId)),
@@ -1550,7 +1568,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           analysisState: state.analysisState,
           // `draft_graph` is read back only when the graph has content.
           modelExists: state.draftGraph !== undefined,
-        }),
+        }), (await readAgentGuidance(store, scenarioId)).record, nextStepStateKey({ graph: state.graph, analysisState: state.analysisState })),
       });
       const replayBody = {
         ...finaliseV5Response(composedReplay, { scenarioId }),
@@ -2395,11 +2413,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return chip === null ? [] : [[chip.id, chip] as const];
       })).values()],
     ]);
+    // ⭐ AI HARNESS G1: the durable guidance record (the answer rows, not a process Map, so a restart remembers it).
+    // A next step pressed in THIS state (the saved model + the Run) is not offered again until either changes.
+    const guidanceAt = new Date().toISOString();
+    const guidanceStateKey = nextStepStateKey({ graph: readbackGraph, analysisState });
+    const guidanceRead = await readAgentGuidance(store, scenarioId);
+    const guidancePrior = guidanceRead.record;
+    const guidanceWithPress = recordPress(guidancePrior, (body['chip'] as { id?: unknown } | null | undefined)?.id, guidanceStateKey, turnId ?? null, guidanceAt);
     // ⭐ Nothing specific to press, on a result that is current: the product's own next steps (NEXT_STEP_CHIPS). Never
     // beside another control, and never while a proposal that would still execute waits for its yes (that is the step).
     const offeredNow: OfferedAction[] = offeredSpecific.length === 0 && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash) === undefined
-      ? [...NEXT_STEP_CHIPS] : offeredSpecific;
+      ? withoutSettledNextSteps(NEXT_STEP_CHIPS, guidanceWithPress, guidanceStateKey) : offeredSpecific;
+    const guidanceNext = recordOffers(guidanceWithPress, offeredNow, guidanceStateKey, turnId ?? null, guidanceAt);
+    // Persisted only when this turn changed it AND the prior record was actually read (never a replacement built on a
+    // failed read). The newest rows are merged on read, so a concurrent tab's press is kept.
+    const guidanceToPersist = guidanceRead.readable && guidanceNext !== guidancePrior ? guidanceNext : undefined;
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
     rememberResearchOffers(approveKey, offeredNow);
@@ -2718,7 +2747,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * with no id that has an offer to carry writes its answer row under an id minted HERE, at the end —
      * no claim, no replay, no fence, exactly as before for everything else about an unnamed turn.
      */
-    const rowTurnId = turnId ?? (durablePending.length > 0 ? randomUUID() : undefined);
+    // A guidance change is an offer to carry too: an unnamed turn that presses a next step still writes its row (P2).
+    const rowTurnId = turnId ?? (durablePending.length > 0 || guidanceToPersist !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
@@ -2746,6 +2776,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
           // approval that reaches a restarted process, can still find them.
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),
+          // AI HARNESS G1: the guidance record, only when this turn changed it (the newest one is the current one).
+          ...(guidanceToPersist !== undefined ? { agent_guidance: guidanceToPersist } : {}),
           },
         });
         if (outcome.priorTurnConflict === true) {

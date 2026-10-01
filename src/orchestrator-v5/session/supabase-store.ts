@@ -95,8 +95,17 @@ import {
 import {
   toPreDispatchSnapshot,
   parseCoachingStateSnapshot,
+  COACHING_STATE_SNAPSHOT_TIMING_PRE_DISPATCH,
   type CoachingStateSnapshot,
 } from '../coaching/coaching-state-snapshot.js';
+import {
+  AGENT_GUIDANCE_MERGE_WINDOW,
+  AGENT_GUIDANCE_SNAPSHOT_TIMING,
+  mergeAgentGuidance,
+  parseAgentGuidanceSnapshot,
+  toAgentGuidanceSnapshot,
+  type AgentGuidanceRecord,
+} from '../coaching/agent-guidance-snapshot.js';
 import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { repairGraphForPersistence } from '../repair-graph-for-persistence.js';
@@ -433,8 +442,14 @@ export class SupabaseSessionStore implements SessionStore {
       p_graph: write.graph ?? null,
       p_brief_text: write.briefText ?? null,
       p_pending_actions: write.pending_actions ?? [],
+      // AI HARNESS G1: a row with no coaching state may carry the Agent's guidance record in the same column, under
+      // its own envelope (`agent_guidance`), which the route-v2 reader below never reads.
       p_coaching_state:
-        write.coaching_state == null ? null : toPreDispatchSnapshot(write.coaching_state),
+        write.coaching_state != null
+          ? toPreDispatchSnapshot(write.coaching_state)
+          : write.agent_guidance != null
+            ? toAgentGuidanceSnapshot(write.agent_guidance)
+            : null,
       p_user_message: write.userMessage ?? null,
       p_assistant_message: write.assistantMessage ?? null,
     };
@@ -2574,6 +2589,10 @@ export class SupabaseSessionStore implements SessionStore {
       .select('id, coaching_state')
       .eq('scenario_id', scenarioId)
       .not('coaching_state', 'is', null)
+      // AI HARNESS G1: only V5's own `pre_dispatch` snapshots (the one timing this parser accepts). The Agent lane's
+      // answer rows carry an `agent_guidance` envelope in the same column; without this filter the newest of them
+      // would shadow V5's prior coaching state on every turn after an Agent turn.
+      .eq('coaching_state->>snapshot_timing', COACHING_STATE_SNAPSHOT_TIMING_PRE_DISPATCH)
       .order('created_at', { ascending: false })
       .limit(1);
     if (error) {
@@ -2596,6 +2615,29 @@ export class SupabaseSessionStore implements SessionStore {
       return null;
     }
     return snapshot;
+  }
+
+  async readMostRecentAgentGuidance(scenarioId: string): Promise<AgentGuidanceRecord | null> {
+    // AI HARNESS G1: the Agent guidance record, MERGED over the newest answer rows that carry one (per entry, the latest
+    // `at` wins). One row is not enough: two tabs that read the same prior record each write a whole snapshot, and the
+    // newest would drop the other's press (CODEX_CLI_OVERFLOW P1 on #2459). Bounded like the coaching read above.
+    const { data, error } = await this.client
+      .from('v5_conversation_turns')
+      .select('id, coaching_state')
+      .eq('scenario_id', scenarioId)
+      .not('coaching_state', 'is', null)
+      .eq('coaching_state->>snapshot_timing', AGENT_GUIDANCE_SNAPSHOT_TIMING)
+      .order('created_at', { ascending: false })
+      .limit(AGENT_GUIDANCE_MERGE_WINDOW);
+    if (error) {
+      throw new SessionReadError(
+        `readMostRecentAgentGuidance(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+    const rows = (data ?? []) as Array<{ id: string; coaching_state: unknown }>;
+    if (rows.length === 0) return null;
+    return mergeAgentGuidance(rows.map((r) => parseAgentGuidanceSnapshot(r.coaching_state)));
   }
 
   async ensureScenarioExists(
