@@ -559,7 +559,7 @@ export async function proposeGoalCurrentLevel(
  * The amount the user wrote for `raw` in their message ("£50k"), with the sentence it sits in (≤160 characters, the
  * reading's `quote` bound), or null when no written amount reads as `raw`. A k/m/bn suffix scales as the M-rung does.
  */
-function writtenIn(text: string, raw: number): { written: string; quote: string } | null {
+export function writtenIn(text: string, raw: number): { written: string; quote: string } | null {
   const scale: Record<string, number> = { k: 1e3, m: 1e6, bn: 1e9 };
   for (const m of text.matchAll(/[£$€]?\s?\d[\d,]*(?:\.\d+)?\s?(?:k|m|bn)?\b/gi)) {
     const token = m[0].trim();
