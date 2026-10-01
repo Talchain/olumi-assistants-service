@@ -13,16 +13,22 @@
  * The provenance travels with the figure ("explicit" stays the user's claim, anything else is Olumi's), so the existing
  * doors decide whose size it is (#2389 written size, #2409 written range) and #2416/#2421 fit it.
  *
- * Only when the factor IS a constant: not a lever (`controllable`), a finite non-zero level, a money unit, no option
- * sets or changes it, no link points into it, and it is used by nothing but that one product; the product is exactly
+ * Only when the factor IS a constant: not a lever (`controllable`), a finite non-zero level, money per ONE of the other
+ * quantity's unit, no constraint reads it, no option sets or changes it, no link points into it, and it is used by nothing but that one product; the product is exactly
  * TWO quantities, the other one not money; the target is money and is NOT the goal (the goal's own product is C46's). Anything else (a price lever, a rate, three factors) is left exactly as drafted.
  * PURE: the candidate itself when nothing applies.
  */
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
 import { readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { sameWord, wordsOf } from './stated-by-user.js';
 
 type Rec = Record<string, any>;
 const money = (unit: unknown): boolean => typeof unit === 'string' && readCurrencyUnitWithQualifiers(unit).kind === 'currency';
+/** "GBP per deal" / "£/deal" → the words after "per" or "/" (deal). None → []. */
+const perWords = (unit: unknown): string[] => {
+  const m = typeof unit === 'string' ? /(?:\bper\b|\/)\s*(.+)$/iu.exec(unit) : null;
+  return m ? wordsOf(m[1]!) : [];
+};
 
 export function perOneLinksForConstantProducts(c: CandidateModel): CandidateModel {
   const identities = c.identities ?? [];
@@ -44,8 +50,14 @@ export function perOneLinksForConstantProducts(c: CandidateModel): CandidateMode
     if (k === undefined) continue;
     const count = id.factors.find((l) => !is(k.label)(l))!;
     const touchesK = cur.links.filter((l) => is(k.label)(l.from) || is(k.label)(l.to));
-    if (!money(unitOf(id.outcome)) || money(unitOf(count)) || setByOption(k.label)
-      || cur.identities!.some((x) => x !== id && x.factors.some(is(k.label)))
+    // ⛔ CODEX 5924765233 — the complete class: a per-one amount is only CONSTANT here when nothing else reads it (no
+    // constraint names it, it is no identity's result or other operand, no other link or option uses it) and it is money
+    // per ONE of the other quantity's own unit ("GBP per deal" × "deals"). A rate or a scale ("%") is never a count.
+    const countUnit = unitOf(count);
+    const perOneOfCount = perWords(k.unit).some((w) => typeof countUnit === 'string' && wordsOf(countUnit).some((u) => sameWord(u, w)));
+    if (!money(unitOf(id.outcome)) || money(countUnit) || !perOneOfCount || setByOption(k.label)
+      || (c.constraints ?? []).some((x) => is(k.label)(x.metric))
+      || cur.identities!.some((x) => x !== id && (is(k.label)(x.outcome) || x.factors.some(is(k.label))))
       || touchesK.some((l) => !(is(k.label)(l.from) && is(id.outcome)(l.to)))) continue;
     const amount = k.baseline_value as number;
     const sized = {

@@ -145,6 +145,30 @@ describe('controls: only a CONSTANT money-per-one in a two-quantity product is r
     expect(perOneLinksForConstantProducts(c)).toBe(c);
   });
 
+  // CODEX 5924765233 collision negatives: a reader of the per-one amount, and a rate operand, keep the product.
+  it('CODEX: a £2m LIMIT on the per-deal amount keeps the product and its node (the constraint has something to check)', () => {
+    const c = { ...base, identities: [base.identities![0]!],
+      constraints: [{ metric: 'Typical investment-firm funding per deal', operator: '<=', value: 2000000, unit: 'GBP', provenance: 'explicit' }] } as unknown as CandidateModel;
+    expect(perOneLinksForConstantProducts(c)).toBe(c);
+  });
+
+  it('CODEX: a % conversion RATE × £ amount is never a count — the product stays (no "£1m per percentage point")', () => {
+    const c = { ...base, outcomes: [...base.outcomes, { label: 'Funding conversion rate', provenance: 'inferred', unit: '%', plausible_max: 100 }],
+      identities: [{ outcome: 'Funding from investment firms', operation: 'product', factors: ['Funding conversion rate', 'Typical investment-firm funding per deal'], provenance: 'ai_proposed' }] } as unknown as CandidateModel;
+    expect(perOneLinksForConstantProducts(c)).toBe(c);
+  });
+
+  it('a per-one amount that is ANOTHER identity\'s result is not a constant: left as drafted', () => {
+    const c = { ...base, identities: [base.identities![0]!, { outcome: 'Typical investment-firm funding per deal', operation: 'sum', factors: ['Typical angel funding per deal', 'Hours per week on angel outreach'], provenance: 'ai_proposed' }] } as unknown as CandidateModel;
+    expect(perOneLinksForConstantProducts(c)).toBe(c);
+  });
+
+  it('CONTROL (captured 0258Z units): "GBP per deal" × "deals" is per one deal — folded', () => {
+    const r = perOneLinksForConstantProducts({ ...base, identities: [base.identities![0]!] } as unknown as CandidateModel);
+    expect(r.identities).toEqual([]);
+    expect(r.links.find((l) => l.from === 'Investment-firm deals closed' && l.to === 'Funding from investment firms')).toEqual(expect.objectContaining({ effect_amount: 1000000, effect_per_source_change: 1 }));
+  });
+
   it('probe', () => {
     if (!process.env.PROBE) return;
     const r = perOneLinksForConstantProducts(draft() as unknown as CandidateModel);
