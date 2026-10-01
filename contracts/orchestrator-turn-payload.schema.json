@@ -380,6 +380,100 @@
                           "source_quote"
                         ],
                         "additionalProperties": false
+                      },
+                      "goal_period": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "day",
+                          "week",
+                          "month",
+                          "quarter",
+                          "year"
+                        ]
+                      },
+                      "goal_horizon": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "deadline": {
+                                "type": "string",
+                                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                              }
+                            },
+                            "required": [
+                              "deadline"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "months": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 120
+                              }
+                            },
+                            "required": [
+                              "months"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "goal_stated_as": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "number"
+                            },
+                            "unit": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 40
+                            },
+                            "period": {
+                              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/goal_period"
+                            },
+                            "quote": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "unit",
+                            "period",
+                            "quote"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1,
+                        "maxItems": 20
+                      },
+                      "option_status": {
+                        "type": "string",
+                        "enum": [
+                          "feasible",
+                          "infeasible",
+                          "removed"
+                        ]
+                      },
+                      "count_noun": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40,
+                        "pattern": "^[^\\d\\s](?:[^\\d]*[^\\d\\s])?$"
+                      },
+                      "full_label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
                       }
                     },
                     "required": [
@@ -1201,6 +1295,61 @@
                       "type": "string",
                       "minLength": 1,
                       "description": "The canonical analysis-affecting graph hash the client last read. The stale gate: every analysis-affecting value this edit writes (goal_threshold, goal_threshold_raw, goal_threshold_cap, goal_constraints) is inside that projection, so a concurrent change to the target moves the hash and the server MUST refuse rather than clobber it. Absent, null and empty are all forbidden."
+                    },
+                    "goal_period": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/goal_period",
+                      "description": "The period `raw_value` is per (none | day | week | month | quarter | year). Written to NodeV3.goal_period."
+                    },
+                    "goal_horizon": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/goal_horizon",
+                      "description": "When the target must be met: {deadline: YYYY-MM-DD} | {months: 1..120}. Written to NodeV3.goal_horizon."
+                    },
+                    "expected_goal_period": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/goal_period"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The goal_period last read from the goal node (null = none recorded). Required iff goal_period is sent."
+                    },
+                    "expected_goal_horizon": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/goal_horizon"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The goal_horizon last read from the goal node (null = none recorded). Required iff goal_horizon is sent."
+                    },
+                    "expected_stated_as": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/goal_stated_as/items"
+                          },
+                          "minItems": 1,
+                          "maxItems": 20
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The goal_stated_as list last read from the goal node (null = none recorded). Required iff stated_as is sent."
+                    },
+                    "stated_as": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/graph_state/properties/nodes/items/properties/goal_stated_as/items"
+                      },
+                      "minItems": 1,
+                      "maxItems": 20,
+                      "description": "Every figure the user GAVE for this goal, verbatim, with its own unit and period: e.g. \"£100k a quarter\" kept when `raw_value` holds it converted to the goal's monthly period. Written to NodeV3.goal_stated_as. Never the target."
                     }
                   },
                   "required": [
@@ -1209,6 +1358,50 @@
                     "constraint_type",
                     "raw_value",
                     "unit",
+                    "base_graph_hash"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "option_status_edit"
+                    },
+                    "option_node_id": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                      "description": "Exact canonical id of the OPTION whose status is set. ID-ADDRESSED, never a label. The server refuses, with no write, an id that names no node or a node whose kind is not `option`. The baseline may be marked too."
+                    },
+                    "expected_status": {
+                      "type": "string",
+                      "enum": [
+                        "feasible",
+                        "infeasible",
+                        "removed"
+                      ],
+                      "description": "The status last read from the canonical persisted option, an ABSENT stored status read as `feasible`. An optimistic-concurrency assertion (the `structural_rename` `expected_label` pattern), never a requested value, and NOT redundant with base_graph_hash: `infeasible` and `removed` both mean `retained_excluded`, so a concurrent infeasible ↔ removed change moves no hash (CODEX #78 5930825929). REQUIRED. CEE MUST refuse on mismatch."
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "feasible",
+                        "infeasible",
+                        "removed"
+                      ],
+                      "description": "The option's lifecycle as the user set it: `feasible` (in the comparison), `infeasible` (cannot be done, kept for the record) or `removed` (taken out). REQUIRED, no default. The server writes NodeV3.option_status and derives analysis_participation from it in the same commit."
+                    },
+                    "base_graph_hash": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The canonical analysis-affecting graph hash the client last read (the stale gate). analysis_participation, which this edit writes, is inside that projection. Absent, null and empty are all forbidden."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "option_node_id",
+                    "expected_status",
+                    "status",
                     "base_graph_hash"
                   ],
                   "additionalProperties": false
