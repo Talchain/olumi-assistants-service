@@ -21,9 +21,12 @@
  * routes' rule), so this route is never an oracle over whether a decision exists or whose it is. Each is TERMINAL for
  * that id: the UI forgets it. The reason is logged server-side only. A 401 is about the caller, a 503 is "retry".
  *
- * ── RATE LIMIT ────────────────────────────────────────────────────────────
- * `CEE_SCENARIO_COPY_RATE_LIMIT_RPM`, `coach` tier: a write, so it fails CLOSED when the limiter is blind. The bucket
- * is per CLIENT (`req.ip`), as the sibling scenario routes: through the edge every visitor carries the same key.
+ * ── RATE LIMIT: KEYED BY THE VERIFIED USER (CODEX overflow P1 on #2493) ──
+ * `CEE_SCENARIO_COPY_RATE_LIMIT_RPM`, `coach` tier: a write, so it fails CLOSED when the limiter is blind. The JWT is
+ * verified FIRST, in this route's own `preHandler`; the limiter runs after it in the same hook and keys on the verified
+ * `sub`. So two people behind one NAT or proxy each get their own quota, and one person cannot widen theirs by
+ * changing IP. A request whose token does not verify is answered 401 before it reaches the limiter (verification is a
+ * local signature check against the cached JWKS).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -51,6 +54,15 @@ const REFUSAL_REPLY: Readonly<Record<GuestCopyRefusal, readonly [number, string,
   unknown_user: [401, 'sign_in_required', 'Your account could not be found. Sign in again and retry.'],
 };
 
+/** The verified `sub` for a request that passed this route's JWT check (set in `preHandler`, read by the limiter key). */
+const verifiedUserOf = new WeakMap<FastifyRequest, string>();
+
+/** The limiter key: the verified user. The `ip:` fallback is never reached in practice (unverified requests stop at 401). */
+export function scenarioCopyRateKey(req: FastifyRequest): string {
+  const userId = verifiedUserOf.get(req);
+  return userId !== undefined ? `scenario_copy:user:${userId}` : `scenario_copy:ip:${req.ip}`;
+}
+
 export default async function route(
   app: FastifyInstance,
   /** Test seam: a hand-rolled store port. Production resolves the service-role singleton lazily, per request. */
@@ -61,19 +73,32 @@ export default async function route(
 
   app.post<{ Params: { scenario_id: string } }>(
     SCENARIO_COPY_PATH,
-    { config: { rateLimit: { max: RATE_LIMIT_MAX, timeWindow: '1 minute' } } },
+    {
+      // JWT FIRST: this route-level hook is in place before the limiter attaches its own `preHandler`, so it runs first.
+      preHandler: async (req, reply) => {
+        const header = req.headers.authorization;
+        const token = typeof header === 'string' && header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
+        if (token === '') {
+          return refuse(reply, req, 401, 'sign_in_required', 'Sign in to keep this decision in your account.');
+        }
+        const verified = await verifySupabaseUserJwt(token);
+        if (!verified.ok) {
+          return refuse(
+            reply, req, 401, verified.reason,
+            verified.reason === 'expired_token' ? 'Your session has expired. Sign in again and retry.' : 'That token could not be verified.',
+          );
+        }
+        verifiedUserOf.set(req, verified.userId);
+      },
+      config: {
+        rateLimit: { max: RATE_LIMIT_MAX, timeWindow: '1 minute', hook: 'preHandler', keyGenerator: scenarioCopyRateKey },
+      },
+    },
     async (req, reply) => {
-      const header = req.headers.authorization;
-      const token = typeof header === 'string' && header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : '';
-      if (token === '') {
+      const userId = verifiedUserOf.get(req);
+      if (userId === undefined) {
+        // Unreachable: the preHandler either set it or answered 401. Refuse rather than act without an owner.
         return refuse(reply, req, 401, 'sign_in_required', 'Sign in to keep this decision in your account.');
-      }
-      const verified = await verifySupabaseUserJwt(token);
-      if (!verified.ok) {
-        return refuse(
-          reply, req, 401, verified.reason,
-          verified.reason === 'expired_token' ? 'Your session has expired. Sign in again and retry.' : 'That token could not be verified.',
-        );
       }
 
       const sourceId = req.params.scenario_id;
@@ -85,7 +110,7 @@ export default async function route(
 
       let outcome;
       try {
-        outcome = await resolveStore().copyGuestScenario(sourceId, verified.userId);
+        outcome = await resolveStore().copyGuestScenario(sourceId, userId);
       } catch (err) {
         log.warn({ event: 'scenario_guest_copy.store_failed', request_id: getRequestId(req), error: err instanceof Error ? err.message : String(err) }, 'guest copy store failed');
         return refuse(reply, req, 503, 'copy_unavailable', 'Your decision could not be copied just now. Try again shortly.');

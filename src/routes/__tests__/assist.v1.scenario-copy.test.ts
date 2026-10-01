@@ -8,6 +8,7 @@
  * Every assertion binds by IDENTITY: the exact (source, user) pair sent to the RPC, the exact refusal code and body.
  */
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -146,6 +147,64 @@ describe('refusals', () => {
     const res = await app.inject({ method: 'POST', url: url(GUEST), headers: { authorization: `Bearer ${await userToken()}` } });
     expect(res.statusCode).toBe(503);
     expect(res.json().code).toBe('copy_unavailable');
+  });
+});
+
+// CODEX overflow P1 on #2493: the bucket is the VERIFIED user, never the IP. These rows run the REAL
+// @fastify/rate-limit, registered as server.ts registers it (global), with the route's own per-route config.
+describe('the rate limit is keyed by the verified user (REAL limiter)', () => {
+  const OTHER_USER = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  async function limitedApp(store: Port): Promise<FastifyInstance> {
+    const prev = process.env.CEE_SCENARIO_COPY_RATE_LIMIT_RPM;
+    process.env.CEE_SCENARIO_COPY_RATE_LIMIT_RPM = '2';
+    try {
+      const app = Fastify({ logger: false });
+      await app.register(rateLimit, { global: true, max: 1000, timeWindow: '1 minute' });
+      await copyRoute(app, { store });
+      await app.ready();
+      return app;
+    } finally {
+      if (prev === undefined) delete process.env.CEE_SCENARIO_COPY_RATE_LIMIT_RPM;
+      else process.env.CEE_SCENARIO_COPY_RATE_LIMIT_RPM = prev;
+    }
+  }
+  const post = (app: FastifyInstance, tok: string, ip: string) =>
+    app.inject({ method: 'POST', url: url(GUEST), headers: { authorization: `Bearer ${tok}` }, remoteAddress: ip });
+
+  it('ONE shared IP, two users: each has their OWN quota (the third call of A is 429; B still copies)', async () => {
+    const { store, copyGuestScenario } = portReturning({ kind: 'copied', scenarioId: COPY, created: false });
+    const app = await limitedApp(store);
+    const a = await userToken(ME); const b = await userToken(OTHER_USER);
+    const codes = [
+      (await post(app, a, '10.0.0.1')).statusCode,
+      (await post(app, a, '10.0.0.1')).statusCode,
+      (await post(app, a, '10.0.0.1')).statusCode,
+      (await post(app, b, '10.0.0.1')).statusCode,
+    ];
+    expect(codes).toEqual([200, 200, 429, 200]);
+    expect(copyGuestScenario.mock.calls).toEqual([[GUEST, ME], [GUEST, ME], [GUEST, OTHER_USER]]);
+  });
+
+  it('ONE user, two IPs: ONE quota (changing IP does not widen it)', async () => {
+    const { store, copyGuestScenario } = portReturning({ kind: 'copied', scenarioId: COPY, created: false });
+    const app = await limitedApp(store);
+    const a = await userToken(ME);
+    const codes = [
+      (await post(app, a, '10.0.0.1')).statusCode,
+      (await post(app, a, '10.0.0.2')).statusCode,
+      (await post(app, a, '10.0.0.3')).statusCode,
+    ];
+    expect(codes).toEqual([200, 200, 429]);
+    expect(copyGuestScenario.mock.calls).toEqual([[GUEST, ME], [GUEST, ME]]);
+  });
+
+  it('an unverified request is 401 BEFORE the limiter: it spends no one\'s quota', async () => {
+    const { store, copyGuestScenario } = portReturning({ kind: 'copied', scenarioId: COPY, created: false });
+    const app = await limitedApp(store);
+    for (let i = 0; i < 3; i++) expect((await app.inject({ method: 'POST', url: url(GUEST), remoteAddress: '10.0.0.1' })).statusCode).toBe(401);
+    const a = await userToken(ME);
+    expect((await post(app, a, '10.0.0.1')).statusCode).toBe(200);
+    expect(copyGuestScenario.mock.calls).toEqual([[GUEST, ME]]);
   });
 });
 
