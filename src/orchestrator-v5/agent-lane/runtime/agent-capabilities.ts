@@ -191,6 +191,7 @@ import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type To
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
+import { resultBlockersOf, TO_RESOLVE_NOTE } from '../result-blockers.js';
 import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
@@ -7347,6 +7348,12 @@ export function createAgentCapabilities(
         ? { scenario_id: ctx.scenario_id, graph_hash_at_run: runHash, computed_at: runAt } : undefined;
       // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
       const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;
+      // ⭐ F1b B6 (RCA D5): everything stopping a figure in THIS Run, one action each, from the post-run read the Run
+      // already made (every Run whose leader is withheld makes one) — no extra read (`../result-blockers.ts`).
+      const resultWarnings = (result as { enrichment?: { inference_warnings?: unknown } } | undefined)?.enrichment?.inference_warnings;
+      const toResolve = result !== undefined && postRunRead !== undefined && postRunRead !== null
+        ? resultBlockersOf({ graph: postRunRead.raw, limitChecks, warnings: Array.isArray(resultWarnings) ? resultWarnings : [] })
+        : [];
       return {
         ok: r.status === 200,
         mutated: false,
@@ -7370,6 +7377,7 @@ export function createAgentCapabilities(
         // the automatic first analysis reads its permission in `describeFirstAnalysisForAgent`, not here.
         claim_permissions: graphForProduct === undefined ? permissions : withNonlinearIdentity(permissions, graphForProduct, evaluatedForProduct),
         ...(limitChecks !== undefined ? { limit_checks: { limits: limitChecks, note: LIMIT_CHECKS_NOTE } } : {}),
+        ...(toResolve.length > 0 ? { to_resolve: { items: toResolve, note: TO_RESOLVE_NOTE } } : {}),
         // ⛔ PLoT #416: the goal's chance withheld on every option — the sentence to say and the rule (`../goal-chance-withheld.ts`).
         ...withGoalChance(result),
         ...(goalCertainty !== undefined ? { goal_certainty: goalCertainty } : {}),
