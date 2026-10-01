@@ -113,6 +113,7 @@ export type NotCitedReason =
   | 'no_canonical_stage'
   | 'stage_not_applicable'
   | 'no_current_run'
+  | 'run_exists'
   | 'no_identified_plan'
   | 'single_option'
   | 'no_evidence_gap'
@@ -136,7 +137,10 @@ export interface MethodScienceContext {
   readonly method: ScienceMethod;
   readonly dsk: DskCitation | null;
   readonly not_cited: NotCitedReason | null;
-  /** The plan a pre-mortem stresses: the licensed leader, else the user's choice, else the single user option. */
+  /**
+   * The plan a pre-mortem stresses: the licensed leader, else the option the user explicitly chose, else none. A lone
+   * option is never named on its own: a plan label needs a licence or the user's choice (PTL 5933036532 #5).
+   */
   readonly plan: { readonly option_id: string; readonly label: string; readonly basis: PlanBasis } | null;
   readonly goal_label: string | null;
   readonly current_option_labels: readonly string[];
@@ -148,7 +152,7 @@ export interface MethodScienceContext {
   readonly supplied_figures: readonly string[];
 }
 
-export type PlanBasis = 'licensed_leader' | 'user_selected' | 'single_option';
+export type PlanBasis = 'licensed_leader' | 'user_selected';
 
 /** Which DSK protocol names each method's exercise (the same pairing as `INTENT_PROTOCOL_ID`, plus the pre-mortem). */
 const METHOD_PROTOCOL_ID: Readonly<Record<ScienceMethod, string>> = {
@@ -185,16 +189,15 @@ function choosePlan(
   userSelected: string | null | undefined,
 ): MethodScienceContext['plan'] {
   const labels = s['model.option_labels'];
-  const leader = s['run.leader_option_id'];
-  if (s['run.leader_licensed'] === true && typeof leader === 'string' && typeof labels[leader] === 'string') {
-    return { option_id: leader, label: labels[leader], basis: 'licensed_leader' };
+  // The leader's identity is read ONLY behind its licence: an unlicensed leader is never read, so it cannot leak.
+  if (s['run.leader_licensed'] === true) {
+    const leader = s['run.leader_option_id'];
+    if (typeof leader === 'string' && typeof labels[leader] === 'string') {
+      return { option_id: leader, label: labels[leader], basis: 'licensed_leader' };
+    }
   }
   if (typeof userSelected === 'string' && typeof labels[userSelected] === 'string') {
     return { option_id: userSelected, label: labels[userSelected], basis: 'user_selected' };
-  }
-  const own = s['model.non_sq_option_ids'];
-  if (own.length === 1 && typeof labels[own[0]] === 'string') {
-    return { option_id: own[0], label: labels[own[0]], basis: 'single_option' };
   }
   return null;
 }
@@ -203,7 +206,7 @@ function choosePlan(
  * The pre-mortem's items in REASONING COACH's action-priority order (`method_turns.RC-PREMORTEM.inputs`, reference
  * `tools/build-cases.py` `pm_items` @ 5ff741ab):
  *   (1) links on the plan's path that only Olumi sized (placeholder or estimate), nearest the goal first;
- *   (2) factors on those paths whose value is Olumi's estimate;
+ *   (2) factors on the plan's path (an end of one of those links) whose value is Olumi's estimate;
  *   (3) risks at either end of a link on the plan's path;
  *   (4) limits whose quantity sits on the plan's path.
  * Ties break by id, in codepoint order.
@@ -219,9 +222,6 @@ function premortemItems(s: MethodScienceSignals, planId: string, graph: unknown)
   const links = new Map(
     onPlan.filter((l) => l.link_sizing === 'placeholder' || l.link_sizing === 'olumi_estimate').map((l) => [l.link_id, l] as const),
   );
-  const factors = new Map(
-    s['model.goal_path_factors'].filter((f) => f.value_authorship === 'olumi_estimate').map((f) => [f.factor_id, f] as const),
-  );
   const riskIds = new Set(s['model.risk_ids']);
   const riskLabel = new Map<string, string>();
   const pathNodes = new Set<string>();
@@ -233,6 +233,12 @@ function premortemItems(s: MethodScienceSignals, planId: string, graph: unknown)
       if (riskIds.has(id)) riskLabel.set(id, label);
     }
   }
+  // A factor only on ANOTHER option's path is not this plan's evidence gap (CODEX_CLI_OVERFLOW 5934859876 P1).
+  const factors = new Map(
+    s['model.goal_path_factors']
+      .filter((f) => f.value_authorship === 'olumi_estimate' && pathNodes.has(f.factor_id))
+      .map((f) => [f.factor_id, f] as const),
+  );
 
   return [
     ...ordered([...links.keys()]).map((id): SuppliedItem => {
@@ -297,6 +303,10 @@ function adjudicate(
     // contraindications[1] "already identified fragile edges and wants to proceed" is the user's dismissal, which the
     // selector's cooldown carries (RC dsk_trigger_map DSK-TR-001 negatives_to_rc); a press is the user asking.
   } else {
+    // P-004 is a frame|ideate exercise ("before we analyse further"): never after a Run, current or stale, whatever
+    // stage is read (DL 5933063973 (a); CODEX_CLI_OVERFLOW 5934859876 P1). Only a model that was never run is eligible;
+    // an unknown run state is not (fail closed).
+    if (s['run.kind'] !== 'none') return { citation: null, reason: 'run_exists' };
     // required_inputs[0] "current options in the model".
     if (Object.keys(s['model.option_labels']).length === 0) return { citation: null, reason: 'no_options' };
     // contraindications[0] "binary go/no-go": one own option (or none) against carrying on as now.

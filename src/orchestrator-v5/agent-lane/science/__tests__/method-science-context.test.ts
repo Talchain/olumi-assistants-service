@@ -137,11 +137,19 @@ describe('DSK-P-001 on the pre-mortem', () => {
     expect(chosen.not_cited).toBe('no_identified_plan');
   });
 
-  it('ROW 5 SERVED (D3 s4: one own option, leader withheld): the single option is the plan, never cited', () => {
+  it('ROW 5 SERVED PAIR (D3 s4: one own option, leader withheld): no plan is named unless the user chooses it; never cited', () => {
     expect(D3_S4['model.non_sq_option_ids']).toEqual(['switch_to_gcp']);
-    const ctx = methodScienceContext(premortem({ signals: D3_S4, graph: { goal_constraints: FIXTURE.goal_constraints['d3-s4'] } }));
-    expect(ctx.plan).toEqual({ option_id: 'switch_to_gcp', label: 'Switch to GCP', basis: 'single_option' });
-    expect(ctx.dsk).toBeNull();
+    const graph = { goal_constraints: FIXTURE.goal_constraints['d3-s4'] };
+    // A lone option is not a licence: no plan label, no items (PTL 5933036532 #5; CODEX_CLI_OVERFLOW 5934859876 P2).
+    const lone = methodScienceContext(premortem({ signals: D3_S4, graph }));
+    expect(lone.plan).toBeNull();
+    expect(lone.supplied_items).toEqual([]);
+    expect(lone.not_cited).toBe('no_identified_plan');
+    // CONTROL: the user explicitly choosing it names it, and grounds the items, but never cites P-001.
+    const chosen = methodScienceContext(premortem({ signals: D3_S4, graph, user_selected_option_id: 'switch_to_gcp' }));
+    expect(chosen.plan).toEqual({ option_id: 'switch_to_gcp', label: 'Switch to GCP', basis: 'user_selected' });
+    expect(chosen.supplied_items.length).toBeGreaterThan(0);
+    expect(chosen.dsk).toBeNull();
   });
 
   it('ROW 5b CONSTRUCTED (licensed leader, ONE own option): the P-001 contraindication holds', () => {
@@ -163,6 +171,37 @@ describe('DSK-P-001 on the pre-mortem', () => {
 });
 
 describe('items bind by IDENTITY to the plan\'s path', () => {
+  /** D3 plus ONE link and ONE Olumi-estimated factor that sit only on Phased's path (CONSTRUCTED). */
+  const phasedOnly = (base: MethodScienceSignals): MethodScienceSignals => ({
+    ...base,
+    'model.goal_path_links': [
+      ...base['model.goal_path_links'],
+      { link_id: 'phased_only_factor->monthly_spend', from_label: 'Phased only', to_label: 'Monthly spend',
+        link_sizing: 'user', option_ids: ['phased_gcp_migration'], goal_distance: 0 },
+    ],
+    'model.goal_path_factors': [
+      ...base['model.goal_path_factors'],
+      { factor_id: 'phased_only_factor', label: 'Phased only', value_authorship: 'olumi_estimate', goal_distance: 1 },
+    ],
+  });
+
+  it('ROW 7b PAIR: an Olumi-estimated factor only on ANOTHER option\'s path is not this plan\'s item, nor its evidence gap', () => {
+    const forSwitch = methodScienceContext(premortem({ signals: phasedOnly(D3) }));
+    expect(forSwitch.supplied_items).toEqual(FIXTURE.premortem_reference.supplied_items);
+    // The reviewer's repro: with every Switch-path item the user's own, the Phased-only factor must not earn P-001.
+    const allYours: MethodScienceSignals = {
+      ...D3,
+      'model.goal_path_links': D3['model.goal_path_links'].map((l) => ({ ...l, link_sizing: 'user' as const })),
+      'model.goal_path_factors': D3['model.goal_path_factors'].map((f) => ({ ...f, value_authorship: 'yours' as const })),
+    };
+    expect(methodScienceContext(premortem({ signals: phasedOnly(allYours) })).not_cited).toBe('no_evidence_gap');
+    // CONTROL: for the plan whose path it lies on, the same factor IS supplied.
+    const forPhased = methodScienceContext(premortem({
+      signals: { ...phasedOnly(D3), 'run.leader_option_id': 'phased_gcp_migration' },
+    }));
+    expect(forPhased.supplied_items.map((i) => i.id)).toContain('phased_only_factor');
+  });
+
   it('ROW 7 PAIR: a link only on ANOTHER option\'s path, and a risk off the path, are excluded', () => {
     const offPath: MethodScienceSignals = {
       ...D3,
@@ -209,9 +248,18 @@ describe('DSK-P-004 on Widen', () => {
     expect(ctx.not_cited).toBe('stage_not_applicable');
   });
 
-  it('ROW 10 PAIR (D3 options at `frame`): two own options cite P-004 and ask its steps; one own option never does', () => {
+  it('ROW 9b REGRESSION: a STALE Run read at a legitimately derived `frame` is still post-Run → no P-004', () => {
+    for (const kind of ['complete_stale', 'complete_current', null]) {
+      const ctx = methodScienceContext({ method: 'elicit_options', canonical_stage: 'frame', signals: { ...D3, 'run.kind': kind } });
+      expect(ctx.dsk, `run.kind ${String(kind)}`).toBeNull();
+      expect(ctx.not_cited).toBe('run_exists');
+    }
+  });
+
+  it('ROW 10 PAIR (D3 options, NEVER run, at `frame`): two own options cite P-004 and ask its steps; one own option never does', () => {
     const p004 = protocol('DSK-P-004');
-    const two = methodScienceContext({ method: 'elicit_options', canonical_stage: 'frame', signals: D3 });
+    const neverRun: MethodScienceSignals = { ...D3, 'run.kind': 'none' };
+    const two = methodScienceContext({ method: 'elicit_options', canonical_stage: 'frame', signals: neverRun });
     expect(two.dsk?.protocol_id).toBe('DSK-P-004');
     expect(two.dsk?.protocol_directive).toContain('Put them to the user as written');
     for (const step of two.dsk?.literal_steps ?? []) expect(two.dsk?.protocol_directive).toContain(step);
@@ -219,8 +267,33 @@ describe('DSK-P-004 on Widen', () => {
     expect(two.dsk?.blind_spot_step).toBeNull();
     expect(two.supplied_items).toEqual([]);
 
-    const one = methodScienceContext({ method: 'elicit_options', canonical_stage: 'frame', signals: D2 });
+    const one = methodScienceContext({ method: 'elicit_options', canonical_stage: 'frame', signals: { ...D2, 'run.kind': 'none' } });
     expect(one.not_cited).toBe('single_option');
+  });
+});
+
+describe('the leader is read only behind its licence', () => {
+  /** D3's signals with `run.leader_option_id` behind a getter that counts reads. */
+  function probed(licensed: boolean): { signals: MethodScienceSignals; reads: () => number } {
+    let reads = 0;
+    const signals = { ...D3, 'run.leader_licensed': licensed } as Record<string, unknown>;
+    delete signals['run.leader_option_id'];
+    Object.defineProperty(signals, 'run.leader_option_id', {
+      enumerable: true,
+      get: () => { reads += 1; return 'switch_to_gcp'; },
+    });
+    return { signals: signals as unknown as MethodScienceSignals, reads: () => reads };
+  }
+
+  it('ROW 14 PAIR: an unlicensed leader is never READ (0 reads); a licensed one is', () => {
+    const unlicensed = probed(false);
+    const a = methodScienceContext(premortem({ signals: unlicensed.signals }));
+    expect(unlicensed.reads()).toBe(0);
+    expect(a.plan).toBeNull();
+    const licensed = probed(true);
+    const b = methodScienceContext(premortem({ signals: licensed.signals }));
+    expect(licensed.reads()).toBeGreaterThan(0);
+    expect(b.plan?.basis).toBe('licensed_leader');
   });
 });
 
