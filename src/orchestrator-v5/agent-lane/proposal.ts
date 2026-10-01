@@ -99,7 +99,13 @@ export interface ProposalOperation {
      * id, `value` is R3's `{outcome_id, operation: 'product', factor_ids, words}` verbatim. Written only through the
      * approved-card door (`commitOptionLevels` → `identity_confirm`, Canonical #2292), one append, alone.
      */
-    | 'confirm_identity';
+    | 'confirm_identity'
+    /**
+     * ⭐ A SAVED TOTAL MADE THE SUM OF ITS PARTS (DL 380e54 #85 5932495794 item 1; `sum-total-card.ts`) — `path` is the
+     * total's id, `value` is `{part_ids, level_after, total, part_links}`: the total node and its part links exactly as the
+     * card's repair writes them. Written only through `/graph/register`, CAS-gated on the card's analysis hash.
+     */
+    | 'repair_sum_total';
   /** Node id, or `from::to` for an edge. */
   readonly path: string;
   readonly value?: unknown;

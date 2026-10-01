@@ -151,6 +151,14 @@ function usersOwn(carrier: unknown): boolean {
   return earnsAuthorshipCredit(classifyValueSource(carrier.source)) || carrier.source === 'user_assumption';
 }
 
+/**
+ * A level that is the user's own figure, by the same rule B6 reads a target's level with ({@link usersOwn}). Exported for
+ * the sum-total card (`sum-totals.ts`): a total whose own level is the user's figure is never overwritten by Σ its parts.
+ */
+export function usersOwnLevel(carrier: unknown): boolean {
+  return usersOwn(carrier);
+}
+
 const SIZED_MAGNITUDES: ReadonlySet<unknown> = new Set(['olumi_estimate', 'user_stated']);
 
 const norm = (u: unknown): string | undefined =>
