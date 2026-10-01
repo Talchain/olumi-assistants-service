@@ -192,11 +192,133 @@ describe('the predicate reads only OUR stored unit against OUR template (unnamed
   it('unitNamingCurrency: the head replaced, the tail byte-exact; null when nothing can be named', async () => {
     const { unitNamingCurrency } = await import('../unnamed-currency.js');
     expect(unitNamingCurrency('currency/quarter', '£')).toBe('£/quarter');
-    expect(unitNamingCurrency('Currency per month', 'GBP')).toBe('GBP per month');
-    expect(unitNamingCurrency('currency', '$')).toBe('$');
+    expect(unitNamingCurrency('<currency>/month', 'GBP')).toBe('GBP/month');
+    expect(unitNamingCurrency('Currency/Quarter', '£')).toBe('£/Quarter');
+    // CHANGED by #2468 P2 (only the template's own "/" forms take a currency): these two were "GBP per month" and "$".
+    expect(unitNamingCurrency('Currency per month', 'GBP')).toBeNull();
+    expect(unitNamingCurrency('currency', '$')).toBeNull();
+    for (const u of ['currency (USD)/quarter', 'currency per year per quarter', 'currency/<period>', 'currency/fortnightly', ' currency/quarter']) {
+      expect(unitNamingCurrency(u, '£'), u).toBeNull();
+    }
     expect(unitNamingCurrency('GBP per quarter', '£')).toBeNull();
     expect(unitNamingCurrency('<currency>/<period>', '£')).toBeNull();
     expect(unitNamingCurrency('currency/quarter', '')).toBeNull();
     expect(unitNamingCurrency('currency/quarter', '£ per')).toBeNull();
   });
+});
+
+// ── CEE #2468 CHANGES_REQUIRED (CODEX_CLI_OVERFLOW @ f1eda736, run by DL 380e54; DL note to MG): each row goes through the
+// routed door — dispatchTool('propose_goal_current_level') → dispatchTool('authorise_change') — and asserts what is STORED. ──
+
+/** Propose, then approve whatever came back (a refusal approves nothing): returns both answers and the store. */
+async function proposeThenApprove(initial: Graph, said: string, args: Rec) {
+  const s = setup(initial, said);
+  const proposed = await s.call(TOOL, { goal_label: GOAL_LABEL, user_stated: true, ...args }) as Rec;
+  const approved = await s.call('authorise_change', { proposal_id: String(proposed.proposal_id ?? 'none') }) as Rec;
+  return { s, proposed, approved };
+}
+
+/** Nothing stored: no registration, the goal byte for byte as it was, and the door's answer a refusal. */
+function nothingStored(initial: Graph, run: { s: ReturnType<typeof setup>; proposed: Rec }): void {
+  expect(run.s.registers, `stored: ${JSON.stringify(goalIn(run.s.graph()))}`).toEqual([]);
+  expect(goalIn(run.s.graph())).toStrictEqual(goalIn(initial));
+  expect(run.proposed.ok, JSON.stringify(run.proposed)).toBe(false);
+}
+
+describe('#2468 P1 (yen): currency is read by the ONE shared alphabet, and a typed period must be the goal\'s own', () => {
+  it('RED (the reviewer\'s row): typed "¥ per year" for "¥100,000 per year" on "currency/quarter" → refused, never stored as ¥/quarter', async () => {
+    const run = await proposeThenApprove(clone(served), 'Our revenue is ¥100,000 per year.', { value: 100000, unit: '¥ per year' });
+    nothingStored(served, run);
+    expect(run.proposed.refusal).toBe('unit_mismatch');
+  });
+
+  it('RED (the alphabet, fail closed): a goal already in ¥/quarter + a figure with NO unit → unit_unstated, never assumed to be in yen', async () => {
+    const g = clone(served); goalIn(g).goal_threshold_unit = '¥/quarter';
+    const run = await proposeThenApprove(g, 'Our quarterly revenue is ¥100,000.', { value: 100000, unit: '' });
+    nothingStored(g, run);
+    expect(run.proposed.refusal).toBe('unit_unstated');
+  });
+
+  it('CONTROL: the same yen goal + typed "¥" → carded and stored in the goal\'s own ¥/quarter', async () => {
+    const g = clone(served); goalIn(g).goal_threshold_unit = '¥/quarter';
+    const run = await proposeThenApprove(g, 'Our quarterly revenue is ¥100,000.', { value: 100000, unit: '¥' });
+    expect(run.approved.applied, JSON.stringify(run.approved)).toBe(true);
+    expect(goalIn(run.s.graph()).observed_state).toMatchObject({ raw_value: 100000, unit: '¥/quarter', source: USER_EDIT_SOURCE });
+  });
+
+  it('RED (the typed period, where no classifier reads the unit): "customers/month" on a goal in "customers/quarter" → refused', async () => {
+    const g = clone(served); Object.assign(goalIn(g), { label: 'New customers', goal_threshold_unit: 'customers/quarter' });
+    const run = await proposeThenApprove(g, 'We sign 12 new customers a month.', { goal_label: 'New customers', value: 12, unit: 'customers/month' });
+    nothingStored(g, run);
+    expect(run.proposed.refusal).toBe('unit_mismatch');
+  });
+
+  it('CONTROL: the same goal + the same period typed ("customers per quarter") → carded', async () => {
+    const g = clone(served); Object.assign(goalIn(g), { label: 'New customers', goal_threshold_unit: 'customers/quarter' });
+    const run = await proposeThenApprove(g, 'We sign 12 new customers a quarter.', { goal_label: 'New customers', value: 12, unit: 'customers per quarter' });
+    expect(run.proposed.ok, JSON.stringify(run.proposed)).toBe(true);
+  });
+});
+
+describe('#2468 P1 (existing currency): a currency already named anywhere on the goal is never replaced — refused at proposal AND at apply', () => {
+  const USD_LEVEL = { value: 80000 / 125000, baseline: 80000 / 125000, unit: 'USD/quarter', source: USER_EDIT_SOURCE, raw_value: 80000, cap: 125000 };
+
+  it('RED (the reviewer\'s row): the user\'s level held in USD/quarter + a £ card → refused, the level and its unit untouched', async () => {
+    const g = clone(served); goalIn(g).observed_state = { ...USD_LEVEL };
+    const run = await proposeThenApprove(g, SAID, { value: 100000, unit: '£' });
+    nothingStored(g, run);
+    expect(run.proposed.refusal).toBe('currency_already_named');
+  });
+
+  it('RED: a limit row on the goal in USD/quarter + a £ card → refused', async () => {
+    const g = clone(served);
+    g.goal_constraints = [{ constraint_id: 'c-usd', node_id: GOAL_ID, operator: '>=', value: 150000, unit: 'USD/quarter', label: 'quarterly revenue at least $150,000' }];
+    const run = await proposeThenApprove(g, SAID, { value: 100000, unit: '£' });
+    nothingStored(g, run);
+    expect(run.proposed.refusal).toBe('currency_already_named');
+  });
+
+  it('RED (apply): a currency named on the goal AFTER the card was prepared → not applied, nothing written', async () => {
+    const s = setup(clone(served), SAID);
+    const proposed = await s.call(TOOL, { goal_label: GOAL_LABEL, value: 100000, unit: '£', user_stated: true }) as Rec;
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    goalIn(s.graph()).observed_state = { ...USD_LEVEL }; // an edit the analysis hash in this store does not see
+    const before = clone(goalIn(s.graph()));
+    const approved = await s.call('authorise_change', { proposal_id: proposed.proposal_id }) as Rec;
+    expect(approved.applied, JSON.stringify(approved)).not.toBe(true);
+    expect(s.registers).toEqual([]);
+    expect(goalIn(s.graph())).toStrictEqual(before);
+  });
+
+  it('CONTROL: a level held in the placeholder unit itself ("currency/quarter") names no currency → adopted as before', async () => {
+    const g = clone(served); goalIn(g).observed_state = { ...USD_LEVEL, unit: SERVED_UNIT };
+    const run = await proposeThenApprove(g, SAID, { value: 100000, unit: '£' });
+    expect(run.approved.applied, JSON.stringify(run.approved)).toBe(true);
+    expect(goalIn(run.s.graph()).goal_threshold_unit).toBe(ADOPTED);
+  });
+});
+
+describe('#2468 P2 (tails): only the exact template forms "currency/<period>" and "<currency>/<period>" take a currency', () => {
+  it.each([
+    ['currency (USD)/quarter', 'a currency inside the tail'],
+    ['currency per year per quarter', 'two periods'],
+    ['currency', 'no period (CHANGED: was adopted as the bare currency)'],
+    ['currency per quarter', 'not the template\'s "/" form'],
+    ['currency/<period>', 'the period slot unfilled'],
+    ['currency/fortnightly', 'not a period word the estate folds'],
+  ])('RED-or-CONTROL: goal unit %j (%s) + a £ card → refused, nothing stored', async (unit) => {
+    const g = clone(served); goalIn(g).goal_threshold_unit = unit;
+    const run = await proposeThenApprove(g, SAID, { value: 100000, unit: '£' });
+    nothingStored(g, run);
+  });
+
+  it.each([['currency/quarter', '£/quarter'], ['Currency/Quarter', '£/Quarter'], ['<currency>/quarter', '£/quarter'], ['currency/month', '£/month']])(
+    'CONTROL: goal unit %j + a £ card → carded and stored as %j (the tail byte for byte)', async (unit, adopted) => {
+      const g = clone(served); goalIn(g).goal_threshold_unit = unit;
+      const said = unit.endsWith('month') ? 'Our monthly revenue is £100,000.' : SAID;
+      const run = await proposeThenApprove(g, said, { value: 100000, unit: '£' });
+      expect(run.approved.applied, JSON.stringify(run.approved)).toBe(true);
+      expect(goalIn(run.s.graph()).goal_threshold_unit).toBe(adopted);
+      expect(goalIn(run.s.graph()).observed_state.unit).toBe(adopted);
+    });
 });

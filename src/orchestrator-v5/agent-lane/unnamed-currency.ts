@@ -12,12 +12,16 @@
  * level card's typed `unit`, which the level door's own words rule grounds in what the user wrote).
  */
 import { unitPhraseHead } from './unit-conflict.js';
+import { ratePeriodWord } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
 /** The placeholder word of the drafter template's currency slot ("<currency>"), as a unit head may carry it. */
 const PLACEHOLDER_HEAD = /^<?currency>?$/i;
 
-/** A template slot still unfilled anywhere in a unit ("<period>", "<item>"). */
-const UNFILLED_SLOT = /<[^<>]*>/;
+/**
+ * The template's own money form and nothing else: the placeholder head, one "/", one word (CEE #2468 P2). The word must then
+ * be a period the estate folds (`ratePeriodWord`); "<period>" is not one, so an unfilled slot names nothing.
+ */
+const TEMPLATE_FORM = /^(<currency>|currency)\/([^\s/]+)$/i;
 
 /**
  * Is this unit our template's money unit with NO currency named: its head (`unitPhraseHead`, the leading token before a
@@ -32,18 +36,37 @@ export function isUnnamedCurrencyUnit(unit: unknown): boolean {
 
 /**
  * The unnamed-currency `goalUnit` with its placeholder head replaced by `statedHead` (the currency the caller was given),
- * every other byte kept exactly: "currency/quarter" + "£" → "£/quarter"; "currency per month" + "GBP" → "GBP per month".
- * Null when there is nothing to name: `goalUnit` is not an unnamed currency, `statedHead` is empty or has a space or "/"
- * in it, or the tail still holds an unfilled template slot ("<currency>/<period>" names no period either, and "£/<period>"
- * would be stored as if it did).
+ * the "/" and the period kept byte for byte: "currency/quarter" + "£" → "£/quarter"; "<currency>/month" + "GBP" →
+ * "GBP/month". ⛔ ONLY the template's own forms (CEE #2468 P2, CODEX_CLI_OVERFLOW: "currency (USD)/quarter" was stored as
+ * "£ (USD)/quarter", and "currency per year per quarter" with both periods). Null for anything else: another tail
+ * ("currency per month", "currency (USD)/quarter", "currency/fortnightly"), no period (a bare "currency"), an unfilled slot
+ * ("currency/<period>", "<currency>/<period>"), or a `statedHead` that is empty or holds a space or "/".
  */
 export function unitNamingCurrency(goalUnit: string, statedHead: string): string | null {
-  if (!isUnnamedCurrencyUnit(goalUnit)) return null;
+  const form = TEMPLATE_FORM.exec(goalUnit);
+  if (form === null || ratePeriodWord(form[2]!) === null) return null;
   const head = statedHead.trim();
   if (head === '' || /[\s/]/.test(head)) return null;
-  const at = /^(\s*)([^\s/]+)/.exec(goalUnit);
-  if (at === null) return null;
-  const tail = goalUnit.slice(at[0].length);
-  if (UNFILLED_SLOT.test(tail)) return null;
-  return `${at[1]}${head}${tail}`;
+  return `${head}/${form[2]}`;
+}
+
+/**
+ * ⛔ A UNIT THE GOAL ALREADY HOLDS (CEE #2468 P1, CODEX_CLI_OVERFLOW: a user's level in "USD/quarter" beside the target's
+ * "currency/quarter" was overwritten by a £ card): the first unit on the goal's own level (`observed_state.unit`) or on a
+ * limit row on the goal (`goal_constraints[].unit` joined by `node_id`) that is anything but our placeholder — a currency it
+ * already has, or one nobody can read. Null when there is none. Reads only what WE stored.
+ */
+export function unitAlreadyOnGoal(
+  goal: { readonly id?: unknown; readonly observed_state?: unknown },
+  rawGraph: unknown,
+): string | null {
+  const rows = (rawGraph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints;
+  const units = [
+    (goal.observed_state as { unit?: unknown } | null | undefined)?.unit,
+    ...(Array.isArray(rows) ? rows : [])
+      .filter((r) => (r as { node_id?: unknown } | null)?.node_id === goal.id)
+      .map((r) => (r as { unit?: unknown }).unit),
+  ];
+  for (const u of units) if (typeof u === 'string' && u.trim() !== '' && !isUnnamedCurrencyUnit(u)) return u;
+  return null;
 }
