@@ -13,9 +13,9 @@
  * The provenance travels with the figure ("explicit" stays the user's claim, anything else is Olumi's), so the existing
  * doors decide whose size it is (#2389 written size, #2409 written range) and #2416/#2421 fit it.
  *
- * Only when the factor IS a constant: a finite non-zero level, a money unit, no option sets or changes it, no link
- * points into it, and it is used by nothing but that one product; the product is exactly TWO quantities, the other one
- * not money; the target is money. Anything else (a price lever, a rate, three factors) is left exactly as drafted.
+ * Only when the factor IS a constant: not a lever (`controllable`), a finite non-zero level, a money unit, no option
+ * sets or changes it, no link points into it, and it is used by nothing but that one product; the product is exactly
+ * TWO quantities, the other one not money; the target is money and is NOT the goal (the goal's own product is C46's). Anything else (a price lever, a rate, three factors) is left exactly as drafted.
  * PURE: the candidate itself when nothing applies.
  */
 import { canonicalLabel, type CandidateModel } from './admit-model.js';
@@ -36,7 +36,10 @@ export function perOneLinksForConstantProducts(c: CandidateModel): CandidateMode
   for (const id of identities) {
     if (id.operation !== 'product' || id.factors.length !== 2) continue;
     const cur = (next ?? c) as CandidateModel;
-    const k = cur.factors.find((f) => id.factors.some(is(f.label)) && typeof f.baseline_value === 'number'
+    // ⛔ Never the GOAL's own product (C46: the user's identity, its confirm card and its withholds), and never a lever the
+    // user controls (`controllable`: an option may set it later, so the product is not linear in what the user can do).
+    if (is(id.outcome)(c.goal.metric)) continue;
+    const k = cur.factors.find((f) => id.factors.some(is(f.label)) && f.role !== 'controllable' && typeof f.baseline_value === 'number'
       && Number.isFinite(f.baseline_value) && f.baseline_value !== 0 && money(f.unit));
     if (k === undefined) continue;
     const count = id.factors.find((l) => !is(k.label)(l))!;

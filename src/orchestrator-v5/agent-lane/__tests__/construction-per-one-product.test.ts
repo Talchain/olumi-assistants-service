@@ -122,6 +122,17 @@ describe('controls: only a CONSTANT money-per-one in a two-quantity product is r
     expect(perOneLinksForConstantProducts(c).identities!.map((i) => i.outcome)).toContain('Funding from investment firms');
   });
 
+  it('the GOAL\'s own product (C46: MRR = price × subscribers, price constant in this draft) is left exactly as drafted', () => {
+    const c = { ...base, goal: { ...base.goal, metric: 'MRR' }, identities: [{ outcome: 'MRR', operation: 'product',
+      factors: ['Investment-firm deals closed', 'Typical investment-firm funding per deal'], provenance: 'inferred' }] } as unknown as CandidateModel;
+    expect(perOneLinksForConstantProducts(c)).toBe(c);
+  });
+
+  it('a LEVER the user controls (role controllable) is never folded away, even with no option setting it yet', () => {
+    const c = { ...base, identities: [base.identities![0]!], factors: base.factors.map((f) => (f.label === 'Typical investment-firm funding per deal' ? { ...f, role: 'controllable' } : f)) } as unknown as CandidateModel;
+    expect(perOneLinksForConstantProducts(c)).toBe(c);
+  });
+
   it('a THREE-quantity product (served 0341Z: conversations × rate × average) is left exactly as drafted', () => {
     const c = { ...base, identities: [{ outcome: 'Funding from investment firms', operation: 'product',
       factors: ['Investment-firm deals closed', 'Typical angel funding per deal', 'Typical investment-firm funding per deal'], provenance: 'ai_proposed' }] } as unknown as CandidateModel;
