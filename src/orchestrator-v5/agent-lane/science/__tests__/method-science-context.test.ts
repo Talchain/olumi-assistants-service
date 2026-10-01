@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { StageType } from '@talchain/schemas/boundary';
+import { ANALYSIS_RUN_STATE_KINDS, type StageType } from '@talchain/schemas/boundary';
 
 import { deriveAuthoritativeStage } from '../../../context/derive-stage.js';
 import { _resetDskBundleCache, loadVerifiedDskBundle } from '../../../compose/dsk-bundle-record.js';
@@ -118,8 +118,8 @@ describe('DSK-P-001 on the pre-mortem', () => {
     expect(ctx.not_cited).toBe('stage_not_applicable');
   });
 
-  it('ROW 3 CONSTRUCTED (run.kind none, stage analyse): no current Run → no citation', () => {
-    const ctx = methodScienceContext(premortem({ canonical_stage: 'analyse', signals: { ...D3, 'run.kind': 'none' } }));
+  it('ROW 3 CONSTRUCTED (run.kind never_run, stage analyse): no current Run → no citation', () => {
+    const ctx = methodScienceContext(premortem({ canonical_stage: 'analyse', signals: { ...D3, 'run.kind': 'never_run' } }));
     expect(ctx.not_cited).toBe('no_current_run');
   });
 
@@ -258,7 +258,7 @@ describe('DSK-P-004 on Widen', () => {
 
   it('ROW 10 PAIR (D3 options, NEVER run, at `frame`): two own options cite P-004 and ask its steps; one own option never does', () => {
     const p004 = protocol('DSK-P-004');
-    const neverRun: MethodScienceSignals = { ...D3, 'run.kind': 'none' };
+    const neverRun: MethodScienceSignals = { ...D3, 'run.kind': 'never_run' };
     const two = methodScienceContext({ method: 'elicit_options', canonical_stage: 'frame', signals: neverRun });
     expect(two.dsk?.protocol_id).toBe('DSK-P-004');
     expect(two.dsk?.protocol_directive).toContain('Put them to the user as written');
@@ -267,8 +267,17 @@ describe('DSK-P-004 on Widen', () => {
     expect(two.dsk?.blind_spot_step).toBeNull();
     expect(two.supplied_items).toEqual([]);
 
-    const one = methodScienceContext({ method: 'elicit_options', canonical_stage: 'frame', signals: { ...D2, 'run.kind': 'none' } });
+    const one = methodScienceContext({ method: 'elicit_options', canonical_stage: 'frame', signals: { ...D2, 'run.kind': 'never_run' } });
     expect(one.not_cited).toBe('single_option');
+  });
+
+  it('ROW 10b SERVED KIND (the contract\'s own run-state kinds): P-004 is cited on `never_run` and on no other kind; RC\'s example "none" is no served kind', () => {
+    // The class is the schema's enumeration, read from @talchain/schemas, never a list typed here.
+    expect(ANALYSIS_RUN_STATE_KINDS).toContain('never_run');
+    expect(ANALYSIS_RUN_STATE_KINDS as readonly string[]).not.toContain('none');
+    const cited = [...ANALYSIS_RUN_STATE_KINDS, 'none'].filter((kind) =>
+      methodScienceContext({ method: 'elicit_options', canonical_stage: 'frame', signals: { ...D3, 'run.kind': kind } }).dsk?.protocol_id === 'DSK-P-004');
+    expect(cited).toEqual(['never_run']);
   });
 });
 
