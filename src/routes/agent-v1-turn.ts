@@ -1797,10 +1797,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           writesDispatched += 1;
           return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOlumiOptionAdoptionInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
         },
-        // ⭐ MG F1 T6 (#2471): an option's status, in-process, so "applied" rests on the writer's own typed outcome.
+        // ⭐ MG F1 T6 (#2471): an option's status, in-process, so "applied" rests on the writer's own typed outcome. It runs
+        // as an Agent SUB-TURN, exactly as the HTTP dispatch it replaces did (:1499): the writer's narration is not the
+        // conversation, so its row keeps no conversation text (#2352 class; DL CR on #2471 P2).
         commitOptionStatus: async (input) => {
           writesDispatched += 1;
-          return readCache.around(() => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionStatusInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused));
+          return readCache.around(() => runAsAgentSubturn(input.scenario_id, () => runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionStatusInProcess(input, String(req.id)), () => ({ status: 'stale' as const }), fenceRefused)));
         },
       },
     );

@@ -49,6 +49,8 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { reconcileScenarioAnalysisFacts, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT } from '../../context/reconcile-scenario-analysis-facts.js';
 import { runFencedInProcessWrite } from '../../../orchestrator/turn-fence-prehandler.js';
 import { TurnFenceRejectedError } from '../../session/turn-fence.js';
+import { runAsAgentSubturn } from '../../session/agent-subturn-context.js';
+import { appendCheckedGraphWrite } from '../../persist-graph-write.js';
 import { ModelVersionMutationReceiptV1LocalSchema } from '../../model-management/mutation-receipt.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { buildD1Fixture } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
@@ -93,10 +95,18 @@ const d: InternalDispatch = async (path) => {
   throw new Error(`unexpected dispatch ${path}`);
 };
 
-/** The port exactly as `agent-v1-turn.ts` wires it: the real door inside the real fence wrapper. */
+/**
+ * The port exactly as `agent-v1-turn.ts` wires it (pinned by `turn-fence-in-process-doors.test.ts`): an Agent sub-turn
+ * around the real fence wrapper around the real door. `bare` drops the sub-turn mark — the contrast for the text row.
+ */
 const fenceRefused = (verdict: 'unclaimed' | 'unavailable') => ({ status: 'refused' as const, reason: `turn_fence_${verdict}` });
-const port = (input: CommitOptionStatusInput) =>
+const bare = (input: CommitOptionStatusInput) =>
   runFencedInProcessWrite(input.scenario_id, input.turn_id, () => commitOptionStatusInProcess(input, 'req-t6'), () => ({ status: 'stale' as const }), fenceRefused);
+const port = (input: CommitOptionStatusInput) => runAsAgentSubturn(input.scenario_id, () => bare(input));
+
+/** Every turn row the REAL persistence floor (`appendCheckedGraphWrite`) handed to the store. */
+const rows: { turn_id: string; userMessage?: string; assistantMessage?: string }[] = [];
+const rowStore = { append: vi.fn(async (w: { turn_id: string; userMessage?: string; assistantMessage?: string }) => { rows.push(w); return { id: `row-${rows.length}` }; }) };
 
 /**
  * What THIS attempt did, as the commit seam reports it (`CommitResult`): `thisAttemptWrote`, the minted version
@@ -104,6 +114,11 @@ const port = (input: CommitOptionStatusInput) =>
  */
 function commitAnswers(a: { wrote: boolean; minted: boolean; receipt?: unknown; persisted: (written: Json) => Json }) {
   mocks.commitDirectAnswer.mockImplementation(async (response: Json, metadata: Json) => {
+    // The turn row, through the real floor every turn row passes, carrying the writer's narration as the commit does.
+    await appendCheckedGraphWrite({ store: rowStore as never, writesGraph: false, source: 'test_option_status',
+      write: { scenario_id: metadata.scenario_id, turn_id: metadata.turn_id, turn_class: 'direct_answer', handler_id: null,
+        request_hash: String(metadata.request_hash), response_emitted: true, llm_calls_used: 0, duration_ms: 1, handler_facts: [],
+        assistantMessage: String(response.assistant_text) } as never });
     stored = a.persisted(metadata.graph as Json);
     return {
       response: { ...response, ...(a.receipt !== undefined ? { model_version_receipt: a.receipt } : {}) },
@@ -115,9 +130,9 @@ function commitAnswers(a: { wrote: boolean; minted: boolean; receipt?: unknown; 
   });
 }
 
-async function press() {
+async function press(commitOptionStatus: typeof port = port) {
   const store = new ProposalStore();
-  const caps = createAgentCapabilities(d, store, undefined, 'full', undefined, { commitOptionStatus: port });
+  const caps = createAgentCapabilities(d, store, undefined, 'full', undefined, { commitOptionStatus });
   const p = await caps.proposeOptionStatus!(ctxOf(SAID), { option_label: 'Launch now', status: 'removed', rationale: SAID });
   expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
   const r = await caps.authoriseChange(ctxOf('Yes.', [SAID]), { proposal_id: String(p.proposal_id) });
@@ -126,6 +141,7 @@ async function press() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  rows.length = 0;
   const parsed = GraphV3.safeParse(buildD1Fixture());
   if (!parsed.success) throw new Error(`fixture must parse: ${JSON.stringify(parsed.error.issues[0])}`);
   stored = parsed.data as Json;
@@ -145,6 +161,22 @@ describe('the Agent says APPLIED only on the option-status writer\'s own typed o
     expect(optionOf(stored)).toMatchObject({ option_status: 'removed', analysis_participation: 'retained_excluded' });
     expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true, receipts: [] }));
     expect(String(r.follow_up)).toMatch(/Launch now/);
+  });
+
+  it('DL CR P2 (#2352 class): the committed turn row keeps NO conversation text — the writer\'s narration is a sub-turn', async () => {
+    commitAnswers({ wrote: true, minted: false, persisted: (written) => written });
+    const { r, turnId } = await press();
+    expect(r.applied).toBe(true);
+    expect(rows.map((w) => w.turn_id), 'the control: the door really wrote ONE turn row').toEqual([turnId]);
+    expect(rows[0]).not.toHaveProperty('assistantMessage');
+    expect(rows[0]).not.toHaveProperty('userMessage');
+  });
+
+  it('CONTRAST: the same door WITHOUT the sub-turn mark stores the narration (the probe sees text when it is there)', async () => {
+    commitAnswers({ wrote: true, minted: false, persisted: (written) => written });
+    await press(bare);
+    expect(rows).toHaveLength(1);
+    expect(String(rows[0]!.assistantMessage)).toMatch(/Launch now/);
   });
 
   it('CONTROL: a SIGNED-IN commit (version minted, its receipt names THIS turn) → APPLIED, with the receipt', async () => {
