@@ -165,6 +165,20 @@ export function periodsCollide(unit: unknown, goalPeriod: GoalPeriodType | undef
   const named = periodNamedByUnit(unit);
   return goalPeriod !== undefined && named !== undefined && named !== goalPeriod;
 }
+/**
+ * ⛔ THE ONE PERIOD-COLLISION RULE (DL 380e54 on #2454 round 3; CODEX 5932596768 / 5933216093). The unit a goal will hold
+ * names one period while the `goal_period` in force AFTER the write — the one this write sets, else the typed one the goal
+ * keeps (absent = unchanged) — names another: two answers for one figure. ENFORCED ONCE, in the shared writer
+ * (`add-constraint.ts`), which every door reaches; the Agent's card (refuses before offering) and its read-back (never
+ * confirms a collision) call this same function, so no door can judge it differently.
+ */
+export function goalUnitCollidesWithPeriod(
+  unit: unknown,
+  goalPeriodWritten: GoalPeriodType | undefined,
+  goal: { readonly goal_period?: unknown } | undefined,
+): boolean {
+  return periodsCollide(unit, goalPeriodWritten ?? typedGoalPeriodOf(goal));
+}
 /** The unit without its period phrase ("£ per quarter" → "£"); a unit with no single joint is returned as it is. */
 export function unitWithoutPeriod(unit: string): string {
   const parts = unit.split(UNIT_PERIOD_JOINT);

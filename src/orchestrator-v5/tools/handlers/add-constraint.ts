@@ -77,6 +77,7 @@ import {
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
+import { goalUnitCollidesWithPeriod } from '../../goal-target/goal-period.js';
 import {
   formatBaselineElicitation,
   formatBaselineNoted,
@@ -1094,6 +1095,42 @@ export function createAddConstraintHandler(): HandlerFn {
       // ONLY the node-threshold stamp that is gated, since that is the
       // field the F9 defect actually moved.
       const stampGoalThreshold = ownsGoalThresholdChannel && !valueUnchanged;
+
+      // ⛔ ONE PERIOD CARRIER — THE ONE ENFORCEMENT POINT (DL 380e54 on #2454; CODEX 5932596768 / 5933216093 / 5934135126).
+      // Every door that writes a goal's figure reaches this line: the `goal_target_edit` event (the UI, and the Agent's
+      // approved card), a typed `add_constraint` chip, and the chat tool. Judged over EVERY unit the goal holds AFTER this
+      // write against the `goal_period` in force after it (this write's, else the typed one the goal keeps):
+      //   · the row this write leaves (`newConstraint.unit`: stated, else the row's, else the node's);
+      //   · the goal's own `goal_threshold_unit` — re-stamped only when `stampGoalThreshold`, else RETAINED (an at-most
+      //     edit never stamps it, so "£ per quarter" stayed beside a new `month`: CODEX 5934135126 P1);
+      //   · the goal's other-direction row, which this write does not touch.
+      // Any one naming another period is two answers for one figure: refused for every door and both directions, nothing
+      // written, never a period silently chosen.
+      if (targetNode.kind === 'goal') {
+        const unitsAfter: unknown[] = [
+          newConstraint.unit,
+          stampGoalThreshold ? newConstraint.unit : targetNode.goal_threshold_unit,
+          ...(graph.goal_constraints ?? []).filter((c) => c.node_id === targetId && c.operator !== operator).map((c) => c.unit),
+        ];
+        const colliding = unitsAfter.find((u) => goalUnitCollidesWithPeriod(u, goalSemantics?.goal_period, targetNode));
+        if (colliding !== undefined) {
+          const periodAfter = goalSemantics?.goal_period ?? targetNode.goal_period;
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            `add_constraint: the goal would hold the unit "${String(colliding)}" beside goal_period ${periodAfter}; refused, nothing written.`,
+            {
+              details: {
+                handler_id: 'add_constraint',
+                target_id: targetId,
+                target_kind: targetNode.kind,
+                rejection_reason: 'goal_period_conflicts_with_unit',
+                reason_code: 'goal_period_conflicts_with_unit',
+              },
+              userGuidance: `The goal's figure is "${String(colliding)}", but its period would be per ${periodAfter}, so I haven't changed it. Say which period the figure is for.`,
+            },
+          );
+        }
+      }
 
       // Gate-1 EMIT GUARD — a constraint must not reach the wire
       // unit-ambiguous. A unit-less value outside [0,1] targeting a

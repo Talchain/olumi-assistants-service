@@ -243,4 +243,19 @@ describe('ONE PERIOD CARRIER, the period in force AFTER the write (CODEX #2454 5
     const r = await send(graphWith({ goal_threshold_unit: '£ per quarter' }), 200000, { unit: '£ per quarter' });
     expect(r.kind, JSON.stringify(r)).toBe('mutated');
   });
+  // ⛔ CODEX overflow 5934135126 P1 #1: an AT-MOST write never stamps the goal's own unit, so "£ per quarter" was RETAINED
+  // beside a newly written `month` (and the read-back returned before checking). The shared writer now judges every unit
+  // the goal holds after the write — this event door reaches it like every other.
+  it('RED (CODEX P1 #1): at most "£" + month on a goal holding "£ per quarter" → REFUSED, nothing written (the retained unit collides)', async () => {
+    const g = graphWith({ goal_threshold_unit: '£ per quarter', goal_threshold_raw: 200000 });
+    const before = bytes(g);
+    const r = await send(g, 5000, { unit: '£', goal_period: 'month' }, 'at_most');
+    expect(r).toMatchObject({ kind: 'refused', reason: 'goal_period_conflicts_with_unit' });
+    expect(bytes(g)).toBe(before);
+  });
+  it('CONTROL: the same at-most write naming the goal\'s own period (quarter) → written; the floor and its unit untouched', async () => {
+    const r = await send(graphWith({ goal_threshold_unit: '£ per quarter', goal_threshold_raw: 200000 }), 15000, { unit: '£', goal_period: 'quarter' }, 'at_most');
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    expect(goalOf(r.mutatedGraph)).toMatchObject({ goal_period: 'quarter', goal_threshold_unit: '£ per quarter', goal_threshold_raw: 200000 });
+  });
 });

@@ -73,12 +73,11 @@ import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
 import { buildTypedChipMutationProposal } from '../routing/typed-chip-mutation-proposal.js';
 import { validateToolCall } from '../routing/validator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
-import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
+import { blockedReasonForHandlerFailure, HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../tools/registry.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { CEE_GOAL_THRESHOLD_FRAME } from '../../utils/goal-threshold-cap.js';
-import type { GoalPeriodType } from '@talchain/schemas';
-import { goalPeriodOf, periodsCollide, statedFigureHolds, typedGoalPeriodOf } from '../goal-target/goal-period.js';
+import { goalPeriodOf, statedFigureHolds } from '../goal-target/goal-period.js';
 
 type GoalTargetEditEvent = Extract<SystemEventTurnPayload['event'], { kind: 'goal_target_edit' }>;
 
@@ -237,13 +236,9 @@ export async function applyGoalTargetEdit(
   // The goal's period is the event's, else the one the goal already holds; the figure `raw_value` came from is the LAST
   // `stated_as` entry. A day / week / none pair is refused (never guessed); a ×3 / ×4 / ×12 conversion that does not
   // give `raw_value` (1e-9 relative) is refused. Either way nothing is written: the client re-sends the right figure.
-  // ⛔ ONE PERIOD CARRIER (CODEX #2454 5932596768 / 5933216093): a unit naming one period beside the `goal_period` in force
-  // AFTER this write — the event's, else the typed one the goal keeps (absent = unchanged) — is two answers for one
-  // figure. Refused for every client, nothing written; never a period silently chosen.
-  if (periodsCollide(event.unit, event.goal_period ?? typedGoalPeriodOf(matches[0] as { goal_period?: unknown }))) {
-    log.info({ ...logBase, event: 'v5.system_event.goal_target_edit.goal_period_conflicts_with_unit' }, 'goal_target_edit — the unit names a different period from goal_period; refusing');
-    return refused('goal_period_conflicts_with_unit');
-  }
+  // ⛔ ONE PERIOD CARRIER: a unit naming a period other than the one in force after this write is refused by THE shared
+  // writer (`add-constraint.ts`, `goalUnitCollidesWithPeriod`), which every door reaches — never a second guard here. Its
+  // reason (`goal_period_conflicts_with_unit`) reaches this event's refusal through the handler's declared reason_code.
   const g1 = statedFigureHolds({
     raw_value: event.raw_value,
     // The goal's period: the event's, else the one the goal holds — typed, or named by its stored unit (legacy).
@@ -459,7 +454,8 @@ export async function applyConstraintEditThroughAddConstraint(params: {
         },
         `${eventName} — handler refused; no graph written`,
       );
-      return refused(err.cause_kind);
+      // The handler's own declared reason (the finest grain), else its typed cause — the estate's one mapping.
+      return refused(blockedReasonForHandlerFailure(err));
     }
     throw err;
   }

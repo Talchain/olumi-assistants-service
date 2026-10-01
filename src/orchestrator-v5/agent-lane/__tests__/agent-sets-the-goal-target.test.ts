@@ -397,6 +397,33 @@ describe('the Agent sets the goal\'s success target the user stated, through the
     expect(w.graph().nodes.find((n) => n.id === 'mrr')).toEqual(expect.objectContaining({ goal_threshold_unit: '£ per quarter', goal_threshold_raw: 60000 }));
   });
 
+  // ⛔ CODEX overflow 5934135126 P1 #1 (the read-back half): an at-most read-back returned "held" BEFORE the period check,
+  // so a write that left the goal's retained "£ per quarter" beside a typed `month` was confirmed. The check now runs
+  // first, over every unit the goal holds, with the same function the writer enforces (`goalUnitCollidesWithPeriod`).
+  it('RED (CODEX P1 #1): an AT-MOST write that leaves "£ per quarter" beside a typed month is NOT confirmed — the collision is judged before the at-most return', async () => {
+    const turn = 'MRR should be at most £60,000.';
+    const w = world(graphWith([{ id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold_unit: '£ per quarter' }]));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(turn), { constraint_type: 'at_most', value: 60000, unit: '£', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+    const collidingWriter: InternalDispatch = async (path, body) => {
+      const r = await w.d(path, body);
+      if (!path.endsWith('/graph')) for (const n of w.graph().nodes) if (n.id === 'mrr') (n as Record<string, unknown>)['goal_period'] = 'month';
+      return r;
+    };
+    const r = await createAgentCapabilities(collidingWriter, store).authoriseChange(ctxOf('Yes.', [turn]), { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: true, refusal: 'not_confirmed' }));
+  });
+
+  it('CONTROL: the same at-most write with no second period held IS confirmed', async () => {
+    const turn = 'MRR should be at most £60,000.';
+    const w = world(graphWith([{ id: 'mrr', kind: 'goal', label: 'MRR', goal_threshold_unit: '£ per quarter' }]));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(turn), { constraint_type: 'at_most', value: 60000, unit: '£', rationale: 'x' });
+    const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.', [turn]), { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
+  });
+
   it('RED: the product refuses the write (422, no reason on the wire) → not saved, and its own sentence is relayed in plain words — never a code', async () => {
     const w = world(graphWith());
     const store = new ProposalStore();
