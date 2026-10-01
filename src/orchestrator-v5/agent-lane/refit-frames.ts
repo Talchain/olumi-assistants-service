@@ -104,6 +104,14 @@ function spreadWouldMove(n: Rec, Fold: number, F: number): boolean {
 
 const key = (e: Rec): string => `${e.from}→${e.to}`;
 const userStated = (e: Rec): boolean => e.provenance?.magnitude === 'user_stated';
+/**
+ * ⭐ R3 #75 5923914386 FINDING 1 (DL 5923941128): the whole holds its parts. A DEFINITIONAL link (±1 in one unit, typed by
+ * admission's `definitionalLink`) is exact by definition, like a user's size, so a frame that cuts it is refit the same
+ * way. Served dry run `train-0258Z`: after "at least £1m" the goal's frame became the target's cap (£1.25m) and Olumi's
+ * £1-per-£1 "Funding from investment firms → Funding secured" (outcome frame £3m) sat at β 2.4: PLoT clamped it and the UI
+ * cold open declined the Run (CANVAS 5923984462). Its origin and its disclosure are unchanged: only frames move.
+ */
+const sizedExactly = (e: Rec): boolean => userStated(e) || e.provenance?.definitional === true;
 
 function reframed(graph: Rec, id: string, F: number): Rec {
   const g: Rec = structuredClone(graph);
@@ -155,7 +163,7 @@ export function refitFramesForStatedEffects(graph: Rec, opts: { readonly goalOwn
   const refused: FrameRefusal[] = [];
   const tried = new Set<string>();
   for (;;) {
-    const e = cuts(g).find((x) => userStated(x) && !tried.has(key(x)));
+    const e = cuts(g).find((x) => sizedExactly(x) && !tried.has(key(x)));
     if (e === undefined) break;
     tried.add(key(e));
     const target = (g.nodes as Rec[]).find((n) => n.id === e.to);

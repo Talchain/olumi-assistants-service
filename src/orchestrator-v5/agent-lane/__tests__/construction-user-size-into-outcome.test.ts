@@ -15,7 +15,8 @@ import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
-import { refitFramesForStatedEffects } from '../refit-frames.js';
+import { frameOf as frameOfNode, refitFramesForStatedEffects } from '../refit-frames.js';
+import { readFileSync } from 'node:fs';
 
 type Rec = Record<string, any>;
 
@@ -286,5 +287,80 @@ describe('A4f cascade: chains, diamonds and rollback (0 LLM)', () => {
     expect(r.refused).toEqual([{ link: 's→a', reason: 'new_cut', detail: 'a→f' }]);
     expect(r.refits).toEqual([]);
     expect(r.graph).toBe(before);
+  });
+});
+
+/**
+ * ⭐ R3 FINDING 1 / U1 ROOT (R3 5923914386; CANVAS 5923984462; DL 5924014025): served `d1d22196` persisted Olumi's
+ * DEFINITIONAL £1-per-£1 "Funding from investment firms → Funding secured" at mean 2.4 after "at least £1m" (goal frame →
+ * the target's cap £1.25m; outcome frame £3m). PLoT clamped it and the UI cold open correctly declined the Run. Replayed
+ * on the served bytes: the pre-consent graph, the goal node and limit row the add_constraint write stamped, then the
+ * retirement exactly as the writer runs it.
+ */
+describe('a definitional link is refit like a user size (the card path, served d1d22196)', () => {
+  type Fx = { pre_graph: Rec; goal_after_write: Rec; goal_constraints: Rec[]; served_after: { definitional_means: Record<string, number> } };
+  const FX = JSON.parse(readFileSync(new URL('./fixtures/d1d22196-consent-write-20261001.json', import.meta.url), 'utf8')) as Fx;
+  const written = (): Rec => {
+    const g = structuredClone(FX.pre_graph);
+    const goal = g.nodes.find((n: Rec) => n.kind === 'goal');
+    const frameBefore = goal.scale_frame;
+    Object.assign(goal, structuredClone(FX.goal_after_write), { scale_frame: frameBefore });
+    return { ...g, goal_constraints: structuredClone(FX.goal_constraints) };
+  };
+  const nat = (g: Rec, e: Rec): number => {
+    const F = (id: string) => frameOfNode(g.nodes.find((n: Rec) => n.id === id));
+    return (e.strength.mean * F(e.to)!) / F(e.from)!;
+  };
+
+  it('RED (served 2.4): after the write, every persisted |mean| ≤ 1, the definitional links keep their £1 per £1, the target reads the same', async () => {
+    const { retireNormalisingGoalFrame } = await import('../normalising-goal-frame.js');
+    expect(Math.max(...Object.values(FX.served_after.definitional_means))).toBe(2.4); // the served defect, verbatim
+    const pre = FX.pre_graph;
+    const after = retireNormalisingGoalFrame(written()) as Rec;
+    for (const e of after.edges.filter((x: Rec) => typeof x.strength?.mean === 'number')) expect(Math.abs(e.strength.mean), `${e.from}→${e.to}`).toBeLessThanOrEqual(1);
+    for (const e of pre.edges.filter((x: Rec) => x.provenance?.definitional === true || x.provenance?.magnitude === 'user_stated')) {
+      const a = after.edges.find((x: Rec) => x.from === e.from && x.to === e.to);
+      expect(nat(after, a)).toBeCloseTo(nat(pre, e), 9);
+    }
+    const goal = after.nodes.find((n: Rec) => n.kind === 'goal');
+    expect(goal.goal_threshold_raw).toBe(1000000);
+    expect(goal.goal_threshold).toBeCloseTo(1000000 / goal.goal_threshold_cap, 12);
+    expect(after.goal_constraints.find((c: Rec) => c.node_id === goal.id).value).toBe(1000000);
+  });
+
+  it('control: Olumi\'s NON-definitional estimate that a frame cuts is never refit (its origin and its own disclosure stay)', () => {
+    const before = servedPaul1();
+    before.edges[2].strength.mean = 0.5; before.edges[2].provenance.natural_effect.strength_mean = 0.5; // the user's size fits
+    before.edges[3].strength.mean = 2.4; // the outcome → goal estimate, not definitional
+    expect(refitFramesForStatedEffects(before).graph).toBe(before);
+  });
+
+  it('a NEGATIVE definitional link (a risk: −£1 per £1) cut by a frame is refit the same way', () => {
+    const before = servedPaul1();
+    before.edges[2].strength.mean = 0.5; before.edges[2].provenance.natural_effect.strength_mean = 0.5; // the user's size fits
+    before.edges[3] = { ...before.edges[3], strength: { mean: -2.4, std: 1.2 }, provenance: { magnitude: 'olumi_estimate', definitional: true, natural_effect: { amount: -1, per_source_change: 1, strength_mean: -2.4 } } };
+    const r = refitFramesForStatedEffects(before);
+    expect(r.refits.map((x: Rec) => x.node)).toEqual(['securing_funding']);
+    expect(Math.abs(r.graph.edges[3].strength.mean)).toBeLessThanOrEqual(1);
+    expect(r.graph.edges[3].strength.mean).toBeLessThan(0);
+  });
+});
+
+/**
+ * ⭐ THE PERSIST INVARIANT (DL 5924014025): no edge leaves CEE's construction write with |mean| > 1 unless it is the
+ * user's own size that could not be fitted AND the user is asked about it ("…would be cut short"). Over every build in
+ * this spec's real paths: a stored cut is never silent.
+ */
+describe('persist invariant: a stored |mean| > 1 is only ever a user size the user is asked about', () => {
+  it.each([
+    ['raw-1 shape', {}], ['deals max 100 (cascade)', { dealsMax: 100 }], ['outcome £3m (p3)', { fundingMax: 3000000 }],
+    ['a factor target (refused)', { fundingAsFactor: true }], ['with a stated target', { fundingMax: 3000000, target: 1000000 }],
+  ] as const)('%s', async (_label, o) => {
+    const { g, out } = await build(draft(o as never));
+    const asked = questionsOf(out).filter((q) => q.includes(NOT_REPRESENTABLE));
+    for (const e of g.edges.filter((x: Rec) => typeof x.strength?.mean === 'number' && Math.abs(x.strength.mean) > 1)) {
+      expect(e.provenance?.magnitude, `${e.from}→${e.to} stored at ${e.strength.mean}`).toBe('user_stated');
+      expect(asked.length, `${e.from}→${e.to} stored cut but not asked`).toBeGreaterThan(0);
+    }
   });
 });
