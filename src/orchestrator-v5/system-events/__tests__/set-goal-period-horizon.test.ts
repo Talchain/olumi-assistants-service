@@ -36,7 +36,7 @@ const goalOf = (g: unknown): Json => (g as { nodes: Json[] }).nodes.find((n) => 
 const bytes = (v: unknown): string => JSON.stringify(v, (_k, x) => (x !== null && typeof x === 'object' && !Array.isArray(x)
   ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, (x as Json)[k]])) : x));
 
-type Extra = { goal_period?: string; goal_horizon?: Json; stated_as?: GoalStatedAs[]; expected?: Json };
+type Extra = { goal_period?: string; goal_horizon?: Json; stated_as?: GoalStatedAs[]; expected?: Json; unit?: string };
 /** The 0.69.0 event, through the REAL door. Every event is parsed by the REAL boundary schema first. */
 const send = async (graph: GraphV3T, raw_value: number, extra: Extra = {}, constraint_type: 'at_least' | 'at_most' = 'at_least') => {
   // A client that READ the graph sends, for each field it writes, the value it read (null = none recorded): schemas
@@ -187,5 +187,39 @@ describe('F1 T5: `goal_target_edit` writes the goal\'s period, horizon and state
     const r = await written(graphWith(), 5000, { goal_period: 'month' }, 'at_most');
     expect(goalOf(r.mutatedGraph).goal_period).toBe('month');
     expect(goalOf(r.mutatedGraph).goal_threshold_raw).toBeUndefined();
+  });
+});
+
+describe('ONE PERIOD CARRIER (CODEX #2454 5932596768): a goal holds ONE period — typed `goal_period`, or the one its stored unit names', () => {
+  const QUARTERLY = { goal_threshold_unit: '£ per quarter' };
+  const stated = (value: number, period: 'month' | 'quarter' | 'year', quote: string): GoalStatedAs => ({ value, unit: '£', period, quote });
+
+  it('RED: `{unit: "£ per quarter", goal_period: "month"}` (two carriers, two periods) is REFUSED, nothing written', async () => {
+    const g = graphWith(QUARTERLY);
+    const r = await send(g, 70000, { unit: '£ per quarter', goal_period: 'month' });
+    expect(r).toMatchObject({ kind: 'refused', reason: 'goal_period_conflicts_with_unit' });
+  });
+
+  it('CONTROL: the unit and goal_period agree ("£ per quarter" + quarter) → written, both held byte-equal', async () => {
+    const r = await send(graphWith(QUARTERLY), 200000, { unit: '£ per quarter', goal_period: 'quarter' });
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    expect(goalOf(r.mutatedGraph)).toMatchObject({ goal_threshold_unit: '£ per quarter', goal_period: 'quarter', goal_threshold_raw: 200000 });
+  });
+
+  it('CONTROL (an explicit period edit, quarter → month): "£" + month on a "£ per quarter" goal → ONE carrier: unit "£", goal_period month', async () => {
+    const r = await send(graphWith(QUARTERLY), 70000, { unit: '£', goal_period: 'month' });
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    expect(goalOf(r.mutatedGraph)).toMatchObject({ goal_threshold_unit: '£', goal_period: 'month', goal_threshold_raw: 70000 });
+  });
+
+  it.each([
+    ['month → quarter (×3)', stated(70000, 'month', 'we need £70k a month'), 210000],
+    ['year → quarter (÷4)', stated(400000, 'year', 'we need £400k a year'), 100000],
+  ])('RED: G1 reads the LEGACY unit period exactly as a typed one — %s', async (_n, s, raw) => {
+    const ok = await send(graphWith(QUARTERLY), raw, { unit: '£ per quarter', stated_as: [s] });
+    expect(ok.kind, JSON.stringify(ok)).toBe('mutated');
+    expect(goalOf(ok.mutatedGraph)).toMatchObject({ goal_threshold_unit: '£ per quarter', goal_threshold_raw: raw });
+    const unconverted = await send(graphWith(QUARTERLY), s.value, { unit: '£ per quarter', stated_as: [s] });
+    expect(unconverted).toMatchObject({ kind: 'refused', reason: 'goal_period_conversion_mismatch' });
   });
 });

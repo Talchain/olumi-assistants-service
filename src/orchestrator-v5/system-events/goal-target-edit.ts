@@ -78,7 +78,7 @@ import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../t
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { CEE_GOAL_THRESHOLD_FRAME } from '../../utils/goal-threshold-cap.js';
 import type { GoalPeriodType } from '@talchain/schemas';
-import { statedFigureHolds } from '../goal-target/goal-period.js';
+import { goalPeriodOf, periodsCollide, statedFigureHolds } from '../goal-target/goal-period.js';
 
 type GoalTargetEditEvent = Extract<SystemEventTurnPayload['event'], { kind: 'goal_target_edit' }>;
 
@@ -237,9 +237,16 @@ export async function applyGoalTargetEdit(
   // The goal's period is the event's, else the one the goal already holds; the figure `raw_value` came from is the LAST
   // `stated_as` entry. A day / week / none pair is refused (never guessed); a ×3 / ×4 / ×12 conversion that does not
   // give `raw_value` (1e-9 relative) is refused. Either way nothing is written: the client re-sends the right figure.
+  // ⛔ ONE PERIOD CARRIER (CODEX #2454 5932596768): a unit naming one period beside a `goal_period` naming another is
+  // two answers for one figure — refused for every client, nothing written.
+  if (periodsCollide(event.unit, event.goal_period)) {
+    log.info({ ...logBase, event: 'v5.system_event.goal_target_edit.goal_period_conflicts_with_unit' }, 'goal_target_edit — the unit names a different period from goal_period; refusing');
+    return refused('goal_period_conflicts_with_unit');
+  }
   const g1 = statedFigureHolds({
     raw_value: event.raw_value,
-    goal_period: event.goal_period ?? (matches[0] as { goal_period?: GoalPeriodType }).goal_period,
+    // The goal's period: the event's, else the one the goal holds — typed, or named by its stored unit (legacy).
+    goal_period: event.goal_period ?? goalPeriodOf(matches[0] as { goal_period?: unknown; goal_threshold_unit?: unknown }),
     stated_as: event.stated_as,
   });
   if (!g1.ok) {

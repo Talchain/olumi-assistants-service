@@ -209,7 +209,7 @@ import { checkProvisionalView, type LeaderStanding } from '../provisional-view.j
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { GoalHorizonSchema, GoalPeriod, GoalStatedAsSchema, type GoalHorizon, type GoalPeriodType, type GoalStatedAs } from '@talchain/schemas';
 import { z } from 'zod';
-import { askForGoalPeriodFigure, convertGoalFigure, GOAL_PERIOD_WORDS, periodsNamedIn, unitKeepingHeldPeriod, unitNamesItsPeriod } from '../../goal-target/goal-period.js';
+import { askForGoalPeriodFigure, convertGoalFigure, GOAL_PERIOD_WORDS, goalPeriodOf, periodNamedByUnit, periodsCollide, periodsNamedIn, unitKeepingHeldPeriod, unitNamesItsPeriod, unitWithoutPeriod } from '../../goal-target/goal-period.js';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
 import { approvalSizes } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
@@ -1678,8 +1678,10 @@ function goalTargetWords(v: Pick<SetGoalTargetValue, 'raw_value' | 'unit' | 'goa
 
 /** What `projectModelContext` and the card read off a stored goal: each F1 field only when it parses (a raw read). */
 function heldGoalSemantics(goal: unknown): { period?: GoalPeriodType; horizon?: GoalHorizon; stated_as?: GoalStatedAs[] } {
-  const g = (goal ?? {}) as { goal_period?: unknown; goal_horizon?: unknown; goal_stated_as?: unknown };
-  const period = GoalPeriod.safeParse(g.goal_period);
+  const g = (goal ?? {}) as { goal_period?: unknown; goal_horizon?: unknown; goal_stated_as?: unknown; goal_threshold_unit?: unknown };
+  // ONE period carrier (CODEX #2454 5932596768): the typed `goal_period`, else the one the stored unit names.
+  const held = goalPeriodOf(g);
+  const period = held === undefined ? GoalPeriod.safeParse(undefined) : GoalPeriod.safeParse(held);
   const horizon = GoalHorizonSchema.safeParse(g.goal_horizon);
   const stated = z.array(GoalStatedAsSchema).min(1).max(20).safeParse(g.goal_stated_as);
   return {
@@ -3598,10 +3600,24 @@ export function createAgentCapabilities(
           reason: `The target was converted into the goal’s own period (${setGoal.goal_period ?? setGoal.held_period}), and today’s level was not stated per that period.` };
       }
       const today = currentLevel !== undefined ? targetFigure(currentLevel.value, currentLevel.unit) : undefined;
+      /**
+       * ⛔ ONE PERIOD CARRIER (R3 F5 I1.1 #85 5932127058; CODEX #2454 5932596768). The goal's held "£ per quarter" survives
+       * a card that says "£" and writes no period (`unitKeepingHeldPeriod`). A card that WRITES a period writes the unit
+       * WITHOUT one when they differ, so the stored goal never says "per quarter" in its unit and "month" in
+       * `goal_period`. A card whose own unit names a period other than the one it writes is refused.
+       */
+      const heldUnit = (goal as { goal_threshold_unit?: unknown }).goal_threshold_unit;
+      if (periodsCollide(unit, setGoal.goal_period)) {
+        return { ok: false, mutated: false, refusal: 'goal_period_conflicts_with_unit',
+          detail: `The unit "${unit}" says per ${periodNamedByUnit(unit)}, but the goal's period would be ${setGoal.goal_period}, so nothing was prepared. `
+            + 'Send the unit without its period (for example "£") and the period on its own.' };
+      }
+      const cardUnit = setGoal.goal_period === undefined || setGoal.goal_period === periodNamedByUnit(heldUnit)
+        ? unitKeepingHeldPeriod(unit, heldUnit)
+        : unitWithoutPeriod(unit);
       const setValue: SetGoalTargetValue = {
         constraint_type: type, raw_value: setGoal.raw_value,
-        // ⛔ R3 F5 I1.1: the goal's held "£ per quarter" survives a card that says "£" (`unitKeepingHeldPeriod`).
-        unit: unitKeepingHeldPeriod(unit, (goal as { goal_threshold_unit?: unknown }).goal_threshold_unit),
+        unit: cardUnit,
         ...(currentLevel !== undefined ? { current_level: currentLevel } : {}),
         ...(setGoal.goal_period !== undefined ? { goal_period: setGoal.goal_period } : {}),
         ...(setGoal.goal_horizon !== undefined ? { goal_horizon: setGoal.goal_horizon } : {}),

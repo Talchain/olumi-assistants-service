@@ -16,7 +16,7 @@
  * `statedFigureHolds` before anything is written — so the UI and the Agent can never disagree about what "£100k a
  * quarter" is per month.
  */
-import type { GoalPeriodType, GoalStatedAs } from '@talchain/schemas';
+import { GoalPeriod, type GoalPeriodType, type GoalStatedAs } from '@talchain/schemas';
 import { PERIOD_NAME } from '../agent-lane/admit-constraint.js';
 
 /** Periods per year, for exactly the three periods G1 converts between. A day and a week are deliberately absent. */
@@ -137,4 +137,36 @@ export function unitKeepingHeldPeriod(cardUnit: string, heldUnit: unknown): stri
 /** Whether a unit already names its period ("£ per quarter", "£/month"), so no period word is appended to it. */
 export function unitNamesItsPeriod(unit: string): boolean {
   return UNIT_PERIOD_JOINT.test(unit);
+}
+
+/**
+ * ⭐ ONE PERIOD CARRIER (CODEX #2454 5932596768: `{unit: '£ per quarter', goal_period: 'month'}` was accepted — two
+ * carriers saying two periods for one figure). A goal stored before 0.69.0 names its period only in its unit string
+ * ("£ per quarter", R3 I1.1); from 0.69.0 the typed `goal_period` names it. They are ONE concept:
+ *   · `periodNamedByUnit` — the single period a stored unit names after its own joint, else undefined (structural);
+ *   · `goalPeriodOf` — the goal's period: the typed `goal_period`, else the one its unit names. The Agent's card, the
+ *     G1 conversion and the writer's gate all read the goal's period through this, so a legacy "per quarter" converts a
+ *     "£70k a month" exactly as a typed `quarter` does;
+ *   · `periodsCollide` — a unit naming one period beside a typed `goal_period` naming another: refused by the writer
+ *     for every client, and never produced by the Agent.
+ */
+export function periodNamedByUnit(unit: unknown): GoalPeriodType | undefined {
+  if (typeof unit !== 'string') return undefined;
+  const parts = unit.split(UNIT_PERIOD_JOINT);
+  if (parts.length !== 2) return undefined;
+  const named = periodsNamedIn(parts[1]);
+  return named.size === 1 ? [...named][0] : undefined;
+}
+export function goalPeriodOf(goal: { readonly goal_period?: unknown; readonly goal_threshold_unit?: unknown } | undefined): GoalPeriodType | undefined {
+  const typed = GoalPeriod.safeParse(goal?.goal_period);
+  return typed.success ? typed.data : periodNamedByUnit(goal?.goal_threshold_unit);
+}
+export function periodsCollide(unit: unknown, goalPeriod: GoalPeriodType | undefined): boolean {
+  const named = periodNamedByUnit(unit);
+  return goalPeriod !== undefined && named !== undefined && named !== goalPeriod;
+}
+/** The unit without its period phrase ("£ per quarter" → "£"); a unit with no single joint is returned as it is. */
+export function unitWithoutPeriod(unit: string): string {
+  const parts = unit.split(UNIT_PERIOD_JOINT);
+  return parts.length === 2 && periodNamedByUnit(unit) !== undefined ? parts[0]!.trim() : unit;
 }

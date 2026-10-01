@@ -200,3 +200,47 @@ describe('F1 T5: the Agent\'s model context shows the goal\'s period, horizon an
     }
   });
 });
+
+describe('ONE PERIOD CARRIER on the Agent\'s card (CODEX #2454 5932596768; R3 I1.1): a "£ per quarter" goal never gets a second period', () => {
+  const QUARTERLY = { goal_threshold_unit: '£ per quarter' };
+  const propose = async (said: string, args: Record<string, unknown>) => {
+    const w = world(graphWith(QUARTERLY));
+    const store = new ProposalStore();
+    const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(said), { constraint_type: 'at_least', unit: '£', rationale: 'x', ...args } as never);
+    return { w, store, p, value: p.ok ? (store.get(String(p.proposal_id))?.operations[0]?.value as Record<string, unknown>) : undefined };
+  };
+
+  it('RED (the CODEX case): "£70k a month" with period month → the card writes unit "£" + goal_period month — never "£ per quarter" + month', async () => {
+    const { w, store, p, value } = await propose('We need at least £70k a month.', { value: 70000, period: 'month' });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+    expect(value).toEqual(expect.objectContaining({ unit: '£', goal_period: 'month', raw_value: 70000 }));
+    const r = await createAgentCapabilities(w.d, store).authoriseChange(ctxOf('Yes.'), { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    parsesOnTheWire(w.sent[0]!);
+    expect(w.graph().nodes.find((n) => n.id === 'mrr')).toEqual(expect.objectContaining({ goal_threshold_unit: '£', goal_period: 'month' }));
+  });
+
+  it('CONTROL (I1.1): no period on the card → the held "£ per quarter" is kept and no goal_period is written', async () => {
+    const { value } = await propose('We need at least £200,000.', { value: 200000 });
+    expect(value).toEqual(expect.objectContaining({ unit: '£ per quarter' }));
+    expect(value).not.toHaveProperty('goal_period');
+  });
+
+  it('CONTROL: period quarter on the card → "£ per quarter" + quarter (the two carriers agree)', async () => {
+    const { value } = await propose('We need at least £200,000 a quarter.', { value: 200000, period: 'quarter' });
+    expect(value).toEqual(expect.objectContaining({ unit: '£ per quarter', goal_period: 'quarter' }));
+  });
+
+  it('REFUSED: the Agent\'s own unit names one period and its period arg another → nothing prepared', async () => {
+    const { p } = await propose('We need at least £70k a month.', { value: 70000, unit: '£ per quarter', period: 'month' });
+    expect(p).toEqual(expect.objectContaining({ ok: false, refusal: 'goal_period_conflicts_with_unit' }));
+  });
+
+  it('RED: G1 converts against the LEGACY period — "£70k a month" on a "£ per quarter" goal → £210,000 per quarter, his words kept', async () => {
+    const said = 'We need at least £70k a month.';
+    const { p, value } = await propose(said, { value: 70000, as_stated: { value: 70000, unit: '£', period: 'month', quote: '£70k a month' } });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true }));
+    expect(value).toEqual(expect.objectContaining({ unit: '£ per quarter', raw_value: 210000 }));
+    expect(value).not.toHaveProperty('goal_period');
+  });
+});
