@@ -9,12 +9,15 @@ import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
 
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
 const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c9ed66d';
-const HOST_SHA = '325bb61e58059ba4a10dc5d38472dbfa64b7b2e4080706a0c6a35a9067562ab6';
+// AI HARNESS (1 Oct, DL 5936996041 on R3 DEFECT 2): the links sentence defines `sizing` (F1b's linkSizing) and no longer
+// says `defaulted` means unsized: 325bb61e… → 26f7e9c0…. The template sha above is unchanged.
+const HOST_SHA = '26f7e9c0eb6f2e6f9329f7d52be5db364ab86f3b7918be536f73769fe2530c49';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
-// Derived from the request the real route SENT (harness raw body), never computed by hand; the template + host shas above are unchanged.
-const RENDERED_SHA = 'c9881d92e4230323acd2f278be86ec8255ceb8ffe5b99f3dbffc2933ab4a332f';
-const RENDERED_BYTES = 27_547;
+// + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
+// Derived from the request the real route SENT (harness raw body), never computed by hand.
+const RENDERED_SHA = 'd335019efc728bf86348adaa8d4c9648ecd6eace1a725b8dab3370a24416b0df';
+const RENDERED_BYTES = 27_833;
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';

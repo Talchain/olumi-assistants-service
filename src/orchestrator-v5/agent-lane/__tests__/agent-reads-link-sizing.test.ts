@@ -1,0 +1,72 @@
+/**
+ * ⭐ THE AGENT READS WHO SIZED EACH LINK BY F1b's ONE RULE (`linkSizing`), NEVER FROM `defaulted` (AI HARNESS; DL
+ * 5936996041 on R3 DEFECT 2 5936673643).
+ *
+ * Served on CEE `b410b1c5` (R3 F5, 1 Oct, scenario 799d1a5d): "fix them all" — the Agent called the two parts→limit links
+ * "Olumi's placeholders" and re-sized them, though both were `olumi_estimate`, and left the two REAL placeholders unsized.
+ * Its view of a link carried `defaulted: true` on every sized link (construction sets it on estimates too) and its
+ * prompt said `defaulted` "means no one has estimated its strength yet". The fixture is that served graph.
+ */
+import { readFileSync } from 'node:fs';
+import { describe, it, expect } from 'vitest';
+import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
+import { ProposalStore } from '../proposal.js';
+import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
+
+const F = JSON.parse(readFileSync(new URL('./fixtures/served-799d1a5d-cold-s1-graph.json', import.meta.url), 'utf8')) as {
+  graph: { nodes: { id: string; label: string }[]; edges: { from: string; to: string; provenance?: { magnitude?: string } }[] };
+  graph_hash: string;
+};
+const SCENARIO = '550e8400-e29b-41d4-a716-446655440799';
+const d: InternalDispatch = async (path) => (path.endsWith('/graph') ? { status: 200, json: { graph: F.graph, graph_hash: F.graph_hash } } : { status: 500, json: {} });
+const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: 'fix them all', user_turn_text: 'fix them all' };
+const label = (id: string) => F.graph.nodes.find((n) => n.id === id)!.label;
+const REAL_PLACEHOLDERS = ['ai_reporting_module_completion->enterprise_deal_close_probability', 'trial_flow_bug_resolution->profile_completion_rate'];
+const PARTS_ESTIMATES = ['ai_reporting_module_completion->sprint_initiatives_tackled_properly', 'trial_flow_bug_resolution->sprint_initiatives_tackled_properly'];
+type Link = { from: string; to: string; sizing?: string; defaulted?: unknown; holds_by_definition?: unknown };
+
+describe('get_canonical_state: every link says who sized it (served 799d1a5d)', () => {
+  it('RED: the placeholders the Agent can see are EXACTLY the two real ones; the two parts→limit links read as Olumi\'s estimate', async () => {
+    // Precondition: on the stored graph every sized link carries `defaulted`, estimates included — it cannot separate them.
+    const stored = F.graph.edges.filter((e) => [...REAL_PLACEHOLDERS, ...PARTS_ESTIMATES].includes(`${e.from}->${e.to}`));
+    expect(stored.every((e) => (e as { defaulted?: unknown }).defaulted === true)).toBe(true);
+    const s = await createAgentCapabilities(d, new ProposalStore()).getCanonicalState(ctx);
+    expect(s.ok, JSON.stringify(s)).toBe(true);
+    const links = (s as unknown as { links: Link[] }).links;
+    const key = (l: Link) => `${l.from}->${l.to}`;
+    expect(links.filter((l) => l.sizing === 'placeholder').map(key).sort()).toEqual([...REAL_PLACEHOLDERS].sort());
+    for (const k of PARTS_ESTIMATES) expect(links.find((l) => key(l) === k)?.sizing, k).toBe('olumi_estimate');
+    // `defaulted` is no sizing mark, so the Agent no longer sees it at all.
+    expect(links.some((l) => 'defaulted' in l)).toBe(false);
+    // A link that holds by definition is arithmetic: it carries no sizing.
+    for (const l of links.filter((x) => x.holds_by_definition === true)) expect(l).not.toHaveProperty('sizing');
+  });
+
+  it('the prompt defines `sizing` and no longer tells the Agent that `defaulted` means unsized', () => {
+    const host = HOST_TOOL_CONTRACT;
+    expect(host).toContain('`placeholder` (nobody has sized it yet: only these are placeholders)');
+    expect(host).not.toContain('`defaulted` means no one has estimated its strength yet');
+  });
+});
+
+describe('propose_link_strengths says when it replaces an estimate (served 799d1a5d)', () => {
+  const propose = (keys: readonly string[]) => createAgentCapabilities(d, new ProposalStore()).proposeLinkStrengths!(ctx, {
+    links: keys.map((k) => { const [from, to] = k.split('->'); return { from_label: label(from!), to_label: label(to!), strength: 'very strong' }; }),
+    rationale: 'fix them all',
+  }) as Promise<{ ok: boolean; links?: { was: { sizing?: string } }[]; note?: string; refusal?: string; detail?: string }>;
+
+  it('RED: re-sizing the two parts→limit links reports them as ALREADY Olumi\'s estimate, never placeholders', async () => {
+    const r = await propose(PARTS_ESTIMATES);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.links!.map((l) => l.was.sizing)).toEqual(['olumi_estimate', 'olumi_estimate']);
+    expect(r.note).toContain('REPLACES an earlier estimate');
+    expect(r.note).toContain('never call them placeholders');
+  });
+
+  it('CONTROL: sizing the two real placeholders reports them as placeholders and says nothing about replacing an estimate', async () => {
+    const r = await propose(REAL_PLACEHOLDERS);
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expect(r.links!.map((l) => l.was.sizing)).toEqual(['placeholder', 'placeholder']);
+    expect(r.note).not.toContain('REPLACES an earlier estimate');
+  });
+});

@@ -43,7 +43,7 @@ export const HOST_TOOL_CONTRACT = [
   // Old AGENT_INSTRUCTIONS #22
   'When a current Run gives an option `display_label` or `option_display_names`, use that wording for that Run\u2019s result. Preserve earlier Runs\u2019 wording and figures exactly. Its `label` and `option_label` remain the user\u2019s saved words and the tool address; never silently rename them.',
   // Old AGENT_INSTRUCTIONS #24
-  'The goal\u2019s `target` is the figure the user stated, in their unit \u2014 quote it as stated. `limits` are the constraints the user set. Each item in `links` says whose link it is (`source`: `user_specified` is the user\u2019s; `cee_hypothesis` or `ai_inferred` is an assumption Olumi made) and how strong it is assumed to be; `defaulted` means no one has estimated its strength yet. When a user challenges a link, say whose it is before proposing a change.',
+  'The goal\u2019s `target` is the figure the user stated, in their unit \u2014 quote it as stated. `limits` are the constraints the user set. Each item in `links` says whose link it is (`source`: `user_specified` is the user\u2019s; `cee_hypothesis` or `ai_inferred` is an assumption Olumi made) and how strong it is assumed to be; its `sizing` says who set that strength: `user` (the user\u2019s own), `olumi_estimate` (Olumi\u2019s estimate), `olumi_accepted` (Olumi\u2019s estimate the user accepted), `placeholder` (nobody has sized it yet: only these are placeholders), `unmarked` (no record of who sized it). A link with `holds_by_definition` is arithmetic and has no `sizing`. When a user challenges a link, say whose it is before proposing a change.',
   // Old AGENT_INSTRUCTIONS #25
   'When a tool tells you something was not represented, say so.',
   // Old AGENT_INSTRUCTIONS #28
