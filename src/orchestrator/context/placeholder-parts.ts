@@ -238,6 +238,14 @@ export function placeholderMovedOptions(
  * `parts_links_placeholder`), so the withheld row can ask for that link's size (AI Quality 5882087383: "How much would a
  * price rise move monthly churn? Give a figure, or let Olumi estimate it.").
  */
+/** A declared SUM whose every operand reaches it through a link that holds by definition (`holdsByDefinition`). */
+function definitionalSum(target: Rec, edges: readonly Rec[], unitOf: (id: unknown) => string | undefined): boolean {
+  const identity = target.nonlinear_identity as Rec;
+  const operands = Array.isArray(identity.factor_ids) ? identity.factor_ids : [];
+  return identity.operation === 'sum' && operands.length >= 2 && operands.every((id) => edges.some((e) => e.from === id
+    && e.to === target.id && holdsByDefinition(e, unitOf)));
+}
+
 export function placeholderPartsFinding(
   targetId: string,
   allNodes: readonly Rec[],
@@ -272,7 +280,11 @@ export function placeholderPartsFinding(
     .filter((iv) => !setsLevel(iv[targetId]) && Object.keys(iv).some((k) => parts.has(k)));
   let guessed: { partId: string; from: string; to: string } | undefined;
   if (movers.length > 0) {
-    if (target !== undefined && isRec(target.nonlinear_identity)) return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
+    // A product cannot be added up on links. A SUM whose every part link holds by definition (+1 per 1, one unit) IS the
+    // linear combination, so its limit is scored on the parts (DL ruling (ii) 5929790081; SEMANTIC MODEL SPEC A4).
+    if (target !== undefined && isRec(target.nonlinear_identity) && !definitionalSum(target, edges, nodeUnitOf(nodes))) {
+      return { reason: PARTS_IDENTITY_UNMODELLED_REASON };
+    }
     const unitById = sizerUnitsOf(nodes);
     const unitOf = nodeUnitOf(nodes);
     const onPath = new Set<unknown>([...parts, targetId]);

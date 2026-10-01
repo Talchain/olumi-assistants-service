@@ -1,0 +1,259 @@
+{
+ "_source": "Capped draft of Paul's 1 Oct sprint brief (staging 8943c320, MG tot/sprint-2), SEEDED with the structure his turn-1 build produced: \"Total sprint capacity allocated\" fed by both sprint-capacity levers under a \u2264100% level limit (DL 5929790081; served 96c6f5f4).",
+ "candidate": {
+  "goal": {
+   "metric": "Quarterly revenue",
+   "operator": ">=",
+   "target_stated": false,
+   "value": null,
+   "unit": "currency/quarter",
+   "horizon_months": 3,
+   "provenance": "inferred",
+   "frame": "level",
+   "baseline_known": false,
+   "baseline_value": null,
+   "baseline_provenance": "ai_proposed",
+   "scope": null
+  },
+  "constraints": [
+   {
+    "metric": "Total sprint capacity allocated",
+    "operator": "<=",
+    "value": 100,
+    "unit": "% of upcoming sprint capacity",
+    "provenance": "inferred",
+    "frame": "level"
+   }
+  ],
+  "options": [
+   {
+    "label": "Build AI Reporting",
+    "provenance": "inferred",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Sprint capacity on AI reporting",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of upcoming sprint capacity",
+      "provenance": "ai_proposed"
+     },
+     {
+      "factor_label": "Sprint capacity on integration fix",
+      "value": 0,
+      "value_kind": "absolute",
+      "unit": "% of upcoming sprint capacity",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "is_status_quo": null
+   },
+   {
+    "label": "Fix Setup Integration",
+    "provenance": "inferred",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Sprint capacity on AI reporting",
+      "value": 0,
+      "value_kind": "absolute",
+      "unit": "% of upcoming sprint capacity",
+      "provenance": "ai_proposed"
+     },
+     {
+      "factor_label": "Sprint capacity on integration fix",
+      "value": 100,
+      "value_kind": "absolute",
+      "unit": "% of upcoming sprint capacity",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "is_status_quo": null
+   },
+   {
+    "label": "Split Sprint",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [
+     {
+      "factor_label": "Sprint capacity on AI reporting",
+      "value": 50,
+      "value_kind": "absolute",
+      "unit": "% of upcoming sprint capacity",
+      "provenance": "ai_proposed"
+     },
+     {
+      "factor_label": "Sprint capacity on integration fix",
+      "value": 50,
+      "value_kind": "absolute",
+      "unit": "% of upcoming sprint capacity",
+      "provenance": "ai_proposed"
+     }
+    ],
+    "is_status_quo": null
+   },
+   {
+    "label": "Continue Current Plan",
+    "provenance": "ai_proposed",
+    "changes": [],
+    "interventions": [],
+    "is_status_quo": true
+   }
+  ],
+  "factors": [
+   {
+    "label": "Sprint capacity on AI reporting",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "% of upcoming sprint capacity",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "Sprint capacity on integration fix",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "% of upcoming sprint capacity",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   },
+   {
+    "label": "AI reporting readiness by next month",
+    "role": "observable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "proportion (0-1)",
+    "provenance": "ai_proposed",
+    "plausible_max": 1
+   },
+   {
+    "label": "Profile-setup abandonment rate",
+    "role": "observable",
+    "baseline_known": true,
+    "baseline_value": 15,
+    "unit": "%",
+    "provenance": "explicit",
+    "plausible_max": 100
+   },
+   {
+    "label": "Total sprint capacity allocated",
+    "role": "controllable",
+    "baseline_known": false,
+    "baseline_value": 0,
+    "unit": "% of upcoming sprint capacity",
+    "provenance": "ai_proposed",
+    "plausible_max": 100
+   }
+  ],
+  "risks": [
+   {
+    "label": "Quarterly revenue lost from enterprise prospect",
+    "provenance": "inferred",
+    "unit": "currency/quarter",
+    "plausible_max": 500000
+   },
+   {
+    "label": "Quarterly revenue lost from profile abandonment",
+    "provenance": "inferred",
+    "unit": "currency/quarter",
+    "plausible_max": 500000
+   }
+  ],
+  "outcomes": [],
+  "links": [
+   {
+    "from": "Sprint capacity on AI reporting",
+    "to": "AI reporting readiness by next month",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": 1,
+    "effect_per_source_change": 100,
+    "effect_provenance": "ai_proposed",
+    "definitional": null
+   },
+   {
+    "from": "Sprint capacity on integration fix",
+    "to": "Profile-setup abandonment rate",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": -12,
+    "effect_per_source_change": 100,
+    "effect_provenance": "ai_proposed",
+    "definitional": null
+   },
+   {
+    "from": "AI reporting readiness by next month",
+    "to": "Quarterly revenue lost from enterprise prospect",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null
+   },
+   {
+    "from": "Profile-setup abandonment rate",
+    "to": "Quarterly revenue lost from profile abandonment",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": null,
+    "definitional": null
+   },
+   {
+    "from": "Quarterly revenue lost from enterprise prospect",
+    "to": "Quarterly revenue",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": -1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "inferred",
+    "definitional": true
+   },
+   {
+    "from": "Quarterly revenue lost from profile abandonment",
+    "to": "Quarterly revenue",
+    "direction": "negative",
+    "provenance": "inferred",
+    "effect_amount": -1,
+    "effect_per_source_change": 1,
+    "effect_provenance": "inferred",
+    "definitional": true
+   },
+   {
+    "from": "Sprint capacity on AI reporting",
+    "to": "Total sprint capacity allocated",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": "ai_proposed",
+    "definitional": null
+   },
+   {
+    "from": "Sprint capacity on integration fix",
+    "to": "Total sprint capacity allocated",
+    "direction": "positive",
+    "provenance": "inferred",
+    "effect_amount": null,
+    "effect_per_source_change": null,
+    "effect_provenance": "ai_proposed",
+    "definitional": null
+   }
+  ],
+  "identities": [],
+  "unknowns": [
+   "What is the enterprise prospect's expected contract value, and how much of it would fall within this quarter?",
+   "Would a fully staffed sprint deliver an AI reporting module that the prospect accepts by next month, or only a partial version?",
+   "How much sprint capacity is actually required to eliminate the integration bug, and what abandonment rate would remain after the fix?",
+   "How many trial signups are lost to the profile-setup bug per month, and what is the expected quarterly revenue per recovered completed profile?",
+   "Can a 50/50 split deliver either initiative to a useful deadline and quality level, or does it simply delay both?",
+   "What revenue level is currently forecast for the quarter, excluding these two effects?",
+   "Does the enterprise prospect's requested AI reporting module affect the same product revenue measured in Quarterly revenue, or is it a separate revenue line?"
+  ],
+  "decision_question": "How should I approach this trade-off? What am I missing here?"
+ }
+}
