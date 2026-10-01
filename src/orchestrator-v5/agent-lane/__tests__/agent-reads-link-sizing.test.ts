@@ -13,6 +13,7 @@ import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent
 import { ProposalStore } from '../proposal.js';
 import { HOST_TOOL_CONTRACT } from '../coach-route-v0_2.js';
 import { composeProposalReply } from '../proposal-reply.js';
+import type { InfluenceBand } from '../../format/influence-bands.js';
 
 const F = JSON.parse(readFileSync(new URL('./fixtures/served-799d1a5d-cold-s1-graph.json', import.meta.url), 'utf8')) as {
   graph: { nodes: { id: string; label: string }[]; edges: { from: string; to: string; provenance?: { magnitude?: string } }[] };
@@ -82,7 +83,7 @@ describe('the composed reply says when it replaces Olumi\'s estimate (served 799
   // Paul's approval of an estimate's band (#2257's `reviewed_by_user`): the link reads `olumi_accepted`.
   const accepted = (k: string) => ({ ...F.graph, edges: F.graph.edges.map((e: Edge) => (`${e.from}->${e.to}` === k
     ? { ...e, provenance: { ...e.provenance, reviewed_by_user: { intent: 'confirm', at: '2026-10-01T09:25:00.000Z' } } } : e)) });
-  const composed = async (asked: readonly (readonly [string, string])[], graph: unknown = F.graph) => {
+  const composed = async (asked: readonly (readonly [string, InfluenceBand])[], graph: unknown = F.graph) => {
     const dg: InternalDispatch = async (path) => (path.endsWith('/graph') ? { status: 200, json: { graph, graph_hash: F.graph_hash } } : { status: 500, json: {} });
     const args = {
       links: asked.map(([k, strength]) => { const [from, to] = k.split('->'); return { from_label: label(from!), to_label: label(to!), strength }; }),
@@ -90,7 +91,7 @@ describe('the composed reply says when it replaces Olumi\'s estimate (served 799
     };
     const result = await createAgentCapabilities(dg, new ProposalStore()).proposeLinkStrengths!(ctx, args);
     expect((result as { ok?: unknown }).ok, JSON.stringify(result)).toBe(true);
-    return { result: result as { links: { was: { sizing?: unknown } }[]; already?: string[] }, text: composeProposalReply('propose_link_strengths', args, result, 'fix them all') };
+    return { result: result as unknown as { links: { was: { sizing?: unknown } }[]; already?: string[] }, text: composeProposalReply('propose_link_strengths', args, result, 'fix them all') };
   };
   const pairOf = (k: string) => { const [from, to] = k.split('->'); return `\u2018${label(from!)}\u2019 \u2192 \u2018${label(to!)}\u2019`; };
   const REPLACES = 'already held Olumi\u2019s estimate';
