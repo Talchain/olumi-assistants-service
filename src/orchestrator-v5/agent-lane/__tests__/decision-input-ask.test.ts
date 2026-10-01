@@ -208,11 +208,16 @@ describe('A7 is folded on the reply the user SEES — after the leader gate (R3 
     expect(withA7AfterGate('Model words.', g, turnCtx, 'The model was saved.')).toBe('Model words.');
   });
 
-  it('route source pin: it runs AFTER the leader gate and BEFORE the answer row is written', () => {
+  it('route source pin: AFTER the leader gate and every later prose rewrite (break-even), BEFORE the shape and the answer row', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     const call = src.indexOf('withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText)');
     expect(call).toBeGreaterThan(src.indexOf('enforceAgentLaneLeaderClaimsAtWire(wireBody'));
+    expect(call).toBeGreaterThan(src.indexOf('withBreakEvenAnswer(wireBody.assistant_text'));
+    expect(call).toBeLessThan(src.indexOf('wireBody = withAnalysisAnswerShape(wireBody'));
     expect(call).toBeLessThan(src.indexOf('assistantMessage: String(wireBody.assistant_text'));
+    // The ONLY assistant_text rewrites after it are the shape (built from this prose) — none appends prose.
+    const after = src.slice(call, src.indexOf('assistantMessage: String(wireBody.assistant_text'));
+    expect(after.match(/assistant_text: with(?!A7)/g) ?? []).toEqual([]);
   });
 });
 

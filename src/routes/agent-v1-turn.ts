@@ -2575,11 +2575,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         wireBody = (enforced.editedFields.includes('assistant_text') ? withoutShape : enforced.response) as OlumiResponse & Record<string, unknown>;
       }
     }
-    // ⭐ A7's fold, measured on the reply the user sees: the gate above may have dropped a ranking sentence (`withA7AfterGate`).
-    if (typeof wireBody.assistant_text === 'string') {
-      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
-      if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
-    }
     /**
      * ⭐ AX1 — WHEN THE ANALYSIS CANNOT RANK A PRICE × VOLUME GOAL, THE ARITHMETIC STILL ANSWERS (DL #70 5850280205;
      * `break-even.ts`). Served (DL's joined run F8): every Run led with "No option can be put forward…" and gave the user
@@ -2630,6 +2625,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * for an approval: the route's own offer, or a proposal the chip rule left without a chip. Never on
      * a turn whose text the leader gate rewrote: its disclosure stays on the face.
      */
+    // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
+    // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
+    // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
+    if (typeof wireBody.assistant_text === 'string') {
+      const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
+      if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
+    }
     wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
