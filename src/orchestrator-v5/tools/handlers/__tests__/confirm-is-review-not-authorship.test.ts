@@ -291,16 +291,18 @@ describe('R11 — a confirm on a placeholder is review, not authorship', () => {
 });
 
 describe('R11 — an in-band pick is review, not authorship', () => {
-  it('canvas confirm_current + the band the link already sits in: std → the band\'s spread, band recorded, NO licence', async () => {
+  // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): the canvas pill's typed band on a confirm used to move std
+  // to the band's spread. A no-change confirm is byte-equal through every door, the typed band included.
+  it('canvas confirm_current + the band the link already sits in: strength KEPT byte-equal (#2473), band recorded, NO licence', async () => {
     const before = placeholder();
     const result = await canvas(before, eventFor({ band: 'strong' }));
 
     expect(result.kind === 'refused' ? result.reason : result.kind).toBe('mutated');
-    if (result.kind !== 'mutated') return;
-    expect((edgeOf(result.mutatedGraph).strength as { mean: number }).mean).toBe(MEAN);
+    if (result.kind !== 'mutated') throw new Error('not mutated');
+    expect(edgeOf(result.mutatedGraph).strength).toStrictEqual(edgeOf(before).strength);
     expect(provenanceOf(result.mutatedGraph).source).toBe('cee_hypothesis');
     expectReviewed(result.mutatedGraph, 'strong');
-    expectKeptExactly(before, result.mutatedGraph, { bandStd: edgeBandStd('strong') });
+    expectKeptExactly(before, result.mutatedGraph);
     expect(licensed(result.mutatedGraph)).toBe(false);
   });
 });
@@ -440,15 +442,17 @@ describe('R11 — the confirm guard (isProvenanceOnlyEdgeConfirmation)', () => {
     expect(guard(before, reviewed(before, { intent: 'set' }))).toBe(false);
   });
 
-  it('a band confirm: ACCEPTS std → the band\'s spread with the band recorded; REFUSES a missing or different band', () => {
+  // ⛔ #2473 CR: a band confirm keeps the std (this row once ACCEPTED std → the band's spread).
+  it('a band confirm: ACCEPTS the band recorded with the strength kept; REFUSES std → the band\'s spread, a missing or a different band', () => {
     const before = placeholder();
     const withSpread = (after: GraphV3T): GraphV3T => {
       after.edges.find((e) => e.from === FROM && e.to === TO)!.strength.std = edgeBandStd('strong');
       return after;
     };
-    expect(guard(before, withSpread(reviewed(before, { band: 'strong' })), 'strong')).toBe(true);
-    expect(guard(before, withSpread(reviewed(before)), 'strong')).toBe(false);
-    expect(guard(before, withSpread(reviewed(before, { band: 'moderate' })), 'strong')).toBe(false);
+    expect(guard(before, reviewed(before, { band: 'strong' }), 'strong')).toBe(true);
+    expect(guard(before, withSpread(reviewed(before, { band: 'strong' })), 'strong')).toBe(false);
+    expect(guard(before, reviewed(before), 'strong')).toBe(false);
+    expect(guard(before, reviewed(before, { band: 'moderate' }), 'strong')).toBe(false);
     // And a figure confirm may not carry a band it was never given.
     expect(guard(before, reviewed(before, { band: 'strong' }))).toBe(false);
   });
