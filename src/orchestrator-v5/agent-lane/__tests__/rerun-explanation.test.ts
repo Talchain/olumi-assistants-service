@@ -140,6 +140,20 @@ describe('the guard: RC\'s check before send, RC\'s fallback on a fail', () => {
     expect(guardRerunExplanation(reply, unmasked!).failed, 'the contrast: without model_labels it reads as a leader claim').toContain('RX-NO-LEADER-UNLICENSED');
   });
 
+  it('CONTROL (buddy preflight 5939219187): a PAIRED, licensed C1 rerun with win shares on both sides MAY say what moved', () => {
+    const paired = plan({ ...UNWITHHELD, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'ai_reporting_module_sprint' }] }, true)!;
+    expect(paired.inputs).toMatchObject({ prior_withheld: false, no_matched_figures: false, leader_licensed: true });
+    const moved = `${SAID_AI}\n${SAID_FIX}\nAI Reporting Module Sprint's chance rose to 57% and it leads the comparison.`;
+    expect(guardRerunExplanation(moved, paired)).toMatchObject({ passed: true, text: moved });
+  });
+
+  it.each(['partial', 'not_recorded', undefined])('coverage %s never licenses "same inputs" or a cause: checked as unpaired, said as "other things also differed"', (coverage) => {
+    const p2 = plan({ ...UNWITHHELD, attribution_case: 'C0_identical', input_coverage: coverage, win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] })!;
+    expect(p2.inputs.attribution_case).toBe('C2_unpaired');
+    expect(p2.fallback.endsWith(RERUN_FALLBACK_LINES.other)).toBe(true);
+    expect(p2.fallback).not.toContain(RERUN_FALLBACK_LINES.C0);
+  });
+
   it('a C2 pair: a causal word is refused (RX-NO-CAUSE-UNPAIRED); a C1 pair may state the cause', () => {
     const c2 = plan({ ...UNWITHHELD, attribution_case: 'C2_unpaired', win_probabilities_unavailable: undefined, win_probabilities: [{ option_id: 'x' }] })!;
     const causal = `${SAID_AI}\n${SAID_FIX}\nThe shift happened because of your change.`;

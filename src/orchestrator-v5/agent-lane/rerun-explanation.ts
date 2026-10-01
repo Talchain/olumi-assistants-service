@@ -120,7 +120,10 @@ export function rerunExplanationPlan(
   const rows = Array.isArray(d.input_changes) ? d.input_changes.map(rec).filter((r): r is Rec => r !== undefined) : [];
   const changes = changeSentences(rows, labelOf);
   if (changes.length === 0) return null;
-  const wireCase = d.attribution_case;
+  // ⛔ Partial or unrecorded coverage never licenses "same inputs" or a cause (CODEX CEE BUDDY preflight 5939219187): other
+  // inputs may have differed unseen, so the pair is judged as unpaired and said as "other things also differed".
+  const coverageComplete = d.input_coverage === 'complete';
+  const wireCase = coverageComplete ? d.attribution_case : 'coverage_incomplete';
   const priorWithheld = d.win_probabilities_unavailable === 'prior_withheld';
   const noMatched = !priorWithheld && Array.isArray(d.win_probabilities) && d.win_probabilities.length === 0;
   const noise = text(rec(d.leader)?.noise_verdict);
