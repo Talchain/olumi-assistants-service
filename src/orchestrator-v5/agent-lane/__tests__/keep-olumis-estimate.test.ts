@@ -16,6 +16,7 @@ import { ProposalStore } from '../proposal.js';
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { earnsAuthorshipCredit, structureProvenance } from '../../../cee/graph-readiness/obligation-provenance.js';
 import { sayFigureRead } from '../say-figure.js';
+import { approvalChipsFor, figureInUserUnits } from '../approval-chips.js';
 
 const SCENARIO = '9390a1b4-ab29-4a16-b39c-64bc00cc4ed0';
 const ctx = { scenario_id: SCENARIO, authenticated_user_id: null, request_id: 'r', user_text: '4 hours a week is about right for me. Keep it.', user_turn_text: '4 hours a week is about right for me. Keep it.' };
@@ -72,7 +73,9 @@ async function keep(items: ReturnType<typeof keepOf>[]) {
   store.put = (x) => { stored += 1; return put(x); };
   const caps = createAgentCapabilities(p.d, store);
   const proposed = await caps.proposeAssumptions(ctx, { assumptions: items } as never);
-  return { p, caps, proposed, stored: () => stored };
+  const chips = () => approvalChipsFor([{ name: 'propose_assumptions', ok: proposed.ok === true, mutated: false, proposal_id: String(proposed.proposal_id) }],
+    (id) => ({ proposal: store.get(id)!, result: proposed }) as never);
+  return { p, caps, proposed, stored: () => stored, chips };
 }
 
 describe('keep: Olumi’s own figure, accepted unchanged, through the real writer', () => {
@@ -147,5 +150,26 @@ describe('only Olumi’s own figure may be kept', () => {
     const caps = createAgentCapabilities(p.d, new ProposalStore());
     const r = await caps.proposeAssumptions(ctx, { assumptions: [{ factor_label: 'Hours per week finding warm connections', value: 4, unit: 'hours/week', basis: 'x' }] });
     expect(r).toMatchObject({ ok: false, refusal: 'nothing_to_adopt', already_valued: [{ label: 'Hours per week finding warm connections', current_value: 4 }] });
+  });
+});
+
+describe('the button says what the Yes records — never "Set … to" for a figure that does not change', () => {
+  it('RED: a keep gets "Keep Olumi’s estimate", with the card (the figure) in detail', async () => {
+    const { proposed, chips } = await keep([keepOf('Hours per week finding warm connections', 4, 'hours/week')]);
+    const [approve] = chips();
+    expect(approve).toMatchObject({ label: 'Keep Olumi\u2019s estimate', message: 'Yes, keep Olumi\u2019s estimate.', detail: String(proposed.public_label) });
+    expect(approve!.label).not.toMatch(/^Set /);
+  });
+
+  it('CONTROL: the user’s own revision keeps its existing "Set … to" button (the keep button binds to the stored keep only)', async () => {
+    const p = product();
+    const store = new ProposalStore();
+    const caps = createAgentCapabilities(p.d, store);
+    const c = { ...ctx, user_text: 'Make it 6 hours a week.', user_turn_text: 'Make it 6 hours a week.' };
+    const r = await caps.proposeAssumptions(c, { assumptions: [{ factor_label: 'Hours per week finding warm connections', value: 6, unit: 'hours/week', basis: 'their figure', revise: true }] });
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    const [approve] = approvalChipsFor([{ name: 'propose_assumptions', ok: true, mutated: false, proposal_id: String(r.proposal_id) }], (id) => ({ proposal: store.get(id)!, result: r }) as never);
+    expect(approve!.label).toBe(`Set Hours per week\u2026 to ${figureInUserUnits(6, 'hours/week')}`);
+    expect(approve!.message).toBe('Yes, use those.');
   });
 });

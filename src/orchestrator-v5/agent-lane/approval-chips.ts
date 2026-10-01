@@ -185,8 +185,30 @@ export function approvalChipsFor(
     return effectReading === undefined ? []
       : [{ id: approvalChipIdFor(proposalId), label: approve.label, message: linkEffectApproveMessage(effectReading), detail: effectReading }, AMEND_CHIP];
   }
+  // ⭐ A KEEP CHANGES NO FIGURE (52f8cd #2436): the button says what the Yes records — the user's acceptance — never
+  // "Set … to"; the card with the figure rides in `detail`.
+  const keep = keepCardFor(tool, labelSourceFor?.(proposalId));
+  if (keep !== undefined) return [{ id: approvalChipIdFor(proposalId), ...keep }, AMEND_CHIP];
   const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId));
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
+}
+
+/** The stored basis of a keep proposal (`proposeAssumptions` `keep: true`) — the authority the keep button binds to. */
+export const KEEP_PROPOSAL_BASIS = 'Olumi\u2019s current estimates, unchanged, for the user to accept';
+
+/**
+ * The keep button, ONLY when the STORED proposal is a keep (its basis) and the proposer's own result for that same id
+ * returned the same card — never the Agent's prose.
+ */
+function keepCardFor(tool: string, source: ApprovalLabelSource | undefined): { label: string; message: string; detail: string } | undefined {
+  const proposal = source?.proposal;
+  const result = source?.result;
+  if (tool !== 'propose_assumptions' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
+  if (proposal.provenance.basis !== KEEP_PROPOSAL_BASIS || typeof proposal.public_label !== 'string' || result.public_label !== proposal.public_label) return undefined;
+  const n = proposal.operations.length;
+  return n === 1
+    ? { label: 'Keep Olumi\u2019s estimate', message: 'Yes, keep Olumi\u2019s estimate.', detail: proposal.public_label }
+    : { label: `Keep Olumi\u2019s ${n} estimates`, message: 'Yes, keep those estimates.', detail: proposal.public_label };
 }
 
 /** Every op sets a factor value the USER wrote (`authored_by: 'user_stated'`, the write's own predicate). */
