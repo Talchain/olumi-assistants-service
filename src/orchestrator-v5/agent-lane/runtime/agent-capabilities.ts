@@ -195,6 +195,7 @@ import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrat
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
+import { optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
@@ -909,6 +910,8 @@ interface GraphRead {
     proposed_by?: unknown;
     /** A user-approved participation decision; origin remains `proposed_by: 'olumi'`. */
     analysis_participation?: unknown;
+    /** MG F1 T6: the user's own word for an option (`option_status_edit`); absent = feasible. */
+    option_status?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -1166,6 +1169,8 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
             ...(n.kind === 'option' && (n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded')
               ? { analysis_participation: n.analysis_participation } : {}),
+            // MG F1 T6: the user's own word for the option (absent = feasible): "removed" / "infeasible" is out of the comparison.
+            ...(n.kind === 'option' && (n.option_status === 'removed' || n.option_status === 'infeasible') ? { option_status: n.option_status } : {}),
           };
         }
 
@@ -3205,6 +3210,58 @@ export function createAgentCapabilities(
      * goal's target at all. Nothing is recorded as the user's that the user did not say: the figure must be in their
      * own words (`figureTheUserWrote`) and the direction in THIS turn's (`comparatorTheUserWrote`); every miss asks.
      */
+    /**
+     * ⭐ ONE OPTION OUT OF THE COMPARISON, OR BACK IN (MG F1 T6; spec §3 O1/O2; F5 I1.3) — the SAME writer as the UI's
+     * option control (`option_status_edit`), carrying the proposal's base hash. Paul, 1 Oct: "I can't remove it with the
+     * available tools" — the baseline included. The option stays in the model; only whether it is compared changes.
+     * Resolved by the ONE label resolver; an ambiguous or unknown name prepares nothing and asks.
+     */
+    async proposeOptionStatus(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const status = args?.status;
+      const requested = typeof args?.option_label === 'string' ? args.option_label.trim() : '';
+      if ((status !== 'removed' && status !== 'infeasible' && status !== 'feasible') || requested === '') {
+        return { ok: false, mutated: false, refusal: 'unreadable_option_status',
+          detail: 'Say which option, and whether to take it out, mark it not feasible, or put it back. Nothing was prepared.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const res = resolveNamed(g, requested, (n) => n.kind === 'option');
+      if (res.kind === 'ambiguous') {
+        return { ok: false, mutated: false, refusal: 'ambiguous_option', ambiguous_targets: [describeAmbiguity(g, requested, res.candidates)],
+          detail: AMBIGUOUS_NOTE };
+      }
+      if (res.kind !== 'one') {
+        return { ok: false, mutated: false, refusal: 'option_not_found',
+          detail: `No option in the model is called "${requested}", so nothing was prepared. Use the option's name exactly as get_canonical_state gives it, or ask the user which option they mean.` };
+      }
+      const option = res.node as GraphRead['nodes'][number] & { option_status?: unknown; analysis_participation?: unknown; proposed_by?: unknown };
+      if (status === 'feasible' && option.proposed_by === 'olumi' && option.analysis_participation !== 'included') {
+        return { ok: false, mutated: false, refusal: 'olumi_suggestion_not_adopted',
+          detail: `"${option.label}" is Olumi's suggestion, which the user has not added to their options; putting it into the comparison is adding it, which is a different change. Nothing was prepared.` };
+      }
+      if ((option.option_status ?? 'feasible') === status && (option.analysis_participation ?? 'included') === PARTICIPATION_FOR_STATUS[status]) {
+        return { ok: false, mutated: false, refusal: 'no_effect',
+          detail: `"${option.label}" is already ${status === 'feasible' ? 'in the comparison' : status === 'removed' ? 'taken out' : 'marked not feasible'}, so nothing was prepared. Tell the user plainly.` };
+      }
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        // The writer's stale gate is the ANALYSIS hash (`analysis_participation` is projected): the base this card was read on.
+        base_graph_identity_hash: g.graph_hash,
+        // `expected_status` is what THIS card was read on (absent = feasible): the writer refuses if it has moved since.
+        operations: [{ op: 'set_option_status', path: option.id, value: { status, expected_status: option.option_status ?? 'feasible' } }],
+        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: status === 'feasible' ? `Put "${option.label}" back into the comparison`
+          : status === 'removed' ? `Take "${option.label}" out of the comparison (it stays in your model)`
+          : `Mark "${option.label}" as not feasible and take it out of the comparison (it stays in your model)`,
+      });
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+        note: 'Show the user exactly this change, never the id, and call authorise_change with this proposal_id once they agree.' };
+    },
+
     async proposeGoalTarget(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const typed = args?.constraint_type;
@@ -4449,6 +4506,41 @@ export function createAgentCapabilities(
        * stored target holds exactly what was approved (`goalTargetHolds`); a write that answered 200 but cannot be read
        * back is "could not be confirmed", never "not saved".
        */
+      /**
+       * ⭐ MG F1 T6: ONE option's status through the ONE writer (`option_status_edit`), carrying the proposal's base hash.
+       * "Done" only when the model HOLDS the status and its participation (`optionStatusHolds`, the writer's own read-back).
+       */
+      if (ops.length === 1 && ops[0]!.op === 'set_option_status') {
+        const op = ops[0]!;
+        const { status, expected_status } = op.value as { status: 'feasible' | 'infeasible' | 'removed'; expected_status: 'feasible' | 'infeasible' | 'removed' };
+        const operationId = authorisationTurnId(decision.proposal.proposal_id);
+        const res = await dispatch('/orchestrate/v2/turn', {
+          kind: 'system_event', turn_id: operationId, scenario_id: ctx.scenario_id, stage: 'frame',
+          event: { kind: 'option_status_edit', option_node_id: op.path, expected_status, status, base_graph_hash: decision.proposal.base_graph_identity_hash },
+        });
+        if (res.status === 409) {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: decision.proposal.proposal_id,
+            detail: 'The model changed just before this was written, so nothing was changed. Offer to prepare it again.' };
+        }
+        if (res.status >= 400 && res.status < 500) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: decision.proposal.proposal_id,
+            detail: 'The option was not changed, and nothing on the model changed. Tell the user plainly and ask what they would like instead.' };
+        }
+        const after = await readGraph(ctx.scenario_id);
+        const landed = res.status === 200 && after !== null && optionStatusHolds(after.raw, op.path, status);
+        if (!landed) {
+          return { ok: false, mutated: res.status === 200, applied: false, refusal: res.status === 200 ? 'not_confirmed' : 'not_applied',
+            proposal_id: decision.proposal.proposal_id,
+            detail: res.status === 200
+              ? 'The change was sent but could not be confirmed in the saved model. Tell the user it could not be confirmed (never that it was saved, never that it failed) and offer to check.'
+              : 'The option was not changed. Tell the user plainly.' };
+        }
+        return { ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId,
+          // The writer's own sentence, about the option the model now holds (one wording for the UI and the Agent).
+          follow_up: optionStatusConfirmationText(String(after!.nodes.find((n) => n.id === op.path)?.label ?? ''), status),
+          note: 'The last analysis no longer reflects the options compared. Offer to run the analysis again.' };
+      }
+
       if (ops.length === 1 && ops[0]!.op === 'set_goal_target') {
         const op = ops[0]!;
         const v = op.value as { constraint_type: 'at_least' | 'at_most'; raw_value: number; unit: string };

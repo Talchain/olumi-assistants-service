@@ -447,6 +447,23 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'propose_option_status',
+    description:
+      'Take ONE option out of the comparison, or put it back, when the user asks (for example "drop carry on as now", '
+      + '"we can\u2019t do option B, take it out", "put option B back"). The baseline (carry on as now) can be taken out too. '
+      + 'This does NOT change anything: it prepares ONE change and returns its id, which you keep for authorise_change: '
+      + 'show the user what it does, never the id, before they approve. The option stays in their model with its wording; '
+      + 'only whether it is compared changes. Use `removed` when they want it out, `infeasible` when they say it cannot be '
+      + 'done, `feasible` to put it back. Never use it to delete an option, and never for Olumi\u2019s own suggestion '
+      + 'the user has not added.',
+    parameters: obj({
+      option_label: { type: 'string', description: 'The option exactly as get_canonical_state names it.' },
+      status: { type: 'string', enum: ['removed', 'infeasible', 'feasible'], description: 'removed = out of the comparison; infeasible = cannot be done, out of the comparison; feasible = back in.' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['option_label', 'status', 'rationale']),
+  },
+  {
+    type: 'function',
     name: 'propose_new_risk',
     description:
       'Add a RISK the user has just asked for, when the model does NOT already have it: something that could go wrong and would '
@@ -694,7 +711,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -768,6 +785,10 @@ export interface AgentCapabilities {
     constraint_type: 'at_least' | 'at_most'; value: number; unit: string; rationale: string;
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
+  }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
+  proposeOptionStatus?(ctx: AgentToolContext, args: {
+    option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {
@@ -885,6 +906,10 @@ export async function dispatchTool(
       return caps.proposeGoalTarget !== undefined
         ? caps.proposeGoalTarget(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
+    case 'propose_option_status':
+      return caps.proposeOptionStatus !== undefined
+        ? caps.proposeOptionStatus(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'An option cannot be taken out or put back here. Nothing was changed.' };
     case 'propose_new_risk':
       return caps.proposeNewRisk !== undefined
         ? caps.proposeNewRisk(ctx, args as never)
