@@ -50,8 +50,8 @@ export interface LeaderFinalEgressOpts extends WireLeaderClaimEnforcementOpts {
   readonly licence: LeaderLicence;
 }
 
-export interface LeaderFinalEgressResult {
-  readonly response: OlumiResponse;
+export interface LeaderFinalEgressResult<T> {
+  readonly response: T;
   readonly removedPaths: readonly string[];
   readonly proseEdited: boolean;
 }
@@ -139,8 +139,8 @@ export const FINAL_EGRESS_FAILED_TEXT =
   'Something went wrong while checking this reply, so it is not shown. Nothing in your model changed; please ask again.';
 
 /** Known-safe: no prose, no chips, no run delta, no enrichment; leader-designating keys nulled on what remains. */
-export function knownSafeEnvelope(response: OlumiResponse): OlumiResponse {
-  const src = response as OlumiResponse & Record<string, unknown>;
+export function knownSafeEnvelope(response: Record<string, unknown>): Record<string, unknown> {
+  const src = response;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(src)) {
     if (k === 'assistant_text' || k === 'framing_question' || k === 'suggested_actions' || k === 'run_delta' || k === '_answer_shape') continue;
@@ -159,13 +159,14 @@ export function knownSafeEnvelope(response: OlumiResponse): OlumiResponse {
       return rest;
     });
   }
-  return { ...(withoutLeaderDesignations(out) as Record<string, unknown>), assistant_text: FINAL_EGRESS_FAILED_TEXT, suggested_actions: [] } as unknown as OlumiResponse;
+  const safe: Record<string, unknown> = { ...(withoutLeaderDesignations(out) as Record<string, unknown>), assistant_text: FINAL_EGRESS_FAILED_TEXT, suggested_actions: [] };
+  return safe;
 }
 
-export function enforceLeaderLicenceAtFinalEgress(response: OlumiResponse, opts: LeaderFinalEgressOpts): LeaderFinalEgressResult {
+export function enforceLeaderLicenceAtFinalEgress<T extends Record<string, unknown>>(response: T, opts: LeaderFinalEgressOpts): LeaderFinalEgressResult<T> {
   if (opts.licence !== 'withheld') return { response, removedPaths: [], proseEdited: false };
   const removed: string[] = [];
-  let body = response as OlumiResponse & Record<string, unknown>;
+  let body: Record<string, unknown> = response;
   let proseEdited = false;
   try {
     const names = optionNamesAndIds(opts.graph, opts.analysisReady);
@@ -216,9 +217,9 @@ export function enforceLeaderLicenceAtFinalEgress(response: OlumiResponse, opts:
 
     // 4: prose, by the shared exact-label edit, on EVERY withheld turn: the break-even / A7 / answer-shape rewrites run
     // after the earlier gate (DL 380e54 5931709758), so this is the only edit that sees the final words.
-    const shared = enforceLeadingOptionClaimsAtWire(body, opts);
+    const shared = enforceLeadingOptionClaimsAtWire(body as OlumiResponse, opts);
     if (shared.changed) {
-      body = shared.response as typeof body;
+      body = shared.response;
       proseEdited = shared.editedFields.length > 0;
       for (const f of shared.editedFields) removed.push(f);
     }
@@ -229,7 +230,7 @@ export function enforceLeaderLicenceAtFinalEgress(response: OlumiResponse, opts:
       { event: 'agent_lane.leader_final_egress_failed', request_id: opts.requestId, exit_path: opts.exitPath, err: err instanceof Error ? err.message : String(err), removed_paths: removed },
       'agent-lane: the final leader egress threw — the reply is replaced by the known-safe envelope',
     );
-    return { response: knownSafeEnvelope(response), removedPaths: ['*'], proseEdited: true };
+    return { response: knownSafeEnvelope(response) as T, removedPaths: ['*'], proseEdited: true };
   }
 
   if (removed.length > 0) {
@@ -240,7 +241,7 @@ export function enforceLeaderLicenceAtFinalEgress(response: OlumiResponse, opts:
   }
   // Report-only: prose the wide alarm vocabulary flags, which no enforcer may safely delete.
   try {
-    const residue = findLeaderClaims(body).filter((h) => h.path === 'assistant_text' || h.path === 'framing_question' || /^blocks\[\d+\]\.[a-z_]+$/.test(h.path));
+    const residue = findLeaderClaims(body as OlumiResponse).filter((h) => h.path === 'assistant_text' || h.path === 'framing_question' || /^blocks\[\d+\]\.[a-z_]+$/.test(h.path));
     if (residue.length > 0) {
       log.warn(
         { event: 'agent_lane.leader_prose_residue', request_id: opts.requestId, paths: [...new Set(residue.map((h) => h.path))].sort(), codes: [...new Set(residue.map((h) => h.code))].sort() },
@@ -249,5 +250,5 @@ export function enforceLeaderLicenceAtFinalEgress(response: OlumiResponse, opts:
     }
   } catch { /* report-only */ }
 
-  return { response: body, removedPaths: [...new Set(removed)], proseEdited };
+  return { response: body as T, removedPaths: [...new Set(removed)], proseEdited };
 }

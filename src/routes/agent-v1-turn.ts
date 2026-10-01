@@ -1562,7 +1562,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       };
       // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
       const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
-      return enforceLeaderLicenceAtFinalEgress(replayBody as unknown as OlumiResponse, {
+      return enforceLeaderLicenceAtFinalEgress(replayBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_replay',
         licence: leaderLicenceFromState(state.analysisState, state.analysisReady),
@@ -1571,7 +1571,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(typeof replayClaim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: replayClaim.withheld_reason } : {}),
         graph: state.graph ?? null,
         analysisReady: state.analysisReady,
-      }).response as unknown as typeof replayBody;
+      }).response;
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
