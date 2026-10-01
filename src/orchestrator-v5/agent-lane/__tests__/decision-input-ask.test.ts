@@ -12,7 +12,8 @@ import { narrateWriteOutcome, openQuestionsForReply, withWriteOutcome } from '..
 type Rec = Record<string, unknown>;
 const FX = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')) as { goal_after_build: Rec; goal_after_target: Rec };
 const graphWith = (goal: Rec) => ({ nodes: [goal, { id: 'opt_a', kind: 'option', label: 'Angel pilot' }], edges: [] });
-const ASK = 'What is the least that "Funding secured" must reach within 2 months? I\'ll propose it as your target.';
+// "Funding secured" reads no direction (`deriveGoalIntent` undetermined, no minimise), so the neutral words (AIQ 5924149215).
+const ASK = 'What figure should "Funding secured" reach or stay under within 2 months? I\'ll propose it as your target.';
 const A7 = 'This model doesn\'t yet say whether any option gets there within 2 months.';
 const base = { restingText: 'The model is a sketch to challenge.', questionsToggle: false, awaitingApproval: false, builtOrRan: true };
 
@@ -49,9 +50,25 @@ describe('the lines, on the served goal', () => {
 
   it('no horizon → no A7 line and the ask drops "within…"; one month is singular; no goal → nothing', () => {
     const { goal_horizon_months: _h, ...noHorizon } = FX.goal_after_build;
-    expect(decisionInputLines(graphWith(noHorizon), base)).toEqual(['What is the least that "Funding secured" must reach? I\'ll propose it as your target.']);
+    expect(decisionInputLines(graphWith(noHorizon), base)).toEqual(['What figure should "Funding secured" reach or stay under? I\'ll propose it as your target.']);
     expect(decisionInputAsk(graphWith({ ...FX.goal_after_build, goal_horizon_months: 1 }), base)).toContain('within 1 month?');
     expect(decisionInputLines({ nodes: [], edges: [] }, base)).toEqual([]);
+  });
+});
+
+describe('the ask follows the goal\'s direction — never a floor on a cost goal (AIQ CR 5924149215)', () => {
+  const askFor = (label: string) => decisionInputAsk(graphWith({ ...FX.goal_after_build, label }), base);
+  it('RED: a cost goal ("Reduce monthly costs", minimised) is asked for the MOST it can be, never the least', () => {
+    expect(askFor('Reduce monthly costs')).toBe('What is the most that "Reduce monthly costs" can be within 2 months? I\'ll propose it as your target.');
+    expect(askFor('Lower churn')).toContain('What is the most that "Lower churn" can be');
+  });
+  it('an increase goal ("Increase MRR") is asked for the least it must reach', () => {
+    expect(askFor('Increase MRR')).toBe('What is the least that "Increase MRR" must reach within 2 months? I\'ll propose it as your target.');
+  });
+  it('no direction ("Monthly spend", "MRR", the served "Funding secured") → the neutral words', () => {
+    for (const label of ['Monthly spend', 'MRR', 'Funding secured']) {
+      expect(askFor(label)).toBe(`What figure should "${label}" reach or stay under within 2 months? I'll propose it as your target.`);
+    }
   });
 });
 
@@ -164,6 +181,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   let app: FastifyInstance;
   let goal: Rec = FX.goal_after_build;
   let modelSays = 'This run is a sketch, not a basis for choosing.';
+  let blocked = false;
   let n = 0;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: modelSays }] }] }), { status: 200 })));
@@ -176,12 +194,14 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
       graph: graphWith(goal), graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true },
       analysis_state: { run_state: { kind: 'complete_current' }, usable_for_chips: true },
     }));
-    app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'ok', blocks: [{ type: 'analysis_result', data: {} }], analysis_ready: { status: 'ready', may_run: true } }));
+    app.post('/orchestrate/v2/turn', async () => (blocked
+      ? { assistant_text: 'Set a level for Hours first.', blocks: [], analysis_ready: { status: 'blocked', may_run: false } }
+      : { assistant_text: 'ok', blocks: [{ type: 'analysis_result', data: {} }], analysis_ready: { status: 'ready', may_run: true } }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; n += 1; });
+  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; n += 1; });
   const runTurn = async (turnId?: string) => (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     ...(turnId !== undefined ? { turn_id: turnId } : {}), kind: 'message', scenario_id: `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`, message: 'Run analysis.', source: 'chip',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
@@ -197,6 +217,13 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect(text.indexOf(A7)).toBeLessThan(text.indexOf(ASK));
     const marker = text.indexOf('Questions this model does not answer yet:');
     expect(marker === -1 || text.indexOf(ASK) < marker).toBe(true);
+  });
+
+  it('CONTROL: a BLOCKED Run (answered, nothing ran) already names what it needs → neither line', async () => {
+    blocked = true;
+    const text = (await runTurn()).assistant_text;
+    expect(text).not.toContain('as your target');
+    expect(text).not.toContain(A7);
   });
 
   it('CONTROL: the same Run turn after the target was stated → no ask (the deadline line stays)', async () => {

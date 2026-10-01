@@ -11,6 +11,9 @@
  * and the host's own at-rest asks (#2420's full-toggle context ask, the levels ask) — CODEX 5923981385.
  */
 
+import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
+import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
+
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -93,14 +96,22 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   if (goal === undefined || label === '') return [];
   const within = withinMonths(goal);
   const a7 = within !== '' && !hasDurationLimit(graph) ? `This model doesn't yet say whether any option gets there${within}.` : null;
-  const ask = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal)
-    ? `What is the least that "${label}" must reach${within}? I'll propose it as your target.`
-    : null;
+  const ask = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
     + ls.reduce((n, l) => n + (l === null ? 0 : words(l)), 0);
   const keepA7 = a7 !== null && !(ctx.questionsToggle && onScreen([a7, ask]) > AT_REST_WORD_BOUND);
   return [keepA7 ? a7 : null, ask].filter((l): l is string => l !== null);
+}
+
+/**
+ * The ask follows the goal's ONE direction authority (AIQ CR 5924149215 on #2426): a floor only where the goal reads
+ * increase, a ceiling where it is minimised, and neutral words otherwise — never "the least your costs must reach".
+ */
+function targetAsk(graph: unknown, goal: Rec, label: string, within: string): string {
+  if (deriveEmittedGoalDirection(graph, goal.id) === 'minimise') return `What is the most that "${label}" can be${within}? I'll propose it as your target.`;
+  if (deriveGoalIntent(label).direction === 'increase') return `What is the least that "${label}" must reach${within}? I'll propose it as your target.`;
+  return `What figure should "${label}" reach or stay under${within}? I'll propose it as your target.`;
 }
 
 /** The one ask (D1), or null. */

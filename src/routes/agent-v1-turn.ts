@@ -2474,16 +2474,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const readinessLine = (staleLine !== null || firstPassRan) && (analysisReady as { may_run?: unknown } | undefined)?.may_run === true ? null : postWriteReadiness;
     // ⭐ D1 + A7 (DL #75 5923918068; AIQ words 5923963470): on the brief and Run turns, at rest — the deadline the model holds
     // but cannot answer, said as a fact; and, while the goal has no stated target, ONE ask for it (`decision-input-ask.ts`).
-    const statusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine]
-      .filter((x): x is string => x !== null && x !== '').join(' ') || null;
+    const statusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine].filter((x): x is string => x !== null && x !== '').join(' ') || null;
     const composedWithout = withWriteOutcome(withDisclosures(narration.text, owed), statusText);
     const decisionLines = decisionInputLines(readbackGraph, {
       restingText: textAtRest(composedWithout),
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
       awaitingApproval: offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
         || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined,
-      builtOrRan: fastPath === 'run' || fa !== undefined
-        || result.tool_calls.some((c) => c.name === 'run_analysis' || c.name === 'build_model_from_brief'),
+      // A build that saved, or an analysis that RAN: a blocked or failed Run already names what it needs, so asks nothing more.
+      builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
+        || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)
+          || (c.name === 'run_analysis' && (result.tool_results[i] as { ran?: unknown } | undefined)?.ran === true)),
     });
     const composed = composeDirectAnswerResponse({
       // ⛔ A proposal id is a binding for authorise_change, never text a user reads or
