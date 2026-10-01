@@ -187,6 +187,7 @@ import {
 // emit the locked template on the one population that most needs the reason.
 import { buildSeparabilityDisclosure } from '../../coaching/separability-disclosure.js';
 import { heldGoalPointsUp, resolveGoalDirection, resolveGoalThresholdStrict } from '../../goal-target/goal-direction.js';
+import { withStatedStrengths } from '../../agent-lane/refit-frames.js';
 
 // `PLOT_SLOW_LIKELY_MS` lives in the shared `../../telemetry/turn-timings.js`
 // module so the turn-executor (error-path reconstruction) can apply the
@@ -1030,8 +1031,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         'run_analysis carried Olumi\'s unconfirmed goal product on the wire copy of a graph with no identity (ids only)',
       );
     }
+    // ⭐ CLAMP AT PERSIST (DL 5924108406): a link stored at ±1 with its full β marked is sent at that full β, on this wire
+    // copy only, so PLoT clamps, marks (`clamped_from`) and withholds exactly as it did when the full β was stored.
+    const statedWireGraph = withStatedStrengths(wireGraph);
+    if (statedWireGraph !== wireGraph) {
+      log.info(
+        { event: 'run_analysis.clamped_links_sent_at_full_size', request_id: invocation.requestId, scenario_id: args.scenario_id },
+        'run_analysis sent stored clamps at their full size (wire copy only; ids only)',
+      );
+    }
     const plotPayload: Record<string, unknown> = {
-      graph: wireGraph,
+      graph: statedWireGraph,
       // No-rank ruling (2026-08-14): the GATED submission set — identical to
       // snapshot.options unless the gate held the status quo at its observed
       // position, or EXCLUDED an option with no values set (disclosed below).

@@ -55,7 +55,7 @@ import { droppedGoalProductLine, gapResidualLine, unconfirmGoalProducts, without
 import { withGoalSenseReading, type GoalSenseReading } from '../goal-sense-reading.js';
 import { briefGoalLevel } from '../unplaced-goal-level.js';
 import { foldProductCarrierIntoGoal, foldedCarrierLines, type FoldedCarrier } from '../goal-product-carrier.js';
-import { refitFramesForStatedEffects } from '../refit-frames.js';
+import { clampForPersist, refitFramesForStatedEffects } from '../refit-frames.js';
 import { NOT_REPRESENTABLE } from '../../../cee/magnitude/link-effect.js';
 import { creditStatedFactorLevels, figureTheUserWrote, figureTheUserWroteFor, writtenRangeFor, goalLevelTheUserWrote, holdStatedGoalAttributes, levelWrittenApartFromTarget, timesTheUserWrote, withdrawUnstatedBaselineStamps } from '../stated-by-user.js';
 import { budgetFor } from '../model-budgets.js';
@@ -1821,7 +1821,8 @@ export async function buildModelFromBrief(
   // served MRR run 4 (57997d1) stated £49 per subscriber on a 106,250 MRR frame (β 2.31), so the Run clamped the user's
   // effect and withheld the chance. Refused (and left to the Run's honest clamp withhold) when a level is set on the
   // target, a spread would move, a new link would be cut, or the target is a bounded scale.
-  const graph = refitFramesForStatedEffects({
+  // ⭐ CLAMP AT PERSIST (DL 5924108406): a link no refit could fit is stored at ±1 with its full β marked (`refit-frames.ts`).
+  const graph = clampForPersist(refitFramesForStatedEffects({
     // The brief's baselines withdrawn where unstated, and the goal's stated attributes held (G1): see `statedGoal`.
     // An option Olumi added carries `proposed_by: 'olumi'` (the Run's filter and the analysis hash read it; never the brief).
     nodes: markOlumiOptions(goalNodes, candidate, brief),
@@ -1829,12 +1830,14 @@ export async function buildModelFromBrief(
     ...(admitted.goal_constraints.length > 0
       ? { goal_constraints: admitted.goal_constraints }
       : {}),
-  } as Record<string, any>).graph as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
+  } as Record<string, any>).graph) as { nodes: typeof goalNodes; edges: typeof admitted.edges; goal_constraints?: typeof admitted.goal_constraints };
   // ⭐ A4f (AIQ 5923220559): the user's size was asked about as "would be cut short" when it was sized, BEFORE the refit
   // above. Where the refit made it fit, that question is no longer true, so it is not asked. Only the user's own sizes:
   // Olumi's set-aside estimate quotes the same words but its link holds a placeholder, never the size.
   const fitted = new Set(graph.edges
-    .filter((e) => e.provenance?.magnitude === 'user_stated' && typeof e.strength?.mean === 'number' && Math.abs(e.strength.mean) <= 1)
+    // A clamped link (its full β marked) is still cut in the analysis: its question stays (CODEX 5924186955).
+    .filter((e) => e.provenance?.magnitude === 'user_stated' && typeof e.strength?.mean === 'number' && Math.abs(e.strength.mean) <= 1
+      && !('clamped_from' in (e.provenance ?? {})))
     .map((e) => `edges[${e.from}::${e.to}].magnitude_question`));
   const noLongerCut = new Set(admitted.loss.filter((l) => fitted.has(l.field_path) && l.reason.includes(NOT_REPRESENTABLE)).map((l) => l.reason));
   for (let i = openQuestions.length - 1; i >= 0; i--) if (noLongerCut.has(openQuestions[i]!)) openQuestions.splice(i, 1);
