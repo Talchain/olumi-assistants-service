@@ -24,6 +24,8 @@ type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const labelOf = (n: Rec): string => (typeof n.label === 'string' ? n.label.trim() : '');
+/** A label as the ask says it: in straight double quotes. */
+const quoted = (label: string): string => `"${label}"`;
 
 /** Links into or out of these carry no causal size: a decision's options and an option's levers. */
 const STRUCTURAL_KINDS: ReadonlySet<unknown> = new Set(['decision', 'option']);
@@ -38,7 +40,7 @@ export interface LinkSizeAskContext {
 }
 
 const fold = (s: string): string => s.toLowerCase().replace(/[“”"‘’'`]/g, '').replace(/\s+/g, ' ').trim();
-const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, (c) => `\\${c}`);
 /** The label appears in the message as whole words (quotes and case ignored). */
 const names = (message: string, label: string): boolean =>
   label.length >= 3 && new RegExp(`(?:^|[^a-z0-9])${escape(fold(label))}(?:$|[^a-z0-9])`).test(fold(message));
@@ -106,7 +108,7 @@ function oneSourceUnit(unit: string): string | null {
   if (PERCENT.test(u)) return 'percentage point';
   if (moneyUnit(u) !== null || !PLAIN_UNIT.test(u)) return null;
   const [head, per] = u.split(/\s*(?:\/|\bper\b)\s*/i);
-  const one = head!.replace(/([a-z])s$/i, '$1');
+  const one = head!.replace(/([a-z])s$/i, (_w, c: string) => c);
   return per === undefined ? one : `${one} per ${per}`;
 }
 
@@ -140,9 +142,9 @@ export function linkSizeAsk(graph: unknown, ctx: LinkSizeAskContext): string | n
     const inWords = targetUnit === undefined ? null : targetUnitWords(targetUnit);
     if (inWords === null) return null;
     const verb = direction === 1 && moneyUnit(targetUnit!) !== null ? 'add to' : 'change';
-    return `How much does one more "${s}" ${verb} "${t}", in ${inWords}? I'll propose it as your figure.`;
+    return `How much does one more ${quoted(s)} ${verb} ${quoted(t)}, in ${inWords}? I'll propose it as your figure.`;
   }
   const one = sourceUnit === undefined ? null : oneSourceUnit(sourceUnit);
   if (one === null) return null;
-  return `How much does "${t}" change when "${s}" goes up by one ${one}? I'll propose it as your figure.`;
+  return `How much does ${quoted(t)} change when ${quoted(s)} goes up by one ${one}? I'll propose it as your figure.`;
 }
