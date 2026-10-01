@@ -3732,6 +3732,13 @@ export function createAgentCapabilities(
       if (assumptions.length === 0 && levels.length === 0) {
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: 'Nothing was proposed.' };
       }
+      // ⛔ A keep is its own approval (`keep_with_other_changes`, CODEX CEE BUDDY 5925846990): never folded into a starting
+      // point's one Yes, whose card would call Olumi's kept figure a starting assumption.
+      if (assumptions.some((x) => (x as { keep?: unknown } | null)?.keep === true)) {
+        return { ok: false, mutated: false, refusal: 'keep_with_other_changes',
+          detail: 'Keeping Olumi\u2019s estimate is its own approval. Nothing was proposed: use propose_assumptions with keep for it, '
+            + 'and propose the starting point without it.' };
+      }
       const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
       // What THIS starting point would make each factor's starting value — read off the stored
       // value half, never the Agent's arguments — so a held level that only restates it is caught.

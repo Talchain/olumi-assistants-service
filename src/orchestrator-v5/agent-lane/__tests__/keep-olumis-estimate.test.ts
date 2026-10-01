@@ -32,8 +32,10 @@ const BASE: Node[] = [
   { id: 'reply_rate', kind: 'factor', label: 'Reply rate', category: 'observable', observed_state: { value: 0.05, raw_value: 5, unit: '%', source: 'user_assumption', reviewed_by_user: { intent: 'confirm', at: '2026-10-01T00:00:00.000Z' } } },
   { id: 'deal_count', kind: 'factor', label: 'Deals in pipeline', category: 'observable', observed_state: { value: 0.3, cap: 10, unit: 'deals', source: 'cee_inference', extractionType: 'inferred' } },
   { id: 'blank', kind: 'factor', label: 'Intro quality', category: 'observable', scale_frame: 100 },
+  // Served `9390a1b4`'s stored 0: Olumi's estimate that no time goes on angels yet.
+  { id: 'angel_hours', kind: 'factor', label: 'Hours per week on angel outreach', category: 'controllable', scale_frame: 40, observed_state: { unit: 'hours/week', value: 0, source: 'cee_inference', raw_value: 0, extractionType: 'inferred' } },
 ];
-const EDGES = ['warm_hours', 'team_size', 'runway', 'reply_rate', 'deal_count', 'blank'].map((from) => (
+const EDGES = ['warm_hours', 'team_size', 'runway', 'reply_rate', 'deal_count', 'blank', 'angel_hours'].map((from) => (
   { from, to: 'funding', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' }));
 
 /** The product double whose value writer IS the served writer. */
@@ -60,7 +62,18 @@ function product() {
     }
     return { status: 200, json: { graph: graph(), graph_hash: `h${rev}` } };
   };
-  return { d, byId: () => Object.fromEntries(nodes.map((n) => [n.id, n])), graph, writes: () => writes };
+  /** Another writer (the user's own inspector edit, through the real writer) sets a figure between card and approval. */
+  const otherWriter = async (target: string, raw: number) => {
+    const ev = { kind: 'factor_value_edit', target_id: target, value: raw, intent: 'set' };
+    const res = await applyFactorValueEdit({
+      payload: { kind: 'system_event', turn_id: '7e1d2c3b-4a5f-4e6d-8c7b-9a0f1e2d3c4b', scenario_id: SCENARIO, stage: 'frame', event: ev } as never,
+      event: ev as never, requestId: 'other-writer', persistedGraph: graph() as never, priorFacts: [],
+    });
+    if (res.kind !== 'mutated') throw new Error(`PRECONDITION: the other writer wrote (${res.kind})`);
+    nodes = (res as unknown as { mutatedGraph: { nodes: Node[] } }).mutatedGraph.nodes;
+    rev += 1;
+  };
+  return { d, byId: () => Object.fromEntries(nodes.map((n) => [n.id, n])), graph, writes: () => writes, otherWriter };
 }
 
 const keepOf = (factor_label: string, value: number, unit: string) => ({ factor_label, value, unit, basis: 'the user said it is about right', keep: true });
@@ -118,6 +131,45 @@ describe('keep: Olumi’s own figure, accepted unchanged, through the real write
     const os = p.byId().deal_count.observed_state!;
     expect(os.value).toBe(0.3);
     expect(os.source).toBe('user_assumption');
+  });
+});
+
+describe('collisions and retries (CODEX CEE BUDDY 5925846990)', () => {
+  it('a stored 0 is a figure: Olumi’s 0 hours is kept and accepted, still 0', async () => {
+    const { p, caps, proposed } = await keep([keepOf('Hours per week on angel outreach', 0, 'hours/week')]);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(applied.ok, JSON.stringify(applied)).toBe(true);
+    expect(p.byId().angel_hours.observed_state).toMatchObject({ value: 0, raw_value: 0, source: 'user_assumption', reviewed_by_user: { intent: 'confirm' } });
+  });
+
+  it('NEGATIVE: the user makes the same 4 their own between card and approval → the keep is refused and never relabels it Olumi’s', async () => {
+    const { p, caps, proposed } = await keep([keepOf('Hours per week finding warm connections', 4, 'hours/week')]);
+    await p.otherWriter('warm_hours', 4);
+    const mine = p.byId().warm_hours.observed_state!;
+    expect(mine, 'PRECONDITION: the same figure is now the user’s own').toMatchObject({ raw_value: 4, source: 'user_override' });
+    const applied = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(applied.ok).toBe(false);
+    expect(p.writes()).toBe(0);
+    expect(p.byId().warm_hours.observed_state).toEqual(mine);
+  });
+
+  it('a retried approval writes nothing more and keeps the review byte for byte', async () => {
+    const { p, caps, proposed } = await keep([keepOf('Hours per week finding warm connections', 4, 'hours/week')]);
+    await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const once = structuredClone(p.byId().warm_hours.observed_state);
+    const again = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    expect(again).toMatchObject({ already_applied: true });
+    expect(p.writes()).toBe(1);
+    expect(p.byId().warm_hours.observed_state).toEqual(once);
+  });
+
+  it('NEGATIVE: a keep is never folded into a starting point’s one Yes', async () => {
+    const p = product();
+    const caps = createAgentCapabilities(p.d, new ProposalStore());
+    const r = await caps.proposeStartingPoint(ctx, { assumptions: [keepOf('Hours per week finding warm connections', 4, 'hours/week')], option_levels: [] } as never);
+    expect(r).toMatchObject({ ok: false, refusal: 'keep_with_other_changes' });
+    expect(p.writes()).toBe(0);
   });
 });
 
