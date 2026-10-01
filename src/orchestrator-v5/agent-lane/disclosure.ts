@@ -42,7 +42,7 @@ export function disclosuresFor(outcomes: readonly DisclosableOutcome[]): readonl
     owed.push(PLACEHOLDER_STRENGTH_DISCLOSURE);
   }
   for (const o of outcomes) {
-    // ⭐ E1 (DL #75 5924370309; AIQ words 5924376899): the user's own level, left out of the target card, is said — once.
+    // ⭐ E1 (DL #75 5924370309; AIQ CR 5924479737): the user's own level, left out of the target card, is said — once.
     const line = o?.current_level_left_out?.host_line;
     if (typeof line === 'string' && line !== '' && !owed.includes(line)) owed.push(line);
   }

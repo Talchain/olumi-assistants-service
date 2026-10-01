@@ -406,7 +406,7 @@ export interface EntityScope {
 }
 
 /** A label's words, lower-cased, three characters or more ("Pro plan price" → pro, plan, price; "MRR" → mrr). */
-export const wordsOf = (label: string): string[] => label.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
+const wordsOf = (label: string): string[] => label.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
 
 /** One word's plain stem: "developers" → developer, "hires"/"hired"/"hire" → hir, "pricing"/"price" → pric. */
 const stemOf = (w: string): string => {
@@ -415,7 +415,7 @@ const stemOf = (w: string): string => {
   return x.endsWith('e') && x.length >= 4 ? x.slice(0, -1) : x;
 };
 /** Two words name the same thing: equal stems, or one stem (four letters or more) begins the other ("month"/"monthly"). */
-export const sameWord = (a: string, b: string): boolean => {
+const sameWord = (a: string, b: string): boolean => {
   const x = stemOf(a);
   const y = stemOf(b);
   if (x === y) return true;

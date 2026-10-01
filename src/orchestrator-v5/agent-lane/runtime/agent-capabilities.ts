@@ -163,7 +163,7 @@ import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, statingSentenceOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -182,7 +182,7 @@ import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
-import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
+import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
@@ -205,31 +205,6 @@ function limitNodeIdsOf(raw: unknown): string[] {
     const id = (c as { node_id?: unknown } | null)?.node_id;
     return typeof id === 'string' ? [id] : [];
   });
-}
-
-/**
- * ⭐ E1 (AIQ words #75 5924376899): the user's own level figure, left out of the target card because it could not be bound
- * to the goal. DGAI's producer opener ("Not included in this proposal: "), the user's verbatim span, and the rivals the
- * strict door found — the other labels holding the goal's words that sit in the figure's own sentence (≤3, most shared
- * first). No question (the card is the turn's one step), and never "recorded" of the level.
- */
-function levelNotIncludedLine(
-  g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] },
-  goalLabel: string,
-  inWords: { readonly raw: number; readonly quote: string | null },
-  sameStatement: boolean,
-  userText: string | null | undefined,
-): string {
-  const span = writtenIn(userText ?? '', inWords.raw)?.written ?? String(inWords.raw);
-  const opener = `Not included in this proposal: today's level you gave, "${span}".`;
-  const close = 'so it isn’t recorded. Approving sets only the target.';
-  // Written apart from the target, and about the goal: not a rival question (PROMPT STRIKE words, for AIQ to rule).
-  if (!sameStatement) return `${opener} It isn’t written in the same sentence as the target, ${close}`;
-  const inClause = wordsOf(inWords.quote ?? '');
-  const goalWords = wordsOf(goalLabel).filter((w) => inClause.some((c) => sameWord(c, w)));
-  const shared = (label: string): number => wordsOf(label).filter((w) => goalWords.some((t) => sameWord(t, w))).length;
-  const rivals = scopeIn(g, goalLabel).others.filter((l) => shared(l) > 0).sort((a, b) => shared(b) - shared(a)).slice(0, 3);
-  return `${opener} It could belong to more than one figure in this model${rivals.length > 0 ? ` (${rivals.map((r) => `"${r}"`).join(', ')})` : ''}, ${close}`;
 }
 
 function scopeIn(g: { readonly nodes: readonly { readonly label?: unknown; readonly kind?: unknown }[] }, ...target: string[]): EntityScope {
@@ -3175,9 +3150,11 @@ export function createAgentCapabilities(
         const sameStatement = inWords.quote !== null && figureTheUserWrote(value, unit, inWords.quote);
         const aboutTheGoal = figureTheUserWroteFor(inWords.raw, unit, ctx.user_text, { ...scopeIn(g, goal.label), strict: true });
         if (!sameStatement || !aboutTheGoal) {
-          // The figure IS the user's (it passed the words rule); only its binding to this goal failed, so Olumi says it was
-          // not included (`disclosuresFor`; AIQ's words 5924376899) — never dropped silently, never "recorded".
-          levelLeftOut = { refusal: 'current_level_not_bound', host_line: levelNotIncludedLine(g, goal.label, inWords, sameStatement, ctx.user_text),
+          // The figure IS the user's (it passed the words rule); only its binding to this goal failed, so Olumi says so
+          // (`disclosuresFor`; AIQ CR 5924479737 on #2429): a true negation, no ask beside the card (≤1 ask; asking again
+          // would only meet the same refusal until the level can bind), and true even when the Agent misread the amount.
+          levelLeftOut = { refusal: 'current_level_not_bound',
+            host_line: `I haven't recorded ${targetFigure(inWords.raw, unit)} as today's level of "${goal.label}". Approving sets only the target.`,
             reason: `${targetFigure(inWords.raw, unit)} is not written as today's level of "${goal.label}" in the same statement as its target.` };
         } else {
           currentLevel = { value: inWords.raw, unit, quote: inWords.quote! };
