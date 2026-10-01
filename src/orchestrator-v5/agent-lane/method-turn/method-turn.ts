@@ -23,9 +23,9 @@ import type { SuggestedAction } from '../../compose/types.js';
 import { deriveAuthoritativeStage } from '../../context/derive-stage.js';
 import type { AnalysisFreshness } from '../../context/freshness.js';
 import { extractGraphOptionIds } from '../../context/option-identity.js';
-import type { InfluenceBand } from '../../format/influence-bands.js';
 import { checkMethodTurn, methodPlanOf, selectGuidance, stateKeyHash } from '../guidance/index.js';
 import { linkTargetOf } from '../guidance/select-strengthen-placeholder.js';
+import { linkStrengthsCardArgs, type LinkStrengthsCardArgs } from '../strengthen-press.js';
 import type { GuidanceSignals as SelectorSignals, GuidanceState, MethodInputs, PolicyId } from '../guidance/index.js';
 import type { GuidanceRecord } from '../guidance/types.js';
 import { POLICY } from '../guidance/policy.js';
@@ -175,7 +175,33 @@ export interface ChoosePlanTurn {
   readonly actions: readonly SuggestedAction[];
 }
 
-export type MethodTurn = RunMethodTurn | ChoosePlanTurn;
+/**
+ * Why a recognised press cannot run the method. The press still gets the method's OWN answer, never ordinary generation
+ * (CODEX_CLI_OVERFLOW P1 on #2480; DL 5939415083 (1)).
+ */
+export type UnavailableReason = 'model_unread' | 'no_goal' | 'no_own_option' | 'plan_unconfirmed' | 'no_grounded_item';
+
+/** ONE deterministic "can't run the pre-mortem because …" reply, with 'Talk it through'. No model call. */
+export interface UnavailableTurn {
+  readonly kind: 'unavailable';
+  readonly reason: UnavailableReason;
+  readonly reply: string;
+  readonly actions: readonly SuggestedAction[];
+}
+
+export type MethodTurn = RunMethodTurn | ChoosePlanTurn | UnavailableTurn;
+
+const UNAVAILABLE_REPLY: Readonly<Record<UnavailableReason, (plan: string | null) => string>> = {
+  model_unread: () => 'I can\u2019t run the pre-mortem right now because I couldn\u2019t read your model. Try again in a moment.',
+  no_goal: () => 'I can\u2019t run the pre-mortem yet because your model has no goal to measure failure against. Add the goal first.',
+  no_own_option: () => 'I can\u2019t run the pre-mortem yet because your model has no option of yours to stress-test. Add one first.',
+  plan_unconfirmed: () => 'I can\u2019t run the pre-mortem because I couldn\u2019t confirm which option to stress-test. Press \u201cRun a pre-mortem\u201d again and pick one.',
+  no_grounded_item: (plan) => `I can\u2019t run the pre-mortem on ${plan === null ? 'that option' : `\u2018${plan}\u2019`} yet because nothing on its path is Olumi\u2019s estimate, a risk or a limit to stress-test.`,
+};
+
+export function unavailableTurn(reason: UnavailableReason, plan: string | null = null): UnavailableTurn {
+  return { kind: 'unavailable', reason, reply: UNAVAILABLE_REPLY[reason](plan), actions: [TALK_IT_THROUGH_CHIP] };
+}
 
 export interface MethodTurnInput {
   /** The request's pressed chip id (`body.chip.id`). */
@@ -184,8 +210,8 @@ export interface MethodTurnInput {
 }
 
 /**
- * The method turn for this request, or null when it is not one: no pre-mortem press, no goal or own option to stress,
- * or nothing in the model a story could rest on. Null is an ordinary Agent turn, exactly as today.
+ * The method turn for this request. Null ONLY when the request carries no pre-mortem press: a recognised press always
+ * gets the method's own answer (run, choose_plan, or unavailable), never an ordinary Agent turn.
  */
 export function planMethodTurn(input: MethodTurnInput): MethodTurn | null {
   const signals = assembleGuidanceSignals({ ...input.signalInputs, request: 'method', explicitRequest: METHOD });
@@ -195,12 +221,14 @@ export function planMethodTurn(input: MethodTurnInput): MethodTurn | null {
 export function methodTurnFromSignals(chipId: unknown, s: TurnSignals, graph: unknown): MethodTurn | null {
   const press = methodPressOf(chipId, s['model.non_sq_option_ids']);
   if (press === null) return null;
+  if (s['model.goal_present'] !== true) return unavailableTurn('no_goal');
+  if (s['model.non_sq_option_ids'].length === 0) return unavailableTurn('no_own_option');
   const selector = selectorSignalsOf(s, press.pick);
   const selection = selectGuidance(selector, selector.guidance ?? {});
-  if (selection.runs_method !== METHOD) return null;
-  if (selection.mode === 'choose_plan') return choosePlan(selection.choices ?? [], s['model.option_labels']);
+  if (selection.runs_method !== METHOD) return unavailableTurn('plan_unconfirmed');
+  if (selection.mode === 'choose_plan') return choosePlan(selection.choices ?? [], s['model.option_labels']) ?? unavailableTurn('plan_unconfirmed');
   const planId = methodPlanOf(selector);
-  if (planId === undefined) return null;
+  if (planId === undefined) return unavailableTurn('plan_unconfirmed');
   const context = methodScienceContext({
     method: 'pre_mortem',
     canonical_stage: canonicalStageOf(s['run.kind'], graph),
@@ -210,8 +238,8 @@ export function methodTurnFromSignals(chipId: unknown, s: TurnSignals, graph: un
   });
   // ONE plan rule, two readers (RC's `methodPlanOf`, SCIENCE/DSK's `choosePlan`): if they ever disagree, nothing runs.
   const plan = context.plan;
-  if (plan === null || plan.option_id !== planId) return null;
-  if (context.supplied_items.length === 0) return null;
+  if (plan === null || plan.option_id !== planId) return unavailableTurn('plan_unconfirmed');
+  if (context.supplied_items.length === 0) return unavailableTurn('no_grounded_item', plan.label);
   const ctx = { ...context, plan };
   return { kind: 'run', context: ctx, directive: methodDirective(ctx), check_inputs: checkInputsOf(ctx, graph) };
 }
@@ -327,15 +355,12 @@ export function settleMethodTurn(turn: RunMethodTurn, draft: string): SettledMet
   return { reply: draft, passed: true, failed: [], target: items[Math.min(...indices)] };
 }
 
+/** The pre-mortem card's basis (provenance, never shown as the user's words). */
+export const PREMORTEM_CARD_RATIONALE = 'Olumi\u2019s current band for a link this pre-mortem rests on, for you to apply as it stands or edit.';
+
 /** The ONE change card's call through the existing door: the tool and the exact arguments its schema takes. */
 export type CardCall =
-  | {
-      readonly tool: 'propose_link_strengths';
-      readonly args: {
-        readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength: InfluenceBand }];
-        readonly rationale: string;
-      };
-    }
+  | { readonly tool: 'propose_link_strengths'; readonly args: LinkStrengthsCardArgs }
   | {
       readonly tool: 'propose_assumptions';
       readonly args: {
@@ -356,7 +381,7 @@ export type CardCall =
  * Null = no card, and the turn offers 'Talk it through' only: a risk or a limit (its card would need a label drawn from
  * the story, i.e. model text: not in v1), or a target the graph no longer holds as it was read.
  */
-export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: string): CardCall | null {
+export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: string = PREMORTEM_CARD_RATIONALE): CardCall | null {
   const g = rec(graph);
   const nodes = Array.isArray(g?.nodes) ? g.nodes.map(rec).filter((n): n is Rec => n !== undefined) : [];
   const edges = Array.isArray(g?.edges) ? g.edges.map(rec).filter((e): e is Rec => e !== undefined) : [];
@@ -369,10 +394,7 @@ export function cardCallFor(target: SuppliedItem, graph: unknown, rationale: str
     const edge = edges.find((e) => `${String(e.from)}->${String(e.to)}` === target.id);
     const link = typeof edge?.from === 'string' && typeof edge.to === 'string' ? linkTargetOf(graph, edge.from, edge.to) : null;
     if (link === null || labelOf(link.from_id) === null || labelOf(link.to_id) === null) return null;
-    return {
-      tool: 'propose_link_strengths',
-      args: { links: [{ from_label: link.from_label, to_label: link.to_label, strength: link.band }], rationale },
-    };
+    return { tool: 'propose_link_strengths', args: linkStrengthsCardArgs(link, rationale) };
   }
   if (target.kind === 'factor') {
     const node = nodes.find((n) => n.id === target.id);
@@ -415,6 +437,8 @@ export function isMethodPress(chipId: unknown): boolean {
  */
 export function methodTurnForReadback(chipId: unknown, rb: MethodReadback): MethodTurn | null {
   if (!isMethodPress(chipId)) return null;
+  // A read that failed (or found no model) is said as such, never handed to the Agent as an ordinary turn.
+  if (rb.graph === undefined || rb.graph === null) return unavailableTurn('model_unread');
   return planMethodTurn({
     chipId,
     signalInputs: {
@@ -431,17 +455,14 @@ export function methodTurnForReadback(chipId: unknown, rb: MethodReadback): Meth
 }
 
 /**
- * The turn's history with its LAST assistant message saying what was actually sent: a replaced draft never reaches the
- * next turn as Olumi's words.
+ * The method turn's record, rebuilt at its EXPLICIT boundary: the history before the turn, the user's words, and what
+ * was SENT. Nothing the call produced survives (a multi-message or tool-hop draft included), and an earlier turn is never
+ * touched, even when the call produced no output (CODEX_CLI_OVERFLOW P1 #3 on #2480; DL 5939415083 (2)).
  */
-export function withSentReply(items: readonly unknown[], text: string): unknown[] {
-  const sent = { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] };
-  for (let i = items.length - 1; i >= 0; i -= 1) {
-    const it = rec(items[i]);
-    // The model's own output message carries `type: 'message'` and may carry no role; an input item carries a role.
-    if (it !== undefined && (it.role === 'assistant' || (it.type === 'message' && it.role === undefined))) {
-      return [...items.slice(0, i), sent, ...items.slice(i + 1)];
-    }
-  }
-  return [...items, sent];
+export function methodTurnItems(history: readonly unknown[] | undefined, message: string, sent: string): unknown[] {
+  return [
+    ...(history ?? []),
+    { role: 'user', content: [{ type: 'input_text', text: message }] },
+    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: sent }] },
+  ];
 }

@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
 
 const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; pending_actions: unknown[] }>();
 const store = {
@@ -49,6 +50,9 @@ const nextScenario = () => { n += 1; SCENARIO = `7a1e2d3c-4b5a-4e6d-9c7b-8a9f0e1
 describe('T3 method turn on the live Agent route (served D1)', () => {
   let app: FastifyInstance;
   let reply = GOOD;
+  /** When set, the model's raw output items for the next call(s), instead of one message carrying `reply`. */
+  let output: unknown[] | null = null;
+  let failRead = false;
   let sent: Sent[] = [];
   let planPickChipId: (id: string) => string;
   let MUTATION_TOOLS: readonly string[];
@@ -56,7 +60,7 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Sent;
       sent.push(body);
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: reply }] }] }), { status: 200 });
+      return new Response(JSON.stringify({ output: output ?? [{ type: 'message', content: [{ type: 'output_text', text: reply }] }] }), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -65,7 +69,7 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     ({ planPickChipId } = await import('../method-turn/method-turn.js'));
     ({ MUTATION_TOOLS } = await import('../runtime/agent-tools.js'));
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
+    app.post('/assist/v1/scenarios/:id/graph', async (_req, res) => (failRead ? res.code(500).send({ error: 'read failed' }) : {
       graph: D1.body.draft_graph,
       graph_hash: 'h-d1',
       analysis_ready: { status: 'ready', may_run: true },
@@ -78,7 +82,7 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { reply = GOOD; sent = []; nextScenario(); });
+  beforeEach(() => { reply = GOOD; output = null; failRead = false; sent = []; nextScenario(); });
 
   const press = async (id: string, message: string): Promise<Body> => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, source: 'chip', chip: { id } } });
@@ -127,8 +131,8 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(call.instructions).toContain('METHOD TURN');
     expect(call.instructions).toContain(`The plan to stress-test is ${q(label(PLAN))}.`);
     expect(JSON.stringify(call.input)).not.toContain('METHOD TURN');
-    expect(call.tools.map((t) => t.name).filter((name) => MUTATION_TOOLS.includes(name))).toEqual([]);
-    expect(call.tools.length, 'vacuity: read tools are still offered').toBeGreaterThan(0);
+    expect(call.tools, 'ONE call with NO tool (DL 5939415083 (2)): not even a read tool').toEqual([]);
+    expect(MUTATION_TOOLS.length, 'vacuity: the catalogue has proposing tools to withhold').toBeGreaterThan(0);
   });
 
   it('ROW R3 PAIR: a passing draft is sent as written, with ONE card on its lowest-index story target + Talk it through, and no other method', async () => {
@@ -139,6 +143,13 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(card).toEqual([{ name: 'propose_link_strengths', ok: true, mutated: false, proposal_id: expect.any(String) }].map((c) => expect.objectContaining(c)));
     const ids = b.suggested_actions.map((c) => c.id);
     expect(ids.some((id) => id.startsWith('agent-approve-proposal:'))).toBe(true);
+    // The card says what its yes records (CODEX P1 #2): the stored proposal's own words — the link and its band.
+    const approve = b.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:')) as Chip & { detail?: string };
+    const mean = (D1.body.draft_graph.edges as { from: string; to: string; strength: { mean: number } }[])
+      .find((e) => e.from === 'integration_step_bug_resolution' && e.to === 'trial_profile_abandonment_rate')!.strength.mean;
+    const word = CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(mean))];
+    expect(approve.detail).toContain(`"${label('integration_step_bug_resolution')}" \u2192 "${label('trial_profile_abandonment_rate')}" as ${word}`);
+    expect(approve.detail).toContain('Olumi\u2019s estimate');
     expect(ids).toContain('agent-talk-it-through');
     expect(ids.filter((id) => id.startsWith('agent-next-'))).toEqual([]);
   });
@@ -170,5 +181,39 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].instructions).not.toContain('METHOD TURN');
     expect(sent[0].tools.map((t) => t.name)).toEqual(expect.arrayContaining(['propose_link_strengths', 'propose_new_risk']));
+  });
+
+  it('ROW R7 (round 2 (1)): a recognised press on a model the read could not return gets ONE "can\'t run" reply, with NO model call', async () => {
+    failRead = true;
+    const b = await generic();
+    expect(sent, 'never an ordinary Agent turn').toHaveLength(0);
+    expect(b.assistant_text.startsWith('I can\u2019t run the pre-mortem')).toBe(true);
+    expect(b.suggested_actions.map((c) => c.id)).toEqual(['agent-talk-it-through']);
+  });
+
+  it('ROW R8 (round 2 (2)): a model that answers with a tool call still makes exactly ONE call; nothing runs and the fallback is sent', async () => {
+    output = [{ type: 'function_call', name: 'get_canonical_state', call_id: 'c1', arguments: '{}' }];
+    const b = await pick();
+    expect(sent, 'ONE model call, never a second hop').toHaveLength(1);
+    expect(b._agent.tool_calls.filter((c) => c.name === 'get_canonical_state')).toEqual([]);
+    expect(b.assistant_text).toContain('has gone badly');
+  });
+
+  it('ROW R9 PAIR (round 2 (2)): a multi-message draft never reaches the next turn; an EMPTY output never touches the earlier turn', async () => {
+    reply = 'Earlier answer from Olumi.';
+    await ask('What do you make of this?');
+    output = [{ type: 'message', content: [{ type: 'output_text', text: 'Draft part one: it will fail.' }] },
+      { type: 'message', content: [{ type: 'output_text', text: 'Draft part two, 40% chance.' }] }];
+    await pick();
+    output = [];
+    await pick();
+    output = null;
+    reply = 'Fine.';
+    await ask('Tell me more.');
+    const next = JSON.stringify(sent[sent.length - 1].input);
+    expect(next).not.toContain('Draft part one');
+    expect(next).not.toContain('Draft part two');
+    expect(next).toContain('Earlier answer from Olumi.');
+    expect(next.match(/has gone badly/g)?.length, 'both method turns hold what was SENT').toBe(2);
   });
 });

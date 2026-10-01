@@ -2321,7 +2321,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // The turn's record is rebuilt at its explicit boundary: the history before it, the user's words, what was SENT.
       // Nothing the call produced survives, and an earlier turn is never touched (CODEX_CLI_OVERFLOW P1 #3).
       result = { ...result, assistant_text: text, items: methodTurnItems(history, message, text), tool_calls: [], tool_results: [] };
-      const card = cardCallFor(settled.target, methodGraph, message);
+      const card = cardCallFor(settled.target, methodGraph);
       const issued = card === null ? undefined : await dispatchTool(card.tool, JSON.stringify(card.args), toolCtx, capabilities, mode);
       if (card !== null && issued !== undefined) {
         result = {

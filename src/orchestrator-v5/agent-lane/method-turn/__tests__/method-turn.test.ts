@@ -13,6 +13,8 @@ import type { SuppliedItem } from '../../science/method-science-context.js';
 import type { GuidanceSignalInputs, GuidanceSignals as TurnSignals } from '../../turn-context/guidance-signals.js';
 import { AGENT_TOOLS } from '../../runtime/agent-tools.js';
 import { edgeBandFromMagnitude } from '../../../format/edge-strength-bands.js';
+import { linkTargetOf } from '../../guidance/select-strengthen-placeholder.js';
+import { linkStrengthsCardArgs } from '../../strengthen-press.js';
 import {
   FALLBACK_TEMPLATE,
   PLAN_PICK_PREFIX,
@@ -20,6 +22,9 @@ import {
   TALK_IT_THROUGH_CHIP,
   canonicalStageOf,
   cardCallFor,
+  methodTurnForReadback,
+  methodTurnItems,
+  PREMORTEM_CARD_RATIONALE,
   methodDirective,
   methodPressOf,
   methodTurnFromSignals,
@@ -377,5 +382,58 @@ describe('the ONE change card, through the existing door (RC action_target; HARN
     const blank = { ...g, nodes: g.nodes.map((n: { id: string }) => (n.id === factor.id ? { ...n, observed_state: { unit: 'person-weeks' } } : n)) };
     expect(cardCallFor(factor, blank, 'x')).toBeNull();
     expect(cardCallFor(link, null, 'x')).toBeNull();
+  });
+});
+
+describe('round 2 (CODEX_CLI_OVERFLOW 5939415083; DL ruling): a recognised press NEVER becomes an ordinary turn', () => {
+  const D1 = served('A-Q-D1-BUILD');
+  const unavailable = (out: ReturnType<typeof turnFor>) => {
+    expect(out?.kind).toBe('unavailable');
+    if (out?.kind !== 'unavailable') throw new Error('expected unavailable');
+    expect(out.reply.startsWith('I can\u2019t run the pre-mortem')).toBe(true);
+    expect(out.actions).toEqual([TALK_IT_THROUGH_CHIP]);
+    return out;
+  };
+
+  it('ROW N1 PAIR (served D1): an unread model, a model with no goal, and no own option each get ONE "can\'t run" reply; the served model runs', () => {
+    expect(turnFor(D1, planPickChipId('ai_reporting_module_sprint'))?.kind, 'control: the served model runs').toBe('run');
+    expect(unavailable(methodTurnForReadback(PREMORTEM_PRESS_ID, { graph: undefined })).reason).toBe('model_unread');
+    const g = D1.body.draft_graph as { nodes: { kind: string }[] };
+    const noGoal = { ...D1, body: { ...D1.body, draft_graph: { ...g, nodes: g.nodes.filter((n) => n.kind !== 'goal') } } };
+    expect(unavailable(turnFor(noGoal, PREMORTEM_PRESS_ID)).reason).toBe('no_goal');
+    const noOwn = methodTurnFromSignals(PREMORTEM_PRESS_ID, methodState({ ...rcCase('A-PREMORTEM-ASKED-CHOOSE-PLAN-D1').state, 'model.non_sq_option_ids': [] }), undefined);
+    expect(unavailable(noOwn).reason).toBe('no_own_option');
+  });
+
+  it('ROW N2 PAIR: a plan the rules cannot confirm, and an own pick with NO eligible item, each get ONE "can\'t run" reply naming the plan', () => {
+    const state = rcCase('A-PREMORTEM-PLAN-CHOSEN-D1').state;
+    const runs = methodTurnFromSignals(planPickChipId('ai_reporting_module_sprint'), methodState(state), undefined);
+    expect(runs?.kind, 'control: RC\'s plan-chosen state runs').toBe('run');
+    const unlabelled = methodTurnFromSignals(PREMORTEM_PRESS_ID, methodState({ ...rcCase('A-PREMORTEM-ASKED-CHOOSE-PLAN-D1').state, 'model.option_labels': {} }), undefined);
+    expect(unavailable(unlabelled).reason).toBe('plan_unconfirmed');
+    const bare = methodTurnFromSignals(planPickChipId('ai_reporting_module_sprint'),
+      methodState({ ...state, 'model.goal_path_links': [], 'model.goal_path_factors': [], 'model.risk_ids': [] }), undefined);
+    const out = unavailable(bare);
+    expect(out.reason).toBe('no_grounded_item');
+    expect(out.reply).toContain(q((state['model.option_labels'] as Record<string, string>)['ai_reporting_module_sprint']));
+  });
+
+  it('ROW N4: the link card is built by the ONE composer, from RC\'s ONE band read', () => {
+    const out = turnFor(D1, planPickChipId('ai_reporting_module_sprint'));
+    if (out?.kind !== 'run') throw new Error('expected a run');
+    const link = out.context.supplied_items.find((i) => i.kind === 'link')!;
+    const edge = (D1.body.draft_graph.edges as { from: string; to: string }[]).find((e) => `${e.from}->${e.to}` === link.id)!;
+    expect(cardCallFor(link, D1.body.draft_graph)).toEqual({
+      tool: 'propose_link_strengths', args: linkStrengthsCardArgs(linkTargetOf(D1.body.draft_graph, edge.from, edge.to)!, PREMORTEM_CARD_RATIONALE) });
+  });
+
+  it('ROW N5: the turn\'s record is rebuilt at its explicit boundary: earlier turns byte-equal, then the user\'s words, then what was SENT', () => {
+    const history = [{ role: 'user', content: [{ type: 'input_text', text: 'earlier' }] }, { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Earlier answer.' }] }];
+    const before = JSON.stringify(history);
+    const items = methodTurnItems(history, 'Run a pre-mortem.', 'Sent.');
+    expect(JSON.stringify(history)).toBe(before);
+    expect(items).toEqual([...history, { role: 'user', content: [{ type: 'input_text', text: 'Run a pre-mortem.' }] },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Sent.' }] }]);
+    expect(methodTurnItems(undefined, 'm', '')).toHaveLength(2);
   });
 });

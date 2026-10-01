@@ -22,13 +22,29 @@ export const STRENGTHEN_PRESS_CHIP_ID = 'agent-next-strengthen';
 /** The proposal's basis (provenance, never shown as the user's words). */
 export const STRENGTHEN_CARD_RATIONALE = 'Olumi’s current band for a link nobody has sized yet, for you to apply as it stands or edit.';
 
+/** The arguments of ONE held `propose_link_strengths` for a link at its current band: Olumi's estimate, no `from_words`. */
+export interface LinkStrengthsCardArgs {
+  readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength: StrengthenPlaceholderTarget['band'] }];
+  readonly rationale: string;
+}
+
+/**
+ * ⭐ THE ONE COMPOSER of a link card's arguments (SCIENCE/DSK + AI HARNESS 5939230071; DL 5939415083 (3)). The M1
+ * Strengthen press and the T3 pre-mortem card both build their `propose_link_strengths` call here, from RC's ONE band
+ * read (`linkTargetOf`): the link at the band it already sits in, with no `from_words`, so it is recorded as Olumi's
+ * estimate the user accepts or edits — and an approval of that same band keeps the stored figure (#2473).
+ */
+export function linkStrengthsCardArgs(
+  link: Pick<StrengthenPlaceholderTarget, 'from_label' | 'to_label' | 'band'>,
+  rationale: string,
+): LinkStrengthsCardArgs {
+  return { links: [{ from_label: link.from_label, to_label: link.to_label, strength: link.band }], rationale };
+}
+
 export interface StrengthenCard {
   readonly target: StrengthenPlaceholderTarget;
   readonly text: string;
-  readonly args: {
-    readonly links: readonly [{ readonly from_label: string; readonly to_label: string; readonly strength: StrengthenPlaceholderTarget['band'] }];
-    readonly rationale: string;
-  };
+  readonly args: LinkStrengthsCardArgs;
 }
 
 export interface StrengthenPressState {
@@ -66,7 +82,7 @@ export function strengthenCardFor(state: StrengthenPressState): StrengthenCard |
     return {
       target,
       text: `${copy.title}\n\n${copy.question}`,
-      args: { links: [{ from_label: target.from_label, to_label: target.to_label, strength: target.band }], rationale: STRENGTHEN_CARD_RATIONALE },
+      args: linkStrengthsCardArgs(target, STRENGTHEN_CARD_RATIONALE),
     };
   } catch {
     return null;
