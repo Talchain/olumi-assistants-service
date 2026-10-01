@@ -42,6 +42,8 @@ import { approvalChipIdFor, approvalChipsFor } from '../approval-chips.js';
 import { proposalPendingAction, rehydrateProposals } from '../durable-proposal.js';
 import { detectSumTotalRepair } from '../sum-totals.js';
 import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { placeholderPartsFinding } from '../../../orchestrator/context/placeholder-parts.js';
+import { collectLimitLevelOwners, readRatifiedConstraints } from '../../../orchestrator/context/constraint-feasibility.js';
 
 type Rec = Record<string, any>;
 const SERVED = (JSON.parse(readFileSync(new URL('./fixtures/served-paul-sprint-96c6f5f4.json', import.meta.url), 'utf8')) as { graph: Rec }).graph;
@@ -353,5 +355,49 @@ describe('stale base: nothing else is written', () => {
     expect(r).toMatchObject({ ok: false, mutated: false, refusal: 'superseded' });
     expect(h.registers).toHaveLength(0);
     expect(nodeOf(h.stored(), TOTAL).label).toBe('Sprint capacity used');
+  });
+});
+
+// ── After the yes: whose figure the committed total's level is (B5/B6 read its OWNER off its parts, A3) ──
+
+const LIMIT = 'agent-lane:total_sprint_capacity_allocated:<=';
+const optionsOf = (g: Rec): Rec[] => g.nodes.filter((n: Rec) => n.kind === 'option');
+const findings = (g: Rec): unknown[] => optionsOf(g).map((o) => placeholderPartsFinding(TOTAL, g.nodes, g.edges, [o]));
+const userOwnsLimitLevel = (g: Rec): boolean => collectLimitLevelOwners(g as never, readRatifiedConstraints(g as never)).userBaselineIds.has(LIMIT);
+
+describe('RED — after the yes, Paul\'s \u2264 100% limit is checked on HIS figures (the committed 60% is his 10% + 50%)', () => {
+  it('B6: no option is withheld (before the card: 3 withheld on placeholder links); B5: the limit\'s level is the user\'s', async () => {
+    expect(findings(SERVED).filter((f) => f !== null), 'precondition: the stored total withholds the 3 options that set its parts').toHaveLength(3);
+    expect(userOwnsLimitLevel(SERVED), 'precondition: the stored total\'s 0% is Olumi\'s').toBe(false);
+    const h = await harness(SERVED);
+    const card = await h.turn('req-owner-1')(TOOL) as Rec;
+    await h.turn('req-owner-2')('authorise_change', { proposal_id: card.proposal_id });
+    const after = h.stored();
+    expect(nodeOf(after, TOTAL).observed_state, 'the level\'s source is kept as stored: never stamped as the user\'s')
+      .toMatchObject({ raw_value: 60, source: 'cee_inference' });
+    expect(optionsOf(after)).toHaveLength(4);
+    expect(findings(after)).toEqual([null, null, null, null]);
+    expect(userOwnsLimitLevel(after)).toBe(true);
+  });
+
+  it('control: a part at OLUMI\'s estimate — the committed total rests on that guess: B6 withholds on the level, B5 says Olumi\'s', async () => {
+    const olumiPart = { ...clone(SERVED), nodes: SERVED.nodes.map((n: Rec) => (n.id === PARTS[1] ? { ...n, provenance: 'ai_inferred',
+      observed_state: { unit: '% of upcoming sprint', value: 0.5, raw_value: 50, source: 'cee_inference', extractionType: 'inferred' } } : n)) };
+    const h = await harness(olumiPart);
+    const card = await h.turn('req-owner-olumi-1')(TOOL) as Rec;
+    expect(card.public_label).toBe(CARD);
+    await h.turn('req-owner-olumi-2')('authorise_change', { proposal_id: card.proposal_id });
+    const after = h.stored();
+    expect(nodeOf(after, TOTAL).observed_state).toMatchObject({ raw_value: 60 });
+    expect(findings(after).filter((f) => (f as { arm?: string } | null)?.arm === 'level').length).toBeGreaterThan(0);
+    expect(userOwnsLimitLevel(after)).toBe(false);
+  });
+
+  it('control: a total level the USER set is read as theirs, whatever its parts', () => {
+    const g = shaped();
+    nodeOf(g, TOTAL).observed_state = { ...nodeOf(g, TOTAL).observed_state, source: 'user_override' };
+    expect(userOwnsLimitLevel(g)).toBe(true);
+    nodeOf(g, PARTS[1]!).observed_state = { ...nodeOf(g, PARTS[1]!).observed_state, source: 'cee_inference' };
+    expect(userOwnsLimitLevel(g), 'an Olumi part does not take the user\'s own total from them').toBe(true);
   });
 });

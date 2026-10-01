@@ -43,6 +43,7 @@ import {
   OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
   PLACEHOLDER_PARTS_REASON,
+  derivedSumParts,
   optionIdOf,
   placeholderMovedOptions,
   type PlaceholderPartsReason,
@@ -1017,6 +1018,12 @@ export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null
   return provenance === 'user_ratified' && stamp === USER_ASSUMPTION_SOURCE ? 'level_user_assumption' : 'level_olumi_estimate';
 }
 
+/** The least-owned of several levels' owners: Olumi's if any is Olumi's, else the user's assumption if any is, else theirs. */
+function weakestLevelOwner(owners: readonly (EstimateOnlyReason | null)[]): EstimateOnlyReason | null {
+  if (owners.includes('level_olumi_estimate')) return 'level_olumi_estimate';
+  return owners.includes('level_user_assumption') ? 'level_user_assumption' : null;
+}
+
 /**
  * B5's per-limit input, from one walk of the analysed graph: the limits whose target's level is the user's own
  * (`userBaselineIds`, precondition (e)) and those whose level is the user's ASSUMPTION (`userAssumptionIds`, the owner
@@ -1077,12 +1084,18 @@ export function collectLimitLevelOwners(
       if (scored.length > 0 && scored.every((id) => moved.has(id))) out.placeholderPartsReasons.set(c.constraint_id, [...moved.values()][0]!);
     }
   }
+  // A3 (`derivedSumParts`): a total held as a definitional sum has its PARTS' level, so its owner is theirs — the
+  // weakest of them (Paul's 10% + 50% are his own, so his ≤ 100% total is checked against his figures, not Olumi's).
+  const levelRecs = rawNodes.map(readRecord).filter((n): n is Record<string, unknown> => n !== null);
+  const edgeRecs = Array.isArray(rawEdges) ? rawEdges.map(readRecord).filter((e): e is Record<string, unknown> => e !== null) : [];
   for (const c of ratified) {
     if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
     const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
     const level = readRecord(readRecord(node)?.observed_state);
     if (level === null) continue;
-    const owner = limitLevelOwnerReason(level.source);
+    const parts = derivedSumParts(readRecord(node) ?? undefined, levelRecs, edgeRecs);
+    const owner = parts === undefined ? limitLevelOwnerReason(level.source) : weakestLevelOwner(
+      parts.map((p) => limitLevelOwnerReason(readRecord(p.observed_state)?.source)));
     if (owner === null) out.userBaselineIds.add(c.constraint_id);
     else if (owner === 'level_user_assumption') out.userAssumptionIds.add(c.constraint_id);
   }
