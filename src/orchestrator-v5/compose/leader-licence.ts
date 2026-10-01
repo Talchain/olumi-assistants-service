@@ -1,0 +1,58 @@
+/**
+ * ⭐ ONE LEADER LICENCE — the single answer to "may Olumi name a leading option on this turn?" (AI HARNESS PR-L1,
+ * programme-docs#85 5931097719; DL rulings 5930708980 §4 (i) and (ii)).
+ *
+ * The RULE belongs to F1b (analysis truth, 52f8cd): this function only reads the published verdicts — the composed
+ * `leader_claim` and the admission's `permitted_analysis_mode` — and never re-derives either. Every consumer that
+ * decides whether a leader may be named reads THIS function, so two rails can no longer disagree about WHETHER:
+ * the Agent lane's wire gate (`agentLaneLeaderWithheld`), the Agent's told permission (`claimPermissionsFrom`), the
+ * model-facing run view (`licensed-run-view.ts`) and the Agent lane's final egress backstop. The V5 rails migrate in
+ * PR-L2.
+ *
+ * Arms, in order (lifted unchanged from the shared wire gate `enforceLeadingOptionClaimsAtWire`):
+ * 1. not entitled → `withheld`;
+ * 2. entitled, separated, `quantified_provisional` → `permitted_with_caveat` (Paul: "caveat, not withhold",
+ *    programme-docs#38 5576895511);
+ * 3. the admission does not license a leader, or the run looked and declined (a `withheld`-kind reason) → `withheld`;
+ * 4. ruling (ii): a separation that could not be evaluated (`separation_unavailable`) → `withheld` (fail-closed);
+ * 5. otherwise `permitted`.
+ *
+ * PURE. Never throws.
+ */
+import { analysisReadyPermitsLeaderNaming, permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
+import { leaderClaimReasonKind, WITHHELD_SEPARATION_UNAVAILABLE } from './analysis-state-v1.js';
+
+export type LeaderLicence = 'permitted' | 'permitted_with_caveat' | 'withheld';
+
+export interface LeaderLicenceInput {
+  /** The run's entitlement to name a leader: on the Agent lane, the readback's `leader_claim.permitted`. */
+  readonly mayNameLeadingOption?: boolean;
+  /** `analysis_state.leader_claim.separation === 'separated'` on the same readback. */
+  readonly separationEstablished?: boolean;
+  /** `analysis_state.leader_claim.withheld_reason` on the same readback. */
+  readonly leaderClaimWithheldReason?: string;
+  /** The `analysis_ready` this turn ships; read only for `analysis_admission.permitted_analysis_mode`. */
+  readonly analysisReady?: unknown;
+}
+
+export function leaderLicence(o: LeaderLicenceInput): LeaderLicence {
+  if (o.mayNameLeadingOption !== true) return 'withheld';
+  if (o.separationEstablished === true && permittedAnalysisModeFromAnalysisReady(o.analysisReady) === 'quantified_provisional') {
+    return 'permitted_with_caveat';
+  }
+  if (!analysisReadyPermitsLeaderNaming(o.analysisReady)) return 'withheld';
+  if (leaderClaimReasonKind(o.leaderClaimWithheldReason) === 'withheld') return 'withheld';
+  if (o.leaderClaimWithheldReason === WITHHELD_SEPARATION_UNAVAILABLE) return 'withheld';
+  return 'permitted';
+}
+
+/** The licence from a turn's `analysis_state` + `analysis_ready`, read the way the Agent lane's wire gate reads them. */
+export function leaderLicenceFromState(analysisState: unknown, analysisReady: unknown): LeaderLicence {
+  const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | null | undefined)?.leader_claim;
+  return leaderLicence({
+    mayNameLeadingOption: claim?.permitted === true,
+    separationEstablished: claim?.separation === 'separated',
+    ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
+    analysisReady,
+  });
+}

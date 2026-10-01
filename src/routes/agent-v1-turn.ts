@@ -90,6 +90,9 @@ import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-g
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
+import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
+import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
+import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
@@ -1557,7 +1560,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           modelExists: state.draftGraph !== undefined,
         }),
       });
-      return {
+      const replayBody = {
         ...finaliseV5Response(composedReplay, { scenarioId }),
         ...(state.graphHash !== undefined ? { graph_hash: state.graphHash } : {}),
         ...(state.analysisReady !== undefined ? { analysis_ready: state.analysisReady } : {}),
@@ -1568,6 +1571,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
       };
+      // ⛔ A replay is an exit too (AI HARNESS PR-L1): the stored words are re-checked against TODAY's licence.
+      const replayClaim = (state.analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
+      return enforceLeaderLicenceAtFinalEgress(replayBody, {
+        requestId: String(req.id),
+        exitPath: 'agent_lane_v1_replay',
+        licence: leaderLicenceFromState(state.analysisState, state.analysisReady),
+        mayNameLeadingOption: replayClaim?.permitted === true,
+        separationEstablished: replayClaim?.separation === 'separated',
+        ...(typeof replayClaim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: replayClaim.withheld_reason } : {}),
+        graph: state.graph ?? null,
+        analysisReady: state.analysisReady,
+      }).response;
     };
     /**
      * ⛔ A RESTART MUST NOT FORGET WHAT THE USER IS ABOUT TO APPROVE (#63 5811981438: three redeploys inside
@@ -1919,10 +1934,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(currentRead?.run_delta !== undefined ? { run_delta: currentRead.run_delta } : {}),
         option_display_names: [...optionNameAliases(st.graph).values()].map((a) => a.display),
       };
-      // AI HARNESS PR-L1 owns the licensed projection at this seam.
-      const runForInterpreter = { result: analysisResultForAgent(st.analysisResult),
+      const currentRun = { result: analysisResultForAgent(st.analysisResult),
         claim_permissions: claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true }),
         canonical_state: canonicalAfterRun };
+      // The owner-approved projection is shared with the Agent loop. Do not mint another licence.
+      const runForInterpreter = runToolOutputLicensesLeader(currentRun) ? currentRun
+        : { ...modelFacingToolResult('run_analysis', currentRun), canonical_state: withoutLeaderDesignations(canonicalAfterRun) };
       const explanationInput = [...recentRunExplanationConversation(history ?? []), { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
         request: RUN_EXPLANATION_MESSAGE, ...runForInterpreter,
       }) }] }];
@@ -1993,7 +2010,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(history ?? []),
         { role: 'user', content: [{ type: 'input_text', text: message }] },
         { type: 'function_call', name: 'run_analysis', call_id: callId, arguments: JSON.stringify({ reason: 'the user pressed Run' }) },
-        { type: 'function_call_output', call_id: callId, output: JSON.stringify(ran) },
+        { type: 'function_call_output', call_id: callId, output: JSON.stringify(modelFacingToolResult('run_analysis', ran)) },
       ];
       const outcome = (ran as { run_outcome?: RunOutcome }).run_outcome;
       if (outcome !== undefined) { runOutcomeChips = outcome.chips.map((c) => ({ ...c })); runOutcomeSaid = true; runOutcomeKind = outcome.kind; }
@@ -2667,6 +2684,28 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
     });
+    /**
+     * ⛔ THE FAIL-CLOSED FINAL EGRESS (AI HARNESS PR-L1, `leader-final-egress.ts`): on EVERY turn, on the body exactly as
+     * it ships — after the leader gate, break-even, A7 and the answer shape, before the answer row so a replay is the
+     * same. One licence (`leaderLicenceFromState`) from this same final readback; a permitted turn is untouched.
+     */
+    {
+      const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
+      const finalEgress = enforceLeaderLicenceAtFinalEgress(wireBody, {
+        requestId: String(req.id),
+        exitPath: 'agent_lane_v1_final',
+        licence: leaderLicenceFromState(analysisState, analysisReady),
+        mayNameLeadingOption: claim?.permitted === true,
+        separationEstablished: claim?.separation === 'separated',
+        ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
+        graph: readbackGraph ?? null,
+        analysisReady,
+      });
+      if (finalEgress.response !== wireBody) {
+        const { _answer_shape: _stale, ...withoutShape } = finalEgress.response as OlumiResponse & { _answer_shape?: unknown };
+        wireBody = (finalEgress.proseEdited ? withoutShape : finalEgress.response) as OlumiResponse & Record<string, unknown>;
+      }
+    }
 
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is

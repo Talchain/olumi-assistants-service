@@ -18,6 +18,7 @@
  */
 
 import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
+import { modelFacingToolResult } from '../licensed-run-view.js';
 import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
@@ -496,7 +497,9 @@ export async function runAgentTurn(
       items.push({
         type: 'function_call_output',
         call_id: call.call_id,
-        output: JSON.stringify(result),
+        // ⭐ The model reads the LICENSED run (`licensed-run-view.ts`): on a turn it may not name a leader, no leader
+        // identity and no producer prose reach it. The route keeps the raw result in `toolResults`.
+        output: JSON.stringify(modelFacingToolResult(String(call.name), result)),
       });
     }
     // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.
