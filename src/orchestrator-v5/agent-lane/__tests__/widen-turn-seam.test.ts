@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
+import { asSent } from './helpers/as-sent.js';
 
 let n = 0;
 let SCENARIO = '';
@@ -202,7 +203,8 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     seeded();
     const before = optionLabels();
     const bodies: Record<string, unknown>[] = [];
-    script = [(body) => { bodies.push(body); return fnCall('propose_new_option', { options: [
+    // The request as SENT (#2516 moved the instructions into the developer input block; `asSent` reads them back).
+    script = [(body) => { bodies.push(asSent(body) as Record<string, unknown>); return fnCall('propose_new_option', { options: [
       { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative', level: est }] },
       { label: 'Cut price to win share', acts_on: [{ factor_label: 'Price', direction: 'negative', level: { value: 45, unit: 'GBP', estimate: true, basis: 'just below today’s £49' } }] },
     ], rationale: 'Both work through a different mechanism from the two price rises.' }); }];
