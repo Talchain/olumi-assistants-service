@@ -180,6 +180,18 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     }
     expect(JSON.stringify(edge('capacityQuality')), 'his own link is untouched').toBe(before);
     expect(String(out.follow_up)).toContain('Olumi’s estimates stay marked as Olumi’s, not yours');
+    // M1 Accept receipt (Codex pre-review 2 P1): each link STORED as Olumi's accepted estimate says RC's sentence, read off
+    // the stored link (never the card), and the boundary shows it whole.
+    const { acceptedOlumiEstimateSentence } = await import('../../../src/orchestrator-v5/agent-lane/rerun-explanation.js');
+    const { linkSizing } = await import('../../../src/cee/magnitude/link-sizing.js');
+    const { withoutAgentDirections } = await import('../../../src/orchestrator-v5/agent-lane/write-outcome.js');
+    for (const k of agreed) {
+      expect(linkSizing(edge(k)), k).toBe('olumi_accepted');
+      expect(String(out.follow_up), k).toContain(acceptedOlumiEstimateSentence(`"${L[k][0]}"`, `"${L[k][1]}"`));
+    }
+    expect(String(out.follow_up).match(/You accepted Olumi's estimate/g)).toHaveLength(agreed.length);
+    expect(String(out.follow_up)).not.toContain('your estimate');
+    expect(withoutAgentDirections(String(out.follow_up)).dropped).toEqual([]);
   });
 
   /**
@@ -262,10 +274,17 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     const { caps, ctx } = agent(NAMED);
     const p = await caps.proposeLinkStrengths!(ctx, { links: named as never, rationale: 'the user named the band it already sits in' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
+    // M1 Accept receipt (Codex pre-review P2): naming the band is review, so the kept figure stays Olumi's — never "yours".
+    expect((p as unknown as { links: { whose: unknown; keeps_current_strength: unknown }[] }).links)
+      .toEqual([expect.objectContaining({ whose: 'Olumi\u2019s estimate', keeps_current_strength: true })]);
+    expect(String(p.note)).toContain('is never the user\u2019s own (`whose`)');
     // The approval both the chip and a typed "yes" reach (`authorise_change`).
     const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
     expect(out.ok, JSON.stringify(out)).toBe(true);
     expectHeldByteEqual(before, hashBefore);
+    // M1 Accept receipt (Codex pre-review 2 P1): stored olumi_accepted → RC's sentence; never "reviewed by you" alone.
+    expect(out.follow_up).toBe('Recorded this link strength: "Delegable routine workload" \u2192 "Routine-work hours delegated" as strong. '
+      + 'You accepted Olumi\'s estimate for how much "Delegable routine workload" changes "Routine-work hours delegated".');
   });
 
   it('RED (#2473 P1, restored proposal): the same named-band approval, restored into a fresh process, holds it byte-equal', async () => {
@@ -302,15 +321,34 @@ describe('⭐ Paul\'s link set (64c5eccc) is ONE approval and ONE commit through
     expect(edge('capacityOverhead').strength.mean, 'control: the other link in the set did land').toBe(0.3);
   });
 
+  it('CONTROL (M1 Accept receipt, Codex pre-review 3 P1): a model-proposed link the sizer never marked, kept in its band → stored unmarked → no authorship claim', async () => {
+    const e = edge('workloadHours') as Edge & Record<string, unknown>;
+    e.strength = { mean: 0.55, std: 0.3 };
+    e.provenance = { source: 'cee_hypothesis' } as never;
+    delete e.defaulted;
+    e.effect_direction = 'positive';
+    const { caps, ctx } = agent('I\'m aligned with these. Please make these updates.');
+    const p = await caps.proposeLinkStrengths!(ctx, { links: setOf(['workloadHours']) as never, rationale: 'agreed' });
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
+    const { linkSizing } = await import('../../../src/cee/magnitude/link-sizing.js');
+    expect(linkSizing(edge('workloadHours'))).toBe('unmarked');
+    expect(out.follow_up).toBe('Recorded this link strength: "Delegable routine workload" \u2192 "Routine-work hours delegated" as strong.');
+  });
+
   it('CONTROL (#2473): a named band that MOVES the link still writes it — the user\'s band, its spread', async () => {
     sizedEstimate();
     const words = 'Make Delegable routine workload very strong';
     const { caps, ctx } = agent(words);
     const p = await caps.proposeLinkStrengths!(ctx, { links: [{ ...named[0], strength: 'very strong', from_words: words }] as never, rationale: 'x' });
     expect(p.ok, JSON.stringify(p)).toBe(true);
-    expect((await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) })).ok).toBe(true);
+    const out = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(out.ok, JSON.stringify(out)).toBe(true);
     expect(Math.abs(edge('workloadHours').strength.mean), 'moved to the very-strong band').toBeGreaterThanOrEqual(0.7);
     expect(edge('workloadHours').strength.std, 'a band that moves the link stores its spread').not.toBe(0.3);
+    // CONTROL (M1 Accept receipt): stored as the user's → "your estimate", and no accept sentence.
+    expect(out.follow_up).toBe('Recorded this link strength: "Delegable routine workload" \u2192 "Routine-work hours delegated" as very strong, your estimate.');
   });
 
   it('R11 × P1-a (Canonical 5874263009, DL 5874274221): the band the user agreed to is their settled view — the magnitude contract never re-sizes it', async () => {

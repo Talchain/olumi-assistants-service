@@ -35,6 +35,7 @@ import type { ProposalAction } from '../routing/types.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { formatEdgeStrengthConfirmed } from '../tools/handlers/d1-shared/format-confirmation.js';
+import { linkSizing, type LinkSizing } from '../../cee/magnitude/link-sizing.js';
 import {
   getDefaultRegistry,
   resolveHandler,
@@ -172,6 +173,12 @@ function rawExactEdge(
       isRecord(edge) && edge.from === from && edge.to === to,
   );
   return matches.length === 1 ? matches[0]! : null;
+}
+
+/** The link's sizing AS WRITTEN — the receipt's authorship — by 52f8cd's one predicate; no single exact edge → none. */
+function storedSizingOf(graph: unknown, from: string, to: string): LinkSizing | undefined {
+  const edge = rawExactEdge(graph, from, to);
+  return edge === null ? undefined : linkSizing(edge);
 }
 
 /**
@@ -703,6 +710,8 @@ export async function applyEdgeStrengthEdit(
               graph.nodes.find((node) => node.id === event.from)?.label ?? event.from,
             toLabel:
               graph.nodes.find((node) => node.id === event.to)?.label ?? event.to,
+            // Whose figure: the link AS WRITTEN (R3 5942069984), by the one sizing predicate.
+            sizing: storedSizingOf(projectedGraph, event.from, event.to),
           })
         : outcome.assistant_text,
     coaching: null,

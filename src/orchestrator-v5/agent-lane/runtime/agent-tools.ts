@@ -370,7 +370,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
       + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' ' + THE_BAND_MUST_REACH_THE_OUTCOME + ' '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
-      + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
+      + 'their review is recorded: it stays Olumi\u2019s estimate unless it was already theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
       + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
       + '("very high", "hardly at all"), give your reading in `strength` and their exact phrase in `from_words`: the user approves your reading. '
       + 'Never use this for a strength the user did not state: if they said nothing about how strong it is, ask which band it is first '
