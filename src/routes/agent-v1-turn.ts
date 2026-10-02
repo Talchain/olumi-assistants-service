@@ -3287,6 +3287,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           store,
           writesGraph: false,
           source: 'agent_turn',
+          baseGraphForInvariants: readbackGraph,
+          withdrawnGoalScopeChipIds: [...scopeWithdrawals].filter((id): id is string => typeof id === 'string'),
           write: {
           scenario_id: scenarioId,
           // The ANSWER row, under the client's own turn_id (the claim `<turn_id>:claim` was taken before

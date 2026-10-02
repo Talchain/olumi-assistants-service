@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
-import { GoalScopeSchema, goalScopeMeaning, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
+import { GOAL_SCOPE_UNRESOLVED_REASON, GoalScopeSchema, goalScopeMeaning, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
 import { figureTheUserWrote } from './stated-by-user.js';
 import type { PendingAction } from '../session/pending-action.js';
@@ -117,6 +117,7 @@ export function assertNoScopedIdentityConflict(graph: unknown): void {
 }
 
 export const SCOPE_APPROVE_PREFIX = 'Yes, record this goal reading: ';
+export const scopeWithdrawalWords = (goalId: string): string => `Withdraw this unresolved goal reading: ${goalId}`;
 
 /** One issue per goal, outside graph identity. Canvas edits refresh operands, never their authorship. */
 export function scopeIssuesAfterWrite(prior: readonly PendingAction[], graph: unknown, scenarioId: string): PendingAction[] {
@@ -132,9 +133,9 @@ export function scopeIssuesAfterWrite(prior: readonly PendingAction[], graph: un
   return kept;
 }
 
-export function scopeClaimGate(state: unknown, issues: readonly unknown[]): unknown {
+export function scopeClaimGate<T>(state: T, issues: readonly unknown[]): T {
   if (issues.length === 0 || !rec(state)) return state;
-  return { ...state, leader_claim: { ...(rec(state.leader_claim) ? state.leader_claim : {}), permitted: false, withheld_reason: 'goal_scope_unresolved' } };
+  return { ...state, leader_claim: { ...(rec(state.leader_claim) ? state.leader_claim : {}), permitted: false, withheld_reason: GOAL_SCOPE_UNRESOLVED_REASON } } as T;
 }
 
 /** Approval revision of this one issue; provenance-only edits cannot invalidate it. */

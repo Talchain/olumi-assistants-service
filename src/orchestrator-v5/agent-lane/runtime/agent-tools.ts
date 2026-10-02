@@ -204,7 +204,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'withdraw_proposal',
     description:
       'Withdraw a change you proposed earlier in THIS turn that you now think is wrong, before you reply. It is never applied '
-      + 'and no approve button is shown. Never ask the user not to approve a change you leave offered.',
+      + 'and no approve button is shown. Never ask the user not to approve a change you leave offered. '
+      + 'An unresolved goal reading (goal-scope: ID) may also be withdrawn, but only when the user writes exactly '
+      + '"Withdraw this unresolved goal reading: <goal_id>". Otherwise retain its question.',
     parameters: obj({ proposal_id: { type: 'string' } }, ['proposal_id']),
   },
   {

@@ -15,7 +15,7 @@ import capture from './fixtures/semantic-spine/paul-20261002.json';
 import { ProposalStore } from '../proposal.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { dispatchTool, type AgentToolContext, type ToolResult } from '../runtime/agent-tools.js';
-import { SCOPE_APPROVE_PREFIX } from '../goal-scope.js';
+import { SCOPE_APPROVE_PREFIX, scopeWithdrawalWords } from '../goal-scope.js';
 import { parsePendingAction, type PendingAction } from '../../session/pending-action.js';
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { createRunAnalysisHandler } from '../../tools/handlers/run-analysis.js';
@@ -25,6 +25,7 @@ import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { breakEvenFor } from '../break-even.js';
 import { buildAtomicCommittedModelVersion } from '../../commit.js';
+import { appendCheckedGraphWrite } from '../../persist-graph-write.js';
 import { config } from '../../../config/index.js';
 
 const SID = '550e8400-e29b-41d4-a716-4466554400d9';
@@ -78,7 +79,8 @@ async function harness(g = g0()) {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SID, turn_id: randomUUID(), message, ...extra } });
     expect(r.statusCode, r.body.slice(0,1000)).toBe(200); return r.json() as Rec;
   };
-  return { row, store, call, restart, retain, read, register, startAgentProcess, agentTurn, get proposals() { return proposals; } };
+  const clearHistory = () => { records.clear(); row.writes.length = 0; };
+  return { row, store, call, restart, retain, read, register, startAgentProcess, agentTurn, clearHistory, get proposals() { return proposals; } };
 }
 async function open(h: Awaited<ReturnType<typeof harness>>) {
   const r = await h.call('reconcile_goal_scope', { goal_label: 'MRR', scope: initialScope, current_level: { value: 10000, unit: 'GBP/month', quote: source } }, source);
@@ -141,6 +143,13 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
     expect(h.row.pending[0]!.action).toMatchObject({ current_level: { value: 10000 }, expected: 'component_share' });
     expect(h.row.writes).toHaveLength(0); expect(count(h.row.graph)).toBe(300);
   });
+  it('S6: a non-graph conversational commit cannot erase the issue when a legacy caller omits it', async () => {
+    const h = await harness(); await open(h);
+    await appendCheckedGraphWrite({ store: h.store as never, writesGraph: false, baseGraphForInvariants: h.row.graph,
+      write: { scenario_id: SID, turn_id: 'unrelated-legacy', pending_actions: [] } as never });
+    expect(h.row.pending).toHaveLength(1); expect(h.row.pending[0]!.action.kind).toBe('reconcile_goal_scope');
+    expect(h.row.writes).toHaveLength(0); expect(count(h.row.graph)).toBe(300);
+  });
   it('S7: a changed or withdrawn issue supersedes the card even when graph identity has not changed', async () => {
     const h = await harness(); await open(h); await share(h); const p = await clarified(h);
     const hash = computeAnalysisAffectingGraphHash(h.row.graph as never);
@@ -176,7 +185,7 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
   });
   it('SUCCESS: canonical read → readiness → captured Run input → Agent context → explanation → cold reload, with no transcript or process memory', async () => {
     const h = await harness(); await open(h); await share(h); const p = await clarified(h); expect(await approve(h, p)).toMatchObject({ applied: true });
-    h.restart(); const read = await h.read(); expect(read.status).toBe(200); expect(read.json.brief_text).toBeNull();
+    h.clearHistory(); h.restart(); const read = await h.read(); expect(read.status).toBe(200); expect(read.json.brief_text).toBeNull();
     const canonical = GraphV3.parse(read.json.graph); expect(canonical.nodes.find(n => n.id === 'mrr')!.goal_scope?.extent).toBe('total');
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'req-load', h.store as never);
     const run = vi.fn(async () => ({ meta: { seed_used: 1, n_samples: 1, response_hash: 'sha256:s' }, results: [], response_hash: 'sha256:t', analysis_status: 'completed' }));
@@ -198,6 +207,22 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
 
 
 describe('S6–S7: the actual Agent route owns the durable reconciliation and cold explanation', () => {
+  it('an explicit user withdrawal retires the issue through the persistence floor and restart', async () => {
+    const h = await harness(); await open(h);
+    expect(await h.call('withdraw_proposal', { proposal_id: 'goal-scope:mrr' }, 'Skip that question for now')).toMatchObject({ refusal: 'withdrawal_not_approved' });
+    expect(h.row.pending).toHaveLength(1);
+    let script: Rec[][] = [[{ type: 'function_call', name: 'withdraw_proposal', call_id: randomUUID(), arguments: JSON.stringify({ proposal_id: 'goal-scope:mrr' }) }],
+      [{ type: 'message', content: [{ type: 'output_text', text: 'The unresolved reading was withdrawn.' }] }]];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: script.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'Ready.' }] }] }), { status: 200 })));
+    await h.startAgentProcess();
+    const reply = await h.agentTurn(scopeWithdrawalWords('mrr'));
+    expect(reply._agent).toMatchObject({ tool_calls: [{ name: 'withdraw_proposal', ok: true }] });
+    expect(h.row.pending.some(p => p.action.kind === 'reconcile_goal_scope')).toBe(false);
+    expect(h.row.writes).toHaveLength(0); expect(count(h.row.graph)).toBe(300);
+    h.restart(); expect((await h.read()).json).not.toHaveProperty('goal_scope_reconciliation');
+    await h.startAgentProcess(); script = []; await h.agentTurn('What does monthly churn mean?');
+    expect(h.row.pending.some(p => p.action.kind === 'reconcile_goal_scope')).toBe(false);
+  });
   it('persists its own question, carries it across restart/unrelated turns, approves its exact card, then explains only canonical meaning', async () => {
     const h = await harness();
     let scripted: Rec[][] = [];
@@ -233,7 +258,7 @@ describe('S6–S7: the actual Agent route owns the durable reconciliation and co
     expect(goal(h.row.graph)).not.toHaveProperty('nonlinear_identity'); expect(count(h.row.graph)).toBe(300);
     expect(h.row.pending.some(p => p.action.kind === 'reconcile_goal_scope')).toBe(false);
     // No transcript remains anywhere in the store or the restarted route. The provider input must still contain all authorities.
-    h.row.writes.length = 0; sent.length = 0; await h.startAgentProcess();
+    h.clearHistory(); sent.length = 0; await h.startAgentProcess();
     scripted = [[{ type: 'message', content: [{ type: 'output_text', text: 'The model records £10,000 total monthly MRR. Pro contributes 30%; 300 refers to registered accounts, not billable subscriptions. Its price and account count do not define total MRR.' }] }]];
     const explanation = await h.agentTurn('Explain the goal reading from the saved model.');
     const request = JSON.stringify(sent);

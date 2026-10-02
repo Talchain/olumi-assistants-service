@@ -879,7 +879,7 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 
 /** One internal dispatch, so every path is the product's own. */
 import { reconcileGoalScope } from '../reconcile-goal-scope.js';
-import { goalScopeCheck, scopeOf, refreshScopePending, scopeReconciliationKey, scopeClaimGate } from '../goal-scope.js';
+import { goalScopeCheck, scopeOf, refreshScopePending, scopeReconciliationKey, scopeClaimGate, scopeWithdrawalWords } from '../goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
 interface GraphRead {
@@ -4421,7 +4421,11 @@ export function createAgentCapabilities(
       const id = typeof args?.proposal_id === 'string' ? args.proposal_id : '';
       const notFound = { ok: false, mutated: false, refusal: 'not_proposed_this_turn', detail: 'No change with that id is awaiting approval. Nothing was withdrawn.' };
       if (id.startsWith('goal-scope:')) {
-        if (!(await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope' && p.chip_id === id)) return notFound;
+        const issue = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).find(p => p.action.kind === 'reconcile_goal_scope' && p.chip_id === id);
+        if (issue?.action.kind !== 'reconcile_goal_scope') return notFound;
+        const words = scopeWithdrawalWords(issue.action.goal_id);
+        if ((ctx.user_turn_text ?? ctx.user_text ?? '').trim() !== words) return { ok: false, mutated: false, refusal: 'withdrawal_not_approved', approval_words: words,
+          detail: 'This unresolved reading belongs to the user. It is retained until they explicitly withdraw it with the displayed words.' };
         withdrawnHolds.add(id);
       } else if (/^gmh_[0-9a-f]{12}$/.test(id)) {
         withdrawnHolds.add(id);

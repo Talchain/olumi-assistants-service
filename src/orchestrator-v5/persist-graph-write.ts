@@ -107,7 +107,8 @@
  *   untouched here — this module is one CALL-GRAPH authority, which is a
  *   narrower claim than one storage generation.
  */
-import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment } from './agent-lane/goal-scope.js';
+import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, refreshScopePending } from './agent-lane/goal-scope.js';
+import { PENDING_ACTIONS_PER_TURN_CAP } from './session/pending-action.js';
 import { log } from '../utils/telemetry.js';
 
 import {
@@ -168,6 +169,8 @@ export interface CheckedGraphAppendParams {
   readonly baseGraphForInvariants?: unknown;
   /** Free-form origin label for logs (`handler_id`, or a route name). */
   readonly source?: string | undefined;
+  /** Only successful, user-authorised scope withdrawals may retire this durable issue. */
+  readonly withdrawnGoalScopeChipIds?: readonly string[];
 }
 
 /**
@@ -338,13 +341,21 @@ export function assertNoIntroducedGraphViolations(
 export async function appendCheckedGraphWrite(
   params: CheckedGraphAppendParams,
 ): Promise<SessionAppendOutcome> {
-  if (params.writesGraph) {
-    assertNoScopedIdentityConflict(params.write.graph);
-    if (typeof params.store.readMostRecentPendingActions === 'function') {
-      assertNoPendingScopeAmendment(params.write.graph, params.baseGraphForInvariants, await params.store.readMostRecentPendingActions(params.write.scenario_id, { validation: 'strict' }));
-    }
+  const { store, writesGraph, source } = params;
+  let write = params.write;
+  // Pending issue lifetime is a persistence obligation even on a read-only conversational turn.
+  // Only this sidecar is extended here; graph bytes and both hashes remain exactly as prepared.
+  if (typeof store.readMostRecentPendingActions === 'function') {
+    const prior = await store.readMostRecentPendingActions(write.scenario_id, { validation: 'strict' });
+    if (writesGraph) assertNoPendingScopeAmendment(write.graph, params.baseGraphForInvariants, prior);
+    const supplied = write.pending_actions ?? [];
+    const missing = prior.filter(p => p.action.kind === 'reconcile_goal_scope'
+      && !params.withdrawnGoalScopeChipIds?.includes(p.chip_id)
+      && !supplied.some(n => n.chip_id === p.chip_id))
+      .flatMap(p => { const kept = refreshScopePending(p, writesGraph ? write.graph : params.baseGraphForInvariants); return kept ? [kept] : []; });
+    if (missing.length > 0) write = { ...write, pending_actions: [...missing, ...supplied].slice(0, PENDING_ACTIONS_PER_TURN_CAP) };
   }
-  const { write, store, writesGraph, source } = params;
+  if (writesGraph) assertNoScopedIdentityConflict(write.graph);
 
   // The check runs on `write.graph` — the same object handed to `store.append`
   // on the last line of this function, with nothing between them.

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export const GOAL_SCOPE_UNRESOLVED_REASON = 'goal_scope_unresolved';
+
 const Source = z.object({ quote: z.string().trim().min(1).max(1600), turn_id: z.string().max(128).optional() }).strict();
 
 /** The construction scope declaration, extended only for an approved goal reading. */

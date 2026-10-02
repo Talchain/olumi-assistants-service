@@ -650,6 +650,7 @@ export default async function route(app: FastifyInstance) {
         scenarioId,
         graph: graphPresent ? graph : null,
         requestId,
+        scopeUnresolved: scopeIssues.length > 0,
         ...(snapshot !== undefined && snapshot !== null ? { analysisInvalidatedAt: snapshot.analysisInvalidatedAt } : {}),
       });
       // The selected block already has one public carrier, `analysis_result`.
