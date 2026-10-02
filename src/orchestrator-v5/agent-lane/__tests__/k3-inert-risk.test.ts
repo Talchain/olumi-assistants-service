@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
+import { BUILD_INSTRUCTIONS, buildModelFromBrief, type CallStructuredModel } from '../runtime/build-model.js';
 import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
@@ -99,6 +99,17 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     expect(a7).toMatch(/^This model doesn't yet say whether any option gets there/);
     const folded = `Your results are ready.\n\n${left}\n\n${ask}`;
     expect(withA7AfterGate(folded, g, { awaitingApproval: false, builtOrRan: true }, null)).toBe(`Your results are ready.\n\n${left}\n\n${a7}\n\n${ask}`);
+  });
+
+  it('the DRAFTER is told what is now true (MG lease 5946961312): an unknown-effect risk says "unknown", is left out, never blocks', async () => {
+    expect(BUILD_INSTRUCTIONS).toContain('A RISK WHOSE EFFECT THE BRIEF SAYS IS UNKNOWN is the one risk this does not apply to: still draw its causes into it, give its link to what it threatens the direction "unknown"');
+    expect(BUILD_INSTRUCTIONS).toContain('Never give it a direction, or a label that implies one, when the brief says its effect is unknown.');
+    // …and it IS true: the served draft that did exactly that is safe to analyse, the risk kept.
+    const { graph } = await build();
+    expect(assessCanonicalAnalysisReadiness(graph).safeToAnalyse).toBe(true);
+    expect((graph.nodes as Rec[]).map((n) => n.label)).toContain(RISK);
+    // CONTROL (#2379: no rule dropped): the general rule still holds for every other dead end.
+    expect(BUILD_INSTRUCTIONS).toContain('is not merely decorative \u2014 it stops the ENTIRE model being analysed.');
   });
 
   it('the Agent is never told it "cannot reach the goal" (the Run no longer has that blocker)', async () => {
