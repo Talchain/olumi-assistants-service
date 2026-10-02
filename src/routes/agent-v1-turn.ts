@@ -24,7 +24,7 @@
  */
 
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
-import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
+import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
@@ -1650,7 +1650,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * the stored reply being Olumi's own fixed line, never from the user's words.
        */
       const replayChip = runExplanationChip(scenarioId, state);
-      const unavailableExplanation = new Set([interpretationUnavailableText({ ok: true, ran: true }), RUN_EXPLANATION_UNAVAILABLE_TEXT]);
+      const unavailableExplanation = new Set([interpretationUnavailableText({ ok: true, ran: true }), RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT]);
       let replayText = prior.assistant_message ?? 'That request was already completed.';
       let replayNarration: { status: 'pending' | 'ready' | 'unavailable' | 'stale'; run_key: string } | undefined;
       const boundControl: OfferedAction[] = [];
@@ -1660,6 +1660,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           replayText = RUN_EXPLANATION_UNAVAILABLE_TEXT;
           replayNarration = { status: 'stale', run_key: runKey };
         } else if (unavailableExplanation.has(replayText)) {
+          if (replayText === RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT) replayText = RUN_EXPLANATION_UNAVAILABLE_TEXT;
           replayNarration = { status: 'unavailable', run_key: runKey };
           if (replayChip !== null) boundControl.push(replayChip);
         } else {

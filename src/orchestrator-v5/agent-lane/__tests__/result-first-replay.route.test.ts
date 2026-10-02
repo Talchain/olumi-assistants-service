@@ -51,6 +51,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 
 let provider: 'ok' | 'empty' | 'fetch_failed' = 'ok';
 let modelCalls = 0;
+let runs = 0;
 
 async function freshApp(): Promise<FastifyInstance> {
   vi.resetModules();
@@ -58,8 +59,11 @@ async function freshApp(): Promise<FastifyInstance> {
   process.env.AGENT_LANE_PREVIEW = 'false';
   const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
   const app = Fastify({ logger: false });
-  app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
-    graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY }));
+  app.post('/orchestrate/v2/turn', async () => {
+    runs += 1;
+    return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
+      graph_hash: HASH, blocks: [SERVED.block], analysis_state: state(), analysis_ready: READY };
+  });
   app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: GRAPH, graph_hash: HASH, analysis_ready: READY,
     analysis_state: state(), analysis_result: SERVED.block }));
   await app.register(agentV1TurnRoute);
@@ -85,7 +89,7 @@ describe('result-first on retry, lost response and failed explanation (live rout
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { computedAt = RUN_A; runKind = 'complete_current'; rows.length = 0; provider = 'ok'; modelCalls = 0; });
+  beforeEach(() => { computedAt = RUN_A; runKind = 'complete_current'; rows.length = 0; provider = 'ok'; modelCalls = 0; runs = 0; });
 
   const post = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: SCENARIO, ...payload } });
   const runTurn = (turnId: string) => post({ turn_id: turnId, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } });
@@ -95,6 +99,42 @@ describe('result-first on retry, lost response and failed explanation (live rout
     return post({ turn_id: turnId, agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id } });
   };
   const explainIds = (b: Body) => b.suggested_actions.filter((c) => isRunExplanationChip(c.id)).map((c) => c.id);
+
+  for (const [version, storedText] of [
+    ['legacy', 'I can’t explain that result as current. Check the current results before asking again. Nothing in your model changed.'],
+    ['current', 'I can’t explain that result as current. Check the current results before asking again.'],
+  ] as const) {
+    it(`keeps a saved ${version} unavailable reply unavailable on the same Run, including after restart; a changed Run is stale`, async () => {
+      const first = (await runTurn(randomUUID())).json() as Body;
+      provider = 'empty';
+      const turnId = randomUUID();
+      const failed = (await explainTurn(turnId, first)).json() as Body;
+      expect(failed.narration?.status).toBe('unavailable');
+      // Seed the durable answer text, independently of the current constants, as an older process would have saved it.
+      const row = rows.find((x) => x.turn_id === turnId && typeof x.assistantMessage === 'string')!;
+      row.assistantMessage = storedText;
+      const savedRows = structuredClone(rows);
+      const calls = modelCalls;
+      const runCount = runs;
+      store.append.mockClear();
+      for (const restart of [false, true]) {
+        if (restart) { await app.close(); app = await freshApp(); }
+        const replay = (await explainTurn(turnId, first)).json() as Body;
+        expect(replay.narration, `restart=${restart}`).toEqual({ status: 'unavailable', run_key: first.narration!.run_key });
+        expect(replay.assistant_text).toBe('I can’t explain that result as current. Check the current results before asking again.');
+        expect(explainIds(replay)).toEqual(explainIds(first));
+      }
+      computedAt = RUN_B;
+      const stale = (await explainTurn(turnId, first)).json() as Body;
+      expect(stale.narration).toEqual({ status: 'stale', run_key: first.narration!.run_key });
+      expect(stale.assistant_text).toBe('I can’t explain that result as current. Check the current results before asking again.');
+      expect(explainIds(stale)).toEqual([]);
+      expect(modelCalls, 'replay calls no provider').toBe(calls);
+      expect(runs, 'replay makes no Run').toBe(runCount);
+      expect(store.append, 'replay writes no answer or claim').not.toHaveBeenCalled();
+      expect(rows, 'old stored words are not rewritten').toEqual(savedRows);
+    });
+  }
 
   it('RED (P1): explain Run A, complete Run B, retry A\'s explanation turn → stale, never A\'s words beside B; CONTROL before B → the stored words', async () => {
     const first = (await runTurn(randomUUID())).json() as Body;
