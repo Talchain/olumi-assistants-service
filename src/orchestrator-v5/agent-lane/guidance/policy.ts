@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ aa42943f626579b96434ba5884bb9e2f77e8c6cd.
+// programme-docs @ a47aa2ba7390a521c585e7c815d688b52cc7abea.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -764,6 +764,13 @@ export const POLICY = {
         "never": "Mask Olumi's own words: only labels the inputs supply, only for a ban the label itself trips, only as whole tokens (option 'A' must never blank the 'a' in 'probability', HARNESS #2478 P1; label 'Will' must never blank 'will fail', #2480 P1 #4).",
         "reference": "tools/check_method_turn.py banned() + masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM, MT-RERUN-MODEL-LABEL-GOOD / -BAD-LEADER, MT-PREMORTEM-SHORT-LABEL-GOOD / -BAD, MT-PREMORTEM-COMMON-WORD-LABEL-BAD, MT-RERUN-BARE-BAN-LABEL-BAD",
         "input": "model_labels: string[] = every node label of the current model (the caller has the graph)."
+      },
+      "internal_value_terms": {
+        "rule": "An explanation never mentions an internal or normalised value. Term set (case-insensitive, on the reply with per-ban label masking, shared.label_masking): /\\b(internal scale|normali[sz]ed (value|values|scale|figures?)|unit interval)\\b/i.",
+        "helper": "internalValueTerms(text, labels) -> string[]: the terms hit (lower-cased, unique, in order), after per-ban label masking (a user label such as 'Internal scale-up plan' is the user's word). It REPORTS and never edits.",
+        "consumer": "AI HARNESS first-run explanation guard (agent.interpret): on ANY hit, replace the WHOLE explanation with the deterministic code line + next step and log explain.internal_value_fallback. Backstop only: the primary fix is input-side (no per-option normalised values or declared_scale on a withheld-leader turn), so the fallback count measures whether that input fix holds.",
+        "why": "Served step 1 (CEE d0e566fc, guest 6452c258): 'its results are on an internal scale, not revenue units' is jargon to the user; driven by the coach template's 'label it explicitly as an internal scale' + normalised unit_interval values (RC #85 5945450369; HARNESS 5945457931).",
+        "reference": "tools/check_method_turn.py internal_value_terms(); fixtures MT-RERUN-INTERNAL-VALUE-BAD / MT-RERUN-INTERNAL-LABEL-GOOD"
       }
     },
     "RC-PREMORTEM": {
@@ -1046,6 +1053,11 @@ export const POLICY = {
           "id": "RX-UNWITHHELD-LINE",
           "rule": "if prior_withheld: the reply carries 'can now compare the options' (whole-token label_matches), the UNWITHHELD line",
           "source": "MG 5939414835"
+        },
+        {
+          "id": "EXPLAIN-NO-INTERNAL-VALUE",
+          "rule": "no internal or normalised value term: method_turns.shared.internal_value_terms (on the label-masked reply, per ban)",
+          "source": "RC #85 5945450369 + AI HARNESS 5945457931 (option A)"
         }
       ],
       "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD + C1: 'That was what held the comparison back, so Olumi can now compare the options.' | UNWITHHELD otherwise: 'Olumi can now compare the options.' + the case line | C2: 'Olumi can’t confirm both runs used the same draw, so the difference can’t be put down to your edit alone.' | C3/C4 (recorded difference): 'Other things also differed between these two runs, so the difference can’t be put down to your edit alone.' | partial coverage or C5_unattributed: 'Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
@@ -1084,4 +1096,4 @@ export const POLICY = {
   }
 } as const;
 
-export const SPEC_SHA = "aa42943f626579b96434ba5884bb9e2f77e8c6cd";
+export const SPEC_SHA = "a47aa2ba7390a521c585e7c815d688b52cc7abea";

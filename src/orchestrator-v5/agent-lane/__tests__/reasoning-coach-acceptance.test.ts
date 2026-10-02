@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import acceptance from './fixtures/reasoning-coach-acceptance.json';
-import { checkMethodTurn, entryKey, renderCopy, selectGuidance, stateKeyHash } from '../guidance/index.js';
+import { checkMethodTurn, entryKey, internalValueTerms, renderCopy, selectGuidance, stateKeyHash } from '../guidance/index.js';
 import { POLICY, SPEC_SHA } from '../guidance/policy.js';
 import { computeResponseHash } from '../../../utils/response-hash.js';
 import type { GuidanceSignals, GuidanceState, MethodInputs, MethodTurnId, PolicyId, SelectedRow } from '../guidance/types.js';
@@ -16,17 +16,17 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
 };
 
 describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
-  it('imports all 35 cases and all 29 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(29);
+  it('imports all 35 cases and all 31 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(31);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('aa42943f626579b96434ba5884bb9e2f77e8c6cd');
+    expect(SPEC_SHA).toBe('a47aa2ba7390a521c585e7c815d688b52cc7abea');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('954e5047862b79635b03f0e8df475067ac748ef56e0186ce5151eea9a54f0b94');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('6a50e594ea1aee4650ef1c6e2f1b06bdce5cdca6f93741b3df4c0b38ab8f9592');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('b8bde5820e47e7fb5896dedd5f3162e56c86e13e21f722253d6b304705555a53');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('d09c6ab5f26decd718a0e966967d239f5364586911a64329425e599a3978fa96');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });
@@ -280,6 +280,17 @@ describe('all deterministic text post-check ids, including methods without vendo
     expect(checkMethodTurn('RERUN-EXPLANATION', named + 'Olumi can now compare the options. Other things also differed between these two runs, so the difference can\u2019t be put down to your edit alone.', rx)).toEqual({ pass: true, failed: [], targets: [] });
     // Control: on C1 the same causal line is licensed.
     expect(checkMethodTurn('RERUN-EXPLANATION', named + 'That was what held the comparison back, so Olumi can now compare the options.', { ...rx, attribution_case: 'C1_attributable' as const })).toEqual({ pass: true, failed: [], targets: [] });
+  });
+  it('internalValueTerms REPORTS internal-value terms after per-ban masking and never edits (HARNESS first-run backstop)', () => {
+    const served = 'Continue Current Plan holds today\u2019s recorded values; its results are on an internal scale, not revenue units.';
+    expect(internalValueTerms(served)).toEqual(['internal scale']);
+    expect(internalValueTerms('Only normalised values exist, on the unit interval.')).toEqual(['normalised values', 'unit interval']);
+    // A user label carrying the term is the user's word; a label that IS the term fails closed.
+    expect(internalValueTerms('Internal scale-up plan rose.', ['Internal scale-up plan'])).toEqual([]);
+    expect(internalValueTerms('Internal scale is low.', ['Internal scale'])).toEqual(['internal scale']);
+    // Contrast: plain revenue words are never hit, and the input string is untouched.
+    expect(internalValueTerms('Quarterly revenue figures are not available yet.')).toEqual([]);
+    const text = served; internalValueTerms(text); expect(text).toBe(served);
   });
   it('Coach edits requires the stale line only for a stale run', () => {
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);
