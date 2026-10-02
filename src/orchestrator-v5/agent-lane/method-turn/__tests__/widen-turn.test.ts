@@ -94,6 +94,20 @@ describe('RC-WIDEN method turn', () => {
       .toEqual({ ok: false, failed: ['WD-NO-DUP'] });
   });
 
+  it('an option LEFT OUT of the comparison is existing too: re-proposing it (by label or by signature) is refused', () => {
+    const g = { nodes: [...GRAPH.nodes, { id: 'o_out', kind: 'option', label: 'Phased churn programme', proposed_by: 'olumi' }],
+      edges: [...GRAPH.edges, { from: 'o_out', to: 'f_churn', strength: { mean: -0.3 } }] };
+    const t = widenTurnFromSignals(signals(), g);
+    if (t.kind !== 'run') throw new Error('expected a run turn');
+    expect(t.directive).toContain('- \u2018Phased churn programme\u2019 (left out of the comparison): changes \u2018Customer churn\u2019');
+    expect(widenGate(t, { label: 'Phased churn programme', acts_on: [{ factor_label: 'Price', direction: 'negative' }], rationale: 'r' }))
+      .toEqual({ ok: false, failed: ['WD-NO-DUP'] });
+    expect(widenGate(t, { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }], rationale: 'r' }))
+      .toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+    // Control: the same proposal on the base graph (no left-out option) passes.
+    expect(widenGate(run(), { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }], rationale: 'r' })).toMatchObject({ ok: true });
+  });
+
   it('WD-S-GROUNDED: a factor the model does not have, or no factor at all, is refused', () => {
     expect(widenGate(run(), { label: 'Hire sales', acts_on: [{ factor_label: 'Sales headcount', direction: 'positive' }], rationale: 'r' }))
       .toEqual({ ok: false, failed: ['WD-S-GROUNDED'] });

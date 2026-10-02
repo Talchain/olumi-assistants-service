@@ -106,7 +106,7 @@ export interface RunWidenTurn {
   readonly goal_label: string;
   /** Appended to this turn's instructions only: never the user's message, so it is never handed on as history. */
   readonly directive: string;
-  /** Current options (the status quo included): label (normalised) and factor-set signature. */
+  /** Every option already in the model (compared, status quo, left out): label (normalised) and factor-set signature. */
   readonly current: readonly { readonly label: string; readonly signature: string }[];
   /** Every factor of the model: exact label (normalised) → id, and id → the model's own label. */
   readonly factor_ids: Readonly<Record<string, string>>;
@@ -148,11 +148,17 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
   const factorLabel = new Map(factors.map((n) => [n.id, labelOf(n)!] as const));
   const factor_ids = Object.fromEntries(factors.map((n) => [norm(labelOf(n)!), String(n.id)]));
   const factor_labels = Object.fromEntries(factors.map((n) => [String(n.id), labelOf(n)!]));
-  const optionIds = [...ownIds, ...(sq !== null ? [sq] : [])];
-  const current = optionIds.map((id) => ({ label: norm(labels[id] ?? id), signature: optionSignature(g, id) }));
+  // EVERY option already in the model is "existing" for distinctness: the compared ones, the status quo, and any option
+  // left out of the comparison (an Olumi option the user excluded is not re-proposed as new: identity, not wording).
+  const compared = new Set([...ownIds, ...(sq !== null ? [sq] : [])]);
+  const optionIds = [...ownIds, ...(sq !== null ? [sq] : []),
+    ...g.nodes.filter((n) => n.kind === 'option' && !compared.has(String(n.id))).map((n) => String(n.id))];
+  const graphLabel = new Map(g.nodes.map((n) => [String(n.id), labelOf(n)] as const));
+  const labelFor = (id: string): string => labels[id] ?? graphLabel.get(id) ?? id;
+  const current = optionIds.map((id) => ({ label: norm(labelFor(id)), signature: optionSignature(g, id) }));
   const describe = (id: string): string => {
     const changes = g.edges.filter((e) => e.from === id && factorLabel.has(e.to)).map((e) => quote(factorLabel.get(e.to)!));
-    return `- ${quote(labels[id] ?? id)}${changes.length > 0 ? `: changes ${changes.join(', ')}` : ''}`;
+    return `- ${quote(labelFor(id))}${compared.has(id) ? '' : ' (left out of the comparison)'}${changes.length > 0 ? `: changes ${changes.join(', ')}` : ''}`;
   };
   const directive = [
     'METHOD TURN: the user asked Olumi to suggest options they have not considered. Call propose_new_option exactly once, '
@@ -160,7 +166,7 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
       + 'the change before anything is added.',
     `The goal is ${quote(goalLabel)}.`,
     ...(variant === 'W1' ? ['On the latest run, every current option is likely to break the user’s limit: each suggestion must work in a different way.'] : []),
-    ...(optionIds.length > 0 ? ['The options already on the table, and the factors each one changes:', ...optionIds.map(describe)] : []),
+    ...(optionIds.length > 0 ? ['The options already in the model, and the factors each one changes (never propose any of these again):', ...optionIds.map(describe)] : []),
     `The model's factors (use these exact labels in acts_on, and no others): ${factors.map((n) => quote(labelOf(n)!)).join(', ')}.`,
     `Shape: ${CONTRACT.body}`,
     'Each option must change a DIFFERENT set of factors (or the same factors in a different direction) from every option '
