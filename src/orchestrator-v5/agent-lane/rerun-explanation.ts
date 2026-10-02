@@ -47,8 +47,12 @@ const strengthMoved = (from: string, to: string, before: string, after: string) 
 /** RC's fallback case lines (policy `fallback`); C3–C5 never say "a new draw" (it may be the engine that differed). */
 export const RERUN_FALLBACK_LINES = {
   unwithheld: 'That was what held the comparison back, so Olumi can now compare the options.',
-  C2: 'This run also used a new draw, so the difference can’t be put down to your edit alone.',
+  // C2 = the draw is NOT shown equal: a recorded new draw OR an unrecorded draw structure (`build-run-delta.ts` classifier).
+  // Only "can't confirm" is true of both (CODEX on 3d0891e2 P1; RC to mirror in policy `fallback`).
+  C2: 'Olumi can’t confirm both runs used the same draw, so the difference can’t be put down to your edit alone.',
   other: 'Other things also differed between these two runs, so the difference can’t be put down to your edit alone.',
+  /** Unknown, not observed (MG 5943403202; CODEX on b6e52dbc P1): partial coverage or an unattributed pair. */
+  unverified: 'Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone.',
   C1: 'The comparison was rerun on the same draw.',
   C0: 'Nothing else changed.',
 } as const;
@@ -155,9 +159,15 @@ export function rerunExplanationPlan(
   const changes = sentences.slice(0, MAX_NAMED_CHANGES);
   const more = sentences.length - changes.length;
   // ⛔ Partial or unrecorded coverage never licenses "same inputs" or a cause (CODEX CEE BUDDY preflight 5939219187): other
-  // inputs may have differed unseen, so the pair is judged as unpaired and said as "other things also differed". A recorded
-  // change no template can name is the same: it differed, unsaid.
+  // inputs may have differed unseen, so the pair is judged as unpaired. A recorded change no template can name is the same
+  // for the check: it differed, unsaid.
+  // ⛔ WHAT IS SAID tells OBSERVED from UNKNOWN (CODEX on b6e52dbc P1; MG 5943403202): "Other things also differed" only
+  // where a difference is RECORDED (an unnamed recorded row; engine drift C3; sample-budget drift C4). `partial` means
+  // "can't verify every sent input was the same" (an end may simply predate the residual), and C5 is unattributed: both
+  // say "Olumi can't confirm nothing else differed".
   const coverageComplete = d.input_coverage === 'complete' && skipped === 0;
+  const differenceUnknown = skipped === 0
+    && (d.input_coverage !== 'complete' || d.attribution_case === 'C5_unattributed');
   const wireCase = coverageComplete ? d.attribution_case : 'coverage_incomplete';
   const priorWithheld = d.win_probabilities_unavailable === 'prior_withheld';
   const noMatched = !priorWithheld && Array.isArray(d.win_probabilities) && d.win_probabilities.length === 0;
@@ -174,23 +184,37 @@ export function rerunExplanationPlan(
   };
   // "Nothing you entered changed" ONLY on a typed, complete, empty record; rows the graph can't name → "can't say".
   const recordedNothing = coverageComplete && Array.isArray(d.input_changes) && rows.length === 0;
+  // ⛔ "That was what held the comparison back" credits the user's change, so it rides ONLY a C1 pair (complete coverage,
+  // same draw and builds: the named changes are the only differences). Any other case can owe the comparison to
+  // something else (an engine that now evaluates what it withheld, a new draw, an unrecorded input), so the line is
+  // the neutral "Olumi can now compare the options." followed by the case line (CODEX on CEE 864e915c, P1).
+  const caseLine = wireCase === 'C0_identical' ? RERUN_FALLBACK_LINES.C0
+    : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.C1
+      : wireCase === 'C2_unpaired' ? RERUN_FALLBACK_LINES.C2
+        : differenceUnknown ? RERUN_FALLBACK_LINES.unverified : RERUN_FALLBACK_LINES.other;
   const codeLine = changes.length > 0
-    ? `${changes.join(' ')}${more > 0 ? ` ${moreChangesLine(more)}` : ''} ${priorWithheld ? RERUN_FALLBACK_LINES.unwithheld
-      : wireCase === 'C0_identical' ? RERUN_FALLBACK_LINES.C0
-        : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.C1
-          : wireCase === 'C2_unpaired' ? RERUN_FALLBACK_LINES.C2 : RERUN_FALLBACK_LINES.other}`
+    ? `${changes.join(' ')}${more > 0 ? ` ${moreChangesLine(more)}` : ''} ${!priorWithheld ? caseLine
+      : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.unwithheld
+        : `${RERUN_NO_CHANGE_LINES.unwithheld} ${caseLine}`}`
     : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;
   const instruction = [
     'Olumi has already told the user, in its own words from the run record, what changed between the two Runs:',
     `"${codeLine}"`,
     'Do not repeat that line, and never say whether the inputs changed or stayed the same: that line is the record. Say what this Run shows.',
     priorWithheld
-      ? 'The earlier Run had no figures, so never say anything rose, fell, moved or changed in value.'
+      ? 'The earlier Run held its comparison figures back, so never say anything rose, fell, moved or changed in value.'
       : noMatched
         ? 'No option has figures in both Runs, so never say anything rose, fell or moved; say only what this Run shows.'
         : inputs.attribution_case === 'C1_attributable'
           ? 'You may say what moved in the comparison.'
-          : 'Other things also differed between the two Runs, so never say the change caused the difference.',
+          // Each premise is TRUE of its case (CODEX on 3d0891e2 P1): C0 + complete proves identity; C2 leaves the draw unshown.
+          : wireCase === 'C0_identical'
+            ? 'Nothing differed between the two Runs, so never say anything moved because of a change.'
+            : differenceUnknown
+              ? 'Olumi can’t confirm nothing else differed between the two Runs, so never say the change caused the difference.'
+              : wireCase === 'C2_unpaired'
+                ? 'Olumi can’t confirm both Runs used the same draw, so never say the change caused the difference.'
+                : 'Other things also differed between the two Runs, so never say the change caused the difference.',
   ].join('\n');
   return { inputs, changes, codeLine, instruction, fallback: codeLine };
 }
