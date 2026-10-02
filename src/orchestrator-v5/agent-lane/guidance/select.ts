@@ -134,6 +134,15 @@ function evaluate(id: PolicyId, s: GuidanceSignals): Evaluation {
   return { candidates: [{ policy_id: id, priority: 'P5', fields }] };
 }
 
+/**
+ * RC-WIDEN's variant and target on these signals, from the SAME evaluation the row uses (the Widen method turn's
+ * inputs), or undefined when no variant holds. Never a second rule: a row and its method turn agree by construction.
+ */
+export function widenVariantOf(s: GuidanceSignals): { readonly variant: Variant; readonly target: Target } | undefined {
+  const c = evaluate('RC-WIDEN', s).candidates[0];
+  return c?.variant !== undefined && c.target !== undefined ? { variant: c.variant, target: c.target } : undefined;
+}
+
 function selected(d: Draft, s: GuidanceSignals): SelectedRow | undefined {
   const copy = renderCopy(d, s);
   if (copy.title === null || d.policy_id !== 'RC-COACH-EDITS' && (copy.why === null || copy.question === null)) return undefined;

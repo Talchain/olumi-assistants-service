@@ -1061,11 +1061,64 @@ function keptFigureFor(node: { scale_frame?: unknown; observed_state?: unknown }
  * One function, so the projection that reads a level back can never use a different range
  * from the write that stored it.
  */
-function levelFrameOf(factor: { observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined): number | null {
+export function levelFrameOf(factor: { observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined): number | null {
   const cap = (factor?.observed_state ?? {}).cap;
   if (typeof cap === 'number' && Number.isFinite(cap) && cap > 0) return cap;
   const frame = factor?.scale_frame;
   return typeof frame === 'number' && Number.isFinite(frame) && frame > 1 ? frame : null;
+}
+
+/**
+ * ⛔ THE ADD-OPTION DOOR'S OWN PER-LEVEL RULE, EXPORTED (DL on CEE #2512, 5950820450): `propose_new_option` stores or
+ * leaves unset each option level through exactly these stages, and the Widen gate (`method-turn/widen-turn.ts`) judges
+ * a proposal by calling them, never by a copy that drifts (four review rounds of the same class).
+ * - `doorLevelOf`: the level as the door reads one `acts_on` entry: a finite value, its unit trimmed when given.
+ * - `factorUnitConflict`: a figure in another kind of unit is never this factor's level (`unit-conflict.ts`: a price
+ *   as churn). The factor's unit is its own, else a limit's on it in the RAW graph.
+ * - `placeLevel`: the name rule (Olumi's figure only), then the writer's range (`levelFrameOf`) → the stored cell.
+ * - `estimateLevelPersists`: both, in the door's order, for a level that is Olumi's estimate.
+ */
+export interface DoorLevel { readonly value: number; readonly unit?: string }
+type LevelFactor = { readonly id?: unknown; observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined;
+
+export function doorLevelOf(level: unknown): DoorLevel | undefined {
+  const l = level as { value?: unknown; unit?: unknown } | null | undefined;
+  const v = l?.value;
+  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
+  return { value: v, ...(typeof l?.unit === 'string' && l.unit.trim() !== '' ? { unit: l.unit.trim() } : {}) };
+}
+
+export function factorUnitConflict(lvl: DoorLevel, factor: LevelFactor, rawGraph: unknown): { readonly factorUnit: string | undefined; readonly conflict: boolean } {
+  const factorUnit = factorUnitOf(rawGraph, factor);
+  return { factorUnit, conflict: unitsConflict(lvl.unit, factorUnit) !== null };
+}
+
+export type LevelPlacement =
+  | { readonly kind: 'contradicts_name' }
+  | { readonly kind: 'out_of_range'; readonly range: number }
+  | { readonly kind: 'no_range' }
+  | { readonly kind: 'set'; readonly value: number; readonly raw_value?: number; readonly unit?: string };
+
+export function placeLevel(lvl: DoorLevel, factor: LevelFactor, factorUnit: string | undefined, optionLabel: string, nameRule: boolean): LevelPlacement {
+  if (nameRule && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, optionLabel)) return { kind: 'contradicts_name' };
+  const frame = levelFrameOf(factor);
+  if (frame !== null) {
+    const v = lvl.value / frame;
+    if (!(v >= 0 && v <= 1)) return { kind: 'out_of_range', range: frame };
+    const os = (factor?.observed_state ?? {}) as { unit?: unknown };
+    const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
+    return { kind: 'set', value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}) };
+  }
+  if (lvl.value >= 0 && lvl.value <= 1) return { kind: 'set', value: lvl.value };
+  return { kind: 'no_range' };
+}
+
+export function estimateLevelPersists(lvl: DoorLevel, factor: LevelFactor, rawGraph: unknown, optionLabel: string):
+  { readonly ok: true; readonly value: number } | { readonly ok: false; readonly kind: 'unit_mismatch' | 'contradicts_name' | 'out_of_range' | 'no_range' } {
+  const { factorUnit, conflict } = factorUnitConflict(lvl, factor, rawGraph);
+  if (conflict) return { ok: false, kind: 'unit_mismatch' };
+  const placed = placeLevel(lvl, factor, factorUnit, optionLabel, true);
+  return placed.kind === 'set' ? { ok: true, value: placed.value } : { ok: false, kind: placed.kind };
 }
 
 /**
@@ -6447,12 +6500,12 @@ export function createAgentCapabilities(
         type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
         const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
-          const v = a.level?.value;
-          if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+          const lv = doorLevelOf(a.level);
+          if (lv === undefined) continue;
           const f = rawNodes.find((x) => x.kind === 'factor' && (norm(x.label) === norm(a.factor_label) || norm(x.description) === norm(a.factor_label)));
           // Olumi's own suggested figure, with its basis (ChatGPT 5839692762 A: an EXPLICIT hypothesis, never silent).
           const basis = a.level?.estimate === true && typeof a.level?.basis === 'string' && a.level.basis.trim() !== '' ? a.level.basis.trim() : undefined;
-          if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}), ...(basis !== undefined ? { estimate: basis } : {}) });
+          if (f !== undefined) levelById.set(f.id, { ...lv, ...(basis !== undefined ? { estimate: basis } : {}) });
         }
         /**
          * ⛔ THE USER'S OWN SPLIT (AI Quality ruling #70 5859388817; served C08 "Let's spit it 50/50" of the £30,000 limit the
@@ -6471,8 +6524,8 @@ export function createAgentCapabilities(
           if (lvl === undefined) return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           const factor = g.nodes.find((x) => x.id === f.id);
           // ⛔ A figure in another kind of unit is never this factor's level (`unit-conflict.ts`: a price as churn).
-          const factorUnit = factorUnitOf(g.raw, factor);
-          if (unitsConflict(lvl.unit, factorUnit) !== null) {
+          const { factorUnit, conflict } = factorUnitConflict(lvl, factor, g.raw);
+          if (conflict) {
             unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
@@ -6506,26 +6559,24 @@ export function createAgentCapabilities(
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           // The user's split's figure in the name ("50/50") is its RATIO, never a level it contradicts.
-          if (!byUser && derived === undefined && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
+          // The name rule, then the writer's range: `placeLevel`, the stage the Widen gate calls too.
+          const placed = placeLevel(lvl, factor, factorUnit, plan.label, !byUser && derived === undefined);
+          if (placed.kind === 'contradicts_name') {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
               reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           lvl.by = byUser ? 'user' : 'olumi';
           const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
-          const frame = levelFrameOf(factor);
-          if (frame !== null) {
-            const v = lvl.value / frame;
-            if (!(v >= 0 && v <= 1)) {
-              outOfRange.push({ option: plan.label, factor: f.label, value: lvl.value, range: frame });
-              return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
-            }
-            const os = (factor?.observed_state ?? {}) as { unit?: unknown };
-            const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
-            set.set(f.id, lvl);
-            return { factor_id: f.id, value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}), ...stamp };
+          if (placed.kind === 'out_of_range') {
+            outOfRange.push({ option: plan.label, factor: f.label, value: lvl.value, range: placed.range });
+            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
-          if (lvl.value >= 0 && lvl.value <= 1) { set.set(f.id, lvl); return { factor_id: f.id, value: lvl.value, ...stamp }; }
+          if (placed.kind === 'set') {
+            set.set(f.id, lvl);
+            return { factor_id: f.id, value: placed.value, ...(placed.raw_value !== undefined ? { raw_value: placed.raw_value } : {}),
+              ...(placed.unit !== undefined ? { unit: placed.unit } : {}), ...stamp };
+          }
           levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
             reason: `The model has no range for ${f.label} to read ${lvl.value} against, so this change leaves that level unset. `
               + `Once the option is added, propose that level with propose_option_interventions, which records a range for ${f.label}.` });
