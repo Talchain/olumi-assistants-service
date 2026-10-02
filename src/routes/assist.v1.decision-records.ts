@@ -150,16 +150,21 @@ export function projectUserRecord(row: DecisionRecordUserRead): DecisionRecordLi
   const optionId = d.chosen_option_id;
   const optionLabel = d.chosen_option_label;
   const confidence = row.prediction?.confidence;
+  const statement = row.prediction?.statement;
   if (typeof optionId !== 'string' || optionId === '' || typeof optionLabel !== 'string' || optionLabel === '') return null;
   if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) return null;
-  const statement = row.prediction?.statement;
+  // `/commit` refuses an empty expectation (it is the claim the outcome is scored against), so a chosen row without
+  // one is malformed — dropped, never shown as a decision with no forecast (CODEX P2 on S1).
+  if (typeof statement !== 'string' || statement.trim() === '') return null;
   return {
     ...base,
     position: 'chosen',
     chosen_option_id: optionId,
     chosen_option_label: optionLabel,
-    confidence_0_100: Math.round(confidence * 100),
-    ...(typeof statement === 'string' && statement.trim() !== '' ? { expectation_statement: statement } : {}),
+    // The user's own number, as stated: `/commit` accepts fractions (72.4 is stored as 0.724), so it is never rounded
+    // to an integer — only the float noise of the ×100 is removed (CODEX P3 on S1).
+    confidence_0_100: Math.round(confidence * 10000) / 100,
+    expectation_statement: statement,
     ...texts,
   };
 }
@@ -498,10 +503,13 @@ export default async function route(
     const userId = await requireUser(req, reply);
     if (userId === null) return reply;
 
-    const scenarioId = readString(asRecord(req.body), 'scenario_id').trim();
-    if (!UUID_RE.test(scenarioId)) {
+    const rawScenarioId = readString(asRecord(req.body), 'scenario_id').trim();
+    if (!UUID_RE.test(rawScenarioId)) {
       return refuse(reply, req, 400, 'invalid_scenario_id', 'scenario_id must be a UUID');
     }
+    // Postgres returns UUIDs lowercase, and the adapter re-asserts the scenario id per row: an uppercase request would
+    // otherwise read the right rows and then drop every one (CODEX P2 on S1).
+    const scenarioId = rawScenarioId.toLowerCase();
 
     const store = resolveStore();
     // OWNERSHIP FIRST: the read is service-role (no RLS), so this check is the
@@ -524,16 +532,16 @@ export default async function route(
     }
 
     try {
-      const page = await store.retrieveUserRecords(scenarioId);
+      const page = await store.retrieveUserRecords(scenarioId, userId);
       const records = page.records
         .map(projectUserRecord)
         .filter((r): r is DecisionRecordListItem => r !== null);
       return reply.code(200).send({
         records,
         total_count: page.totalCount,
-        // True when more user records exist than were returned (the adapter's
-        // hard cap): a client can then say "showing the latest N".
-        truncated: page.totalCount > page.records.length,
+        // True whenever FEWER records are returned than exist — the adapter's hard cap OR a malformed row the
+        // projection dropped (CODEX P2 on S1): a client can then say "showing N of M".
+        truncated: page.totalCount > records.length,
         request_id: getRequestId(req),
       });
     } catch (err) {

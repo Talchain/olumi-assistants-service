@@ -371,9 +371,11 @@ export interface DecisionRecordStorePort {
    * newest-first, hard-capped. The filter is in the QUERY, never after it: every
    * Run auto-captures a `model_derived` row (`commit.ts`), so a post-filter on a
    * capped page would let a few Runs push the user's own decision out of the window.
-   * The CALLER owns the ownership check (service-role read, no RLS).
+   * The CALLER owns the scenario-ownership check (service-role read, no RLS), AND every row is filtered to
+   * `owner_user_id = ownerUserId` (CODEX P1 on S1): decision records SURVIVE their scenario's deletion with the old
+   * owner's id, so a scenario UUID re-created by someone else would otherwise pass the scenario check and read them.
    */
-  retrieveUserRecords(scenarioId: string): Promise<DecisionRecordUserReadPage>;
+  retrieveUserRecords(scenarioId: string, ownerUserId: string): Promise<DecisionRecordUserReadPage>;
 
   /**
    * Fill a record's WRITE-ONCE outcome. Throws
@@ -552,14 +554,15 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
     return { records: out, totalCount };
   }
 
-  async retrieveUserRecords(scenarioId: string): Promise<DecisionRecordUserReadPage> {
-    // Same SCOPE-AT-THE-BYTES guard as retrieveRecords, plus the authorship
-    // filter IN the query (`decision->>committed_by_user = 'true'`), so the
-    // LIMIT and the exact count both count only the user's own decisions.
+  async retrieveUserRecords(scenarioId: string, ownerUserId: string): Promise<DecisionRecordUserReadPage> {
+    // Same SCOPE-AT-THE-BYTES guard as retrieveRecords, plus the OWNER (filtered, never selected) and the authorship
+    // filter IN the query (`decision->>committed_by_user = 'true'`), so the LIMIT and the exact count both count only
+    // this user's own decisions.
     const { data, error, count } = await this.client
       .from('decision_records')
       .select(DECISION_RECORD_USER_READ_COLUMNS, { count: 'exact' })
       .eq('scenario_id', scenarioId)
+      .eq('owner_user_id', ownerUserId)
       .eq('decision->>committed_by_user', 'true')
       .order('created_at', { ascending: false })
       .limit(DECISION_RECORDS_HARD_CAP);

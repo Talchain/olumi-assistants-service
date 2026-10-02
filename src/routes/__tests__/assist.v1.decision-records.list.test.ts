@@ -94,7 +94,7 @@ describe('S1: the owner reads back their own decisions — from any device', () 
     const { store, retrieveUserRecords } = makeStore(OWNER_ID);
     const res = await list(store, await userToken());
     expect(res.statusCode).toBe(200);
-    expect(retrieveUserRecords).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(retrieveUserRecords).toHaveBeenCalledWith(SCENARIO_ID, OWNER_ID);
     const body = res.json();
     expect(body.records).toEqual([
       { record_id: CHOSEN.record_id, created_at: CHOSEN.created_at, review_date: CHOSEN.review_date, graph_hash: 'aag_v1:abc', has_outcome: false,
@@ -116,6 +116,35 @@ describe('S1: the owner reads back their own decisions — from any device', () 
     expect(body.truncated).toBe(true);
     expect(body.total_count).toBe(11);
   });
+
+  it('CODEX P2: a projection drop on an UNCAPPED page still says truncated (2 stored, 1 shown)', async () => {
+    const noLabel = { ...CHOSEN, record_id: '11111111-1111-4111-8111-111111111111', decision: { ...CHOSEN.decision, chosen_option_label: '' } };
+    const { store } = makeStore(OWNER_ID, { records: [noLabel, CHOSEN], totalCount: 2 });
+    const body = (await list(store, await userToken())).json();
+    expect(body.records).toHaveLength(1);
+    expect(body.truncated).toBe(true);
+  });
+
+  it('CODEX P2: a chosen row with no expectation (null / blank / missing) is malformed — /commit requires one — and is dropped', async () => {
+    const rows = [null, '  ', undefined].map((statement, i) => ({ ...CHOSEN, record_id: `4444444${i}-4444-4444-8444-444444444444`,
+      prediction: { confidence: 0.6, confidence_source: 'user_stated', ...(statement === undefined ? {} : { statement }) } })) as UserRead[];
+    const { store } = makeStore(OWNER_ID, { records: [...rows, CHOSEN], totalCount: 4 });
+    expect((await list(store, await userToken())).json().records.map((r: { record_id: string }) => r.record_id)).toEqual([CHOSEN.record_id]);
+  });
+
+  it('CODEX P3: a fractional stated confidence comes back as stated (0.724 → 72.4), not rounded to an integer', async () => {
+    const { store } = makeStore(OWNER_ID, { records: [{ ...CHOSEN, prediction: { ...CHOSEN.prediction, confidence: 0.724 } }], totalCount: 1 });
+    expect((await list(store, await userToken())).json().records[0].confidence_0_100).toBe(72.4);
+  });
+
+  it('CODEX P2: an UPPERCASE scenario id reads the same records (Postgres returns UUIDs lowercase)', async () => {
+    const { store, readScenarioOwner, retrieveUserRecords } = makeStore(OWNER_ID);
+    const res = await list(store, await userToken(), SCENARIO_ID.toUpperCase());
+    expect(res.statusCode).toBe(200);
+    expect(readScenarioOwner).toHaveBeenCalledWith(SCENARIO_ID);
+    expect(retrieveUserRecords).toHaveBeenCalledWith(SCENARIO_ID, OWNER_ID);
+    expect(res.json().records).toHaveLength(2);
+  });
 });
 
 describe('S1 refusals: no identity, guest, and NO EXISTENCE ORACLE (DL condition)', () => {
@@ -124,6 +153,20 @@ describe('S1 refusals: no identity, guest, and NO EXISTENCE ORACLE (DL condition
     const res = await list(store, null);
     expect(res.statusCode).toBe(401);
     expect(readScenarioOwner).not.toHaveBeenCalled();
+  });
+
+  it('CODEX P2: a FORGED signature, an EXPIRED token and a WRONG audience are all 401 with NO ownership or record read (requireUserJwt is false)', async () => {
+    const otherKey = await makeEs256Key('kid-not-published');
+    const forged = await forgeUserToken(otherKey.privateKey, jwks.issuer, { sub: OWNER_ID, aud: 'authenticated', extraClaims: { role: 'authenticated' } });
+    const expired = await forgeUserToken(projectKey.privateKey, jwks.issuer, { sub: OWNER_ID, aud: 'authenticated', expired: true, extraClaims: { role: 'authenticated' } });
+    const wrongAud = await forgeUserToken(projectKey.privateKey, jwks.issuer, { sub: OWNER_ID, aud: null, extraClaims: { role: 'anon' } });
+    for (const t of [forged, expired, wrongAud]) {
+      const { store, readScenarioOwner, retrieveUserRecords } = makeStore(OWNER_ID);
+      const res = await list(store, t);
+      expect(res.statusCode).toBe(401);
+      expect(readScenarioOwner).not.toHaveBeenCalled();
+      expect(retrieveUserRecords).not.toHaveBeenCalled();
+    }
   });
 
   it('a guest scenario answers DR001 (distinct, as on /commit) and reads no records', async () => {
@@ -154,30 +197,63 @@ describe('S1 refusals: no identity, guest, and NO EXISTENCE ORACLE (DL condition
 });
 
 describe('S1 adapter: only the user\'s OWN commits, filtered IN the query', () => {
-  function fakeClient(rows: unknown[], count: number) {
+  type Row = Record<string, unknown> & { owner_user_id: string; scenario_id: string; created_at: string; decision: Record<string, unknown> };
+  /** A fake PostgREST that HONOURS the filters, the order, the limit and the exact-count option it is sent. */
+  function fakeClient(rows: Row[]) {
     const calls: [string, ...unknown[]][] = [];
+    const filters: [string, unknown][] = [];
+    let cols: string[] = []; let opts: { count?: string } | undefined; let order: { col: string; asc: boolean } | undefined;
     const chain = {
-      select: (...a: unknown[]) => { calls.push(['select', ...a]); return chain; },
-      eq: (...a: unknown[]) => { calls.push(['eq', ...a]); return chain; },
-      order: (...a: unknown[]) => { calls.push(['order', ...a]); return chain; },
-      limit: (...a: unknown[]) => { calls.push(['limit', ...a]); return Promise.resolve({ data: rows, error: null, count }); },
+      select: (c: string, o?: { count?: string }) => { calls.push(['select', c, o]); cols = c.split(',').map((x) => x.trim()); opts = o; return chain; },
+      eq: (c: string, v: unknown) => { calls.push(['eq', c, v]); filters.push([c, v]); return chain; },
+      order: (c: string, o: { ascending: boolean }) => { calls.push(['order', c, o]); order = { col: c, asc: o.ascending }; return chain; },
+      limit: (n: number) => {
+        calls.push(['limit', n]);
+        let hit = rows.filter((r) => filters.every(([c, v]) => (c === 'decision->>committed_by_user' ? String(r.decision.committed_by_user) === v : r[c] === v)));
+        if (order) hit = [...hit].sort((a, b) => (String(a[order!.col]) < String(b[order!.col]) ? -1 : 1) * (order!.asc ? 1 : -1));
+        const data = hit.slice(0, n).map((r) => Object.fromEntries(cols.map((c) => [c, r[c]])));
+        return Promise.resolve({ data, error: null, count: opts?.count === 'exact' ? hit.length : null });
+      },
     };
     return { client: { from: (t: string) => { calls.push(['from', t]); return chain; } }, calls };
   }
+  const row = (id: string, at: string, over: Partial<Row> = {}): Row => ({ record_id: id, scenario_id: SCENARIO_ID, owner_user_id: OWNER_ID, created_at: at,
+    review_date: '2026-12-31T00:00:00.000Z', outcome: null, decision: { ...CHOSEN.decision }, prediction: { ...CHOSEN.prediction }, ...over });
 
-  it('sends the scenario AND authorship filters to PostgREST, and a model_derived row that slips through is still dropped', async () => {
-    const modelDerived = { ...CHOSEN, record_id: '33333333-3333-4333-8333-333333333333', decision: { chosen_option_id: 'opt_a', chosen_option_label: 'A', graph_hash: 'aag_v1:x' },
-      prediction: { confidence: 0.5, confidence_source: 'model_derived' }, review_date: '2026-12-01T00:00:00.000Z', outcome: null };
-    const userRow = { ...CHOSEN, outcome: { result: 'happened' } };
-    const { client, calls } = fakeClient([modelDerived, userRow], 2);
-    const store = new SupabaseDecisionRecordStore(client as never);
-    const page = await store.retrieveUserRecords(SCENARIO_ID);
-    expect(calls).toContainEqual(['from', 'decision_records']);
+  it('sends scenario + OWNER + authorship filters, exact count, newest-first, limit 8; never selects owner_user_id; a model_derived row is excluded', async () => {
+    const modelDerived = row('33333333-3333-4333-8333-333333333333', '2026-10-02T09:00:00.000Z', { decision: { chosen_option_id: 'opt_a', chosen_option_label: 'A' } });
+    const { client, calls } = fakeClient([modelDerived, row(CHOSEN.record_id, '2026-10-02T08:00:00.000Z', { outcome: { result: 'happened' } })]);
+    const page = await new SupabaseDecisionRecordStore(client as never).retrieveUserRecords(SCENARIO_ID, OWNER_ID);
     expect(calls).toContainEqual(['eq', 'scenario_id', SCENARIO_ID]);
+    expect(calls).toContainEqual(['eq', 'owner_user_id', OWNER_ID]);
     expect(calls).toContainEqual(['eq', 'decision->>committed_by_user', 'true']);
-    expect(String(calls.find((c) => c[0] === 'select')?.[1])).toContain('review_date');
-    expect(String(calls.find((c) => c[0] === 'select')?.[1])).not.toContain('owner_user_id');
+    expect(calls).toContainEqual(['order', 'created_at', { ascending: false }]);
+    expect(calls).toContainEqual(['limit', 8]);
+    const sel = calls.find((c) => c[0] === 'select')!;
+    expect(sel[2]).toEqual({ count: 'exact' });
+    expect(String(sel[1])).toContain('review_date');
+    expect(String(sel[1])).not.toContain('owner_user_id');
     expect(page.records.map((r) => r.record_id)).toEqual([CHOSEN.record_id]);
     expect(page.records[0]!.has_outcome).toBe(true);
+  });
+
+  it('CODEX P1: a scenario UUID RE-CREATED by someone else never reads the previous owner\'s records', async () => {
+    const formerOwners = row(CHOSEN.record_id, '2026-10-01T08:00:00.000Z', { owner_user_id: VIEWER_ID });
+    const { client } = fakeClient([formerOwners]);
+    const page = await new SupabaseDecisionRecordStore(client as never).retrieveUserRecords(SCENARIO_ID, OWNER_ID);
+    expect(page).toEqual({ records: [], totalCount: 0 });
+  });
+
+  it('CODEX P2: the 8/9 boundary — nine stored, eight returned newest-first, the true total is nine (and the route says truncated)', async () => {
+    const nine = Array.from({ length: 9 }, (_, i) => row(`5555555${i}-5555-4555-8555-555555555555`, `2026-10-0${i + 1}T08:00:00.000Z`));
+    const { client } = fakeClient(nine);
+    const store = new SupabaseDecisionRecordStore(client as never);
+    const page = await store.retrieveUserRecords(SCENARIO_ID, OWNER_ID);
+    expect(page.totalCount).toBe(9);
+    expect(page.records.map((r) => r.record_id)).toEqual(nine.slice(1).reverse().map((r) => r.record_id));
+    (store as unknown as { readScenarioOwner: () => Promise<string> }).readScenarioOwner = async () => OWNER_ID;
+    const body = (await list(store as never, await userToken())).json();
+    expect(body.records).toHaveLength(8);
+    expect(body.truncated).toBe(true);
   });
 });
