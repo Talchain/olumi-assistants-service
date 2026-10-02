@@ -14,11 +14,12 @@
  * re-reads the model afterwards and reports what the model actually shows.
  */
 
+import { comparisonBlockOf } from '../comparison-answer.js';
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
-import { acceptedOlumiEstimateSentence } from '../rerun-explanation.js';
+import { acceptedOlumiEstimateSentence, rerunPlanForGraph } from '../rerun-explanation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
@@ -960,6 +961,8 @@ interface GraphRead {
   readonly analysis_result?: unknown;
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
+  /** The read's selected pair, `current_read.run_delta` (complete_current only); absent = no pair to compare. */
+  readonly run_delta?: unknown;
 }
 
 // An edited graph can still carry an earlier Run. Its old result must not be
@@ -1810,6 +1813,10 @@ export function createAgentCapabilities(
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
+      ...(() => {
+        const pair = (r.json.current_read as { run_delta?: unknown } | null | undefined)?.run_delta;
+        return pair === undefined || pair === null ? {} : { run_delta: pair };
+      })(),
     };
   };
 
@@ -2790,6 +2797,13 @@ export function createAgentCapabilities(
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
         ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, g),
+        // ⭐ "Ask about this comparison" (`comparison-answer.ts`): the pair the user can compare, from this same read, in
+        // Olumi's own code line with what may be said about it. None without a pair. It carries no leader and no figure.
+        ...(() => {
+          const comparison = comparisonBlockOf(g.run_delta, rerunPlanForGraph(g.run_delta, g.raw, false,
+            [...optionNames.values()].map((a) => a.display)));
+          return comparison === undefined ? {} : { comparison };
+        })(),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest

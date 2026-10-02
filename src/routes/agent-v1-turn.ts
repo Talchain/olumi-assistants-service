@@ -25,7 +25,8 @@
 
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
 import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
-import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
+import { composeRerunExplanation, rerunPlanForGraph, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
+import { enforceComparisonAnswer } from '../orchestrator-v5/agent-lane/comparison-answer.js';
 import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
@@ -860,7 +861,7 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; runDelta?: unknown }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -921,6 +922,8 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   let draftGraph: unknown;
   /** The persisted graph as read — the leader wire gate reads its option ROSTER, never a verdict. */
   let graph: unknown;
+  /** The read's selected pair (`current_read.run_delta`, emitted only on complete_current): the comparison check's ONE source. */
+  let runDelta: unknown;
   try {
     const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (after.status === 200) {
@@ -929,6 +932,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
       analysisReady = after.json.analysis_ready;
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
       if (typeof after.json.analysis_result === 'object' && after.json.analysis_result !== null) analysisResult = after.json.analysis_result;
+      runDelta = (after.json.current_read as { run_delta?: unknown } | null | undefined)?.run_delta ?? undefined;
       // The selected run's own constraint verdict state, bound to the SAME fact as
       // `analysis_result` by the graph read (R&C #70 5842182272). `null` = not recorded.
       // Narrowed through the contract's own enum: a string that is not a state is not carried.
@@ -1074,7 +1078,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, ...(runDelta !== undefined ? { runDelta } : {}) };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -2206,13 +2210,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⭐ M2 RERUN-EXPLANATION (MG; RC contract; DL ruling 5940472067): what changed between the two Runs is Olumi's own
       // CODE LINE from the selected delta's TYPED rows; the model only says why, and its sentences pass RC's checker beside
       // that line. `null` (no delta: a first Run) leaves this path exactly as it was.
-      const graphNodes = Array.isArray((st.graph as { nodes?: unknown } | null)?.nodes) ? (st.graph as { nodes: { id?: unknown; kind?: unknown; label?: unknown }[] }).nodes : [];
-      const rerunPlan = rerunExplanationPlan(currentRead?.run_delta,
-        (id) => { const n = graphNodes.find((x) => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; },
-        [...new Set([...graphNodes.filter((n) => n.kind === 'option' && typeof n.label === 'string').map((n) => n.label as string),
-          ...[...optionNameAliases(st.graph).values()].map((a) => a.display)])],
-        runToolOutputLicensesLeader(selectedRun),
-        graphNodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''));
+      const rerunPlan = rerunPlanForGraph(currentRead?.run_delta, st.graph, runToolOutputLicensesLeader(selectedRun),
+        [...optionNameAliases(st.graph).values()].map((a) => a.display));
       const providerStartedAt = Date.now();
       let interpreted: { answer: string; messages: Record<string, unknown>[] } | undefined;
       let explanationReady = false;
@@ -2659,6 +2658,25 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) === null) {
       text = RUN_RESULT_UNVERIFIED_TEXT;
+    }
+    /**
+     * ⭐ "ASK ABOUT THIS COMPARISON", the backstop (`comparison-answer.ts`; lease #85 5949274551): the narrator's OWN words on
+     * an ordinary answered turn, before any host line joins them, pass RC's COMPARISON-ANSWER check against the pair this
+     * same final readback selects (the input half is the state item's `comparison` block). A failing sentence is dropped
+     * and Olumi's record appended; the text then differs from the narrator's words, so it is never shaped. No Run ever (`none`) → no
+     * comparison to invent, so nothing is checked; any other state without a pair → every licence refused (fail-closed).
+     */
+    if (fastPath === undefined && narratorWords !== null && text === narratorWords
+      && (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind !== 'none') {
+      const labels = (Array.isArray((readbackGraph as { nodes?: unknown } | null)?.nodes) ? (readbackGraph as { nodes: { label?: unknown }[] }).nodes : [])
+        .map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== '');
+      const checked = enforceComparisonAnswer(text, rerunPlanForGraph(finalRead.runDelta, readbackGraph, false,
+        [...optionNameAliases(readbackGraph).values()].map((a) => a.display)), labels);
+      if (checked.dropped.length > 0) {
+        log.info({ site: 'agent-v1-turn.comparison_answer', request_id: String(req.id), failed: checked.failed,
+          dropped: checked.dropped.length, paired: finalRead.runDelta !== undefined }, 'agent-lane: comparison claim dropped from the narrator text');
+        text = checked.text;
+      }
     }
     if (fastPath === 'explain' && (runStillCurrent === false || !runExplanationMatches(explanationId, scenarioId, { graphHash, analysisState, analysisResult }))) {
       result = { ...result, assistant_text: RUN_EXPLANATION_UNAVAILABLE_TEXT,
