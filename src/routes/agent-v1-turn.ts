@@ -59,6 +59,7 @@ import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
 import type { NotModelledManifest } from '../cee/context-integrity/not-modelled-manifest.js';
@@ -1609,7 +1610,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * (`writesGraph: false`), so the read returns what a read started after it would. See `turnReadCache`.
      */
     const readCache = turnReadCache(dispatch, `/assist/v1/scenarios/${scenarioId}/graph`, [`/assist/v1/scenarios/${scenarioId}/versions`]);
-    readCache.prefetch();
+    // Run consumes no graph before its dispatch ends this epoch. Its post-run readers still read fresh.
+    // An approval wins over Run and retains its verification reads.
+    if (!typedRunOf(body) || typedApprovalOf(body) !== undefined) readCache.prefetch();
 
     const approvedProposal = typedApprovalOf(body);
     const explanationId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
@@ -2028,6 +2031,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let narrationStatus: 'pending' | 'unavailable' | 'ready' | 'stale' | undefined;
     /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
     let fastPathView: ProvisionalView | null = null;
+    let explanationRead: Awaited<ReturnType<typeof readBackState>> | undefined;
+    let explanationBriefText: string | null = null;
     /** A Run with no result: its typed outcome's own chips (the identity ask's "Check the figures", a retry), `run-outcome.ts`. */
     let runOutcomeChips: OfferedAction[] = [];
     let runOutcomeSaid = false;
@@ -2096,9 +2101,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (result === undefined && approvedProposal === undefined && isRunExplanationChip(explanationId)) {
       const fastStartedAt = Date.now();
       const st = await readBackState(readingDispatch, scenarioId);
+      explanationRead = st;
       // This is the same cached canonical read, carrying the producer's selected-Run delta.
       // Never recover a delta from an earlier tool output or calculate one in the narration layer.
       const selectedRead = await readingDispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
+      explanationBriefText = typeof selectedRead.json.brief_text === 'string' ? selectedRead.json.brief_text : null;
       const currentRead = selectedRead.status === 200
         ? selectedRead.json.current_read as { run_delta?: unknown } | undefined : undefined;
       const matches = message === RUN_EXPLANATION_MESSAGE && !typedRunOf(body)
@@ -2565,13 +2572,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE the reply is composed, because the Run offer below keys on the
      * readiness this same response carries.
      */
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = await readBackState(fastPath === 'explain'
-      ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
+    const runCheckStarted = Date.now();
+    const runStillCurrent = fastPath === 'explain'
+      ? await runExplanationCurrentness(store, scenarioId, userId, explanationId, { graph: explanationRead?.graph, briefText: explanationBriefText }) : undefined;
+    if (runStillCurrent !== undefined) dispatchLedger.push({ path: 'store:run-currentness', ms: Date.now() - runCheckStarted, status: runStillCurrent ? 200 : 409 });
+    // A successful bound check reuses the exact read that supplied the narration. A mismatch/failure
+    // reads current wire state, but never restores the old explanation's licence.
+    const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
+      : await readBackState(fastPath === 'explain'
+        ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
+    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
     if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) === null) {
       text = RUN_RESULT_UNVERIFIED_TEXT;
     }
-    if (fastPath === 'explain' && !runExplanationMatches(explanationId, scenarioId, { graphHash, analysisState, analysisResult })) {
+    if (fastPath === 'explain' && (runStillCurrent === false || !runExplanationMatches(explanationId, scenarioId, { graphHash, analysisState, analysisResult }))) {
       result = { ...result, assistant_text: RUN_EXPLANATION_UNAVAILABLE_TEXT,
         items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: RUN_EXPLANATION_MESSAGE }] },
           { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: RUN_EXPLANATION_UNAVAILABLE_TEXT }] }] };

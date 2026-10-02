@@ -371,6 +371,11 @@ const store = createMockSessionStore({
     readFactsLikeTheStore(rowIds, handlerId) as never,
   loadGraph: async () => jsonb(db.graph),
   loadGraphAndBriefText: async () => ({ graph: jsonb(db.graph), briefText: null }),
+  // T1(d) coalesces the reload's row reads. This snapshot must read the same
+  // committed fake DB bytes as the legacy graph reads, including after edits.
+  readExistingScenario: async () => ({
+    userId: null, graph: jsonb(db.graph), briefText: null, analysisInvalidatedAt: null,
+  }),
   scenarioExists: async () => true,
   // GUEST scenario: no owner, so the ownership pre-flight admits an anonymous
   // caller on both routes and no model-version receipt is minted.

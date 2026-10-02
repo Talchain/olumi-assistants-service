@@ -361,6 +361,16 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // the route) would have been the mirror this guard exists to prevent.
     // Deliberate, reviewed, and NOT precedent for a turn-path caller.
     'src/routes/scenario-graph-analysis-read.ts': 2,
+    // 2026-10-02 T1(d): import + one call at the AFTER-narration read seam.
+    // The typed Agent explanation bypasses TurnExecutor. Its initial canonical
+    // read predates the provider wait, so its freshness cannot vouch for a
+    // newer Run, model edit or restore committed during that wait. The one
+    // joined query supplies the SAME scoped Run/model/restore inputs to the
+    // canonical authority; this is a bounded reuse check, not a second analysis
+    // projection. A mismatch refreshes through the existing canonical reader.
+    // Requires owning HARNESS/DL review in this PR; remove this entry if a
+    // canonical frame from that post-wait snapshot becomes available here.
+    'src/orchestrator-v5/agent-lane/run-currentness.ts': 2,
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)
