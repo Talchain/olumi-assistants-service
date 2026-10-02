@@ -132,6 +132,35 @@ function pendingProposalPair(dropped: readonly unknown[]): unknown[] {
  * removed with it.
  */
 /** What a superseded read or run output becomes in the history: small, and still a valid output for its call. */
+/**
+ * ⭐ THE AGENT REMEMBERS WHAT THE USER WAS SENT (P0 context inventory, defect 1; DL 5958515601). The loop's items end on
+ * the model's DRAFT answer; the route then rewrites it (leader gate, disclosures, host lines, the target question). History
+ * written from the draft makes the next turn recall words the user never saw and miss words they did. This replaces the
+ * turn's final answer — every assistant message after its last tool output — with ONE message carrying the SENT text,
+ * keeping the item it rewrites (and so its id and position); a turn with no drafted answer gains one. Tool calls, outputs
+ * and reasoning are untouched.
+ */
+export function withSentAnswer(items: readonly unknown[], sent: string): unknown[] {
+  const isAnswer = (i: unknown): boolean => {
+    const it = i as { type?: unknown; role?: unknown } | null;
+    return it?.type === 'message' && it.role === 'assistant';
+  };
+  let lastTool = -1;
+  items.forEach((i, k) => { if ((i as { type?: unknown } | null)?.type === 'function_call_output') lastTool = k; });
+  const content = [{ type: 'output_text', text: sent }];
+  const out: unknown[] = [];
+  let placed = false;
+  items.forEach((i, k) => {
+    if (k > lastTool && isAnswer(i)) {
+      if (!placed) { out.push({ ...(i as Record<string, unknown>), content }); placed = true; }
+      return;
+    }
+    out.push(i);
+  });
+  if (!placed && sent.trim() !== '') out.push({ type: 'message', role: 'assistant', content });
+  return out;
+}
+
 export const SUPERSEDED_OUTPUT = JSON.stringify({ superseded: true, note: 'An earlier read. The current model state is given at the start of each turn.' });
 /** Tools whose output is a snapshot of the model: every one is superseded by the state given with the next turn. */
 const SNAPSHOT_TOOLS = new Set(['get_canonical_state', 'build_model_from_brief']);

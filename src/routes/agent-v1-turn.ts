@@ -48,7 +48,7 @@ import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-cont
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
-import { BOARD_EDIT_PREFIX, DURABLE_SEED_ROWS_READ, HistoryStore, dropSupersededPairs, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
+import { BOARD_EDIT_PREFIX, DURABLE_SEED_ROWS_READ, HistoryStore, dropSupersededPairs, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs, withSentAnswer } from '../orchestrator-v5/agent-lane/history-store.js';
 import { contextBindingSecret, issueContextPacket } from '../orchestrator-v5/agent-lane/runtime/request-assembly.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -2769,8 +2769,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : [];
     // Every retained Run output becomes a neutral marker. The next turn reads its facts from CURRENT MODEL STATE.
     // PJ-C1 tokens: a pair the prune stubbed carries nothing, so it leaves with its reasoning (`dropSupersededPairs`).
-    // A method turn's history is written once, from the wire (T3, terminal; below).
-    if (fastPath !== 'method') histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals)));
+    // Every turn's history is written once, from the wire (T3, terminal; below): the user's words and the SENT text.
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
@@ -3242,8 +3241,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     // T3, terminal: the ONE history write for a method turn — the history before it, the user's words, and the FINAL SENT
     // text (the wire after the last gate), never a pre-gate copy or anything the call produced.
-    if (fastPath === 'method') {
-      histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(methodTurnItems(history, message, String(wireBody.assistant_text ?? text)), [])));
+    // Every other turn keeps its tool items and replaces the model's draft answer with the sent one (`withSentAnswer`).
+    {
+      const sent = String(wireBody.assistant_text ?? text);
+      histories.set(sessionId, fastPath === 'method'
+        ? dropSupersededPairs(pruneSupersededToolOutputs(methodTurnItems(history, message, sent), []))
+        : dropSupersededPairs(pruneSupersededToolOutputs(withSentAnswer(result.items, sent), chipApprovals)));
     }
 
     /**
