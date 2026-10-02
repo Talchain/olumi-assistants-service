@@ -128,6 +128,7 @@ import { guardAnalysisParticipation } from './run-analysis-participation-guard.j
 import { filterOlumiProposedOptions } from './olumi-option-filter.js';
 import { userExcludedOptions, PARTICIPATION_STATE_FOR } from './user-option-status-filter.js';
 import { buildRunInputSnapshot, runIdFor, sentDigest } from './run-input-snapshot.js';
+import type { RunAnalysisProbe } from './run-analysis-probe.js';
 import {
   carryLevelLimitBaselines,
   carryLimitTargetCaps,
@@ -360,6 +361,11 @@ export interface RunAnalysisHandlerDeps {
   readonly plotClient: PLoTClient;
   /** Scenario state reader — test injects mock, production injects real. */
   readonly scenarioReader: ScenarioReader;
+  /**
+   * SCIENCE ROBUSTNESS (EXPERIMENT): when set, receive the exact payload a Run would send and return BEFORE PLoT with
+   * no facts (`run-analysis-probe.ts`). Only the decision-flip dispatch sets it; production Runs never do.
+   */
+  readonly probe?: RunAnalysisProbe;
 }
 
 /**
@@ -1266,6 +1272,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       { event: 'run_analysis.seed_reuse', request_id: invocation.requestId, scenario_id: args.scenario_id, reason: seedReuse.reason },
       'run_analysis seed decision',
     );
+
+    // SCIENCE ROBUSTNESS (EXPERIMENT): the decision-flip probe takes the EXACT payload this Run would send — after the
+    // seed decision, before PLoT — and the handler returns with no facts, so no Run happens and nothing is persisted.
+    if (deps.probe) {
+      await deps.probe({ plotPayload: structuredClone(plotPayload), runInputSnapshot, graphHashAtRun, requestId: invocation.requestId });
+      return { assistant_text: '', handler_facts: [], llm_calls_used: 0 };
+    }
 
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
