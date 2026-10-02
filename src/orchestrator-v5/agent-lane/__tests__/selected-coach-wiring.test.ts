@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
 import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
+import { asSent } from './helpers/as-sent.js';
 
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
 const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c9ed66d';
@@ -83,7 +84,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
 
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body?: unknown }) => {
-      const body = JSON.parse(String(init.body)) as Sent;
+      const body = asSent(JSON.parse(String(init.body))) as Sent;
       sent.push(body);
       registeredAtCall.push(registered);
       if (body.text?.format?.name === 'whole_candidate') {

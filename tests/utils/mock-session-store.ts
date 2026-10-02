@@ -148,6 +148,9 @@ export function createMockSessionStore(
       userId: null, graph: null, briefText: null, analysisInvalidatedAt: null,
     }),
     readRunCurrentness: async () => null,
+    // ACCOUNTS "Invite a colleague" (#2514): the drift alarm fired here, as designed. Benign default = nobody is a
+    // viewer member, so every existing suite keeps its owner-or-guest access exactly as before.
+    isScenarioMember: async () => false,
     // C8-A (atomic model-version restore) — the drift alarm fired again here,
     // as designed: `readAnalysisInvalidatedAt` was added to `SessionStore` and
     // this helper was not updated. Benign default = the DB-stamped restore

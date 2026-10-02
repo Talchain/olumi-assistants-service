@@ -208,7 +208,8 @@ describe('two-request Run through the real handler and canonical analysis reader
       expect(second.statusCode).toBe(200); expect(runs).toBe(1); expect(modelBodies).toHaveLength(0);
       expect(second.json()._agent.tool_calls).toEqual([]);
       expect(second.json().narration.status).toBe('stale');
-      expect(second.json().assistant_text).toContain('Nothing in your model changed');
+      expect(second.json().assistant_text).toContain('I can’t explain that result as current. Check the current results before asking again.');
+      expect(second.json().assistant_text).not.toContain('Nothing in your model changed');
     });
   }
 

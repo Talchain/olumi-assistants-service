@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 import { AGENT_PROMPT_ALIASES, promptSha256 } from '../runtime/prompt-identity.js';
 import { researchChipFor } from '../runtime/public-research.js';
 import { OPENAI_ONLY, assertProviderAllowed, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
+import { asSent } from './helpers/as-sent.js';
 
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
@@ -38,7 +39,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 const sha = (text: unknown): string => createHash('sha256').update(typeof text === 'string' ? text : '', 'utf8').digest('hex');
 const HEX64 = /^[0-9a-f]{64}$/;
 
-type Row = { site: string; provider: string; model: string; purpose: string; outcome: string; prompt_alias?: string; prompt_sha256?: string };
+type Row = { site: string; provider: string; model: string; purpose: string; outcome: string; prompt_alias?: string; prompt_sha256?: string; instructions_carrier?: string };
 
 /** One scenario per row, so no row reads another's history, offer or readback. */
 const ORDINARY = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01';
@@ -55,6 +56,8 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
   let app: FastifyInstance;
   /** Every request body the provider received, in order. */
   let sent: Record<string, unknown>[] = [];
+  /** The same requests exactly as sent, before `asSent` reads the instructions back out of their carrier (T1 b). */
+  let raw: Record<string, unknown>[] = [];
   /** What the conversation model does next, one entry per non-interpreting call; then it just answers. */
   let script: Record<string, unknown>[] = [];
   const say = (text: string) => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
@@ -62,7 +65,9 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
 
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { type?: string } } };
+      const rawBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      raw.push(rawBody);
+      const body = asSent(rawBody) as Record<string, unknown> & { text?: { format?: { type?: string } } };
       sent.push(body);
       // Construction: no structured answer (the measured "reasoning ate the budget" shape) — the row is what is tested.
       if (body.text?.format?.type === 'json_schema') return new Response(JSON.stringify({ output: [] }), { status: 200 });
@@ -103,7 +108,7 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { sent = []; script = []; });
+  beforeEach(() => { sent = []; raw = []; script = []; });
 
   const turn = async (scenarioId: string, payload: Record<string, unknown>) => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: scenarioId, ...payload } });
@@ -206,6 +211,28 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
     expect(own.length).toBeGreaterThanOrEqual(1);
     for (const r of own) expect([r.prompt_alias, HEX64.test(r.prompt_sha256 ?? '')]).toEqual(['agent.converse', true]);
   });
+  it('RED (T1 b): a converse call sends the Agent instructions as a developer block with an EXPLICIT cache breakpoint; same text, same sha', async () => {
+    const rows = await turn(ORDINARY, { message: 'What does the model say?' });
+    const req = raw[0]!;
+    expect(req, 'no top-level instructions on a converse call').not.toHaveProperty('instructions');
+    const first = (req['input'] as Record<string, unknown>[])[0]!;
+    expect(first['role']).toBe('developer');
+    const block = (first['content'] as Record<string, unknown>[])[0]!;
+    expect(block['type']).toBe('input_text');
+    expect(block['prompt_cache_breakpoint']).toEqual({ mode: 'explicit' });
+    expect(block['text'], 'exactly the instructions the old carrier sent').toBe(sent[0]!['instructions']);
+    expect(rows[0]!.prompt_sha256, 'the ledger identity is of the same text').toBe(sha(block['text']));
+    expect(rows[0]!.instructions_carrier).toBe('developer_breakpoint');
+  });
+
+  it('CONTROL (T1 b): the interpreting call keeps top-level instructions — its per-Run line would make a breakpoint write an entry nothing reads', async () => {
+    const rows = await runChip(RUN_WITHHELD);
+    expect(raw[0]!['tool_choice']).toBe('none');
+    expect(typeof raw[0]!['instructions']).toBe('string');
+    expect(JSON.stringify(raw[0]!['input'] ?? [])).not.toContain('prompt_cache_breakpoint');
+    expect(rows[0]!.instructions_carrier).toBe('instructions');
+  });
+
 });
 
 describe('the ledger fields are additive, and the alias list is the map’s', () => {

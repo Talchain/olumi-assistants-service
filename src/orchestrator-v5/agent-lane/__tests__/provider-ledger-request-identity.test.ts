@@ -130,7 +130,8 @@ describe('⭐ PTL row 4: each Agent ledger row carries the WHOLE request identit
     const structured = sent.find((s) => s.text?.format?.type === 'json_schema')!;
     expect(Object.keys(structured)).toEqual(['model', 'instructions', 'input', 'max_output_tokens', 'reasoning', 'text']);
     const conversation = sent.find((s) => s.text?.format?.type !== 'json_schema')!;
-    expect(Object.keys(conversation)).toEqual(['model', 'instructions', 'input', 'tools', 'reasoning', 'max_output_tokens']);
+    // T1 (b): the converse instructions ride as input[0] (a developer block with an explicit cache breakpoint), not a field.
+    expect(Object.keys(conversation)).toEqual(['model', 'input', 'tools', 'reasoning', 'max_output_tokens']);
   });
 
   it('CONTROL: a LEGACY site beneath internal dispatch carries none of the new fields; the Agent’s own rows in the same turn do', async () => {

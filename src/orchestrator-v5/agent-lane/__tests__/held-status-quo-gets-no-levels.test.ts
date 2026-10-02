@@ -30,6 +30,7 @@ import { structuralFacts } from '../structural-facts.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../../graph/repair-authored-edge.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../../orchestrator/context/constants.js';
+import { asSent } from './helpers/as-sent.js';
 
 // Only the route-level prompt capture (d) needs these; the capability tests never touch them.
 const sessionStore = {
@@ -484,7 +485,7 @@ describe('(d) the Agent is told a held status quo is never given levels — in t
   const instructions: string[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown>;
       instructions.push(String(body['instructions'] ?? ''));
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The model holds three options.' }] }] }), { status: 200 });
     }));

@@ -13,6 +13,7 @@
 
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
+import { inertRiskBranch } from '../../graph/inert-risk.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -96,20 +97,55 @@ const withinMonths = (goal: Rec): string => {
  * question; D1 never does. When the reply on screen would pass `AT_REST_WORD_BOUND` and a questions toggle holds A7's
  * fact, A7 stays behind it.
  */
+/**
+ * ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out of
+ * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
+ */
+function leftOutLines(graph: unknown, goalLabel: string): string[] {
+  const g = recordOf(graph);
+  const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
+  const edges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
+    .filter((e): e is Rec => e !== undefined && e.edge_type !== 'bidirected' && typeof e.from === 'string' && typeof e.to === 'string')
+    .map((e) => ({ from: e.from as string, to: e.to as string }));
+  const limits = (Array.isArray(g?.goal_constraints) ? g.goal_constraints : []).map((k) => recordOf(k)?.node_id)
+    .filter((id): id is string => typeof id === 'string');
+  const leftOut = inertRiskBranch(nodes as { id: string; kind?: unknown; category?: unknown }[], edges, limits);
+  const labelOf = (n: Rec): string => String(n.label ?? n.id);
+  return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string)).map((r) => {
+    // ⭐ THE ONE WRITER (HARNESS CR on #2509): everything left out with this risk is named HERE, however many hops
+    // (DL condition 3), in words that stay true when one cause feeds two left-out risks.
+    const upstream = new Set<string>(); const walk = [r.id as string];
+    while (walk.length > 0) {
+      const at = walk.pop()!;
+      for (const e of edges) if (e.to === at && leftOut.has(e.from) && !upstream.has(e.from)) { upstream.add(e.from); walk.push(e.from); }
+    }
+    const named = nodes.filter((n) => n.kind !== 'risk' && upstream.has(n.id as string)).map((n) => `"${labelOf(n)}"`);
+    const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+    const withIt = named.length === 0 ? '' : ` (with ${list}, which ${named.length === 1 ? 'feeds' : 'feed'} only what is left out)`;
+    return `"${labelOf(r)}"${withIt} is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`;
+  });
+}
+
+/** A7's own opener: the one way A7 is told apart from the other owed lines (CODEX K3 P2: never "the first non-ask line"). */
+const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
+
 export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext): string[] {
   if (!ctx.builtOrRan) return [];
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return [];
+  // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
+  // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
+  const leftOut = leftOutLines(graph, label);
   const within = withinMonths(goal);
-  const a7 = within !== '' && !hasDurationLimit(graph) ? `This model doesn't yet say whether any option gets there${within}.` : null;
+  const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
   const wanted = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
   const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
     + ls.reduce((n, l) => n + (l === null ? 0 : words(l)), 0);
-  const keepA7 = a7 !== null && !(ctx.questionsToggle && onScreen([a7, ask]) > AT_REST_WORD_BOUND);
-  return [keepA7 ? a7 : null, ask].filter((l): l is string => l !== null);
+  const keepA7 = a7 !== null && !(ctx.questionsToggle && onScreen([...leftOut, a7, ask]) > AT_REST_WORD_BOUND);
+  return [...leftOut, keepA7 ? a7 : null, ask].filter((l): l is string => l !== null);
 }
 
 /**
@@ -142,7 +178,7 @@ export function withA7AfterGate(
 ): string {
   // Unfolded: the lines owed with nothing at rest yet; only A7 is ever inserted here.
   const owedLines = decisionInputLines(graph, { ...ctx, restingText: '', questionsToggle: false });
-  const a7 = owedLines.find((l) => !l.endsWith('as your target.'));
+  const a7 = owedLines.find((l) => l.startsWith(A7_OPENER));
   if (a7 === undefined || text.includes(a7)) return text;
   const rest = textAtRest(text);
   if (rest !== text && words(rest) + TOGGLE_LABEL_WORDS + words(a7) > AT_REST_WORD_BOUND) return text;

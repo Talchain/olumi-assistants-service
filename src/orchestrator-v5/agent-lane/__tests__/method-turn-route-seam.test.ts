@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { CANVAS_BAND_WORD, edgeBandFromMagnitude } from '../../format/edge-strength-bands.js';
+import { asSent } from './helpers/as-sent.js';
 
 const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; pending_actions: unknown[] }>();
 const store = {
@@ -71,7 +72,7 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
   let hashOf: (g: unknown) => string | null;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as Sent;
+      const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Sent;
       sent.push(body);
       return new Response(JSON.stringify({ output: output ?? [{ type: 'message', content: [{ type: 'output_text', text: reply }] }] }), { status: 200 });
     }));

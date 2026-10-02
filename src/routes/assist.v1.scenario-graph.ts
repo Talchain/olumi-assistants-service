@@ -460,6 +460,8 @@ export default async function route(app: FastifyInstance) {
       // Production reads one existing row: absence stays distinct from a guest owner,
       // and this read has no create-on-read path. Legacy stores retain their original ladder.
       let snapshot: Awaited<ReturnType<NonNullable<typeof store.readExistingScenario>>> | undefined;
+      // True only when access came from viewer membership (never for the owner or a guest row). See §6.
+      let memberRead = false;
       if (typeof store.readExistingScenario === "function") {
         try {
           snapshot = await store.readExistingScenario(scenarioId);
@@ -468,7 +470,34 @@ export default async function route(app: FastifyInstance) {
         }
         if (snapshot === null) return refuse();
         const caller = resolved.identity.mode === 'verified' ? resolved.identity.userId : null;
-        if (scenarioAccessDecision(snapshot.userId, caller) !== 'allow') return refuse();
+        let access = scenarioAccessDecision(snapshot.userId, caller);
+        // ⭐ A VIEWER MEMBER MAY READ (ACCOUNTS "Invite a colleague", DL #85 5947426886). THIS ROUTE ONLY: it is a
+        // read, and every write door (turns, register, versions, the Supabase saves) keeps its owner-only check, so a
+        // member is a non-owner everywhere else. Only a VERIFIED caller on an OWNED row is asked. A membership read
+        // that fails answers the SAME refusal bytes (logged), never 503: a distinct status for "exists but your
+        // membership could not be checked" would tell a stranger the scenario exists.
+        if (access !== 'allow' && caller !== null && snapshot.userId !== null && typeof store.isScenarioMember === 'function') {
+          let member = false;
+          try {
+            member = await store.isScenarioMember(scenarioId, caller);
+          } catch (err) {
+            log.warn(
+              {
+                event: 'v5.scenario_graph.member_check_failed',
+                request_id: requestId,
+                scenario_id: scenarioId,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'Scenario graph read — membership check failed; refusing',
+            );
+          }
+          if (member) {
+            access = 'allow';
+            memberRead = true;
+            log.info({ event: 'v5.scenario_graph.member_read', request_id: requestId, scenario_id: scenarioId }, 'Scenario graph read by a viewer member');
+          }
+        }
+        if (access !== 'allow') return refuse();
       } else {
         // ── 2. EXISTENCE — before ownership, so the read cannot CREATE ──────
         // Error discipline is the INVERSE of turn-stop's fail-open: a Stop
@@ -632,7 +661,12 @@ export default async function route(app: FastifyInstance) {
       // byte-identical and no extra query runs. The stored `assistant_message` is the
       // POST-WIRE text the user saw (AIQ 5907360564), served as stored — never
       // re-derived. `null` = this leg did not answer, never "no conversation".
-      const conversationTurns = wantsConversationTurns(req.body)
+      //
+      // ⚠ A VIEWER MEMBER GETS THE MODEL AND THE RUN, NEVER THE OWNER'S CONVERSATION. The premise above ("the caller
+      // entitled to read the graph is exactly the caller entitled to read its conversation") holds for the owner and
+      // a guest row. A colleague the owner shared the decision with was given the decision, not the owner's chat
+      // with Olumi. So a member read leaves the field out, exactly as if it had not been asked for.
+      const conversationTurns = wantsConversationTurns(req.body) && !memberRead
         ? await readConversationTurns(store, scenarioId, requestId)
         : undefined;
 
