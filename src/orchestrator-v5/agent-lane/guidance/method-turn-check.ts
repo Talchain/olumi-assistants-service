@@ -38,6 +38,7 @@ const INTERNAL_VALUE = /\b(internal scale|normali[sz]ed (value|values|scale|figu
  * shared.internal_value_terms: the internal/normalised value terms Olumi's own text uses, after per-ban label masking
  * (a user label such as 'Internal scale-up plan' is the user's word). REPORTS lower-cased unique terms in order and never
  * edits: AI HARNESS's first-run explanation guard replaces the WHOLE explanation on any hit (backstop; RC 5945450369).
+ * Deliberately NOT a RERUN-EXPLANATION post-check: that list is live on the served M2 path (HARNESS CR on #2505).
  */
 export function internalValueTerms(text: string, labels: readonly (string | undefined)[] = []): string[] {
   const hits = [...maskedFor(text, INTERNAL_VALUE, labels).matchAll(new RegExp(INTERNAL_VALUE.source, 'giu'))].map(match => match[0].toLowerCase());
@@ -130,8 +131,6 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
       || !banned(reply, /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu, labels));
     // A recorded change is never "no change": the whole claim class (MG 5939414835; CODEX CEE BUDDY 5940259670).
     check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 || !banned(reply, CONTRARY_SAME, labels));
-    // An explanation never mentions an internal or normalised value (RC 5945450369 / HARNESS 5945457931).
-    check('EXPLAIN-NO-INTERNAL-VALUE', internalValueTerms(reply, labels).length === 0);
     // The un-withheld transition must say so (MG 5939414835).
     check('RX-UNWITHHELD-LINE', inputs.prior_withheld !== true || labelMatches(reply, ['can now compare the options']));
   } else if (policy_id === 'RC-WIDEN') {

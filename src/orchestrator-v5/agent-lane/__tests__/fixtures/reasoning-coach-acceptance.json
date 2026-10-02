@@ -7516,54 +7516,6 @@
    "note": "The contract's old UNWITHHELD template credits the edit; off C1 that is an unpaired cause claim (52f8cd: an engine-drift pair un-withholds beside an unrelated edit)."
   },
   {
-   "id": "MT-RERUN-INTERNAL-VALUE-BAD",
-   "policy_id": "RERUN-EXPLANATION",
-   "grounded_on": "served step-1 explanation, CEE d0e566fc guest 6452c258 (HARNESS why-witness)",
-   "inputs": {
-    "attribution_case": "C2_unpaired",
-    "change_labels": [
-     "Hours per week on investment-firm cold emails",
-     "securing funding"
-    ],
-    "leader_licensed": false,
-    "noise_verdict": "not_noise_qualified",
-    "current_option_labels": [
-     "Continue current outreach",
-     "Angel investor outreach"
-    ]
-   },
-   "reply": "Two things changed since the last run.\n- Hours per week on investment-firm cold emails: 8 → 5 hours a week.\n- Securing funding: you set the target to at least £1,000,000.\nThis run also used a new draw, so the difference can't be put down to your edits alone.\n• Continue Current Plan holds today’s recorded values; its results are on an internal scale, not revenue units.",
-   "expect": "fail",
-   "failing_checks": [
-    "EXPLAIN-NO-INTERNAL-VALUE"
-   ],
-   "note": "Served words (RC #85 5945450369): an internal/normalised value is jargon to the user. Control: MT-RERUN-INTERNAL-LABEL-GOOD."
-  },
-  {
-   "id": "MT-RERUN-INTERNAL-LABEL-GOOD",
-   "policy_id": "RERUN-EXPLANATION",
-   "grounded_on": "MT-RERUN-GOOD inputs with a user node labelled Internal scale-up plan",
-   "inputs": {
-    "attribution_case": "C2_unpaired",
-    "change_labels": [
-     "Hours per week on investment-firm cold emails",
-     "securing funding"
-    ],
-    "leader_licensed": false,
-    "noise_verdict": "not_noise_qualified",
-    "current_option_labels": [
-     "Continue current outreach",
-     "Angel investor outreach"
-    ],
-    "model_labels": [
-     "Internal scale-up plan"
-    ]
-   },
-   "reply": "Two things changed since the last run.\n- Hours per week on investment-firm cold emails: 8 → 5 hours a week.\n- Securing funding: you set the target to at least £1,000,000.\nThis run also used a new draw, so the difference can't be put down to your edits alone. Internal scale-up plan is unchanged in the model.",
-   "expect": "pass",
-   "note": "A user label carrying the term is the user's word (per-ban masking), so it never trips the check."
-  },
-  {
    "id": "MT-RERUN-UNWITHHELD-BAD-NO-LINE",
    "policy_id": "RERUN-EXPLANATION",
    "grounded_on": "MT-RERUN-UNWITHHELD-GOOD inputs (D1)",

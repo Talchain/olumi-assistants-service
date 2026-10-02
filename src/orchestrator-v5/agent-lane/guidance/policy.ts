@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ a47aa2ba7390a521c585e7c815d688b52cc7abea.
+// programme-docs @ 712625a1c484943ad330214504634121a44216e7.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -770,7 +770,50 @@ export const POLICY = {
         "helper": "internalValueTerms(text, labels) -> string[]: the terms hit (lower-cased, unique, in order), after per-ban label masking (a user label such as 'Internal scale-up plan' is the user's word). It REPORTS and never edits.",
         "consumer": "AI HARNESS first-run explanation guard (agent.interpret): on ANY hit, replace the WHOLE explanation with the deterministic code line + next step and log explain.internal_value_fallback. Backstop only: the primary fix is input-side (no per-option normalised values or declared_scale on a withheld-leader turn), so the fallback count measures whether that input fix holds.",
         "why": "Served step 1 (CEE d0e566fc, guest 6452c258): 'its results are on an internal scale, not revenue units' is jargon to the user; driven by the coach template's 'label it explicitly as an internal scale' + normalised unit_interval values (RC #85 5945450369; HARNESS 5945457931).",
-        "reference": "tools/check_method_turn.py internal_value_terms(); fixtures MT-RERUN-INTERNAL-VALUE-BAD / MT-RERUN-INTERNAL-LABEL-GOOD"
+        "reference": "tools/check_method_turn.py internal_value_terms(); shared.internal_value_terms.cases (checked against the reference by build-cases.py)",
+        "scope": "NOT a RERUN-EXPLANATION post-check (AI HARNESS CR on CEE #2505: RERUN-EXPLANATION checks are LIVE on the served M2 path, composeRerunExplanation drops sentences and rerunViewFailures hides the view). It joins a checker only in HARNESS's morning PR, measured on paired explain calls.",
+        "cases": [
+          {
+            "text": "Continue Current Plan holds today’s recorded values; its results are on an internal scale, not revenue units.",
+            "labels": [],
+            "expect_terms": [
+              "internal scale"
+            ],
+            "source": "served step 1, CEE d0e566fc guest 6452c258"
+          },
+          {
+            "text": "Only normalised values exist, on the unit interval.",
+            "labels": [],
+            "expect_terms": [
+              "normalised values",
+              "unit interval"
+            ]
+          },
+          {
+            "text": "Internal scale-up plan rose.",
+            "labels": [
+              "Internal scale-up plan"
+            ],
+            "expect_terms": [],
+            "note": "a user label carrying the term is the user's word"
+          },
+          {
+            "text": "Internal scale is low.",
+            "labels": [
+              "Internal scale"
+            ],
+            "expect_terms": [
+              "internal scale"
+            ],
+            "note": "a label that IS the term fails closed"
+          },
+          {
+            "text": "Quarterly revenue figures are not available yet.",
+            "labels": [],
+            "expect_terms": [],
+            "note": "contrast"
+          }
+        ]
       }
     },
     "RC-PREMORTEM": {
@@ -1053,11 +1096,6 @@ export const POLICY = {
           "id": "RX-UNWITHHELD-LINE",
           "rule": "if prior_withheld: the reply carries 'can now compare the options' (whole-token label_matches), the UNWITHHELD line",
           "source": "MG 5939414835"
-        },
-        {
-          "id": "EXPLAIN-NO-INTERNAL-VALUE",
-          "rule": "no internal or normalised value term: method_turns.shared.internal_value_terms (on the label-masked reply, per ban)",
-          "source": "RC #85 5945450369 + AI HARNESS 5945457931 (option A)"
         }
       ],
       "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD + C1: 'That was what held the comparison back, so Olumi can now compare the options.' | UNWITHHELD otherwise: 'Olumi can now compare the options.' + the case line | C2: 'Olumi can’t confirm both runs used the same draw, so the difference can’t be put down to your edit alone.' | C3/C4 (recorded difference): 'Other things also differed between these two runs, so the difference can’t be put down to your edit alone.' | partial coverage or C5_unattributed: 'Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
@@ -1096,4 +1134,4 @@ export const POLICY = {
   }
 } as const;
 
-export const SPEC_SHA = "a47aa2ba7390a521c585e7c815d688b52cc7abea";
+export const SPEC_SHA = "712625a1c484943ad330214504634121a44216e7";

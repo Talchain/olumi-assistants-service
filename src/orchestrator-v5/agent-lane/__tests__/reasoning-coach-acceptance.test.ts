@@ -16,17 +16,17 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
 };
 
 describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
-  it('imports all 35 cases and all 31 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(31);
+  it('imports all 35 cases and all 29 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(29);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('a47aa2ba7390a521c585e7c815d688b52cc7abea');
+    expect(SPEC_SHA).toBe('712625a1c484943ad330214504634121a44216e7');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('b8bde5820e47e7fb5896dedd5f3162e56c86e13e21f722253d6b304705555a53');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('d09c6ab5f26decd718a0e966967d239f5364586911a64329425e599a3978fa96');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('98c6316254198f6f7384911adf0c06c71096181c422fcc96a2ffbca857ca4f45');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('6a50e594ea1aee4650ef1c6e2f1b06bdce5cdca6f93741b3df4c0b38ab8f9592');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });
@@ -291,6 +291,11 @@ describe('all deterministic text post-check ids, including methods without vendo
     // Contrast: plain revenue words are never hit, and the input string is untouched.
     expect(internalValueTerms('Quarterly revenue figures are not available yet.')).toEqual([]);
     const text = served; internalValueTerms(text); expect(text).toBe(served);
+    // The contract's own cases (shared.internal_value_terms.cases) agree with the leaf, case for case.
+    for (const c of POLICY.method_turns.shared.internal_value_terms.cases) expect(internalValueTerms(c.text, c.labels), c.text).toEqual(c.expect_terms);
+    // NOT a RERUN-EXPLANATION post-check: that list is live on the served M2 path (HARNESS CR on #2505).
+    expect(POLICY.method_turns['RERUN-EXPLANATION'].post_checks.map(rule => rule.id)).not.toContain('EXPLAIN-NO-INTERNAL-VALUE');
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Sprint capacity for AI reporting. ' + served, { change_labels: ['Sprint capacity for AI reporting'], attribution_case: 'C1_attributable', leader_licensed: true }).failed).not.toContain('EXPLAIN-NO-INTERNAL-VALUE');
   });
   it('Coach edits requires the stale line only for a stale run', () => {
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);
