@@ -311,7 +311,10 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     const { budgetFor, interpretBudget } = await import('../model-budgets.js');
     const conversation = budgetFor('gpt-6.1-sol', 'conversation');
     const interpret = interpretBudget();
-    expect(conversation.reasoning_effort, 'vacuity: the two banked budgets differ').not.toBe(interpret.reasoning_effort);
+    // B6 (#85 5958075937): the conversation budget moved high → low, so the two budgets no longer differ on the wire and
+    // the routing below cannot be told apart by effort. The property this row protects still binds: a method call is
+    // never sent at the coach's former high effort (25.5 s for ONE served call, R3 j7 @ecce374d).
+    expect(interpret.reasoning_effort).toBe('low');
     reply = 'In the current model, the link matters.';
     await ask('What do you make of this?');
     expect(sent[0].reasoning?.effort, 'an ordinary turn on a built model: the conversation budget').toBe(conversation.reasoning_effort);
@@ -322,6 +325,7 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].model).toBe(interpret.model);
     expect(sent[0].reasoning?.effort).toBe(interpret.reasoning_effort);
+    expect(sent[0].reasoning?.effort, 'a method call never runs at high effort').not.toBe('high');
     expect(sent[0].max_output_tokens).toBe(interpret.max_output_tokens);
   });
 });

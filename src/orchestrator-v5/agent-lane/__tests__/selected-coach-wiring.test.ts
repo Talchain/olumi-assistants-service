@@ -76,7 +76,7 @@ const proposeLink = [{ type: 'function_call', name: 'propose_model_change', call
   arguments: JSON.stringify({ from_label: 'Price-release alignment', to_label: 'Pro conversion rate',
     direction: 'positive', strength: 'strong', rationale: 'Timing changes how the price lands.' }) }];
 
-describe('selected Sol-high coach on the actual Agent route', () => {
+describe('selected Sol coach (low since B6) on the actual Agent route', () => {
   let app: FastifyInstance;
   let turn = 0;
   let interpretOnlyConstraint: string;
@@ -146,7 +146,8 @@ describe('selected Sol-high coach on the actual Agent route', () => {
   };
   const selected = (body: Sent) => {
     expect(body.model).toBe('gpt-6.1-sol');
-    expect(body.reasoning?.effort).toBe('high');
+    // B6 (#85 5958075937): the conversation budget's effort, high → low.
+    expect(body.reasoning?.effort).toBe('low');
     expect(body.max_output_tokens).toBe(3400);
   };
   const conversationBodies = () => sent.filter((body) => body.text?.format?.name !== 'whole_candidate');
@@ -186,7 +187,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(sent).toHaveLength(1);
     const body = sent[0]!;
     // AI HARNESS 2a: the interpreting call keeps the selected model, prompt and cap, at the interpret role's measured
-    // effort (low; `model-budgets.ts` evidence). The ordinary conversation above stays high.
+    // effort (low; `model-budgets.ts` evidence). Since B6 the ordinary conversation above is low too.
     expect(body.model).toBe('gpt-6.1-sol');
     expect(body.reasoning?.effort).toBe('low');
     expect(body.max_output_tokens).toBe(3400);
@@ -200,7 +201,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     expect(body.instructions).toContain(interpreterV02);
   });
 
-  it('keeps Terra-low for every hop of a known-empty construction, then uses Sol-high on the next turn', async () => {
+  it('keeps Terra-low for every hop of a known-empty construction, then uses Sol (conversation budget) on the next turn', async () => {
     readMode = 'empty';
     await sendTurn(BRIEF, [[{ type: 'function_call', name: 'build_model_from_brief', call_id: 'build-1',
       arguments: JSON.stringify({ brief: BRIEF }) }]], undefined, FIRST_SCENARIO);

@@ -1,7 +1,7 @@
 import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * Selected coach request configuration: #78 5915316114 and DL #75 5916003868.
- * Populated-model conversation uses Sol/high/3400; the Run's interpretation uses the interpret role, Sol/low/3400 (2a).
+ * Populated-model conversation uses Sol/low/3400 (B6, was high); the Run's interpretation uses the interpret role, Sol/low/3400 (2a).
  * This supersedes PJ-C1 batch 5's Terra/low conversation setting; authoritative
  * empty-model turns retain Terra/low, covered by selected-coach-wiring.test.ts.
  * Construction keeps its separate Terra/medium budget. These captured requests
@@ -29,7 +29,7 @@ const GRAPH = {
 };
 const STATE = { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } };
 
-describe('selected coach: populated conversation and Run use high; construction keeps its own', () => {
+describe('selected coach: populated conversation is Sol/low (B6), the Run interprets at low; construction keeps its own', () => {
   let app: FastifyInstance;
   let modelBodies: Body[] = [];
 
@@ -64,13 +64,13 @@ describe('selected coach: populated conversation and Run use high; construction 
   });
   beforeEach(() => { modelBodies = []; });
 
-  it('⭐ RED: a populated turn’s conversation call uses selected Sol/high/3400', async () => {
+  it('⭐ RED: a populated turn’s conversation call uses selected Sol/low/3400 (B6: high → low, #85 5958075937)', async () => {
     const res = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: randomUUID(), message: 'What drives the result most?' } });
     expect(res.statusCode, res.body).toBe(200);
     expect(modelBodies.length).toBeGreaterThan(0);
     for (const b of modelBodies) {
       expect(b.model).toBe('gpt-6.1-sol');
-      expect(b.reasoning, JSON.stringify(b.reasoning)).toEqual({ effort: 'high' });
+      expect(b.reasoning, JSON.stringify(b.reasoning)).toEqual({ effort: 'low' });
       expect(b.max_output_tokens).toBe(3400);
     }
   });

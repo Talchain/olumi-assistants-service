@@ -116,9 +116,17 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
     model: 'gpt-6.1-sol',
     role: 'conversation',
     max_output_tokens: 3400,
-    reasoning_effort: 'high',
+    // B6 (DL 380e54 GO + ruling, programme-docs#85 5958075937): high → low. Revert = this one line back to 'high'.
+    reasoning_effort: 'low',
     evidence:
-      'Selected Sol-high coach v0.2 by AI Experience/DL (programme-docs #78 5915140232 / 5915156800). ' +
+      'LOWERED 2 Oct, high -> low (B6, COMPARE AUDIT e467b9; DL ruling on #85). Four served Sol-high conversation turns ' +
+      'from R3 captures, rebuilt through runAgentTurn + getCanonicalState over the cold read before each turn (staging ' +
+      'aac1b379), first hop only, effort the ONLY difference, 2 reps per arm interleaved (16 calls, 0 x 429): median ' +
+      '21.6 s (8.0-39.2) at high vs 6.2 s (3.6-10.5) at low; reasoning tokens median 686 vs 0. Rows registered before ' +
+      'the run, judged blind: served checkers 0 hits both arms; no truth/authorship/consent row separates the arms; ' +
+      'low\'s one low-only miss = one reply asking two questions (style row, DL non-blocking). Evidence: programme-docs ' +
+      'audit/compare-closeout-20261002 output/b6-latency/ (REPORT section 6, exp1/). n=8 per arm is a direction. ' +
+      'WAS: Selected Sol-high coach v0.2 by AI Experience/DL (programme-docs #78 5915140232 / 5915156800). ' +
       'Real-route paired gate at docs 50ce5eba, n=1/row: largest Sol-high hop across 20 gate turns ' +
       'used 1140 output tokens; median 20.1 s versus Terra 8.5 s. Keep the measured 3400 cap; ' +
       'no evidence supports a 16000 cap. Exact prompt/config handoff #78 5915316114.',
