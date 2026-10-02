@@ -135,6 +135,16 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
       '"Bad press" (with "Market mood", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "Revenue".',
     ]);
   });
+
+  it('DL row (b): a left-out RISK feeding another is said in its OWN line only — never named again in the other\'s', () => {
+    const g = { nodes: [{ id: 'goal', kind: 'goal', label: 'Revenue' }, { id: 'opt', kind: 'option', label: 'Raise' }, { id: 'f', kind: 'factor', category: 'controllable', label: 'Price' },
+      { id: 'exo', kind: 'factor', category: 'external', label: 'Market mood' }, { id: 'r1', kind: 'risk', label: 'Churn' }, { id: 'r2', kind: 'risk', label: 'Bad press' }],
+    edges: [{ from: 'opt', to: 'f' }, { from: 'f', to: 'goal' }, { from: 'exo', to: 'r1' }, { from: 'r1', to: 'r2' }] };
+    expect(decisionInputLines(g, { restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true }).filter((l) => l.includes('left out'))).toEqual([
+      '"Churn" (with "Market mood", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "Revenue".',
+      '"Bad press" (with "Market mood", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "Revenue".',
+    ]);
+  });
 });
 
 describe('the ONE definition: only a risk, and only what reaches the goal through nothing else', () => {
