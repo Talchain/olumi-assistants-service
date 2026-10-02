@@ -7,7 +7,9 @@ import { validateAnalysisRunFactIdentity } from '../context/analysis-interpretat
 export const RUN_EXPLANATION_PREFIX = 'agent-explain-run:';
 export const RUN_EXPLANATION_MESSAGE = 'Explain this result';
 export const RUN_RESULT_READY_TEXT = 'Your results are ready. You can view them now or ask me to explain them.';
-export const RUN_EXPLANATION_UNAVAILABLE_TEXT = 'I can’t explain that result as current. Check the current results before asking again. Nothing in your model changed.';
+export const RUN_EXPLANATION_UNAVAILABLE_TEXT = 'I can’t explain that result as current. Check the current results before asking again.';
+/** Saved answer rows used this exact text before the copy correction. Keep recognising them on replay. */
+export const RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT = 'I can’t explain that result as current. Check the current results before asking again. Nothing in your model changed.';
 
 export interface RunExplanationRead {
   readonly graphHash?: string;
