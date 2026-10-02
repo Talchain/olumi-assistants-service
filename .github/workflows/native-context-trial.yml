@@ -3,21 +3,23 @@ on:
   push:
     branches: [experiment/openai-native-context-20261002]
     paths:
+      - src/config/native-context-trial.ts
+      - src/routes/agent-v1-turn.ts
+      - src/orchestrator-v5/agent-lane/runtime/agent-loop.ts
       - src/orchestrator-v5/agent-lane/runtime/native-context-trial.ts
-      - src/orchestrator-v5/agent-lane/__tests__/native-context-trial.integration.test.ts
-      - scripts/apply-native-context-trial.mjs
+      - src/orchestrator-v5/agent-lane/__tests__/native-context-*.integration.test.ts
       - tests/native-context-trial/**
       - .github/workflows/native-context-trial.yml
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
   packages: read
 defaults:
   run:
     shell: bash
 concurrency:
   group: isolated-native-context-trial
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   focused:
     if: github.ref == 'refs/heads/experiment/openai-native-context-20261002'
@@ -26,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: experiment/openai-native-context-20261002
+          ref: ${{ github.sha }}
           fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
@@ -34,23 +36,17 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 9
-      - name: Apply exact-base integration and commit only to experiment
-        shell: bash
+      - name: Record exact committed source
         run: |
-          set -euo pipefail
-          node scripts/apply-native-context-trial.mjs
-          git diff --check
-          if ! git diff --quiet -- src/routes/agent-v1-turn.ts src/orchestrator-v5/agent-lane/runtime/agent-loop.ts; then
-            git config user.name 'Olumi isolated trial'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add src/routes/agent-v1-turn.ts src/orchestrator-v5/agent-lane/runtime/agent-loop.ts
-            git commit -m 'feat(experiment): wire native context into real Agent route and loop'
-            git push origin HEAD:refs/heads/experiment/openai-native-context-20261002
-          fi
           mkdir -p native-context-evidence
           git rev-parse HEAD | tee native-context-evidence/tested-sha.txt
-          git show --stat HEAD > native-context-evidence/source-summary.txt
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --check
+          grep -q 'nativeContextTrialEnvironment()' src/routes/agent-v1-turn.ts
+          grep -q 'input.nativeContext.call' src/orchestrator-v5/agent-lane/runtime/agent-loop.ts
       - name: Focused transport and lifecycle tests
+        id: helper
+        continue-on-error: true
         run: node --experimental-strip-types --test tests/native-context-trial/continuation.test.mjs 2>&1 | tee native-context-evidence/helper-tests.txt
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
@@ -63,25 +59,27 @@ jobs:
       - name: Lint changed runtime files
         id: lint
         continue-on-error: true
-        run: pnpm exec eslint src/routes/agent-v1-turn.ts src/orchestrator-v5/agent-lane/runtime/agent-loop.ts src/orchestrator-v5/agent-lane/runtime/native-context-trial.ts 2>&1 | tee native-context-evidence/lint.txt
-      - name: Real-route trial and existing compatibility tests
+        run: pnpm exec eslint src/config/native-context-trial.ts src/routes/agent-v1-turn.ts src/orchestrator-v5/agent-lane/runtime/agent-loop.ts src/orchestrator-v5/agent-lane/runtime/native-context-trial.ts 2>&1 | tee native-context-evidence/lint.txt
+      - name: Real-route trial, approval and existing compatibility tests
         id: tests
         continue-on-error: true
         run: |
           pnpm exec vitest run --maxWorkers=1 --no-file-parallelism \
-            src/orchestrator-v5/agent-lane/__tests__/native-context-trial.integration.test.ts \
+            src/orchestrator-v5/agent-lane/__tests__/native-context-*.integration.test.ts \
             src/orchestrator-v5/agent-lane/__tests__/turn-state-given-not-fetched.test.ts \
             src/orchestrator-v5/agent-lane/__tests__/provider-ledger-prompt-identity.test.ts \
             2>&1 | tee native-context-evidence/route-tests.txt
       - name: Focused verdict
         if: always()
         env:
+          HELPER: ${{ steps.helper.outcome }}
           BUILD: ${{ steps.build.outcome }}
           LINT: ${{ steps.lint.outcome }}
           TESTS: ${{ steps.tests.outcome }}
         run: |
-          printf 'build=%s\nlint=%s\nroute_tests=%s\n' "$BUILD" "$LINT" "$TESTS" | tee native-context-evidence/verdict.txt
-          test "$BUILD" = success && test "$LINT" = success && test "$TESTS" = success
+          mkdir -p native-context-evidence
+          printf 'helper=%s\nbuild=%s\nlint=%s\nroute_tests=%s\n' "$HELPER" "$BUILD" "$LINT" "$TESTS" | tee native-context-evidence/verdict.txt
+          test "$HELPER" = success && test "$BUILD" = success && test "$LINT" = success && test "$TESTS" = success
       - uses: actions/upload-artifact@v4
         if: always()
         with:
