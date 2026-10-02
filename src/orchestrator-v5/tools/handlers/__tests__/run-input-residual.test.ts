@@ -37,6 +37,10 @@
  *   F8  the user's edit plus an independent node `display_value` (not the writer's) → partial.
  *   F9  the user types 3% → 4% → 3% between Runs (the writer's exact shape, SAME figure; σ now exact) → partial, [].
  *   F10 a colleague's figure: only WHO gave it changes (`elicited_from.participant_id`), same value → partial, [].
+ * CODEX r2 (96054bd3) surviving mutants:
+ *   F11 the user's edit plus an independent NODE-level `extractionType` → partial.
+ *   F12 churn 3% → 4% AND gross additions retyped 60 → 61 → 60 (writer's shape, same figure): the churn row must not
+ *       credit another factor's authorship → partial.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -431,6 +435,26 @@ describe('0.73.0 factor authorship — a user\'s value edit is credited pairwise
     );
     expect(p.wireMoved, 'precondition: who gave it reached the request').toBe(true);
     expect([p.complete, p.rows]).toEqual([false, []]);
+  });
+
+  it('F11 (CODEX r2 mutant): the user\'s edit plus an independent NODE-level extractionType → partial', async () => {
+    const p = await pair(async (g) => {
+      const written = await writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 });
+      node(written, 'monthly_churn').extractionType = 'explicit';
+      return written;
+    });
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id])).toEqual([['factor_value', 'monthly_churn']]);
+    expect(p.complete).toBe(false);
+  });
+
+  it('F12 (CODEX r2 mutant): one factor\'s value row never credits ANOTHER factor\'s writer-shaped authorship → partial', async () => {
+    const p = await pair(async (g) => {
+      const churn = await writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 });
+      return writeFactor(await writeFactor(churn, 'monthly_gross_additions', { value: 61, raw_value: 61 }), 'monthly_gross_additions', { value: 60, raw_value: 60 });
+    });
+    expect(node(p.bGraph, 'monthly_gross_additions').observed_state.source, 'precondition: the writer restamped it').toBe(VALUE_WRITE_USER_SOURCE);
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id])).toEqual([['factor_value', 'monthly_churn']]);
+    expect(p.complete).toBe(false);
   });
 
   it('the typed-figure stamp the digest matches IS the value writer\'s own constant', () => {
