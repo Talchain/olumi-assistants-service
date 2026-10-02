@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import capture from './fixtures/semantic-spine/paul-20261002.json';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { goalScopeMeaning, type GoalScope } from '../../../schemas/goal-scope.js';
-import { goalScopeCheck, identityConflictsWithScope, reconciliationPending, refreshScopePending, scopeShareAnswerCanBind, scopeSourcesAreUserWords, assertNoScopedIdentityConflict, scopePendingResolved } from '../goal-scope.js';
+import { goalScopeCheck, identityConflictsWithScope, reconciliationPending, refreshScopePending, scopeShareAnswerCanBind, scopeSourcesAreUserWords, assertNoScopedIdentityConflict, scopePendingResolved, scopeReadyToApprove } from '../goal-scope.js';
 import { parsePendingAction, isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 import { computeSurvivingPriorPendingsDetailed } from '../../commit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -23,6 +23,15 @@ describe('Paul 2 October: conversation to canonical goal meaning', () => {
     const check = goalScopeCheck(g, 'mrr', scope, { ...current, value: 9800 });
     expect(check.contradiction).toBe(false);
     expect(count.observed_state).toMatchObject({ raw_value: 60 });
+  });
+  it('S1: a component goal compares its own baseline with the product, without applying a whole-goal share', () => {
+    const component: GoalScope = { ...scope, extent: 'component', component: { ...scope.component!, basis: 'same' } };
+    const check = goalScopeCheck(graph(), 'mrr', component, { ...current, value: 14700 });
+    expect(check).toMatchObject({ contradiction: false, comparable: true });
+    expect(check.derivations.map(d => d.kind)).toEqual(['implied_count']);
+    expect(check.derivations[0]!.value).toBe(300);
+    expect(scopeReadyToApprove(component, check)).toBe(true);
+    expect(goalScopeCheck(graph(), 'mrr', component, current).contradiction).toBe(true);
   });
   it('S2–S4: £10k total + 30% Pro + £49 + 300 yield one conditional issue, never a rewritten count', () => {
     const g = graph(); const before = structuredClone(g);

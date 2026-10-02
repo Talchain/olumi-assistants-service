@@ -19,7 +19,7 @@ The independent pre-change staging witnesses are in [PRECONDITIONS.md](PRECONDIT
 
 | Requirement | Executable witness |
 | --- | --- |
-| S1: consistent figures, currency/period controls | `semantic-spine.test.ts`: deterministic native-value and unit-composition checks. |
+| S1: consistent figures, currency/period controls | Core and real-route tests: a total uses its component share; a component goal uses its own current level. The component level is not relabelled as a derivation. |
 | S2–S4: one reconciliation; 300 unchanged; £3k/~61 remain conditional derivations | Core and real-route tests: no graph write before approval; conditional provenance survives JSON serialization. |
 | S5: registered accounts versus billable subscriptions | Real canonical read/register and existing approval writer: one commit records total scope, share and count basis, writes £10k and withdraws the product. |
 | S6: restart, unrelated turns and registration while open | Actual Agent route restarts with JSONB key reordering; latest answer rows retain the question. The shared persistence floor protects legacy callers that omit it. |
@@ -43,7 +43,11 @@ The implementation was rebased onto staging CEE `aac1b37936cd2bc051ea48e78f10eef
 
 Focused verification after the rebase passed 96 tests; regression closure passed 124 tests. The final withdrawal/restart check passed 16 tests, the pre-hash turn-writer check passed 51, the regression type repairs passed 68, and the final pricing/unit controls passed 23. These runs overlap and are not an aggregate test denominator.
 
-Whole-repository lint passed with zero errors and two existing unused-disable warnings; final changed files passed lint. Source-only typecheck passed in the isolated snapshot. On draft head `e8ceafa89`, Linux CI's required lint/typecheck/guards and all three test shards passed ([CI run](https://github.com/Talchain/olumi-assistants-service/actions/runs/37042292123)). CI exposed 11 new regression-test type errors; those were corrected without increasing the error allowance. The final required shards and type-drift check must pass on the final source head before this draft is ready.
+Whole-repository lint passed with zero errors and two existing unused-disable warnings; final changed files passed lint. Source-only typecheck passed in the isolated snapshot. On draft head `e8ceafa89`, Linux CI's required lint/typecheck/guards and all three test shards passed ([CI run](https://github.com/Talchain/olumi-assistants-service/actions/runs/37042292123)). CI exposed 11 new regression-test type errors; those were corrected without increasing the error allowance.
+
+Head `764388ca18aac6d030b491ec80174e75d5ad6081` then passed all three required shards, lint/typecheck/guards and the unchanged type-drift ratchet ([CI run](https://github.com/Talchain/olumi-assistants-service/actions/runs/37043873441)). Its checkout was synthetic merge `5e933c933f09f9781eeff411f036871a67f68232`, whose parents are that head and newer staging `18cd1c46290595323336553095cb6f62e212f228` (Suggest options). Thus the shared turn writer was exercised alongside the later staging change.
+
+Final scope-alternative review found that a valid component-only reading also needed the component's own current level in the existing comparison. That bounded correction passed 25 pricing/canonical-route tests plus source typecheck and lint. The complete required regression must pass on the final source head before this draft is ready.
 
 The first local full required run was RED. Its change-related failures were repaired and rechecked; a duplicate final local run was stopped after shared-machine timing stalls. Linux CI runs the complete required suite in the repository's existing three shards, with no suite exclusions or loosened CI limits.
 

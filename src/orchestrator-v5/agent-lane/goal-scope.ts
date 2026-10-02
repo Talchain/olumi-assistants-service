@@ -36,10 +36,10 @@ export function goalScopeCheck(graph: unknown, goalId: string, scope: GoalScope,
   const operands = [total && { id: goalId, ...total }, rate && { id: c!.rate_id, ...rate }, count && { id: c!.count_id, ...count }]
     .filter((v): v is NonNullable<typeof v> => v !== undefined);
   const derivations: GoalScopeReconciliation['derivations'] = [];
-  if (!total || !c || c.share === undefined || scope.extent !== 'total') return { operands, derivations, contradiction: false, comparable: false };
-  const revenue = total.value * c.share;
+  if (!total || !c || scope.extent === 'total' && c.share === undefined) return { operands, derivations, contradiction: false, comparable: false };
+  const revenue = scope.extent === 'total' ? total.value * c.share! : total.value;
   if (!Number.isFinite(revenue)) return { operands, derivations, contradiction: false, comparable: false };
-  derivations.push({ kind: 'component_revenue', value: revenue, unit: total.unit, source: 'deterministic_derivation', conditional: true });
+  if (scope.extent === 'total') derivations.push({ kind: 'component_revenue', value: revenue, unit: total.unit, source: 'deterministic_derivation', conditional: true });
   // The estate's own currency / period / denominator check, never a pricing-specific parser.
   const compose = rate && count && unitsCompose(total.unit, String(goal?.label ?? ''),
     { unit: rate.unit, label: String(rateNode?.label ?? '') }, { unit: count.unit, label: String(countNode?.label ?? '') });
@@ -52,10 +52,10 @@ export function goalScopeCheck(graph: unknown, goalId: string, scope: GoalScope,
 }
 
 export function scopeQuestion(label: string, scope: GoalScope, check: ReturnType<typeof goalScopeCheck>): string {
-  const revenue = check.derivations.find(d => d.kind === 'component_revenue'), count = check.derivations.find(d => d.kind === 'implied_count');
+  const revenue = check.derivations.find(d => d.kind === 'component_revenue') ?? (scope.extent === 'component' ? check.operands[0] : undefined), count = check.derivations.find(d => d.kind === 'implied_count');
   if (check.contradiction && revenue && count) return `If these figures describe the same monthly billing basis, ${scope.component!.label} would contribute ${revenue.value} ${revenue.unit}, implying about ${Number(count.value.toPrecision(3))} ${count.unit}. The stated count is ${check.operands.find(o => o.id === scope.component!.count_id)!.value}. Does that count refer to a different population, or do the revenue and price use a different billing basis?`;
   if (!scope.component) return `Approve the current level and resolved scope of ${label} on the displayed card.`;
-  if (scope.component.share === undefined) return `What share of the current ${label} comes from ${scope.component?.label ?? 'the modelled component'}?`;
+  if (scope.extent === 'total' && scope.component.share === undefined) return `What share of the current ${label} comes from ${scope.component?.label ?? 'the modelled component'}?`;
   return `Do ${scope.component.label}'s revenue share, price and count describe the same population and billing period?`;
 }
 
@@ -108,7 +108,7 @@ export function refreshScopePending(pa: PendingAction, graph: unknown): PendingA
   if (!pa.action.scope) return pa;
   const check = goalScopeCheck(graph, pa.action.goal_id, pa.action.scope, pa.action.current_level);
   return { ...pa, action: { ...pa.action, operands: check.operands, derivations: check.derivations,
-    ...(!scopeReadyToApprove(pa.action.scope, check) && pa.action.scope.component?.share !== undefined ? { expected: 'billing_basis' as const, question: scopeQuestion(pa.action.goal_label, pa.action.scope, check) } : {}) } };
+    ...(!scopeReadyToApprove(pa.action.scope, check) && (pa.action.scope.extent === 'component' || pa.action.scope.component?.share !== undefined) ? { expected: 'billing_basis' as const, question: scopeQuestion(pa.action.goal_label, pa.action.scope, check) } : {}) } };
 }
 
 export class GoalScopeIdentityConflict extends Error {
@@ -165,5 +165,5 @@ export function assertNoPendingScopeAmendment(graph: unknown, base: unknown, pri
 
 export function scopeReadyToApprove(scope: GoalScope, check: ReturnType<typeof goalScopeCheck>): boolean {
   const c = scope.component;
-  return !check.contradiction && (!c || c.share !== undefined && (c.basis === 'different' || c.basis === 'same' && check.comparable));
+  return !check.contradiction && (!c || (scope.extent === 'component' || c.share !== undefined) && (c.basis === 'different' || c.basis === 'same' && check.comparable));
 }

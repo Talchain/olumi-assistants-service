@@ -101,6 +101,17 @@ async function approve(h: Awaited<ReturnType<typeof harness>>, r: ToolResult, wo
 }
 
 describe('Semantic spine S1–S7 through real canonical read/register and Run input', () => {
+  it('S1: an explicitly scoped component goal can approve consistent figures without changing its count or identity authorship', async () => {
+    const h = await harness();
+    const words = 'MRR here means Pro-plan revenue only. Current Pro MRR is £14,700 per month. Its £49 price and 300 subscriptions use the same monthly billing basis.';
+    const scope = { modelled: 'Pro-plan revenue only', alternative: 'all-plan revenue', extent: 'component', stated_in_brief: true, source: { quote: words },
+      component: { label: 'Pro', rate_id: 'pro_plan_price', count_id: 'pro_paying_subscribers', basis: 'same', source: { quote: words }, basis_source: { quote: words } } };
+    const p = await h.call('reconcile_goal_scope', { goal_label: 'MRR', scope, current_level: { value: 14700, unit: 'GBP/month', quote: words } }, words);
+    expect(p, JSON.stringify(p)).toHaveProperty('proposal_id'); h.retain(p);
+    expect(await approve(h, p)).toMatchObject({ applied: true });
+    expect(goal(h.row.graph)).toMatchObject({ goal_scope: { extent: 'component' }, observed_state: { raw_value: 14700 }, nonlinear_identity: { stated_in_brief: false } });
+    expect(count(h.row.graph)).toBe(300); expect(h.row.pending).toEqual([]);
+  });
   it('S2–S6: restart, unrelated register, share, explicit population clarification → one authorised commit, 300 retained', async () => {
     const h = await harness(); await open(h);
     const hash = computeAnalysisAffectingGraphHash(h.row.graph as never);

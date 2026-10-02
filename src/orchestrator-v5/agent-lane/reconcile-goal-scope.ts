@@ -65,7 +65,7 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   }
   if (scope.extent === 'total' && !scope.component && (goal.nonlinear_identity as {operation?: string} | undefined)?.operation === 'product') return fail('scope_operand_missing', 'Identify the modelled component’s rate and count before reconciling this total goal. Nothing was prepared.');
   const check = goalScopeCheck(graph.raw, goal.id, scope, current);
-  const expected = scope.component && scope.component.share === undefined ? 'component_share' : !scopeReadyToApprove(scope, check) ? 'billing_basis' : 'approval';
+  const expected = scope.extent === 'total' && scope.component && scope.component.share === undefined ? 'component_share' : !scopeReadyToApprove(scope, check) ? 'billing_basis' : 'approval';
   const action: GoalScopeReconciliation = { kind: 'reconcile_goal_scope', goal_id: goal.id, goal_label: goal.label, scope,
     ...(current ? { current_level: current } : {}), expected, question: scopeQuestion(goal.label, scope, check),
     operands: check.operands, derivations: check.derivations };
