@@ -73,7 +73,8 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, textAtRest, withA7AfterGate } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, textAtRest, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
@@ -385,6 +386,33 @@ const MUTATION_INSTRUCTION =
  * session's journey; beyond it, saying the open ask once more is a reminder, not a repeat.
  */
 const RECENT_REPLIES_READ = 20;
+
+type RecentRowsReader = { readonly readRecent?: (scenarioId: string, limit?: number) => Promise<readonly { readonly request_hash?: string | null; readonly turn_id?: string | null; readonly assistant_message?: string | null }[]> };
+
+/**
+ * D1's at-rest lines with the target ask said ONCE (PANEL 5944136475): only when the lines would ask, the Agent's own recent
+ * answers are read, and an ask already among them is still open and not said again. ⛔ Only the Agent route's answer rows
+ * (`isAgentAnswerRow`): each Run also commits in-process sub-turn rows the user never read, so the cap counts AFTER the drop,
+ * over the raw window the Agent's memory reads (`DURABLE_SEED_ROWS_READ`). `exceptTurnId` leaves out the row being replayed:
+ * a lost response the user never saw has not said the ask (Codex P2). A failed read asks, as before.
+ */
+async function decisionLinesAskedOnce(
+  graph: unknown, ctx: DecisionInputAskContext, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined,
+): Promise<string[]> {
+  const lines = decisionInputLines(graph, ctx);
+  if (!lines.some((l) => l.endsWith('as your target.')) || typeof store.readRecent !== 'function') return lines;
+  try {
+    const recentReplies = (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
+      .filter((t) => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
+      .slice(0, RECENT_REPLIES_READ)
+      .map((t) => t.assistant_message)
+      .filter((m): m is string => typeof m === 'string');
+    return recentReplies.length > 0 ? decisionInputLines(graph, { ...ctx, recentReplies }) : lines;
+  } catch (err) {
+    log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — the target ask is said');
+    return lines;
+  }
+}
 
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
@@ -1643,7 +1671,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
           const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
           const withoutAsks = withDisclosures(RUN_RESULT_READY_TEXT, owedNow);
-          const lines = decisionInputLines(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks });
+          const lines = await decisionLinesAskedOnce(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks }, store, scenarioId, turnId);
           let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow, ...lines]);
           const breakEvenNow = (state.analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
             ? breakEvenFor(state.graph, state.identityEvaluated) : null;
@@ -2827,19 +2855,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       restingText: textAtRest(composedWithout),
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
     };
-    let decisionLines = decisionInputLines(readbackGraph, decisionCtx);
-    // ⭐ ASKED ONCE (PANEL 5944136475): only when this turn would ask, read the recent answers as shipped (≤RECENT_REPLIES_READ durable rows,
-    // restart-safe); an ask already among them stays open and is not repeated. A failed read asks, as before.
-    if (decisionLines.some((l) => l.endsWith('as your target.')) && typeof store.readRecent === 'function') {
-      try {
-        const recentReplies = (await store.readRecent(scenarioId, RECENT_REPLIES_READ))
-          .map((t) => (t as { assistant_message?: unknown }).assistant_message)
-          .filter((m): m is string => typeof m === 'string');
-        if (recentReplies.length > 0) decisionLines = decisionInputLines(readbackGraph, { ...decisionCtx, recentReplies });
-      } catch (err) {
-        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — the target ask is said');
-      }
-    }
+    // ⭐ ASKED ONCE (PANEL 5944136475): an ask already among the Agent's recent answers stays open and is not repeated.
+    const decisionLines = await decisionLinesAskedOnce(readbackGraph, decisionCtx, store, scenarioId, undefined);
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
     const linkAsk = decisionLines.some((l) => l.endsWith('as your target.')) ? null : linkSizeAsk(readbackGraph, {

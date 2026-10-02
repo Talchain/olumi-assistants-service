@@ -280,8 +280,9 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; recentFails = false; n += 1; });
+  const scenarioNow = () => `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
   const runTurn = async (turnId?: string, explain = false) => {
-    const scenarioId = `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
+    const scenarioId = scenarioNow();
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     ...(turnId !== undefined ? { turn_id: turnId } : {}), kind: 'message', scenario_id: scenarioId, message: 'Run analysis.', source: 'chip',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
@@ -341,6 +342,22 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect(answers.length, 'precondition: 9 answers — beyond a 6-row window').toBe(9);
     const asking = answers.filter((r) => String(r.assistant_message ?? '').includes(ASK)).map((r) => String(r.turn_id));
     expect(asking, 'only the first Run asked').toEqual(['c374e586-91a2-43b4-a5c6-d7e8f90a1b23']);
+  });
+
+  it('RED (Codex P2 @4433c99f): a lost Rerun response retried stays ask-free; the first Run retried still asks', async () => {
+    const A = '1a2b3c4d-0e1f-4a2b-8c3d-4e5f6a7b8c90', B = '2b3c4d5e-1f2a-4b3c-9d4e-5f6a7b8c9d01';
+    expect((await runTurn(A)).assistant_text.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    expect((await runTurn(B)).assistant_text, 'precondition: the Rerun does not').not.toContain('as your target');
+    // A replay of a lost Run response is REBUILT from the current readback (never the stored words): it reads the history too.
+    expect((await runTurn(B)).assistant_text, 'B retried').not.toContain('as your target');
+    // …but never its OWN row: a response the user never received has not said the ask.
+    expect((await runTurn(A)).assistant_text.split(ASK).length - 1, 'A retried').toBe(1);
+  });
+
+  it('CONTROL (Codex): an in-process sub-turn row holding the ask text (never shown) does not count as said → the Run asks', async () => {
+    const sid = scenarioNow();
+    rows.set(`${sid}|sub-1`, { scenario_id: sid, turn_id: 'sub-1', request_hash: 'sha256:0f1e2d3c', assistant_message: `Earlier: ${ASK}` });
+    expect((await runTurn('3c4d5e6f-2a3b-4c4d-8e5f-6a7b8c9d0e12')).assistant_text.split(ASK).length - 1).toBe(1);
   });
 
   it('CONTROL (DL 5944162815): the goal CHANGES between Runs → its new ask is said (an open ask binds to its own goal)', async () => {
