@@ -1,4 +1,4 @@
-export { entryKey, selectGuidance } from './select.js';
+export { entryKey, selectGuidance, widenVariantOf } from './select.js';
 export { methodPlanOf, planOf } from './plan.js';
 export { renderCopy } from './render.js';
 export { stateKeyHash } from './state-key.js';

@@ -101,6 +101,10 @@ import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
+import {
+  isWidenPress, nextStepsWithWiden, settleWidenTurn, widenGate, widenOffered, widenTurnForReadback,
+  WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
+} from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -501,6 +505,8 @@ export const NEXT_STEP_CHIPS = [
 ] as const satisfies readonly OfferedAction[];
 
 const NEXT_STEP_CHIP_IDS: ReadonlySet<string> = new Set(NEXT_STEP_CHIPS.map((c) => c.id));
+/** Every press that runs a reasoning method (the selector withholds its rows on one): the next steps and Widen. */
+const METHOD_PRESS_IDS: ReadonlySet<string> = new Set([...NEXT_STEP_CHIP_IDS, WIDEN_PRESS_ID]);
 
 /**
  * The next steps are offered only on a result that is current and that the canonical state lets chips build on
@@ -2338,6 +2344,33 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     /**
+     * ⭐ WIDEN THE OPTIONS (PTL 5947349533; DL 5947426886; RC `method_turns.RC-WIDEN`; `method-turn/widen-turn.ts`). A
+     * recognised press is TERMINAL like the pre-mortem's: ONE model call whose only tool is the add-option door, gated
+     * by RC's structured checks BEFORE the door stores anything (`widenGate`), so it ends in ONE consent card or in RC's
+     * deterministic fallback with no card. Unavailable (no goal, unread model) answers with no model call.
+     */
+    let widenTurn: WidenTurn | null = null;
+    let widenGateResult: WidenGateResult | undefined;
+    if (result === undefined && approvedProposal === undefined && methodTurn === null && isWidenPress(pressedChipId)) {
+      const rb = await readBackState(readingDispatch, scenarioId);
+      widenTurn = widenTurnForReadback(pressedChipId, rb);
+      if (widenTurn !== null) fastPath = 'method';
+      if (widenTurn !== null && widenTurn.kind === 'unavailable') {
+        result = {
+          assistant_text: widenTurn.reply,
+          items: [],
+          tool_calls: [],
+          tool_results: [],
+          mutated: false,
+          hops: 0,
+          stopped_reason: 'answered',
+          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
+        };
+        log.info({ scenario_id: scenarioId, widen_turn: 'unavailable', reason: widenTurn.reason }, 'agent-lane: widen turn answered without a model call');
+      }
+    }
+    const widenRun = widenTurn?.kind === 'run' ? widenTurn : undefined;
+    /**
      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
@@ -2401,7 +2434,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * provider call anywhere. A buffered turn starts no reading and is exactly today's path. (This block runs only for
          * the request that WON the turn claim: a losing, refused or replayed request has already returned above.)
          */
-        const mayRouteBrief = emitStage !== undefined && knownEmpty && earlierWordsKnown && needsDurableSeed(history) && typedNow !== null && methodTurn === null;
+        const mayRouteBrief = emitStage !== undefined && knownEmpty && earlierWordsKnown && needsDurableSeed(history) && typedNow !== null && methodTurn === null && widenTurn === null;
         const reading = emitStage !== undefined && knownEmpty ? readBrief(message, callBriefReading) : undefined;
         if (reading !== undefined && emitStage !== undefined) {
           briefReadingOpen = true;
@@ -2428,12 +2461,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ctx: toolCtx,
           history,
           message,
-          instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}` : AGENT_INSTRUCTIONS,
+          instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}`
+            : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}` : AGENT_INSTRUCTIONS,
           maxOutputTokens: budget.max_output_tokens,
           mode,
           // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
-          withheldTools: methodTurn?.kind === 'run' ? toolsFor(mode).map((t) => t.name) : withheldToolsOf(body),
-          ...(methodTurn?.kind === 'run' ? { maxHops: 1 } : {}),
+          withheldTools: methodTurn?.kind === 'run' ? toolsFor(mode).map((t) => t.name)
+            // Widen: ONE call, and its ONLY tool is the add-option door (forced below), so the turn ends in one card or none.
+            : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
+          ...(methodTurn?.kind === 'run' || widenRun !== undefined ? { maxHops: 1 } : {}),
+          ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
@@ -2442,7 +2479,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...((body['chip'] as { id?: unknown } | null | undefined)?.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
             ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
         },
-        capabilities,
+        // Widen: RC's structured checks run INSIDE the door, before it stores anything; a refusal stores nothing.
+        widenRun === undefined ? capabilities : {
+          ...capabilities,
+          proposeNewOption: async (gateCtx, gateArgs) => {
+            widenGateResult = widenGate(widenRun, gateArgs);
+            return widenGateResult.ok
+              ? capabilities.proposeNewOption(gateCtx, gateArgs)
+              : { ok: false, mutated: false, refusal: WIDEN_GATE_REFUSAL,
+                  detail: `These suggestions did not pass Olumi’s checks (${widenGateResult.failed.join(', ')}). Nothing was changed.` };
+          },
+        },
         callModelFor(budget),
       );
     } catch (err) {
@@ -2495,6 +2542,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         passed: settled.passed, failed: settled.failed, target_kind: settled.target.kind,
         card: card?.tool ?? null, card_ok: issued?.ok === true, card_refusal: issued?.refusal,
       }, 'agent-lane: method turn settled');
+    }
+    // Widen: the door's ONE passed card and its own reply, else RC's deterministic fallback (a refused call stored nothing).
+    let widenActions: readonly OfferedAction[] = [];
+    if (widenRun !== undefined) {
+      const settled = settleWidenTurn(widenRun, { assistant_text: result.stopped_reason === 'answered' ? text : '', tool_calls: result.tool_calls }, widenGateResult);
+      text = settled.reply;
+      widenActions = settled.actions;
+      // The record is rebuilt ONCE from the final wire text (below); the call's own items never survive.
+      result = { ...result, assistant_text: text, items: [] };
+      log.info({
+        scenario_id: scenarioId, widen_variant: widenRun.variant, carded: settled.carded,
+        gate_failed: widenGateResult !== undefined && !widenGateResult.ok ? widenGateResult.failed : [],
+        tool_calls: result.tool_calls.map((c) => `${c.name}:${c.ok ? 'ok' : (c.refusal ?? 'refused')}`),
+      }, 'agent-lane: widen turn settled');
     }
 
     // ⭐ `answerKind` is REQUIRED and load-bearing: route egress synthesises
@@ -2716,6 +2777,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const offeredSpecific: OfferedAction[] = fastPath === 'method' && methodTurn !== null
       // T3, terminal: the method's ONE card (its approval) and the method's own follow-ups (RC method_turn_rule), nothing else.
       ? firstOfEachId([...approvals, ...(methodTurn.kind === 'run' ? [TALK_IT_THROUGH_CHIP] : methodTurn.actions)])
+      // Widen, terminal: the door's ONE card (its approval) and RC's follow-up, or the unavailable reply's own follow-up.
+      : fastPath === 'method' && widenTurn !== null
+      ? firstOfEachId([...approvals, ...(widenTurn.kind === 'run' ? widenActions : widenTurn.actions)])
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
@@ -2742,7 +2806,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // beside another control, and never while a proposal that would still execute waits for its yes (that is the step).
     const offeredNow: OfferedAction[] = offeredSpecific.length === 0 && offersNextSteps(analysisState)
       && executableWaitingProposal(scenarioId, userId, graphHash) === undefined
-      ? [...NEXT_STEP_CHIPS] : offeredSpecific;
+      // Widen takes the plain "What would change the result?" place when the selector's RC-WIDEN holds on options.
+      ? nextStepsWithWiden(NEXT_STEP_CHIPS, widenOffered({ graph: readbackGraph, analysisState, analysisReady, analysisResult, optionParticipation, identityEvaluated }))
+      : offeredSpecific;
     if (turnId !== undefined) rememberOffered(`${scenarioId}:${turnId}`, offeredNow);
     rememberApprove(approveKey, offeredNow);
     rememberResearchOffers(approveKey, offeredNow);
@@ -3045,7 +3111,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const waitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash);
       const waiting = waitingIds.map((id) => ({ id: approvalChipIdFor(id) }));
       const guidance = turnGuidanceFor({
-        request: guidanceRequestOf(fastPath, (body['chip'] as { id?: unknown } | null | undefined)?.id, NEXT_STEP_CHIP_IDS),
+        request: guidanceRequestOf(fastPath, (body['chip'] as { id?: unknown } | null | undefined)?.id, METHOD_PRESS_IDS),
         offeredSpecific: firstOfEachId([...offeredSpecific, ...waiting]),
         assistantText: wireBody.assistant_text,
         licence: leaderLicenceFromState(analysisState, analysisReady),
