@@ -7,7 +7,23 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.72.0.tgz` ← **THE CURRENT PIN** (F1b 52f8cd, a link's `authorship_digest`)
+### `talchain-schemas-0.73.0.tgz` ← **THE CURRENT PIN** (F1b 52f8cd, a factor's `authorship_digest`)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`b447da6f`** (schemas #83 merge; publish run 36964921360), 2026-10-02. Registry download:
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.73.0/ab0b2c9af7e9441ba88e45837f1cff89bd449379`.
+>
+> ```
+> npm shasum (sha1)  ab0b2c9af7e9441ba88e45837f1cff89bd449379   ← matches
+> integrity (sha512) sha512-GZFRo1Nl8yTGdKRO6TqU/cH4vGuxvHb0n758g7pDq17pMMiK0CMCnEeAedhYa6RuE+yrX2ZspYCzASRClsOTSA==   ← matches (pnpm-lock, written by pnpm)
+> sha256             c74339dc4eb24a2571958bf7ae3f91ebbd511b2afd4295791d5a0d5236132dd4
+> ```
+>
+> **What 0.73.0 adds (additive, optional):** Run snapshot `factors[].authorship_digest` — the factor's authorship as sent
+> (CEE `FACTOR_AUTHORSHIP_MEMBERS`, measured on the real value writer → wire), so a user's value edit is credited pairwise:
+> an authorship change is explained only beside that factor's own value row. `RunDelta` unchanged; the UI needs no re-vendor.
+
+### `talchain-schemas-0.72.0.tgz` (superseded) (F1b 52f8cd, a link's `authorship_digest`)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
 > **`cd1e868e`** (schemas #82 merge; publish run 36935147076), 2026-10-01. Registry download:

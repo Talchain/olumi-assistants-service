@@ -260,7 +260,12 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // against the PUBLISHED tarballs (sha1 `c783076e…` → `fd389b22…`): the FILE SET naming `edge_strength_edit` is
     // identical and all five files are byte-unchanged; 0 changed dist lines name a strength or a band (contrast: the
     // same diff finds 42 lines naming `authorship_digest`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.72.0');
+    //
+    // 0.72.0 → 0.73.0 (schemas #83, F1b: Run snapshot FACTOR `authorship_digest`; main `b447da6f`), RE-DERIVED on 2 Oct
+    // against the PUBLISHED tarballs (sha1 `fd389b22…` → `ab0b2c9a…`): the FILE SET naming `edge_strength_edit` is identical and
+    // all five files are byte-unchanged; 0 changed dist lines name a strength or a band (contrast: the same diff finds 42
+    // lines naming `authorship_digest`).
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.73.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
