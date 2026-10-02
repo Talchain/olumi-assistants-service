@@ -12,6 +12,9 @@ on:
 permissions:
   contents: write
   packages: read
+defaults:
+  run:
+    shell: bash
 concurrency:
   group: isolated-native-context-trial
   cancel-in-progress: false
