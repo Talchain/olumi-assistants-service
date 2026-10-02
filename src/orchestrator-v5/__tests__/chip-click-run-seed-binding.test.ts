@@ -79,14 +79,24 @@ function harness() {
 
   /** Committed Run facts, newest first — what the next turn's window reads back. */
   const window: HandlerFact[] = [];
-  const run = async (turnId: string) => {
-    const priorTurns = window.map((_, i) => ({
+  /**
+   * `agedOut`: the prior Run's turn has left the 20-turn hot window — the window reads back NO turns or facts, while the
+   * scenario's durable analysis read still holds every committed Run (+ `durableExtra`, newest first). `durableDown`: the
+   * durable read throws (the reconciled set degrades).
+   */
+  const run = async (turnId: string, opts: { agedOut?: boolean; durableExtra?: HandlerFact[]; durableDown?: boolean } = {}) => {
+    const hot = opts.agedOut === true ? [] : window;
+    const priorTurns = hot.map((_, i) => ({
       id: `row-run-${i}`, scenario_id: SCENARIO, user_id: null, turn_id: `turn-run-${i}`, turn_class: 'handler',
       handler_id: 'run_analysis', request_hash: 'sha256:run', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
       created_at: '2026-10-01T19:42:00.000Z',
     })) as unknown as SessionTurn[];
     const writes: SessionTurnWrite[] = [];
-    const base = createNoopSessionStore({ priorTurns, facts: [...window] });
+    const base = createNoopSessionStore({
+      priorTurns, facts: [...hot],
+      ...(opts.agedOut === true ? { scenarioAnalysisFacts: [...(opts.durableExtra ?? []), ...window] } : {}),
+      ...(opts.durableDown === true ? { throwOnScenarioAnalysisFactRead: new Error('durable read down') } : {}),
+    });
     storeHolder.current = { ...base, append: async (w: SessionTurnWrite) => { writes.push(w); return { id: `row-${turnId}` }; } };
     await dispatchChipClickRunAnalysis({
       payload: makeMessagePayload({
@@ -139,6 +149,78 @@ describe('C1 on the chip Run path — the prior Run lends its seed (R3 #85 59392
     await h.run('turn-a');
     await h.run('turn-b');
     for (const bound of h.seenBindings) expect((bound as Rec).analysisGraphHash).toBe(NO_CLAIM);
-    expect((h.seenBindings[1] as Rec).priorRunSeed).toMatchObject({ seedUsed: expect.any(String), structureKey: expect.any(String) });
+    const a = h.window[1] as Rec;
+    expect((h.seenBindings[1] as Rec).priorRunSeed, 'the EXACT seed Run A echoed').toMatchObject({ seedUsed: a.result.enrichment.meta.seed_used });
+  });
+});
+
+/**
+ * ⭐ C1 DURABLE HISTORY (DL lease 5944383317, narrowed to the seed; DL conditions): a user who talks for 20+ turns between
+ * Runs loses the prior Run from the turn's hot window. The seed is then lent from the scenario's reconciled DURABLE set —
+ * attested for THIS scenario, `complete | capped` — never from a foreign scenario, a non-Run fact, or a failed Run, and the
+ * window always wins when it holds a Run. Through the REAL chip dispatcher (every Run goes route-v2 → this exit).
+ */
+describe('C1 durable history — a Run that aged out of the hot window still lends its seed', () => {
+  const seedOf = (f: Rec) => f.result.enrichment.meta.seed_used as string;
+  const runFact = (seed: string, extra: Rec = {}) => {
+    const f = structuredClone(happyFact) as Rec;
+    f.result.enrichment.meta.seed_used = seed;
+    f.result.computed_at = '2099-01-01T00:00:00.000Z';
+    Object.assign(f.result, extra);
+    return f as unknown as HandlerFact;
+  };
+  let happyFact: Rec;
+
+  it('B4 (RED): Run A aged out of the window, the durable set holds it → Run B sends A\'s EXACT seed → the pair is C1', async () => {
+    const h = harness();
+    const a = await h.run('turn-a');
+    happyFact = structuredClone(a);
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(60);
+    await h.run('turn-b', { agedOut: true });
+    expect(h.sentSeeds[1], 'Run B sends Run A\'s seed echo, verbatim').toBe(seedOf(a));
+    expect((h.seenBindings[1] as Rec).priorRunSeed).toMatchObject({ seedUsed: seedOf(a) });
+    const built = buildRunDelta({ priorFacts: h.window as never, mayNameLeadingOption: true });
+    expect((built as { delta: Rec }).delta.attribution_case).toBe('C1_attributable');
+  });
+
+  it('B5 (control): aged out AND the durable read is down → no seed; the binding says no_prior_run (today\'s answer)', async () => {
+    const h = harness();
+    await h.run('turn-a');
+    await h.run('turn-b', { agedOut: true, durableDown: true });
+    expect(h.sentSeeds[1]).toBeUndefined();
+    expect((h.seenBindings[1] as Rec).priorRunSeed).toBe('no_prior_run');
+  });
+
+  // Each intruder's EXACT outcome: the successful-Run selector skips a failed Run (Run A lends); the reconciler refuses a
+  // durable page carrying a non-Run fact or another scenario's Run (degraded → the window → `no_prior_run`, fail-closed).
+  it.each([
+    ['a NEWER failed Run (same writer, not successful) → skipped: Run A lends', (f: HandlerFact) => { (((f as unknown as Rec).result.enrichment) as Rec).analysis_status = 'failed'; return f; }, 'A'],
+    ['a NEWER non-Run fact → the durable page is refused → no_prior_run', (f: HandlerFact) => ({ ...(f as unknown as Rec), fact_type: 'explain_results' }) as unknown as HandlerFact, 'none'],
+    ['a NEWER Run of ANOTHER scenario → the durable page is refused → no_prior_run', (f: HandlerFact) => { ((f as unknown as Rec).result as Rec).scenario_id = '22222222-2222-4222-8222-222222222222'; return f; }, 'none'],
+  ] as const)('B6 (writer identity): %s', async (_n, mutate, expected) => {
+    const h = harness();
+    const a = await h.run('turn-a');
+    happyFact = structuredClone(a);
+    await h.run('turn-b', { agedOut: true, durableExtra: [mutate(runFact('777777'))] });
+    if (expected === 'A') {
+      expect(h.sentSeeds[1]).toBe(seedOf(a));
+      expect((h.seenBindings[1] as Rec).priorRunSeed).toMatchObject({ seedUsed: seedOf(a) });
+    } else {
+      expect(h.sentSeeds[1]).toBeUndefined();
+      expect((h.seenBindings[1] as Rec).priorRunSeed).toBe('no_prior_run');
+    }
+  });
+
+  it('B7 (DL condition 1): the window holds the NEWEST Run → the window lends, never an older durable seed', async () => {
+    const h = harness();
+    await h.run('turn-a');
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(60);
+    const b = await h.run('turn-b');
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(61);
+    await h.run('turn-c');
+    expect(h.sentSeeds[2], 'Run C borrows the NEWEST prior Run (B), from the window').toBe(seedOf(b));
   });
 });

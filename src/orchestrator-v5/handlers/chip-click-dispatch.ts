@@ -120,7 +120,7 @@ import { applyCoachingSignal } from '../coaching/coaching-signal-application.js'
 import { applyDefaultedValueEgress } from '../compose/defaulted-value-egress.js';
 import { readDefaultedAssumptionsFromEnrichment } from '../coaching/pick-defaulted-assumptions.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
-import { priorRunForSeed } from '../coaching/seed-reuse.js';
+import { priorRunForSeed, seedHistoryFacts } from '../coaching/seed-reuse.js';
 import { bindAnalysisSnapshotForTurn, NO_CLAIM } from '../run-analysis-snapshot-binding.js';
 import type { V5TurnTimings } from '../telemetry/turn-timings.js';
 import { generateChips } from '../compose/chip-generator.js';
@@ -1341,7 +1341,9 @@ export async function dispatchChipClickRunAnalysis(
   bindAnalysisSnapshotForTurn({
     scenarioId: context.session_id,
     analysisGraphHash: NO_CLAIM,
-    priorRunSeed: priorRunForSeed(context.prior_facts),
+    priorRunSeed: priorRunForSeed(seedHistoryFacts({
+      scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set,
+    })),
   });
 
   // V5 finaliser contract — single-source-of-truth for the scenario graph.
