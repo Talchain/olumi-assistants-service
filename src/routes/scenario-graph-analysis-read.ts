@@ -137,6 +137,8 @@ import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
 import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
+import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
+import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { log } from '../utils/telemetry.js';
 import { projectCurrentRead, type CurrentReadProjection } from './current-read-projection.js';
 import { projectSelectedRunFigures, readSelectedGoalFigureContext } from './selected-run-figures.js';
@@ -475,19 +477,43 @@ export async function readScenarioAnalysis(
             : null,
       }) ?? null;
 
-    const boundResult = analysisResult !== null && analysisState !== null
+    const builtResult = analysisResult !== null && analysisState !== null
       ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState, derivation.reason)[0] ?? null
       : analysisResult;
     // SC-24: the displayed Run's comparison with the Run before it — the same producer and permission the turn used.
     // Only for a DELIVERED fact that is the pair's newer end, with no newer Run withholding its claim; `current_read`
     // then adds its own currentness gate (row 1). It never rides top-level on the read.
-    const runDelta = (() => {
-      if (fact === null || boundResult === null || newerClaimWithholds) return undefined;
+    const builtRunDelta = (() => {
+      if (fact === null || builtResult === null || newerClaimWithholds) return undefined;
       const pair = selectTwoNewestRunAnalysisFacts(facts);
       if (pair === null || pair.current !== fact) return undefined;
       const built = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: mayPresentLeaderClaimForFact(fact) });
       return built.kind === 'ok' ? built.delta : undefined;
     })();
+    // ⭐ ONE RUN, ONE SERIALISATION (F1b; DL ruling 5949485462, lease 5950467893). The Run turn ships its block and pair
+    // through the Agent lane's final egress under `leaderLicenceFromState`. This read had no egress, so a Run whose
+    // claim is withheld (separation unavailable, a limit tier, the admission) reloaded with the builder's ranking-order
+    // brief, a different content hash and the pair's leader ids. The SAME function, under the licence read from THIS
+    // read's own state, now licenses both before they feed `analysis_result`, `current_read` and the figures. A licensed
+    // Run returns by reference.
+    const claim = analysisState?.leader_claim;
+    const licensed = enforceLeaderLicenceAtFinalEgress<Record<string, unknown>>(
+      { blocks: builtResult === null ? [] : [builtResult], ...(builtRunDelta !== undefined ? { run_delta: builtRunDelta } : {}) },
+      {
+        requestId: params.requestId,
+        exitPath: 'scenario_graph_read',
+        licence: leaderLicenceFromState(analysisState, analysisReady),
+        mayNameLeadingOption: claim?.permitted === true,
+        separationEstablished: claim?.separation === 'separated',
+        ...(typeof claim?.withheld_reason === 'string' ? { leaderClaimWithheldReason: claim.withheld_reason } : {}),
+        graph: params.graph,
+        analysisReady,
+        noEarlierGate: true,
+      },
+    ).response;
+    const boundResult = builtResult === null ? null
+      : ((licensed.blocks as unknown[] | undefined)?.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as typeof builtResult | undefined) ?? null;
+    const runDelta = licensed.run_delta as typeof builtRunDelta;
     return {
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })
