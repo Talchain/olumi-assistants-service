@@ -54,6 +54,8 @@ describe('the explicit Run is offered after a change the canonical readiness adm
    */
   let failReadbackAfterWrite = false;
   let postWriteReads = 0;
+  let graphReads = 0;
+  let approvalReads = 0;
   /** Scripted model outputs for an agent-loop turn, consumed in order before the default behaviour. */
   let script: Record<string, unknown>[] = [];
   /** A route instance on FRESH modules: an empty process cache and an empty proposal store. */
@@ -62,6 +64,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     const a = Fastify({ logger: false });
     a.post('/assist/v1/scenarios/:id/graph', async (_req, reply) => {
+      graphReads += 1;
       if (edges.length > 0) postWriteReads += 1;
       if (failReadbackAfterWrite && postWriteReads >= 2) return reply.code(500).send({ error: 'read failed' });
       return {
@@ -101,7 +104,7 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     app = await buildRouteApp();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; script = []; nextScenario(); });
+  beforeEach(() => { edges = []; runs = 0; modelBodies = []; proposeNext = true; analysisState = {}; failReadbackAfterWrite = false; postWriteReads = 0; graphReads = 0; approvalReads = 0; script = []; nextScenario(); });
 
   /** Propose (one Agent turn), then approve through the typed chip (fast path 2). */
   async function proposeThenApprove(approveTurnId?: string): Promise<{ suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } }> {
@@ -109,7 +112,9 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const approve = (t1.json() as { suggested_actions: Chip[] }).suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
     expect(approve, 'the control: a real proposal was offered').toBeDefined();
     lastApproveId = approve!.id;
+    const beforeApproval = graphReads;
     const t2 = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: approve!.message, source: 'chip', chip: { id: approve!.id }, ...(approveTurnId ? { turn_id: approveTurnId } : {}) } });
+    approvalReads = graphReads - beforeApproval;
     expect(t2.statusCode).toBe(200);
     return t2.json() as { suggested_actions: Chip[]; _diagnostic_trace: { fast_path?: string } };
   }
@@ -119,6 +124,8 @@ describe('the explicit Run is offered after a change the canonical readiness adm
     const b = await proposeThenApprove();
     expect(b._diagnostic_trace.fast_path).toBe('approve');
     expect(edges, 'the approval really applied').toHaveLength(1);
+    expect(approvalReads, 'Accept retains both existing graph reads').toBe(2);
+    expect(postWriteReads).toBe(1);
     expect(b.suggested_actions.filter((c) => c.action_type === 'run_analysis')).toEqual([
       expect.objectContaining({ id: 'agent-run-analysis', label: 'Run analysis', action_type: 'run_analysis' }),
     ]);

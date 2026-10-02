@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SessionStore } from '../../session/store.js';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE, RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
 
 const SCENARIO = '4d2c1b0a-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
@@ -10,6 +11,7 @@ const GRAPH = { nodes: [{ id: 'g', kind: 'goal', label: 'MRR', goal_threshold_ra
   { id: 'f', kind: 'factor', label: 'Price' }],
 edges: [{ from: 'f', to: 'g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' }] };
 let graph: unknown = GRAPH;
+let briefText = 'The strategic brief';
 let fact: typeof FACT | null = null;
 let readFails = false;
 const rows: Record<string, unknown>[] = [];
@@ -20,6 +22,7 @@ const store = {
   readRecent: vi.fn(async () => [{ id: 'run-row', turn_class: 'decide', created_at: '2026-10-01T12:00:00.000Z' }, ...rows].reverse()),
   readFactsFor: vi.fn(async () => fact === null ? [] : [fact]),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
+  readRunCurrentness: undefined as SessionStore['readRunCurrentness'],
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
@@ -30,6 +33,7 @@ describe('two-request Run through the real handler and canonical analysis reader
   let app: FastifyInstance;
   let modelBodies: Record<string, unknown>[] = [];
   let runs = 0;
+  let graphReads = 0;
   let mutateDuringExplanation: (() => void) | undefined;
   let providerMode: 'ok' | 'empty' | 'failed' | 'timeout' = 'ok';
   let hashOf: (g: unknown) => string | null;
@@ -65,9 +69,10 @@ describe('two-request Run through the real handler and canonical analysis reader
         analysis_ready: { status: 'ready', options: [], blockers: [] } };
     });
     app.post('/assist/v1/scenarios/:id/graph', async (_req, reply) => {
+      graphReads += 1;
       if (readFails) return reply.code(500).send({ error: 'unavailable' });
       const read = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'test' });
-      return { graph, graph_hash: hashOf(graph), ...read };
+      return { graph, brief_text: briefText, graph_hash: hashOf(graph), ...read };
     });
     await app.register(agentV1TurnRoute);
     await app.ready();
@@ -76,8 +81,8 @@ describe('two-request Run through the real handler and canonical analysis reader
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { graph = GRAPH; fact = null; readFails = false; rows.length = 0; runs = 0;
-    modelBodies = []; providerMode = 'ok'; mutateDuringExplanation = undefined; });
+  beforeEach(() => { graph = GRAPH; briefText = 'The strategic brief'; fact = null; readFails = false; rows.length = 0; runs = 0; graphReads = 0;
+    modelBodies = []; providerMode = 'ok'; mutateDuringExplanation = undefined; store.readRunCurrentness = undefined; });
   const run = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     turn_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
   } });
@@ -88,6 +93,71 @@ describe('two-request Run through the real handler and canonical analysis reader
     return app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { turn_id: randomUUID(), scenario_id: SCENARIO,
       agent_session_id: first._agent.session_id, message: RUN_EXPLANATION_MESSAGE, chip: { id: chip!.id }, ...extra } });
   };
+
+  it('Run and Re-run each read the post-run graph once, without an unused prefetch', async () => {
+    expect((await run()).statusCode).toBe(200);
+    expect(graphReads, 'Run: the one post-run canonical read').toBe(1);
+    const beforeRerun = graphReads;
+    expect((await run()).statusCode).toBe(200);
+    expect(graphReads - beforeRerun, 'Re-run: the one post-run canonical read').toBe(1);
+    expect(runs).toBe(2);
+    expect(modelBodies).toHaveLength(0);
+  });
+
+  it('an unchanged explanation reads one graph plus one bounded currentness query', async () => {
+    const first = (await run()).json();
+    store.readRunCurrentness = vi.fn(async () => fact === null ? null : ({ userId: null, graph, briefText, analysisInvalidatedAt: null, fact }));
+    const before = graphReads;
+    const second = await explanation(first);
+    expect(second.json().narration.status).toBe('ready');
+    expect(graphReads - before).toBe(1);
+    expect(store.readRunCurrentness).toHaveBeenCalledExactlyOnceWith(SCENARIO);
+    expect(runs).toBe(1);
+  });
+
+  for (const edit of ['label', 'brief'] as const) {
+    it(`refreshes the wire after a concurrent ${edit} edit that leaves the Run current`, async () => {
+      const first = (await run()).json();
+      store.readRunCurrentness = vi.fn(async () => fact === null ? null : ({ userId: null, graph, briefText, analysisInvalidatedAt: null, fact }));
+      mutateDuringExplanation = () => {
+        if (edit === 'label') graph = { ...GRAPH, nodes: GRAPH.nodes.map((node) => ({ ...node, label: `${node.label} renamed` })) };
+        if (edit === 'brief') briefText = 'A revised strategic brief';
+      };
+      const before = graphReads;
+      const second = await explanation(first);
+      expect(hashOf(graph), 'this edit preserves the analysis hash').toBe(hashOf(GRAPH));
+      expect(second.json().narration.status).toBe('ready');
+      expect(graphReads - before, 'the current Run does not license serving old model/brief bytes').toBe(2);
+      if (edit === 'label') expect(JSON.stringify(second.json().draft_graph)).toContain('MRR renamed');
+    });
+  }
+
+  for (const change of ['new-run', 'graph', 'restore', 'owner', 'unavailable'] as const) {
+    it(`bounded currentness withholds narration after concurrent ${change}`, async () => {
+      const first = (await run()).json();
+      let owner: string | null = null;
+      let restored: string | null = null;
+      store.readRunCurrentness = vi.fn(async () => {
+        if (readFails) throw new Error('read unavailable');
+        return fact === null ? null : { userId: owner, graph, briefText, analysisInvalidatedAt: restored, fact };
+      });
+      mutateDuringExplanation = () => {
+        if (change === 'new-run') fact = { ...fact, result: { ...fact.result, computed_at: '2026-10-01T12:00:01.000Z' } };
+        if (change === 'graph') graph = { ...GRAPH, nodes: [...GRAPH.nodes, { id: 'f2', kind: 'factor', label: 'Churn' }] };
+        if (change === 'restore') restored = '2026-10-01T12:00:01.000Z';
+        if (change === 'owner') owner = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        if (change === 'unavailable') readFails = true;
+      };
+      const before = graphReads;
+      const second = await explanation(first);
+      expect(graphReads - before).toBe(2); // mismatch refreshes the wire, while withholding the old narration
+      expect(second.json().narration.status).toBe('stale');
+      expect(second.json().assistant_text).toContain(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+      expect(rows.at(-1)?.assistantMessage).not.toContain('depends on the assumptions');
+      expect(store.readRunCurrentness).toHaveBeenCalledExactlyOnceWith(SCENARIO);
+      expect(runs).toBe(1);
+    });
+  }
 
   it('returns the saved current result with zero narration calls; the follow-up only explains that Run', async () => {
     const response = await run();

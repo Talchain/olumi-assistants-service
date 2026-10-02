@@ -38,10 +38,20 @@ export function runExplanationChip(scenarioId: string, read: RunExplanationRead)
     computed_at: run.computed_at,
   });
   if (identity.status !== 'confirmed') return null;
+  return chipForIdentity(identity.identity);
+}
+
+function chipForIdentity(identity: { readonly scenario_id: string; readonly graph_hash_at_run: string; readonly computed_at: string }): SuggestedAction {
   const digest = createHash('sha256').update(JSON.stringify({
-    v: 1, run_fact: identity.identity,
+    v: 1, run_fact: identity,
   })).digest('hex').slice(0, 16);
   return { id: `${RUN_EXPLANATION_PREFIX}${digest}`, label: RUN_EXPLANATION_MESSAGE, message: RUN_EXPLANATION_MESSAGE };
+}
+
+/** The same reference, after a currentness check by the canonical freshness authority. */
+export function runExplanationIdentityMatches(id: unknown, identity: unknown): boolean {
+  const checked = validateAnalysisRunFactIdentity(identity);
+  return checked.status === 'confirmed' && chipForIdentity(checked.identity).id === id;
 }
 
 export function runExplanationMatches(id: unknown, scenarioId: string, read: RunExplanationRead): boolean {
