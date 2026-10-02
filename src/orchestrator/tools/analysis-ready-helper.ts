@@ -1051,9 +1051,33 @@ function projectSemanticAnalysisReadyFromGraph(
   // status decision for BOTH readiness paths. Two surfaces deciding
   // independently which edges the repair invented was trap 21's shape.
 
+  // ⭐ B3 (model fidelity): what an option does NOT model is declared on its NODE (`unresolved_targets` +
+  // `user_questions`, the Agent writer's carrier). A top-level `options[]` mirror entry — which
+  // `reconcileTopLevelOptionsFromNodes` appends for an Agent-added option, copying only its levels — would otherwise
+  // SHADOW that declaration and read the option as complete. The node's gaps are therefore UNIONED into the mirror
+  // entry's; a node that declares none leaves the entry exactly as it was (the drafter's own carrier, unchanged).
+  const optionNodeById = new Map(
+    optionNodeRecords
+      .filter((node) => readNonEmptyString(node.id) !== null)
+      .map((node) => [node.id as string, node] as const),
+  );
+  const withNodeGaps = (option: unknown): unknown => {
+    if (!isPlainObject(option)) return option;
+    const node = optionNodeById.get(readNonEmptyString(option.id) ?? '');
+    if (node === undefined) return option;
+    const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+    const nodeTargets = strings(node.unresolved_targets);
+    const nodeQuestions = strings(node.user_questions);
+    if (nodeTargets.length === 0 && nodeQuestions.length === 0) return option;
+    return {
+      ...option,
+      unresolved_targets: [...new Set([...strings(option.unresolved_targets), ...nodeTargets])],
+      user_questions: [...new Set([...strings(option.user_questions), ...nodeQuestions])],
+    };
+  };
   const projectedTopLevel = Array.isArray(rawGraph.options)
     ? rawGraph.options
-        .map((option) => projectOptionForCanonicalBuilder(option, factorIds))
+        .map((option) => projectOptionForCanonicalBuilder(withNodeGaps(option), factorIds))
         .filter(
           (option): option is OptionV3T => option !== null && optionNodeIds.has(option.id),
         )

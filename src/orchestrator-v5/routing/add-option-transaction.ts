@@ -153,6 +153,11 @@ const AddOptionParamsSchema = z.object({
   label: z.string().min(1),
   option_id: z.string().min(1).optional(),
   interventions: z.array(InterventionSpecSchema).default([]),
+  // ⭐ B3 (model fidelity): what the option does that its levels do NOT carry yet, as the Agent declared it, and the ask
+  // naming it (`agent-lane/unmodelled-mechanisms.ts`). Written onto the option node in the SAME add, so the option is
+  // admitted as incomplete from its first commit. Absent on every other add, whose node bytes are unchanged.
+  unresolved_targets: z.array(z.string().min(1).max(200)).min(1).max(20).optional(),
+  user_questions: z.array(z.string().min(1).max(1000)).min(1).max(20).optional(),
 });
 
 export type AddOptionSkipReason =
@@ -319,7 +324,7 @@ export function buildAddOptionTransaction(
 
   const parsed = AddOptionParamsSchema.safeParse(parameters);
   if (!parsed.success) return fail('parameters_invalid');
-  const { parent_decision_id, label, option_id, interventions } = parsed.data;
+  const { parent_decision_id, label, option_id, interventions, unresolved_targets, user_questions } = parsed.data;
 
   // Parent must resolve to a DECISION node (an option hangs off a decision).
   const parent = findNode(graph, parent_decision_id);
@@ -381,6 +386,8 @@ export function buildAddOptionTransaction(
         kind: 'option',
         label,
         interventions: interventionBundle,
+        ...(unresolved_targets !== undefined ? { unresolved_targets } : {}),
+        ...(user_questions !== undefined ? { user_questions } : {}),
       },
     },
     { op: 'add_edge', path: `${parent_decision_id}::${optionId}`, value: structuralEdgeValue(parent_decision_id, optionId) },

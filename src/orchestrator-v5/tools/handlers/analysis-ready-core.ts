@@ -755,6 +755,13 @@ function resolveRunAdmissionTerms(
         ...((option as { is_baseline?: boolean }).is_baseline === true
           ? { is_baseline: true }
           : {}),
+        // ⭐ B3: the same readiness verdict the run gate reads (`incompleteMissingOf`), so an option that declares what
+        // it does not model is EXCLUDED here too — the panel's offer and the run's submission stay one answer (F4).
+        status: option.status,
+        // The wire option type omits it (`analysis_ready.options` is passthrough), so it is read as the record carries it.
+        ...((option as { unresolved_targets?: unknown }).unresolved_targets !== undefined
+          ? { unresolved_targets: (option as { unresolved_targets?: unknown }).unresolved_targets }
+          : {}),
       })),
       graph: rawGraph,
       rawPersistedGraph: rawGraph,

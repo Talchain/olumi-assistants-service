@@ -161,6 +161,7 @@ import { buildAnalysisParticipationDisclosure } from '../../coaching/analysis-pa
 import { buildGoalReadingDisclosure } from '../../coaching/goal-reading-disclosure.js';
 import {
   gateAnalysableOptions,
+  tooFewAfterExclusionNextStep,
   PLOT_MIN_COMPARISON_OPTIONS,
   type ExcludedOptionRecord,
 } from './analysable-option-gate.js';
@@ -657,7 +658,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
             handler_id: 'run_analysis',
             scenario_id: args.scenario_id,
             reason_code: 'insufficient_analysable_options',
-            next_step:
+            // ⭐ B3: an incomplete or duplicate exclusion names what it is waiting for; an all-empty one keeps the copy below.
+            next_step: tooFewAfterExclusionNextStep(gate.excluded) ?? (
               excludedLabel !== null
                 ? `I've left out the options that don't have any values set yet, and that leaves ` +
                   `only one option — which isn't a comparison, so I've stopped rather than show ` +
@@ -668,7 +670,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
                   `only one option — which isn't a comparison, so I've stopped rather than show ` +
                   `you a result that just means "it was the only one". Tell me what your other ` +
                   `options change and I'll write them into the model, then ask me to run the ` +
-                  `analysis again.`,
+                  `analysis again.`),
           },
         },
       );

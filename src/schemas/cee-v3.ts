@@ -504,6 +504,16 @@ export const NodeV3 = z.object({
    *  reconciliation (typed extras), never re-derived from the brief. Declared here because `NodeV3` strips undeclared
    *  keys: without it the mark would be lost on the register write. Adopting the option removes it. */
   proposed_by: z.literal('olumi').optional(),
+  /** ⭐ B3 MODEL FIDELITY — what this option does that the model does NOT carry yet (option-kind nodes only), as the
+   *  Agent DECLARED it when it wrote the option (`agent-lane/unmodelled-mechanisms.ts`): "free first month", "billable
+   *  seats". The existing carrier, read by `computeAnalysisReadyStatusWithReason` (`needs_user_mapping`) and kept out of
+   *  the comparison by the run gate (`analysable-option-gate.ts`). `user_questions` names the ask, so the status always
+   *  says what it waits for (`v3-validator` MISSING_USER_QUESTIONS).
+   *  ⚠ LOAD-BEARING, like `proposed_by` above: `NodeV3` strips undeclared keys, so an undeclared gap would be deleted by
+   *  the next unrelated write's re-parse and the option would silently read as complete again. A malformed value is
+   *  dropped (`.catch`), never a reason to refuse a stored graph. */
+  unresolved_targets: z.array(z.string().min(1).max(200)).max(20).optional().catch(undefined),
+  user_questions: z.array(z.string().min(1).max(1000)).max(20).optional().catch(undefined),
   /** UI display vocabulary for the node's origin. Set by the V3 transform from
    *  `extractionType`: `explicit`/`observed` → `from_brief`,
    *  `inferred`/`range` → `ai_inferred`, absent/unknown → `ai_inferred`.

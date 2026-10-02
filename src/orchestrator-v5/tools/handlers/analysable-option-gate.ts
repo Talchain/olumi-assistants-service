@@ -131,7 +131,19 @@ export interface ExcludedOptionRecord {
   readonly option_id: string;
   /** Raw option label (unsanitised); null when the node carried none. */
   readonly label: string | null;
-  readonly reason: 'no_interventions';
+  /**
+   * ⭐ B3 (model fidelity + admission) gave the enum its second and third causes — the reason it was an enum:
+   *   · `no_interventions` — nothing says what the option does (unchanged);
+   *   · `incomplete`       — the option says SOME of what it does and declares what it does not carry yet
+   *                          (`needs_user_mapping` with `unresolved_targets`; `missing` names them);
+   *   · `duplicate`        — its submitted intervention vector equals another option's (`duplicate_of` names it).
+   */
+  readonly reason: 'no_interventions' | 'incomplete' | 'duplicate';
+  /** `incomplete` only: what the option does that the model does not carry yet, as declared. */
+  readonly missing?: readonly string[];
+  /** `duplicate` only: the option it cannot be told apart from, which stays in the comparison. */
+  readonly duplicate_of?: string;
+  readonly duplicate_of_label?: string | null;
 }
 
 export interface AnalysableOptionGateOutcome {
@@ -229,6 +241,124 @@ function interventionsOf(option: Dict): Dict {
  */
 function hasEmptyInterventions(option: Dict): boolean {
   return Object.keys(interventionsOf(option)).length === 0;
+}
+
+/**
+ * ⭐ B3 MODEL FIDELITY — "≥1 numeric intervention ⇒ complete" WAS THE PREDICATE, AND IT RANKED HALF-MODELLED OPTIONS.
+ *
+ * MEASURED (Paul's 2 Oct pricing test): "Raise Pro to £59 with introductory offer of 1 month free" carried only the
+ * ongoing price and "per-seat pricing" carried a per-seat price with no seats; both had a value, so both were submitted
+ * and RANKED, while the Agent itself said each was incomplete. Emptiness is PLoT's refusal predicate, not the
+ * product's admission predicate.
+ *
+ * An option is INCOMPLETE when the one readiness authority (`assessCanonicalAnalysisReadiness` →
+ * `computeAnalysisReadyStatusWithReason`) says `needs_user_mapping` AND it names what is missing in
+ * `unresolved_targets` — the existing carrier, read here, never re-derived. Such an option is excluded exactly as an
+ * empty one is: nothing is minted for it, it is named, and the reason travels.
+ *
+ * ⚠ BOTH CONJUNCTS. `needs_user_mapping` with NO targets is the empty-option limb (`interventions: {}`), which the
+ * emptiness rule above already owns; a target list on a `ready` option does not occur (the status owner returns
+ * `needs_user_mapping` first) and is not read as a verdict here.
+ */
+export function incompleteMissingOf(option: Dict): readonly string[] | null {
+  if (option.status !== 'needs_user_mapping') return null;
+  const targets = Array.isArray(option.unresolved_targets)
+    ? option.unresolved_targets.filter((t): t is string => typeof t === 'string' && t.trim() !== '')
+    : [];
+  return targets.length > 0 ? targets : null;
+}
+
+/**
+ * The option's SUBMITTED intervention vector, as an identity: each factor's numeric `value` and, when present, its
+ * `raw_value` (the user's own figure), sorted by factor. `null` when any cell is not a plain number pair — such an
+ * option is never called a duplicate (fail toward comparing, never toward hiding an option on a guess).
+ *
+ * Deliberately STRICTER than PLoT's own `IDENTICAL_OPTIONS` fingerprint (`analysis-ready-core.ts::
+ * interventionFingerprint`, value only): two options are duplicates here only when both numbers agree, so this rule can
+ * only ever remove an arm PLoT would also have collapsed.
+ */
+function submittedVectorIdentity(option: Dict): string | null {
+  const cells = Object.entries(interventionsOf(option));
+  if (cells.length === 0) return null;
+  const parts: string[] = [];
+  for (const [factorId, raw] of cells) {
+    const cell = isPlainObject(raw) ? raw : { value: raw };
+    const value = finiteNum(cell.value);
+    if (value === undefined) return null;
+    const rawValue = cell.raw_value === undefined ? undefined : finiteNum(cell.raw_value);
+    if (cell.raw_value !== undefined && rawValue === undefined) return null;
+    const snap = (n: number): number => Math.round(n / 1e-9) * 1e-9;
+    parts.push(`${factorId}:${snap(value)}${rawValue !== undefined ? `|${snap(rawValue)}` : ''}`);
+  }
+  return parts.sort().join(';');
+}
+
+/** An unadopted Olumi suggestion, which the Run's own filter keeps out of an ordinary comparison after this gate. */
+function unadoptedOlumiIds(graph: unknown): Set<string> {
+  const ids = new Set<string>();
+  for (const node of nodesOf(graph)) {
+    if (node.kind === 'option' && typeof node.id === 'string' && node.proposed_by === 'olumi'
+      && node.analysis_participation !== 'included') ids.add(node.id);
+  }
+  return ids;
+}
+
+/**
+ * ⭐ B3-2 — TWO OPTIONS WITH THE SAME SUBMITTED VECTOR ARE ONE ARM, NOT TWO. For each group of complete options sharing
+ * a vector, ONE stays: the status quo first, then a user option over an unadopted Olumi suggestion (which the Run drops
+ * after this gate — keeping it would lose the user's own option), then the earlier one. Every other member is excluded
+ * naming the one that stays.
+ */
+function duplicateExclusions(options: readonly Dict[], graph: unknown): Map<Dict, Dict> {
+  const olumi = unadoptedOlumiIds(graph);
+  const rank = (o: Dict): number => {
+    if (isBaselineOption(o)) return 0;
+    const id = optionIdOf(o);
+    return id !== null && olumi.has(id) ? 2 : 1;
+  };
+  const groups = new Map<string, Dict[]>();
+  for (const opt of options) {
+    if (optionIdOf(opt) === null) continue;
+    const identity = submittedVectorIdentity(opt);
+    if (identity === null) continue;
+    const group = groups.get(identity);
+    if (group === undefined) groups.set(identity, [opt]);
+    else group.push(opt);
+  }
+  const dropped = new Map<Dict, Dict>();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const keeper = group.reduce((best, o) => (rank(o) < rank(best) ? o : best), group[0]!);
+    for (const o of group) if (o !== keeper) dropped.set(o, keeper);
+  }
+  return dropped;
+}
+
+/**
+ * The refusal sentence when B3's exclusions leave fewer than two options to compare — or `null` when every excluded
+ * option is an empty one, so the existing copy ships byte for byte. Names the first incomplete option and what it does
+ * not model, or the duplicate and its twin; never a count alone.
+ */
+export function tooFewAfterExclusionNextStep(excluded: readonly ExcludedOptionRecord[]): string | null {
+  const incomplete = excluded.find((e) => e.reason === 'incomplete' && e.label !== null && (e.missing?.length ?? 0) > 0);
+  if (incomplete !== undefined) {
+    const missing = (incomplete.missing ?? []).join(' or the ');
+    return `I've left out the options that aren't fully modelled yet, and that leaves fewer than two options, so `
+      + `there's nothing to compare. '${incomplete.label}' does not model the ${missing} yet. Tell me what the `
+      + `${missing} changes and by how much, and I'll write it into the model, then ask me to run the analysis again.`;
+  }
+  const duplicate = excluded.find((e) => e.reason === 'duplicate' && e.label !== null && typeof e.duplicate_of_label === 'string');
+  if (duplicate !== undefined) {
+    return `'${duplicate.label}' sets exactly the same values as '${duplicate.duplicate_of_label}', so they are one `
+      + `option to the analysis, and that leaves fewer than two options to compare. Tell me what makes them different, `
+      + `or add another option, then ask me to run the analysis again.`;
+  }
+  if (excluded.some((e) => e.reason !== 'no_interventions')) {
+    return `I've left out the options that aren't fully modelled yet or repeat another option, and that leaves fewer `
+      + `than two options, so there's nothing to compare. Tell me what your other options change and I'll write them `
+      + `into the model, then ask me to run the analysis again.`;
+  }
+  return null;
 }
 
 /**
@@ -457,16 +587,30 @@ export function gateAnalysableOptions(
     const options = input.options.filter(isPlainObject);
     if (options.length !== input.options.length) return ungated;
 
-    const unanalysable = options.filter(hasEmptyInterventions);
+    // ⭐ B3: an option that declares what it does not model is INCOMPLETE and leaves first (with an identity — an
+    // option that cannot be named cannot be disclosed, so it stays to PLoT exactly as before); then, among the complete
+    // valued options, a second option with the same submitted vector is the SAME arm and leaves naming its twin.
+    const incomplete = new Map<Dict, readonly string[]>();
+    for (const opt of options) {
+      const missing = incompleteMissingOf(opt);
+      if (missing !== null && optionIdOf(opt) !== null) incomplete.set(opt, missing);
+    }
+    const valuedComplete = options.filter((o) => !incomplete.has(o) && !hasEmptyInterventions(o));
+    const duplicates = duplicateExclusions(valuedComplete, input.rawPersistedGraph ?? input.graph);
+
+    const unanalysable = options.filter((o) => !incomplete.has(o) && hasEmptyInterventions(o));
     // BYTE-STABLE NO-OP: every option is analysable, so there is nothing to
     // decide. The submitted set is the INPUT ARRAY BY REFERENCE.
-    if (unanalysable.length === 0) return ungated;
-    const analysable = options.filter((o) => !hasEmptyInterventions(o));
+    if (unanalysable.length === 0 && incomplete.size === 0 && duplicates.size === 0) return ungated;
+    const analysable = valuedComplete.filter((o) => !duplicates.has(o));
     // All-unanalysable is owned by the pre-PLoT `options_not_configured` guard
     // (`run-analysis.ts` §2.5), which tests the same emptiness predicate over
     // the same options and runs BEFORE this gate. The gate must never turn
     // "nothing was runnable" into an EMPTY submission.
-    if (analysable.length === 0) return ungated;
+    // ⚠ B3: that guard cannot see an INCOMPLETE option (it has a value), so this early return is kept ONLY for the
+    // pre-B3 shape. With an incomplete option present the exclusions below still run, and too few survivors is the
+    // run's own `insufficient_analysable_options` refusal — never a submission that ranks the incomplete option.
+    if (analysable.length === 0 && incomplete.size === 0 && duplicates.size === 0) return ungated;
 
     const holdValues = buildHoldFactorValues(input.graph, input.scaleNetEnabled);
     const edgeTargets = buildOptionFactorEdgeMap(input.graph);
@@ -490,6 +634,27 @@ export function gateAnalysableOptions(
     const submitted: Dict[] = [];
 
     for (const opt of options) {
+      const missing = incomplete.get(opt);
+      if (missing !== undefined) {
+        excluded.push({
+          option_id: optionIdOf(opt)!,
+          label: typeof opt.label === 'string' ? opt.label : null,
+          reason: 'incomplete',
+          missing: [...missing],
+        });
+        continue;
+      }
+      const twin = duplicates.get(opt);
+      if (twin !== undefined) {
+        excluded.push({
+          option_id: optionIdOf(opt)!,
+          label: typeof opt.label === 'string' ? opt.label : null,
+          reason: 'duplicate',
+          duplicate_of: optionIdOf(twin)!,
+          duplicate_of_label: typeof twin.label === 'string' ? twin.label : null,
+        });
+        continue;
+      }
       if (!hasEmptyInterventions(opt)) {
         submitted.push(opt);
         continue;

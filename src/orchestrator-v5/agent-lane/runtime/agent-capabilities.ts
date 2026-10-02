@@ -170,6 +170,10 @@ import { runWithApprovedAdoption } from '../approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../stated-link-band-context.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../../graph/repair-authored-edge.js';
 import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import {
+  mergeUnmodelledMechanisms, normaliseUnmodelledMechanisms, optionGapCardWords, optionGapsHeld, optionGapsOfLevelOps,
+  optionGapFields,
+} from '../unmodelled-mechanisms.js';
 import { inShareFrame, isShareFactor, relativeFigureAgainst } from '../relative-figure.js';
 import { newFactorScopeIn } from '../figure-scope.js';
 import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
@@ -2154,6 +2158,7 @@ export function createAgentCapabilities(
     const valueOps = parent.operations.filter((o) => o.op === 'set_factor_value');
     const levelOps = parent.operations.filter((o) => o.op === 'set_option_intervention');
     const linkOps = parent.operations.filter(isLevelLink);
+    const optionGaps = optionGapsOfLevelOps(levelOps);
     const pairOf = (path: string): { option_id: string; factor_id: string } => {
       const [option_id, factor_id] = path.split('::');
       return { option_id: option_id ?? '', factor_id: factor_id ?? '' };
@@ -2342,6 +2347,8 @@ export function createAgentCapabilities(
         levels,
         ...(values.length > 0 ? { values } : {}),
         ...(frames.length > 0 ? { frames } : {}),
+        // ⭐ B3: the approved declaration of what each option does not model yet, in the SAME commit as its levels.
+        ...(optionGaps.length > 0 ? { option_gaps: optionGaps } : {}),
       });
       if (res.status === 'unconfirmed') {
         // ⛔ The commit was attempted and could not be read back: neither saved nor refused (#1995's `not_confirmed`).
@@ -2366,7 +2373,8 @@ export function createAgentCapabilities(
         const holds = check !== null
           && levels.every((l) => heldLevelOf(check, l.option_id, l.factor_id) === l.value)
           && links.every((k) => check.edges.some((e) => e.from === k.option_id && e.to === k.factor_id))
-          && [...expectedValueOf].every(([id, v]) => (check.nodes.find((n) => n.id === id)?.observed_state as { value?: unknown } | undefined)?.value === v);
+          && [...expectedValueOf].every(([id, v]) => (check.nodes.find((n) => n.id === id)?.observed_state as { value?: unknown } | undefined)?.value === v)
+          && optionGapsHeld(check.nodes as unknown as ReadonlyArray<Record<string, unknown>>, optionGaps);
         if (!holds) {
           return {
             ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,
@@ -4135,6 +4143,8 @@ export function createAgentCapabilities(
       const notAccepted: { option: string; factor: string; value: unknown; reason: string }[] = [];
       /** Levels the Agent marked `user_stated` that the user never wrote: recorded as Olumi's, never as theirs. */
       const notWrittenByUser: { option: string; factor: string; value: unknown }[] = [];
+      /** ⭐ B3: each option's `unmodelled_mechanisms` declarations, in the order its levels named them. */
+      const declaredGaps = new Map<string, (readonly string[])[]>();
       const seen = new Set<string>();
       const set: {
         option: { id: string; label: string }; factor: { id: string; label: string };
@@ -4169,6 +4179,9 @@ export function createAgentCapabilities(
         }
         const option = optionRes.kind === 'one' ? optionRes.node : undefined;
         const factor = factorRes.kind === 'one' ? factorRes.node : undefined;
+        // ⭐ B3: what the Agent declares this option does NOT model yet, typed — kept per option (`unmodelled-mechanisms.ts`).
+        const gapDeclared = normaliseUnmodelledMechanisms(i?.unmodelled_mechanisms);
+        if (option !== undefined && gapDeclared !== undefined) declaredGaps.set(option.id, [...(declaredGaps.get(option.id) ?? []), gapDeclared]);
         if (option === undefined) {
           unresolved.push(`option "${asGiven.option}"`);
           notAccepted.push({ ...asGiven, reason: `No option in the model is labelled "${asGiven.option}". Use an option label exactly as get_canonical_state gives it.` });
@@ -4313,7 +4326,8 @@ export function createAgentCapabilities(
 
         const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
         const currentValue = typeof current === 'number' ? current : (current as { value?: unknown } | undefined)?.value;
-        if (currentValue === normalised || currentValue === raw) {
+        // ⭐ B3: a level already held still carries its option's declaration (the resolve path clears a gap with `[]`).
+        if ((currentValue === normalised || currentValue === raw) && gapDeclared === undefined) {
           unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
           continue;
         }
@@ -4343,6 +4357,12 @@ export function createAgentCapabilities(
 
       const ordered = [...set].sort((x, y) =>
         `${x.option.id}::${x.factor.id}` < `${y.option.id}::${y.factor.id}` ? -1 : 1);
+      // ⭐ B3: one declaration per option (all its levels' declarations merged), carried on every level op of that option.
+      const gapsByOption = new Map<string, string[]>();
+      for (const [optionId, declarations] of declaredGaps) {
+        const merged = mergeUnmodelledMechanisms(declarations);
+        if (merged !== undefined && ordered.some((i) => i.option.id === optionId)) gapsByOption.set(optionId, merged);
+      }
       // The links the levels need come first; each is written before any level (`applyCompound` step 2b).
       const linkOps: ProposalOperation[] = ordered.filter((i) => i.needsLink)
         .map((i) => ({ op: 'add_edge', path: `${i.option.id}::${i.factor.id}`, value: { link_for_level: true } }));
@@ -4354,8 +4374,10 @@ export function createAgentCapabilities(
           ...(i.unit !== '' ? { unit: i.unit } : {}),
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
+          ...(gapsByOption.has(i.option.id) ? { unmodelled_mechanisms: gapsByOption.get(i.option.id) } : {}),
         },
       }))];
+      const gapWords = [...gapsByOption].map(([optionId, m]) => optionGapCardWords(ordered.find((i) => i.option.id === optionId)!.option.label, m));
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4365,6 +4387,7 @@ export function createAgentCapabilities(
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
           ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${sayFigureExactly(i.raw, i.unit) ?? `${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`}`).join('; ') +
+          gapWords.map((w) => `; ${w}`).join('') +
           ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
@@ -4386,6 +4409,13 @@ export function createAgentCapabilities(
           stated_by: i.userStated ? 'user' : 'olumi_estimate',
         })),
         ...(unresolved.length > 0 ? { unresolved } : {}),
+        // ⭐ B3: what each option still does not model, typed — the user approves it with the levels, and the option stays
+        // out of the comparison (shown, with this reason) until it is modelled.
+        ...(gapsByOption.size > 0 ? {
+          not_modelled_yet: [...gapsByOption].map(([optionId, missing]) => ({ option: ordered.find((i) => i.option.id === optionId)!.option.label, missing })),
+          not_modelled_yet_note: 'Each option listed keeps its levels, and is recorded as not yet modelling what is listed: it stays out of '
+            + 'the comparison, shown with that reason, until it is modelled. Say so plainly; never call it compared or complete.',
+        } : {}),
         ...(linkOps.length > 0 ? {
           adds_links_note: 'Some levels are on a factor the option was not yet linked to: this ONE change also adds that link (marked adds_the_link), '
             + 'and the level is recorded right after it. Say so plainly. Never tell the user a level will be recorded later: it is in this change.',
@@ -4860,6 +4890,11 @@ export function createAgentCapabilities(
        * The per-value path stays only where no door is wired (never in the route, which always wires it).
        */
       if (opts.commitOptionLevels !== undefined && ops.length > 0 && ops.every((o) => o.op === 'set_factor_value')) {
+        return applyCompound(ctx, decision.proposal, before);
+      }
+      // ⭐ B3: levels that carry a declaration of what their option does not model go through the ONE door that writes
+      // both in the same commit (`option_gaps`); the per-level path below has no carrier for it.
+      if (opts.commitOptionLevels !== undefined && optionGapsOfLevelOps(ops).length > 0) {
         return applyCompound(ctx, decision.proposal, before);
       }
 
@@ -6225,9 +6260,11 @@ export function createAgentCapabilities(
        * and B" is ONE proposal the user approves once: every option is built into ONE held batch, and it lands
        * whole or not at all. A single option may still be sent without `options`.
        */
+      // ⭐ B3: each option's typed declaration of what it does NOT model yet travels with its spec (`unmodelled`).
       const askedSpecs = Array.isArray(args?.options) && args.options.length > 0
-        ? (args.options as unknown[]).map((o) => ({ label: String((o as { label?: unknown } | null)?.label ?? ''), acts_on: askedOf((o as { acts_on?: unknown } | null)?.acts_on) }))
-        : [{ label: String(args?.label ?? ''), acts_on: askedOf(args?.acts_on) }];
+        ? (args.options as unknown[]).map((o) => ({ label: String((o as { label?: unknown } | null)?.label ?? ''), acts_on: askedOf((o as { acts_on?: unknown } | null)?.acts_on),
+          unmodelled: normaliseUnmodelledMechanisms((o as { unmodelled_mechanisms?: unknown } | null)?.unmodelled_mechanisms) }))
+        : [{ label: String(args?.label ?? ''), acts_on: askedOf(args?.acts_on), unmodelled: normaliseUnmodelledMechanisms(args?.unmodelled_mechanisms) }];
       // A named Olumi suggestion already has an identity, links and levels. The user's request adopts its
       // participation in place; treating it as a new option would either clash or duplicate it. This branch
       // prepares a stored proposal only. The clicked card is checked again at authorisation.
@@ -6702,7 +6739,11 @@ export function createAgentCapabilities(
           const l = newGradedLevels.get(a.key);
           return l !== undefined ? { factor_key: a.key, ...l.iv } : { factor_key: a.key, value: null, ...linkAuthor(a.label) };
         });
-        return { plan, set, newGradedLevels, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added] } };
+        // ⭐ B3: the declared gaps ride on the option's own add (`add-option-transaction.ts`), so it is admitted as incomplete
+        // from its first commit — never ranked as complete in between.
+        const gaps = spec.unmodelled !== undefined ? optionGapFields(plan.label, spec.unmodelled) : null;
+        return { plan, set, newGradedLevels, entry: { label: plan.label, option_id: plan.optionId, interventions: [...interventions, ...added],
+          ...(gaps !== null ? gaps : {}) } };
       });
       if (switchLevelConflicts.length > 0) {
         const entriesNaming = (option: string, factor: string): number =>
@@ -6935,6 +6976,13 @@ export function createAgentCapabilities(
           ? { option: { label: described[0]!.label, linked_from: described[0]!.linked_from, acts_on: described[0]!.acts_on }, levels: described[0]!.levels }
           : { options: described }),
         ...(levelsNotSet.some((l) => labels.includes(l.option)) ? { levels_not_set: levelsNotSet.filter((l) => labels.includes(l.option)) } : {}),
+        // ⭐ B3: what each option in this change does NOT model yet, recorded on it with the add.
+        ...(kept.some(({ entry }) => (entry.unresolved_targets?.length ?? 0) > 0) ? {
+          not_modelled_yet: kept.filter(({ entry }) => (entry.unresolved_targets?.length ?? 0) > 0)
+            .map(({ plan, entry }) => ({ option: plan.label, missing: entry.unresolved_targets! })),
+          not_modelled_yet_note: 'Each option listed is added recorded as not yet modelling what is listed: it stays out of the '
+            + 'comparison, shown with that reason, until it is modelled. Say so plainly; never call it compared or complete.',
+        } : {}),
         // A placeholder 0 on the only entry naming a new switch was no level: the option turns the switch on.
         ...(switchPlaceholderRead.some((d) => labels.includes(d.option)) ? {
           switch_placeholder_levels_read_as_on: switchPlaceholderRead.filter((d) => labels.includes(d.option)),
