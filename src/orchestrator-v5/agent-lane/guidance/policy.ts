@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ 734de2c98790dd010873448e855bd11ab219b836.
+// programme-docs @ aa42943f626579b96434ba5884bb9e2f77e8c6cd.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -1048,7 +1048,7 @@ export const POLICY = {
           "source": "MG 5939414835"
         }
       ],
-      "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD + C1: 'That was what held the comparison back, so Olumi can now compare the options.' | UNWITHHELD otherwise: 'Olumi can now compare the options.' + the case line | C2: 'Olumi can’t confirm both runs used the same draw, so the difference can’t be put down to your edit alone.' | C3/C4 (recorded difference): 'Other things also differed between these two runs, so the difference can't be put down to your edit alone.' | partial coverage or C5_unattributed: 'Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
+      "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD + C1: 'That was what held the comparison back, so Olumi can now compare the options.' | UNWITHHELD otherwise: 'Olumi can now compare the options.' + the case line | C2: 'Olumi can’t confirm both runs used the same draw, so the difference can’t be put down to your edit alone.' | C3/C4 (recorded difference): 'Other things also differed between these two runs, so the difference can’t be put down to your edit alone.' | partial coverage or C5_unattributed: 'Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
       "change_label_templates": {
         "accept_olumi_estimate": {
           "when": "run_delta.input_changes[] row with field 'sizing', before 'placeholder', after 'olumi_accepted'",
@@ -1077,11 +1077,11 @@ export const POLICY = {
         "sentences": "When change_labels are sentences, {changes} = those sentences joined, then the case line (never 'You changed You accepted…').",
         "C2_unpaired": "Olumi can’t confirm both runs used the same draw, so the difference can’t be put down to your edit alone.",
         "why": "'a new draw' is false for engine drift (MG 5939033153), and C2 is assigned whenever the draw is NOT shown equal, including an unrecorded draw structure, so C2 says Olumi can't confirm the same draw. 'Other things also differed' is only for RECORDED differences (C3, C4); partial coverage and C5_unattributed say Olumi can't confirm nothing else differed (52f8cd HIGH PR, Codex round 3, MG/DL wording).",
-        "C3_C4_recorded": "Other things also differed between these two runs, so the difference can't be put down to your edit alone.",
+        "C3_C4_recorded": "Other things also differed between these two runs, so the difference can’t be put down to your edit alone.",
         "unverified": "Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone."
       }
     }
   }
 } as const;
 
-export const SPEC_SHA = "734de2c98790dd010873448e855bd11ab219b836";
+export const SPEC_SHA = "aa42943f626579b96434ba5884bb9e2f77e8c6cd";

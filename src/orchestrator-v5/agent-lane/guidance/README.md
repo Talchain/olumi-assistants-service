@@ -1,7 +1,7 @@
 # Guidance selector leaf — INERT
 
 Policy source: Talchain/olumi-programme-docs, rc/reasoning-coach-20261001 @
-`734de2c98790dd010873448e855bd11ab219b836` (board #85; T1 re-pin, REASONING COACH lease 5937451355).
+`aa42943f626579b96434ba5884bb9e2f77e8c6cd` (board #85; T1 re-pin, REASONING COACH lease 5937451355).
 
 The adjacent policy JSON and the acceptance fixture are byte-identical to that commit (35 cases, 29 checker
 fixtures). `policy.ts` contains its typed selection, row, copy and method-turn constants; tests assert their
