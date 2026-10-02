@@ -857,7 +857,7 @@ function perOneRangeRule(written: string): string {
  * ⛔ A STATED CHANGE IS NOT A RANGE (DL + CODEX follow-up on #2506; MG lease 5946766696): "we'll raise the price from X to Y"
  * moves ONE quantity between two levels, which a draft holds as option levels, never as a size per one, so the first pass
  * gives it no per-one note. Read narrowly: "from <low> to <high>" with a change word at most six words before "from", in
- * the same sentence. A spread ("anywhere / ranging / varying from") is never a change. Anything else keeps its note, the
+ * the same clause. A spread ("anywhere / ranging / varying from") is never a change. Anything else keeps its note, the
  * fail-safe default (the note itself says "draw it as you otherwise would"). The retry is unchanged: its `heldAsOne`
  * reads the draft, which a first pass does not have.
  */
@@ -878,7 +878,9 @@ const CHANGE_WORDS = [
 const CHANGE_THEN_FROM = new RegExp(`\\b(?:${CHANGE_WORDS.join('|')})\\b(?:\\s+\\S+){0,6}\\s+from\\s*$`, 'i');
 const SPREAD_THEN_FROM = /\b(?:anywhere|anything|range|ranges|ranged|ranging|vary|varies|varied|varying)\s+from\s*$/i;
 function statedChange(brief: string, r: StatedRange): boolean {
-  const sentence = brief.slice(0, r.low.index).split(/[.!?](?=\s)|\n/).pop() ?? '';
+  // The CLAUSE the range is written in: a sentence, or a part of one after ";" (CODEX CEE BUDDY 5946882195: "Raise awareness;
+  // deals run from X to Y" governs nothing).
+  const sentence = brief.slice(0, r.low.index).split(/[.!?](?=\s)|[;\n]/).pop() ?? '';
   const joint = brief.slice(r.low.index + r.low.matchedText.length, r.high.index);
   return /^\s*to\s*$/i.test(joint) && CHANGE_THEN_FROM.test(sentence) && !SPREAD_THEN_FROM.test(sentence);
 }

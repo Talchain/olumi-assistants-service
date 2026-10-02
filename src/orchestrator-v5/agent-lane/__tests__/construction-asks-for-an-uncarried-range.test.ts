@@ -329,6 +329,13 @@ describe('A4 first pass: the written range is asked of the FIRST construct', () 
     expect(noted('We are targeting £1m to £2m in new ARR by December.')).toEqual(['£1m to £2m']);
   });
 
+  it('SMALLEST PAIR (CODEX CEE BUDDY 5946882195): "Raise price from £49 to £59" → no note; "Price ranges from £49 to £59" → note', () => {
+    expect(noted('Raise price from £49 to £59.')).toEqual([]);
+    expect(noted('Price ranges from £49 to £59.')).toEqual(['£49 to £59']);
+    // A change word in an ADJACENT clause governs nothing here.
+    expect(noted('Raise awareness; deals run from £1m to £2m.')).toEqual(['£1m to £2m']);
+  });
+
   it('CONTROL: a SPREAD written with "from" keeps its note, even beside a change word ("can go anywhere from", "ranging from")', () => {
     expect(noted('Deal sizes can go anywhere from £1m to £2m.')).toEqual(['£1m to £2m']);
     expect(noted('We sell to firms with deals ranging from £1m to £2m.')).toEqual(['£1m to £2m']);
