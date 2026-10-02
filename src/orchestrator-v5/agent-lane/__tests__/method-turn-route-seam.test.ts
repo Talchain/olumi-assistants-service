@@ -27,7 +27,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {
 
 type Chip = { id: string; label: string; message: string; action_type?: string };
 type Body = { assistant_text: string; suggested_actions: Chip[]; _agent: { tool_calls: { name: string; ok: boolean }[] } };
-type Sent = { instructions: string; tools: { name: string }[]; input: unknown[] };
+type Sent = { instructions: string; tools: { name: string }[]; input: unknown[]; model?: string; reasoning?: { effort?: string }; max_output_tokens?: number };
 
 const SERVED = JSON.parse(readFileSync(new URL('../turn-context/__tests__/fixtures/rc-served-signal-cases.json', import.meta.url), 'utf8')) as { cases: { id: string; capture_sha_matches_case: boolean; body: Record<string, any> }[] };
 const D1 = SERVED.cases.find((c) => c.id === 'A-Q-D1-BUILD')!;
@@ -305,5 +305,22 @@ describe('T3 method turn on the live Agent route (served D1)', () => {
       expect(said, 'history = wire').toEqual([b.assistant_text]);
       expect(rows.get(`${SCENARIO}:${turnId}`)?.assistant_message, 'answer row = wire').toBe(b.assistant_text);
     }
+  });
+  it('ROW R12 (M3 latency, RC T1 map item 5): the method call runs on the banked INTERPRET budget (Sol, effort low), never the coach\'s conversation budget; CONTROL: an ordinary question keeps it', async () => {
+    const { budgetFor, interpretBudget } = await import('../model-budgets.js');
+    const conversation = budgetFor('gpt-6.1-sol', 'conversation');
+    const interpret = interpretBudget();
+    expect(conversation.reasoning_effort, 'vacuity: the two banked budgets differ').not.toBe(interpret.reasoning_effort);
+    reply = 'In the current model, the link matters.';
+    await ask('What do you make of this?');
+    expect(sent[0].reasoning?.effort, 'an ordinary turn on a built model: the conversation budget').toBe(conversation.reasoning_effort);
+    sent = [];
+    nextScenario();
+    reply = GOOD;
+    await pick();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].model).toBe(interpret.model);
+    expect(sent[0].reasoning?.effort).toBe(interpret.reasoning_effort);
+    expect(sent[0].max_output_tokens).toBe(interpret.max_output_tokens);
   });
 });
