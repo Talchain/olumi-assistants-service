@@ -247,6 +247,24 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     }
   }, 120_000);
 
+  it('W-R8 (DL P1): an EARLIER user figure equal to a Widen level never makes it the user\u2019s — Approve stores Olumi\u2019s estimate (cee_hypothesis)', async () => {
+    seeded();
+    const agent_session_id = `sess-${SCENARIO}`;
+    await turn({ message: 'Our price used to be £45.', agent_session_id });
+    script = [() => fnCall('propose_new_option', { options: [
+      { label: 'Cut price to win share', acts_on: [{ factor_label: 'Price', direction: 'negative', level: { value: 45, unit: 'GBP', estimate: true, basis: 'just below today’s £49' } }] },
+    ], rationale: 'A different mechanism from the two price rises.' })];
+    const t1 = await turn({ message: WIDEN.message, source: 'chip', chip: { id: WIDEN.id }, agent_session_id });
+    const approve = approveChipOf(t1);
+    expect(approve?.id, JSON.stringify(t1.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_/);
+    expect(t1.assistant_text).not.toMatch(/your (own )?(figure|estimate)/i);
+    await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id }, agent_session_id });
+    const node = graphNow().nodes.find((x) => x.kind === 'option' && x.label === 'Cut price to win share')!;
+    const cell = (node as unknown as { interventions: Record<string, Record<string, unknown>> }).interventions['fac_price']!;
+    expect(cell['raw_value']).toBe(45);
+    expect(cell['source'], JSON.stringify(cell)).toBe('cee_hypothesis');
+  }, 120_000);
+
   it('W-R2 REFUSED (identity, not wording): a reworded copy of a current option is refused INSIDE the door — no hold, no approve chip, RC’s fallback', async () => {
     seeded();
     const before = optionLabels();

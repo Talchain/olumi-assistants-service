@@ -394,7 +394,7 @@ export function stillValidOffers(
   // The next steps stay while the result is still current and no approval is waiting (process-local, like the
   // next step after a blocked Run: after a restart the replay carries the words only).
   const nextSteps = offersNextSteps(now.analysisState) && now.outstandingProposalIds.size === 0
-    ? offered.filter((a) => NEXT_STEP_CHIP_IDS.has(a.id)) : [];
+    ? offered.filter((a) => METHOD_PRESS_IDS.has(a.id)) : [];  // Widen sits in a next step's place (DL P2 on #2512)
   return [...approvals, ...(approvals.length > 0 ? [AMEND_CHIP] : []), ...(run ? [RUN_OFFER_CHIP] : []), ...(nextStep ? [NEXT_STEP_AFTER_BLOCKED_RUN_CHIP] : []), ...(startingAssumptions ? [SUGGEST_STARTING_ASSUMPTIONS_CHIP] : []), ...(rebuild ? [REBUILD_AFTER_TOO_LARGE_CHIP] : []), ...nextSteps];
 }
 const sessions = new SessionBindingRegistry();
@@ -2563,8 +2563,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
                 detail: 'Only one set of suggestions per press (WD-COUNT). Nothing was changed.' };
             }
             widenGateResult = widenGate(widenRun, gateArgs);
+            // ⛔ SERVER-OWNED ORIGIN (DL P1 on #2512): a Widen press carries no user-written figure, so every level it
+            // proposes is Olumi's ESTIMATE. The session's earlier words ("Price was £45") must never make it "yours".
             return widenGateResult.ok
-              ? capabilities.proposeNewOption(gateCtx, gateArgs)
+              ? capabilities.proposeNewOption({ ...gateCtx, user_text: '' }, gateArgs)
               : { ok: false, mutated: false, refusal: WIDEN_GATE_REFUSAL,
                   detail: `These suggestions did not pass Olumi’s checks (${widenGateResult.failed.join(', ')}). Nothing was changed.` };
           },

@@ -175,6 +175,12 @@ describe('the helpers', () => {
     expect(stillValidOffers(NEXT_STEP_CHIPS, now(STALE))).toEqual([]);
     expect(stillValidOffers(NEXT_STEP_CHIPS, now(undefined))).toEqual([]);
     expect(stillValidOffers(NEXT_STEP_CHIPS, now(CURRENT, ['prop_x']))).toEqual([]);
+    // DL P2 on #2512: Widen offered in a next step's place survives a retry on an unchanged result (3 chips stay 3).
+    const { nextStepsWithWiden } = await import('../method-turn/widen-turn.js');
+    const withWiden = nextStepsWithWiden(NEXT_STEP_CHIPS, true);
+    expect(stillValidOffers(withWiden, now(CURRENT)).map((a) => a.id)).toEqual(withWiden.map((a) => a.id));
+    expect(withWiden.map((a) => a.id)).toContain('agent-next-widen');
+    expect(stillValidOffers(withWiden, now(STALE))).toEqual([]);
     expect(stillValidOffers([], now(CURRENT)), 'never offered → never replayed').toEqual([]);
   });
 
