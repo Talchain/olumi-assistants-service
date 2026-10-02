@@ -210,7 +210,8 @@ describe('(2) confirm_current from a band: the whole strength is kept (#2473 CR)
     expect(edge).not.toHaveProperty('exists_defaulted');
     expect(edge.exists_probability).toBe(0.8);
     expect(edge.effect_direction).toBe('positive');
-    expect(result.kind === 'mutated' && result.response.assistant_text).toContain('Confirmed the current strength');
+    // R3 5942069984: the stored link is Olumi's estimate, accepted — the receipt says so (RC's accept_olumi_estimate).
+    expect(result.kind === 'mutated' && result.response.assistant_text).toBe("You accepted Olumi's estimate for how much Price sensitivity changes Monthly churn.");
   });
 
   it('#2473: the ONLY analysis input that moves is the placeholder’s sizing (L4) — never the std', async () => {

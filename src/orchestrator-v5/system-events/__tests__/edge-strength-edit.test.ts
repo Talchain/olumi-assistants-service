@@ -285,8 +285,9 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
     expect(confirmed.provenance_display).toBe('ai_inferred');
     expect((confirmed.provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm' });
     expect(result.handlerFacts[0]).toMatchObject({ noop: true });
+    // R3 5942069984: the stored link stays Olumi's (cee_hypothesis, no sizing marker) — the receipt claims no authorship.
     expect(result.response.assistant_text).toContain('Confirmed the current strength');
-    expect(result.response.assistant_text).toContain('as your judgement');
+    expect(result.response.assistant_text).not.toContain('your judgement');
     expect(result.response.assistant_text).not.toMatch(/positive|negative|0\./i);
     expect(result.response.assistant_text).not.toContain('Adjusted');
     expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(beforeAnalysisHash);
@@ -352,7 +353,7 @@ describe('applyEdgeStrengthEdit — canonical adapter', () => {
       expect(confirmed.provenance_display).toBeUndefined();
       expect(confirmed.provenance?.natural_effect).toStrictEqual(edgeIn(graph).provenance!.natural_effect);
       expect(confirmed.provenance?.magnitude).toBe('olumi_estimate');
-      expect(result.response.assistant_text).toContain('Confirmed the current strength');
+      expect(result.response.assistant_text).toBe("You accepted Olumi's estimate for how much Marketing budget changes Revenue.");
       expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(beforeAnalysisHash);
       // The persisted bytes the dispatcher writes, not only the parsed view.
       const persistedEdge = (result.mutatedGraph as { edges: Array<Record<string, unknown>> }).edges.find(

@@ -18,6 +18,7 @@ import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-cha
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
+import { acceptedOlumiEstimateSentence } from '../rerun-explanation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
@@ -179,7 +180,7 @@ import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
-import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
+import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from '../../tools/handlers/d1-shared/normalise-factor-value.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
@@ -202,7 +203,7 @@ import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLe
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import type { NotSavedValue } from '../write-outcome.js';
+import { quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
@@ -2630,13 +2631,26 @@ export function createAgentCapabilities(
         detail: 'These links were sent as one change, but reading the model back did not show all of them as approved. Say exactly that; never say they were recorded or not recorded.' };
     }
     proposals.markApplied(parent.proposal_id, receipts);
-    const olumis = sent.filter((l) => l.author === 'model_proposed').length;
+    /**
+     * ⭐ M1 ACCEPT RECEIPT (DL 5942097719; Codex pre-review 2 P1): whose figure each link holds is read off the STORED link
+     * after the write (`linkSizing`), never off the card. Every link stored `olumi_accepted` says RC's accept sentence (the
+     * one the system-event receipt and the M2 rerun line say); only a link stored as the user's is "your estimate"; any
+     * other claims nobody. Labels are quoted: this is shown through `withoutAgentDirections`, where an unquoted
+     * "Size of the user base" or `cost_per_hire` would drop the sentence.
+     */
+    const storedSizing = (l: { from: string; to: string }) => linkSizing(check!.edges.find((x) => x.from === l.from && x.to === l.to));
+    const quotedLabel = (id: string): string => quoteLabelForUser(labelOf(id));
+    const parts = sent.map((l) => `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
+    const accepted = sent.filter((l) => storedSizing(l) === 'olumi_accepted').map((l) => acceptedOlumiEstimateSentence(quotedLabel(l.from), quotedLabel(l.to)));
+    // Olumi's estimates as STORED (Codex pre-review 3 P1): a model-proposed link the sizer never marked (`unmarked`) is no one's.
+    const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate', 'placeholder'].includes(storedSizing(l))).length;
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
-      follow_up: `${parent.public_label.replace(/^Record /, 'Recorded ')}.`
-        + (olumis > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
+      follow_up: `Recorded ${sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
+        + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
+        + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
   };
@@ -2880,8 +2894,11 @@ export function createAgentCapabilities(
             + 'Give "direction" only when the user said it runs the other way, with their exact words in "direction_from_words": words that themselves say which way it runs.' };
       }
       const currentBand = edgeBandFromMagnitude(Math.abs(mean));
-      // Already in the band the user named, pushing the same way: KEEP the figure, record it as theirs.
+      // Already in the band the user named, pushing the same way: KEEP the figure. A confirm is REVIEW, never authorship
+      // (R11): the writer keeps who sized the link, so only a link the user ALREADY sized may be called theirs (M1 Accept
+      // receipt, R3 5942069984; DL 5942097719 — on Olumi's estimate it lands `olumi_accepted`, Olumi's figure).
       const confirm = currentBand === band && wanted === current;
+      const keptIsTheirs = linkSizing(edge) === 'user';
       const magnitude = confirm ? Math.abs(mean) : bandMidpoint(band);
       const value = {
         magnitude,
@@ -2901,7 +2918,7 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
-          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate (its strength stays as it is)`
+          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}${keptIsTheirs ? ', as your own estimate' : ''} (its strength stays as it is)`
           : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`,
         ...(interpretation === undefined ? {} : { interpretation }),
       });
@@ -2915,7 +2932,9 @@ export function createAgentCapabilities(
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
-          ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
+          ? (keptIsTheirs
+            ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
+            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },
@@ -3194,6 +3213,15 @@ export function createAgentCapabilities(
       const whose = (x: Shown): string => x.yours
         ? (x.keeps ? 'reviewed by you, kept as it is' : 'your estimate')
         : 'Olumi\u2019s estimate';
+      /**
+       * Whose figure each link holds AFTER the approval (M1 Accept receipt, Codex pre-review P2): naming the band a link
+       * already sits in is review (R11), never authorship — the writer keeps who sized it, so a kept link is the user's
+       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its two literals are a typed contract
+       * (`proposal-reply.ts` `LINK_WHOSE`, fail-closed on any other).
+       */
+      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' =>
+        x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours' : 'Olumi\u2019s estimate';
+      const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user').length;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -3214,13 +3242,16 @@ export function createAgentCapabilities(
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
         links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), sizing: x.sizedBefore },
-          becomes: { band: linkBandWord(x.band) }, whose: x.yours ? 'yours' : 'Olumi\u2019s estimate', keeps_current_strength: x.keeps })),
+          becomes: { band: linkBandWord(x.band) }, whose: whoseFigure(x), keeps_current_strength: x.keeps })),
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
         note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
           + (definitional.length > 0 ? 'Some links were left out because a calculation the model declares defines them (`left_out_definitional`): say so in those words, and never offer to change them. ' : '')
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
+            : '')
+          + (keptNotTheirs > 0
+            ? `${keptNotTheirs === shown.length ? 'Every link here' : `${keptNotTheirs} of these links`} already sits in the band the user named, so approving records only their review: its strength is kept exactly as it is and is never the user\u2019s own (\`whose\`). `
             : '')
           + (reEstimated.length > 0
             ? `${reEstimated.length === shown.length ? 'Every link here' : `${reEstimated.length} of these links`} already held Olumi\u2019s estimate (\`was.sizing\`), so this REPLACES an earlier estimate; it does not size a placeholder: never call ${reEstimated.length === 1 ? 'it a placeholder' : 'them placeholders'}. The links nobody has sized are the ones whose \`sizing\` is \`placeholder\` in the model state. `
@@ -4514,14 +4545,35 @@ export function createAgentCapabilities(
          * `bdba963b`): one click on "Record this link" showed this `follow_up` verbatim — "Recorded as the user's own
          * estimate: … Offer to run the analysis again so they can see what it changes." The typed-approval fast path
          * shows `follow_up` to the user and no model reads the result there; on the loop path the Agent reads both.
-         * So the sentence the user reads is addressed to them (the label already says "as your own estimate"), and
-         * the next step for the Agent stays in `note`, where only the Agent reads it.
+         * So the sentence the user reads is addressed to them, and the next step for the Agent stays in `note`, where
+         * only the Agent reads it.
          */
+        /**
+         * ⭐ M1 ACCEPT RECEIPT (R3 5942069984; DL 5942097719): WHOSE FIGURE IS READ OFF THE STORED LINK after the write
+         * (`linkSizing`, F1b's one predicate), never off the card. A confirm is review (R11), so on Olumi's estimate it
+         * lands `olumi_accepted` and says RC's accept sentence — the one the system-event receipt and the M2 rerun line
+         * say (`formatEdgeStrengthConfirmed`). Only a link the user sized is "your own estimate"; any other claims nobody.
+         */
+        const storedEdge = after.edges.find((e) => e.from === fromId && e.to === toId);
+        const sizing = storedEdge === undefined ? undefined : linkSizing(storedEdge);
+        const fromLabel = after.nodes.find((n) => n.id === fromId)?.label;
+        const toLabel = after.nodes.find((n) => n.id === toId)?.label;
+        const followUp = sizing === 'user'
+          ? `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`
+          : typeof fromLabel === 'string' && typeof toLabel === 'string'
+            // Quoted: shown through `withoutAgentDirections`, where an unquoted label can drop the sentence (Codex P2).
+            ? formatEdgeStrengthConfirmed({ fromLabel: quoteLabelForUser(fromLabel), toLabel: quoteLabelForUser(toLabel), sizing })
+            : 'Recorded your review of this link; its strength stays as it was.';
+        const whoseNote = sizing === 'user'
+          ? 'Recorded as the user’s own estimate.'
+          : sizing === 'olumi_accepted'
+            ? 'Recorded as the user’s review: the strength stays Olumi’s estimate, which they accepted. Never call it their own.'
+            : 'Recorded as the user’s review: the strength stays exactly as it was, and who sized it did not change. Never call it their own.';
         return {
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-          follow_up: `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`,
-          note: 'Recorded as the user’s own estimate. Offer to run the analysis again so they can see what it changes.',
+          follow_up: followUp,
+          note: `${whoseNote} Offer to run the analysis again so they can see what it changes.`,
         };
       }
 
