@@ -177,20 +177,46 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
  */
 describe('the UNWITHHELD line credits the change ONLY on a C1 pair; an unknown difference is never said as observed', () => {
   const NEUTRAL = RERUN_NO_CHANGE_LINES.unwithheld;
+  const UNSURE = 'Olumi can’t confirm nothing else differed between the two Runs';
   it.each([
     ['C0 complete', 'C0_identical', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.C0}`],
     ['C1 complete (the investor moment)', 'C1_attributable', 'complete', RERUN_FALLBACK_LINES.unwithheld],
-    ['C2 new draw', 'C2_unpaired', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.C2}`],
+    ['C2 draw not shown equal', 'C2_unpaired', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.C2}`],
     ['C3 engine drift (recorded)', 'C3_engine_drift', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.other}`],
     ['C4 budget drift (recorded)', 'C4_budget_drift', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.other}`],
     ['C5 unattributed (unknown)', 'C5_unattributed', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`],
-    ['C1 but PARTIAL coverage (unknown)', 'C1_attributable', 'partial', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`],
-    ['C3 and PARTIAL coverage', 'C3_engine_drift', 'partial', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`],
+    ...(['C0_identical', 'C1_attributable', 'C2_unpaired', 'C3_engine_drift', 'C4_budget_drift', 'C5_unattributed'] as const)
+      .map((c) => [`${c} with PARTIAL coverage (unknown)`, c, 'partial', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`] as const),
   ])('prior_withheld + a named change, %s → the exact line; RC\'s check passes', (_n, attribution_case, input_coverage, tail) => {
     const p = plan({ ...UNWITHHELD, attribution_case, input_coverage, input_changes: [AI] })!;
     expect(p.codeLine).toBe(`${SAID_AI} ${tail}`);
     if (attribution_case !== 'C1_attributable' || input_coverage !== 'complete') expect(p.codeLine).not.toContain(RERUN_FALLBACK_LINES.unwithheld);
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it('RED (CODEX on 3d0891e2): a C2 pair never asserts "a new draw" — the draw may only be unrecorded; Olumi can\'t confirm it was the same', () => {
+    const p = plan({ ...PAIRED, attribution_case: 'C2_unpaired', input_changes: [AI] })!;
+    expect(p.codeLine).toBe(`${SAID_AI} Olumi can’t confirm both runs used the same draw, so the difference can’t be put down to your edit alone.`);
+    expect(p.codeLine).not.toContain('new draw');
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  // The model's premise per case, on a PAIRED (not withheld) delta with a named change — each must be TRUE of its case.
+  it.each([
+    ['C0 complete + NO change: identity is proven', { ...PAIRED, attribution_case: 'C0_identical', input_changes: [] }, 'Nothing differed between the two Runs', ['Other things also differed', UNSURE]],
+    ['C1 complete', { ...PAIRED, input_changes: [AI] }, 'You may say what moved', ['Other things also differed', UNSURE]],
+    ['C2 complete: the draw is not shown equal', { ...PAIRED, attribution_case: 'C2_unpaired', input_changes: [AI] }, 'Olumi can’t confirm both Runs used the same draw', ['Other things also differed', 'new draw']],
+    ['C3 complete: a recorded engine difference', { ...PAIRED, attribution_case: 'C3_engine_drift', input_changes: [AI] }, 'Other things also differed between the two Runs', [UNSURE]],
+    ['C4 complete: a recorded budget difference', { ...PAIRED, attribution_case: 'C4_budget_drift', input_changes: [AI] }, 'Other things also differed between the two Runs', [UNSURE]],
+    ['C5 complete: unattributed', { ...PAIRED, attribution_case: 'C5_unattributed', input_changes: [AI] }, UNSURE, ['Other things also differed']],
+    ['C0 PARTIAL', { ...PAIRED, attribution_case: 'C0_identical', input_coverage: 'partial', input_changes: [AI] }, UNSURE, ['Other things also differed', 'Nothing differed']],
+    ['C2 PARTIAL', { ...PAIRED, attribution_case: 'C2_unpaired', input_coverage: 'partial', input_changes: [AI] }, UNSURE, ['Other things also differed']],
+    ['C4 PARTIAL', { ...PAIRED, attribution_case: 'C4_budget_drift', input_coverage: 'partial', input_changes: [AI] }, UNSURE, ['Other things also differed']],
+    ['C5 PARTIAL', { ...PAIRED, attribution_case: 'C5_unattributed', input_coverage: 'partial', input_changes: [AI] }, UNSURE, ['Other things also differed']],
+  ])('the model instruction is true of its case: %s', (_n, delta, says, never) => {
+    const p = plan(delta)!;
+    expect(p.instruction).toContain(says);
+    for (const n of never) expect(p.instruction).not.toContain(n);
   });
 
   it('RED (MG 5943403202): an UNWITHHELD pair with PARTIAL coverage never says "Other things also differed" — Olumi can\'t confirm', () => {

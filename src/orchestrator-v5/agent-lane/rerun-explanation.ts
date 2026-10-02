@@ -47,7 +47,9 @@ const strengthMoved = (from: string, to: string, before: string, after: string) 
 /** RC's fallback case lines (policy `fallback`); C3–C5 never say "a new draw" (it may be the engine that differed). */
 export const RERUN_FALLBACK_LINES = {
   unwithheld: 'That was what held the comparison back, so Olumi can now compare the options.',
-  C2: 'This run also used a new draw, so the difference can’t be put down to your edit alone.',
+  // C2 = the draw is NOT shown equal: a recorded new draw OR an unrecorded draw structure (`build-run-delta.ts` classifier).
+  // Only "can't confirm" is true of both (CODEX on 3d0891e2 P1; RC to mirror in policy `fallback`).
+  C2: 'Olumi can’t confirm both runs used the same draw, so the difference can’t be put down to your edit alone.',
   other: 'Other things also differed between these two runs, so the difference can’t be put down to your edit alone.',
   /** Unknown, not observed (MG 5943403202; CODEX on b6e52dbc P1): partial coverage or an unattributed pair. */
   unverified: 'Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone.',
@@ -205,9 +207,14 @@ export function rerunExplanationPlan(
         ? 'No option has figures in both Runs, so never say anything rose, fell or moved; say only what this Run shows.'
         : inputs.attribution_case === 'C1_attributable'
           ? 'You may say what moved in the comparison.'
-          : differenceUnknown
-            ? 'Olumi can’t confirm nothing else differed between the two Runs, so never say the change caused the difference.'
-            : 'Other things also differed between the two Runs, so never say the change caused the difference.',
+          // Each premise is TRUE of its case (CODEX on 3d0891e2 P1): C0 + complete proves identity; C2 leaves the draw unshown.
+          : wireCase === 'C0_identical'
+            ? 'Nothing differed between the two Runs, so never say anything moved because of a change.'
+            : differenceUnknown
+              ? 'Olumi can’t confirm nothing else differed between the two Runs, so never say the change caused the difference.'
+              : wireCase === 'C2_unpaired'
+                ? 'Olumi can’t confirm both Runs used the same draw, so never say the change caused the difference.'
+                : 'Other things also differed between the two Runs, so never say the change caused the difference.',
   ].join('\n');
   return { inputs, changes, codeLine, instruction, fallback: codeLine };
 }
