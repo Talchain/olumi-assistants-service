@@ -58,7 +58,19 @@ const CONTRARY_SAME = new RegExp(String.raw`\b(nothing(?:'s| has| had)? changed|
  * COMPARISON-ANSWER's pair-context gate (Compare audit rx-fp.mjs, measured): a sentence is about the comparison only when it
  * names two Runs, a rerun or a change between Runs. "Nothing has changed yet." about a held write is true and kept.
  */
-const PAIR_CONTEXT = /\b(since the (last|previous|earlier) (run|analysis)|between (the|these|both) (two )?(runs|analyses)|(last|previous|earlier|first|second|new) (run|analysis)|re-?ran|re-?run|this run|this time|compared with|than before|than last time)\b/iu;
+export const PAIR_CONTEXT = /\b(since the (last|previous|earlier) (run|analysis)|between (the|these|both) (two )?(runs|analyses)|(last|previous|earlier|first|second|new) (run|analysis)|re-?ran|re-?run|this run|this time|compared with|than before|than last time)\b/iu;
+/**
+ * COMPARISON-ANSWER's bans. The cause class is RX's plus the plain connectives ("because the rate was raised"): it runs only
+ * on a sentence about the two Runs, where any stated reason for the difference is a cause claim.
+ */
+const COMPARISON_CAUSE = /\b(because|due to|as a result of|caused|led to|driven by|thanks to|(?:is|was|comes?|came) down to|explained by|held (?:the|its) comparison back)\b/iu;
+const RX_CAUSE = /\b(because (you|of your)|caused|due to your|as a result of your|led to|held (the|its) comparison back)\b/iu;
+/** A sentence about the result having changed, or about the difference itself. */
+const RESULT_CHANGED = /\b((result|answer|comparison|ranking|outcome|figure|number|chance|order)s? (has |have |had )?(changed|moved|shifted|flipped|differs?|differed)|the difference|differen(t|ce) (now|this time))\b/iu;
+/** A sentence about a write that is held or was refused: "Nothing has changed yet", "…refused…; nothing changed". */
+const PENDING_WRITE = /\b(yet|until you|once you|approv(e|al|ed)|refused|rejected|couldn'?t|could not|(cannot|can'?t) (record|save)|wasn'?t (saved|recorded)|not (saved|recorded))\b/iu;
+const MOVEMENT = /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu;
+const NOISE = /\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\b/iu;
 /** WHOLE-TOKEN match after normalise(): label 'B' never matches inside another word (HARNESS #2478 P1). */
 function labelMatches(text: string, labels: readonly string[]): boolean {
   const normal = ` ${normalise(text)} `;
@@ -135,19 +147,29 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('RX-NO-MOVEMENT-WITHOUT-PRIOR', !(inputs.prior_withheld === true || inputs.no_matched_figures === true)
       || !banned(reply, /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu, labels));
     // A recorded change is never "no change": the whole claim class (MG 5939414835; CODEX CEE BUDDY 5940259670).
-    check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 || !banned(reply, CONTRARY_SAME, labels));
+    check('RX-NO-CONTRARY-SAME', Math.max(inputs.changes_recorded ?? 0, (inputs.change_labels ?? []).length) === 0 || !banned(reply, CONTRARY_SAME, labels));
     // The un-withheld transition must say so (MG 5939414835).
     check('RX-UNWITHHELD-LINE', inputs.prior_withheld !== true || labelMatches(reply, ['can now compare the options']));
   } else if (policy_id === 'COMPARISON-ANSWER') {
     const labels = [...model, ...(inputs.change_labels ?? []), ...(inputs.current_option_labels ?? [])];
-    check('CA-NO-CAUSE-UNLICENSED', inputs.attribution_case === 'C1_attributable'
-      || !banned(reply, /\b(because (you|of your)|caused|due to your|as a result of your|led to|held (the|its) comparison back)\b/iu, labels));
-    check('CA-NO-MOVEMENT-UNLICENSED', !(inputs.prior_withheld === true || inputs.no_matched_figures === true)
-      || !banned(reply, /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu, labels));
-    check('CA-NOISE', inputs.noise_verdict === 'signal'
-      || !banned(reply, /\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\b/iu, labels));
+    // Only what is said ABOUT the two Runs is judged: the user asked about them, or the sentence names them.
+    const about = reply.split(/(?<=[.!?])\s+|\n/u).filter(sentence => sentence.trim() !== ''
+      && (inputs.comparison_question === true || PAIR_CONTEXT.test(sentence)));
+    // The plain connectives judge a sentence that is itself about the runs or a changed result; elsewhere in the answer
+    // ("…because your limits remain unchecked" explains THIS Run) only RX's own attribution class does.
+    check('CA-NO-CAUSE-UNLICENSED', inputs.attribution_case === 'C1_attributable' || !about.some(sentence =>
+      banned(sentence, PAIR_CONTEXT.test(sentence) || RESULT_CHANGED.test(sentence) ? COMPARISON_CAUSE : RX_CAUSE, labels)));
+    // A movement needs matched figures, a row beyond noise, every option it names beyond noise, and no figure of its own
+    // (Olumi gave the model none: the Compare panel shows them).
+    const signal = (inputs.signal_option_labels ?? []);
+    const unsignalled = (inputs.matched_option_labels ?? []).filter(label => !labelMatches(label, signal));
+    check('CA-NO-MOVEMENT-UNLICENSED', about.filter(sentence => banned(sentence, MOVEMENT, labels)).every(sentence =>
+      inputs.prior_withheld !== true && inputs.no_matched_figures !== true && inputs.signal_movement === true
+      && !/\d/u.test(masked(sentence, labels)) && !labelMatches(sentence, unsignalled)));
+    check('CA-NOISE', inputs.noise_verdict === 'signal' || !about.some(sentence => banned(sentence, NOISE, labels)));
+    // "Nothing has changed yet." about a held or refused write is true and is not about the runs, unless it names them.
     check('CA-NO-CONTRARY-SAME', Math.max(inputs.changes_recorded ?? 0, (inputs.change_labels ?? []).length) === 0
-      || !reply.split(/(?<=[.!?])\s+|\n/u).some(sentence => PAIR_CONTEXT.test(sentence) && banned(sentence, CONTRARY_SAME, labels)));
+      || !about.some(sentence => banned(sentence, CONTRARY_SAME, labels) && (PAIR_CONTEXT.test(sentence) || !PENDING_WRITE.test(sentence))));
   } else if (policy_id === 'RC-WIDEN') {
     const items = reply.split(/\r?\n/u).filter(line => /^\s*-\s/u.test(line)).map(line => line.trim().slice(1).trim());
     check('WD-COUNT', items.length >= 1 && items.length <= 3);

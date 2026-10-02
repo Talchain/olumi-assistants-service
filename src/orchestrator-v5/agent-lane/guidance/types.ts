@@ -135,6 +135,13 @@ export interface MethodInputs {
   readonly change_labels?: readonly string[];
   /** COMPARISON-ANSWER: how many input-change rows the pair records, named or not (a `presence` row has no template). */
   readonly changes_recorded?: number;
+  /** COMPARISON-ANSWER: some matched option's movement is beyond noise (a `signal` row in run_delta.win_probabilities). */
+  readonly signal_movement?: boolean;
+  /** COMPARISON-ANSWER: the current labels of options with matched figures, and of those whose movement is beyond noise. */
+  readonly matched_option_labels?: readonly string[];
+  readonly signal_option_labels?: readonly string[];
+  /** COMPARISON-ANSWER: the user's question is about the two Runs, so every sentence of the answer is judged as about them. */
+  readonly comparison_question?: boolean;
   readonly attribution_case?: 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
   readonly leader_licensed?: boolean;
   readonly noise_verdict?: string;

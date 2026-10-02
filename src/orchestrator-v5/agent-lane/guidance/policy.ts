@@ -1047,12 +1047,12 @@ export const POLICY = {
       "format": "Insight line, then up to 3 bullets (what changed, the assumption it touches, what may change), then the stale line only if stale."
     },
     "COMPARISON-ANSWER": {
-      "purpose": "DRAFT (AI HARNESS 8e75e3; RC to own, #85 5949446291): an ordinary Agent answer that talks about the selected pair of Runs. Inputs = the RERUN-EXPLANATION MethodInputs from the same plan; no pair = C2_unpaired + no_matched_figures + no change_labels (fail-closed). Checked per sentence; a failing sentence is dropped and the plan's code line is appended.",
+      "purpose": "DRAFT (AI HARNESS 8e75e3; RC to own, #85 5949446291): an ordinary Agent answer about the selected pair of Runs. Inputs = the RERUN-EXPLANATION MethodInputs from the same plan (+ signal_movement, matched/signal option labels, comparison_question); no pair = C2_unpaired + no_matched_figures + nothing recorded (fail-closed). Only sentences about the two Runs are judged: comparison_question, or the sentence matches PAIR_CONTEXT. A failing sentence is dropped and the plan's code line appended.",
       "post_checks": [
-        { "id": "CA-NO-CAUSE-UNLICENSED", "rule": "RX-NO-CAUSE-UNPAIRED's ban unless attribution_case is C1_attributable" },
-        { "id": "CA-NO-MOVEMENT-UNLICENSED", "rule": "RX-NO-MOVEMENT-WITHOUT-PRIOR's ban if prior_withheld or no_matched_figures" },
-        { "id": "CA-NOISE", "rule": "RX-NOISE's ban unless noise_verdict is signal" },
-        { "id": "CA-NO-CONTRARY-SAME", "rule": "RX-NO-CONTRARY-SAME's class, only if change_labels is non-empty and the same sentence is about the runs (pair context)" }
+        { "id": "CA-NO-CAUSE-UNLICENSED", "rule": "unless attribution_case is C1_attributable: no /because|due to|as a result of|caused|led to|driven by|thanks to|(is|was|comes|came) down to|explained by|held the comparison back/ in a sentence about the runs" },
+        { "id": "CA-NO-MOVEMENT-UNLICENSED", "rule": "a sentence about the runs with RX's movement words needs: not prior_withheld, not no_matched_figures, signal_movement, no digit (label-masked), and no matched option named whose movement is within noise" },
+        { "id": "CA-NOISE", "rule": "RX-NOISE's ban unless noise_verdict is signal, in a sentence about the runs" },
+        { "id": "CA-NO-CONTRARY-SAME", "rule": "RX-NO-CONTRARY-SAME's class in a sentence about the runs, if max(changes_recorded, change_labels.length) > 0" }
       ]
     },
     "RERUN-EXPLANATION": {
