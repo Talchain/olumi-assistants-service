@@ -174,6 +174,8 @@ export function rerunExplanationPlan(
   const noise = text(rec(d.leader)?.noise_verdict);
   const inputs: MethodInputs = {
     change_labels: changes,
+    // RC 5949965940: a recorded row no template can name (a `presence` row) still counts as a change.
+    changes_recorded: rows.length,
     attribution_case: checkCase(wireCase),
     leader_licensed: leaderLicensed,
     ...(noise !== undefined ? { noise_verdict: noise } : {}),
@@ -217,6 +219,27 @@ export function rerunExplanationPlan(
                 : 'Other things also differed between the two Runs, so never say the change caused the difference.',
   ].join('\n');
   return { inputs, changes, codeLine, instruction, fallback: codeLine };
+}
+
+/**
+ * The plan from ONE graph read: its node labels name the change rows, its options' labels (plus the read's display
+ * aliases) are the option labels, and every node label is masked before the bans. The ordinary turn's `comparison` block
+ * (`comparison-block.ts`) builds it this way, from the same `current_read.run_delta` the explanation reads.
+ */
+export function rerunPlanForGraph(
+  runDelta: unknown,
+  graph: unknown,
+  leaderLicensed: boolean,
+  optionDisplays: readonly string[] = [],
+): RerunExplanationPlan | null {
+  const nodes = Array.isArray((graph as { nodes?: unknown } | null)?.nodes)
+    ? (graph as { nodes: { id?: unknown; kind?: unknown; label?: unknown }[] }).nodes : [];
+  return rerunExplanationPlan(runDelta,
+    (id) => { const n = nodes.find((x) => x.id === id); return typeof n?.label === 'string' ? n.label : undefined; },
+    [...new Set([...nodes.filter((n) => n.kind === 'option' && typeof n.label === 'string').map((n) => n.label as string),
+      ...optionDisplays])],
+    leaderLicensed,
+    nodes.map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== ''));
 }
 
 const SENTENCE_BREAK = /(?<=[.!?])\s+/u;

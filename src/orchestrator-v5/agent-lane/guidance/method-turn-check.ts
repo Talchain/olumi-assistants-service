@@ -130,7 +130,8 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('RX-NO-MOVEMENT-WITHOUT-PRIOR', !(inputs.prior_withheld === true || inputs.no_matched_figures === true)
       || !banned(reply, /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu, labels));
     // A recorded change is never "no change": the whole claim class (MG 5939414835; CODEX CEE BUDDY 5940259670).
-    check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 || !banned(reply, CONTRARY_SAME, labels));
+    // Keyed on RECORDED rows, named or not (RC contract a4992165; served crn-final2: one `presence` row, no template).
+    check('RX-NO-CONTRARY-SAME', Math.max(inputs.changes_recorded ?? 0, (inputs.change_labels ?? []).length) === 0 || !banned(reply, CONTRARY_SAME, labels));
     // The un-withheld transition must say so (MG 5939414835).
     check('RX-UNWITHHELD-LINE', inputs.prior_withheld !== true || labelMatches(reply, ['can now compare the options']));
   } else if (policy_id === 'RC-WIDEN') {

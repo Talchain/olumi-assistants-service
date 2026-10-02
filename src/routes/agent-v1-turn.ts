@@ -2652,8 +2652,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (runStillCurrent !== undefined) dispatchLedger.push({ path: 'store:run-currentness', ms: Date.now() - runCheckStarted, status: runStillCurrent ? 200 : 409 });
     // A successful bound check reuses the exact read that supplied the narration. A mismatch/failure
     // reads current wire state, but never restores the old explanation's licence.
+    // ⛔ A Run the Agent loop made is read back FRESH (Codex buddy on the comparison input, P2): its post-Run read (the
+    // comparison block's) is kept in this epoch, and the narrating call that follows can outlast another writer's Run, which
+    // a reused read would hide. The Run chip's fast path has no call in between, so it keeps reusing the read (no added read).
+    const loopRan = fastPath === undefined && result.tool_calls.some((c) => c.name === 'run_analysis');
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
-      : await readBackState(fastPath === 'explain'
+      : await readBackState(fastPath === 'explain' || loopRan
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
     if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
