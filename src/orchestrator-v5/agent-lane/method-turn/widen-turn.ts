@@ -25,6 +25,7 @@ import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import { widenVariantOf } from '../guidance/index.js';
 import type { Target, Variant } from '../guidance/types.js';
 import { POLICY } from '../guidance/policy.js';
+import { levelFrameOf } from '../runtime/agent-capabilities.js';
 import { assembleGuidanceSignals, type GuidanceSignals as TurnSignals } from '../turn-context/guidance-signals.js';
 import { selectorSignalsOf, TALK_IT_THROUGH_CHIP, type MethodReadback } from './method-turn.js';
 
@@ -104,17 +105,40 @@ export function existingLevers(g: Graph, optionId: string, sqId: string | null):
   const byId = new Map(g.nodes.map((n) => [String(n.id), n] as const));
   const factorIds = new Set(g.nodes.filter((n) => n.kind === 'factor').map((n) => String(n.id)));
   const ivs = rec(byId.get(optionId)?.interventions) ?? {};
-  const sqIvs = sqId === null ? {} : rec(byId.get(sqId)?.interventions) ?? {};
-  const baseline = (t: string): number => numeric(sqIvs[t]) ?? numeric(rec(byId.get(t)?.observed_state)?.value) ?? 0;
   const out = new Map<string, Move>();
   for (const t of Object.keys(ivs).filter((k) => factorIds.has(k))) {
-    const v = numeric(ivs[t]);
-    out.set(t, v === undefined ? 'unknown' : v > baseline(t) ? 'positive' : v < baseline(t) ? 'negative' : 'unchanged');
+    // No finite baseline is NO direction (DL P1-D): never a default of 0 that invents one.
+    const base = baselineOf(g, t, sqId);
+    out.set(t, moveOf(numeric(ivs[t]), base));
   }
   if (out.size === 0) {
     for (const e of g.edges) if (e.from === optionId && factorIds.has(String(e.to))) out.set(String(e.to), 'unknown');
   }
   return out;
+}
+
+/** sign(level − baseline); `unknown` when either side is not a finite number. */
+export function moveOf(level: number | undefined, base: number | null): Move {
+  if (level === undefined || base === null) return 'unknown';
+  return level > base ? 'positive' : level < base ? 'negative' : 'unchanged';
+}
+
+/** A factor's baseline on the stored (encoded) scale: the status quo's level, else the observed value; null when neither is finite. */
+export function baselineOf(g: Graph, factorId: string, sqId: string | null): number | null {
+  const byId = new Map(g.nodes.map((n) => [String(n.id), n] as const));
+  const sqIvs = sqId === null ? {} : rec(byId.get(sqId)?.interventions) ?? {};
+  return numeric(sqIvs[factorId]) ?? numeric(rec(byId.get(factorId)?.observed_state)?.value) ?? null;
+}
+
+/**
+ * A PROPOSED level on the stored scale, by the DOOR's own rule (`levelFrameOf`: the factor's cap, else its scale_frame;
+ * a level inside 0..1 is stored as given): the figure the door would write, so £ and encoded values never meet raw.
+ * Undefined when the door would not store it (outside the frame, or no frame and outside 0..1).
+ */
+export function encodedLevelOf(factor: Rec | undefined, value: number): number | undefined {
+  const frame = levelFrameOf(factor as never);
+  const v = frame !== null ? value / frame : value;
+  return v >= 0 && v <= 1 ? v : undefined;
 }
 
 /** A proposal copies an option when it moves EXACTLY the same factors the same way; an `unknown` move matches any (fail closed). */
@@ -139,6 +163,9 @@ export interface RunWidenTurn {
   readonly current: readonly { readonly label: string; readonly levers: Levers }[];
   /** Every factor of the model, as the DOOR resolves them (`planNewOption`: label OR description, trim + lower-case). */
   readonly factors: readonly { readonly id: string; readonly label: string; readonly description: string }[];
+  /** The graph as read and its status quo: a proposed level's direction is read against the same baseline (DL P1-E). */
+  readonly graph: Graph;
+  readonly sq: string | null;
 }
 
 export type WidenUnavailableReason = 'model_unread' | 'no_goal';
@@ -205,7 +232,7 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
   ].join('\n');
   const doorFactors = g.nodes.filter((n) => n.kind === 'factor').map((n) => ({
     id: String(n.id), label: typeof n.label === 'string' ? n.label : '', description: typeof n.description === 'string' ? n.description : '' }));
-  return { kind: 'run', target: 'options', variant, goal_label: goalLabel, directive, current, factors: doorFactors };
+  return { kind: 'run', target: 'options', variant, goal_label: goalLabel, directive, current, factors: doorFactors, graph: g, sq };
 }
 
 /** The Widen turn for a press, from the route's own readback (the same licence and identity projection as the pre-mortem). */
@@ -272,6 +299,14 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
       levers.set(id, direction);
       const level = rec(e?.level);
       if (level !== undefined && (level.estimate !== true || typeof level.basis !== 'string' || level.basis.trim() === '')) failed.add('WD-NO-NEW-FIGURES');
+      // DL P1-E: a level the door would write decides the move, not the declared word. Read on the door's own frame
+      // against the same baseline as the existing options; a level that disagrees with its declared direction (a "cut"
+      // to £60 when today is £49, or a "cut" that keeps today's level) is refused, never trusted.
+      const value = typeof level?.value === 'number' && Number.isFinite(level.value) ? level.value : undefined;
+      const node = turn.graph.nodes.find((n) => String(n.id) === id);
+      const encoded = value === undefined ? undefined : encodedLevelOf(node, value);
+      const derived = moveOf(encoded, baselineOf(turn.graph, id, turn.sq));
+      if (derived !== 'unknown' && derived !== direction) failed.add('WD-S-DIRECTION');
     }
     if (levers.size > 0 && seen.some((existing) => sameLevers(levers, existing))) failed.add('WD-S-DISTINCT');
     seen.push(levers);

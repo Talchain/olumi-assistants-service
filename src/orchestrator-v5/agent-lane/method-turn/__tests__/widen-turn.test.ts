@@ -20,7 +20,7 @@ const STRUCTURAL = { strength: { mean: 1.0 }, effect_direction: 'positive' };
 const GRAPH = {
   nodes: [
     { id: 'goal', kind: 'goal', label: 'Revenue' },
-    { id: 'f_price', kind: 'factor', label: 'Price', observed_state: { value: 0.245 } },
+    { id: 'f_price', kind: 'factor', label: 'Price', observed_state: { value: 0.245, raw_value: 49, unit: 'GBP', cap: 200 } },
     { id: 'f_churn', kind: 'factor', label: 'Customer churn', observed_state: { value: 0.1 } },
     { id: 'o_cut', kind: 'option', label: 'Cut to £45', interventions: { f_price: { value: 0.2 } } },
     { id: 'o_raise', kind: 'option', label: 'Raise to £59', interventions: { f_price: { value: 0.3 } } },
@@ -87,6 +87,32 @@ describe('RC-WIDEN method turn', () => {
     const t = turnOn(onlyCut, { 'model.non_sq_option_ids': ['o_cut'] });
     expect(widenGate(t, one('Lift what we charge', ['Price', 'positive']))).toEqual({ ok: true });
     expect(widenGate(t, one('Trim what we charge', ['Price', 'negative']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+  });
+
+  it('P1-D: NO finite baseline is NO direction — a missing or non-finite baseline reads `unknown`, refusing both directions', () => {
+    for (const observed of [undefined, { value: 'n/a' }, { value: Number.NaN }]) {
+      const g = { nodes: [...GRAPH.nodes, { id: 'f_x', kind: 'factor', label: 'Partner reach', ...(observed !== undefined ? { observed_state: observed } : {}) },
+        { id: 'o_x', kind: 'option', label: 'Partner push', interventions: { f_x: { value: 0.6 } } }],
+        edges: [...GRAPH.edges, { from: 'o_x', to: 'f_x', ...STRUCTURAL }] };
+      expect([...existingLevers(g as never, 'o_x', 'o_sq')], JSON.stringify(observed)).toEqual([['f_x', 'unknown']]);
+      const t = turnOn(g, { 'model.non_sq_option_ids': ['o_cut', 'o_raise', 'o_x'] });
+      expect(widenGate(t, one('Grow partner reach', ['Partner reach', 'positive']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+      expect(widenGate(t, one('Shrink partner reach', ['Partner reach', 'negative']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+    }
+  });
+
+  it('P1-E: a proposed LEVEL decides the move on the door\u2019s own frame — a "cut" to £60 when today is £49 is refused', () => {
+    // Today £49 (0.245 on the cap of 200); the only other option raises to £59. A "cut" to £60 would be WRITTEN as a rise.
+    const onlyRaise = { nodes: GRAPH.nodes.filter((n) => n.id !== 'o_cut'), edges: GRAPH.edges.filter((e) => e.from !== 'o_cut') };
+    const t = turnOn(onlyRaise, { 'model.non_sq_option_ids': ['o_raise'] });
+    const cut = (value: number) => ({ label: 'Cut what we charge', rationale: 'r',
+      acts_on: [{ factor_label: 'Price', direction: 'negative', level: { value, unit: 'GBP', estimate: true, basis: 'b' } }] });
+    expect(widenGate(t, cut(60))).toEqual({ ok: false, failed: ['WD-S-DIRECTION'] });
+    expect(widenGate(t, cut(49)), 'a "cut" that keeps today\u2019s level is not a cut').toEqual({ ok: false, failed: ['WD-S-DIRECTION'] });
+    // Control: a TRUE lowering to £45 passes.
+    expect(widenGate(t, cut(45))).toEqual({ ok: true });
+    // Control: no level → the declared direction stands (nothing written to contradict it).
+    expect(widenGate(t, one('Cut what we charge', ['Price', 'negative']))).toEqual({ ok: true });
   });
 
   it('fail closed: an option whose direction is UNKNOWN (no level set) matches any proposal on the same factors', () => {

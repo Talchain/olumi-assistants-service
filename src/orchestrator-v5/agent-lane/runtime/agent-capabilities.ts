@@ -1061,7 +1061,7 @@ function keptFigureFor(node: { scale_frame?: unknown; observed_state?: unknown }
  * One function, so the projection that reads a level back can never use a different range
  * from the write that stored it.
  */
-function levelFrameOf(factor: { observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined): number | null {
+export function levelFrameOf(factor: { observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined): number | null {
   const cap = (factor?.observed_state ?? {}).cap;
   if (typeof cap === 'number' && Number.isFinite(cap) && cap > 0) return cap;
   const frame = factor?.scale_frame;

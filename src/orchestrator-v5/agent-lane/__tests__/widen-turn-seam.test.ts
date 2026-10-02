@@ -196,7 +196,8 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     g.nodes = g.nodes.map((n) => (n['id'] === 'fac_1' ? { ...n, label: 'Customer churn' } : n));
     graphOf.set(SCENARIO, g);
   };
-  const est = { value: 60, unit: 'GBP', estimate: true, basis: 'a typical retention programme for this price band' };
+  /** A LOWERING level on Customer churn (cap 200, today 49 → 0.245): 20 → 0.1, consistent with direction 'negative'. */
+  const est = { value: 20, unit: 'GBP', estimate: true, basis: 'a typical retention programme for this price band' };
   const optionLabels = () => graphNow().nodes.filter((x) => x.kind === 'option').map((x) => x.label).sort();
 
   it('W-R1 PASS: ONE model call whose only tool is the door → ONE held card + Something else; nothing written before the yes; the yes adds both, linked from the decision', async () => {
@@ -232,6 +233,13 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(t2._agent.tool_calls, JSON.stringify(t2._agent.tool_calls)).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
     expect(optionLabels()).toEqual([...before, 'Cut price to win share', 'Retention offer'].sort());
     const g = graphNow();
+    // Bound to what Approve WROTE: each new option's lever, on the door's frame (figure / cap 200), with the figure kept.
+    const ivOf = (label: string) => g.nodes.find((x) => x.kind === 'option' && x.label === label)!.interventions as Record<string, { value: number; raw_value?: number }>;
+    expect(Object.keys(ivOf('Retention offer'))).toEqual(['fac_1']);
+    expect(ivOf('Retention offer')['fac_1']!.value).toBeCloseTo(0.1, 6);
+    expect(ivOf('Retention offer')['fac_1']!.raw_value).toBe(20);
+    expect(Object.keys(ivOf('Cut price to win share'))).toEqual(['fac_price']);
+    expect(ivOf('Cut price to win share')['fac_price']!.value).toBeCloseTo(0.225, 6);
     for (const label of ['Retention offer', 'Cut price to win share']) {
       const id = g.nodes.find((x) => x.kind === 'option' && x.label === label)!.id;
       expect(g.edges.some((e) => e.from === 'dec_x' && e.to === id), `${label} is linked from the decision`).toBe(true);
@@ -278,28 +286,33 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(t1.assistant_text).not.toContain('What other way could you reach');
   }, 120_000);
 
-  it('W-R6 (DL P1-B): two gate-passing options, one a SAME-LEVEL twin of an existing option → the door holds ONE; the reply names only it + the twin note', async () => {
+  it('W-R6: a SAME-LEVEL twin never reaches the door — its level reads as today\u2019s (unchanged), not the declared cut (WD-S-DIRECTION)', async () => {
     seeded();
     const before = optionLabels();
     script = [() => fnCall('propose_new_option', { options: [
       { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative', level: est }] },
-      // Lowering Price passes the gate (no current option lowers it), but at £49 it sets EXACTLY "Keep £49"'s level.
       { label: 'Hold at £49', acts_on: [{ factor_label: 'Price', direction: 'negative', level: { value: 49, unit: 'GBP', estimate: true, basis: 'today\u2019s price' } }] },
     ], rationale: 'r' })];
     const t1 = await press();
-    expect(t1._agent.tool_calls.map((c) => [c.name, c.ok]), JSON.stringify(t1._agent.tool_calls)).toEqual([['propose_new_option', true]]);
-    // Bound to the HELD ops: exactly one new option node, carrying a lever on Customer churn (fac_1) and none on Price.
-    const held = await heldOnLatestRow();
-    expect(held).toHaveLength(1);
-    const ops = held[0]!.action.inline_patch!.operations! as { op: string; path: string; value?: { kind?: string; label?: string; interventions?: Record<string, unknown> } }[];
-    const added = ops.filter((o) => o.op === 'add_node' && o.value?.kind === 'option');
-    expect(added.map((o) => o.value!.label), JSON.stringify(ops)).toEqual(['Retention offer']);
-    expect(Object.keys(added[0]!.value!.interventions ?? {})).toEqual(['fac_1']);
-    expect(ops.some((o) => o.op === 'add_edge' && o.path === `dec_x::${added[0]!.path}`)).toBe(true);
-    // The words match the card: only the held option is offered for approval; the twin is named as left out.
-    expect(t1.assistant_text).toContain('Retention offer');
-    expect(t1.assistant_text).toMatch(/Hold at £49.{0,80}(same levels|NOT in this change|Not in this change)/s);
-    expect(t1.assistant_text).not.toMatch(/Approve to add them/);
+    expect(t1._agent.tool_calls.map((c) => [c.name, c.ok, c.refusal])).toEqual([['propose_new_option', false, 'widen_gate']]);
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'route-v2 never reached').toEqual([]);
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(optionLabels()).toEqual(before);
+  }, 120_000);
+
+  it('W-R7: the DOOR itself refuses (a level outside the factor\u2019s range) → nothing stored, no approve chip, RC\u2019s fallback — never the model\u2019s figure', async () => {
+    seeded();
+    const before = optionLabels();
+    script = [() => fnCall('propose_new_option', { label: 'Loosen retention spend', rationale: 'r',
+      acts_on: [{ factor_label: 'Customer churn', direction: 'positive', level: { value: 500, unit: 'GBP', estimate: true, basis: 'b' } }] })];
+    const t1 = await press();
+    // The gate passed it (500 is off the door's frame, so it decides no direction): the DOOR's own refusal stands.
+    expect(t1._agent.tool_calls.map((c) => [c.name, c.ok, c.refusal])).toEqual([['propose_new_option', false, 'level_out_of_range']]);
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(approveChipOf(t1)).toBeUndefined();
+    expect(t1.assistant_text).toBe('What other way could you reach \u2018Revenue\u2019? For example, a different lever, a smaller first step, or a mix of these options.');
+    expect(t1.assistant_text).not.toContain('500');
     expect(optionLabels()).toEqual(before);
   }, 120_000);
 
