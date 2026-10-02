@@ -79,6 +79,7 @@ import {
 } from '../orchestrator-v5/decision-records/store-adapter.js';
 import type {
   DecisionRecordStorePort,
+  DecisionRecordUserRead,
   RecordDecisionOutcomeWrite,
 } from '../orchestrator-v5/decision-records/store-adapter.js';
 import {
@@ -99,6 +100,74 @@ import { log } from '../utils/telemetry.js';
 export const DECISION_RECORDS_COMMIT_PATH = '/assist/v1/decision-records/commit';
 export const DECISION_RECORDS_OUTCOME_PATH =
   '/assist/v1/decision-records/:record_id/outcome';
+/**
+ * ⭐ DECIDE & REVIEW S1 (MG lease #85 5948537951): the READ-BACK. Until now a
+ * committed decision came back only from the browser that wrote it
+ * (localStorage); nothing read `decision_records` for the user. Same always-on
+ * JWT + owner check as `/commit`; USER-AUTHORED rows only.
+ */
+export const DECISION_RECORDS_LIST_PATH = '/assist/v1/decision-records/list';
+
+/** One record as the read-back returns it — the commit request's own field names. */
+export interface DecisionRecordListItem {
+  readonly record_id: string;
+  readonly created_at: string;
+  readonly review_date: string;
+  readonly position: 'chosen' | 'not_ready';
+  readonly chosen_option_id?: string;
+  readonly chosen_option_label?: string;
+  readonly confidence_0_100?: number;
+  readonly expectation_statement?: string;
+  readonly rationale?: string;
+  readonly key_assumption?: string;
+  readonly revisit_trigger?: string;
+  readonly next_action?: string;
+  /** The analysed graph the decision was anchored to (CEE-derived at commit), or null. */
+  readonly graph_hash: string | null;
+  readonly has_outcome: boolean;
+}
+
+/**
+ * Project one stored user-authored row onto the read-back shape, or null when it
+ * is malformed. A chosen row with no option, or with a confidence outside [0, 1],
+ * is dropped rather than shown half-true. Text fields appear only when stored.
+ */
+export function projectUserRecord(row: DecisionRecordUserRead): DecisionRecordListItem | null {
+  const d = row.decision;
+  const texts: Record<string, string> = {};
+  for (const field of REASONING_TEXT_FIELDS) {
+    const v = d[field];
+    if (typeof v === 'string' && v.trim() !== '') texts[field] = v;
+  }
+  const base = {
+    record_id: row.record_id,
+    created_at: row.created_at,
+    review_date: row.review_date,
+    graph_hash: typeof d.graph_hash === 'string' && d.graph_hash !== '' ? d.graph_hash : null,
+    has_outcome: row.has_outcome,
+  };
+  if (d.position === 'not_ready') return { ...base, position: 'not_ready', ...texts };
+  const optionId = d.chosen_option_id;
+  const optionLabel = d.chosen_option_label;
+  const confidence = row.prediction?.confidence;
+  const statement = row.prediction?.statement;
+  if (typeof optionId !== 'string' || optionId === '' || typeof optionLabel !== 'string' || optionLabel === '') return null;
+  if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) return null;
+  // `/commit` refuses an empty expectation (it is the claim the outcome is scored against), so a chosen row without
+  // one is malformed — dropped, never shown as a decision with no forecast (CODEX P2 on S1).
+  if (typeof statement !== 'string' || statement.trim() === '') return null;
+  return {
+    ...base,
+    position: 'chosen',
+    chosen_option_id: optionId,
+    chosen_option_label: optionLabel,
+    // The user's own number, as stated: `/commit` accepts fractions (72.4 is stored as 0.724), so it is never rounded
+    // to an integer — only the float noise of the ×100 is removed (CODEX P3 on S1).
+    confidence_0_100: Math.round(confidence * 10000) / 100,
+    expectation_statement: statement,
+    ...texts,
+  };
+}
 
 /** UUID shape — `scenario_id` and `record_id` are UUID columns. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -424,6 +493,67 @@ export default async function route(
         'DecisionRecords — outcome write failed',
       );
       return refuse(reply, req, 502, 'store_error', 'We could not save that outcome. Nothing was recorded.');
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // LIST — the read-back of the user's OWN decisions on one scenario.
+  // -------------------------------------------------------------------------
+  app.post(DECISION_RECORDS_LIST_PATH, async (req, reply) => {
+    const userId = await requireUser(req, reply);
+    if (userId === null) return reply;
+
+    const rawScenarioId = readString(asRecord(req.body), 'scenario_id').trim();
+    if (!UUID_RE.test(rawScenarioId)) {
+      return refuse(reply, req, 400, 'invalid_scenario_id', 'scenario_id must be a UUID');
+    }
+    // Postgres returns UUIDs lowercase, and the adapter re-asserts the scenario id per row: an uppercase request would
+    // otherwise read the right rows and then drop every one (CODEX P2 on S1).
+    const scenarioId = rawScenarioId.toLowerCase();
+
+    const store = resolveStore();
+    // OWNERSHIP FIRST: the read is service-role (no RLS), so this check is the
+    // only thing between a caller and someone else's decisions.
+    // ⛔ NO EXISTENCE ORACLE (DL on S1, the #2514 rule; `scenario-graph-register`'s
+    // "one refusal"): an absent scenario, someone ELSE's scenario — including one
+    // the caller is a viewer MEMBER of — and an ownership lookup that fails all
+    // answer these exact bytes, so the route never says whether a scenario exists
+    // or whose it is. Only the guest refusal (DR001) is distinct, as on /commit.
+    const notFound = () => refuse(reply, req, 404, 'scenario_not_found', 'No such scenario.');
+    let owner: string | null | undefined;
+    try {
+      owner = await store.readScenarioOwner(scenarioId);
+    } catch {
+      return notFound();
+    }
+    if (owner === undefined || (owner !== null && owner !== userId)) return notFound();
+    if (owner === null) {
+      return refuse(reply, req, 403, 'DR001', 'Decision records require sign-in: this scenario has no owner.');
+    }
+
+    try {
+      const page = await store.retrieveUserRecords(scenarioId, userId);
+      const records = page.records
+        .map(projectUserRecord)
+        .filter((r): r is DecisionRecordListItem => r !== null);
+      return reply.code(200).send({
+        records,
+        total_count: page.totalCount,
+        // True whenever FEWER records are returned than exist — the adapter's hard cap OR a malformed row the
+        // projection dropped (CODEX P2 on S1): a client can then say "showing N of M".
+        truncated: page.totalCount > records.length,
+        request_id: getRequestId(req),
+      });
+    } catch (err) {
+      log.warn(
+        {
+          event: 'v5.decision_records.list_failed',
+          scenario_id: scenarioId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'DecisionRecords — list read failed',
+      );
+      return refuse(reply, req, 502, 'store_error', 'We could not read your decision records.');
     }
   });
 }

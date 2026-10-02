@@ -13,6 +13,21 @@
  *   B1 a prior Run in the window → the chip Run sends that Run's own seed echo to PLoT, and the pair is C1.
  *   B2 (control) an empty window → no seed sent; the binding is present and says `no_prior_run` for the real reason.
  *   B3 the read-A guard is unchanged: bound as `NO_CLAIM`, which stands it down exactly as no binding did.
+ * ONE HISTORY FOR THE SEED AND THE PAIR (F1b lease #85 5947561416; R3 5945463416: after 20+ turns the turn said
+ * `insufficient_runs` while the cold read paired A→B):
+ *   B9  A aged out → the dispatch hands the finaliser [B, A]: freshness selects B, the turn's run_delta pairs A→B (C1),
+ *       and the paired prior IS the Run that lent the seed.
+ *   B9c (control) aged out AND the durable read down → [B] only → honest `insufficient_runs` (today's answer).
+ *   B10 (control) the window holds a Run → the window, never durable Runs mixed in.
+ * CODEX on 84f47072 (freshness stays on the window; only the PAIR reads the history):
+ *   B11 durable Runs dated in the FUTURE (clock skew) → through the real finaliser the turn ships NO run_delta that
+ *       leaves out THIS Run (the identity binding withholds it), never A1→A2.
+ *   B13 the prior SHOWN Run aged out → no "first analysis" coaching and no FIRST_ANALYSIS_COMPLETE on this Run's fact.
+ *   B13c (control) a genuinely first Run → FIRST_ANALYSIS_COMPLETE as today.
+ *   B13p the aged-out shown prior was PARTIAL → still no "first analysis" (CODEX r2 surviving mutant).
+ * CODEX on 6b053a8b (a durable Run dated after THIS Run):
+ *   B14 durable [A, partial P dated 2099] → the finaliser never sees the durable history: priorFacts = [B], no pair
+ *       (staging's answer), so neither C2 nor F-LIMIT can be evaded by a Run newer than this one.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -35,6 +50,7 @@ const { loadScenarioSnapshotForRunAnalysis } = await import('../build-turn-conte
 const { createRunAnalysisHandler } = await import('../tools/handlers/run-analysis.js');
 const { buildRunDelta } = await import('../coaching/build-run-delta.js');
 const { currentBoundAnalysisSnapshot, NO_CLAIM } = await import('../run-analysis-snapshot-binding.js');
+const { finaliseV5Response } = await import('../response-finaliser.js');
 
 type Rec = Record<string, any>;
 const SCENARIO = 'c96fc4bb-ccd1-4615-a6d9-52c652e3e0e4';
@@ -79,6 +95,8 @@ function harness() {
 
   /** Committed Run facts, newest first — what the next turn's window reads back. */
   const window: HandlerFact[] = [];
+  /** The last dispatch result — what route-v2 hands the finaliser (`priorFacts`, `freshness`). */
+  const last: { out?: Rec } = {};
   /**
    * `agedOut`: the prior Run's turn has left the 20-turn hot window — the window reads back NO turns or facts, while the
    * scenario's durable analysis read still holds every committed Run (+ `durableExtra`, newest first). `durableDown`: the
@@ -94,11 +112,11 @@ function harness() {
     const writes: SessionTurnWrite[] = [];
     const base = createNoopSessionStore({
       priorTurns, facts: [...hot],
-      ...(opts.agedOut === true ? { scenarioAnalysisFacts: [...(opts.durableExtra ?? []), ...window] } : {}),
+      ...(opts.agedOut === true || opts.durableExtra !== undefined ? { scenarioAnalysisFacts: [...(opts.durableExtra ?? []), ...window] } : {}),
       ...(opts.durableDown === true ? { throwOnScenarioAnalysisFactRead: new Error('durable read down') } : {}),
     });
     storeHolder.current = { ...base, append: async (w: SessionTurnWrite) => { writes.push(w); return { id: `row-${turnId}` }; } };
-    await dispatchChipClickRunAnalysis({
+    last.out = await dispatchChipClickRunAnalysis({
       payload: makeMessagePayload({
         scenario_id: SCENARIO, turn_id: turnId, stage: 'analyse', message: 'Run analysis.', turn_class: 'decide',
         source: 'chip_click', chip: { action_type: 'run_analysis' },
@@ -115,7 +133,7 @@ function harness() {
     const node = graph.nodes.find((n: Rec) => n.id === 'raise_price_to_59')!;
     node.interventions.pro_plan_price = { ...node.interventions.pro_plan_price, value: raw / 200, raw_value: raw };
   };
-  return { sentSeeds, seenBindings, run, setPrice, window };
+  return { sentSeeds, seenBindings, run, setPrice, window, last };
 }
 
 describe('C1 on the chip Run path — the prior Run lends its seed (R3 #85 5939245408)', () => {
@@ -246,4 +264,113 @@ describe('C1 durable history — a Run that aged out of the hot window still len
     await h.run('turn-b', { durableDown: true });
     expect(h.sentSeeds[1]).toBe(seedOf(a));
 });
+
+  const runIdOf = (f: Rec) => f.result.run_id as string;
+  const runIdsOf = (facts: readonly Rec[]) => facts.filter((f) => f.fact_type === 'run_analysis').map(runIdOf);
+
+  it('B9 (RED, R3 5945463416): A1, A2 aged out → the turn pairs A2→B; seed donor = live prior = cold prior, by identity', async () => {
+    const h = harness();
+    const a1 = await h.run('turn-a1');
+    happyFact = structuredClone(a1);
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(60);
+    // A2 draws FRESH (as B7's B: aged out + durable down), so A1 and A2 carry different seeds and the donor is identifiable.
+    const a2 = await h.run('turn-a2', { agedOut: true, durableDown: true });
+    expect(seedOf(a2), 'precondition: the two earlier Runs drew different seeds').not.toBe(seedOf(a1));
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(61);
+    const b = await h.run('turn-b', { agedOut: true });
+    const out = h.last.out!;
+    expect(runIdsOf(out.priorFacts), 'the post-dispatch history: this Run, then the durable Runs newest first').toEqual([runIdOf(b), runIdOf(a2), runIdOf(a1)]);
+    expect(runIdOf(out.priorFacts[out.freshness.selected_fact_index]), 'freshness selects THIS Run').toBe(runIdOf(b));
+    expect(h.sentSeeds[2], 'the seed donor is A2 (not A1)').toBe(seedOf(a2));
+    const live = buildRunDelta({ priorFacts: out.priorFacts, mayNameLeadingOption: true }) as { kind: string; delta: Rec };
+    expect(live.kind).toBe('ok');
+    expect([live.delta.endpoints?.prior?.run_id, live.delta.endpoints?.current?.run_id], 'the live pair: A2 → B').toEqual([runIdOf(a2), runIdOf(b)]);
+    expect(live.delta.attribution_case).toBe('C1_attributable');
+    // The cold read pairs from the durable set, which holds every committed Run (`h.window`): the SAME prior.
+    const cold = buildRunDelta({ priorFacts: h.window as never, mayNameLeadingOption: true }) as { kind: string; delta: Rec };
+    expect(cold.delta.endpoints?.prior?.run_id, 'cold prior = live prior = seed donor').toBe(live.delta.endpoints?.prior?.run_id);
+  });
+
+  it('B9c (control): aged out AND the durable read down → [B] only → the turn honestly says insufficient_runs', async () => {
+    const h = harness();
+    await h.run('turn-a');
+    const b = await h.run('turn-b', { agedOut: true, durableDown: true });
+    const out = h.last.out!;
+    expect(runIdsOf(out.priorFacts)).toEqual([runIdOf(b)]);
+    expect(buildRunDelta({ priorFacts: out.priorFacts, mayNameLeadingOption: true })).toMatchObject({ kind: 'none', reason: 'insufficient_runs' });
+  });
+
+  it('B10 (control): the window holds a Run → the turn pairs from the window, no durable Run mixed in', async () => {
+    const h = harness();
+    const a = await h.run('turn-a');
+    const extra = { ...structuredClone(a), result: { ...structuredClone(a).result, run_id: 'f'.repeat(64) } } as Rec;
+    const b = await h.run('turn-b', { durableExtra: [extra as HandlerFact] });
+    expect(runIdsOf(h.last.out!.priorFacts), 'the newer durable-only Run is never paired while the window holds one').toEqual([runIdOf(b), runIdOf(a)]);
+  });
+
+  /** The chip exit's finaliser, fed exactly as route-v2 feeds it (`route-v2.ts` chip `ok` exit). */
+  const finaliseChip = (out: Rec) => finaliseV5Response(out.response, {
+    scenarioId: SCENARIO, analysisReady: out.analysisReady, graph: out.graph, mayNameLeadingOption: out.mayNameLeadingOption,
+    ...(out.freshness ? { freshness: out.freshness } : {}), ...(out.priorFacts ? { priorFacts: out.priorFacts } : {}),
+  } as never) as unknown as Rec;
+
+  it('B11 (CODEX P1-1): durable Runs dated in the FUTURE → the turn never ships a pair that leaves out THIS Run', async () => {
+    const h = harness();
+    await h.run('turn-a1');
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(60);
+    await h.run('turn-a2', { agedOut: true, durableDown: true });
+    (h.window[1] as Rec).result.computed_at = '2098-01-01T00:00:00.000Z';
+    (h.window[0] as Rec).result.computed_at = '2099-01-01T00:00:00.000Z';
+    h.setPrice(61);
+    const b = await h.run('turn-b', { agedOut: true });
+    const body = finaliseChip(h.last.out!);
+    const shipped = body.run_delta as Rec | undefined;
+    expect(shipped === undefined || shipped.endpoints?.current?.run_id === runIdOf(b), 'no pair without THIS Run').toBe(true);
+    expect(shipped, 'the skewed pair is withheld, not shown').toBeUndefined();
+  });
+
+  it('B13 (CODEX P2-4): the prior SHOWN Run aged out → no "first analysis" coaching on the Run that pairs with it', async () => {
+    const h = harness();
+    await h.run('turn-a');
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(60);
+    const b = await h.run('turn-b', { agedOut: true });
+    expect(runIdsOf(h.last.out!.priorFacts).length, 'precondition: the turn pairs with the aged-out Run').toBe(2);
+    expect(JSON.stringify(b), 'no FIRST_ANALYSIS_COMPLETE on this Run').not.toContain('FIRST_ANALYSIS_COMPLETE');
+    expect(JSON.stringify(h.last.out!.response).toLowerCase()).not.toContain('first analysis');
+  });
+
+  it('B13c (control): a genuinely first Run → FIRST_ANALYSIS_COMPLETE as today', async () => {
+    const h = harness();
+    const a = await h.run('turn-a');
+    expect(JSON.stringify(a)).toContain('FIRST_ANALYSIS_COMPLETE');
+  });
+
+  it('B13p (CODEX r2 mutant): the aged-out shown prior was PARTIAL → still no "first analysis"', async () => {
+    const h = harness();
+    await h.run('turn-a');
+    (h.window[0] as Rec).result.enrichment.analysis_status = 'partial';
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(60);
+    const b = await h.run('turn-b', { agedOut: true });
+    expect(JSON.stringify(b), 'no FIRST_ANALYSIS_COMPLETE on this Run').not.toContain('FIRST_ANALYSIS_COMPLETE');
+  });
+
+  it('B14 (CODEX r2 P1-1/P1-2): a durable partial dated AFTER this Run → the finaliser never sees the durable history', async () => {
+    const h = harness();
+    await h.run('turn-a');
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(60);
+    await h.run('turn-p', { agedOut: true, durableDown: true });
+    const p = h.window[0] as Rec;
+    p.result.enrichment.analysis_status = 'partial';
+    p.result.computed_at = '2099-01-01T00:00:00.000Z';
+    h.setPrice(61);
+    const b = await h.run('turn-b', { agedOut: true });
+    expect(runIdsOf(h.last.out!.priorFacts), 'the window (empty) — not the history holding a Run newer than this one').toEqual([runIdOf(b)]);
+    expect(finaliseChip(h.last.out!).run_delta, 'no pair').toBeUndefined();
+  });
 });
