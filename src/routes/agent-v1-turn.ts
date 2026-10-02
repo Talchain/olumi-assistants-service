@@ -48,7 +48,7 @@ import { runAsAgentSubturn } from '../orchestrator-v5/session/agent-subturn-cont
 import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { collectTurnReceipts } from '../orchestrator-v5/agent-lane/turn-receipts.js';
 import { withCurrentGraphHash } from '../orchestrator-v5/agent-lane/analysis-freshness-stamp.js';
-import { BOARD_EDIT_PREFIX, DURABLE_SEED_ROWS_READ, HistoryStore, dropSupersededPairs, historyFromDurableTurns, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
+import { BOARD_EDIT_PREFIX, DURABLE_SEED_ROWS_READ, HistoryStore, dropSupersededPairs, historyFromDurableTurns, historyWithSentText, needsDurableSeed, pruneSupersededToolOutputs } from '../orchestrator-v5/agent-lane/history-store.js';
 import { contextBindingSecret, issueContextPacket } from '../orchestrator-v5/agent-lane/runtime/request-assembly.js';
 import { internalHeaders } from '../orchestrator-v5/agent-lane/internal-headers.js';
 import { resolveUserIdentity } from '../orchestrator/user-identity.js';
@@ -2767,10 +2767,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const chipApprovals = fastPath === 'approve'
       ? result.tool_calls.flatMap((c, k) => (c.name === 'authorise_change' && k < results.length ? [results[k]] : []))
       : [];
-    // Every retained Run output becomes a neutral marker. The next turn reads its facts from CURRENT MODEL STATE.
-    // PJ-C1 tokens: a pair the prune stubbed carries nothing, so it leaves with its reasoning (`dropSupersededPairs`).
-    // A method turn's history is written once, from the wire (T3, terminal; below).
-    if (fastPath !== 'method') histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(result.items, chipApprovals)));
     const fa = firstAnalysis?.outcome;
     // An analysis of THIS revision exists because this turn's construction ran it (or already had).
     const firstAnalysisExists = fa !== undefined && (fa.ran || fa.reason === 'already_ran_for_construction');
@@ -3240,11 +3236,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const preview = previewBesideItsChip(pendingPreview, approvalChipIdFor, wireBody.suggested_actions);
       if (preview !== undefined) wireBody = { ...wireBody, proposal_preview: preview };
     }
-    // T3, terminal: the ONE history write for a method turn — the history before it, the user's words, and the FINAL SENT
-    // text (the wire after the last gate), never a pre-gate copy or anything the call produced.
-    if (fastPath === 'method') {
-      histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(methodTurnItems(history, message, String(wireBody.assistant_text ?? text)), [])));
-    }
+    // History and the durable answer row below remember the same FINAL SENT text, after every gate.
+    // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
+    // Every retained Run output becomes a neutral marker; superseded pairs leave with their reasoning as before.
+    const sentText = String(wireBody.assistant_text ?? text);
+    const sentItems = fastPath === 'method'
+      ? methodTurnItems(history, message, sentText)
+      : historyWithSentText(result.items, sentText);
+    histories.set(sessionId, dropSupersededPairs(pruneSupersededToolOutputs(sentItems, chipApprovals)));
 
     /**
      * ⭐ PERSIST THE TURN BEFORE ANSWERING — the row a lost-response retry is
