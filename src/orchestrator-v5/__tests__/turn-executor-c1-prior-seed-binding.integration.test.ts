@@ -17,8 +17,12 @@ import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/
 import type { RunTurnExecutorOptions } from '../turn-executor.js';
 import { currentBoundAnalysisSnapshot } from '../run-analysis-snapshot-binding.js';
 
-const mockState: { priorTurns: Array<Record<string, unknown>>; priorFacts: Array<Record<string, unknown>>; persistedGraph: unknown | null } = {
-  priorTurns: [], priorFacts: [], persistedGraph: null,
+const mockState: {
+  priorTurns: Array<Record<string, unknown>>; priorFacts: Array<Record<string, unknown>>; persistedGraph: unknown | null;
+  /** The scenario's durable analysis read (`null` = the port throws: the reconciled set degrades). */
+  durableFacts: Array<Record<string, unknown>> | null;
+} = {
+  priorTurns: [], priorFacts: [], persistedGraph: null, durableFacts: null,
 };
 
 vi.mock('../session/index.js', () => ({
@@ -33,6 +37,13 @@ vi.mock('../session/index.js', () => ({
     loadGraphAndBriefText: async () => ({ graph: mockState.persistedGraph, briefText: null }),
     ensureScenarioExists: async () => ({ user_id: null }),
     readMostRecentPendingActions: async () => [],
+    readScenarioRunAnalysisFactsFor: async () => {
+      if (mockState.durableFacts === null) throw new Error('durable analysis read unavailable');
+      return {
+        facts: mockState.durableFacts.map((fact, i) => ({ fact, fact_row_id: `durable-row-${i}`, fact_created_at: new Date(Date.now() - 60_000 - i * 1000).toISOString() })),
+        total_count: mockState.durableFacts.length,
+      };
+    },
   }),
   resetSessionStoreForTests: () => undefined,
 }));
@@ -56,7 +67,8 @@ const READY_GRAPH = {
 };
 const READY_GRAPH_HASH = computeAnalysisAffectingGraphHash(READY_GRAPH as never)!;
 const SNAPSHOT = {
-  snapshot_version: 1, sent_digest: 'a'.repeat(64),
+  // Schema-valid (`goal` is required): the durable read parses every fact with HandlerFactSchema, as production writes it.
+  snapshot_version: 1, sent_digest: 'a'.repeat(64), goal: null,
   options: [{ option_id: 'opt_hire', settings: [{ factor_id: 'fac_capacity', encoded: 1 }] }],
   options_not_sent: [], factors: [], constraints: [],
   links: [{ from: 'fac_capacity', to: 'goal_q3', mean: 1, exists_probability: 1 }],
@@ -107,6 +119,7 @@ describe('C1 — the turn binds the Run a rerun will be paired with', () => {
     seen.length = 0;
     mockState.priorTurns = [PRIOR_TURN];
     mockState.persistedGraph = READY_GRAPH;
+    mockState.durableFacts = null;
     setTestSink(() => {});
   });
   afterEach(() => { vi.clearAllMocks(); setTestSink(null); });
@@ -123,5 +136,22 @@ describe('C1 — the turn binds the Run a rerun will be paired with', () => {
     mockState.priorFacts = [priorRun(false)];
     await runTurnExecutor(mkPayload('Please run the analysis again on this same model.'), 'req-c1-legacy', { routingAdapter: adapter(), graphState: READY_GRAPH as never, ...registries() });
     expect(seen).toEqual(['prior_not_recorded']);
+  });
+
+  // ⭐ C1 DURABLE HISTORY on the EXECUTOR path (CODEX on 30bb9170: a composer imperative rerun reaches run_analysis here).
+  it('T3 (RED): the prior Run AGED OUT of the 20-turn window, the durable set holds it → the handler sees its EXACT seed', async () => {
+    mockState.priorTurns = [];
+    mockState.priorFacts = [];
+    mockState.durableFacts = [priorRun(true)];
+    await runTurnExecutor(mkPayload('Please run the analysis again on this same model.'), 'req-c1-aged', { routingAdapter: adapter(), graphState: READY_GRAPH as never, ...registries() });
+    expect(seen.length, 'the rerun reached run_analysis').toBe(1);
+    expect(seen[0]).toMatchObject({ seedUsed: '1234567' });
+  });
+
+  it('T4 (control): aged out AND the durable read is down → no_prior_run (today\'s answer)', async () => {
+    mockState.priorTurns = [];
+    mockState.priorFacts = [];
+    await runTurnExecutor(mkPayload('Please run the analysis again on this same model.'), 'req-c1-aged-down', { routingAdapter: adapter(), graphState: READY_GRAPH as never, ...registries() });
+    expect(seen).toEqual(['no_prior_run']);
   });
 });
