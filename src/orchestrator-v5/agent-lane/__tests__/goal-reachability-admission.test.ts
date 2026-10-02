@@ -99,9 +99,12 @@ describe('risks are wired in, not deleted', () => {
       expect(a.withheld).toContainEqual(expect.objectContaining({ from: attrition.id, reason: 'no_authored_direction' }));
       expect(a.edges.filter((e) => e.from === attrition.id), 'no signed edge may leave a risk whose link is unknown').toEqual([]);
       expect(a.loss.some((l) => /The risk "Attrition" was named but never connected/.test(l.reason))).toBe(false);
-      // Kept, and named, so the Agent asks rather than the analysis guessing.
+      // Kept, and named, so the Agent asks rather than the analysis guessing — said as LEFT OUT of the analysis with the one
+      // question (K3, MG lease #85 5945974225), so the Run proceeds without it. It was "no chain of causes runs from it…
+      // cannot be run", a line no reply ever said (its field path missed build-model's `not_represented` filter).
       expect(a.nodes.map((n) => n.label)).toContain('Attrition');
-      expect(a.loss.filter((l) => /no chain of causes runs from it/.test(l.reason)).map((l) => l.before)).toContain('Attrition');
+      expect(a.loss.filter((l) => l.field_path.endsWith('.left_out_of_analysis')).map((l) => l.before)).toEqual(['Attrition']);
+      expect(a.loss.filter((l) => /no chain of causes runs from it/.test(l.reason)).map((l) => l.before)).not.toContain('Attrition');
       // CONTRAST, same run: the risks with no stated link are still wired.
       for (const label of ['Churn constraint breach', 'MRR target miss']) {
         const id = a.nodes.find((n) => n.label === label)!.id;
