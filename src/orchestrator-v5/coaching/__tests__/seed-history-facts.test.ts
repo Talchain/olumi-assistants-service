@@ -56,6 +56,14 @@ describe('seedHistoryFacts — the window first; the durable set only when the w
     expect(seedOf(facts)).toBe('111');
   });
 
+  it('RED (CODEX r2): the window is NON-EMPTY but holds no SUCCESSFUL Run (a failed Run, a non-Run fact) → the durable set lends', () => {
+    const failed = runFact('f1', '2026-10-01T11:30:00.000Z') as unknown as { result: { enrichment: Record<string, unknown> } };
+    failed.result.enrichment.analysis_status = 'failed';
+    const failedRun = failed as unknown as HandlerFact;
+    const notARun = { fact_type: 'explain_results', fact_version: 1, noop: true, result: { precondition_unmet: false, option_count: 2 } } as unknown as HandlerFact;
+    expect(seedOf(seedHistoryFacts({ scenarioId: SCENARIO, hotWindow: [failedRun, notARun], durable: reconciled([failedRun, A]) }))).toBe('111');
+  });
+
   it('RED: … and when it is CAPPED (its newest rows) → the durable set lends', () => {
     expect(seedOf(seedHistoryFacts({ scenarioId: SCENARIO, hotWindow: [], durable: reconciled(cappedPage([B, A]), SCENARIO_ANALYSIS_FACT_CAP + 5) }))).toBe('222');
   });

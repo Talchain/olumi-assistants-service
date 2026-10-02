@@ -84,8 +84,8 @@ function harness() {
    * scenario's durable analysis read still holds every committed Run (+ `durableExtra`, newest first). `durableDown`: the
    * durable read throws (the reconciled set degrades).
    */
-  const run = async (turnId: string, opts: { agedOut?: boolean; durableExtra?: HandlerFact[]; durableDown?: boolean } = {}) => {
-    const hot = opts.agedOut === true ? [] : window;
+  const run = async (turnId: string, opts: { agedOut?: boolean; durableExtra?: HandlerFact[]; durableDown?: boolean; hotAfterAgeOut?: HandlerFact[] } = {}) => {
+    const hot = opts.agedOut === true ? [...(opts.hotAfterAgeOut ?? [])] : window;
     const priorTurns = hot.map((_, i) => ({
       id: `row-run-${i}`, scenario_id: SCENARIO, user_id: null, turn_id: `turn-run-${i}`, turn_class: 'handler',
       handler_id: 'run_analysis', request_hash: 'sha256:run', response_emitted: true, llm_calls_used: 0, duration_ms: 1,
@@ -184,6 +184,16 @@ describe('C1 durable history — a Run that aged out of the hot window still len
     // delta reads the hot window, which lost A, and honestly emits none: CODEX-confirmed `insufficient_runs`.)
     const built = buildRunDelta({ priorFacts: h.window as never, mayNameLeadingOption: true });
     expect((built as { delta: Rec }).delta.attribution_case).toBe('C1_attributable');
+  });
+
+  it('B4b (CODEX r2): the window still holds a FAILED Run after A aged out (non-empty, no success) → the durable set lends A\'s EXACT seed', async () => {
+    const h = harness();
+    const a = await h.run('turn-a');
+    happyFact = structuredClone(a);
+    const failed = runFact('555555');
+    (((failed as unknown as Rec).result.enrichment) as Rec).analysis_status = 'failed';
+    await h.run('turn-b', { agedOut: true, hotAfterAgeOut: [failed], durableExtra: [failed] });
+    expect(h.sentSeeds[1], 'Run B sends Run A\'s seed echo, verbatim').toBe(seedOf(a));
   });
 
   it('B5 (control): aged out AND the durable read is down → no seed; the binding says no_prior_run (today\'s answer)', async () => {
