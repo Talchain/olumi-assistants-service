@@ -2316,6 +2316,13 @@ export class SupabaseSessionStore implements SessionStore {
     return parseExistingScenarioRow(data, scenarioId);
   }
 
+  /** Viewer membership (READ grant for the graph-read route only; see the port). Throws on a store failure. */
+  async isScenarioMember(scenarioId: string, userId: string): Promise<boolean> {
+    const { data, error } = await this.client.rpc('is_scenario_member', { p_scenario_id: scenarioId, p_user_id: userId });
+    if (error) throw new SessionReadError('Scenario membership read failed', { cause: error, code: errCode(error) });
+    return data === true;
+  }
+
   /** A scoped parent join keeps the graph, restore marker and newest Run in one read. */
   async readRunCurrentness(scenarioId: string) {
     const { data, error } = await this.client
