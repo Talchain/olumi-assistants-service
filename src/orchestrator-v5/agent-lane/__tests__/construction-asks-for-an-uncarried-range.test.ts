@@ -303,4 +303,40 @@ describe('A4 first pass: the written range is asked of the FIRST construct', () 
     const asked = 'We need to raise at least £1.2m in 2 months. Should we focus on firms that do deals between £1-2m?';
     expect(firstConstructInput(asked)).toBe(asked);
   });
+
+  // ⛔ A STATED CHANGE IS NOT A RANGE (DL + CODEX follow-up on #2506; MG lease 5946766696).
+  const noted = (brief: string): string[] => {
+    const at = firstConstructInput(brief).indexOf('\n\nConstruction notes: ');
+    return at === -1 ? [] : (JSON.parse(firstConstructInput(brief).slice(at + '\n\nConstruction notes: '.length)) as string[])
+      .map((n) => n.match(/^The brief writes "([^"]+)"/)?.[1] ?? n);
+  };
+
+  it('RED: a change STATED outside a question ("we will raise the Pro plan price from £49 to £59") gets no per-one note', () => {
+    const stated = 'We need £100k MRR within 12 months. We will raise the Pro plan price from £49 to £59 per month next quarter.';
+    expect(firstConstructInput(stated)).toBe(stated);
+    for (const s of ['MRR grew from £10k to £20k last year.', 'We cut the ad spend from £80k to £50k in March.', 'Our fee went from £400 to £550 per day.']) {
+      expect(noted(s), s).toEqual([]);
+    }
+  });
+
+  it('RED: a stated change BESIDE a per-one range → only the range is noted', () => {
+    expect(noted('We will move pricing from £49 to £59. We focus on firms that do deals between £1-2m.')).toEqual(['£1-2m']);
+  });
+
+  it('CONTROL (price / budget / target): a range that is not a change keeps its note — the note says "draw it as you otherwise would"', () => {
+    expect(noted('Our price will sit between £49 and £59 per seat.')).toEqual(['£49 and £59']);
+    expect(noted('We have a marketing budget of £50k to £80k this year.')).toEqual(['£50k to £80k']);
+    expect(noted('We are targeting £1m to £2m in new ARR by December.')).toEqual(['£1m to £2m']);
+  });
+
+  it('CONTROL: a SPREAD written with "from" keeps its note, even beside a change word ("can go anywhere from", "ranging from")', () => {
+    expect(noted('Deal sizes can go anywhere from £1m to £2m.')).toEqual(['£1m to £2m']);
+    expect(noted('We sell to firms with deals ranging from £1m to £2m.')).toEqual(['£1m to £2m']);
+    // A change word in an EARLIER sentence never reaches this one.
+    expect(noted('We raised prices last year. Deals run from £1m to £2m.')).toEqual(['£1m to £2m']);
+    // …nor one more than six words before "from" in the same sentence.
+    expect(noted('We raised a small seed round last year and the deals in our space now typically run from £1m to £2m.')).toEqual(['£1m to £2m']);
+    // Only "from X TO Y" is a stated change: a band written with a dash after a change word stays a range.
+    expect(noted('We plan to raise from £1-2m this round.')).toEqual(['£1-2m']);
+  });
 });

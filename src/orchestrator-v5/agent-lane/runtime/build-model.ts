@@ -854,6 +854,36 @@ function perOneRangeRule(written: string): string {
 }
 
 /**
+ * ⛔ A STATED CHANGE IS NOT A RANGE (DL + CODEX follow-up on #2506; MG lease 5946766696): "we'll raise the price from X to Y"
+ * moves ONE quantity between two levels, which a draft holds as option levels, never as a size per one, so the first pass
+ * gives it no per-one note. Read narrowly: "from <low> to <high>" with a change word at most six words before "from", in
+ * the same sentence. A spread ("anywhere / ranging / varying from") is never a change. Anything else keeps its note, the
+ * fail-safe default (the note itself says "draw it as you otherwise would"). The retry is unchanged: its `heldAsOne`
+ * reads the draft, which a first pass does not have.
+ */
+const CHANGE_WORDS = [
+  'raise', 'raises', 'raised', 'raising', 'increase', 'increases', 'increased', 'increasing', 'reduce', 'reduces', 'reduced',
+  'reducing', 'decrease', 'decreases', 'decreased', 'decreasing', 'lower', 'lowers', 'lowered', 'lowering', 'cut', 'cuts',
+  'cutting', 'slash', 'slashes', 'slashed', 'slashing', 'trim', 'trims', 'trimmed', 'trimming', 'move', 'moves', 'moved',
+  'moving', 'change', 'changes', 'changed', 'changing', 'switch', 'switches', 'switched', 'switching', 'shift', 'shifts',
+  'shifted', 'shifting', 'go', 'goes', 'going', 'gone', 'went', 'grow', 'grows', 'growing', 'grown', 'grew', 'rise', 'rises',
+  'rising', 'risen', 'rose', 'fall', 'falls', 'falling', 'fallen', 'fell', 'drop', 'drops', 'dropped', 'dropping', 'decline',
+  'declines', 'declined', 'declining', 'climb', 'climbs', 'climbed', 'climbing', 'jump', 'jumps', 'jumped', 'jumping', 'double',
+  'doubles', 'doubled', 'doubling', 'triple', 'tripled', 'halve', 'halved', 'halving', 'hike', 'hikes', 'hiked', 'hiking',
+  'bump', 'bumps', 'bumped', 'bumping', 'push', 'pushes', 'pushed', 'pushing', 'bring', 'brings', 'bringing', 'brought', 'take',
+  'takes', 'taking', 'taken', 'took', 'upgrade', 'upgraded', 'downgrade', 'downgraded', 'reprice', 'repriced', 'repricing',
+  'adjust', 'adjusts', 'adjusted', 'adjusting', 'expand', 'expanded', 'boost', 'boosted', 'shrink', 'shrank', 'shrunk',
+  'surged', 'soared', 'plunged', 'spiked', 'ballooned', 'crept',
+] as const;
+const CHANGE_THEN_FROM = new RegExp(`\\b(?:${CHANGE_WORDS.join('|')})\\b(?:\\s+\\S+){0,6}\\s+from\\s*$`, 'i');
+const SPREAD_THEN_FROM = /\b(?:anywhere|anything|range|ranges|ranged|ranging|vary|varies|varied|varying)\s+from\s*$/i;
+function statedChange(brief: string, r: StatedRange): boolean {
+  const sentence = brief.slice(0, r.low.index).split(/[.!?](?=\s)|\n/).pop() ?? '';
+  const joint = brief.slice(r.low.index + r.low.matchedText.length, r.high.index);
+  return /^\s*to\s*$/i.test(joint) && CHANGE_THEN_FROM.test(sentence) && !SPREAD_THEN_FROM.test(sentence);
+}
+
+/**
  * ⭐ A4 FIRST PASS (MG #85 lease 5944839798; AI HARNESS 5944602546): the range is asked BEFORE the first draft, not only
  * of the retry. On Paul's brief the first pass left his written deal-size range uncarried on 5 of 8 served first briefs (7 of 8
  * paid a second construct, median +15.7 s), and that range retry was adopted 5 times in 6: the first pass skipped real work. Every range the brief
@@ -861,7 +891,7 @@ function perOneRangeRule(written: string): string {
  * writes no range is sent exactly as before, byte for byte.
  */
 export function firstConstructInput(brief: string): string {
-  const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
+  const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index) && !statedChange(brief, r)).map((r) => r.text))]
     .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
   return notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
 }
