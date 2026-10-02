@@ -148,6 +148,34 @@ describe('RC-WIDEN method turn', () => {
       .toEqual({ ok: true });
   });
 
+  it('P1-G: the gate reads units as the DOOR does — a level in another unit, the name rule on the factor\u2019s unit, a repeated factor', () => {
+    // Churn measured in % on its own level, and (second graph) only through a limit in the RAW graph's goal_constraints.
+    const pct = { ...GRAPH, nodes: GRAPH.nodes.map((n) => (n.id === 'f_churn' ? { ...n, observed_state: { value: 0.1, unit: '%' } } : n)) };
+    const viaLimit = { ...GRAPH, goal_constraints: [{ node_id: 'f_churn', operator: '<=', value: 0.3, unit: '%' }] };
+    const churnAt = (unit?: string) => ({ label: 'Retention push', rationale: 'r',
+      acts_on: [{ factor_label: 'Customer churn', direction: 'negative', level: { value: 0.05, ...(unit !== undefined ? { unit } : {}), estimate: true, basis: 'b' } }] });
+    // (a) A churn level stated in GBP: the door records unitMismatch and stores no level → refused, on both unit sources.
+    expect(widenGate(turnOn(pct), churnAt('GBP'))).toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
+    expect(widenGate(turnOn(viaLimit), churnAt('GBP'))).toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
+    // Controls: the same level in the factor's own unit, or with no unit, persists.
+    expect(widenGate(turnOn(pct), churnAt('%'))).toEqual({ ok: true });
+    expect(widenGate(turnOn(viaLimit), churnAt())).toEqual({ ok: true });
+    // (b) No unit on the level: the door reads the name with the FACTOR's unit (GBP), so only '£27' counts → contradicts 45.
+    // Without the fallback, '45%' in the name would match 45 and the gate would pass a level that never persists.
+    // On a model without 'Cut to £45', so a refusal here is the level's, never WD-S-DISTINCT against that option.
+    const noCut = turnOn({ nodes: GRAPH.nodes.filter((n) => n.id !== 'o_cut'), edges: GRAPH.edges.filter((e) => e.from !== 'o_cut') },
+      { 'model.non_sq_option_ids': ['o_raise'] });
+    const priceNoUnit = (label: string) => ({ label, rationale: 'r',
+      acts_on: [{ factor_label: 'Price', direction: 'negative', level: { value: 45, estimate: true, basis: 'b' } }] });
+    expect(widenGate(noCut, priceNoUnit('Take 45% off to £27'))).toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
+    // Control: the factor's unit also drops a figure of another kind — '£20' is not a churn level, so 0.05 persists.
+    expect(widenGate(turnOn(pct), { ...churnAt(), label: 'Spend £20 a head on retention' })).toEqual({ ok: true });
+    expect(widenGate(noCut, priceNoUnit('Take it down to £45'))).toEqual({ ok: true });
+    // (c) A factor twice in one option: the door keeps the FIRST direction but the LAST level → refused.
+    expect(widenGate(noCut, one('Cut then raise', ['Price', 'negative'], ['Price', 'positive']))).toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
+    expect(widenGate(noCut, one('Cut twice', ['Price', 'negative'], ['Price', 'negative']))).toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
+  });
+
   it('fail closed: an option whose direction is UNKNOWN (no level set) matches any proposal on the same factors', () => {
     const g = { nodes: [...GRAPH.nodes, { id: 'o_new', kind: 'option', label: 'Loyalty scheme' }],
       edges: [...GRAPH.edges, { from: 'o_new', to: 'f_churn', ...STRUCTURAL }] };

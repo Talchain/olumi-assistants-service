@@ -27,6 +27,7 @@ import type { Target, Variant } from '../guidance/types.js';
 import { POLICY } from '../guidance/policy.js';
 import { levelFrameOf } from '../runtime/agent-capabilities.js';
 import { contradictsItsName } from '../stated-by-user.js';
+import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
 import { assembleGuidanceSignals, type GuidanceSignals as TurnSignals } from '../turn-context/guidance-signals.js';
 import { selectorSignalsOf, TALK_IT_THROUGH_CHIP, type MethodReadback } from './method-turn.js';
 
@@ -167,6 +168,8 @@ export interface RunWidenTurn {
   /** The graph as read and its status quo: a proposed level's direction is read against the same baseline (DL P1-E). */
   readonly graph: Graph;
   readonly sq: string | null;
+  /** The RAW graph, exactly as the door reads it (`factorUnitOf` joins `goal_constraints` by node id). */
+  readonly raw: unknown;
 }
 
 export type WidenUnavailableReason = 'model_unread' | 'no_goal';
@@ -235,7 +238,7 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
   ].join('\n');
   const doorFactors = g.nodes.filter((n) => n.kind === 'factor').map((n) => ({
     id: String(n.id), label: typeof n.label === 'string' ? n.label : '', description: typeof n.description === 'string' ? n.description : '' }));
-  return { kind: 'run', target: 'options', variant, goal_label: goalLabel, directive, current, factors: doorFactors, graph: g, sq };
+  return { kind: 'run', target: 'options', variant, goal_label: goalLabel, directive, current, factors: doorFactors, graph: g, sq, raw: graph };
 }
 
 /** The Widen turn for a press, from the route's own readback (the same licence and identity projection as the pre-mortem). */
@@ -288,6 +291,7 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
   const currentLabels = new Set(turn.current.map((c) => c.label));
   const proposedLabels = new Set<string>();
   for (const item of raw) {
+    const factorsSeen = new Set<string>();
     const o = rec(item);
     const label = typeof o?.label === 'string' ? norm(o.label) : '';
     const actsOn = Array.isArray(o?.acts_on) ? o.acts_on.map(rec) : [];
@@ -299,11 +303,17 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
       const id = doorFactorOf(turn, e?.factor_label);
       const direction = e?.direction === 'negative' ? 'negative' : e?.direction === 'positive' ? 'positive' : undefined;
       if (id === undefined || direction === undefined) { failed.add('WD-S-GROUNDED'); continue; }
+      // The door keeps the FIRST entry's direction but the LAST entry's level for a repeated factor: refuse the repeat.
+      if (factorsSeen.has(id)) { failed.add('WD-S-LEVEL'); continue; }
+      factorsSeen.add(id);
       /**
        * ⛔ THE GATE JUDGES WHAT THE WRITER WILL PERSIST, NEVER WHAT THE MODEL DECLARED (DL round 3, P1-F; the scope cut
-       * for v1). Every factor a Widen option changes carries Olumi's estimate level that the door WILL store: a number,
-       * `estimate: true` + a basis, inside the factor's frame (`levelFrameOf`), not contradicting the option's own name
-       * (`contradictsItsName`: the door leaves such a level unset), against a finite baseline. Anything else refuses the
+       * for v1). Every factor a Widen option changes carries Olumi's estimate level that the door WILL store. The door's
+       * per-level loop (`proposeNewOption`) leaves a level unset or refuses it on EXACTLY these paths, each mirrored here
+       * with the door's own helpers: (1) no level; (2) `unitsConflict(unit, factorUnitOf(raw, factor))`; (3) the user's
+       * split in another period (unreachable: the press message is our fixed chip text, no ratio); (4) not the user's
+       * figure and no estimate + basis; (5) `contradictsItsName(value, unit ?? factorUnit, label)`; (6) framed and
+       * outside 0..1; (7) unframed and outside 0..1. Plus a finite baseline for the move. Anything else refuses the
        * WHOLE proposal: a lever that never persists can never make an option "distinct".
        */
       const level = rec(e?.level);
@@ -311,8 +321,12 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
       if (level === undefined || value === undefined) { failed.add('WD-S-LEVEL'); continue; }
       if (level.estimate !== true || typeof level.basis !== 'string' || level.basis.trim() === '') { failed.add('WD-NO-NEW-FIGURES'); continue; }
       const node = turn.graph.nodes.find((n) => String(n.id) === id);
+      // The door's own unit read: a non-empty string, trimmed; the factor's unit from its level, else a limit on it.
+      const unit = typeof level.unit === 'string' && level.unit.trim() !== '' ? level.unit.trim() : undefined;
+      const factorUnit = factorUnitOf(turn.raw, node as never);
+      if (unitsConflict(unit, factorUnit) !== null) { failed.add('WD-S-LEVEL'); continue; }
       const encoded = encodedLevelOf(node, value);
-      if (encoded === undefined || contradictsItsName(value, level.unit, typeof o?.label === 'string' ? o.label : '')) { failed.add('WD-S-LEVEL'); continue; }
+      if (encoded === undefined || contradictsItsName(value, unit ?? factorUnit, typeof o?.label === 'string' ? o.label : '')) { failed.add('WD-S-LEVEL'); continue; }
       // DL P1-E: the persisted level decides the move, on the door's own frame against the same baseline as the existing
       // options. No finite baseline = no move (refused); today's level, or a move against the declared word, is refused.
       const derived = moveOf(encoded, baselineOf(turn.graph, id, turn.sq));
