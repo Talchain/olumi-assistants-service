@@ -239,9 +239,10 @@ const rows = new Map<string, Rec>();
 let recentFails = false;
 const store = {
   // The durable answers, newest first, as `readRecent` returns them (claims excluded); a switch makes the read fail.
-  readRecent: vi.fn(async (sid: string) => {
+  // …and only the newest `limit` rows, as the store's own LIMIT does: a mock that returned every row hid the window (MG).
+  readRecent: vi.fn(async (sid: string, limit: number) => {
     if (recentFails) throw new Error('read failed');
-    return [...rows.values()].filter((r) => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim')).reverse();
+    return [...rows.values()].filter((r) => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim')).reverse().slice(0, limit);
   }),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, tid: string) => rows.get(`${sid}|${tid}`) ?? null),
@@ -327,6 +328,19 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const again = (await runTurn('7e2f9031-4c5d-4e6f-8071-8293a4b5c6d7')).assistant_text;
     expect(again).not.toContain('as your target');
     expect(again).toContain(A7);
+  });
+
+  it('RED (R3 5944174003, journey-12 shape): the first Run asks, then FOUR more Run + Explain pairs → the ask is said ONCE in all', async () => {
+    const first = (await runTurn('c374e586-91a2-43b4-a5c6-d7e8f90a1b23')).assistant_text;
+    expect(first.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    const ids = ['d485f697-a2b3-44c5-b6d7-e8f90a1b2c34', 'e596a7b8-b3c4-45d6-87e8-f90a1b2c3d45', 'f6a7b8c9-c4d5-46e7-98f9-0a1b2c3d4e56', '07b8c9d0-d5e6-47f8-a90a-1b2c3d4e5f67'];
+    for (const id of ids) await runTurn(id, true);
+    // Bound to the durable ANSWER ROWS — what each turn shipped and a replay returns (the Explain reply is not the Run's).
+    const sid = [...rows.values()].find((r) => r.turn_id === 'c374e586-91a2-43b4-a5c6-d7e8f90a1b23')?.scenario_id;
+    const answers = [...rows.values()].filter((r) => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim'));
+    expect(answers.length, 'precondition: 9 answers — beyond a 6-row window').toBe(9);
+    const asking = answers.filter((r) => String(r.assistant_message ?? '').includes(ASK)).map((r) => String(r.turn_id));
+    expect(asking, 'only the first Run asked').toEqual(['c374e586-91a2-43b4-a5c6-d7e8f90a1b23']);
   });
 
   it('CONTROL (DL 5944162815): the goal CHANGES between Runs → its new ask is said (an open ask binds to its own goal)', async () => {
