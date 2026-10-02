@@ -77,6 +77,8 @@ import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResult
 import { decisionInputLines, textAtRest, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
+import { modelScaleMarkerOf, modelScaleOutcomeLines } from '../orchestrator-v5/agent-lane/model-scale-outcome.js';
+import { internalValueTerms } from '../orchestrator-v5/agent-lane/guidance/method-turn-check.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
 import { goalChanceLineOwed, goalChanceSayFromThisTurn, goalChanceWithheldForAgent } from '../orchestrator-v5/agent-lane/goal-chance-withheld.js';
@@ -2103,6 +2105,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * the host composes, never inferred from the bytes.
      */
     let hostComposed = false;
+    /** ITEM 2: Olumi's own reason line + next step leading the explanation (`model-scale-outcome.ts`); host lines. */
+    let explainLead: string[] = [];
     let explanationBriefText: string | null = null;
     /** A Run with no result: its typed outcome's own chips (the identity ask's "Check the figures", a retry), `run-outcome.ts`. */
     let runOutcomeChips: OfferedAction[] = [];
@@ -2268,13 +2272,29 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: fast-path interpretation failed — answering from the run itself');
       }
+      // ⭐ ITEM 2 BACKSTOP (RC `shared.internal_value_terms`; HARNESS/RC 5945457931): a FIRST-run explanation that still names
+      // an internal value is replaced WHOLE by Olumi's own line, never trimmed per sentence. Not on a rerun (M2 has its own
+      // checker, HARNESS CR on #2505). The input fix (the marker) is primary: this count measures whether it holds.
+      if (interpreted !== undefined && rerunPlan === null) {
+        const terms = internalValueTerms(interpreted.answer, graphNodes.map((n) => (typeof n.label === 'string' ? n.label : undefined)));
+        if (terms.length > 0) {
+          log.warn({ scenario_id: scenarioId, terms, event: 'explain.internal_value_fallback' }, 'agent-lane: the explanation named an internal value — replaced whole by Olumi\'s own line');
+          interpreted = undefined;
+          explanationReady = false;
+        }
+      }
+      // ⭐ ITEM 2 (RC rule (1); F1b's marker, DL 5947906652): WHY the outcome can't be read in the goal's own units, and ONE
+      // next step, said by Olumi FIRST, from the marker's own fills (a missing fill says nothing).
+      explainLead = matches ? modelScaleOutcomeLines(modelScaleMarkerOf(st.analysisResult)) : [];
+      if (explainLead.length > 0) hostComposed = true;
       narrationStatus = matches ? explanationReady ? 'ready' : 'unavailable' : 'stale';
       fastPath = 'explain';
       const ms = Date.now() - fastStartedAt;
       const providerMs = runInterpreted ? Math.min(Date.now() - providerStartedAt, ms) : 0;
       // M2: with no interpretation, a rerun still says Olumi's code line rather than nothing about what changed.
-      const text = interpreted?.answer ?? (matches
+      const said = interpreted?.answer ?? (matches
         ? (rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true })) : RUN_EXPLANATION_UNAVAILABLE_TEXT);
+      const text = explainLead.length > 0 ? `${explainLead.join(' ')}\n\n${said}` : said;
       result = {
         assistant_text: text,
         items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],

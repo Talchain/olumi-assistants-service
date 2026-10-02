@@ -24,6 +24,7 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
+import { modelScaleOutcomeOptionIds } from './model-scale-outcome.js';
 import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
 
 export const NO_SINGLE_ASSUMPTION = 'No single assumption measurably changes which option leads.';
@@ -92,11 +93,14 @@ export function analysisResultForAgent(result: unknown): unknown {
   if (enrichment !== undefined) {
     const { factor_sensitivity: _structural, ...rest } = enrichment;
     const withheld = runWithheldGoalFigures(enrichment);
-    const outcomeHidden = keptOutcomeOptionIds(enrichment);
+    // + F1b's model-scale marker (`model-scale-outcome.ts`): the panel keeps those outcomes; the model never reads them. On
+    // the model's own scale the DOWNSIDE figures (p05, CVaR, expected regret) are internal values too, so they go as well.
+    const modelScale = modelScaleOutcomeOptionIds(enrichment);
+    const outcomeHidden = new Set([...keptOutcomeOptionIds(enrichment), ...modelScale]);
     const brief = recordOf(rest.decision_brief);
     let limitsRenamed = false;
     const rows = (value: unknown): unknown => {
-      const projected = optionRowsForAgent(value, withheld, outcomeHidden);
+      const projected = optionRowsForAgent(value, withheld, outcomeHidden, modelScale);
       if (projected.renamed) limitsRenamed = true;
       return projected.rows;
     };
@@ -143,7 +147,9 @@ export function analysisResultForAgent(result: unknown): unknown {
  * together — never the goal's target) becomes `all_limits_hold_probability`; under #416's withhold no row keeps a
  * `probability_of_goal`. Not an array → unchanged.
  */
-function optionRowsForAgent(value: unknown, withheld: boolean, outcomeHidden: ReadonlySet<string> = new Set()): { rows: unknown; renamed: boolean } {
+function optionRowsForAgent(
+  value: unknown, withheld: boolean, outcomeHidden: ReadonlySet<string> = new Set(), downsideHidden: ReadonlySet<string> = new Set(),
+): { rows: unknown; renamed: boolean } {
   if (!Array.isArray(value)) return { rows: value, renamed: false };
   let renamed = false;
   const rows = value.map((row) => {
@@ -162,6 +168,10 @@ function optionRowsForAgent(value: unknown, withheld: boolean, outcomeHidden: Re
         for (const k of ['mean', 'std', 'p10', 'p50', 'p90'] as const) delete kept[k];
         next = { ...next, outcome: kept };
       }
+    }
+    if ('downside' in next && (downsideHidden.has(EVERY_OPTION) || (id !== undefined && downsideHidden.has(id)))) {
+      const { downside: _modelScale, ...others } = next;
+      next = others;
     }
     if ('probability_of_joint_goal' in next) {
       const { probability_of_joint_goal: joint, ...others } = next;
