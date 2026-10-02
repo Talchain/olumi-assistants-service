@@ -307,6 +307,24 @@ export interface RetrieveDecisionRecordsOpts {
 }
 
 /**
+ * ⭐ DECIDE & REVIEW S1 (MG lease #85 5948537951): one USER-AUTHORED row for the
+ * read-back — the columns the record card needs, which {@link DecisionRecordRead}
+ * never carried (`review_date`, and whether an outcome is on record).
+ */
+export interface DecisionRecordUserRead extends DecisionRecordRead {
+  /** ISO timestamptz — the date the user is asked to look again (NOT NULL column). */
+  readonly review_date: string;
+  /** True once `record_decision_outcome` has written the write-once outcome. */
+  readonly has_outcome: boolean;
+}
+
+/** The user-authored page: same pre-cap truth as {@link DecisionRecordReadPage}. */
+export interface DecisionRecordUserReadPage {
+  readonly records: readonly DecisionRecordUserRead[];
+  readonly totalCount: number;
+}
+
+/**
  * One page of the scenario-scoped read: the rows the LIMIT actually returned,
  * PLUS how many rows exist behind that LIMIT.
  *
@@ -349,6 +367,15 @@ export interface DecisionRecordStorePort {
   ): Promise<DecisionRecordReadPage>;
 
   /**
+   * The scenario's USER-AUTHORED records only (`decision.committed_by_user = true`),
+   * newest-first, hard-capped. The filter is in the QUERY, never after it: every
+   * Run auto-captures a `model_derived` row (`commit.ts`), so a post-filter on a
+   * capped page would let a few Runs push the user's own decision out of the window.
+   * The CALLER owns the ownership check (service-role read, no RLS).
+   */
+  retrieveUserRecords(scenarioId: string): Promise<DecisionRecordUserReadPage>;
+
+  /**
    * Fill a record's WRITE-ONCE outcome. Throws
    * {@link DecisionRecordNotFoundError} (DR404) and
    * {@link DecisionRecordOutcomeConflictError} (DR409) as typed errors; an
@@ -384,6 +411,8 @@ export const DECISION_RECORDS_HARD_CAP = 8;
 
 /** Columns the read projection needs — NEVER `owner_user_id` (not projected). */
 const DECISION_RECORD_READ_COLUMNS = 'record_id, scenario_id, created_at, decision, prediction';
+/** The user read-back adds the review date and the outcome (presence only is surfaced). Still never `owner_user_id`. */
+const DECISION_RECORD_USER_READ_COLUMNS = `${DECISION_RECORD_READ_COLUMNS}, review_date, outcome`;
 
 function isPlainObject(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -520,6 +549,39 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
         'DecisionRecords — no exact count on the read; falling back to the row count (a cap drop may go undisclosed on this turn)',
       );
     }
+    return { records: out, totalCount };
+  }
+
+  async retrieveUserRecords(scenarioId: string): Promise<DecisionRecordUserReadPage> {
+    // Same SCOPE-AT-THE-BYTES guard as retrieveRecords, plus the authorship
+    // filter IN the query (`decision->>committed_by_user = 'true'`), so the
+    // LIMIT and the exact count both count only the user's own decisions.
+    const { data, error, count } = await this.client
+      .from('decision_records')
+      .select(DECISION_RECORD_USER_READ_COLUMNS, { count: 'exact' })
+      .eq('scenario_id', scenarioId)
+      .eq('decision->>committed_by_user', 'true')
+      .order('created_at', { ascending: false })
+      .limit(DECISION_RECORDS_HARD_CAP);
+    if (error) {
+      throw new DecisionRecordStoreError(
+        `retrieveUserRecords for scenario ${scenarioId} failed: ${errMsg(error)}`,
+        { cause: error },
+      );
+    }
+    if (!Array.isArray(data)) return { records: [], totalCount: 0 };
+    const out: DecisionRecordUserRead[] = [];
+    for (const row of data) {
+      const parsed = parseReadRow(row);
+      if (parsed === null || parsed.scenario_id !== scenarioId) continue;
+      // Defence-in-depth on the authorship filter: a row that is not the user's
+      // own commit never reaches a surface that says "your decision".
+      if (parsed.decision.committed_by_user !== true) continue;
+      const { review_date: reviewDate, outcome } = row as { review_date?: unknown; outcome?: unknown };
+      if (typeof reviewDate !== 'string' || reviewDate.length === 0) continue;
+      out.push({ ...parsed, review_date: reviewDate, has_outcome: outcome !== null && outcome !== undefined });
+    }
+    const totalCount = typeof count === 'number' && Number.isFinite(count) && count >= out.length ? count : out.length;
     return { records: out, totalCount };
   }
 
