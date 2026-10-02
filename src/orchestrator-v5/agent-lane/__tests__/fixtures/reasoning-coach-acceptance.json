@@ -7467,6 +7467,55 @@
    "note": "Honest control: after naming the change, 'Nothing else changed.' is true and passes (MG's C0 line)."
   },
   {
+   "id": "MT-RERUN-UNWITHHELD-UNPAIRED-GOOD",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "MT-RERUN-UNWITHHELD-GOOD inputs (D1) as an engine-drift pair (wire C3-C5, checked as C2_unpaired)",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "prior_withheld": true,
+    "leader_licensed": true,
+    "noise_verdict": "not_noise_qualified",
+    "change_labels": [
+     "Sprint capacity for integration fix",
+     "Integration step bug resolution"
+    ],
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Continue Current Plan"
+    ]
+   },
+   "reply": "You accepted Olumi's estimate for how much sprint capacity for integration fix changes integration step bug resolution.\nOlumi can now compare the options. Other things also differed between these two runs, so the difference can't be put down to your edit alone.",
+   "expect": "pass",
+   "note": "Un-withheld off C1: say Olumi can now compare the options and give the case line; never credit the edit (52f8cd 2 Oct). Control for -BAD-CREDIT."
+  },
+  {
+   "id": "MT-RERUN-UNWITHHELD-UNPAIRED-BAD-CREDIT",
+   "policy_id": "RERUN-EXPLANATION",
+   "grounded_on": "MT-RERUN-UNWITHHELD-UNPAIRED-GOOD inputs",
+   "inputs": {
+    "attribution_case": "C2_unpaired",
+    "prior_withheld": true,
+    "leader_licensed": true,
+    "noise_verdict": "not_noise_qualified",
+    "change_labels": [
+     "Sprint capacity for integration fix",
+     "Integration step bug resolution"
+    ],
+    "current_option_labels": [
+     "AI Reporting Module Sprint",
+     "Integration Bug Fix Sprint",
+     "Continue Current Plan"
+    ]
+   },
+   "reply": "You accepted Olumi's estimate for how much sprint capacity for integration fix changes integration step bug resolution.\nThat was what held the comparison back, so Olumi can now compare the options.",
+   "expect": "fail",
+   "failing_checks": [
+    "RX-NO-CAUSE-UNPAIRED"
+   ],
+   "note": "The contract's old UNWITHHELD template credits the edit; off C1 that is an unpaired cause claim (52f8cd: an engine-drift pair un-withholds beside an unrelated edit)."
+  },
+  {
    "id": "MT-RERUN-UNWITHHELD-BAD-NO-LINE",
    "policy_id": "RERUN-EXPLANATION",
    "grounded_on": "MT-RERUN-UNWITHHELD-GOOD inputs (D1)",

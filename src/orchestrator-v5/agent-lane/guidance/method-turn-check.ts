@@ -106,7 +106,7 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('RX-NAMES-CHANGES', (inputs.change_labels ?? []).slice(0, 3).every(label => labelMatches(reply, [label])));
     const labels = [...model, ...(inputs.change_labels ?? []), ...(inputs.current_option_labels ?? [])];
     check('RX-NO-CAUSE-UNPAIRED', inputs.attribution_case === 'C1_attributable'
-      || !banned(reply, /\b(because (you|of your)|caused|due to your|as a result of your|led to)\b/iu, labels));
+      || !banned(reply, /\b(because (you|of your)|caused|due to your|as a result of your|led to|held (the|its) comparison back)\b/iu, labels));
     const sentences = reply.split(/(?<=[.!?])\s+|\n/u);
     check('RX-NO-LEADER-UNLICENSED', inputs.leader_licensed === true || !sentences.some(sentence =>
       labelMatches(sentence, inputs.current_option_labels ?? []) && banned(sentence, /\b(leads|ahead|best|wins|now first)\b/iu, labels)));

@@ -74,7 +74,8 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, textAtRest, withA7AfterGate } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, textAtRest, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
 import { disclosuresFor, valueChangeDisclosures, withDisclosures } from '../orchestrator-v5/agent-lane/disclosure.js';
@@ -94,7 +95,7 @@ import { GM_HELD_HANDLER_ID } from '../orchestrator-v5/handlers/edit-graph-refer
 import { dispatchTool, toolsFor } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
 import { buildAppliedGraphWireField } from '../orchestrator-v5/compose/applied-graph-emit.js';
 import { currentStageEmitter, graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
-import { readBrief, BRIEF_READING_TIMEOUT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
+import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS, type CallBriefReading } from '../orchestrator-v5/agent-lane/brief-reading.js';
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
@@ -378,6 +379,41 @@ const MUTATION_INSTRUCTION =
   config.proxy.agentLanePreview === true
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
     : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most), propose_new_risk to add a risk the user asked for, propose_new_factor for new factors whose figures the user just stated, propose_limit_change for a new figure the user has just stated for a limit the model already holds \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
+
+/**
+ * How many recent answers the target ask reads to see whether it is already open (`decision-input-ask.ts`, PANEL 5944136475).
+ * A suppressed ask is not in its own row, so the window must reach back to the LAST ask actually said: R3's journey-12
+ * (guest 4b218a76) spans 14 turns from the first Run to the last, and at 6 the ask came back mid-journey. 20 covers one
+ * session's journey; beyond it, saying the open ask once more is a reminder, not a repeat.
+ */
+const RECENT_REPLIES_READ = 20;
+
+type RecentRowsReader = { readonly readRecent?: (scenarioId: string, limit?: number) => Promise<readonly { readonly request_hash?: string | null; readonly turn_id?: string | null; readonly assistant_message?: string | null }[]> };
+
+/**
+ * D1's at-rest lines with the target ask said ONCE (PANEL 5944136475): only when the lines would ask, the Agent's own recent
+ * answers are read, and an ask already among them is still open and not said again. ⛔ Only the Agent route's answer rows
+ * (`isAgentAnswerRow`): each Run also commits in-process sub-turn rows the user never read, so the cap counts AFTER the drop,
+ * over the raw window the Agent's memory reads (`DURABLE_SEED_ROWS_READ`). `exceptTurnId` leaves out the row being replayed:
+ * a lost response the user never saw has not said the ask (Codex P2). A failed read asks, as before.
+ */
+async function decisionLinesAskedOnce(
+  graph: unknown, ctx: DecisionInputAskContext, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined,
+): Promise<string[]> {
+  const lines = decisionInputLines(graph, ctx);
+  if (!lines.some((l) => l.endsWith('as your target.')) || typeof store.readRecent !== 'function') return lines;
+  try {
+    const recentReplies = (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
+      .filter((t) => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
+      .slice(0, RECENT_REPLIES_READ)
+      .map((t) => t.assistant_message)
+      .filter((m): m is string => typeof m === 'string');
+    return recentReplies.length > 0 ? decisionInputLines(graph, { ...ctx, recentReplies }) : lines;
+  } catch (err) {
+    log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — the target ask is said');
+    return lines;
+  }
+}
 
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
@@ -1166,7 +1202,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     };
     const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
       model: budget.model,
-      purpose: 'conversation',
+      // T1 (b): the cache prewarm is a real call, on the ledger as itself (`PREWARM_OUTPUT_TOKENS`).
+      purpose: req.purpose === 'prewarm' ? 'prewarm' : 'conversation',
       ...agentRequestIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), sentBody),
     });
     const deadlineMs = (req as { deadline_ms?: unknown }).deadline_ms;
@@ -1637,7 +1674,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
           const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
           const withoutAsks = withDisclosures(RUN_RESULT_READY_TEXT, owedNow);
-          const lines = decisionInputLines(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks });
+          const lines = await decisionLinesAskedOnce(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks }, store, scenarioId, turnId);
           let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow, ...lines]);
           const breakEvenNow = (state.analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
             ? breakEvenFor(state.graph, state.identityEvaluated) : null;
@@ -1951,10 +1988,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // `historyFromDurableTurns`. A failed read degrades to no history; it never
     // fails the turn.
     const held = histories.get(sessionId);
+    /** T1 (a): this conversation's earlier words are KNOWN — held in-process, or read durably. A failed or absent read leaves them unknown. */
+    let earlierWordsKnown = !needsDurableSeed(held);
     if (needsDurableSeed(held) && typeof store.readRecent === 'function') {
       try {
         const durable = historyFromDurableTurns(await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ));
         if (durable.length > 0) histories.set(sessionId, [...durable, ...held]);
+        earlierWordsKnown = true;
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: durable conversation could not be read — continuing without it');
       }
@@ -2310,6 +2350,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
        * no packet: the tool stays offered, exactly as before.
        */
       let canonicalContext: Parameters<typeof runAgentTurn>[0]['canonicalContext'];
+      let hostFirstCall: Parameters<typeof runAgentTurn>[0]['hostFirstCall'];
       try {
         const st = await capabilities.getCanonicalState(toolCtx);
         // Select once from the initial host read; registration later in this turn cannot switch the model.
@@ -2340,19 +2381,40 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * Agent, ONE fast call copies the user's own goal and options out of THEIR message (never the Agent's
          * restatement); each span must be an exact substring of it or it is dropped (`gateBriefReading`).
          *   · Streamed turns only: a buffered turn has no stage emitter, so nothing starts and its body is untouched.
-         *   · Never awaited: the turn's latency and outcome cannot depend on it; a failure is simply no frame.
+         *   · Never awaited for the frame: a failure is simply no frame. Only T1 (a)'s routing waits for it, capped (below).
          *   · Emitted only while the Agent turn is open AND before GRAPH_READY: the model supersedes the reading.
          * Display-only: nothing is persisted, and nothing reaches the Agent or the COMPLETE body.
          */
         const emitStage = currentStageEmitter();
-        if (emitStage !== undefined && st.ok === true && (st as { empty?: unknown }).empty === true) {
+        const knownEmpty = st.ok === true && (st as { empty?: unknown }).empty === true;
+        /**
+         * ⭐ T1 (a) — A FIRST BRIEF GOES STRAIGHT TO THE CONSTRUCTOR (DL 5942371176; served map 5942431674). On a known-empty
+         * model, on the conversation's PROVABLY first user message, typed (no chip, no retry), no method press, the first model call only ever
+         * decided to call `build_model_from_brief` with the user's words (13.6–14k input tokens, ~4 s). The SAME brief
+         * reading the stream shows decides it instead, from typed spans of the user's own message (`gateBriefReading`:
+         * exact substrings, never a wording rule) plus its typed `build` judgement (false when the user asks to hold off):
+         * `build` and a goal or at least one option → the host makes that call
+         * (`hostFirstCall`) with the message verbatim, and one call answers from its result. No reading within
+         * `BRIEF_ROUTE_WAIT_MS`, or neither → the Agent decides, exactly as before. A brief spread over earlier messages
+         * is never routed, nor one whose earlier words could not be read (Codex pre-review): only the Agent combines them.
+         * ⛔ STREAMED TURNS ONLY (DL CR on #2496): routing REUSES the display reading the stream already makes, so it adds no
+         * provider call anywhere. A buffered turn starts no reading and is exactly today's path. (This block runs only for
+         * the request that WON the turn claim: a losing, refused or replayed request has already returned above.)
+         */
+        const mayRouteBrief = emitStage !== undefined && knownEmpty && earlierWordsKnown && needsDurableSeed(history) && typedNow !== null && methodTurn === null;
+        const reading = emitStage !== undefined && knownEmpty ? readBrief(message, callBriefReading) : undefined;
+        if (reading !== undefined && emitStage !== undefined) {
           briefReadingOpen = true;
-          void readBrief(message, callBriefReading).then((reading) => {
-            if (!briefReadingOpen || reading === null || graphPreviewEmitted()) return;
+          void reading.then((r) => {
+            if (!briefReadingOpen || r === null || graphPreviewEmitted()) return;
             try {
-              emitStage({ kind: 'BRIEF_READ', goal: reading.goal, options: reading.options, limits: reading.limits, elapsed_ms: Date.now() - startedAt });
+              emitStage({ kind: 'BRIEF_READ', goal: r.goal, options: r.options, limits: r.limits, elapsed_ms: Date.now() - startedAt });
             } catch { /* display work never costs the turn */ }
           });
+        }
+        if (mayRouteBrief && reading !== undefined) {
+          const r = await readingWithin(reading, BRIEF_ROUTE_WAIT_MS);
+          if (r !== null && r.build === true && (r.goal !== null || r.options.length > 0)) hostFirstCall = { name: 'build_model_from_brief', args: { brief: message } };
         }
       } catch (err) {
         log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: turn state could not be read — the Agent will read it itself');
@@ -2373,6 +2435,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           withheldTools: methodTurn?.kind === 'run' ? toolsFor(mode).map((t) => t.name) : withheldToolsOf(body),
           ...(methodTurn?.kind === 'run' ? { maxHops: 1 } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
+          ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
           composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
           // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
@@ -2802,11 +2865,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)
           || (c.name === 'run_analysis' && (result.tool_results[i] as { ran?: unknown } | undefined)?.ran === true)),
     };
-    const decisionLines = decisionInputLines(readbackGraph, {
+    const decisionCtx = {
       ...decisionTurn,
       restingText: textAtRest(composedWithout),
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
-    });
+    };
+    // ⭐ ASKED ONCE (PANEL 5944136475): an ask already among the Agent's recent answers stays open and is not repeated.
+    const decisionLines = await decisionLinesAskedOnce(readbackGraph, decisionCtx, store, scenarioId, undefined);
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
     const linkAsk = decisionLines.some((l) => l.endsWith('as your target.')) ? null : linkSizeAsk(readbackGraph, {

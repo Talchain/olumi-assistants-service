@@ -149,6 +149,69 @@ export function goalFiguresWithheldWarning(envelope: Record<string, unknown>): R
   return filterObjectEntries(warnings).find((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
 }
 
+/**
+ * Every option whose identity is STRUCTURALLY SAFE, mapped to its win
+ * probability.
+ *
+ * ⚠ WHY NOT `result.win_probabilities`, WHICH IS RIGHT THERE AND ALREADY
+ * PERSISTED. Because it is LABEL-KEYED. `run-analysis.ts` (`extractWinProbabilities`)
+ * (`extractWinProbabilities`) keys that record by `option_label` FIRST and only
+ * falls back to `option_id`, so on any ordinary run its keys are DISPLAY
+ * STRINGS. `RunDeltaWinProbabilityDeltaSchema.option_id` is identity-bound —
+ * *"Option id — identity-bound (trap 19), never a label"* — and feeding labels
+ * into it would reintroduce exactly the defect `compare-runs.ts` documents at
+ * length: a rename is invisible to the analysis-affecting hash, so two runs
+ * that differ only in a label would be reported as different options.
+ *
+ * ⚠ AND NOT `compactAnalysis(...).summary.options[]` either: that projection
+ * carries the SAME `option_id <- option_label` fallback, which is precisely why
+ * `readLeaderOptionId` exists to confirm the winner's id against the raw
+ * records. Only the raw source plus an explicit id check is safe.
+ *
+ * A DUPLICATE ID DROPS BOTH ENTRIES. If two records claim one id we cannot tell
+ * which is which, and picking either would attach a number to an option by
+ * guess. Fail-closed.
+ *
+ * ONE identity rule, shared: the run-delta producer reads a Run's shares with it, and the goal-figure withholder
+ * ({@link withholdOptionGoalFigures}'s `win_shares_withheld`) asks it whether there were any shares to remove.
+ */
+export function identityBoundWinProbabilities(
+  enrichment: Record<string, unknown>,
+): ReadonlyMap<string, number> {
+  const found = new Map<string, number>();
+  const ambiguous = new Set<string>();
+
+  for (const entry of winnerOptionResultSource(enrichment)) {
+    const id = entry.option_id;
+    if (typeof id !== 'string' || id.length === 0) continue;
+    // The SHARED predicate, imported rather than re-implemented: a usable
+    // win probability is a finite number in [0, 1]. Re-stating that inequality
+    // here would be a second definition free to drift from the first.
+    if (!isUsableWinProbability(entry.win_probability)) continue;
+    if (found.has(id)) {
+      ambiguous.add(id);
+      continue;
+    }
+    found.set(id, entry.win_probability);
+  }
+
+  for (const id of ambiguous) found.delete(id);
+  return found;
+}
+
+/**
+ * Did this Run's goal-figure withholder REMOVE win shares it had? True only on a typed record: a
+ * `GOAL_FIGURES_WITHHELD_CODES` warning carrying `win_shares_withheld: true`, which `withholdOptionGoalFigures` sets
+ * only when the envelope held ≥1 identity-bound usable share before the withhold. A code alone proves the goal
+ * figures were withheld, never that shares existed (PLoT may have sent none). A Run recorded before the marker
+ * existed answers `false`: its cause is unknown, so no cause is claimed from it.
+ */
+export function runWithheldWinShares(envelope: Record<string, unknown>): boolean {
+  const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
+  return filterObjectEntries(warnings).some((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code)
+    && w.win_shares_withheld === true);
+}
+
 function readEverySource(
   envelope: Record<string, unknown>,
 ): ReadonlyArray<ReadonlyArray<Record<string, unknown>>> {
