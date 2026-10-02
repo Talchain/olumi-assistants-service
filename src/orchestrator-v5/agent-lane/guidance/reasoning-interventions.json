@@ -1415,13 +1415,13 @@
         "run_delta.leader.changed + noise_verdict",
         "run.leader_licensed",
         "no_matched_figures: run_delta.win_probabilities is empty (AVAILABLE today: 'no comparable pair', any cause)",
-        "prior_withheld: run_delta.win_probabilities_unavailable == 'prior_withheld' (schemas 0.70.0, 52f8cd 5937207590; PENDING until CEE emits it). While pending it is absent, so the UNWITHHELD wording is never used."
+        "prior_withheld: run_delta.win_probabilities_unavailable == 'prior_withheld' (schemas 0.70.0, emitted by CEE; 52f8cd 5937207590)."
       ],
       "body": {
         "C0_identical": "Same inputs as the last run; say the result is unchanged, nothing more.",
         "C1_attributable": "Name each change (up to 3, before → after). Say what moved in the comparison. A cause may be stated, because the pair isolates the edit.",
         "C2_unpaired": "Name each change. Say the two runs differ in more than your edit (a new draw), so Olumi can't attribute the difference to the edit alone. State no cause.",
-        "UNWITHHELD": "Only when prior_withheld is TRUE (typed; never inferred from an empty array): name each change, say that this is what held the comparison back, and that Olumi can now compare the options. Never describe a movement: the earlier run had no figures. Name a leader only if run.leader_licensed (with its caveat).",
+        "UNWITHHELD": "Only when prior_withheld is TRUE (typed; never inferred from an empty array): name each change and say that Olumi can now compare the options. Say the change is what held the comparison back ONLY when attribution_case is C1_attributable; otherwise give the case line instead (C2 / C3–C5) and never credit the edit (an engine-drift pair can un-withhold beside an unrelated edit; 52f8cd + Codex on CEE 864e915c). Never describe a movement: the earlier run held its comparison figures back. Name a leader only if run.leader_licensed (with its caveat).",
         "NO_MATCHED_FIGURES": "When no_matched_figures and prior_withheld is not true: name each change and describe no movement; say only what the run now shows (CANVAS's interim pill: 'This pair has no matched figures to compare.')."
       },
       "format": "One-line insight, then up to 3 bullets (one per change), then one line on what moved.",
@@ -1432,7 +1432,8 @@
         },
         {
           "id": "RX-NO-CAUSE-UNPAIRED",
-          "rule": "if attribution_case != C1_attributable: no /\\b(because (you|of your)|caused|due to your|as a result of your|led to)\\b/i (on the label-masked reply, shared.label_masking)"
+          "rule": "if attribution_case != C1_attributable: no /\\b(because (you|of your)|caused|due to your|as a result of your|led to|held (the|its) comparison back)\\b/i (on the label-masked reply, shared.label_masking)",
+          "source": "; + 'held the comparison back' (the contract's own UNWITHHELD template; 52f8cd 2 Oct)"
         },
         {
           "id": "RX-NO-LEADER-UNLICENSED",
@@ -1457,7 +1458,7 @@
           "source": "MG 5939414835"
         }
       ],
-      "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD: 'That was what held the comparison back, so Olumi can now compare the options.' | C2: 'This run also used a new draw, so the difference can't be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
+      "fallback": "Deterministic: 'You changed {changes}. ' + (UNWITHHELD + C1: 'That was what held the comparison back, so Olumi can now compare the options.' | UNWITHHELD otherwise: 'Olumi can now compare the options.' + the case line | C2: 'This run also used a new draw, so the difference can't be put down to your edit alone.' | C1: 'The comparison was rerun on the same draw.' | C0: 'Nothing else changed.')",
       "change_label_templates": {
         "accept_olumi_estimate": {
           "when": "run_delta.input_changes[] row with field 'sizing', before 'placeholder', after 'olumi_accepted'",

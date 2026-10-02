@@ -16,17 +16,17 @@ const rowsOf = (state: GuidanceSignals, guidance: GuidanceState = state.guidance
 };
 
 describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
-  it('imports all 35 cases and all 27 checker fixtures, with unique ids', () => {
-    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(27);
+  it('imports all 35 cases and all 29 checker fixtures, with unique ids', () => {
+    expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(29);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('84767db585cd47f50952b11e70617d5977017441');
+    expect(SPEC_SHA).toBe('c5c0c02fc9babecb04099ca2391e17faf56be1bd');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('832a17d5fcfe363612c71b0596b0fcb29326bcfefb35ccde9d9e3d4d08d2c2de');
-    expect(createHash('sha256').update(fixture).digest('hex')).toBe('349a31bf7ce9de6b53e21400e8c182b3af76df61bc211b548a67ee4a9954fb3b');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('422e3882f93f628ed1f0debffa60546ff6094a28aa1712ca28341f59503dc78e');
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe('6a50e594ea1aee4650ef1c6e2f1b06bdce5cdca6f93741b3df4c0b38ab8f9592');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
   });
@@ -232,7 +232,7 @@ describe('all deterministic text post-check ids, including methods without vendo
     expect(checkMethodTurn('RC-STRENGTHEN-ITEM', 'Edge compute cost changes revenue.', { item_labels: ['Edge compute cost', 'Revenue'] }).failed).not.toContain('ST-BANNED');
     expect(checkMethodTurn('RC-STRENGTHEN-ITEM', 'Edge compute cost changes revenue on this edge.', { item_labels: ['Edge compute cost', 'Revenue'] }).failed).toContain('ST-BANNED');
     const rx = { change_labels: ['Churn rose to plan'], attribution_case: 'C2_unpaired' as const, prior_withheld: true, current_option_labels: ['Best-of-breed vendor'], leader_licensed: false };
-    const line = ' That was what held the comparison back, so Olumi can now compare the options.';
+    const line = ' Olumi can now compare the options.'; // off C1: never "held the comparison back" (52f8cd 2 Oct)
     expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor is one option.' + line, rx)).toEqual({ pass: true, failed: [], targets: [] });
     expect(checkMethodTurn('RERUN-EXPLANATION', 'You changed Churn rose to plan. Best-of-breed vendor wins and churn rose.' + line, rx).failed.sort()).toEqual(['RX-NO-LEADER-UNLICENSED', 'RX-NO-MOVEMENT-WITHOUT-PRIOR']);
     // RX-UNWITHHELD-LINE (MG 5939414835): without the line, the un-withheld transition fails.
@@ -272,6 +272,14 @@ describe('all deterministic text post-check ids, including methods without vendo
     }
     // With no recorded change the claim is not contrary.
     expect(checkMethodTurn('RERUN-EXPLANATION', 'Nothing changed.', { ...rx, change_labels: [] }).failed).not.toContain('RX-NO-CONTRARY-SAME');
+  });
+  it('un-withheld off C1 never credits the edit: "held the comparison back" is a C1-only line (52f8cd 2 Oct)', () => {
+    const rx = { change_labels: ['Sprint capacity for AI reporting'], attribution_case: 'C2_unpaired' as const, leader_licensed: false, prior_withheld: true, no_matched_figures: false, current_option_labels: ['Continue Current Plan'] };
+    const named = 'You accepted Olumi\u2019s estimate for Sprint capacity for AI reporting. ';
+    expect(checkMethodTurn('RERUN-EXPLANATION', named + 'That was what held the comparison back, so Olumi can now compare the options.', rx).failed).toEqual(['RX-NO-CAUSE-UNPAIRED']);
+    expect(checkMethodTurn('RERUN-EXPLANATION', named + 'Olumi can now compare the options. Other things also differed between these two runs, so the difference can\u2019t be put down to your edit alone.', rx)).toEqual({ pass: true, failed: [], targets: [] });
+    // Control: on C1 the same causal line is licensed.
+    expect(checkMethodTurn('RERUN-EXPLANATION', named + 'That was what held the comparison back, so Olumi can now compare the options.', { ...rx, attribution_case: 'C1_attributable' as const })).toEqual({ pass: true, failed: [], targets: [] });
   });
   it('Coach edits requires the stale line only for a stale run', () => {
     expect(checkMethodTurn('RC-COACH-EDITS', 'You changed cost. The analysis is out of date.', { edited_labels: ['Cost'], 'run.kind': 'complete_current' }).failed).toEqual(['CE-STALE-IFF']);
