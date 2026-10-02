@@ -439,8 +439,10 @@ function classifyAttribution(
 /**
  * SC-24 (schemas 0.68.0) — the pair's endpoints and its exact input changes, read off the two facts' own
  * `run_id` / `input_snapshot` (what each Run was SENT; `run-analysis.ts` §3.9).
- *   - `compared`: both Runs recorded their inputs → the diff (possibly `[]`), `input_coverage: 'complete'` — or
- *     `'partial'` when a sent input changed that no authored row can state (`run-input-changes.ts` RULES).
+ *   - `compared`: both Runs recorded their inputs → the diff (possibly `[]`), `input_coverage: 'complete'` ONLY when
+ *     every sent input is VERIFIED the same outside the rows (equal 0.71 residuals on both ends + the link rules,
+ *     `run-input-changes.ts`) — else `'partial'`, which means "can't verify", NEVER "an input changed": an end with no
+ *     recorded residual (a Run before 0.71) is `partial` on a no-edit rerun (DL 5939864517; F1b 5943379851).
  *   - `not_recorded`: an end predates snapshots → the coverage says so and NO list travels (never an empty diff).
  *   - `same_run`: both ends are one Run re-delivered → no delta at all.
  */

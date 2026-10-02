@@ -619,6 +619,13 @@ describe('R3 gap (a) · prior_withheld from the withholder\'s own record that it
     expect(reason([CURRENT(), prior(env)])).toEqual([0, undefined]);
   });
 
+  it('NEGATIVE (CODEX P2, identity): a DUPLICATED option id was never identity-bound (both entries dropped) → no marker → no reason', () => {
+    const env = withhold(envelope([{ option_id: 'opt-a', win_probability: 0.62 }, { option_id: 'opt-a', win_probability: 0.38 }], '111'), GOAL_FIGURES_PLACEHOLDER_PATH);
+    expect(warningsOf(env).at(-1)).toMatchObject({ code: GOAL_FIGURES_PLACEHOLDER_PATH });
+    expect(warningsOf(env).at(-1)).not.toHaveProperty('win_shares_withheld');
+    expect(reason([CURRENT(), prior(env)])).toEqual([0, undefined]);
+  });
+
   it('NEGATIVE (pre-deploy Run): the code with no marker — R3\'s served s4 bytes, recorded before the marker existed → no reason', async () => {
     const { readFileSync } = await import('node:fs');
     const fx = JSON.parse(readFileSync(new URL('./fixtures/served-a58f1537-withheld-prior.json', import.meta.url), 'utf8')) as

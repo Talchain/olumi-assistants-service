@@ -133,18 +133,23 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
     ['C0_identical', RERUN_FALLBACK_LINES.C0],
     ['C2_unpaired', RERUN_FALLBACK_LINES.C2],
     ['C3_engine_drift', RERUN_FALLBACK_LINES.other],
-    ['C5_unattributed', RERUN_FALLBACK_LINES.other],
+    ['C4_budget_drift', RERUN_FALLBACK_LINES.other],
+    // Unattributed is UNKNOWN, not an observed difference (CODEX on b6e52dbc P1; DL 5943403202's ruling).
+    ['C5_unattributed', RERUN_FALLBACK_LINES.unverified],
   ])('the case line for %s (C3–C5 are checked as C2 and never say "a new draw")', (c, line) => {
     const p = plan({ ...PAIRED, attribution_case: c })!;
     expect(p.codeLine.endsWith(line)).toBe(true);
     expect(p.inputs.attribution_case).toBe(c === 'C0_identical' ? 'C0_identical' : 'C2_unpaired');
   });
 
-  it.each(['partial', 'not_recorded', undefined])('coverage %s never licenses "same inputs" or a cause: checked as unpaired, said as "other things also differed"', (coverage) => {
+  // `partial` = "can't VERIFY every sent input was the same" (F1b 5943379851), never "an input changed": said as Olumi
+  // can't confirm, never as an observed difference (MG 5943403202; DL ruling).
+  it.each(['partial', 'not_recorded', undefined])('coverage %s never licenses "same inputs" or a cause: checked as unpaired, said as "Olumi can\'t confirm"', (coverage) => {
     const p2 = plan({ ...PAIRED, attribution_case: 'C0_identical', input_coverage: coverage })!;
     expect(p2.inputs.attribution_case).toBe('C2_unpaired');
-    expect(p2.codeLine.endsWith(RERUN_FALLBACK_LINES.other)).toBe(true);
+    expect(p2.codeLine.endsWith(RERUN_FALLBACK_LINES.unverified)).toBe(true);
     expect(p2.codeLine).not.toContain(RERUN_FALLBACK_LINES.C0);
+    expect(p2.codeLine).not.toContain(RERUN_FALLBACK_LINES.other);
   });
 
   it.each([
@@ -152,6 +157,8 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
     ['C0', { ...PAIRED, attribution_case: 'C0_identical' }],
     ['C2', { ...PAIRED, attribution_case: 'C2_unpaired' }],
     ['C3', { ...PAIRED, attribution_case: 'C3_engine_drift' }],
+    ['C5', { ...PAIRED, attribution_case: 'C5_unattributed' }],
+    ['partial', { ...PAIRED, input_coverage: 'partial' }],
     ['nothing', { attribution_case: 'C0_identical', input_coverage: 'complete', input_changes: [], win_probabilities: [{ option_id: 'x' }] }],
     ['nothing + withheld', { attribution_case: 'C0_identical', input_coverage: 'complete', input_changes: [], win_probabilities: [], win_probabilities_unavailable: 'prior_withheld' }],
     ['unknown', { attribution_case: 'C2_unpaired', input_coverage: 'partial', input_changes: [], win_probabilities: [] }],
@@ -168,22 +175,41 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
  * differences). Under engine drift, a new draw or partial coverage the comparison may be owed to something else: the
  * line is the neutral "Olumi can now compare the options." followed by the case line.
  */
-describe('the UNWITHHELD line credits the change ONLY on a C1 pair', () => {
+describe('the UNWITHHELD line credits the change ONLY on a C1 pair; an unknown difference is never said as observed', () => {
+  const NEUTRAL = RERUN_NO_CHANGE_LINES.unwithheld;
   it.each([
-    ['C3 engine drift (complete)', 'C3_engine_drift', 'complete', RERUN_FALLBACK_LINES.other],
-    ['C2 new draw (complete)', 'C2_unpaired', 'complete', RERUN_FALLBACK_LINES.C2],
-    ['C1 but PARTIAL coverage', 'C1_attributable', 'partial', RERUN_FALLBACK_LINES.other],
-  ])('RED: prior_withheld + an unrelated named change under %s → no causal line; neutral line + the case line', (_n, attribution_case, input_coverage, caseLine) => {
+    ['C0 complete', 'C0_identical', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.C0}`],
+    ['C1 complete (the investor moment)', 'C1_attributable', 'complete', RERUN_FALLBACK_LINES.unwithheld],
+    ['C2 new draw', 'C2_unpaired', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.C2}`],
+    ['C3 engine drift (recorded)', 'C3_engine_drift', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.other}`],
+    ['C4 budget drift (recorded)', 'C4_budget_drift', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.other}`],
+    ['C5 unattributed (unknown)', 'C5_unattributed', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`],
+    ['C1 but PARTIAL coverage (unknown)', 'C1_attributable', 'partial', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`],
+    ['C3 and PARTIAL coverage', 'C3_engine_drift', 'partial', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`],
+  ])('prior_withheld + a named change, %s → the exact line; RC\'s check passes', (_n, attribution_case, input_coverage, tail) => {
     const p = plan({ ...UNWITHHELD, attribution_case, input_coverage, input_changes: [AI] })!;
-    expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_NO_CHANGE_LINES.unwithheld} ${caseLine}`);
-    expect(p.codeLine).not.toContain(RERUN_FALLBACK_LINES.unwithheld);
+    expect(p.codeLine).toBe(`${SAID_AI} ${tail}`);
+    if (attribution_case !== 'C1_attributable' || input_coverage !== 'complete') expect(p.codeLine).not.toContain(RERUN_FALLBACK_LINES.unwithheld);
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
   });
 
-  it('CONTROL: C1 + complete coverage → the causal line (the investor moment), and it passes RC\'s check', () => {
-    const p = plan({ ...UNWITHHELD, input_changes: [AI] })!;
-    expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.unwithheld}`);
+  it('RED (MG 5943403202): an UNWITHHELD pair with PARTIAL coverage never says "Other things also differed" — Olumi can\'t confirm', () => {
+    const p = plan({ ...PAIRED, input_coverage: 'partial', input_changes: [AI] })!;
+    expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.unverified}`);
+    expect(p.instruction).toContain('Olumi can’t confirm nothing else differed between the two Runs');
+    expect(p.instruction).not.toContain('Other things also differed');
     expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it('CONTROL: a RECORDED row no template can name, under PARTIAL coverage, is an observed difference → "Other things also differed"', () => {
+    const presence = { entity_kind: 'link', entity_id: 'p', link: { from: 'qualified_leads', to: 'quarterly_revenue' }, field: 'presence', before: null, after: { raw: true }, change: 'added' };
+    expect(plan({ ...PAIRED, input_coverage: 'partial', input_changes: [AI, presence] })!.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
+  });
+
+  it('CONTROL: a RECORDED difference stays observed — engine drift says "Other things also differed", in the line and the instruction', () => {
+    const p = plan({ ...PAIRED, attribution_case: 'C3_engine_drift', input_changes: [AI] })!;
+    expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.other}`);
+    expect(p.instruction).toContain('Other things also differed between the two Runs');
   });
 
   it('the instruction never tells the model the earlier Run had NO figures (a subset withhold keeps some): it held them back', () => {
