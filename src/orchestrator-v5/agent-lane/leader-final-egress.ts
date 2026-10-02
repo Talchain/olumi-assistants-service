@@ -68,6 +68,11 @@ function withheldKey(rec: Record<string, unknown>, key: string): Record<string, 
 
 export interface LeaderFinalEgressOpts extends WireLeaderClaimEnforcementOpts {
   readonly licence: LeaderLicence;
+  /**
+   * The caller has NO earlier gate, so a removal is the projection itself, not a residual (the stored `/graph` read,
+   * `scenario-graph-analysis-read.ts`). Logged at level 30 under its own event; the removals are unchanged.
+   */
+  readonly noEarlierGate?: true;
 }
 
 export interface LeaderFinalEgressResult<T> {
@@ -322,7 +327,12 @@ export function enforceLeaderLicenceAtFinalEgress<T extends Record<string, unkno
     return { response: knownSafeEnvelope(response) as T, removedPaths: ['*'], proseEdited: true };
   }
 
-  if (removed.length > 0) {
+  if (removed.length > 0 && opts.noEarlierGate === true) {
+    log.info(
+      { event: 'leader_licence.projected_without_earlier_gate', request_id: opts.requestId, exit_path: opts.exitPath, removed_paths: [...new Set(removed)].sort(), removed_count: removed.length },
+      'leader licence: a withheld Run was projected on a path with no earlier gate',
+    );
+  } else if (removed.length > 0) {
     log.error(
       { event: 'agent_lane.leader_claim_residual_removed', request_id: opts.requestId, exit_path: opts.exitPath, removed_paths: [...new Set(removed)].sort(), removed_count: removed.length, enforced: true },
       'agent-lane: a withheld leader reached the final egress and was removed — fix the producer named by removed_paths',

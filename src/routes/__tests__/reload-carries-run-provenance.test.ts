@@ -31,6 +31,9 @@ vi.mock('../../orchestrator-v5/session/index.js', () => ({
 }));
 vi.mock('../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  // The read now passes the leader licence (leader-final-egress → the shared wire gate), which emits telemetry.
+  emit: vi.fn(),
+  TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
 
 import { readScenarioAnalysis } from '../scenario-graph-analysis-read.js';
