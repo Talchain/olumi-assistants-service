@@ -180,6 +180,8 @@ describe('C1 durable history — a Run that aged out of the hot window still len
     await h.run('turn-b', { agedOut: true });
     expect(h.sentSeeds[1], 'Run B sends Run A\'s seed echo, verbatim').toBe(seedOf(a));
     expect((h.seenBindings[1] as Rec).priorRunSeed).toMatchObject({ seedUsed: seedOf(a) });
+    // The COLD read pairs from the durable set (scenario-graph-analysis-read.ts:341), which holds A and B: C1. (The turn's own
+    // delta reads the hot window, which lost A, and honestly emits none: CODEX-confirmed `insufficient_runs`.)
     const built = buildRunDelta({ priorFacts: h.window as never, mayNameLeadingOption: true });
     expect((built as { delta: Rec }).delta.attribution_case).toBe('C1_attributable');
   });
@@ -212,15 +214,26 @@ describe('C1 durable history — a Run that aged out of the hot window still len
     }
   });
 
-  it('B7 (DL condition 1): the window holds the NEWEST Run → the window lends, never an older durable seed', async () => {
+  it('B7 (DL condition 1): the window holds the NEWEST Run → the window lends it, never an older durable seed', async () => {
     const h = harness();
-    await h.run('turn-a');
+    const a = await h.run('turn-a');
     await new Promise((r) => setTimeout(r, 5));
     h.setPrice(60);
-    const b = await h.run('turn-b');
+    // Run B draws FRESH (aged out + durable down), so its seed differs from A's and the donor is identifiable.
+    const b = await h.run('turn-b', { agedOut: true, durableDown: true });
+    expect(seedOf(b), 'precondition: B and A carry different seeds').not.toBe(seedOf(a));
     await new Promise((r) => setTimeout(r, 5));
     h.setPrice(61);
     await h.run('turn-c');
     expect(h.sentSeeds[2], 'Run C borrows the NEWEST prior Run (B), from the window').toBe(seedOf(b));
   });
+
+  it('B8 (CODEX on 30bb9170): a Run IN the window lends even when the durable read is down — the window is the first authority', async () => {
+    const h = harness();
+    const a = await h.run('turn-a');
+    await new Promise((r) => setTimeout(r, 5));
+    h.setPrice(60);
+    await h.run('turn-b', { durableDown: true });
+    expect(h.sentSeeds[1]).toBe(seedOf(a));
+});
 });

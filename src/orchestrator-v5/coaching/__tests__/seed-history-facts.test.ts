@@ -65,6 +65,23 @@ describe('seedHistoryFacts — the window first; the durable set only when the w
     expect(seedOf(seedHistoryFacts({ scenarioId: SCENARIO, hotWindow: [B], durable: durableOnlyA }))).toBe('222');
   });
 
+  it('CODEX P2 disposition (capped + clock skew): the donor is the capped page\'s own newest success — the SAME Run the cold read pairs from (same carrier, same selector), so no C1 is claimed for a pair the read never shows', () => {
+    // Database order [A, 19 failed, B]: A committed last but computed earlier; B (computed later) is the 21st row the cap drops.
+    const failed = Array.from({ length: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT - 2 }, (_, i) => {
+      const f = runFact(`f${i}`, `2026-10-01T09:00:${String(i).padStart(2, '0')}.000Z`) as unknown as { result: { enrichment: Record<string, unknown> } };
+      f.result.enrichment.analysis_status = 'failed';
+      return f as unknown as HandlerFact;
+    });
+    const skewA = runFact('111', '2026-10-01T12:00:00.000Z');
+    const skewB = runFact('222', '2026-10-01T12:00:01.000Z');
+    const set = reconciled([skewA, ...failed, skewB], SCENARIO_ANALYSIS_FACT_CAP + 1);
+    expect(set.status).toBe('capped');
+    const donor = seedOf(seedHistoryFacts({ scenarioId: SCENARIO, hotWindow: [], durable: set }));
+    const coldReadPrior = seedOf(set.facts);
+    expect(donor).toBe('111');
+    expect(donor, 'the donor IS the cold read\'s prior').toBe(coldReadPrior);
+  });
+
   it('a durable set attested for ANOTHER scenario never lends → the window (no Run) → no_prior_run', () => {
     expect(reconciled([runFact('999', '2026-10-01T12:00:00.000Z', OTHER)], 1, OTHER).status, 'precondition: attested, for OTHER').toBe('complete');
     expect(seedOf(seedHistoryFacts({ scenarioId: SCENARIO, hotWindow: [], durable: reconciled([runFact('999', '2026-10-01T12:00:00.000Z', OTHER)], 1, OTHER) }))).toBe('no_prior_run');
