@@ -18,6 +18,7 @@
 
 import { REPAIR_CODES, type RepairEntry, type GoalThresholdFrameType, type QuantityFrameType } from '@talchain/schemas';
 import { limitSinkBranch } from '../../graph/limit-sink-branch.js';
+import { inertRiskBranch } from '../../graph/inert-risk.js';
 import { rerouteExtraParentsOfProductGoal, sayExtraParentOfProductGoal } from './product-goal-extra-parent.js';
 import { foldPassThroughRateOntoUsersPrice, sayRateOperandIsUsersPrice } from './product-goal-rate-operand.js';
 import { oneRoutePerEffect } from './one-route-per-effect.js';
@@ -4229,6 +4230,22 @@ function admitOnce(
     } as RepairEntry);
   };
 
+  // ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out
+  // of this analysis — the Run proceeds — and said so, with the one question that brings it in.
+  // A cause drawn only into it goes with it, and is named in the same line (DL condition 3): nothing is left out unsaid.
+  const sayLeftOut = (n: { id: string; label?: string }, goal: { label?: string }, causes: readonly string[]): void => {
+    const withCauses = causes.length === 0 ? '' : ` (with ${causes.map((c) => `"${c}"`).join(', ')}, drawn only into it)`;
+    loss.push({
+      field_path: `nodes[${n.id}].left_out_of_analysis`,
+      before: n.label,
+      after: n.label,
+      reason:
+        `"${n.label}"${withCauses} is kept in the model but left out of this analysis, because nothing says which way it `
+        + `moves "${goal.label}". Say whether it raises or lowers "${goal.label}" and it will count.`,
+      severity: 'warn',
+    } as RepairEntry);
+  };
+
   /**
    * ⛔ NO LOOP IS REGISTERED THAT ONE OF OLUMI'S OWN LINKS CLOSES (`breakLoops`).
    *
@@ -4406,11 +4423,20 @@ function admitOnce(
     // terminal and its ancestors, when a lever reaches it, end at the limit — readiness accepts them, so they are never
     // said to be unconnected (the Agent raised that as "connect downtime to the cost goal", a false cause).
     const sinkBranch = limitSinkBranch(nodes, edgesNow, constraintResult.constraints.map((c) => c.node_id));
+    const leftOut = inertRiskBranch(nodes, edgesNow, constraintResult.constraints.map((c) => c.node_id));
     for (const n of nodes) {
       // A pure limit left with no edge out ends at its limit by construction (above): readiness holds it as a valid
       // terminal. One that still feeds something is judged like any other node.
       if (n.id === goalForReach.id || n.kind === 'decision' || reachesGoal(n.id) || sinkBranch.has(n.id)
         || (pureLimits.some((p) => p.node_id === n.id) && !edgesNow.some((e) => e.from === n.id))) continue;
+      // The risk itself is said; a cause drawn only into it is left out with it and comes back when the risk does.
+      if (leftOut.has(n.id)) {
+        if (n.kind === 'risk') {
+          const causes = nodes.filter((c) => c.kind !== 'risk' && leftOut.has(c.id) && edgesNow.some((e) => e.from === c.id && e.to === n.id));
+          sayLeftOut(n, goalForReach, causes.map((c) => c.label ?? c.id));
+        }
+        continue;
+      }
       sayUnreached(n, goalForReach);
     }
     finalEdges = edgesNow;

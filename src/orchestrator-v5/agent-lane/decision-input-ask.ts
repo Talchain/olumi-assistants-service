@@ -13,6 +13,7 @@
 
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
+import { inertRiskBranch } from '../../graph/inert-risk.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -49,6 +50,11 @@ export interface DecisionInputAskContext {
   readonly awaitingApproval: boolean;
   /** This turn built the model or ran the analysis (the brief and Run turns). */
   readonly builtOrRan: boolean;
+  /**
+   * ⭐ K3 (DL on lease #85 5945974225): this turn RAN the analysis (a Run, or its replay) — not the build, whose own reply
+   * already says a left-out risk (admission's ledger). The Run names each kept risk it left out, once per Run.
+   */
+  readonly ranAnalysis?: boolean;
 }
 
 /** A duration limit the analysis scores (a week/month/day constraint): then the deadline is answered, not just held. */
@@ -96,11 +102,29 @@ const withinMonths = (goal: Rec): string => {
  * question; D1 never does. When the reply on screen would pass `AT_REST_WORD_BOUND` and a questions toggle holds A7's
  * fact, A7 stays behind it.
  */
+/**
+ * ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out of
+ * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
+ */
+function leftOutLines(graph: unknown, goalLabel: string): string[] {
+  const g = recordOf(graph);
+  const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
+  const edges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
+    .filter((e): e is Rec => e !== undefined && e.edge_type !== 'bidirected' && typeof e.from === 'string' && typeof e.to === 'string')
+    .map((e) => ({ from: e.from as string, to: e.to as string }));
+  const limits = (Array.isArray(g?.goal_constraints) ? g.goal_constraints : []).map((k) => recordOf(k)?.node_id)
+    .filter((id): id is string => typeof id === 'string');
+  const leftOut = inertRiskBranch(nodes as { id: string; kind?: unknown; category?: unknown }[], edges, limits);
+  return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string))
+    .map((n) => `"${String(n.label ?? n.id)}" is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`);
+}
+
 export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext): string[] {
   if (!ctx.builtOrRan) return [];
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return [];
+  const leftOut = ctx.ranAnalysis === true ? leftOutLines(graph, label) : [];
   const within = withinMonths(goal);
   const a7 = within !== '' && !hasDurationLimit(graph) ? `This model doesn't yet say whether any option gets there${within}.` : null;
   const wanted = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
@@ -108,8 +132,8 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
     + ls.reduce((n, l) => n + (l === null ? 0 : words(l)), 0);
-  const keepA7 = a7 !== null && !(ctx.questionsToggle && onScreen([a7, ask]) > AT_REST_WORD_BOUND);
-  return [keepA7 ? a7 : null, ask].filter((l): l is string => l !== null);
+  const keepA7 = a7 !== null && !(ctx.questionsToggle && onScreen([...leftOut, a7, ask]) > AT_REST_WORD_BOUND);
+  return [...leftOut, keepA7 ? a7 : null, ask].filter((l): l is string => l !== null);
 }
 
 /**
