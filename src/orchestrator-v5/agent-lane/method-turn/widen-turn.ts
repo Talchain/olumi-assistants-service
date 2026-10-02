@@ -26,6 +26,7 @@ import { widenVariantOf } from '../guidance/index.js';
 import type { Target, Variant } from '../guidance/types.js';
 import { POLICY } from '../guidance/policy.js';
 import { levelFrameOf } from '../runtime/agent-capabilities.js';
+import { contradictsItsName } from '../stated-by-user.js';
 import { assembleGuidanceSignals, type GuidanceSignals as TurnSignals } from '../turn-context/guidance-signals.js';
 import { selectorSignalsOf, TALK_IT_THROUGH_CHIP, type MethodReadback } from './method-turn.js';
 
@@ -225,8 +226,10 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
     'Each option must change a DIFFERENT set of factors (or the same factors in a different direction) from every option '
       + 'above and from each other: a reworded copy of an existing option is refused. Name each option in 6 words or fewer, '
       + 'in plain words. Add no new factors.',
-    'For each factor an option changes, give a level only as your own estimate (estimate: true, with a basis the user can '
-      + 'check), so the options can be compared once the user approves; never present it as the user’s figure.',
+    'EVERY factor an option changes needs a level: your own estimate (estimate: true, with a basis the user can check), in '
+      + 'the factor’s own units and within its range, so the options can be compared once the user approves. An option whose '
+      + 'levels you cannot estimate is not suggested. Never present a level as the user’s figure, and put no figure in an '
+      + 'option’s name.',
     'Put why each option might do better in `rationale`, in one or two plain sentences.',
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
   ].join('\n');
@@ -296,17 +299,26 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
       const id = doorFactorOf(turn, e?.factor_label);
       const direction = e?.direction === 'negative' ? 'negative' : e?.direction === 'positive' ? 'positive' : undefined;
       if (id === undefined || direction === undefined) { failed.add('WD-S-GROUNDED'); continue; }
-      levers.set(id, direction);
+      /**
+       * ⛔ THE GATE JUDGES WHAT THE WRITER WILL PERSIST, NEVER WHAT THE MODEL DECLARED (DL round 3, P1-F; the scope cut
+       * for v1). Every factor a Widen option changes carries Olumi's estimate level that the door WILL store: a number,
+       * `estimate: true` + a basis, inside the factor's frame (`levelFrameOf`), not contradicting the option's own name
+       * (`contradictsItsName`: the door leaves such a level unset), against a finite baseline. Anything else refuses the
+       * WHOLE proposal: a lever that never persists can never make an option "distinct".
+       */
       const level = rec(e?.level);
-      if (level !== undefined && (level.estimate !== true || typeof level.basis !== 'string' || level.basis.trim() === '')) failed.add('WD-NO-NEW-FIGURES');
-      // DL P1-E: a level the door would write decides the move, not the declared word. Read on the door's own frame
-      // against the same baseline as the existing options; a level that disagrees with its declared direction (a "cut"
-      // to £60 when today is £49, or a "cut" that keeps today's level) is refused, never trusted.
       const value = typeof level?.value === 'number' && Number.isFinite(level.value) ? level.value : undefined;
+      if (level === undefined || value === undefined) { failed.add('WD-S-LEVEL'); continue; }
+      if (level.estimate !== true || typeof level.basis !== 'string' || level.basis.trim() === '') { failed.add('WD-NO-NEW-FIGURES'); continue; }
       const node = turn.graph.nodes.find((n) => String(n.id) === id);
-      const encoded = value === undefined ? undefined : encodedLevelOf(node, value);
+      const encoded = encodedLevelOf(node, value);
+      if (encoded === undefined || contradictsItsName(value, level.unit, typeof o?.label === 'string' ? o.label : '')) { failed.add('WD-S-LEVEL'); continue; }
+      // DL P1-E: the persisted level decides the move, on the door's own frame against the same baseline as the existing
+      // options. No finite baseline = no move (refused); today's level, or a move against the declared word, is refused.
       const derived = moveOf(encoded, baselineOf(turn.graph, id, turn.sq));
-      if (derived !== 'unknown' && derived !== direction) failed.add('WD-S-DIRECTION');
+      if (derived === 'unknown') { failed.add('WD-S-LEVEL'); continue; }
+      if (derived !== direction) { failed.add('WD-S-DIRECTION'); continue; }
+      levers.set(id, derived);
     }
     if (levers.size > 0 && seen.some((existing) => sameLevers(levers, existing))) failed.add('WD-S-DISTINCT');
     seen.push(levers);

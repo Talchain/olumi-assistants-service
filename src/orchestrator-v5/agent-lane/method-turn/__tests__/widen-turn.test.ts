@@ -54,9 +54,17 @@ const turnOn = (graph: unknown, over: Partial<Record<keyof GuidanceSignals, unkn
   return t;
 };
 const run = (): RunWidenTurn => turnOn(GRAPH);
-const one = (label: string, ...acts: [string, 'positive' | 'negative'][]) =>
-  ({ label, acts_on: acts.map(([factor_label, direction]) => ({ factor_label, direction })), rationale: 'r' });
-const est = { value: 2, unit: '%', estimate: true, basis: 'a typical retention programme' };
+/** Olumi's framed estimate per factor and move: Price on its cap of 200 (today £49 = 0.245), churn on 0..1 (today 0.1). */
+const LEVEL: Record<string, Record<'positive' | 'negative', { value: number; unit?: string }>> = {
+  Price: { negative: { value: 45, unit: 'GBP' }, positive: { value: 70, unit: 'GBP' } },
+  'Customer churn': { negative: { value: 0.05 }, positive: { value: 0.2 } },
+  'customer churn': { negative: { value: 0.05 }, positive: { value: 0.2 } },
+};
+/** One proposed option; every factor carries Olumi's framed estimate unless the factor has none in LEVEL. */
+const one = (label: string, ...acts: [string, 'positive' | 'negative'][]) => ({ label, rationale: 'r',
+  acts_on: acts.map(([factor_label, direction]) => ({ factor_label, direction,
+    ...(LEVEL[factor_label] !== undefined ? { level: { ...LEVEL[factor_label]![direction], estimate: true, basis: 'Olumi\u2019s estimate' } } : {}) })) });
+const est = { value: 0.05, estimate: true, basis: 'a typical retention programme' };
 
 describe('RC-WIDEN method turn', () => {
   it('runs on typed signals: variant W1 (limit), target options; the directive names the factors by exact label', () => {
@@ -96,8 +104,11 @@ describe('RC-WIDEN method turn', () => {
         edges: [...GRAPH.edges, { from: 'o_x', to: 'f_x', ...STRUCTURAL }] };
       expect([...existingLevers(g as never, 'o_x', 'o_sq')], JSON.stringify(observed)).toEqual([['f_x', 'unknown']]);
       const t = turnOn(g, { 'model.non_sq_option_ids': ['o_cut', 'o_raise', 'o_x'] });
-      expect(widenGate(t, one('Grow partner reach', ['Partner reach', 'positive']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
-      expect(widenGate(t, one('Shrink partner reach', ['Partner reach', 'negative']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+      // A proposal on that factor cannot persist a move either (no baseline): refused, both directions.
+      const lvl = (direction: 'positive' | 'negative') => ({ label: `Partner ${direction}`, rationale: 'r',
+        acts_on: [{ factor_label: 'Partner reach', direction, level: { value: 0.7, estimate: true, basis: 'b' } }] });
+      expect(widenGate(t, lvl('positive'))).toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
+      expect(widenGate(t, lvl('negative'))).toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
     }
   });
 
@@ -111,8 +122,30 @@ describe('RC-WIDEN method turn', () => {
     expect(widenGate(t, cut(49)), 'a "cut" that keeps today\u2019s level is not a cut').toEqual({ ok: false, failed: ['WD-S-DIRECTION'] });
     // Control: a TRUE lowering to £45 passes.
     expect(widenGate(t, cut(45))).toEqual({ ok: true });
-    // Control: no level → the declared direction stands (nothing written to contradict it).
-    expect(widenGate(t, one('Cut what we charge', ['Price', 'negative']))).toEqual({ ok: true });
+  });
+
+  it('P1-F SCOPE CUT: the gate judges what the writer will PERSIST — every changed factor needs a framed Olumi estimate', () => {
+    const onlyRaise = { nodes: GRAPH.nodes.filter((n) => n.id !== 'o_cut'), edges: GRAPH.edges.filter((e) => e.from !== 'o_cut') };
+    const t = turnOn(onlyRaise, { 'model.non_sq_option_ids': ['o_raise'] });
+    const price59 = { factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP', estimate: true, basis: 'b' } };
+    // The Codex mixed case: Price £59 (= the existing raise) + Churn with NO level. The writer drops the unset Churn and
+    // Approve would persist an exact copy of "Raise to £59" → refused.
+    // Both reasons hold: the unset Churn never persists (WD-S-LEVEL), and what WOULD persist, Price £59 alone, is a copy.
+    expect(widenGate(t, { label: 'Raise and retain', rationale: 'r', acts_on: [price59, { factor_label: 'Customer churn', direction: 'negative' }] }))
+      .toEqual({ ok: false, failed: ['WD-S-LEVEL', 'WD-S-DISTINCT'] });
+    // An unframed level (churn has no frame; 5 is outside 0..1, so the door would not store it) → refused.
+    expect(widenGate(t, { label: 'Retention push', rationale: 'r', acts_on: [{ factor_label: 'Customer churn', direction: 'positive', level: { value: 5, estimate: true, basis: 'b' } }] }))
+      .toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
+    // A level that contradicts the figure in the option's own name: the door leaves it unset → refused.
+    expect(widenGate(t, { label: 'Cut to £40', rationale: 'r', acts_on: [{ factor_label: 'Price', direction: 'negative', level: { value: 45, unit: 'GBP', estimate: true, basis: 'b' } }] }))
+      .toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
+    // No level at all → refused.
+    expect(widenGate(t, { label: 'Cut what we charge', rationale: 'r', acts_on: [{ factor_label: 'Price', direction: 'negative' }] }))
+      .toEqual({ ok: false, failed: ['WD-S-LEVEL'] });
+    // Control: Price £45 + Churn at a framed estimate → passes; and Price £59 + a framed Churn is a REAL second lever.
+    expect(widenGate(t, one('Cut price and retain', ['Price', 'negative'], ['Customer churn', 'negative']))).toEqual({ ok: true });
+    expect(widenGate(t, { label: 'Raise and retain', rationale: 'r', acts_on: [price59, { factor_label: 'Customer churn', direction: 'negative', level: { ...est } }] }))
+      .toEqual({ ok: true });
   });
 
   it('fail closed: an option whose direction is UNKNOWN (no level set) matches any proposal on the same factors', () => {
@@ -129,7 +162,7 @@ describe('RC-WIDEN method turn', () => {
   it('PASS control: two options on a DIFFERENT lever set, grounded, figures only as Olumi’s estimate', () => {
     expect(widenGate(run(), { options: [
       { label: 'Retention offer for at-risk accounts', acts_on: [{ factor_label: 'Customer churn', direction: 'negative', level: est }] },
-      { label: 'Cut price, cut churn', acts_on: [{ factor_label: 'Price', direction: 'negative' }, { factor_label: 'customer churn', direction: 'negative' }] },
+      one('Cut price, cut churn', ['Price', 'negative'], ['customer churn', 'negative']),
     ], rationale: 'r' })).toEqual({ ok: true });
     expect(widenGate(run(), one('Retention offer', ['Customer churn', 'negative']))).toEqual({ ok: true });
     // Two proposals with one lever set: the second copies the first.
@@ -138,7 +171,7 @@ describe('RC-WIDEN method turn', () => {
   });
 
   it('WD-NO-DUP: a current option’s label (case and spacing folded) is refused, the status quo included', () => {
-    expect(widenGate(run(), one('cut  to £45', ['Customer churn', 'negative']))).toEqual({ ok: false, failed: ['WD-NO-DUP'] });
+    expect(widenGate(run(), one('cut  to £45', ['Customer churn', 'negative']))).toMatchObject({ ok: false, failed: expect.arrayContaining(['WD-NO-DUP']) });
     expect(widenGate(run(), one('Carry on as now', ['Customer churn', 'negative']))).toEqual({ ok: false, failed: ['WD-NO-DUP'] });
   });
 

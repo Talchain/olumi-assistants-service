@@ -240,6 +240,7 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(ivOf('Retention offer')['fac_1']!.raw_value).toBe(20);
     expect(Object.keys(ivOf('Cut price to win share'))).toEqual(['fac_price']);
     expect(ivOf('Cut price to win share')['fac_price']!.value).toBeCloseTo(0.225, 6);
+    expect(ivOf('Cut price to win share')['fac_price']!.raw_value).toBe(45);
     for (const label of ['Retention offer', 'Cut price to win share']) {
       const id = g.nodes.find((x) => x.kind === 'option' && x.label === label)!.id;
       expect(g.edges.some((e) => e.from === 'dec_x' && e.to === id), `${label} is linked from the decision`).toBe(true);
@@ -250,7 +251,8 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     seeded();
     const before = optionLabels();
     // "Lift what we charge" shares no word with "Raise to £59", but it changes the SAME factor the same way.
-    script = [() => fnCall('propose_new_option', { label: 'Lift what we charge', acts_on: [{ factor_label: 'Price', direction: 'positive' }], rationale: 'r' })];
+    script = [() => fnCall('propose_new_option', { label: 'Lift what we charge', rationale: 'r',
+      acts_on: [{ factor_label: 'Price', direction: 'positive', level: { value: 59, unit: 'GBP', estimate: true, basis: 'b' } }] })];
     const t1 = await press();
     expect(openAiCalls).toBe(1);
     expect(t1._agent.tool_calls.map((c) => [c.name, c.ok, c.refusal])).toEqual([['propose_new_option', false, 'widen_gate']]);
@@ -274,7 +276,7 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
   it('W-R5 (HARNESS P2): TWO door calls in ONE response, each passing alone → exactly ONE stored card, ONE approve chip, the card\u2019s own reply', async () => {
     seeded();
     const call = (id: string, label: string, factor: string) => ({ type: 'function_call', name: 'propose_new_option', call_id: id,
-      arguments: JSON.stringify({ label, acts_on: [{ factor_label: factor, direction: 'negative' }], rationale: 'r' }) });
+      arguments: JSON.stringify({ label, rationale: 'r', acts_on: [{ factor_label: factor, direction: 'negative', level: { value: factor === 'Price' ? 45 : 20, unit: 'GBP', estimate: true, basis: 'b' } }] }) });
     script = [() => ({ output: [call('c-a', 'Retention offer', 'Customer churn'), call('c-b', 'Cut price to win share', 'Price')] })];
     const t1 = await press();
     expect(openAiCalls).toBe(1);
@@ -301,14 +303,15 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(optionLabels()).toEqual(before);
   }, 120_000);
 
-  it('W-R7: the DOOR itself refuses (a level outside the factor\u2019s range) → nothing stored, no approve chip, RC\u2019s fallback — never the model\u2019s figure', async () => {
+  it('W-R7: a level the door would NOT store (outside the factor\u2019s range) is refused at the GATE → nothing stored, no approve chip, RC\u2019s fallback — never the model\u2019s figure', async () => {
     seeded();
     const before = optionLabels();
     script = [() => fnCall('propose_new_option', { label: 'Loosen retention spend', rationale: 'r',
       acts_on: [{ factor_label: 'Customer churn', direction: 'positive', level: { value: 500, unit: 'GBP', estimate: true, basis: 'b' } }] })];
     const t1 = await press();
-    // The gate passed it (500 is off the door's frame, so it decides no direction): the DOOR's own refusal stands.
-    expect(t1._agent.tool_calls.map((c) => [c.name, c.ok, c.refusal])).toEqual([['propose_new_option', false, 'level_out_of_range']]);
+    // DL round 3 scope cut: a lever that never persists can't be judged, so the gate refuses it before the door.
+    expect(t1._agent.tool_calls.map((c) => [c.name, c.ok, c.refusal])).toEqual([['propose_new_option', false, 'widen_gate']]);
+    expect(inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option'), 'route-v2 never reached').toEqual([]);
     expect(await heldOnLatestRow()).toEqual([]);
     expect(approveChipOf(t1)).toBeUndefined();
     expect(t1.assistant_text).toBe('What other way could you reach \u2018Revenue\u2019? For example, a different lever, a smaller first step, or a mix of these options.');
