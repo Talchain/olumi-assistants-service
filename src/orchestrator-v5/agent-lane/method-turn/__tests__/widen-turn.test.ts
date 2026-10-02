@@ -1,29 +1,35 @@
 /**
  * RC-WIDEN's method turn (`widen-turn.ts`): the gate is by IDENTITY (DL 5947426886 rows), never by wording. Each refusal
  * row has its passing control beside it, so a gate that refuses everything (or nothing) is RED here.
+ *
+ * ⛔ The fixture's option → factor edges are STRUCTURAL (+1.0, `STRUCTURAL_EDGE_DEFAULTS`), exactly as the product
+ * writes them: an option's direction lives in its INTERVENTION (DL P1-A on #2512), so a gate that read the edge sign
+ * would call every option "raises" and these rows go RED.
  */
 import { describe, expect, it } from 'vitest';
 
 import { POLICY } from '../../guidance/policy.js';
 import type { GuidanceSignals } from '../../turn-context/guidance-signals.js';
 import {
-  nextStepsWithWiden, settleWidenTurn, SOMETHING_ELSE_CHIP, WIDEN_CHIP, WIDEN_FALLBACK_TEMPLATE, WIDEN_REPLACES_CHIP_ID,
-  WIDEN_CARD_LINE, widenGate, widenTurnFromSignals, type RunWidenTurn,
+  doorFactorOf, existingLevers, nextStepsWithWiden, sameLevers, settleWidenTurn, SOMETHING_ELSE_CHIP, WIDEN_CARD_LINE, WIDEN_CHIP,
+  WIDEN_FALLBACK_TEMPLATE, WIDEN_REPLACES_CHIP_ID, widenDoorReply, widenGate, widenTurnFromSignals, type RunWidenTurn,
 } from '../widen-turn.js';
 
-/** A goal, two factors, two options that BOTH act on Price (same lever), and a status quo. */
+const STRUCTURAL = { strength: { mean: 1.0 }, effect_direction: 'positive' };
+/** A goal, two factors, a status quo at today's price, an option that CUTS the price and one that RAISES it. */
 const GRAPH = {
   nodes: [
     { id: 'goal', kind: 'goal', label: 'Revenue' },
-    { id: 'f_price', kind: 'factor', label: 'Price' },
-    { id: 'f_churn', kind: 'factor', label: 'Customer churn' },
-    { id: 'o_keep', kind: 'option', label: 'Keep £49' },
-    { id: 'o_raise', kind: 'option', label: 'Raise to £59' },
-    { id: 'o_sq', kind: 'option', label: 'Carry on as now' },
+    { id: 'f_price', kind: 'factor', label: 'Price', observed_state: { value: 0.245 } },
+    { id: 'f_churn', kind: 'factor', label: 'Customer churn', observed_state: { value: 0.1 } },
+    { id: 'o_cut', kind: 'option', label: 'Cut to £45', interventions: { f_price: { value: 0.2 } } },
+    { id: 'o_raise', kind: 'option', label: 'Raise to £59', interventions: { f_price: { value: 0.3 } } },
+    { id: 'o_sq', kind: 'option', label: 'Carry on as now', interventions: { f_price: { value: 0.245 } } },
   ],
   edges: [
-    { from: 'o_keep', to: 'f_price', strength: { mean: 0.4 } },
-    { from: 'o_raise', to: 'f_price', strength: { mean: 0.6 } },
+    { from: 'o_cut', to: 'f_price', ...STRUCTURAL },
+    { from: 'o_raise', to: 'f_price', ...STRUCTURAL },
+    { from: 'o_sq', to: 'f_price', ...STRUCTURAL },
     { from: 'f_price', to: 'goal', strength: { mean: 0.5 } },
     { from: 'f_churn', to: 'goal', strength: { mean: -0.5 } },
   ],
@@ -34,19 +40,22 @@ const signals = (over: Partial<Record<keyof GuidanceSignals, unknown>> = {}): Gu
   'run.withheld_reason': 'every_option_likely_breaks_limit', 'run.leader_option_id': null,
   'run.decision_sensitivity': { status: 'not_measured' },
   'model.goal_present': true, 'model.goal_label': 'Revenue', 'model.goal_horizon': null,
-  'model.status_quo_option_id': 'o_sq', 'model.non_sq_option_ids': ['o_keep', 'o_raise'],
-  'model.option_labels': { o_keep: 'Keep £49', o_raise: 'Raise to £59', o_sq: 'Carry on as now' },
+  'model.status_quo_option_id': 'o_sq', 'model.non_sq_option_ids': ['o_cut', 'o_raise'],
+  'model.option_labels': { o_cut: 'Cut to £45', o_raise: 'Raise to £59', o_sq: 'Carry on as now' },
   'model.same_lever': true, 'model.risk_ids': [], 'model.goal_path_factor_ids': ['f_price', 'f_churn'],
   'model.goal_path_links': [], 'model.placeholder_goal_links': [], 'model.goal_path_factors': [],
   'since_run.goal_path_user_edits': { status: 'pending' }, guidance: {}, 'user.explicit_request': 'RC-WIDEN',
   ...over,
 } as unknown as GuidanceSignals);
 
-const run = (): RunWidenTurn => {
-  const t = widenTurnFromSignals(signals(), GRAPH);
+const turnOn = (graph: unknown, over: Partial<Record<keyof GuidanceSignals, unknown>> = {}): RunWidenTurn => {
+  const t = widenTurnFromSignals(signals(over), graph);
   if (t.kind !== 'run') throw new Error('expected a run turn');
   return t;
 };
+const run = (): RunWidenTurn => turnOn(GRAPH);
+const one = (label: string, ...acts: [string, 'positive' | 'negative'][]) =>
+  ({ label, acts_on: acts.map(([factor_label, direction]) => ({ factor_label, direction })), rationale: 'r' });
 const est = { value: 2, unit: '%', estimate: true, basis: 'a typical retention programme' };
 
 describe('RC-WIDEN method turn', () => {
@@ -55,62 +64,81 @@ describe('RC-WIDEN method turn', () => {
     expect([t.variant, t.target]).toEqual(['W1', 'options']);
     expect(t.directive).toContain('METHOD TURN');
     expect(t.directive).toContain('‘Price’, ‘Customer churn’');
-    expect(t.directive).toContain('- ‘Keep £49’: changes ‘Price’');
+    expect(t.directive).toContain('- ‘Cut to £45’: changes ‘Price’');
     expect(t.directive).toContain(POLICY.method_turns['RC-WIDEN'].body);
   });
 
   it('no goal → the unavailable reply, no model call', () => {
-    const t = widenTurnFromSignals(signals({ 'model.goal_present': false }), GRAPH);
-    expect(t.kind).toBe('unavailable');
+    expect(widenTurnFromSignals(signals({ 'model.goal_present': false }), GRAPH).kind).toBe('unavailable');
   });
 
-  it('PASS control: two options on a DIFFERENT factor set, grounded, figures only as Olumi’s estimate', () => {
+  it('P1-A: an existing option’s direction comes from its INTERVENTION vs the baseline, never the structural edge (+1.0)', () => {
+    expect([...existingLevers(GRAPH as never, 'o_cut', 'o_sq')]).toEqual([['f_price', 'negative']]);
+    expect([...existingLevers(GRAPH as never, 'o_raise', 'o_sq')]).toEqual([['f_price', 'positive']]);
+    expect([...existingLevers(GRAPH as never, 'o_sq', 'o_sq')]).toEqual([['f_price', 'unchanged']]);
+  });
+
+  it('P1-A WD-S-DISTINCT: a reworded LOWERING proposal copies the lowering option and is refused; RAISING copies the raise', () => {
+    // "Trim what we charge" shares no word with "Cut to £45": a wording check passes it; the edge sign (+1.0) did too.
+    expect(widenGate(run(), one('Trim what we charge', ['Price', 'negative']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+    expect(widenGate(run(), one('Lift what we charge', ['Price', 'positive']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+    // Control (DL): with ONLY the lowering option on the table, a RAISING proposal on the same factor passes.
+    const onlyCut = { nodes: GRAPH.nodes.filter((n) => n.id !== 'o_raise'), edges: GRAPH.edges.filter((e) => e.from !== 'o_raise') };
+    const t = turnOn(onlyCut, { 'model.non_sq_option_ids': ['o_cut'] });
+    expect(widenGate(t, one('Lift what we charge', ['Price', 'positive']))).toEqual({ ok: true });
+    expect(widenGate(t, one('Trim what we charge', ['Price', 'negative']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+  });
+
+  it('fail closed: an option whose direction is UNKNOWN (no level set) matches any proposal on the same factors', () => {
+    const g = { nodes: [...GRAPH.nodes, { id: 'o_new', kind: 'option', label: 'Loyalty scheme' }],
+      edges: [...GRAPH.edges, { from: 'o_new', to: 'f_churn', ...STRUCTURAL }] };
+    expect([...existingLevers(g as never, 'o_new', 'o_sq')]).toEqual([['f_churn', 'unknown']]);
+    const t = turnOn(g, { 'model.non_sq_option_ids': ['o_cut', 'o_raise', 'o_new'] });
+    expect(widenGate(t, one('Retention offer', ['Customer churn', 'negative']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+    expect(widenGate(t, one('Retention offer', ['Customer churn', 'positive']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+    // Control: a different factor SET is distinct even beside an unknown.
+    expect(widenGate(t, one('Bundle', ['Customer churn', 'negative'], ['Price', 'negative']))).toEqual({ ok: true });
+  });
+
+  it('PASS control: two options on a DIFFERENT lever set, grounded, figures only as Olumi’s estimate', () => {
     expect(widenGate(run(), { options: [
       { label: 'Retention offer for at-risk accounts', acts_on: [{ factor_label: 'Customer churn', direction: 'negative', level: est }] },
-      { label: 'Cut price, cut churn', acts_on: [{ factor_label: 'Price', direction: 'negative' }, { factor_label: 'customer  churn', direction: 'negative' }] },
-    ], rationale: 'r' })).toMatchObject({ ok: true });
-    // The single-option form is gated the same way.
-    expect(widenGate(run(), { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }], rationale: 'r' })).toMatchObject({ ok: true });
-  });
-
-  it('WD-S-DISTINCT (identity, not wording): a REWORDED copy of a current option — same factor, same direction — is refused', () => {
-    // The label shares no words with either current option: a wording check would pass it.
-    const copy = { label: 'Lift what we charge', acts_on: [{ factor_label: 'Price', direction: 'positive' }] };
-    expect(widenGate(run(), { label: copy.label, acts_on: copy.acts_on, rationale: 'r' })).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
-    // Control: the same label on the opposite direction is a different mechanism.
-    expect(widenGate(run(), { label: copy.label, acts_on: [{ factor_label: 'Price', direction: 'negative' }], rationale: 'r' })).toMatchObject({ ok: true });
-    // Two proposals with one signature: the second is a copy of the first.
-    const r = widenGate(run(), { options: [
-      { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }] },
-      { label: 'Loyalty scheme', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }] },
-    ], rationale: 'r' });
-    expect(r).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+      { label: 'Cut price, cut churn', acts_on: [{ factor_label: 'Price', direction: 'negative' }, { factor_label: 'customer churn', direction: 'negative' }] },
+    ], rationale: 'r' })).toEqual({ ok: true });
+    expect(widenGate(run(), one('Retention offer', ['Customer churn', 'negative']))).toEqual({ ok: true });
+    // Two proposals with one lever set: the second copies the first.
+    expect(widenGate(run(), { options: [one('Retention offer', ['Customer churn', 'negative']), one('Loyalty scheme', ['Customer churn', 'negative'])], rationale: 'r' }))
+      .toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
   });
 
   it('WD-NO-DUP: a current option’s label (case and spacing folded) is refused, the status quo included', () => {
-    expect(widenGate(run(), { label: 'keep  £49', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }], rationale: 'r' }))
-      .toEqual({ ok: false, failed: ['WD-NO-DUP'] });
-    expect(widenGate(run(), { label: 'Carry on as now', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }], rationale: 'r' }))
-      .toEqual({ ok: false, failed: ['WD-NO-DUP'] });
+    expect(widenGate(run(), one('cut  to £45', ['Customer churn', 'negative']))).toEqual({ ok: false, failed: ['WD-NO-DUP'] });
+    expect(widenGate(run(), one('Carry on as now', ['Customer churn', 'negative']))).toEqual({ ok: false, failed: ['WD-NO-DUP'] });
   });
 
-  it('an option LEFT OUT of the comparison is existing too: re-proposing it (by label or by signature) is refused', () => {
-    const g = { nodes: [...GRAPH.nodes, { id: 'o_out', kind: 'option', label: 'Phased churn programme', proposed_by: 'olumi' }],
-      edges: [...GRAPH.edges, { from: 'o_out', to: 'f_churn', strength: { mean: -0.3 } }] };
-    const t = widenTurnFromSignals(signals(), g);
-    if (t.kind !== 'run') throw new Error('expected a run turn');
-    expect(t.directive).toContain('- \u2018Phased churn programme\u2019 (left out of the comparison): changes \u2018Customer churn\u2019');
-    expect(widenGate(t, { label: 'Phased churn programme', acts_on: [{ factor_label: 'Price', direction: 'negative' }], rationale: 'r' }))
-      .toEqual({ ok: false, failed: ['WD-NO-DUP'] });
-    expect(widenGate(t, { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }], rationale: 'r' }))
-      .toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
-    // Control: the same proposal on the base graph (no left-out option) passes.
-    expect(widenGate(run(), { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }], rationale: 'r' })).toMatchObject({ ok: true });
+  it('an option LEFT OUT of the comparison is existing too: re-proposing it (by label or by levers) is refused', () => {
+    const g = { nodes: [...GRAPH.nodes, { id: 'o_out', kind: 'option', label: 'Phased churn programme', proposed_by: 'olumi', interventions: { f_churn: { value: 0.05 } } }],
+      edges: [...GRAPH.edges, { from: 'o_out', to: 'f_churn', ...STRUCTURAL }] };
+    const t = turnOn(g);
+    expect(t.directive).toContain('- ‘Phased churn programme’ (left out of the comparison): changes ‘Customer churn’');
+    expect(widenGate(t, one('Phased churn programme', ['Price', 'negative'], ['Customer churn', 'positive']))).toEqual({ ok: false, failed: ['WD-NO-DUP'] });
+    expect(widenGate(t, one('Retention offer', ['Customer churn', 'negative']))).toEqual({ ok: false, failed: ['WD-S-DISTINCT'] });
+    expect(widenGate(run(), one('Retention offer', ['Customer churn', 'negative']))).toEqual({ ok: true });
+  });
+
+  it('P2-C: the gate resolves a factor exactly as the DOOR does (label OR description); an ambiguous label is refused', () => {
+    const g = { nodes: [...GRAPH.nodes, { id: 'f_ret', kind: 'factor', label: 'Retention', description: 'Customer churn' }], edges: GRAPH.edges };
+    const t = turnOn(g);
+    expect(doorFactorOf(t, 'Customer churn'), 'label of one, description of another: the door would pick the FIRST').toBeUndefined();
+    expect(widenGate(t, one('Retention offer', ['Customer churn', 'negative']))).toEqual({ ok: false, failed: ['WD-S-GROUNDED'] });
+    // Controls: a unique label resolves; a unique description resolves to the node the door picks.
+    expect(doorFactorOf(t, '  PRICE ')).toBe('f_price');
+    const d = turnOn({ nodes: [...GRAPH.nodes, { id: 'f_ret', kind: 'factor', label: 'Retention', description: 'How many stay' }], edges: GRAPH.edges });
+    expect(doorFactorOf(d, 'how many stay')).toBe('f_ret');
   });
 
   it('WD-S-GROUNDED: a factor the model does not have, or no factor at all, is refused', () => {
-    expect(widenGate(run(), { label: 'Hire sales', acts_on: [{ factor_label: 'Sales headcount', direction: 'positive' }], rationale: 'r' }))
-      .toEqual({ ok: false, failed: ['WD-S-GROUNDED'] });
+    expect(widenGate(run(), one('Hire sales', ['Sales headcount', 'positive']))).toEqual({ ok: false, failed: ['WD-S-GROUNDED'] });
     expect(widenGate(run(), { label: 'Hire sales', acts_on: [], rationale: 'r' })).toEqual({ ok: false, failed: ['WD-S-GROUNDED'] });
   });
 
@@ -122,38 +150,58 @@ describe('RC-WIDEN method turn', () => {
   });
 
   it('WD-COUNT and WD-S-NEW-FACTORS: 1 to 3 options, and no new factors in v1', () => {
-    const o = (i: number) => ({ label: `Option ${i}`, acts_on: [{ factor_label: i % 2 ? 'Customer churn' : 'Price', direction: i < 2 ? 'negative' : 'positive' }] });
+    const o = (i: number) => one(`Option ${i}`, [i % 2 ? 'Customer churn' : 'Price', i < 2 ? 'negative' : 'positive']);
     expect(widenGate(run(), { options: [o(0), o(1), o(2), o(3)], rationale: 'r' })).toMatchObject({ ok: false, failed: expect.arrayContaining(['WD-COUNT']) });
     expect(widenGate(run(), { rationale: 'r' })).toEqual({ ok: false, failed: ['WD-COUNT'] });
-    expect(widenGate(run(), { label: 'New lever', acts_on: [{ factor_label: 'Customer churn', direction: 'negative' }], new_factors: [{ label: 'X', affects: [] }], rationale: 'r' }))
+    expect(widenGate(run(), { ...one('New lever', ['Customer churn', 'negative']), new_factors: [{ label: 'X', affects: [] }] }))
       .toEqual({ ok: false, failed: ['WD-S-NEW-FACTORS'] });
   });
 
-  it('settle: ONE passed card → the door’s own reply + Something else; anything else → RC’s fallback + Talk it through, no card', () => {
+  it('P1-B: the reply comes from the DOOR’S TYPED RESULT — only what it HELD, plus every option it left out', () => {
+    const held = { ok: true, mutated: false, proposal_id: 'gmh_0123456789ab',
+      options: [
+        { label: 'Retention offer', levels: [{ factor: 'Customer churn', value: 2, unit: '%', stated_by: 'olumi_estimate', basis: 'b' }] },
+        { label: 'Bundle', levels: [{ factor: 'Price', value: null, still_needed: true }] },
+      ],
+      not_added: [{ option: 'Hold at £49', same_levels_as: 'Carry on as now' }] };
+    expect(widenDoorReply(held)).toBe('Options you haven’t compared yet:\n'
+      + '- Retention offer: sets ‘Customer churn’ (Olumi’s estimate)\n'
+      + '- Bundle: sets ‘Price’ (level still needed)\n'
+      + 'Not in this change: ‘Hold at £49’ would set the same levels as ‘Carry on as now’.\n'
+      + 'Approve to add them to the comparison, then re-analyse.');
+    const single = { ok: true, proposal_id: 'gmh_x', option: { label: 'Retention offer' }, levels: [{ factor: 'Customer churn', value: 2, stated_by: 'user' }] };
+    expect(widenDoorReply(single)).toBe('An option you haven’t compared yet:\n- Retention offer: sets ‘Customer churn’ (your figure)\nApprove to add it to the comparison, then re-analyse.');
+    expect(widenDoorReply({ ok: true })).toBeNull();
+  });
+
+  it('settle: ONE passed card → the door’s reply (its own text, else its typed result); anything else → RC’s fallback, no card', () => {
     const t = run();
     const ok = [{ name: 'propose_new_option', ok: true, proposal_id: 'gmh_0123456789ab' }];
-    const card = settleWidenTurn(t, { assistant_text: 'I would add two options…', tool_calls: ok });
-    expect(card).toEqual({ reply: 'I would add two options…', carded: true, actions: [SOMETHING_ELSE_CHIP] });
-    // ⛔ A stored card is NEVER answered with the fallback (seam W-R1 caught it: the door composed no text at 1 hop).
-    const gate = widenGate(t, { options: [
-      { label: 'Retention offer', acts_on: [{ factor_label: 'customer churn', direction: 'negative' }] },
-      { label: 'Cut price', acts_on: [{ factor_label: 'Price', direction: 'negative' }] },
-    ], rationale: 'r' });
-    const silent = settleWidenTurn(t, { assistant_text: '', tool_calls: ok }, gate);
-    expect(silent.carded).toBe(true);
-    expect(silent.reply).toBe('Options you haven\u2019t compared yet, each working a different way:\n'
-      + '- Retention offer: lowers \u2018Customer churn\u2019\n- Cut price: lowers \u2018Price\u2019\n'
-      + 'Approve to add them to the comparison, then re-analyse.');
+    expect(settleWidenTurn(t, { assistant_text: 'I would add two options…', tool_calls: ok }))
+      .toEqual({ reply: 'I would add two options…', carded: true, actions: [SOMETHING_ELSE_CHIP] });
+    // ⛔ A stored card is NEVER answered with the fallback (seam W-R1: the door composed no text at 1 hop).
+    const doorResult = { ok: true, proposal_id: 'gmh_0123456789ab', option: { label: 'Retention offer' }, levels: [] };
+    const silent = settleWidenTurn(t, { assistant_text: '', tool_calls: ok, tool_results: [doorResult] });
+    expect(silent).toEqual({ reply: widenDoorReply(doorResult), carded: true, actions: [SOMETHING_ELSE_CHIP] });
     expect(settleWidenTurn(t, { assistant_text: '', tool_calls: ok }).reply).toBe(WIDEN_CARD_LINE);
     const refused = settleWidenTurn(t, { assistant_text: '', tool_calls: [{ name: 'propose_new_option', ok: false }] });
     expect(refused.carded).toBe(false);
     expect(refused.reply).toBe(WIDEN_FALLBACK_TEMPLATE.replace('{goal}', '‘Revenue’'));
     expect(refused.actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
-    expect(settleWidenTurn(t, { assistant_text: 'x', tool_calls: [] }).carded).toBe(false);
+  });
+
+  it('sameLevers: exact lever set; unknown matches any direction; size or factor differences are distinct', () => {
+    const m = (...e: [string, 'positive' | 'negative' | 'unchanged' | 'unknown'][]) => new Map(e);
+    expect(sameLevers(m(['a', 'negative']), m(['a', 'negative']))).toBe(true);
+    expect(sameLevers(m(['a', 'negative']), m(['a', 'unknown']))).toBe(true);
+    expect(sameLevers(m(['a', 'negative']), m(['a', 'positive']))).toBe(false);
+    expect(sameLevers(m(['a', 'negative']), m(['a', 'unchanged']))).toBe(false);
+    expect(sameLevers(m(['a', 'negative'], ['b', 'negative']), m(['a', 'negative']))).toBe(false);
+    expect(sameLevers(m(), m())).toBe(false);
   });
 
   it('contract pins: the fallback and the chip label are RC’s words', () => {
-    expect(POLICY.method_turns['RC-WIDEN'].fallback).toContain(WIDEN_FALLBACK_TEMPLATE.replace('{goal}', '{goal}'));
+    expect(POLICY.method_turns['RC-WIDEN'].fallback).toContain(WIDEN_FALLBACK_TEMPLATE);
     expect(WIDEN_CHIP.label).toBe('Suggest options');
   });
 

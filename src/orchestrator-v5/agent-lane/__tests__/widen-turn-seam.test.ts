@@ -218,7 +218,12 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(t1.assistant_text).toContain('Retention offer');
     expect(t1.assistant_text).toContain('Cut price to win share');
     expect(t1.assistant_text).not.toContain('What other way could you reach');
-    expect((await heldOnLatestRow()).map((p) => p.chip_id)).toEqual([approve!.id.slice('agent-approve-proposal:'.length)]);
+    const held = await heldOnLatestRow();
+    expect(held.map((p) => p.chip_id)).toEqual([approve!.id.slice('agent-approve-proposal:'.length)]);
+    const ops = held[0]!.action.inline_patch!.operations! as { op: string; path: string; value?: { kind?: string; label?: string; interventions?: Record<string, unknown> } }[];
+    const added = ops.filter((o) => o.op === 'add_node' && o.value?.kind === 'option');
+    expect(Object.fromEntries(added.map((o) => [o.value!.label, Object.keys(o.value!.interventions ?? {})])))
+      .toEqual({ 'Retention offer': ['fac_1'], 'Cut price to win share': ['fac_price'] });
     expect(optionLabels(), 'nothing is written before the approval').toEqual(before);
 
     const t2 = await turn({ message: approve!.message, source: 'chip', chip: { id: approve!.id } });
@@ -269,6 +274,31 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(await heldOnLatestRow()).toHaveLength(1);
     expect(t1.assistant_text).toContain('Retention offer');
     expect(t1.assistant_text).not.toContain('What other way could you reach');
+  }, 120_000);
+
+  it('W-R6 (DL P1-B): two gate-passing options, one a SAME-LEVEL twin of an existing option → the door holds ONE; the reply names only it + the twin note', async () => {
+    seeded();
+    const before = optionLabels();
+    script = [() => fnCall('propose_new_option', { options: [
+      { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative', level: est }] },
+      // Lowering Price passes the gate (no current option lowers it), but at £49 it sets EXACTLY "Keep £49"'s level.
+      { label: 'Hold at £49', acts_on: [{ factor_label: 'Price', direction: 'negative', level: { value: 49, unit: 'GBP', estimate: true, basis: 'today\u2019s price' } }] },
+    ], rationale: 'r' })];
+    const t1 = await press();
+    expect(t1._agent.tool_calls.map((c) => [c.name, c.ok]), JSON.stringify(t1._agent.tool_calls)).toEqual([['propose_new_option', true]]);
+    // Bound to the HELD ops: exactly one new option node, carrying a lever on Customer churn (fac_1) and none on Price.
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    const ops = held[0]!.action.inline_patch!.operations! as { op: string; path: string; value?: { kind?: string; label?: string; interventions?: Record<string, unknown> } }[];
+    const added = ops.filter((o) => o.op === 'add_node' && o.value?.kind === 'option');
+    expect(added.map((o) => o.value!.label), JSON.stringify(ops)).toEqual(['Retention offer']);
+    expect(Object.keys(added[0]!.value!.interventions ?? {})).toEqual(['fac_1']);
+    expect(ops.some((o) => o.op === 'add_edge' && o.path === `dec_x::${added[0]!.path}`)).toBe(true);
+    // The words match the card: only the held option is offered for approval; the twin is named as left out.
+    expect(t1.assistant_text).toContain('Retention offer');
+    expect(t1.assistant_text).toMatch(/Hold at £49.{0,80}(same levels|NOT in this change|Not in this change)/s);
+    expect(t1.assistant_text).not.toMatch(/Approve to add them/);
+    expect(optionLabels()).toEqual(before);
   }, 120_000);
 
   it('W-R4 CONTROL: the same model reply on an ORDINARY turn (not a Widen press) is not gated — the door holds it', async () => {

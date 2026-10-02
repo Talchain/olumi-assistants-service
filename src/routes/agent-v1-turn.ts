@@ -2552,7 +2552,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Widen: the door's ONE passed card and its own reply, else RC's deterministic fallback (a refused call stored nothing).
     let widenActions: readonly OfferedAction[] = [];
     if (widenRun !== undefined) {
-      const settled = settleWidenTurn(widenRun, { assistant_text: result.stopped_reason === 'answered' ? text : '', tool_calls: result.tool_calls }, widenGateResult);
+      const settled = settleWidenTurn(widenRun, { assistant_text: result.stopped_reason === 'answered' ? text : '', tool_calls: result.tool_calls, tool_results: result.tool_results });
       text = settled.reply;
       widenActions = settled.actions;
       // The record is rebuilt ONCE from the final wire text (below); the call's own items never survive.

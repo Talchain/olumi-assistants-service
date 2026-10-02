@@ -71,7 +71,7 @@ const quote = (label: string): string => `‘${label}’`;
 /** Labels compare after folding curly quotes, case and whitespace: the same entity, however the model typed it. */
 const norm = (s: string): string => s.replace(/[‘’]/gu, "'").replace(/[“”]/gu, '"').replace(/\s+/gu, ' ').trim().toLowerCase();
 
-interface Graph {
+export interface Graph {
   readonly nodes: Rec[];
   readonly edges: Rec[];
 }
@@ -84,18 +84,47 @@ function graphOf(graph: unknown): Graph {
 }
 const labelOf = (n: Rec | undefined): string | null => (typeof n?.label === 'string' && n.label !== '' ? n.label : null);
 
-/** An option's identity for distinctness: the set of factor ids it changes, each with its direction, sorted. */
-function signature(entries: readonly { factor_id: string; direction: string }[]): string {
-  return [...new Set(entries.map((e) => `${e.factor_id}:${e.direction}`))].sort().join('|');
+/** How an option moves one factor: from its INTERVENTION, never from the structural edge (always +1.0, DL P1-A). */
+export type Move = 'positive' | 'negative' | 'unchanged' | 'unknown';
+/** An option's identity for distinctness: factor id → how it moves that factor. */
+export type Levers = ReadonlyMap<string, Move>;
+
+const numeric = (v: unknown): number | undefined => {
+  const x = rec(v) !== undefined ? rec(v)!.value : v;
+  return typeof x === 'number' && Number.isFinite(x) ? x : undefined;
+};
+
+/**
+ * An existing option's levers by the CANONICAL rule (`model.same_lever`, guidance-signals.ts): the sign of its set level
+ * against the baseline (the status-quo option's level, else the factor's observed value, else 0). A level that is not a
+ * number is `unknown`. An option with no interventions falls back to its option → factor edges, each `unknown`: the
+ * direction is not stored there, so a proposal on the same factors fails closed.
+ */
+export function existingLevers(g: Graph, optionId: string, sqId: string | null): Levers {
+  const byId = new Map(g.nodes.map((n) => [String(n.id), n] as const));
+  const factorIds = new Set(g.nodes.filter((n) => n.kind === 'factor').map((n) => String(n.id)));
+  const ivs = rec(byId.get(optionId)?.interventions) ?? {};
+  const sqIvs = sqId === null ? {} : rec(byId.get(sqId)?.interventions) ?? {};
+  const baseline = (t: string): number => numeric(sqIvs[t]) ?? numeric(rec(byId.get(t)?.observed_state)?.value) ?? 0;
+  const out = new Map<string, Move>();
+  for (const t of Object.keys(ivs).filter((k) => factorIds.has(k))) {
+    const v = numeric(ivs[t]);
+    out.set(t, v === undefined ? 'unknown' : v > baseline(t) ? 'positive' : v < baseline(t) ? 'negative' : 'unchanged');
+  }
+  if (out.size === 0) {
+    for (const e of g.edges) if (e.from === optionId && factorIds.has(String(e.to))) out.set(String(e.to), 'unknown');
+  }
+  return out;
 }
 
-/** A current option's signature, from the graph's own option → factor edges (sign of the edge's mean = direction). */
-function optionSignature(g: Graph, optionId: string): string {
-  const factorIds = new Set(g.nodes.filter((n) => n.kind === 'factor').map((n) => n.id));
-  return signature(g.edges.filter((e) => e.from === optionId && factorIds.has(e.to)).map((e) => {
-    const mean = rec(e.strength)?.mean ?? e.strength_mean;
-    return { factor_id: String(e.to), direction: typeof mean === 'number' && mean < 0 ? 'negative' : 'positive' };
-  }));
+/** A proposal copies an option when it moves EXACTLY the same factors the same way; an `unknown` move matches any (fail closed). */
+export function sameLevers(proposed: Levers, existing: Levers): boolean {
+  if (proposed.size === 0 || proposed.size !== existing.size) return false;
+  for (const [t, d] of proposed) {
+    const e = existing.get(t);
+    if (e === undefined || (e !== 'unknown' && e !== d)) return false;
+  }
+  return true;
 }
 
 /** A Widen that runs: what the route needs for the ONE model call, and what the gate checks against. */
@@ -106,11 +135,10 @@ export interface RunWidenTurn {
   readonly goal_label: string;
   /** Appended to this turn's instructions only: never the user's message, so it is never handed on as history. */
   readonly directive: string;
-  /** Every option already in the model (compared, status quo, left out): label (normalised) and factor-set signature. */
-  readonly current: readonly { readonly label: string; readonly signature: string }[];
-  /** Every factor of the model: exact label (normalised) → id, and id → the model's own label. */
-  readonly factor_ids: Readonly<Record<string, string>>;
-  readonly factor_labels: Readonly<Record<string, string>>;
+  /** Every option already in the model (compared, status quo, left out): label (normalised) and its levers. */
+  readonly current: readonly { readonly label: string; readonly levers: Levers }[];
+  /** Every factor of the model, as the DOOR resolves them (`planNewOption`: label OR description, trim + lower-case). */
+  readonly factors: readonly { readonly id: string; readonly label: string; readonly description: string }[];
 }
 
 export type WidenUnavailableReason = 'model_unread' | 'no_goal';
@@ -146,8 +174,6 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
   const ownIds = s['model.non_sq_option_ids'];
   const factors = g.nodes.filter((n) => n.kind === 'factor' && labelOf(n) !== null);
   const factorLabel = new Map(factors.map((n) => [n.id, labelOf(n)!] as const));
-  const factor_ids = Object.fromEntries(factors.map((n) => [norm(labelOf(n)!), String(n.id)]));
-  const factor_labels = Object.fromEntries(factors.map((n) => [String(n.id), labelOf(n)!]));
   // EVERY option already in the model is "existing" for distinctness: the compared ones, the status quo, and any option
   // left out of the comparison (an Olumi option the user excluded is not re-proposed as new: identity, not wording).
   const compared = new Set([...ownIds, ...(sq !== null ? [sq] : [])]);
@@ -155,7 +181,7 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
     ...g.nodes.filter((n) => n.kind === 'option' && !compared.has(String(n.id))).map((n) => String(n.id))];
   const graphLabel = new Map(g.nodes.map((n) => [String(n.id), labelOf(n)] as const));
   const labelFor = (id: string): string => labels[id] ?? graphLabel.get(id) ?? id;
-  const current = optionIds.map((id) => ({ label: norm(labelFor(id)), signature: optionSignature(g, id) }));
+  const current = optionIds.map((id) => ({ label: norm(labelFor(id)), levers: existingLevers(g, id, sq) }));
   const describe = (id: string): string => {
     const changes = g.edges.filter((e) => e.from === id && factorLabel.has(e.to)).map((e) => quote(factorLabel.get(e.to)!));
     return `- ${quote(labelFor(id))}${compared.has(id) ? '' : ' (left out of the comparison)'}${changes.length > 0 ? `: changes ${changes.join(', ')}` : ''}`;
@@ -177,7 +203,9 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
     'Put why each option might do better in `rationale`, in one or two plain sentences.',
     ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
   ].join('\n');
-  return { kind: 'run', target: 'options', variant, goal_label: goalLabel, directive, current, factor_ids, factor_labels };
+  const doorFactors = g.nodes.filter((n) => n.kind === 'factor').map((n) => ({
+    id: String(n.id), label: typeof n.label === 'string' ? n.label : '', description: typeof n.description === 'string' ? n.description : '' }));
+  return { kind: 'run', target: 'options', variant, goal_label: goalLabel, directive, current, factors: doorFactors };
 }
 
 /** The Widen turn for a press, from the route's own readback (the same licence and identity projection as the pre-mortem). */
@@ -199,14 +227,22 @@ export function widenTurnForReadback(chipId: unknown, rb: MethodReadback): Widen
   return widenTurnFromSignals(signals, rb.graph);
 }
 
-/** One gated option, typed: its label as proposed and the model's factors it moves (by the model's own labels). */
-export interface WidenItem {
-  readonly label: string;
-  readonly changes: readonly { readonly factor_label: string; readonly direction: 'positive' | 'negative' }[];
+export type WidenGateResult = { readonly ok: true } | { readonly ok: false; readonly failed: readonly string[] };
+
+/** The door's own normaliser (`propose-new-option.ts` `norm`): trim + lower-case, nothing else. */
+const doorNorm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
+
+/**
+ * The factor the DOOR would pick for this label, or undefined. The door takes the FIRST factor whose label OR
+ * description matches (`planNewOption`); the gate accepts only when exactly ONE factor matches either way, so both
+ * resolve the same node (DL P2-C).
+ */
+export function doorFactorOf(turn: RunWidenTurn, wanted: unknown): string | undefined {
+  const w = doorNorm(wanted);
+  if (w === '') return undefined;
+  const hits = turn.factors.filter((f) => doorNorm(f.label) === w || doorNorm(f.description) === w);
+  return hits.length === 1 ? hits[0]!.id : undefined;
 }
-export type WidenGateResult =
-  | { readonly ok: true; readonly items: readonly WidenItem[] }
-  | { readonly ok: false; readonly failed: readonly string[] };
 
 /**
  * RC-WIDEN's structured checks on the door's own arguments, BEFORE the door stores anything (by identity, never wording).
@@ -218,33 +254,29 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
   const failed = new Set<string>();
   if (raw.length < 1 || raw.length > WIDEN_MAX_OPTIONS) failed.add('WD-COUNT');
   if (Array.isArray(a.new_factors) && a.new_factors.length > 0) failed.add('WD-S-NEW-FACTORS');
-  const seen = new Set(turn.current.map((c) => c.signature));
+  const seen: Levers[] = turn.current.map((c) => c.levers);
   const currentLabels = new Set(turn.current.map((c) => c.label));
   const proposedLabels = new Set<string>();
-  const items: WidenItem[] = [];
   for (const item of raw) {
     const o = rec(item);
     const label = typeof o?.label === 'string' ? norm(o.label) : '';
     const actsOn = Array.isArray(o?.acts_on) ? o.acts_on.map(rec) : [];
     if (label === '' || currentLabels.has(label) || proposedLabels.has(label)) failed.add('WD-NO-DUP');
     proposedLabels.add(label);
-    const entries: { factor_id: string; direction: string }[] = [];
+    const levers = new Map<string, Move>();
     if (actsOn.length === 0) failed.add('WD-S-GROUNDED');
     for (const e of actsOn) {
-      const id = typeof e?.factor_label === 'string' ? turn.factor_ids[norm(e.factor_label)] : undefined;
+      const id = doorFactorOf(turn, e?.factor_label);
       const direction = e?.direction === 'negative' ? 'negative' : e?.direction === 'positive' ? 'positive' : undefined;
       if (id === undefined || direction === undefined) { failed.add('WD-S-GROUNDED'); continue; }
-      entries.push({ factor_id: id, direction });
+      levers.set(id, direction);
       const level = rec(e?.level);
       if (level !== undefined && (level.estimate !== true || typeof level.basis !== 'string' || level.basis.trim() === '')) failed.add('WD-NO-NEW-FIGURES');
     }
-    const sig = signature(entries);
-    if (entries.length > 0 && seen.has(sig)) failed.add('WD-S-DISTINCT');
-    seen.add(sig);
-    items.push({ label: typeof o?.label === 'string' ? o.label.trim() : '',
-      changes: entries.map((e) => ({ factor_label: turn.factor_labels[e.factor_id] ?? e.factor_id, direction: e.direction as 'positive' | 'negative' })) });
+    if (levers.size > 0 && seen.some((existing) => sameLevers(levers, existing))) failed.add('WD-S-DISTINCT');
+    seen.push(levers);
   }
-  return failed.size === 0 ? { ok: true, items } : { ok: false, failed: [...failed] };
+  return failed.size === 0 ? { ok: true } : { ok: false, failed: [...failed] };
 }
 
 export function widenFallbackReply(turn: RunWidenTurn): string {
@@ -262,30 +294,55 @@ export interface SettledWidenTurn {
 /** The card's line when neither the door nor the gate has typed items to name (never the fallback beside a live card). */
 export const WIDEN_CARD_LINE = 'I\u2019ve prepared options you haven\u2019t compared yet. Approve to add them to the comparison, then re-analyse.';
 
-/** The card's own line when the door composed none: RC's format ('- {name}: {what it changes}'), from TYPED items only. */
-export function widenCardReply(items: readonly WidenItem[]): string {
-  const verb = (d: 'positive' | 'negative'): string => (d === 'positive' ? 'raises' : 'lowers');
+/**
+ * The card's own line when the door composed none, from the DOOR'S TYPED RESULT only (DL P1-B): exactly the options it
+ * HELD (`option` / `options`), the factors each sets and whose figure it is, and every option it left out (`not_added`).
+ * No figure is restated (the card shows them); null when the result is not one this reads.
+ */
+export function widenDoorReply(result: unknown): string | null {
+  const r = rec(result);
+  if (r === undefined) return null;
+  const held = Array.isArray(r.options) ? r.options.map(rec)
+    : rec(r.option) !== undefined ? [{ ...rec(r.option)!, levels: r.levels }] : [];
+  if (held.length === 0 || held.some((o) => o === undefined || typeof o.label !== 'string' || o.label === '')) return null;
+  const sets = (l: unknown): string | null => {
+    const x = rec(l);
+    if (typeof x?.factor !== 'string') return null;
+    if (x.value === null || x.value === undefined) return `${quote(x.factor)} (level still needed)`;
+    return `${quote(x.factor)} (${x.stated_by === 'olumi_estimate' ? 'Olumi\u2019s estimate' : 'your figure'})`;
+  };
+  const lines = held.map((o) => {
+    const parts = (Array.isArray(o!.levels) ? o!.levels : []).map(sets).filter((p): p is string => p !== null);
+    return `- ${String(o!.label)}${parts.length > 0 ? `: sets ${parts.join(', ')}` : ''}`;
+  });
+  const left = (Array.isArray(r.not_added) ? r.not_added.map(rec) : []).flatMap((n) =>
+    typeof n?.option === 'string' && typeof n.same_levels_as === 'string'
+      ? [`Not in this change: ${quote(n.option)} would set the same levels as ${quote(n.same_levels_as)}.`] : []);
   return [
-    `${items.length === 1 ? 'An option' : 'Options'} you haven\u2019t compared yet, each working a different way:`,
-    ...items.map((i) => `- ${i.label}: ${i.changes.map((c) => `${verb(c.direction)} ${quote(c.factor_label)}`).join(', ')}`),
-    `Approve to add ${items.length === 1 ? 'it' : 'them'} to the comparison, then re-analyse.`,
+    `${held.length === 1 ? 'An option' : 'Options'} you haven\u2019t compared yet:`,
+    ...lines,
+    ...left,
+    `Approve to add ${held.length === 1 ? 'it' : 'them'} to the comparison, then re-analyse.`,
   ].join('\n');
 }
 
 /**
  * The turn's outcome from the loop's own record. The STORED card is the truth: exactly ONE passed proposal with an id
- * means the card stands, and its text is the door's own reply or, when the door composed none, `widenCardReply` from
- * the gate's typed items. Anything else is RC's fallback with no card (a refused call stored nothing).
+ * means the card stands, and its text is the door's own reply or, when the door composed none, `widenDoorReply` from
+ * the door's typed result (what it HELD, DL P1-B). Anything else is RC's fallback with no card (a refused call stored nothing).
  */
 export function settleWidenTurn(
   turn: RunWidenTurn,
-  run: { readonly assistant_text: string; readonly tool_calls: readonly { readonly name: string; readonly ok: boolean; readonly proposal_id?: string }[] },
-  gate?: WidenGateResult,
+  run: {
+    readonly assistant_text: string;
+    readonly tool_calls: readonly { readonly name: string; readonly ok: boolean; readonly proposal_id?: string }[];
+    readonly tool_results?: readonly unknown[];
+  },
 ): SettledWidenTurn {
-  const cards = run.tool_calls.filter((c) => c.name === WIDEN_TOOL && c.ok && typeof c.proposal_id === 'string');
+  const cards = run.tool_calls.flatMap((c, i) => (c.name === WIDEN_TOOL && c.ok && typeof c.proposal_id === 'string' ? [i] : []));
   if (cards.length === 1) {
     const reply = run.assistant_text.trim() !== '' ? run.assistant_text
-      : gate?.ok === true ? widenCardReply(gate.items) : WIDEN_CARD_LINE;
+      : widenDoorReply(run.tool_results?.[cards[0]!]) ?? WIDEN_CARD_LINE;
     return { reply, carded: true, actions: [SOMETHING_ELSE_CHIP] };
   }
   return { reply: widenFallbackReply(turn), carded: false, actions: [TALK_IT_THROUGH_CHIP] };
