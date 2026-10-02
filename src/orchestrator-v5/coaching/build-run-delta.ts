@@ -154,7 +154,8 @@ interface RunEchoes {
    */
   readonly builds: Readonly<Record<string, unknown>> | null;
   /**
-   * The byte-for-byte PLoT envelope itself. Carried on this value rather than
+   * PLoT's envelope as stored (its own `meta`, CEE's claim withholds applied —
+   * see `readRunEchoes`). Carried on this value rather than
    * re-read at the call site so a caller cannot pair one run's echoes with
    * another run's option records — the same construction as `RunProjection`
    * in `compare-runs.ts`: make the coupling a property of one value, not an
@@ -218,9 +219,12 @@ function readRunEchoes(fact: HandlerFact): RunEchoes | null {
       : null;
   if (graphHashAtRun === null) return null;
 
-  // `enrichment` is the byte-for-byte PLoT envelope (`run-analysis.ts` writes
-  // it with no projection and no stripping), so `meta` and `_meta` below are
-  // PLoT's own, not a CEE reconstruction.
+  // `enrichment` is PLoT's envelope AS `run-analysis.ts` STORED IT: `meta` and
+  // `_meta` below are PLoT's own, never a CEE reconstruction — but the option
+  // figures are AFTER CEE's claim withholds (`withholdOptionGoalFigures` /
+  // `withholdOptionLimitScores` strip withheld figures and append a typed
+  // warning: `GOAL_FIGURES_WITHHELD_CODES`, `win_shares_withheld`). So a share
+  // missing here may have been withheld, not absent from PLoT.
   const enrichment = asRecord(result.enrichment);
   if (enrichment === null) return null;
 
