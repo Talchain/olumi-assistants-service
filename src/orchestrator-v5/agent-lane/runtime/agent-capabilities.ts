@@ -17,6 +17,7 @@
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
+import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { acceptedOlumiEstimateSentence } from '../rerun-explanation.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -960,6 +961,8 @@ interface GraphRead {
   readonly analysis_result?: unknown;
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
+  /** The selected Run's recorded participation via the canonical reader; absent = not recorded. */
+  readonly option_participation?: StoredOptionParticipation;
 }
 
 // An edited graph can still carry an earlier Run. Its old result must not be
@@ -1479,10 +1482,25 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
       ...(decision !== undefined ? { goal_certainty: decision } : {}),
     }];
   }) : [];
+  // Participation belongs to the same selected, delivered current Run. Only labels come from this read's graph;
+  // today's option authorship, adoption and status never reinterpret the Run's recorded reason.
+  const labels = new Map(g.nodes.filter((n) => n.kind === 'option').map((n) => [n.id, n.label]));
+  const labelledOption = (id: string): { option_id: string; label?: string } => ({
+    option_id: id, ...(labels.has(id) ? { label: labels.get(id)! } : {}),
+  });
+  const participation = current && g.analysis_result !== undefined && g.option_participation !== undefined
+    ? g.option_participation
+      .map((entry) => ({ ...entry, ...labelledOption(entry.option_id),
+        ...(entry.unanalysable_user_option_ids === undefined ? {} : {
+          unanalysable_user_options: entry.unanalysable_user_option_ids.map(labelledOption),
+        }),
+      }))
+    : undefined;
   return { ...context, analysis: { ...analysis,
     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
     ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
+    ...(participation !== undefined ? { option_participation: participation } : {}),
   } };
 }
 
@@ -1863,6 +1881,7 @@ export function createAgentCapabilities(
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
+      ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),
     };
   };
 
