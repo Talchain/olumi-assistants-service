@@ -444,7 +444,14 @@ describe('the Agent route runs the first analysis itself, once', () => {
    * first. The prose is a SERVED Run reply's (AI Quality corpus W.V2.rep1, labelled clean), used for its
    * shape — first sentence, three bullets, a closing line. See `agent-run-reply-answer-shape.test.ts`.
    */
-  it('RED: a build turn whose first analysis ran → its bulleted narration carries `_answer_shape`, and the text is its derivation', async () => {
+  /**
+   * ⛔ DL item 3 (2 Oct; CODEX r2 P1 on #2509, CODEX on #2517): this row used to require a shape here, and that shape put
+   * the host's OWN build lines ("The model was saved as version 1.", what is held fixed, the questions the model does not
+   * answer yet) behind "Show more", because the UI renders `_answer_shape` instead of the text. The build turn's narration
+   * is still the narrator's, but the reply is no longer ONLY the narrator's words, so it ships whole with every host line
+   * on the face. CONTROL: `agent-run-reply-answer-shape.test.ts` rows 8/11 (the narrator's words alone are still shaped).
+   */
+  it('a build turn whose first analysis ran → its narration PLUS the host\'s own build lines → NOT shaped; every host line on the face', async () => {
     const { readFileSync } = await import('node:fs');
     const corpus = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as { replies: { id: string; text: string }[] };
     const prose = corpus.replies.find((r) => r.id === 'stack-1854-714677d5/pricing-run-complete.W.V2.rep1')!.text;
@@ -452,11 +459,9 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const b = await turn(app, { message: BRIEF }) as Body & { _answer_shape?: { headline: string; bullets: string[]; detail: string } };
     expect(b._diagnostic_trace.first_analysis, 'the control: the first pass ran').toMatchObject({ ran: true });
     expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'the control: an analysis-bearing turn').toBe(true);
-    expect(b._answer_shape).toBeDefined();
-    expect(b._answer_shape!.headline).toBe(prose.split('\n')[0]);
-    expect(b._answer_shape!.bullets).toHaveLength(3);
-    const { deriveAnswerTextFromShape } = await import('../../routing/answer-shape.js');
-    expect(deriveAnswerTextFromShape(b._answer_shape as never)).toBe(b.assistant_text);
+    expect(b.assistant_text.startsWith(prose), 'the control: the narrator\'s words lead, untouched').toBe(true);
+    expect(b.assistant_text, 'the control: the host appended its own build line').toContain('The model was saved as version 1.');
+    expect(b._answer_shape, 'not the narrator\'s words alone → not shaped').toBeUndefined();
   });
 
   /**

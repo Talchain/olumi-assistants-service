@@ -343,6 +343,15 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect('_answer_shape' in b, 'a reply carrying a host line is not shaped').toBe(false);
   });
 
+  it('12. HOST STATUS (CODEX on #2517, a class a list missed): an unsupported "Saved" claim → the host\'s own status line → NOT shaped', async () => {
+    const claim = `${CLEAN_BULLETS.text}\n\nSaved the change.`;
+    const b = await askedTurn(claim, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a16') as Offered;
+    expect(carriesResult(b), 'the control: over a current result').toBe(true);
+    expect(b.assistant_text.endsWith('Nothing was saved this turn.'), 'the control: the host removed the claim and said so').toBe(true);
+    expect(faceOf(synthesiseAnswerShapeFromText(b.assistant_text)!).includes('Nothing was saved this turn.'), 'the control: a shape would fold it').toBe(false);
+    expect('_answer_shape' in b, 'not the narrator\'s words alone → not shaped').toBe(false);
+  });
+
   it('11. CONTROL: the SAME Agent Run on the graph WITH its target → no host ask is owed → the reply is still shaped', async () => {
     const b = await askedTurn(CLEAN_BULLETS.text, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a15', [runCall], 'Run the analysis and tell me what it says.') as Offered;
     expect(b._agent.tool_calls, 'the control: the Agent ran the analysis').toMatchObject([{ name: 'run_analysis', ok: true }]);
