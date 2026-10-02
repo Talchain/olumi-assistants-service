@@ -38,7 +38,7 @@ import {
 } from "@talchain/schemas/orchestrator";
 import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
-import { readOptionResultSources } from "./option-result-source.js";
+import { identityBoundWinProbabilities, readOptionResultSources } from "./option-result-source.js";
 import {
   OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
@@ -307,7 +307,15 @@ export function withholdOptionGoalFigures<E>(
   }
   for (const k of COMPARISON_DERIVED_KEYS) delete out[k];
   if (readRecord(env.robustness) !== null) out.robustness = { fragile_edges: [], robust_edges: [] };
-  const recorded = opts.keepOutcome === true ? { ...warning, withheld_claims: [...OUTCOME_KEPT_CLAIMS] } : warning;
+  // `win_shares_withheld`: this withhold REMOVED identity-bound usable shares (the run-delta producer's own rule, read
+  // off the envelope BEFORE the strip). Every entry's share goes above, so a later reader sees none and cannot tell a
+  // removed share from one PLoT never sent; only this record can (`runWithheldWinShares`, CODEX on CEE 864e915c P1).
+  const sharesRemoved = identityBoundWinProbabilities(env).size > 0;
+  const recorded = {
+    ...warning,
+    ...(opts.keepOutcome === true ? { withheld_claims: [...OUTCOME_KEPT_CLAIMS] } : {}),
+    ...(sharesRemoved ? { win_shares_withheld: true } : {}),
+  };
   out.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), recorded];
   return out as E;
 }
