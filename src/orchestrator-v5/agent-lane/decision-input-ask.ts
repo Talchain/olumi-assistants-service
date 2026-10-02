@@ -105,7 +105,11 @@ function leftOutLines(graph: unknown, goalLabel: string, restingText: string): s
   // ⭐ ONCE PER RISK (DL on #2509 5af6a010): the build turn's narrator is handed admission's own line for it
   // (`not_represented`) and may relay it; a risk the reply already says is left out is not said again by the host.
   const sentences = restingText.split(/(?<=[.!?])\s+/);
-  const alreadySaid = (label: string): boolean => sentences.some((x) => x.includes(`"${label}"`) && x.includes('left out of this analysis'));
+  // ⛔ A NEGATED sentence ("is not / no longer / never left out") says the opposite, and never suppresses it (DL): omission
+  // is the worse direction.
+  const negated = /\b(?:not|never|no longer)\s+(?:been\s+)?left out of this analysis|n't\s+(?:been\s+)?left out of this analysis/i;
+  const alreadySaid = (label: string): boolean => sentences.some((x) => x.includes(`"${label}"`)
+    && x.includes('left out of this analysis') && !negated.test(x));
   const g = recordOf(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
   const edges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)

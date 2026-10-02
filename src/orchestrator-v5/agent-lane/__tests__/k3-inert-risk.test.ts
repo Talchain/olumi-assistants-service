@@ -79,6 +79,11 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     // CONTROL: a narrator that did not say it → the host says it, once; another risk's mention does not suppress it.
     const silent = decisionInputLines(graph, { restingText: 'I built the model. "Founder burnout" matters too.', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
     expect(silent.filter((l) => l.includes('left out of this analysis'))).toEqual([LEFT_OUT_RUN]);
+    // CONTROL (DL): a NEGATED sentence says the opposite → still said ("not", "no longer", "isn't").
+    for (const neg of [`"${RISK}" is not left out of this analysis.`, `"${RISK}" is no longer left out of this analysis.`, `"${RISK}" isn't left out of this analysis.`]) {
+      const said = decisionInputLines(graph, { restingText: `I built the model. ${neg}`, questionsToggle: false, awaitingApproval: false, builtOrRan: true });
+      expect(said.filter((l) => l.includes('left out of this analysis')), neg).toEqual([LEFT_OUT_RUN]);
+    }
     // CONTROL: the narrator names THIS risk without saying it is left out → still said (the label alone never suppresses it).
     const named = decisionInputLines(graph, { restingText: `I built the model. "${RISK}" is a real worry.`, questionsToggle: false, awaitingApproval: false, builtOrRan: true });
     expect(named.filter((l) => l.includes('left out of this analysis'))).toEqual([LEFT_OUT_RUN]);
