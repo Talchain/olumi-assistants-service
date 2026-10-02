@@ -106,14 +106,16 @@ export interface GenerativeCall {
   readonly cee_build?: string;
   readonly environment?: string;
   readonly environment_source?: string;
+  /** T1 (b): where the Agent instructions rode — `developer_breakpoint` (an explicit cache breakpoint) or `instructions`. */
+  readonly instructions_carrier?: string;
 }
 
 /** What a caller may say about its call; every field is optional and recorded only when given. */
 export type ProviderCallDetail = Readonly<Partial<Pick<GenerativeCall,
   'model' | 'purpose' | 'prompt_alias' | 'prompt_sha256' | 'tools_sha256' | 'schema_sha256' | 'reasoning_effort'
-  | 'max_output_tokens' | 'cee_build' | 'environment' | 'environment_source'>>>;
+  | 'max_output_tokens' | 'cee_build' | 'environment' | 'environment_source' | 'instructions_carrier'>>>;
 /** The identity fields, in the order a row carries them. */
-const IDENTITY_FIELDS = ['prompt_alias', 'prompt_sha256', 'tools_sha256', 'schema_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source'] as const;
+const IDENTITY_FIELDS = ['prompt_alias', 'prompt_sha256', 'tools_sha256', 'schema_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source', 'instructions_carrier'] as const;
 
 /**
  * ⭐ WHAT A CALL COST, SO CACHING CAN BE MEASURED RATHER THAN ASSUMED.

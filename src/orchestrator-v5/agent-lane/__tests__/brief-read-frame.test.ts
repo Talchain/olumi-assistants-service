@@ -120,9 +120,20 @@ const callTool = (name: string, args: Record<string, unknown>) => ({ output: [{ 
 let readingReply: { status: number; text: string } = { status: 200, text: '{}' };
 let readingHold: Promise<void> | null = null;
 let readingCalls = 0;
+/** T1 (b): when true, every request carrying the instructions cache breakpoint is refused with the provider's 400. */
+let refuseBreakpoint = false;
+/** Every request the provider received, in order (the ledger must count each one). */
+let providerRequests = 0;
+/** Holds the refused PREWARM's answer until released, so the refusal lands after the turn has ended (Codex r1's case). */
+let prewarmRefusalHold: Promise<void> | null = null;
 function installFetch() {
   vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
     const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { type?: string; name?: string } } };
+    providerRequests += 1;
+    if (refuseBreakpoint && JSON.stringify(body['input'] ?? []).includes('prompt_cache_breakpoint')) {
+      if (body['max_output_tokens'] === PREWARM_CAP) { steps.push({ at: 'prewarm' }); if (prewarmRefusalHold !== null) await prewarmRefusalHold; }
+      return new Response(JSON.stringify({ error: { message: 'Unsupported parameter.', type: 'invalid_request_error', param: 'input[0].content[0].prompt_cache_breakpoint' } }), { status: 400 });
+    }
     if (body.text?.format?.name === 'brief_spans') {
       readingCalls += 1;
       steps.push({ at: 'reading' });
@@ -244,7 +255,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
     nextScenario();
     script = []; steps = []; constructionReturns = 'ready'; conversationBodies = []; constructionBodies = []; durableRead = 'none';
     readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS, build: true }) };
-    readingHold = null; readingCalls = 0;
+    readingHold = null; readingCalls = 0; refuseBreakpoint = false; providerRequests = 0; prewarmRefusalHold = null;
   });
 
   type TurnBody = Body & { _provider_calls?: { provider: string; purpose: string; prompt_alias?: string }[] };
@@ -528,6 +539,22 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       await turn({ message: BRIEF });
       expect(readingCalls).toBe(1);
       todaysPath('populated');
+    });
+
+    // ⛔ Runs LAST in this file: a breakpoint refusal sets the route module's latch for every later call.
+    it('RED (Codex r1 P1 on T1 b): a refused breakpoint never resends the unawaited PREWARM — every request the provider received is on the ledger and in llm_calls_used', async () => {
+      const turnId = '11111111-2222-4333-8444-555555555599';
+      refuseBreakpoint = true;
+      let release!: () => void;
+      prewarmRefusalHold = new Promise<void>((r) => { release = r; });
+      const { body } = await streamed({ message: BRIEF, turn_id: turnId });
+      // The turn has ended; only now does the prewarm's refusal arrive (it was never awaited).
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+      expect(steps.filter((s) => s.at === 'prewarm'), 'the prewarm was sent once and never resent').toHaveLength(1);
+      const counted = (body._provider_calls ?? []).length;
+      expect(providerRequests, 'every request the provider received is on the turn ledger').toBe(counted);
+      expect(rows.get(`${SID}:${turnId}`)?.llm_calls_used, 'and in llm_calls_used').toBe(providerRequests);
     });
   });
 });

@@ -18,6 +18,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { readFileSync } from 'node:fs';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
+import { asSent } from './helpers/as-sent.js';
 
 const CC_SERVED = JSON.parse(readFileSync(new URL('./fixtures/cc-olumi-levels-unset-20260930.json', import.meta.url), 'utf8')) as { graph: unknown };
 
@@ -102,7 +103,7 @@ const callTool = (name: string, args: Record<string, unknown>) => ({ output: [{ 
 
 function installFetch() {
   vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { type?: string } } };
+    const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown> & { text?: { format?: { type?: string } } };
     if (body.text?.format?.type === 'json_schema') {
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(candidate) }] }] }), { status: 200 });
     }

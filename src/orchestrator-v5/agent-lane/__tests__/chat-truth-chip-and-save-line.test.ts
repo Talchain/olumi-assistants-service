@@ -19,6 +19,7 @@ import { APPROVAL_LABEL_MAX, approvalChipIdFor, approvalChipsFor } from '../appr
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import type { ToolResult } from '../runtime/agent-tools.js';
 import { ProposalStore } from '../proposal.js';
+import { asSent } from './helpers/as-sent.js';
 
 const e = (from: string, to: string) => ({ from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.8, effect_direction: 'positive' as const });
 
@@ -279,7 +280,7 @@ describe('the real route: build + proposal in one turn', () => {
   let SID = '';
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { type?: string } } };
+      const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown> & { text?: { format?: { type?: string } } };
       // The build's own structured call — stubbed, like every model call here.
       if (body.text?.format?.type === 'json_schema') return new Response(JSON.stringify(say(JSON.stringify(CANDIDATE))), { status: 200 });
       modelBodies.push(body);

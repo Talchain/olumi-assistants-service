@@ -150,6 +150,33 @@ function parsedGraphOrNull(raw: unknown): GraphV3T | null {
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
 /**
+ * T1 (b) — THE INSTRUCTIONS CARRY AN EXPLICIT CACHE BREAKPOINT (OpenAI prompt-caching guide, GPT-5.6+: routing is automatic,
+ * the TTL is 30m by default, and a breakpoint may sit only on an `input_text` block — never on top-level `instructions`).
+ * The implicit breakpoint ends at the latest message, so two scenarios share no cache entry before their first differing
+ * byte; an explicit one at the end of the static Agent instructions lets every converse call read them. Converse only: the
+ * interpret call's instructions carry a per-Run line, so a breakpoint there writes an entry nothing reads. The TEXT is
+ * unchanged (the ledger's `prompt_sha256` is still of these instructions); only its carrier moves. A provider that refuses
+ * the field gets today's request (top-level `instructions`) once and from then on — never a failed turn.
+ */
+let instructionsBreakpointRefused = false;
+function withInstructionsBreakpoint(body: Record<string, unknown>): Record<string, unknown> {
+  const { instructions, input } = body;
+  if (typeof instructions !== 'string' || instructions.length === 0 || !Array.isArray(input)) return body;
+  const developer = { role: 'developer', content: [{ type: 'input_text', text: instructions, prompt_cache_breakpoint: { mode: 'explicit' } }] };
+  // Field order kept (the request bytes are pinned): `instructions` leaves, `input` stays where it was.
+  return Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'instructions')
+    .map(([k, v]) => [k, k === 'input' ? [developer, ...input] : v]));
+}
+/** The provider's own 400 names the refused parameter (`error.param`); only the breakpoint counts. */
+function refusesInstructionsBreakpoint(status: number, text: string): boolean {
+  if (status !== 400) return false;
+  try {
+    const param = (JSON.parse(text) as { error?: { param?: unknown } }).error?.param;
+    return typeof param === 'string' && param.includes('prompt_cache_breakpoint');
+  } catch { return false; }
+}
+
+/**
  * ⛔ A TURN'S IDENTITY IS CLAIMED BEFORE IT RUNS — independent review of #1720
  * at f616bc2a (CHANGES_REQUIRED): a preflight READ of "has this turn
  * committed?" let two concurrent identical requests both see "no row" and both
@@ -1184,7 +1211,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * the interpret-only constraint changes it.
      */
     // Built ONCE: the ledger's identity (PTL row 4) is read from the very object that is sent.
-    const sentBody: Record<string, unknown> = {
+    const alias = conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice);
+    const plainBody: Record<string, unknown> = {
       model: budget.model,
       instructions: req.instructions,
       input: req.input,
@@ -1200,26 +1228,48 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(budget.reasoning_effort !== undefined ? { reasoning: { effort: budget.reasoning_effort } } : {}),
       max_output_tokens: req.max_output_tokens,
     };
-    const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
-      model: budget.model,
-      // T1 (b): the cache prewarm is a real call, on the ledger as itself (`PREWARM_OUTPUT_TOKENS`).
-      purpose: req.purpose === 'prewarm' ? 'prewarm' : 'conversation',
-      ...agentRequestIdentity(conversationPromptAlias((req as { tool_choice?: unknown }).tool_choice), sentBody),
-    });
     const deadlineMs = (req as { deadline_ms?: unknown }).deadline_ms;
-    const r = await fetch(OPENAI_RESPONSES_URL, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(sentBody),
-      // 2a: a caller-set deadline aborts the call, and such a call is never retried (`withTransportRetry`).
-      ...(typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
-    });
+    const post = (sentBody: Record<string, unknown>, carrier: 'developer_breakpoint' | 'instructions') => {
+      const handle = assertProviderAllowed('openai', 'agent-v1-turn.callModel', {
+        model: budget.model,
+        // T1 (b): the cache prewarm is a real call, on the ledger as itself (`PREWARM_OUTPUT_TOKENS`).
+        purpose: req.purpose === 'prewarm' ? 'prewarm' : 'conversation',
+        // The identity is of the instructions TEXT wherever it rides, so a before/after pair differs only in its carrier.
+        ...agentRequestIdentity(alias, plainBody),
+        instructions_carrier: carrier,
+      });
+      return fetch(OPENAI_RESPONSES_URL, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${config.llm.openaiApiKey ?? ''}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(sentBody),
+        // 2a: a caller-set deadline aborts the call, and such a call is never retried (`withTransportRetry`).
+        ...(typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
+      }).then((res) => ({ r: res, usageHandle: handle }));
+    };
+    const breakpoint = alias === 'agent.converse' && !instructionsBreakpointRefused;
+    let { r, usageHandle } = breakpoint
+      ? await post(withInstructionsBreakpoint(plainBody), 'developer_breakpoint')
+      : await post(plainBody, 'instructions');
     if (!r.ok) {
       const text = await r.text();
-      throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+      const refused = breakpoint && refusesInstructionsBreakpoint(r.status, text);
+      if (refused && !instructionsBreakpointRefused) {
+        instructionsBreakpointRefused = true;
+        log.error({ site: 'agent-v1-turn.callModel', status: r.status, detail: text.slice(0, 300) }, 'agent-lane: provider refused the instructions cache breakpoint; sending top-level instructions from now on');
+      }
+      // ⛔ A PREWARM IS NEVER RESENT (Codex r1 P1 on T1 b): it is unawaited, so a resend could be made after the turn's
+      // ledger and `llm_calls_used` are written — a call the turn never counts. The latch alone is its job.
+      // ⛔ NOR IS A DEADLINED CALL: its deadline is its whole budget, made once (`withTransportRetry`; CODEX CEE BUDDY pre-read).
+      const deadlined = typeof deadlineMs === 'number' && deadlineMs > 0;
+      if (!refused || req.purpose === 'prewarm' || deadlined) throw new Error(`openai_${r.status}: ${text.slice(0, 300)}`);
+      ({ r, usageHandle } = await post(plainBody, 'instructions'));
+      if (!r.ok) {
+        const retryText = await r.text();
+        throw new Error(`openai_${r.status}: ${retryText.slice(0, 300)}`);
+      }
     }
     const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown; status?: unknown; incomplete_details?: { reason?: unknown } | null };
     // Never throws, and records nothing for a malformed payload, so a successful call
