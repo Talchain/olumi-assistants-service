@@ -855,8 +855,8 @@ function perOneRangeRule(written: string): string {
 
 /**
  * ⭐ A4 FIRST PASS (MG #85 lease 5944839798; AI HARNESS 5944602546): the range is asked BEFORE the first draft, not only
- * of the retry. On Paul's brief the first pass left "£1-2 million" uncarried on 5 of 8 served first briefs, and each cost a
- * second construct (median +15.7 s) that was adopted 5 times in 6, so the first pass skipped real work. Every range the brief
+ * of the retry. On Paul's brief the first pass left his written deal-size range uncarried on 5 of 8 served first briefs (7 of 8
+ * paid a second construct, median +15.7 s), and that range retry was adopted 5 times in 6: the first pass skipped real work. Every range the brief
  * writes outside a question gets the retry's own per-one words; the retry stays the backstop, unchanged. A brief that
  * writes no range is sent exactly as before, byte for byte.
  */
