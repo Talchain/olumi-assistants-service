@@ -341,6 +341,15 @@ describe('version event sink (contract §7.3 seam)', () => {
 });
 
 describe('compareVersions wiring', () => {
+  it('opt-in result binding reuses exactly the same two version reads', async () => {
+    const from = record(); const to = record({ id: NEW_ID, version_number: 2 });
+    const store = makeStore({ getVersion: vi.fn().mockResolvedValueOnce(from).mockResolvedValueOnce(to) });
+    const result = await makeService(store).compareVersions(SCENARIO, TARGET_ID, NEW_ID, true);
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') expect(result.value.records).toStrictEqual({ from, to });
+    expect(store.getVersion).toHaveBeenCalledTimes(2);
+  });
+
   it('fetches both versions and short-circuits on identical identity envelopes', async () => {
     const store = makeStore({
       getVersion: vi
@@ -364,6 +373,7 @@ describe('compareVersions wiring', () => {
     });
     if (result.status !== 'ok') throw new Error('expected comparison');
     expect(Object.values(result.value.categories).flat()).toEqual([]);
+    expect(result.value).not.toHaveProperty('records');
     expect(store.getVersion).toHaveBeenCalledWith(SCENARIO, TARGET_ID);
     expect(store.getVersion).toHaveBeenCalledWith(SCENARIO, NEW_ID);
   });

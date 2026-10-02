@@ -103,6 +103,12 @@ function scanRepo(ident: string): Record<string, number> {
 const EXPECTED: Record<string, Record<string, number>> = {
   deriveAnalysisFreshness: {
     'src/orchestrator-v5/context/freshness.ts': 1, // authority (definition)
+    // VERSION RESULT-DIFF: import + one call while binding a saved version to
+    // its recorded Run. This compare route is outside a turn: no context frame
+    // exists for the historical version. Reuse the canonical Run-attested goal
+    // unit/currentness verdict over that version's graph and matching Run hash;
+    // do not invent another freshness rule. Owning HARNESS/DL review in this PR.
+    'src/orchestrator-v5/model-management/version-result-binding.ts': 2,
     // 21 Sep 2026 — NEW APPROVED SEAM, with the justification this map demands.
     // The replacement conversation controller BYPASSES THE TURN-EXECUTOR BY
     // DESIGN, so there is no CanonicalContextFrame for it to read from: the

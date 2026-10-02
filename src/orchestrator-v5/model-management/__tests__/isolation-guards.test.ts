@@ -39,6 +39,14 @@ const ALLOWED_CROSS_BOUNDARY = new Set(
   [
     '../../config/index.js', // config.cee.modelVersionsEnabled (flag read)
     '../context/graph-identity.js', // Group A: computeGraphIdentityHash + analysis-affecting hash
+    // VERSION RESULT-DIFF's pure binder reads the existing Run identity,
+    // currentness and claim authorities; it introduces no writer or science
+    // projection. These exact seams require owning HARNESS/DL review in this PR.
+    '../context/analysis-interpretation-identity.js',
+    '../context/freshness.js',
+    '../context/claim-safety-read.js',
+    '../context/reconcile-scenario-analysis-facts.js', // fact-set type only
+    '../coaching/build-run-delta.js', // selected-pair types only
     '../boundary/request-extensions.js', // GraphStateIngress (type-only)
     '../../orchestrator/context/stable-stringify.js', // Group A canonicaliser
     // C8-A (Codex review defect 2 / H1, 2026-08-25): the SANCTIONED sigma
@@ -66,6 +74,7 @@ const ALLOWED_CROSS_BOUNDARY = new Set(
 const EXTERNAL_ALLOWED = new Set([
   '@supabase/supabase-js',
   '@talchain/schemas/boundary', // local overlay extends the currently-published response
+  '@talchain/schemas/orchestrator', // canonical Run snapshot parser + fact types
   'zod',
 ]);
 
@@ -286,6 +295,11 @@ describe('model-management isolation guards — meta-checks (the enforcer cannot
     expect(importAllowed(moduleDir, './service.js')).toBe(true);
     expect(importAllowed(moduleDir, '../../config/index.js')).toBe(true);
     expect(importAllowed(moduleDir, '../context/graph-identity.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../context/analysis-interpretation-identity.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../context/freshness.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../context/claim-safety-read.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../context/reconcile-scenario-analysis-facts.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../coaching/build-run-delta.js')).toBe(true);
     expect(importAllowed(moduleDir, '../boundary/request-extensions.js')).toBe(true);
     expect(importAllowed(moduleDir, '../../orchestrator/context/stable-stringify.js')).toBe(true);
     expect(importAllowed(moduleDir, '../../utils/telemetry.js')).toBe(true);
@@ -293,6 +307,7 @@ describe('model-management isolation guards — meta-checks (the enforcer cannot
     expect(importAllowed(moduleDir, '../../schemas/cee-v3.js')).toBe(true);
     expect(importAllowed(moduleDir, '@supabase/supabase-js')).toBe(true);
     expect(importAllowed(moduleDir, '@talchain/schemas/boundary')).toBe(true);
+    expect(importAllowed(moduleDir, '@talchain/schemas/orchestrator')).toBe(true);
     // zod is now allowlisted (added with the strict boundary-contract module):
     expect(importAllowed(moduleDir, 'zod')).toBe(true);
     // Off-list / forbidden:
