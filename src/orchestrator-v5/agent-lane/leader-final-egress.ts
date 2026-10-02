@@ -8,8 +8,9 @@
  * This runs on EVERY Agent turn, on the body exactly as it will ship (after every text editor, before the answer row is
  * written so a replay returns the same bytes). It reads the ONE licence (`compose/leader-licence.ts`); on any licence
  * but `withheld` it returns the body by reference. On a withheld turn it REMOVES, never merely reports:
- * 1. a member whose KEY designates a leading option and carries an identity → `null` (e.g. `run_delta.leader.
- *    current_leading_option_id`, gated today on entitlement only);
+ * 1. a member whose KEY designates a leading option and carries an identity → REMOVED (e.g. `run_delta.leader.
+ *    current_leading_option_id`, gated today on entitlement only), or `null` only where the contract keeps the key
+ *    required + nullable ({@link NULLABLE_LEADER_KEYS});
  * 2. the analysis block's enrichment → the wire's withheld projection again (idempotent), then any producer-prose string
  *    that BOTH uses leader vocabulary AND names an exact option label or id → deleted;
  * 3. a chip whose label / message / detail asserts a leading option by exact label → dropped;
@@ -46,6 +47,24 @@ const SKIPPED_TOP_LEVEL: ReadonlySet<string> = new Set(['assistant_text', 'frami
 const CHIP_TEXT_MEMBERS = ['label', 'message', 'detail'] as const;
 
 const MAX_DEPTH = 40;
+
+/**
+ * ⛔ A WITHHELD KEY IS REMOVED, NOT NULLED, unless the contract keeps it REQUIRED + NULLABLE (strip gap, CANVAS
+ * 5943987710). @talchain/schemas types `leading_option_id` as `z.string().nullable()` (the `analysis_result` block), so
+ * there `null` is the withheld value. Every other leader-designating key the wire types is OPTIONAL and non-nullable
+ * (`run_delta.leader.{prior,current}_leading_option_id`, `leading_option`: `z.string().min(1).optional()`), and absence
+ * already means "no entitled claim" (`route-with-tool-use.ts`). A `null` there failed the parse, and the UI quarantines a
+ * whole additive member that fails (`responseParser` QUARANTINABLE_ADDITIVE_KEYS): every withheld Run's `run_delta` was
+ * dropped, so the strip and Compare went empty. Untyped passthrough (enrichment) takes the same removal.
+ */
+const NULLABLE_LEADER_KEYS: ReadonlySet<string> = new Set(['leading_option_id']);
+
+/** `record` without the withheld key, or with it nulled where the contract requires it ({@link NULLABLE_LEADER_KEYS}). */
+function withheldKey(rec: Record<string, unknown>, key: string): Record<string, unknown> {
+  if (NULLABLE_LEADER_KEYS.has(key)) return { ...rec, [key]: null };
+  const { [key]: _withheld, ...rest } = rec;
+  return rest;
+}
 
 export interface LeaderFinalEgressOpts extends WireLeaderClaimEnforcementOpts {
   readonly licence: LeaderLicence;
@@ -118,7 +137,7 @@ function scrub(value: unknown, path: string, names: readonly string[], removed: 
   for (const [k, v] of Object.entries(rec)) {
     if (keyNamesLeader(k) && hasIdentity(v)) {
       removed.push(`${path}.${k}`);
-      out[k] = null;
+      if (NULLABLE_LEADER_KEYS.has(k)) out[k] = null;
       changed = true;
       continue;
     }
@@ -176,7 +195,7 @@ function envelopeAllowList(value: unknown, key: string | undefined, depth: numbe
   if (rec === undefined) return value;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rec)) {
-    if (keyNamesLeader(k) && v !== null && v !== undefined && v !== '') { out[k] = null; continue; }
+    if (keyNamesLeader(k) && v !== null && v !== undefined && v !== '') { if (NULLABLE_LEADER_KEYS.has(k)) out[k] = null; continue; }
     const kept = envelopeAllowList(v, k, depth + 1);
     if (kept !== undefined) out[k] = kept;
   }
@@ -223,7 +242,7 @@ export function knownSafeEnvelope(response: Record<string, unknown>): Record<str
         out._agent = envelopeAllowList(rest, k, 0);
         continue;
       }
-      if (keyNamesLeader(k) && v !== null && v !== undefined && v !== '') { out[k] = null; continue; }
+      if (keyNamesLeader(k) && v !== null && v !== undefined && v !== '') { if (NULLABLE_LEADER_KEYS.has(k)) out[k] = null; continue; }
       const kept = envelopeAllowList(v, k, 0);
       if (kept !== undefined) out[k] = kept;
     }
@@ -245,7 +264,7 @@ export function enforceLeaderLicenceAtFinalEgress<T extends Record<string, unkno
     // 1 + 2: structured members (everything but prose, chips, blocks and the provisional view).
     for (const [k, v] of Object.entries(body)) {
       if (SKIPPED_TOP_LEVEL.has(k)) continue;
-      if (keyNamesLeader(k) && hasIdentity(v)) { removed.push(k); body = { ...body, [k]: null }; continue; }
+      if (keyNamesLeader(k) && hasIdentity(v)) { removed.push(k); body = withheldKey(body, k); continue; }
       const next = scrub(v, k, names, removed, 0);
       if (next !== v) body = { ...body, [k]: next };
     }
@@ -256,7 +275,7 @@ export function enforceLeaderLicenceAtFinalEgress<T extends Record<string, unkno
         if (block === undefined) return b;
         let out: Record<string, unknown> = block;
         for (const [k, v] of Object.entries(block)) {
-          if (keyNamesLeader(k) && hasIdentity(v)) { removed.push(`blocks[${i}].${k}`); out = { ...out, [k]: null }; }
+          if (keyNamesLeader(k) && hasIdentity(v)) { removed.push(`blocks[${i}].${k}`); out = withheldKey(out, k); }
         }
         const enrichment = record(block.enrichment);
         if (enrichment !== undefined) {
