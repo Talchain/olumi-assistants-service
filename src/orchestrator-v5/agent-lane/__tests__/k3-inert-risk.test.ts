@@ -69,6 +69,18 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     expect(decisionInputLines(connected, at).filter((l) => l.includes('left out')), 'connected').toEqual([]);
   });
 
+  it('ONCE PER RISK on the build turn (DL): the narrator relaying admission\'s line → the host does not say it again', async () => {
+    const { graph, out } = await build();
+    const ledger = (out.not_represented as string[]).find((s) => s.includes('left out of this analysis'))!;
+    const narrated = `I built the model. ${ledger} Ask me to run it.`;
+    const owed = decisionInputLines(graph, { restingText: narrated, questionsToggle: false, awaitingApproval: false, builtOrRan: true });
+    const reply = [narrated, ...owed].join('\n\n');
+    expect(reply.split('left out of this analysis').length - 1, 'said once').toBe(1);
+    // CONTROL: a narrator that did not say it → the host says it, once; another risk's mention does not suppress it.
+    const silent = decisionInputLines(graph, { restingText: 'I built the model. "Founder burnout" matters too.', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
+    expect(silent.filter((l) => l.includes('left out of this analysis'))).toEqual([LEFT_OUT_RUN]);
+  });
+
   it('RED (CODEX P2): A7 is restored after the gate by its OWN words — never mistaken for the left-out line', () => {
     const goal = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')).goal_after_build as Rec;
     const g = { nodes: [goal, { id: 'opt_a', kind: 'option', label: 'Angel pilot' }, { id: 'f_x', kind: 'factor', label: 'Founder hours' }, { id: 'r_b', kind: 'risk', label: 'Founder burnout' }], edges: [{ from: 'f_x', to: 'r_b' }] };

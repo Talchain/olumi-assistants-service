@@ -101,7 +101,11 @@ const withinMonths = (goal: Rec): string => {
  * ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out of
  * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
  */
-function leftOutLines(graph: unknown, goalLabel: string): string[] {
+function leftOutLines(graph: unknown, goalLabel: string, restingText: string): string[] {
+  // ⭐ ONCE PER RISK (DL on #2509 5af6a010): the build turn's narrator is handed admission's own line for it
+  // (`not_represented`) and may relay it; a risk the reply already says is left out is not said again by the host.
+  const sentences = restingText.split(/(?<=[.!?])\s+/);
+  const alreadySaid = (label: string): boolean => sentences.some((x) => x.includes(`"${label}"`) && x.includes('left out of this analysis'));
   const g = recordOf(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
   const edges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
@@ -110,7 +114,7 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
   const limits = (Array.isArray(g?.goal_constraints) ? g.goal_constraints : []).map((k) => recordOf(k)?.node_id)
     .filter((id): id is string => typeof id === 'string');
   const leftOut = inertRiskBranch(nodes as { id: string; kind?: unknown; category?: unknown }[], edges, limits);
-  return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string))
+  return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string) && !alreadySaid(String(n.label ?? n.id)))
     .map((n) => `"${String(n.label ?? n.id)}" is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`);
 }
 
@@ -124,7 +128,7 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   if (goal === undefined || label === '') return [];
   // ⭐ K3 (DL on lease 5945974225; CODEX P1): HOST-said on the build turn (and its automatic first analysis) and on every
   // Run — never left to the narrator, whose words may omit it.
-  const leftOut = leftOutLines(graph, label);
+  const leftOut = leftOutLines(graph, label, ctx.restingText);
   const within = withinMonths(goal);
   const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
   const wanted = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
