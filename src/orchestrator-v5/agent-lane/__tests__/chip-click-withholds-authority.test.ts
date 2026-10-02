@@ -18,6 +18,7 @@
  * The model is a fetch stub (no provider, no network).
  */
 import { randomUUID } from 'node:crypto';
+import { asSent } from './helpers/as-sent.js';
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -104,7 +105,7 @@ describe('a chip click that is not the approval or the Run withholds authority f
     }
     expect(offeredOn(0)).toEqual(expect.arrayContaining(['propose_model_change', 'propose_assumptions']));
     // The read is still available: offered as a tool, or (slice C1) the model's state is given as the turn's input.
-    const stateGiven = JSON.stringify((modelBodies[0] as { input?: unknown }).input ?? []).includes('CURRENT MODEL STATE');
+    const stateGiven = JSON.stringify(asSent(modelBodies[0] as Record<string, unknown>)['input'] ?? []).includes('CURRENT MODEL STATE');
     expect(stateGiven || offeredOn(0).includes('get_canonical_state'), 'the read is offered or its result is given').toBe(true);
     expect(b._agent.tool_calls).toEqual([]);
   });

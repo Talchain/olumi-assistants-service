@@ -713,10 +713,17 @@ export function leavesProposalAwaitingApproval(
  * approve chip (`offersApproval`), or a turn the route says left a proposal awaiting a yes whether or not a
  * chip names it (`turn.proposalAwaitingApproval`, from `approvalChipsFor`'s own rule), is returned by
  * reference, byte-identical.
+ *
+ * ⛔ OLUMI'S OWN LINES STAY ON THE FACE (DL item 3, 2 Oct; CODEX r2 P1 on #2509). The host appends its disclosures and asks
+ * AFTER the narrator's words: K3's "left out of this analysis", A7, D1's target ask, a withheld figure's sentence. The UI
+ * renders `_answer_shape` INSTEAD of the text (headline + ≤3 bullets, the rest behind "Show more"), so a shape built over
+ * the whole reply folds exactly those lines away whenever the narrator writes bullets. There is no face slot for them in
+ * the shape, so a reply that is not EXACTLY the narrator's own words (`turn.hostLinesInText`: any host line added or
+ * edited — disclosures, asks, status, break-even arithmetic, a rerun's code line) ships whole, as a leader-gate edit does.
  */
 export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
   body: T,
-  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean } = {},
+  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean; hostLinesInText?: boolean } = {},
 ): T {
   if ('_answer_shape' in body) return body;
   if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
@@ -724,6 +731,7 @@ export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; bl
   // shape would put them behind "Show more" (independent review of #1914, 5832549611). Ship it whole, as
   // route-v2 does when its gate edits the text.
   if (turn.leaderGateEditedText === true) return body;
+  if (turn.hostLinesInText === true) return body;
   const blocks = body.blocks;
   const carriesResult = Array.isArray(blocks)
     && blocks.some((b) => b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'analysis_result');
@@ -2089,6 +2097,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
     let fastPathView: ProvisionalView | null = null;
     let explanationRead: Awaited<ReturnType<typeof readBackState>> | undefined;
+    /**
+     * The NARRATOR's own words on this turn, exactly as the model wrote them (the explanation's raw answer, or the Agent
+     * loop's reply), or null when the reply is Olumi's own text. The answer shape is built ONLY when the final text is
+     * still exactly these words: any line the host added or edited ships whole (see `withAnalysisAnswerShape`).
+     */
+    let narratorWords: string | null = null;
+    /**
+     * The host COMPOSED this reply (CODEX r2 on #2517): it can strip a narrator sentence and restore an identical host line
+     * (the save receipt, a rerun's code line), so equal final text does not prove the narrator's words stand alone. Set where
+     * the host composes, never inferred from the bytes.
+     */
+    let hostComposed = false;
     let explanationBriefText: string | null = null;
     /** A Run with no result: its typed outcome's own chips (the identity ask's "Check the figures", a retry), `run-outcome.ts`. */
     let runOutcomeChips: OfferedAction[] = [];
@@ -2238,8 +2258,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         if (answerIsIncomplete(resp as never)) log.warn({ scenario_id: scenarioId, incomplete_reason: (resp as { incomplete_reason?: unknown }).incomplete_reason ?? null }, 'agent-lane: fast-path interpretation incomplete — answering from the run itself');
         else if (answer.trim().length > 0) {
           explanationReady = true;
+          narratorWords = answer;
           // M2: Olumi's code line first, then the model's sentences that pass RC's checker (a hit drops that sentence only).
           const composed = rerunPlan !== null ? composeRerunExplanation(answer, rerunPlan) : null;
+          if (composed !== null) hostComposed = true;
           if (composed !== null && composed.dropped.length > 0) log.info({ scenario_id: scenarioId, failed: composed.failed, dropped: composed.dropped.length }, 'agent-lane: rerun explanation sentences failed RC checks — dropped');
           const said = composed?.text ?? answer;
           interpreted = typed !== null || composed !== null
@@ -2573,6 +2595,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : result.stopped_reason === 'hop_limit' && result.assistant_text.length === 0
         ? 'I was not able to finish that within this turn. Ask me again and I will continue.'
         : result.assistant_text;
+    if (fastPath === undefined && result.stopped_reason === 'answered') narratorWords = result.assistant_text;
 
     // ⭐ T3: the method turn's draft is checked BEFORE it is sent; a failed check sends RC's deterministic fallback
     // (never a repair, never a second call). Then ONE card on the story's target, through the existing door, exactly as
@@ -3153,9 +3176,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
       if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
     }
+    const finalText = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
     if (fastPath !== 'method') wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
+      // Shaped only while the reply is EXACTLY the narrator's words AND the host composed nothing into it (CODEX r1/r2 on
+      // #2517): a status line, an owed disclosure, a decision line or a rerun composition ships the reply whole, even when
+      // the host restored text identical to the narrator's.
+      hostLinesInText: narratorWords === null || finalText.trim() !== narratorWords.trim() || hostComposed
+        || (statusText ?? '').trim() !== '' || owed.length > 0 || decisionLines.length > 0,
     });
     let pendingPreview: ProposalPreview | undefined;
     /**

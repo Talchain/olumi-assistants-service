@@ -383,7 +383,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const ref = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')?.proposal_id;
     expect(ref).toMatch(/^gmh_[0-9a-f]{12}$/);
     let seenByModel = '';
-    script = [() => fnCall('authorise_change', { proposal_id: ref }), (body) => { seenByModel = JSON.stringify(body['input']); return say('Added.'); }];
+    script = [() => fnCall('authorise_change', { proposal_id: ref }), (body) => { seenByModel = JSON.stringify(asSent(body)['input']); return say('Added.'); }];
     const t2 = await turn({ message: 'Yes, add it.' });
     // (B) the Agent is told what the model needs NOW, from the stored graph after the write — in plain words.
     expect(seenByModel, seenByModel.slice(-1500)).toMatch(/readiness_after/);
