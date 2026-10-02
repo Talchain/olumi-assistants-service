@@ -12,6 +12,7 @@ import { explainRun } from './fixtures/run-explanation-follow-up.js';
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { asSent } from './helpers/as-sent.js';
 
 const SCENARIO = '6b2d8f3c-4e5a-4b7c-9d0e-1f2a3b4c5d6e';
 const store = {
@@ -49,7 +50,7 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
   let modelBodies: Record<string, unknown>[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown>;
       modelBodies.push(body);
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'That limit cannot be checked in this model yet.' }] }] }), { status: 200 });
     }));
