@@ -1,9 +1,8 @@
 /**
- * D2 S1 — RED ROWS ONLY (ACCOUNTS, 2 Oct 2026; spec programme-docs output/d2-team-reasoning/SPEC.md).
+ * D2 S1 — "Ask Olumi to challenge this" (ACCOUNTS, 2 Oct 2026; spec programme-docs output/d2-team-reasoning/SPEC.md).
  *
- * "Olumi challenges and synthesises" a closed blind round in the HOST's conversation. The module under test,
- * `../panel-challenge.ts`, does NOT exist at this tip — every row here is RED by construction, and the build lands it.
- * Queued behind B2 by the DL; no PR from this branch.
+ * "Olumi challenges and synthesises" a closed blind round in the HOST's conversation. These rows were written RED
+ * before `../panel-challenge.ts` existed (branch accounts/d2-s1-red-rows @daa83b72).
  *
  * The shape these rows pin (smallest change, mirroring RC-PREMORTEM in `method-turn.ts`):
  *   • the carrier is the EXISTING turn field `chip.id` — `agent-panel-challenge:<round uuid>` — so no schemas bump;
@@ -12,8 +11,9 @@
  *   • the context is `summariseDisagreementForPrompt(view)` byte-for-byte; the reply is gated by
  *     `checkPanelChallenge` BEFORE it is sent; a failing draft falls back to the code-owned headline + question.
  *
- * Route-level rows (R4c member/participant refused at the turn's owner gate; R5 served corpus ≤10 calls; R6 dissent
- * survives apply) are listed in the spec and belong to the build PR — they need the real route + served replies.
+ * The route rows (the press reaches the branch, ONE tool-less call, the settled reply is what is sent) are in
+ * `routes/__tests__/agent-v1-turn.panel-challenge.test.ts`. R5's served corpus (≤10 calls) and R6 (dissent survives
+ * apply) are witnessed on staging.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -22,11 +22,22 @@ import { summariseDisagreementForPrompt, type DisagreementView } from '../../../
 import { PREMORTEM_PRESS_ID } from '../method-turn.js';
 import {
   PANEL_CHALLENGE_PREFIX,
+  PANEL_CHALLENGE_UNAVAILABLE,
   checkPanelChallenge,
   panelChallengeFallback,
   panelChallengePressOf,
   panelChallengeTurn,
+  resolvePanelChallenge,
+  settlePanelChallenge,
 } from '../panel-challenge.js';
+import { assembleDisagreementView as assembleView } from '../../../../collab/disagreement-read-model.js';
+import {
+  FIXTURE_ROUND_ID,
+  FIXTURE_SCENARIO_ID,
+  SENTINELS,
+  fixtureRound,
+  seededOpenRoundStore,
+} from '../../../../../tests/collab/contracts.js';
 
 const ROUND = '0b5d6f0e-3c7a-4d0e-9a51-2f4b8c1d7e90';
 const SCENARIO = 'a6f1c2d3-4b5e-4f60-8a7b-9c0d1e2f3a4b';
@@ -59,10 +70,11 @@ const SPLIT: DisagreementView = {
   ],
 };
 
-const round = (over: Partial<{ status: string; scenario_id: string }> = {}) => ({
+const round = (over: Partial<{ status: string; scenario_id: string; created_by: string }> = {}) => ({
   round_id: ROUND,
   scenario_id: SCENARIO,
   status: 'closed',
+  created_by: OWNER,
   ...over,
 });
 
@@ -102,6 +114,59 @@ describe('D2 S1 — the decision (verified owner, own scenario, closed round)', 
     const t = panelChallengeTurn({ caller: null, scenarioId: SCENARIO, round: round(), view: SPLIT });
     expect(t).toMatchObject({ kind: 'unavailable', reason: 'not_found' });
   });
+
+  it('R4c: a signed-in caller who did not run the round gets the unknown-round answer, before any status is told', () => {
+    const stranger = '22222222-2222-4222-8222-222222222222';
+    const closed = panelChallengeTurn({ caller: stranger, scenarioId: SCENARIO, round: round(), view: SPLIT });
+    const open = panelChallengeTurn({ caller: stranger, scenarioId: SCENARIO, round: round({ status: 'open' }), view: null });
+    expect(closed).toEqual({ kind: 'unavailable', reason: 'not_found', reply: PANEL_CHALLENGE_UNAVAILABLE.not_found });
+    expect(open).toEqual(closed);
+  });
+
+  it('R4d: a closed round where nobody answered → nothing_to_discuss, no context', () => {
+    const empty: DisagreementView = { ...SPLIT, per_target: [{ ...SPLIT.per_target[0]!, shape: 'no_answers', positions: [], question: null }] };
+    expect(panelChallengeTurn({ caller: OWNER, scenarioId: SCENARIO, round: round(), view: empty }))
+      .toMatchObject({ kind: 'unavailable', reason: 'nothing_to_discuss' });
+  });
+});
+
+describe('D2 S1 — resolvePanelChallenge through the collab store (the reveal’s own gates, inherited)', () => {
+  const OWNER_ID = SENTINELS.OWNER_USER_ID;
+  const closedStore = () => {
+    const store = seededOpenRoundStore();
+    store.state.rounds.set(FIXTURE_ROUND_ID, fixtureRound({ status: 'closed' }));
+    return store;
+  };
+
+  it('R3 (store): a closed owned round → context byte-equal to the summary of the reveal’s own disagreement view', async () => {
+    const store = closedStore();
+    const t = await resolvePanelChallenge(() => store, { caller: OWNER_ID, scenarioId: FIXTURE_SCENARIO_ID, roundId: FIXTURE_ROUND_ID });
+    const view = await assembleView(store, { round_id: FIXTURE_ROUND_ID, requested_by: { kind: 'owner', user_id: OWNER_ID } });
+    expect(t.kind).toBe('challenge');
+    expect(t.kind === 'challenge' && t.context).toBe(summariseDisagreementForPrompt(view));
+    expect(t.kind === 'challenge' && t.directive).toContain(summariseDisagreementForPrompt(view));
+  });
+
+  it('R4a (store): the seeded OPEN round → round_open', async () => {
+    const store = seededOpenRoundStore();
+    expect(await resolvePanelChallenge(() => store, { caller: OWNER_ID, scenarioId: FIXTURE_SCENARIO_ID, roundId: FIXTURE_ROUND_ID }))
+      .toMatchObject({ kind: 'unavailable', reason: 'round_open' });
+  });
+
+  it('R4b/R4c (store): another scenario, another caller and an unknown id all give ONE answer', async () => {
+    const store = closedStore();
+    const unknown = await resolvePanelChallenge(() => store, { caller: OWNER_ID, scenarioId: FIXTURE_SCENARIO_ID, roundId: 'no-such-round' });
+    const otherScenario = await resolvePanelChallenge(() => store, { caller: OWNER_ID, scenarioId: 'scenario-other', roundId: FIXTURE_ROUND_ID });
+    const otherCaller = await resolvePanelChallenge(() => store, { caller: 'someone-else', scenarioId: FIXTURE_SCENARIO_ID, roundId: FIXTURE_ROUND_ID });
+    expect(unknown).toMatchObject({ kind: 'unavailable', reason: 'not_found' });
+    expect(otherScenario).toEqual(unknown);
+    expect(otherCaller).toEqual(unknown);
+  });
+
+  it('a store that cannot be built or read → unreadable, never a throw', async () => {
+    const t = await resolvePanelChallenge(() => { throw new Error('no env'); }, { caller: OWNER_ID, scenarioId: FIXTURE_SCENARIO_ID, roundId: FIXTURE_ROUND_ID });
+    expect(t).toMatchObject({ kind: 'unavailable', reason: 'unreadable' });
+  });
 });
 
 describe('D2 S1 — the reply gate (restate or ask, never adjudicate)', () => {
@@ -135,5 +200,20 @@ describe('D2 S1 — the reply gate (restate or ask, never adjudicate)', () => {
     expect(fb).toContain(SPLIT.per_target[0]!.headline);
     expect(fb).toContain(SPLIT.per_target[0]!.question!);
     expect(checkPanelChallenge(fb, SPLIT)).toEqual({ ok: true });
+  });
+
+  it('R5f: settle sends a passing draft verbatim and a failing one as the fallback — never a repair', () => {
+    const turn = panelChallengeTurn({ caller: OWNER, scenarioId: SCENARIO, round: round(), view: SPLIT });
+    if (turn.kind !== 'challenge') throw new Error('expected a challenge turn');
+    expect(settlePanelChallenge(turn, GOOD)).toEqual({ reply: GOOD, passed: true, failed: null });
+    const bad = settlePanelChallenge(turn, `${GOOD} The consensus is 0.6.`);
+    expect(bad.passed).toBe(false);
+    expect(bad.reply).toBe(panelChallengeFallback(SPLIT));
+    expect(settlePanelChallenge(turn, '').reply).toBe(panelChallengeFallback(SPLIT));
+  });
+
+  it('R5g: a percentage of a stated proportion counts as stated (85% for 0.85); 62% does not', () => {
+    expect(checkPanelChallenge(`${GOOD} Grace’s 85% is the high end.`, SPLIT)).toEqual({ ok: true });
+    expect(checkPanelChallenge(`${GOOD} Somewhere near 62% seems fair.`, SPLIT)).toMatchObject({ ok: false, reason: 'unstated_number' });
   });
 });

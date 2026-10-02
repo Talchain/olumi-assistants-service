@@ -105,6 +105,10 @@ import {
   isWidenPress, nextStepsWithWiden, settleWidenTurn, widenGate, widenOffered, widenTurnForReadback,
   WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
+import {
+  panelChallengePressOf, resolvePanelChallenge, settlePanelChallenge, type PanelChallengeTurn,
+} from '../orchestrator-v5/agent-lane/method-turn/panel-challenge.js';
+import { getCollabStore } from '../collab/store.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -2444,6 +2448,32 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const widenRun = widenTurn?.kind === 'run' ? widenTurn : undefined;
     /**
+     * ⭐ D2 S1 — "ASK OLUMI TO CHALLENGE THIS" (ACCOUNTS; DL GO 2 Oct; `method-turn/panel-challenge.ts`). The host's press
+     * names a closed blind round; the VERIFIED caller must own it and it must belong to THIS scenario. TERMINAL like the
+     * pre-mortem: ONE model call with NO tool, reading `summariseDisagreementForPrompt`, its draft checked BEFORE it is
+     * sent (restate or ask, never adjudicate). Writes nothing. Any refusal answers with no model call.
+     */
+    let panelTurn: PanelChallengeTurn | null = null;
+    const panelPress = panelChallengePressOf(pressedChipId);
+    if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && panelPress !== null) {
+      panelTurn = await resolvePanelChallenge(getCollabStore, { caller: userId, scenarioId, roundId: panelPress.round_id });
+      fastPath = 'method';
+      if (panelTurn.kind === 'unavailable') {
+        result = {
+          assistant_text: panelTurn.reply,
+          items: [],
+          tool_calls: [],
+          tool_results: [],
+          mutated: false,
+          hops: 0,
+          stopped_reason: 'answered',
+          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
+        };
+        log.info({ scenario_id: scenarioId, panel_challenge: 'unavailable', reason: panelTurn.reason }, 'agent-lane: panel challenge answered without a model call');
+      }
+    }
+    const panelRun = panelTurn?.kind === 'challenge' ? panelTurn : undefined;
+    /**
      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
@@ -2507,7 +2537,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * provider call anywhere. A buffered turn starts no reading and is exactly today's path. (This block runs only for
          * the request that WON the turn claim: a losing, refused or replayed request has already returned above.)
          */
-        const mayRouteBrief = emitStage !== undefined && knownEmpty && earlierWordsKnown && needsDurableSeed(history) && typedNow !== null && methodTurn === null && widenTurn === null;
+        const mayRouteBrief = emitStage !== undefined && knownEmpty && earlierWordsKnown && needsDurableSeed(history) && typedNow !== null && methodTurn === null && widenTurn === null && panelTurn === null;
         const reading = emitStage !== undefined && knownEmpty ? readBrief(message, callBriefReading) : undefined;
         if (reading !== undefined && emitStage !== undefined) {
           briefReadingOpen = true;
@@ -2528,21 +2558,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // ⏱ M3 latency (RC T1 map item 5; SCIENCE/DSK #85 5942859063): a method turn is tool-less and checked BEFORE it is
       // sent, so it is an interpret-shaped call — the banked interpret budget (Sol, effort low; `model-budgets.ts`), not
       // the coach's conversation budget (Sol, effort high: 716 reasoning tokens, 25.5 s for ONE served call, R3 j7 @ecce374d).
-      if (methodTurn?.kind === 'run') budget = interpretBudget();
+      if (methodTurn?.kind === 'run' || panelRun !== undefined) budget = interpretBudget();
       result = await runAgentTurn(
         {
           ctx: toolCtx,
           history,
           message,
           instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}`
-            : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}` : AGENT_INSTRUCTIONS,
+            : widenRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${widenRun.directive}`
+            : panelRun !== undefined ? `${AGENT_INSTRUCTIONS}\n\n${panelRun.directive}` : AGENT_INSTRUCTIONS,
           maxOutputTokens: budget.max_output_tokens,
           mode,
           // T3: a method turn is structurally ONE model call with NO tool (DL 5939415083 (2)): every tool withheld, one hop.
-          withheldTools: methodTurn?.kind === 'run' ? toolsFor(mode).map((t) => t.name)
+          withheldTools: methodTurn?.kind === 'run' || panelRun !== undefined ? toolsFor(mode).map((t) => t.name)
             // Widen: ONE call, and its ONLY tool is the add-option door (forced below), so the turn ends in one card or none.
             : widenRun !== undefined ? toolsFor(mode).map((t) => t.name).filter((n) => n !== WIDEN_TOOL) : withheldToolsOf(body),
-          ...(methodTurn?.kind === 'run' || widenRun !== undefined ? { maxHops: 1 } : {}),
+          ...(methodTurn?.kind === 'run' || widenRun !== undefined || panelRun !== undefined ? { maxHops: 1 } : {}),
           ...(widenRun !== undefined ? { firstCallTool: WIDEN_TOOL } : {}),
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
@@ -2624,6 +2655,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         passed: settled.passed, failed: settled.failed, target_kind: settled.target.kind,
         card: card?.tool ?? null, card_ok: issued?.ok === true, card_refusal: issued?.refusal,
       }, 'agent-lane: method turn settled');
+    }
+    // D2 S1: the draft is checked BEFORE it is sent; a failed check sends the code-owned fallback (never a repair or a
+    // second call). Nothing the call produced survives: the record is rebuilt ONCE from the final wire text (below).
+    if (panelRun !== undefined) {
+      const settled = settlePanelChallenge(panelRun, result.stopped_reason === 'answered' ? text : '');
+      text = settled.reply;
+      result = { ...result, assistant_text: text, items: [], tool_calls: [], tool_results: [] };
+      log.info({
+        scenario_id: scenarioId, panel_challenge: 'settled', round_id: panelRun.round_id,
+        passed: settled.passed, failed: settled.failed?.ok === false ? settled.failed.reason : null,
+      }, 'agent-lane: panel challenge settled');
     }
     // Widen: the door's ONE passed card and its own reply, else RC's deterministic fallback (a refused call stored nothing).
     let widenActions: readonly OfferedAction[] = [];
@@ -2862,6 +2904,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Widen, terminal: the door's ONE card (its approval) and RC's follow-up, or the unavailable reply's own follow-up.
       : fastPath === 'method' && widenTurn !== null
       ? firstOfEachId([...approvals, ...(widenTurn.kind === 'run' ? widenActions : widenTurn.actions)])
+      // D2 S1, terminal: a challenge reply offers 'Talk it through' (an ordinary turn); a refusal offers nothing.
+      : fastPath === 'method' && panelTurn !== null
+      ? firstOfEachId([...approvals, ...(panelTurn.kind === 'challenge' ? [TALK_IT_THROUGH_CHIP] : [])])
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
