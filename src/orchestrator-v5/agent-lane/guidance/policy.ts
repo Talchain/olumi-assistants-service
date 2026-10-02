@@ -1,5 +1,5 @@
 // Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ 712625a1c484943ad330214504634121a44216e7.
+// programme-docs @ a4992165f02b178f6ac4f697c554d569bd9229fb.
 // The acceptance suite asserts equality with the pinned source.
 export const POLICY = {
   "selection": {
@@ -759,7 +759,7 @@ export const POLICY = {
         "owner": "SCIENCE/DSK owns applicability and the badge; RC owns the method shape, checks and fallback; AI HARNESS composes (PTL 5933036532 owner split)."
       },
       "label_masking": {
-        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked, PER BAN: a ban blanks only the labels in which that same ban matches (they are the user's words: 'Enterprise prospect signing likelihood' for PM-NO-PROB, 'Qualified leads per month' for RX-NO-LEADER-UNLICENSED), never a label it does not match (an unrelated label 'Will' must not hide 'This plan will fail'), and never a label that is nothing but banned words ('Odds', 'Leads': the check fails closed). Blanking is case-insensitive, curly quotes folded, longest label first, WHOLE TOKENS ONLY (a label is blanked only where no letter, digit or '_' touches either end; label matching is whole-token too). The candidate labels are model_labels (EVERY node label in the current model: goal, options, factors, risks, outcomes) plus the method's own labels: RC-PREMORTEM supplied_items + plan_label + current_option_labels; RERUN-EXPLANATION change_labels + current_option_labels; RC-WHAT-CHANGES factor_label; RC-STRENGTHEN-ITEM item_labels; RC-COACH-EDITS edited_labels.",
+        "rule": "Every text BAN (a pattern a reply must NOT contain) runs on the reply with the user's own labels blanked, PER BAN: a ban blanks only the labels in which that same ban matches (they are the user's words: 'Enterprise prospect signing likelihood' for PM-NO-PROB, 'Qualified leads per month' for RX-NO-LEADER-UNLICENSED), never a label it does not match (an unrelated label 'Will' must not hide 'This plan will fail'), and never a label that is nothing but banned words ('Odds', 'Leads': the check fails closed). Blanking is case-insensitive, curly quotes folded, longest label first, WHOLE TOKENS ONLY (a label is blanked only where no letter, digit or '_' touches either end; label matching is whole-token too). The candidate labels are model_labels (EVERY node label in the current model: goal, options, factors, risks, outcomes) plus the method's own labels: RC-PREMORTEM supplied_items + plan_label + current_option_labels; RERUN-EXPLANATION change_labels + current_option_labels; COMPARISON-ANSWER change_labels + current_option_labels + matched_option_labels + signal_option_labels; RC-WHAT-CHANGES factor_label; RC-STRENGTHEN-ITEM item_labels; RC-COACH-EDITS edited_labels.",
         "why": "A label the user wrote is grounding, not a claim. Served D1 (the investor decision) has the factor 'Enterprise prospect signing likelihood': without masking every grounded pre-mortem failed PM-NO-PROB and fell back (SCIENCE/DSK 5938372911). RC served-label scan (CEE staging fixtures, 1,440 labels / 305 graphs): goal labels with '%' ('Cut Burn Rate by 30%'), factor labels with 'leads' ('Qualified leads per month'), risk labels with '%' ('Churn above 4%'): none of them supplied items, so the mask set is every model label. PER BAN (CODEX_CLI_OVERFLOW on CEE #2480 P1 #4): blanking every label let a common-word label ('Will') erase Olumi's own 'will fail'. Re-scan at per-ban (1,074 labels / 359 CEE fixture graphs): 17 labels carry a ban hit (11 '%'/probability words, 5 'leads', 1 'significant'), all multi-word and still blanked; 0 are wholly a ban token, so failing closed costs no served label.",
         "never": "Mask Olumi's own words: only labels the inputs supply, only for a ban the label itself trips, only as whole tokens (option 'A' must never blank the 'a' in 'probability', HARNESS #2478 P1; label 'Will' must never blank 'will fail', #2480 P1 #4).",
         "reference": "tools/check_method_turn.py banned() + masked(); fixtures MT-PREMORTEM-D1-OWN-LABEL-GOOD / -BAD-CLAIM, MT-RERUN-MODEL-LABEL-GOOD / -BAD-LEADER, MT-PREMORTEM-SHORT-LABEL-GOOD / -BAD, MT-PREMORTEM-COMMON-WORD-LABEL-BAD, MT-RERUN-BARE-BAN-LABEL-BAD",
@@ -814,6 +814,42 @@ export const POLICY = {
             "note": "contrast"
           }
         ]
+      },
+      "model_scale_outcome": {
+        "status": "POLICY READY, PINNED to F1b's marker fields (#85 5947982233): analysis inference_warnings[] entry { code: 'GOAL_OUTCOME_MODEL_SCALE', message, severity, node_ids: [goal_id], option_ids, precondition: 'P1' | 'P5', goal_label, from_label?, to_label? }.",
+        "trigger": "The run's warnings carry GOAL_OUTCOME_MODEL_SCALE: the goal has no target and its outcome figures are on Olumi's model scale because (a) the goal's current level is missing (P1), or (b) the goal path rests on a link nobody has sized (P5). The comparison itself (shares, leader, panel shifts) is served unchanged.",
+        "rule": "RC rule (1): the first-run explanation names WHY the outcome can't be read in the goal's own units, in the user's words, and gives ONE next step. It never states a per-option outcome figure as the goal's units and never uses an internal-value term (shared.internal_value_terms is the backstop).",
+        "copy": {
+          "today_level": "Olumi can’t yet say what the options do to {goal_label} in its own units: its current level isn’t set.",
+          "placeholder_link": "Olumi can’t yet say what the options do to {goal_label} in its own units: the link from {from_label} to {to_label} hasn’t been sized."
+        },
+        "next_step": {
+          "today_level": "Give today’s {goal_label} and the next run can say it in its own units.",
+          "placeholder_link": "Size that link (accept Olumi’s estimate or give your own) and run again."
+        },
+        "fills": "All fills come from the marker itself (goal_label, from_label, to_label), verbatim: the user's words. A missing fill drops the whole line: never an unresolved template (the guidance render rule).",
+        "order": "The reason line first, then the next step, then the rest of the explanation (shares, leader) unchanged.",
+        "never": [
+          "a per-option outcome figure stated in {goal_label}'s units",
+          "internal scale / normalised value / unit interval (shared.internal_value_terms)",
+          "'no usable outcome figures' or 'missing, not zero' (the sibling family: the reason line replaces it)"
+        ],
+        "owner": "RC words; AI HARNESS carries the typed reason into the interpret input (item 2, after F1b's marker); F1b produces the marker.",
+        "evidence": "Served corpus output/reasoning-coach/served-explain-corpus-20261002.json (RC 1d16c250): 13 internal-scale texts + 7 sibling 'missing / not supplied' texts; HARNESS #85 5947874597 traced both to the no-target path.",
+        "marker": {
+          "code": "GOAL_OUTCOME_MODEL_SCALE",
+          "carrier": "inference_warnings[] (flat, as withholdOptionGoalFigures' extras)",
+          "precondition_to_copy": {
+            "P1": "today_level",
+            "P5": "placeholder_link"
+          },
+          "fills_from_warning": {
+            "goal_label": "goal_label",
+            "from_label": "from_label (P5 only: the first guessed link on the option→goal path, targetTestabilityOf P5)",
+            "to_label": "to_label (P5 only)"
+          },
+          "absent_label": "absent, never invented (F1b): the line that needs it is dropped"
+        }
       }
     },
     "RC-PREMORTEM": {
@@ -977,6 +1013,20 @@ export const POLICY = {
         ],
         "wording_owner": "REASONING COACH owns this copy (PTL 5933600218: AIQ is not a live lane); PTL/DL may challenge.",
         "item_label": "link → 'how much {from} affects {to}'; factor → 'the figure for {label}' (label case rule applies)"
+      },
+      "link_tipping_points_copy": {
+        "status": "contract for SCIENCE/DSK's CEE leg (lease 5950283606); deterministic, 0 LLM; serving waits for Paul's science reviewer",
+        "signal": "run.link_tipping_points: per requested link (top-2 goal-path links by the stored Run's fragile_edges order), one of quoted {threshold, current_mean, other_option_label} | no_change | absent {reason}",
+        "quoted": "{other} would come out ahead if {from}'s effect on {to} fell below about {fraction} of what it is now.",
+        "fraction_rule": "ratio = |threshold| / |current_mean| (a negative link weakens toward zero too). {fraction} = the LARGEST ladder value <= ratio (round DOWN, so the claim is always a sufficient condition and never false): a tenth 0.1 · a fifth 0.2 · a quarter 0.25 · a third 1/3 · two fifths 0.4 · half 0.5 · three fifths 0.6 · two thirds 2/3 · three quarters 0.75 · four fifths 0.8 · nine tenths 0.9. ratio < 0.1 → \"{other} would come out ahead only if {from}'s effect on {to} all but disappeared.\" ratio >= 1, non-finite, or current_mean 0 → absent (no claim).",
+        "no_change": "{leader} would still lead even if {from} had no effect on {to}.",
+        "absent": "silent on that link (no sentence); every requested link absent → honest_limit",
+        "never": [
+          "a band word for the tipping point ('{tip_band} rather than {band}'): a band is wider than the tipping point (SCIENCE/DSK 5950269835: D1 tips at 0.064 inside 'slight' 0-0.2; at 0.15 the lead does not change)",
+          "the threshold or current strength as a number or percentage",
+          "'No single assumption measurably changes which option leads' or any claim that nothing would change the answer"
+        ],
+        "source": "RC 5950124321 (no_change/absent); ratio wording proposed by SCIENCE/DSK 5950269835, adopted with round-DOWN ladder by RC"
       }
     },
     "RC-STRENGTHEN-ITEM": {
@@ -1089,8 +1139,8 @@ export const POLICY = {
         },
         {
           "id": "RX-NO-CONTRARY-SAME",
-          "rule": "if change_labels is non-empty (changes are recorded): no claim that nothing or no input changed, the WHOLE class: /\\b(nothing('s| has| had)? changed|nothing (was|has been|had been) changed|nothing in (your|the) model('s| has| had)? changed|same inputs?|inputs?( values)? (were|was|are|is|stayed|remained|have stayed|have remained) (unchanged|the same)|unchanged inputs?|(no|none of the) inputs? (were |was |have been |has been )?changed|no changes? (were|was|have been|has been) made|(didn'?t|did not|haven't|have not|hasn't|has not) changed? anything)\\b/i (on the label-masked reply, shared.label_masking). 'Nothing else changed.' is the honest control and passes.",
-          "source": "MG 5939414835; class widened per CODEX CEE BUDDY 5940259670 (seven forms passed the two-phrase ban); MG 5940298428 ('No changes were made.')"
+          "rule": "if changes are recorded (max(changes_recorded, change_labels.length) > 0; changes_recorded = input_changes.length, so a row with no label template still counts): no claim that nothing or no input changed, the WHOLE class: /\\b(nothing('s| has| had)? changed|nothing (was|has been|had been) changed|nothing in (your|the) model('s| has| had)? changed|same inputs?|inputs?( values)? (were|was|are|is|stayed|remained|have stayed|have remained) (unchanged|the same)|unchanged inputs?|(no|none of the) inputs? (were |was |have been |has been )?changed|no changes? (were|was|have been|has been) made|(didn'?t|did not|haven't|have not|hasn't|has not) changed? anything)\\b/i (on the label-masked reply, shared.label_masking). 'Nothing else changed.' is the honest control and passes.",
+          "source": "MG 5939414835; class widened per CODEX CEE BUDDY 5940259670 (seven forms passed the two-phrase ban); MG 5940298428 ('No changes were made.'); keyed on RECORDED rows per AI HARNESS 5949695570 (served crn-final2 11-cold-s4: 1 presence row, no template, change_labels [])"
         },
         {
           "id": "RX-UNWITHHELD-LINE",
@@ -1130,8 +1180,29 @@ export const POLICY = {
         "C3_C4_recorded": "Other things also differed between these two runs, so the difference can’t be put down to your edit alone.",
         "unverified": "Olumi can’t confirm nothing else differed between these two runs, so the difference can’t be put down to your edit alone."
       }
+    },
+    "COMPARISON-ANSWER": {
+      "purpose": "an ordinary Agent answer about the selected pair of Runs. Inputs = the RERUN-EXPLANATION MethodInputs from the same plan (+ signal_movement, matched/signal option labels, comparison_question); no pair = C2_unpaired + no_matched_figures + nothing recorded (fail-closed). Only sentences about the two Runs are judged: comparison_question, or the sentence matches PAIR_CONTEXT. A failing sentence is dropped and the plan's code line appended.",
+      "post_checks": [
+        {
+          "id": "CA-NO-CAUSE-UNLICENSED",
+          "rule": "unless attribution_case is C1_attributable: no /because|due to|as a result of|caused|led to|driven by|thanks to|(is|was|comes|came) down to|explained by|held the comparison back/ in a sentence about the runs"
+        },
+        {
+          "id": "CA-NO-MOVEMENT-UNLICENSED",
+          "rule": "a sentence about the runs with RX's movement words needs: not prior_withheld, not no_matched_figures, signal_movement, no digit (label-masked), and no matched option named whose movement is within noise"
+        },
+        {
+          "id": "CA-NOISE",
+          "rule": "RX-NOISE's ban unless noise_verdict is signal, in a sentence about the runs"
+        },
+        {
+          "id": "CA-NO-CONTRARY-SAME",
+          "rule": "RX-NO-CONTRARY-SAME's class in a sentence about the runs, if max(changes_recorded, change_labels.length) > 0"
+        }
+      ]
     }
   }
 } as const;
 
-export const SPEC_SHA = "712625a1c484943ad330214504634121a44216e7";
+export const SPEC_SHA = "a4992165f02b178f6ac4f697c554d569bd9229fb";

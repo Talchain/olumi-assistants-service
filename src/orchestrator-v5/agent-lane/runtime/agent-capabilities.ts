@@ -18,7 +18,8 @@ import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-cha
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
-import { acceptedOlumiEstimateSentence } from '../rerun-explanation.js';
+import { acceptedOlumiEstimateSentence, rerunPlanForGraph } from '../rerun-explanation.js';
+import { comparisonBlockOf } from '../comparison-block.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
@@ -960,6 +961,8 @@ interface GraphRead {
   readonly analysis_result?: unknown;
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
+  /** The read's selected pair, `current_read.run_delta` (complete_current only); absent = no pair to compare. */
+  readonly run_delta?: unknown;
 }
 
 // An edited graph can still carry an earlier Run. Its old result must not be
@@ -1387,6 +1390,17 @@ const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<s
  * (`goalCertaintyForAgent`, the one reader): its recorded decisions and each `say`, or `unchecked` when it cannot be bound
  * (a stale Run, nothing recorded, a refused record). No second truth, nothing recomputed.
  */
+/**
+ * ⭐ "Ask about this comparison" (`../comparison-block.ts`): the read's own pair as ONE model-facing block, or none. Movement
+ * is licensed by the same leader permission that gates the saved Run's per-option chances (`withSavedRunCertainty`).
+ */
+function comparisonOfRead(g: GraphRead | null | undefined): ReturnType<typeof comparisonBlockOf> {
+  if (g === null || g === undefined || g.run_delta === undefined) return undefined;
+  const leaderLicensed = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
+  return comparisonBlockOf(g.run_delta, rerunPlanForGraph(g.run_delta, g.raw, false, [...optionNameAliasesForCurrentRun(g).values()].map((a) => a.display)),
+    g.raw, leaderLicensed);
+}
+
 function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: string, g: GraphRead): Record<string, unknown> {
   const analysis = context.analysis as Record<string, unknown> | undefined;
   if (analysis === undefined) return context;
@@ -1810,6 +1824,10 @@ export function createAgentCapabilities(
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
+      ...(() => {
+        const pair = (r.json.current_read as { run_delta?: unknown } | null | undefined)?.run_delta;
+        return pair === undefined || pair === null ? {} : { run_delta: pair };
+      })(),
     };
   };
 
@@ -2790,6 +2808,8 @@ export function createAgentCapabilities(
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
         ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, g),
+        // The pair the user can compare, from this same read, in Olumi's own words with what may be said; none without one.
+        ...(() => { const comparison = comparisonOfRead(g); return comparison === undefined ? {} : { comparison }; })(),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest
@@ -7525,6 +7545,16 @@ export function createAgentCapabilities(
       const runAt = (r.json.analysis_state as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at;
       const runIdentity = typeof runHash === 'string' && typeof runAt === 'string'
         ? { scenario_id: ctx.scenario_id, graph_hash_at_run: runHash, computed_at: runAt } : undefined;
+      // ⭐ A Run that made a new pair hands the model THAT pair's block (the canonical read's), so a later call in the turn never
+      // explains the turn-start pair. Its own read variable: the confirm card below keys on whether `postRunRead` was made.
+      let comparison: ReturnType<typeof comparisonBlockOf>;
+      if (result !== undefined && r.json.run_delta !== undefined && r.json.run_delta !== null) {
+        let pairRead: GraphRead | null = postRunRead ?? null;
+        if (postRunRead === undefined) {
+          try { pairRead = await readGraph(ctx.scenario_id); } catch { pairRead = null; }
+        }
+        comparison = comparisonOfRead(pairRead);
+      }
       // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
       const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;
       return {
@@ -7544,6 +7574,7 @@ export function createAgentCapabilities(
         // ⛔ The Agent reads decision sensitivity from EVPPI only, never PLoT's structural ranking (`../decision-sensitivity.ts`).
         ...(result !== undefined ? { result: analysisResultForAgent(result) } : {}),
         ...(runIdentity !== undefined ? { run_identity: runIdentity } : {}),
+        ...(comparison !== undefined ? { comparison } : {}),
         // The typed leader permission for THIS run, read from its own wire verdict — so the Agent names a
         // leader only when `leader_may_be_named` (see the route's reporting instruction). `requested`: every
         // run_analysis dispatch is one the user asked for (the Agent's own call, or the Run chip's fast path);

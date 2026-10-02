@@ -133,6 +133,8 @@ export interface MethodInputs {
   readonly 'run.kind'?: string;
   /** RERUN-EXPLANATION (run_delta): the changed inputs' labels, the attribution case and the comparison's limits. */
   readonly change_labels?: readonly string[];
+  /** How many input-change rows the pair records, named or not (a `presence` row has no label template). */
+  readonly changes_recorded?: number;
   readonly attribution_case?: 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
   readonly leader_licensed?: boolean;
   readonly noise_verdict?: string;
