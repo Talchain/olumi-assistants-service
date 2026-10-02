@@ -1,3 +1,4 @@
+import { nativeContextTrialEnvironment } from '../config/native-context-trial.js';
 /**
  * POST /agent/v1/turn — the OpenAI Agent mounted in the real PoC.
  *
@@ -1145,7 +1146,7 @@ export function sameAgentTurnRequest(stored: string, requested: string, chipless
 
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   if (config.proxy.agentLaneEnabled !== true) return;
-  const nativeContexts = nativeContextTrialEnabled(process.env) ? new NativeContextStore() : undefined;
+  const nativeContexts = nativeContextTrialEnabled(nativeContextTrialEnvironment()) ? new NativeContextStore() : undefined;
 
   /**
    * READ-ONLY preview. Resolved ONCE at registration, not per request, so no
