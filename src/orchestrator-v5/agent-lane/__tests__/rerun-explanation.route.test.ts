@@ -121,6 +121,20 @@ describe('M2 RERUN-EXPLANATION on the live route: a rejected claim never reaches
     expect(explained.assistant_text).toContain(`${FALLBACK}\n\n${WHY}`);
   });
 
+  /**
+   * ⛔ CODEX r2 on #2517: the narrator repeats Olumi's code line first; the composer drops the repeat and prepends the SAME
+   * line, rebuilding the narrator's text byte for byte. An equality-only guard then shaped the reply, putting the code
+   * line's own caveats behind "Show more". The host composed it, so it ships whole.
+   */
+  it('IDENTICAL RECONSTRUCTION: the narrator repeats Olumi\'s code line, the host restores it → the reply is NOT shaped', async () => {
+    modelText = `${FALLBACK}\n\n${WHY}\n- Both options are compared on the same goal.\n- The comparison is provisional.\nAsk me what would change it.`;
+    const first = (await runTurn(randomUUID())).json() as Body;
+    const explained = (await explainTurn(randomUUID(), first)).json() as Body & { _answer_shape?: unknown; blocks?: { type?: string }[] };
+    expect(explained.assistant_text.trim(), 'the control: the host rebuilt the narrator\'s exact text').toBe(modelText.trim());
+    expect((explained.blocks ?? []).some((b) => b.type === 'analysis_result'), 'the control: an analysis-bearing reply').toBe(true);
+    expect(explained._answer_shape, 'the host composed it → shipped whole').toBeUndefined();
+  });
+
   it.each([
     ['RED: a movement claim in the typed view\'s reasoning → no provisional view on the wire', { ...VIEW, reasoning: 'Its chance rose from 40% to 57%.' }, false],
     ['CONTROL: a clean typed view → shown', VIEW, true],
