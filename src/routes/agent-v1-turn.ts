@@ -2828,7 +2828,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
     };
     let decisionLines = decisionInputLines(readbackGraph, decisionCtx);
-    // ⭐ ASKED ONCE (PANEL 5944136475): only when this turn would ask, read the recent answers as shipped (≤6 durable rows,
+    // ⭐ ASKED ONCE (PANEL 5944136475): only when this turn would ask, read the recent answers as shipped (≤RECENT_REPLIES_READ durable rows,
     // restart-safe); an ask already among them stays open and is not repeated. A failed read asks, as before.
     if (decisionLines.some((l) => l.endsWith('as your target.')) && typeof store.readRecent === 'function') {
       try {
