@@ -329,6 +329,15 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect(again).toContain(A7);
   });
 
+  it('CONTROL (DL 5944162815): the goal CHANGES between Runs → its new ask is said (an open ask binds to its own goal)', async () => {
+    const first = (await runTurn('a152c364-7f80-4192-83a4-b5c6d7e8f901')).assistant_text;
+    expect(first.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    goal = { ...FX.goal_after_build, label: 'Monthly spend' };
+    const again = (await runTurn('b263d475-8091-42a3-94b5-c6d7e8f90a12')).assistant_text;
+    expect(again.split(ASK.replace('Funding secured', 'Monthly spend')).length - 1, 'the changed goal is asked for').toBe(1);
+    expect(again).not.toContain(ASK);
+  });
+
   it('CONTROL: the recent answers cannot be read → the Rerun asks again (today\'s behaviour, never a silent drop)', async () => {
     await runTurn('8f30a142-5d6e-4f70-8182-93a4b5c6d7e8');
     recentFails = true;
