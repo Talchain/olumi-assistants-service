@@ -89,8 +89,9 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
 });
 
 describe('the ONE definition: only a risk, and only what reaches the goal through nothing else', () => {
-  const g = (nodes: Rec[], edges: [string, string][]) => ({ nodes, edges: edges.map(([from, to]) => ({ from, to })) });
-  const base = [{ id: 'goal', kind: 'goal' }, { id: 'opt', kind: 'option' }, { id: 'f', kind: 'factor' }, { id: 'r', kind: 'risk' }];
+  type N = { id: string; kind?: string; category?: string };
+  const g = (nodes: N[], edges: [string, string][]) => ({ nodes, edges: edges.map(([from, to]) => ({ from, to })) });
+  const base: N[] = [{ id: 'goal', kind: 'goal' }, { id: 'opt', kind: 'option' }, { id: 'f', kind: 'factor' }, { id: 'r', kind: 'risk' }];
 
   it('a risk with no onward edge (with or without a cause) is in; a cause drawn only into it joins', () => {
     const x = g([...base, { id: 'exo', kind: 'factor', category: 'external' }], [['opt', 'f'], ['f', 'goal'], ['f', 'r'], ['exo', 'r']]);
