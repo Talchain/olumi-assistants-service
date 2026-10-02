@@ -166,18 +166,24 @@ export function rerunExplanationPlan(
   };
   // "Nothing you entered changed" ONLY on a typed, complete, empty record; rows the graph can't name → "can't say".
   const recordedNothing = coverageComplete && Array.isArray(d.input_changes) && rows.length === 0;
+  // ⛔ "That was what held the comparison back" credits the user's change, so it rides ONLY a C1 pair (complete coverage,
+  // same draw and builds: the named changes are the only differences). Any other case can owe the comparison to
+  // something else (an engine that now evaluates what it withheld, a new draw, an unrecorded input), so the line is
+  // the neutral "Olumi can now compare the options." followed by the case line (CODEX on CEE 864e915c, P1).
+  const caseLine = wireCase === 'C0_identical' ? RERUN_FALLBACK_LINES.C0
+    : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.C1
+      : wireCase === 'C2_unpaired' ? RERUN_FALLBACK_LINES.C2 : RERUN_FALLBACK_LINES.other;
   const codeLine = changes.length > 0
-    ? `${changes.join(' ')}${more > 0 ? ` ${moreChangesLine(more)}` : ''} ${priorWithheld ? RERUN_FALLBACK_LINES.unwithheld
-      : wireCase === 'C0_identical' ? RERUN_FALLBACK_LINES.C0
-        : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.C1
-          : wireCase === 'C2_unpaired' ? RERUN_FALLBACK_LINES.C2 : RERUN_FALLBACK_LINES.other}`
+    ? `${changes.join(' ')}${more > 0 ? ` ${moreChangesLine(more)}` : ''} ${!priorWithheld ? caseLine
+      : wireCase === 'C1_attributable' ? RERUN_FALLBACK_LINES.unwithheld
+        : `${RERUN_NO_CHANGE_LINES.unwithheld} ${caseLine}`}`
     : `${recordedNothing ? RERUN_NO_CHANGE_LINES.nothing : RERUN_NO_CHANGE_LINES.unknown}${priorWithheld ? ` ${RERUN_NO_CHANGE_LINES.unwithheld}` : ''}`;
   const instruction = [
     'Olumi has already told the user, in its own words from the run record, what changed between the two Runs:',
     `"${codeLine}"`,
     'Do not repeat that line, and never say whether the inputs changed or stayed the same: that line is the record. Say what this Run shows.',
     priorWithheld
-      ? 'The earlier Run had no figures, so never say anything rose, fell, moved or changed in value.'
+      ? 'The earlier Run held its comparison figures back, so never say anything rose, fell, moved or changed in value.'
       : noMatched
         ? 'No option has figures in both Runs, so never say anything rose, fell or moved; say only what this Run shows.'
         : inputs.attribution_case === 'C1_attributable'

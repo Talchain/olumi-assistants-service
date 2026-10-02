@@ -58,9 +58,8 @@ import {
 } from '@talchain/schemas/boundary';
 
 import {
-  isUsableWinProbability,
-  runWithheldGoalFigures,
-  winnerOptionResultSource,
+  identityBoundWinProbabilities,
+  runWithheldWinShares,
 } from '../../orchestrator/context/option-result-source.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
 import { mayPresentComparedRunLeader, mayPresentComparedRunVerdicts } from './compared-run-leader.js';
@@ -438,53 +437,6 @@ function classifyAttribution(
 }
 
 /**
- * Every option whose identity is STRUCTURALLY SAFE, mapped to its win
- * probability.
- *
- * ⚠ WHY NOT `result.win_probabilities`, WHICH IS RIGHT THERE AND ALREADY
- * PERSISTED. Because it is LABEL-KEYED. `run-analysis.ts:2286-2302`
- * (`extractWinProbabilities`) keys that record by `option_label` FIRST and only
- * falls back to `option_id`, so on any ordinary run its keys are DISPLAY
- * STRINGS. `RunDeltaWinProbabilityDeltaSchema.option_id` is identity-bound —
- * *"Option id — identity-bound (trap 19), never a label"* — and feeding labels
- * into it would reintroduce exactly the defect `compare-runs.ts` documents at
- * length: a rename is invisible to the analysis-affecting hash, so two runs
- * that differ only in a label would be reported as different options.
- *
- * ⚠ AND NOT `compactAnalysis(...).summary.options[]` either: that projection
- * carries the SAME `option_id <- option_label` fallback, which is precisely why
- * `readLeaderOptionId` exists to confirm the winner's id against the raw
- * records. Only the raw source plus an explicit id check is safe.
- *
- * A DUPLICATE ID DROPS BOTH ENTRIES. If two records claim one id we cannot tell
- * which is which, and picking either would attach a number to an option by
- * guess. Fail-closed.
- */
-function identityBoundWinProbabilities(
-  enrichment: Record<string, unknown>,
-): ReadonlyMap<string, number> {
-  const found = new Map<string, number>();
-  const ambiguous = new Set<string>();
-
-  for (const entry of winnerOptionResultSource(enrichment)) {
-    const id = entry.option_id;
-    if (typeof id !== 'string' || id.length === 0) continue;
-    // The SHARED predicate, imported rather than re-implemented: a usable
-    // win probability is a finite number in [0, 1]. Re-stating that inequality
-    // here would be a second definition free to drift from the first.
-    if (!isUsableWinProbability(entry.win_probability)) continue;
-    if (found.has(id)) {
-      ambiguous.add(id);
-      continue;
-    }
-    found.set(id, entry.win_probability);
-  }
-
-  for (const id of ambiguous) found.delete(id);
-  return found;
-}
-
-/**
  * SC-24 (schemas 0.68.0) — the pair's endpoints and its exact input changes, read off the two facts' own
  * `run_id` / `input_snapshot` (what each Run was SENT; `run-analysis.ts` §3.9).
  *   - `compared`: both Runs recorded their inputs → the diff (possibly `[]`), `input_coverage: 'complete'` — or
@@ -660,10 +612,12 @@ export function buildRunDelta(input: {
   // ⛔ `prior_withheld` is a CAUSE CLAIM, so it needs the earlier Run's OWN RECORDED withhold — never the absence of a
   // stamp (DL ruling #2482 r3 P1-3; CODEX reproduced the cause claim from missing evidence). Two records qualify:
   //   (a) its typed `constraint_verdict` says it may not name a leader (the Run is then not entitled here);
-  //   (b) it has NO shares and its own envelope carries a typed goal-figure withhold (`GOAL_FIGURES_WITHHELD_CODES`,
-  //       the code decides, never the words). The Run stays entitled, but the withholder took every share with the
-  //       figures (R3 journey-8 5942780839: an unsized Olumi link on the way → `GOAL_FIGURES_PLACEHOLDER_PATH`; after
-  //       the Accept, "No option has figures from both runs" was shown where the options can now be compared).
+  //   (b) it has NO shares and its own envelope records that the goal-figure withholder REMOVED shares it had
+  //       (`runWithheldWinShares`: a `GOAL_FIGURES_WITHHELD_CODES` warning carrying `win_shares_withheld: true`, set by
+  //       the withholder only when the envelope held ≥1 identity-bound usable share). A code alone is not enough: PLoT
+  //       may have sent no shares at all (CODEX pre-review on 864e915c, P1). The Run stays entitled, but the withholder
+  //       took every share with the figures (R3 journey-8 5942780839: an unsized Olumi link on the way; after the
+  //       Accept, "No option has figures from both runs" was shown where the options can now be compared).
   // A historical Run with neither record is "not entitled" (fail closed) or share-less, but its cause is unknown,
   // so no reason travels.
   const priorVerdictWithheld = (() => {
@@ -671,7 +625,7 @@ export function buildRunDelta(input: {
     return verdict !== null && typeof verdict === 'object' && !Array.isArray(verdict)
       && (verdict as { may_name_leading_option?: unknown }).may_name_leading_option === false;
   })();
-  const priorFiguresWithheld = priorWins.size === 0 && runWithheldGoalFigures(priorEchoes.enrichment);
+  const priorFiguresWithheld = priorWins.size === 0 && runWithheldWinShares(priorEchoes.enrichment);
   const winProbabilitiesUnavailable: RunDeltaWinProbabilitiesUnavailableLiteral | undefined = winProbabilities.length > 0 ? undefined
     : currentEntitled && currentWins.size > 0 && ((!priorEntitled && priorVerdictWithheld) || priorFiguresWithheld) ? 'prior_withheld'
       : priorEntitled && currentEntitled && priorWins.size > 0 && currentWins.size > 0 ? 'no_matched_option'

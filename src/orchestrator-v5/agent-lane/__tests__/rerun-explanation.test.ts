@@ -162,6 +162,37 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
   });
 });
 
+/**
+ * ⛔ M2 CHAIN (CODEX pre-review on CEE 864e915c, P1; DL GO): "That was what held the comparison back" CREDITS the user's
+ * change, so it rides ONLY a C1 pair (complete coverage, same draw and builds → the named changes are the only
+ * differences). Under engine drift, a new draw or partial coverage the comparison may be owed to something else: the
+ * line is the neutral "Olumi can now compare the options." followed by the case line.
+ */
+describe('the UNWITHHELD line credits the change ONLY on a C1 pair', () => {
+  it.each([
+    ['C3 engine drift (complete)', 'C3_engine_drift', 'complete', RERUN_FALLBACK_LINES.other],
+    ['C2 new draw (complete)', 'C2_unpaired', 'complete', RERUN_FALLBACK_LINES.C2],
+    ['C1 but PARTIAL coverage', 'C1_attributable', 'partial', RERUN_FALLBACK_LINES.other],
+  ])('RED: prior_withheld + an unrelated named change under %s → no causal line; neutral line + the case line', (_n, attribution_case, input_coverage, caseLine) => {
+    const p = plan({ ...UNWITHHELD, attribution_case, input_coverage, input_changes: [AI] })!;
+    expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_NO_CHANGE_LINES.unwithheld} ${caseLine}`);
+    expect(p.codeLine).not.toContain(RERUN_FALLBACK_LINES.unwithheld);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it('CONTROL: C1 + complete coverage → the causal line (the investor moment), and it passes RC\'s check', () => {
+    const p = plan({ ...UNWITHHELD, input_changes: [AI] })!;
+    expect(p.codeLine).toBe(`${SAID_AI} ${RERUN_FALLBACK_LINES.unwithheld}`);
+    expect(checkMethodTurn('RERUN-EXPLANATION', p.codeLine, p.inputs)).toMatchObject({ pass: true, failed: [] });
+  });
+
+  it('the instruction never tells the model the earlier Run had NO figures (a subset withhold keeps some): it held them back', () => {
+    const p = plan(UNWITHHELD)!;
+    expect(p.instruction).toContain('The earlier Run held its comparison figures back');
+    expect(p.instruction).not.toContain('had no figures');
+  });
+});
+
 describe('the composer: the code line first, then the model\'s sentences that pass RC\'s checker beside it', () => {
   const p = plan(UNWITHHELD)!;
   const WHY = 'The model now shows a provisional comparison of the four options.';
