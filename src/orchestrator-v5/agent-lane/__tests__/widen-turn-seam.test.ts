@@ -256,6 +256,21 @@ describe('WIDEN on the live route: one gated card, or nothing stored', () => {
     expect(await heldOnLatestRow()).toEqual([]);
   }, 120_000);
 
+  it('W-R5 (HARNESS P2): TWO door calls in ONE response, each passing alone → exactly ONE stored card, ONE approve chip, the card\u2019s own reply', async () => {
+    seeded();
+    const call = (id: string, label: string, factor: string) => ({ type: 'function_call', name: 'propose_new_option', call_id: id,
+      arguments: JSON.stringify({ label, acts_on: [{ factor_label: factor, direction: 'negative' }], rationale: 'r' }) });
+    script = [() => ({ output: [call('c-a', 'Retention offer', 'Customer churn'), call('c-b', 'Cut price to win share', 'Price')] })];
+    const t1 = await press();
+    expect(openAiCalls).toBe(1);
+    const oks = t1._agent.tool_calls.filter((c) => c.name === 'propose_new_option' && c.ok);
+    expect(oks, JSON.stringify(t1._agent.tool_calls)).toHaveLength(1);
+    expect(t1.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:'))).toHaveLength(1);
+    expect(await heldOnLatestRow()).toHaveLength(1);
+    expect(t1.assistant_text).toContain('Retention offer');
+    expect(t1.assistant_text).not.toContain('What other way could you reach');
+  }, 120_000);
+
   it('W-R4 CONTROL: the same model reply on an ORDINARY turn (not a Widen press) is not gated — the door holds it', async () => {
     seeded();
     script = [

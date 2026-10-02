@@ -2483,6 +2483,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         widenRun === undefined ? capabilities : {
           ...capabilities,
           proposeNewOption: async (gateCtx, gateArgs) => {
+            // ONE card or none: only the press's FIRST door call is gated and may reach the door (HARNESS P2 on #2512;
+            // the loop's ONE_CHANGE_PER_APPROVAL refuses a second proposal too, and this holds without it).
+            if (widenGateResult !== undefined) {
+              return { ok: false, mutated: false, refusal: WIDEN_GATE_REFUSAL,
+                detail: 'Only one set of suggestions per press (WD-COUNT). Nothing was changed.' };
+            }
             widenGateResult = widenGate(widenRun, gateArgs);
             return widenGateResult.ok
               ? capabilities.proposeNewOption(gateCtx, gateArgs)
