@@ -178,7 +178,7 @@ describe('the plan: Olumi\'s code line from the typed rows, the check inputs', (
 describe('the UNWITHHELD line credits the change ONLY on a C1 pair; an unknown difference is never said as observed', () => {
   const NEUTRAL = RERUN_NO_CHANGE_LINES.unwithheld;
   const UNSURE = 'Olumi can’t confirm nothing else differed between the two Runs';
-  it.each([
+  it.each<[string, string, string, string]>([
     ['C0 complete', 'C0_identical', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.C0}`],
     ['C1 complete (the investor moment)', 'C1_attributable', 'complete', RERUN_FALLBACK_LINES.unwithheld],
     ['C2 draw not shown equal', 'C2_unpaired', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.C2}`],
@@ -186,7 +186,7 @@ describe('the UNWITHHELD line credits the change ONLY on a C1 pair; an unknown d
     ['C4 budget drift (recorded)', 'C4_budget_drift', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.other}`],
     ['C5 unattributed (unknown)', 'C5_unattributed', 'complete', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`],
     ...(['C0_identical', 'C1_attributable', 'C2_unpaired', 'C3_engine_drift', 'C4_budget_drift', 'C5_unattributed'] as const)
-      .map((c) => [`${c} with PARTIAL coverage (unknown)`, c, 'partial', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`] as const),
+      .map((c): [string, string, string, string] => [`${c} with PARTIAL coverage (unknown)`, c, 'partial', `${NEUTRAL} ${RERUN_FALLBACK_LINES.unverified}`]),
   ])('prior_withheld + a named change, %s → the exact line; RC\'s check passes', (_n, attribution_case, input_coverage, tail) => {
     const p = plan({ ...UNWITHHELD, attribution_case, input_coverage, input_changes: [AI] })!;
     expect(p.codeLine).toBe(`${SAID_AI} ${tail}`);
