@@ -199,7 +199,7 @@ describe('S1 refusals: no identity, guest, and NO EXISTENCE ORACLE (DL condition
 describe('S1 adapter: only the user\'s OWN commits, filtered IN the query', () => {
   type Row = Record<string, unknown> & { owner_user_id: string; scenario_id: string; created_at: string; decision: Record<string, unknown> };
   /** A fake PostgREST that HONOURS the filters, the order, the limit and the exact-count option it is sent. */
-  function fakeClient(rows: Row[]) {
+  function fakeClient(rows: Row[], ignore: string[] = []) {
     const calls: [string, ...unknown[]][] = [];
     const filters: [string, unknown][] = [];
     let cols: string[] = []; let opts: { count?: string } | undefined; let order: { col: string; asc: boolean } | undefined;
@@ -209,7 +209,7 @@ describe('S1 adapter: only the user\'s OWN commits, filtered IN the query', () =
       order: (c: string, o: { ascending: boolean }) => { calls.push(['order', c, o]); order = { col: c, asc: o.ascending }; return chain; },
       limit: (n: number) => {
         calls.push(['limit', n]);
-        let hit = rows.filter((r) => filters.every(([c, v]) => (c === 'decision->>committed_by_user' ? String(r.decision.committed_by_user) === v : r[c] === v)));
+        let hit = rows.filter((r) => filters.filter(([c]) => !ignore.includes(c)).every(([c, v]) => (c === 'decision->>committed_by_user' ? String(r.decision.committed_by_user) === v : r[c] === v)));
         if (order) hit = [...hit].sort((a, b) => (String(a[order!.col]) < String(b[order!.col]) ? -1 : 1) * (order!.asc ? 1 : -1));
         const data = hit.slice(0, n).map((r) => Object.fromEntries(cols.map((c) => [c, r[c]])));
         return Promise.resolve({ data, error: null, count: opts?.count === 'exact' ? hit.length : null });
@@ -235,6 +235,13 @@ describe('S1 adapter: only the user\'s OWN commits, filtered IN the query', () =
     expect(String(sel[1])).not.toContain('owner_user_id');
     expect(page.records.map((r) => r.record_id)).toEqual([CHOSEN.record_id]);
     expect(page.records[0]!.has_outcome).toBe(true);
+  });
+
+  it('DEFENCE IN DEPTH: if a future query change ever lets a model_derived row through, the per-row check still drops it', async () => {
+    const modelDerived = row('33333333-3333-4333-8333-333333333333', '2026-10-02T09:00:00.000Z', { decision: { chosen_option_id: 'opt_a', chosen_option_label: 'A' } });
+    const { client } = fakeClient([modelDerived, row(CHOSEN.record_id, '2026-10-02T08:00:00.000Z')], ['decision->>committed_by_user']);
+    const page = await new SupabaseDecisionRecordStore(client as never).retrieveUserRecords(SCENARIO_ID, OWNER_ID);
+    expect(page.records.map((r) => r.record_id)).toEqual([CHOSEN.record_id]);
   });
 
   it('CODEX P1: a scenario UUID RE-CREATED by someone else never reads the previous owner\'s records', async () => {
