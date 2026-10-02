@@ -13,6 +13,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
+import { RunDeltaSchema } from '@talchain/schemas/boundary';
 
 const readRecent = vi.fn();
 const readFactsFor = vi.fn();
@@ -30,11 +31,13 @@ vi.mock('../../utils/telemetry.js', () => ({
 }));
 
 import { readScenarioAnalysis } from '../scenario-graph-analysis-read.js';
+import { readBackState } from '../agent-v1-turn.js';
 import { buildAnalysisResultBlock } from '../../orchestrator-v5/compose.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { leaderLicenceFromState } from '../../orchestrator-v5/compose/leader-licence.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { currentAnalysisCoaching } from '../../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
 import type { GraphStateIngress } from '../../orchestrator-v5/boundary/request-extensions.js';
 
 type Rec = Record<string, any>;
@@ -111,6 +114,7 @@ describe('one Run, one serialisation — the reload ships the block the Run turn
     expect(read.analysis_result.leading_option_id).toBeNull();
     // ONE function of ONE licence: the read's block is the turn egress's output over the builder's block.
     expect(read.analysis_result).toEqual(turnEgress(buildAnalysisResultBlock(fact), read.analysis_state).response.blocks?.[0]);
+    expect(read.current_read.result).toBe(read.analysis_result);
   });
 
   it('R2 CONTROL: a licensed Run reloads with the builder\'s block, unchanged', async () => {
@@ -121,6 +125,8 @@ describe('one Run, one serialisation — the reload ships the block the Run turn
     expect(optionIds(read.analysis_result)).toEqual(['option-b', 'option-a']);
     expect(read.analysis_result.enrichment.decision_brief.headline).toBe('Option B currently leads.');
     expect(read.analysis_result.leading_option_id).toBe('option-b');
+    expect(read.current_read.result).toBe(read.analysis_result);
+    expect(turnEgress(read.analysis_result, read.analysis_state).response.blocks?.[0]).toBe(read.analysis_result);
   });
 
   it('R3: the egress over the read\'s withheld block removes nothing (idempotent)', async () => {
@@ -128,6 +134,48 @@ describe('one Run, one serialisation — the reload ships the block the Run turn
     const again = turnEgress(read.analysis_result, read.analysis_state);
     expect(again.removedPaths).toEqual([]);
     expect(again.response.blocks?.[0]).toEqual(read.analysis_result);
+  });
+
+  it.each([false, true])('Agent readBackState, repeated and cold reads preserve one projected Run (separated=%s)', async (separated) => {
+    const fact = runFact({ separated });
+    const persistedBytes = JSON.stringify(fact);
+    const graphBytes = JSON.stringify(GRAPH);
+    const read = await reload(fact, 'agent-readback');
+    const liveResult = turnEgress(buildAnalysisResultBlock(fact), read.analysis_state).response.blocks?.[0];
+    const card = {
+      type: 'coaching', coaching_kind: 'assumption_check', block_id: '00000000-0000-4000-8000-000000000001',
+      signal_id: 'same-run', created_at: RUN_AT, source_handler: 'run_analysis', graph_hash_at_generation: HASH,
+      freshness: 'fresh', title: 'Check the assumption', body: 'Which evidence supports this assumption?',
+      source: 'deterministic_signal', target_refs: [], priority_rank: 15,
+    };
+    const capture = { scenario_id: SCENARIO, status: 200, analysis_state: read.analysis_state, blocks: [liveResult, card] };
+    // Only dispatch I/O is replaced: the analysis response and exported Agent reader are the production code.
+    const dispatch = vi.fn(async (path: string) => {
+      expect(path).toBe(`/assist/v1/scenarios/${SCENARIO}/graph`);
+      return { status: 200, json: { graph: GRAPH, graph_hash: HASH, ...await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'dispatch-read' }) } };
+    });
+    const readback = await readBackState(dispatch, SCENARIO);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(readback.analysisState).toEqual(read.analysis_state);
+    expect(readback.analysisResult).toEqual(liveResult);
+    const fromLive = currentAnalysisCoaching(capture, { scenarioId: SCENARIO, graphHash: HASH, analysisState: read.analysis_state, analysisResult: liveResult });
+    expect(fromLive).toEqual([card]);
+    expect(currentAnalysisCoaching(capture, { scenarioId: SCENARIO, ...readback })).toEqual(fromLive);
+    expect(turnEgress(readback.analysisResult, readback.analysisState as Rec, readback.graph).response.blocks?.[0]).toEqual(liveResult);
+
+    const repeated = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'repeat-read' });
+    // Discard the module cache: the cold reader reconstructs the same persisted fact, not a held result.
+    vi.resetModules();
+    const { readScenarioAnalysis: coldRead } = await import('../scenario-graph-analysis-read.js');
+    const cold = await coldRead({ scenarioId: SCENARIO, graph: JSON.parse(graphBytes), requestId: 'cold-read' });
+    for (const result of [read, repeated, cold]) {
+      expect(result.analysis_result).toEqual(liveResult);
+      expect(result.current_read.result).toBe(result.analysis_result);
+    }
+    expect(JSON.stringify(fact)).toBe(persistedBytes);
+    expect(JSON.stringify(GRAPH)).toBe(graphBytes);
+    expect(fact.result.leading_option_id).toBe('option-b');
+    expect(fact.result.enrichment?.decision_brief).toHaveProperty('headline', 'Option B currently leads.');
   });
 });
 
@@ -169,6 +217,7 @@ describe('one Run, one serialisation — the reload\'s run_delta names no leader
     const read = await reloadPair(true);
     expect(read.analysis_state?.leader_claim, 'premise: licensed').toMatchObject({ permitted: true, separation: 'separated' });
     expect(read.current_read?.run_delta?.leader).toMatchObject({ prior_leading_option_id: 'option-a', current_leading_option_id: 'option-b' });
+    expect(RunDeltaSchema.safeParse(read.current_read.run_delta).success).toBe(true);
   });
 
   it('R4 RED: the current Run\'s separation was never evaluated → the pair still rides, with no leader id on either side', async () => {
@@ -178,5 +227,6 @@ describe('one Run, one serialisation — the reload\'s run_delta names no leader
     expect(delta, 'premise: the pair rides').toBeDefined();
     expect(delta.leader).not.toHaveProperty('current_leading_option_id');
     expect(delta.leader).not.toHaveProperty('prior_leading_option_id');
+    expect(RunDeltaSchema.safeParse(delta).success).toBe(true);
   });
 });
