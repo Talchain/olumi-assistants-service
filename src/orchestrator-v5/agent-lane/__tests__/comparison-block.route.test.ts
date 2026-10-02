@@ -10,9 +10,10 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rerunPlanForGraph } from '../rerun-explanation.js';
 
-type Read = { json: { graph: { nodes: unknown[] }; current_read: { run_delta?: unknown } } };
+type Read = { json: { graph: { nodes: unknown[] }; graph_hash: string; current_read: { run_delta?: unknown } } };
 const read = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/comparison/${name}.json`, import.meta.url), 'utf8')) as Read;
 const C2_PARTIAL = read('c2-partial');
+const C1_PARTIAL = read('c1-partial');
 const NO_PAIR = read('stale-no-pair');
 const SCENARIO = '3c9b1e2d-4f5a-4b6c-8d7e-9f0a1b2c3dc2';
 
@@ -41,13 +42,18 @@ const textsOf = (v: unknown): string[] => typeof v === 'string' ? [v]
 
 let served: Read = C2_PARTIAL;
 const requests: string[] = [];
+/** Scripted model outputs, in order (default: one plain answer); `onCall(n)` runs before the n-th model call is answered. */
+let outputs: unknown[][] = [];
+let onCall: (n: number) => void = () => undefined;
 
 describe('"Ask about this comparison" on the live route: the model is sent the read\'s pair', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       requests.push(typeof init?.body === 'string' ? init.body : '');
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'The comparison rests on that change.' }] }] }), { status: 200 });
+      onCall(requests.length);
+      const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: 'The comparison rests on that change.' }] }];
+      return new Response(JSON.stringify({ output }), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -55,6 +61,11 @@ describe('"Ask about this comparison" on the live route: the model is sent the r
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => served.json);
+    // The run turn: C1 PARTIAL's own Run, result and pair (the canonical read then selects the same pair until another writer).
+    const runJ = C1_PARTIAL.json as unknown as Record<string, unknown>;
+    app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
+      graph_hash: runJ.graph_hash, blocks: [runJ.analysis_result], analysis_state: runJ.analysis_state, analysis_ready: { status: 'ready' },
+      run_delta: (runJ.current_read as { run_delta: unknown }).run_delta }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -62,7 +73,7 @@ describe('"Ask about this comparison" on the live route: the model is sent the r
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; requests.length = 0; served = C2_PARTIAL; });
+  beforeEach(() => { rows.length = 0; requests.length = 0; served = C2_PARTIAL; outputs = []; onCall = () => undefined; });
 
   const ask = () => app.inject({ method: 'POST', url: '/agent/v1/turn',
     payload: { scenario_id: SCENARIO, turn_id: randomUUID(), message: 'Why did the result change?' } });
@@ -84,5 +95,25 @@ describe('"Ask about this comparison" on the live route: the model is sent the r
     expect(res.statusCode).toBe(200);
     expect(requests.length).toBeGreaterThan(0);
     expect(requests.some((r) => r.includes('what_changed')), 'no comparison block').toBe(false);
+  });
+
+  it('RACE (Codex buddy P2): the Agent runs an analysis, another writer\'s Run lands during the narrating call → the reply is bound to the NEWER Run', async () => {
+    served = C1_PARTIAL;
+    outputs = [
+      [{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'the user asked to rerun' }), call_id: 'r1' }],
+      [{ type: 'message', content: [{ type: 'output_text', text: 'Done: the analysis ran again.' }] }],
+    ];
+    // The second model call is the narration after the Run: by then another writer's Run is the canonical read's.
+    onCall = (n) => { if (n === 2) served = C2_PARTIAL; };
+    expect(C1_PARTIAL.json.graph_hash, 'the control: two different reads').not.toBe(C2_PARTIAL.json.graph_hash);
+    const res = await app.inject({ method: 'POST', url: '/agent/v1/turn',
+      payload: { scenario_id: SCENARIO, turn_id: randomUUID(), message: 'Run it again and tell me what changed.' } });
+    expect(res.statusCode, res.body.slice(0, 300)).toBe(200);
+    expect(outputs, 'the model ran the analysis and answered').toEqual([]);
+    // The Run's own tool output (not the turn-start state) carries the block of ITS pair.
+    const runOutput = (JSON.parse(requests[1]!) as { input: { type?: string; output?: string }[] }).input
+      .find((i) => i.type === 'function_call_output')?.output ?? '';
+    expect(runOutput, 'the Run handed the model ITS pair').toContain('"what_changed"');
+    expect((res.json() as { graph_hash?: string }).graph_hash).toBe(C2_PARTIAL.json.graph_hash);
   });
 });

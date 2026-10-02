@@ -22,7 +22,7 @@ const blockOf = (r: Read, leaderLicensed: boolean) => comparisonBlockOf(r.json.c
 /** The served pair's beyond-noise rows, each with its own direction, by the option's current label. */
 const movedOf = (r: Read) => (r.json.current_read.run_delta!.win_probabilities ?? [])
   .filter((w) => w.noise_verdict === 'signal' && w.prior !== w.current)
-  .map((w) => ({ option: r.json.graph.nodes.find((n) => n.id === w.option_id)!.label, direction: w.current > w.prior ? 'up' : 'down' }));
+  .map((w) => ({ option_id: w.option_id, option: r.json.graph.nodes.find((n) => n.id === w.option_id)!.label, direction: w.current > w.prior ? 'up' : 'down' }));
 
 const C1_COMPLETE = read('c1-complete');
 const C1_PARTIAL = read('c1-partial');
@@ -45,7 +45,7 @@ describe('the served pairs are what the rows say they are (controls)', () => {
     expect(NO_PAIR.json.current_read.run_delta).toBeUndefined();
   });
   it('C1 + complete: two options moved beyond noise, in OPPOSITE directions (the reversed-direction control)', () => {
-    expect(movedOf(C1_COMPLETE)).toEqual([
+    expect(movedOf(C1_COMPLETE).map(({ option, direction }) => ({ option, direction }))).toEqual([
       { option: 'AI Reporting Module Sprint', direction: 'down' }, { option: 'Integration Bug Fix Sprint', direction: 'up' }]);
   });
 });
@@ -91,6 +91,13 @@ describe('the block: the read\'s own pair, in Olumi\'s words, with what may be s
     expect(block.movement_unavailable).toBe(unavailable);
     expect(block.movement_licensed).toBe(unavailable === undefined);
     expect(block.moved_beyond_noise).toEqual(unavailable === undefined ? movedOf(r) : []);
+  });
+  it('two options sharing a label (reversed node order) stay distinguishable: each movement carries its own option id', () => {
+    const graph = structuredClone(C1_COMPLETE.json.graph);
+    graph.nodes = [...graph.nodes].reverse().map((n) => (n.kind === 'option' ? { ...n, label: 'Sprint' } : n));
+    const moved = comparisonBlockOf(C1_COMPLETE.json.current_read.run_delta, planOf(C1_COMPLETE), graph, true)!.moved_beyond_noise;
+    expect(moved.map((m) => m.option)).toEqual(['Sprint', 'Sprint']);
+    expect(moved.map((m) => [m.option_id, m.direction])).toEqual([['ai_reporting_module_sprint', 'down'], ['integration_bug_fix_sprint', 'up']]);
   });
   it('no pair → no block', () => {
     expect(planOf(NO_PAIR)).toBeNull();

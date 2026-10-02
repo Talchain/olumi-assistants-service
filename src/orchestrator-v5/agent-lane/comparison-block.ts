@@ -43,7 +43,7 @@ export interface ComparisonBlock {
   readonly movement_licensed: boolean;
   readonly movement_unavailable?: MovementUnavailable;
   /** Only when movement is licensed: each option whose own row is `signal`, with which way it moved. */
-  readonly moved_beyond_noise: readonly { readonly option: string; readonly direction: 'up' | 'down' }[];
+  readonly moved_beyond_noise: readonly { readonly option_id: string; readonly option: string; readonly direction: 'up' | 'down' }[];
   readonly beyond_noise: boolean;
   readonly rule: string;
 }
@@ -64,7 +64,8 @@ export function comparisonBlockOf(runDelta: unknown, plan: RerunExplanationPlan 
     const label = labelOf(r.option_id);
     const prior = r.prior; const current = r.current;
     if (r.noise_verdict !== 'signal' || label === undefined || typeof prior !== 'number' || typeof current !== 'number' || prior === current) return [];
-    return [{ option: label, direction: current > prior ? 'up' as const : 'down' as const }];
+    // By id as well as label: two options may share a label (Codex buddy P2), and the state's entities carry the ids.
+    return [{ option_id: String(r.option_id), option: label, direction: current > prior ? 'up' as const : 'down' as const }];
   });
   const { inputs } = plan;
   const movementUnavailable: MovementUnavailable | undefined = inputs.prior_withheld === true ? 'prior_withheld'
