@@ -79,6 +79,9 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     // CONTROL: a narrator that did not say it → the host says it, once; another risk's mention does not suppress it.
     const silent = decisionInputLines(graph, { restingText: 'I built the model. "Founder burnout" matters too.', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
     expect(silent.filter((l) => l.includes('left out of this analysis'))).toEqual([LEFT_OUT_RUN]);
+    // CONTROL: the narrator names THIS risk without saying it is left out → still said (the label alone never suppresses it).
+    const named = decisionInputLines(graph, { restingText: `I built the model. "${RISK}" is a real worry.`, questionsToggle: false, awaitingApproval: false, builtOrRan: true });
+    expect(named.filter((l) => l.includes('left out of this analysis'))).toEqual([LEFT_OUT_RUN]);
   });
 
   it('RED (CODEX P2): A7 is restored after the gate by its OWN words — never mistaken for the left-out line', () => {
