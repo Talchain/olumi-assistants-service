@@ -25,9 +25,7 @@ import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import { widenVariantOf } from '../guidance/index.js';
 import type { Target, Variant } from '../guidance/types.js';
 import { POLICY } from '../guidance/policy.js';
-import { levelFrameOf } from '../runtime/agent-capabilities.js';
-import { contradictsItsName } from '../stated-by-user.js';
-import { factorUnitOf, unitsConflict } from '../unit-conflict.js';
+import { doorLevelOf, estimateLevelPersists } from '../runtime/agent-capabilities.js';
 import { assembleGuidanceSignals, type GuidanceSignals as TurnSignals } from '../turn-context/guidance-signals.js';
 import { selectorSignalsOf, TALK_IT_THROUGH_CHIP, type MethodReadback } from './method-turn.js';
 
@@ -130,17 +128,6 @@ export function baselineOf(g: Graph, factorId: string, sqId: string | null): num
   const byId = new Map(g.nodes.map((n) => [String(n.id), n] as const));
   const sqIvs = sqId === null ? {} : rec(byId.get(sqId)?.interventions) ?? {};
   return numeric(sqIvs[factorId]) ?? numeric(rec(byId.get(factorId)?.observed_state)?.value) ?? null;
-}
-
-/**
- * A PROPOSED level on the stored scale, by the DOOR's own rule (`levelFrameOf`: the factor's cap, else its scale_frame;
- * a level inside 0..1 is stored as given): the figure the door would write, so £ and encoded values never meet raw.
- * Undefined when the door would not store it (outside the frame, or no frame and outside 0..1).
- */
-export function encodedLevelOf(factor: Rec | undefined, value: number): number | undefined {
-  const frame = levelFrameOf(factor as never);
-  const v = frame !== null ? value / frame : value;
-  return v >= 0 && v <= 1 ? v : undefined;
 }
 
 /** A proposal copies an option when it moves EXACTLY the same factors the same way; an `unknown` move matches any (fail closed). */
@@ -308,25 +295,21 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
       factorsSeen.add(id);
       /**
        * ⛔ THE GATE JUDGES WHAT THE WRITER WILL PERSIST, NEVER WHAT THE MODEL DECLARED (DL round 3, P1-F; the scope cut
-       * for v1). Every factor a Widen option changes carries Olumi's estimate level that the door WILL store. The door's
-       * per-level loop (`proposeNewOption`) leaves a level unset or refuses it on EXACTLY these paths, each mirrored here
-       * with the door's own helpers: (1) no level; (2) `unitsConflict(unit, factorUnitOf(raw, factor))`; (3) the user's
-       * split in another period (unreachable: the press message is our fixed chip text, no ratio); (4) not the user's
-       * figure and no estimate + basis; (5) `contradictsItsName(value, unit ?? factorUnit, label)`; (6) framed and
-       * outside 0..1; (7) unframed and outside 0..1. Plus a finite baseline for the move. Anything else refuses the
-       * WHOLE proposal: a lever that never persists can never make an option "distinct".
+       * for v1). Every factor a Widen option changes carries Olumi's estimate level that the door WILL store, judged by
+       * the DOOR'S OWN exported stages (DL 5950820450, structural; never a copy): `doorLevelOf` reads the level as the
+       * door does, and `estimateLevelPersists` runs its unit check, name rule (`unit ?? factorUnit`) and range, in its
+       * order. The door's other unset paths: no estimate + basis (WD-NO-NEW-FIGURES here) and the user's split in
+       * another period (unreachable: the press message is our fixed chip text, no ratio). Plus a finite baseline for
+       * the move. Anything else refuses the WHOLE proposal: a lever that never persists can never make it "distinct".
        */
       const level = rec(e?.level);
-      const value = typeof level?.value === 'number' && Number.isFinite(level.value) ? level.value : undefined;
-      if (level === undefined || value === undefined) { failed.add('WD-S-LEVEL'); continue; }
+      const lvl = doorLevelOf(level);
+      if (level === undefined || lvl === undefined) { failed.add('WD-S-LEVEL'); continue; }
       if (level.estimate !== true || typeof level.basis !== 'string' || level.basis.trim() === '') { failed.add('WD-NO-NEW-FIGURES'); continue; }
       const node = turn.graph.nodes.find((n) => String(n.id) === id);
-      // The door's own unit read: a non-empty string, trimmed; the factor's unit from its level, else a limit on it.
-      const unit = typeof level.unit === 'string' && level.unit.trim() !== '' ? level.unit.trim() : undefined;
-      const factorUnit = factorUnitOf(turn.raw, node as never);
-      if (unitsConflict(unit, factorUnit) !== null) { failed.add('WD-S-LEVEL'); continue; }
-      const encoded = encodedLevelOf(node, value);
-      if (encoded === undefined || contradictsItsName(value, unit ?? factorUnit, typeof o?.label === 'string' ? o.label : '')) { failed.add('WD-S-LEVEL'); continue; }
+      const persists = estimateLevelPersists(lvl, node as never, turn.raw, typeof o?.label === 'string' ? o.label : '');
+      if (!persists.ok) { failed.add('WD-S-LEVEL'); continue; }
+      const encoded = persists.value;
       // DL P1-E: the persisted level decides the move, on the door's own frame against the same baseline as the existing
       // options. No finite baseline = no move (refused); today's level, or a move against the declared word, is refused.
       const derived = moveOf(encoded, baselineOf(turn.graph, id, turn.sq));
