@@ -44,6 +44,7 @@
  * DL HIGH PASS condition (the KNOWN one-off after deploy):
  *   F13 a PRE-DEPLOY prior (no factor digests; its residual computed without exception 4, exactly as before) beside a
  *       post-deploy Run, NO edit → partial, []; the next pair, both post-deploy → complete, [].
+ *   F13b the same with NO factor carried, so the one-off comes from the authorship members alone.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -470,6 +471,21 @@ describe('0.73.0 factor authorship — a user\'s value edit is credited pairwise
     const preDeploy = { ...rest, factors: preDeployFactors, residual_digest: preDeployResidual! } as RunInputSnapshot;
     expect(diffRunInputs(preDeploy, p.b.snapshot)).toEqual({ rows: [], complete: false });
     expect([p.complete, p.rows], 'the next rerun (both post-deploy)').toEqual([true, []]);
+  });
+
+  it('F13b: the same one-off comes from the AUTHORSHIP members alone (no factor carried) → partial, []', async () => {
+    const unstated = (g: Rec) => {
+      for (const n of g.nodes) if (n.kind === 'factor' && n.observed_state) Object.assign(n.observed_state, { source: 'cee_inference' });
+    };
+    const p = await pair(() => {}, unstated);
+    expect(p.a.sent.graph.nodes.filter((n: Rec) => n.observed_state?.std === STATED_LEVEL_STD).map((n: Rec) => n.id), 'precondition: no σ carried').toEqual([]);
+    const { factors, residual_digest: _postDeploy, ...rest } = p.a.snapshot;
+    const preDeployFactors = factors.map(({ authorship_digest: _d, ...f }) => f);
+    const preDeployResidual = residualDigest(p.a.sent, { ...rest, factors: preDeployFactors } as never);
+    expect(preDeployResidual, 'the authorship members alone make the pre-deploy residual differ').not.toBe(p.a.snapshot.residual_digest);
+    const preDeploy = { ...rest, factors: preDeployFactors, residual_digest: preDeployResidual! } as RunInputSnapshot;
+    expect(diffRunInputs(preDeploy, p.b.snapshot)).toEqual({ rows: [], complete: false });
+    expect([p.complete, p.rows]).toEqual([true, []]);
   });
 
   it('the typed-figure stamp the digest matches IS the value writer\'s own constant', () => {
