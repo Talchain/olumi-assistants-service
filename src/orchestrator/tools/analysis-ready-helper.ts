@@ -1537,7 +1537,8 @@ export function assessCanonicalAnalysisReadiness(
         ...(detail.factorLabel ? { factor_label: detail.factorLabel } : {}),
       });
     }
-    const structural = validateGraphStructure(parsed.data);
+    // ⭐ K3 (`graph/inert-risk.ts`): a risk nobody has said the direction of is left out of the Run, never a block on it.
+    const structural = validateGraphStructure(parsed.data, { leaveOutInertRisks: true });
     structural.violations.forEach((violation, index) => {
       blockingIssues.push(structuralIssue(violation, index));
     });

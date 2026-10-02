@@ -80,6 +80,7 @@
  */
 
 import { limitSinkBranch } from '../graph/limit-sink-branch.js';
+import { inertRiskBranch } from '../graph/inert-risk.js';
 import type { GraphV3T } from "../schemas/cee-v3.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 import { isDecisionFreeShape } from "../validators/decision-free-shape.js";
@@ -371,16 +372,25 @@ export function wouldExceedAddRiskLimits(graph: GraphV3T): AddRiskPreflight {
   };
 }
 
-export function validateGraphStructure(graph: GraphV3T): StructuralValidationResult {
+export function validateGraphStructure(
+  graph: GraphV3T,
+  // ⭐ K3 (`graph/inert-risk.ts`): READINESS ONLY (`analysis-ready-helper.ts`) leaves an inert risk out of the Run rather
+  // than refusing it. The chat-edit gate (`edit-graph.ts`) does not pass it: an edit that dead-ends a risk is still refused,
+  // exactly as before (DL condition 2 on lease #85 5945974225).
+  opts: { readonly leaveOutInertRisks?: boolean } = {},
+): StructuralValidationResult {
   const violations: StructuralViolation[] = [];
+  const leftOut = opts.leaveOutInertRisks === true
+    ? inertRiskBranch(graph.nodes, graph.edges.filter(isDirected), limitIdsOf(graph))
+    : new Set<string>();
 
   checkRequiredNodeKinds(graph, violations);
   // No size check. Absolute graph size is `graphCaps`' question, not this
   // validator's — see the file header for the measurement that settled it.
-  checkOrphanNodes(graph, violations);
+  checkOrphanNodes(graph, violations, leftOut);
   checkOptionFactorEdges(graph, violations);
   checkOptionDecisionEdges(graph, violations);
-  checkPathToGoal(graph, violations);
+  checkPathToGoal(graph, violations, leftOut);
   checkCycles(graph, violations);
 
   return {
@@ -420,16 +430,17 @@ function checkRequiredNodeKinds(graph: GraphV3T, violations: StructuralViolation
   }
 }
 
-function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[]): void {
+function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[], leftOut: ReadonlySet<string>): void {
   // Build set of nodes that have at least one edge (directed or bidirected)
   const connected = new Set<string>();
   for (const edge of graph.edges) {
     connected.add(edge.from);
     connected.add(edge.to);
   }
+  // ⭐ K3: `leftOut` (readiness only) — a risk nobody has said the direction of is left out of the Run and said.
 
   for (const node of graph.nodes) {
-    if (!connected.has(node.id)) {
+    if (!connected.has(node.id) && !leftOut.has(node.id)) {
       violations.push({
         code: 'ORPHAN_NODE',
         detail: `Node "${node.id}" (${node.label}) has no edges`,
@@ -437,6 +448,13 @@ function checkOrphanNodes(graph: GraphV3T, violations: StructuralViolation[]): v
       });
     }
   }
+}
+
+/** The nodes a limit names (`goal_constraints`): never left out as an inert risk, and the limit-sink branch's roots. */
+function limitIdsOf(graph: GraphV3T): Set<string> {
+  return new Set(
+    (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
+  );
 }
 
 function isDirected(edge: GraphV3T['edges'][number]): boolean {
@@ -509,7 +527,7 @@ function checkOptionDecisionEdges(graph: GraphV3T, violations: StructuralViolati
   }
 }
 
-function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): void {
+function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[], leftOut: ReadonlySet<string>): void {
   const goalNodes = graph.nodes.filter((n) => n.kind === 'goal');
   if (goalNodes.length === 0) return; // Already caught by NO_GOAL check
 
@@ -652,9 +670,7 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
   // and every ancestor of it. Any other dead end — one reaching no limit, a limited node with an onward edge that misses
   // the goal, or a limited island no lever reaches — is still refused. Journey C's all-lever parents is a case of this;
   // an exogenous cause of a limited quantity is part of its branch (this supersedes #2129's parents-only contrast).
-  const limitTargetIds = new Set(
-    (graph.goal_constraints ?? []).map((c) => c.node_id).filter((id): id is string => typeof id === 'string'),
-  );
+  const limitTargetIds = limitIdsOf(graph);
   const limitSinkBranchIds = limitSinkBranch(graph.nodes, graph.edges.filter(isDirected), limitTargetIds);
 
   for (const node of graph.nodes) {
@@ -662,6 +678,8 @@ function checkPathToGoal(graph: GraphV3T, violations: StructuralViolation[]): vo
     if (node.kind === 'decision') continue; // Loop 1 owns the decision→goal relationship.
     if (canReachGoal.has(node.id)) continue;
     if (limitSinkBranchIds.has(node.id)) continue;
+    // ⭐ K3 (readiness only): a risk nobody has said the direction of, and a cause drawn only into it, is left out.
+    if (leftOut.has(node.id)) continue;
     if (node.kind === 'option' && optionsMissingFactorEdge.has(node.id)) continue;
     // Already caught by orphan check if it has no edges at all —
     // but an edged node can still be a dead-end with no path to the goal.
