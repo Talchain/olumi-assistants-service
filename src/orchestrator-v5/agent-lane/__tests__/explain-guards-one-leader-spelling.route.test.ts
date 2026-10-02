@@ -21,6 +21,7 @@ import { CURRENT_MODEL_STATE_PREFIX } from '../runtime/agent-loop.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
+import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import { explanationContext } from './fixtures/run-explanation-follow-up.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
 
@@ -190,6 +191,26 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     expect(state.analysis.leader_claim.permitted).toBe(true);
     expect(state.analysis.claim_permissions, JSON.stringify(state.analysis)).toEqual({ leader_may_be_named: false, permitted_analysis_mode: 'exploratory' });
     expect(state.analysis.claim_permissions.leader_may_be_named).toBe(tool.claim_permissions.leader_may_be_named);
+  });
+
+  it('D6-c (DL 4563ad): over the producer’s four admission cells, a separated permitted Run reads ONE permission on the follow-up and the Run turn, never looser than the one licence', async () => {
+    // The producer's joint domain (`analysis-admission.ts`): none/exploratory only with structurally_analysable false,
+    // quantified_provisional/comparative_leader only with true.
+    const cells = [['none', false, false], ['exploratory', false, false], ['quantified_provisional', true, true], ['comparative_leader', true, true]] as const;
+    for (const [mode, analysable, nameable] of cells) {
+      read = fresh();
+      modelBodies = [];
+      read.analysis_admission = { ...read.analysis_admission, permitted_analysis_mode: mode, structurally_analysable: analysable };
+      expect(read.analysis_state.leader_claim).toEqual({ permitted: true, separation: 'separated' });
+      const licence = leaderLicenceFromState(read.analysis_state, { analysis_admission: read.analysis_admission });
+      const tool = await runToolOutput();
+      const state = await followUpState();
+      const followUp = state.analysis.claim_permissions as Json;
+      expect(followUp.leader_may_be_named, mode).toBe(nameable);
+      expect(followUp, mode).toEqual(tool.claim_permissions);
+      // Never looser than the licence: nameable only where the one licence is not `withheld`.
+      if (followUp.leader_may_be_named === true) expect(licence, mode).not.toBe('withheld');
+    }
   });
 
   it('D6-b CONTROL: comparative_leader and permitted — leader_may_be_named true on both the Run turn and the follow-up', async () => {
