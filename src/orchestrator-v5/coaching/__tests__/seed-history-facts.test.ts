@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
-import { seedHistoryFacts } from '../seed-reuse.js';
+import { historyPredatesRun, seedHistoryFacts } from '../seed-reuse.js';
 import { orderSuccessfulRunAnalysisFactsNewestFirst } from '../../context/freshness.js';
 import {
   SCENARIO_ANALYSIS_FACT_CAP,
@@ -106,5 +106,46 @@ describe('seedHistoryFacts — the window first; the durable set only when the w
     expect(seedOf(seedHistoryFacts({ scenarioId: SCENARIO, hotWindow: [], durable: degraded }))).toBe('no_prior_run');
     expect(seedOf(seedHistoryFacts({ scenarioId: SCENARIO, hotWindow: [], durable: undefined }))).toBe('no_prior_run');
     expect(seedOf(seedHistoryFacts({ scenarioId: SCENARIO, hotWindow: [A], durable: undefined }))).toBe('111');
+  });
+});
+
+/**
+ * ⛔ `historyPredatesRun` — a durable history is PAIRED with THIS Run only when every Run in it is older IN THE
+ * SELECTORS' OWN ORDER (`freshness.ts` sorts `computed_at` lexicographically; chronology only in `toISOString` form).
+ * CODEX on 99b8728a: a parse-based gate admitted a second-precision / offset partial that the selectors then ordered
+ * AFTER this Run — it evaded C2 and skipped F-LIMIT.
+ */
+describe('historyPredatesRun — older in the order the selectors use, or not at all', () => {
+  const at = (computed_at: string | undefined): HandlerFact =>
+    ({ fact_type: 'run_analysis', result: computed_at === undefined ? {} : { computed_at } }) as unknown as HandlerFact;
+  const B = at('2026-10-02T10:00:00.001Z');
+
+  it('a canonical, strictly older history → pairs', () => {
+    expect(historyPredatesRun([at('2026-10-02T09:59:59.999Z'), at('2026-10-02T08:00:00.000Z')], B)).toBe(true);
+  });
+
+  it.each([
+    ['CODEX r3: second precision — chronologically older, but the selectors sort it AFTER B', '2026-10-02T10:00:00Z'],
+    ['CODEX r3: an offset form (10:30+01:00 = 09:30Z, older) — the selectors compare the string', '2026-10-02T10:30:00+01:00'],
+    ['equal to B (the selectors keep insertion order: not provably older)', '2026-10-02T10:00:00.001Z'],
+    ['newer than B (clock skew)', '2099-01-01T00:00:00.000Z'],
+    ['a canonical-LOOKING but unparseable timestamp that the string order would call older (minute 61)', '2026-10-02T09:61:00.000Z'],
+    ['an offset form the STRING order calls older (09:30-02:00 sorts before B) but is 11:30Z — chronologically NEWER', '2026-10-02T09:30:00-02:00'],
+  ])('refuses %s', (_name, computedAt) => {
+    expect(historyPredatesRun([at('2026-10-02T08:00:00.000Z'), at(computedAt)], B)).toBe(false);
+  });
+
+  it.each([
+    ['CODEX r4: 30 February (sorts below 1 March; parses to 2 March, AFTER B)', '2026-02-30T12:00:00.000Z', '2026-03-01T12:00:00.000Z'],
+    ['CODEX r4: hour 24 (sorts below 1 March 00:00; parses to the SAME instant)', '2026-02-28T24:00:00.000Z', '2026-03-01T00:00:00.000Z'],
+  ])('refuses %s — the canonical shape is not enough; the timestamp must round-trip', (_name, computedAt, current) => {
+    expect(computedAt < current, 'precondition: the string order calls it older').toBe(true);
+    expect(historyPredatesRun([at(computedAt)], at(current))).toBe(false);
+  });
+
+  it('refuses a history Run with no computed_at, and a current Run whose own timestamp is not canonical', () => {
+    expect(historyPredatesRun([at(undefined)], B)).toBe(false);
+    expect(historyPredatesRun([at('2026-10-02T08:00:00.000Z')], at('2026-10-02T10:00:00Z'))).toBe(false);
+    expect(historyPredatesRun([at('2026-10-02T08:00:00.000Z')], undefined)).toBe(false);
   });
 });
