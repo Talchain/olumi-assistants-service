@@ -1670,7 +1670,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // Olumi's fixed line, then what the CURRENT readback owes, in the live Run turn's order and by its helpers: the
           // withheld goal chance's sentence, the at-rest asks (D1 + A7, `decision-input-ask.ts`), the break-even arithmetic
           // while the leader is withheld, A7's fold. On the same state this is the words the user first saw.
-          const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true, ranAnalysis: true };
+          const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
           const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
           const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
           const withoutAsks = withDisclosures(RUN_RESULT_READY_TEXT, owedNow);
@@ -2864,9 +2864,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       builtOrRan: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
         || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)
           || (c.name === 'run_analysis' && (result.tool_results[i] as { ran?: unknown } | undefined)?.ran === true)),
-      // ⭐ K3: the analysis RAN on this turn (never the build alone) — the Run names a kept risk it left out.
-      ranAnalysis: (fastPath === 'run' && (result.tool_results[0] as { ran?: unknown } | undefined)?.ran === true)
-        || result.tool_calls.some((c, i) => c.name === 'run_analysis' && (result.tool_results[i] as { ran?: unknown } | undefined)?.ran === true),
     };
     const decisionCtx = {
       ...decisionTurn,

@@ -4232,16 +4232,20 @@ function admitOnce(
 
   // ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out
   // of this analysis — the Run proceeds — and said so, with the one question that brings it in.
-  // A cause drawn only into it goes with it, and is named in the same line (DL condition 3): nothing is left out unsaid.
-  const sayLeftOut = (n: { id: string; label?: string }, goal: { label?: string }, causes: readonly string[]): void => {
-    const withCauses = causes.length === 0 ? '' : ` (with ${causes.map((c) => `"${c}"`).join(', ')}, drawn only into it)`;
+  // Everything left out with it is named in the same line (DL condition 3; CODEX P2: the WHOLE branch, not one hop, in words
+  // that stay true when one cause feeds two left-out risks): nothing is left out unsaid.
+  const sayLeftOut = (n: { id: string; label?: string }, goal: { label?: string }, withIt: readonly string[]): void => {
+    const named = withIt.map((c) => `"${c}"`);
+    const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+    const alsoOut = named.length === 0 ? ''
+      : named.length === 1 ? `, and so is ${list}, which feeds only what is left out` : `, and so are ${list}, which feed only what is left out`;
     loss.push({
       field_path: `nodes[${n.id}].left_out_of_analysis`,
       before: n.label,
       after: n.label,
       reason:
-        `"${n.label}"${withCauses} is kept in the model but left out of this analysis, because nothing says which way it `
-        + `moves "${goal.label}". Say whether it raises or lowers "${goal.label}" and it will count.`,
+        `"${n.label}" is kept in the model but left out of this analysis, because nothing says which way it moves `
+        + `"${goal.label}"${alsoOut}. Say whether it raises or lowers "${goal.label}" and it will count.`,
       severity: 'warn',
     } as RepairEntry);
   };
@@ -4432,8 +4436,13 @@ function admitOnce(
       // The risk itself is said; a cause drawn only into it is left out with it and comes back when the risk does.
       if (leftOut.has(n.id)) {
         if (n.kind === 'risk') {
-          const causes = nodes.filter((c) => c.kind !== 'risk' && leftOut.has(c.id) && edgesNow.some((e) => e.from === c.id && e.to === n.id));
-          sayLeftOut(n, goalForReach, causes.map((c) => c.label ?? c.id));
+          // Every non-risk node of the left-out branch upstream of this risk, however many hops (the branch is closed).
+          const upstream = new Set<string>(); const walk = [n.id];
+          while (walk.length > 0) {
+            const at = walk.pop()!;
+            for (const e of edgesNow) if (e.to === at && leftOut.has(e.from) && !upstream.has(e.from)) { upstream.add(e.from); walk.push(e.from); }
+          }
+          sayLeftOut(n, goalForReach, nodes.filter((c) => c.kind !== 'risk' && upstream.has(c.id)).map((c) => c.label ?? c.id));
         }
         continue;
       }

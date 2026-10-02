@@ -50,11 +50,6 @@ export interface DecisionInputAskContext {
   readonly awaitingApproval: boolean;
   /** This turn built the model or ran the analysis (the brief and Run turns). */
   readonly builtOrRan: boolean;
-  /**
-   * ⭐ K3 (DL on lease #85 5945974225): this turn RAN the analysis (a Run, or its replay) — not the build, whose own reply
-   * already says a left-out risk (admission's ledger). The Run names each kept risk it left out, once per Run.
-   */
-  readonly ranAnalysis?: boolean;
 }
 
 /** A duration limit the analysis scores (a week/month/day constraint): then the deadline is answered, not just held. */
@@ -119,14 +114,19 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
     .map((n) => `"${String(n.label ?? n.id)}" is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`);
 }
 
+/** A7's own opener: the one way A7 is told apart from the other owed lines (CODEX K3 P2: never "the first non-ask line"). */
+const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
+
 export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext): string[] {
   if (!ctx.builtOrRan) return [];
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return [];
-  const leftOut = ctx.ranAnalysis === true ? leftOutLines(graph, label) : [];
+  // ⭐ K3 (DL on lease 5945974225; CODEX P1): HOST-said on the build turn (and its automatic first analysis) and on every
+  // Run — never left to the narrator, whose words may omit it.
+  const leftOut = leftOutLines(graph, label);
   const within = withinMonths(goal);
-  const a7 = within !== '' && !hasDurationLimit(graph) ? `This model doesn't yet say whether any option gets there${within}.` : null;
+  const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
   const wanted = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
   const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
@@ -166,7 +166,7 @@ export function withA7AfterGate(
 ): string {
   // Unfolded: the lines owed with nothing at rest yet; only A7 is ever inserted here.
   const owedLines = decisionInputLines(graph, { ...ctx, restingText: '', questionsToggle: false });
-  const a7 = owedLines.find((l) => !l.endsWith('as your target.'));
+  const a7 = owedLines.find((l) => l.startsWith(A7_OPENER));
   if (a7 === undefined || text.includes(a7)) return text;
   const rest = textAtRest(text);
   if (rest !== text && words(rest) + TOGGLE_LABEL_WORDS + words(a7) > AT_REST_WORD_BOUND) return text;

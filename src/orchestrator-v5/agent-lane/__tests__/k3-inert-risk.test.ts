@@ -14,7 +14,7 @@ import type { InternalDispatch } from '../runtime/agent-capabilities.js';
 import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { inertRiskBranch } from '../../../graph/inert-risk.js';
-import { decisionInputLines } from '../decision-input-ask.js';
+import { decisionInputLines, withA7AfterGate } from '../decision-input-ask.js';
 import { structuralFacts } from '../structural-facts.js';
 
 type Rec = Record<string, any>;
@@ -59,14 +59,25 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     expect(validateGraphStructure(graph as never, { leaveOutInertRisks: true }).violations).toEqual([]);
   });
 
-  it('the Run names it ONCE (DL): on the Run turn only — not the build (admission said it), not once it is connected', async () => {
+  it('HOST-said (CODEX P1): on the build turn and every Run — never left to the narrator; not on follow-ups; gone once connected', async () => {
     const { graph } = await build();
     const at = { restingText: 'Your results are ready.', questionsToggle: false, awaitingApproval: false, builtOrRan: true };
-    expect(decisionInputLines(graph, { ...at, ranAnalysis: true }).filter((l) => l.includes('left out'))).toEqual([LEFT_OUT_RUN]);
-    expect(decisionInputLines(graph, { ...at, ranAnalysis: false }).filter((l) => l.includes('left out')), 'the build turn').toEqual([]);
+    expect(decisionInputLines(graph, at).filter((l) => l.includes('left out'))).toEqual([LEFT_OUT_RUN]);
+    expect(decisionInputLines(graph, { ...at, builtOrRan: false }).filter((l) => l.includes('left out')), 'a follow-up turn').toEqual([]);
     const goalId = (graph.nodes as Rec[]).find((n) => n.kind === 'goal')!.id;
     const connected = { ...graph, edges: [...(graph.edges as Rec[]), { from: riskId(graph), to: goalId }] };
-    expect(decisionInputLines(connected, { ...at, ranAnalysis: true }).filter((l) => l.includes('left out')), 'connected').toEqual([]);
+    expect(decisionInputLines(connected, at).filter((l) => l.includes('left out')), 'connected').toEqual([]);
+  });
+
+  it('RED (CODEX P2): A7 is restored after the gate by its OWN words — never mistaken for the left-out line', () => {
+    const goal = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')).goal_after_build as Rec;
+    const g = { nodes: [goal, { id: 'opt_a', kind: 'option', label: 'Angel pilot' }, { id: 'f_x', kind: 'factor', label: 'Founder hours' }, { id: 'r_b', kind: 'risk', label: 'Founder burnout' }], edges: [{ from: 'f_x', to: 'r_b' }] };
+    const owed = decisionInputLines(g, { restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
+    const [left, a7, ask] = owed;
+    expect(left).toContain('"Founder burnout" is left out of this analysis');
+    expect(a7).toMatch(/^This model doesn't yet say whether any option gets there/);
+    const folded = `Your results are ready.\n\n${left}\n\n${ask}`;
+    expect(withA7AfterGate(folded, g, { awaitingApproval: false, builtOrRan: true }, null)).toBe(`Your results are ready.\n\n${left}\n\n${a7}\n\n${ask}`);
   });
 
   it('the Agent is never told it "cannot reach the goal" (the Run no longer has that blocker)', async () => {
@@ -76,14 +87,16 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     expect(facts.entities_with_no_connections).not.toContain(RISK);
   });
 
-  it('a cause drawn ONLY into the risk goes with it and is NAMED in the same line (DL condition 3)', async () => {
+  it('the WHOLE left-out branch is NAMED in the same line, however many hops (DL condition 3; CODEX P2)', async () => {
     const d = JSON.parse(FX.output_text) as Rec;
-    d.factors = [...d.factors, { label: 'Vendor staff turnover', role: 'external', baseline_known: false, baseline_value: null, unit: 'percent', provenance: 'ai_proposed', plausible_max: 100 }];
-    d.links = [...d.links, { from: 'Vendor staff turnover', to: RISK, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null }];
+    const ext = (label: string) => ({ label, role: 'external', baseline_known: false, baseline_value: null, unit: 'percent', provenance: 'ai_proposed', plausible_max: 100 });
+    const link = (from: string, to: string) => ({ from, to, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
+    d.factors = [...d.factors, ext('Vendor contract churn'), ext('Vendor staff turnover')];
+    d.links = [...d.links, link('Vendor contract churn', 'Vendor staff turnover'), link('Vendor staff turnover', RISK)];
     const { graph, out } = await build(JSON.stringify(d));
     expect(assessCanonicalAnalysisReadiness(graph).safeToAnalyse).toBe(true);
     expect((out.not_represented as string[]).filter((s) => s.includes('left out of this analysis'))).toEqual([
-      `"${RISK}" (with "Vendor staff turnover", drawn only into it) is kept in the model but left out of this analysis, because nothing says which way it moves "${GOAL}". Say whether it raises or lowers "${GOAL}" and it will count.`,
+      `"${RISK}" is kept in the model but left out of this analysis, because nothing says which way it moves "${GOAL}", and so are "Vendor contract churn" and "Vendor staff turnover", which feed only what is left out. Say whether it raises or lowers "${GOAL}" and it will count.`,
     ]);
   });
 });
@@ -102,9 +115,12 @@ describe('the ONE definition: only a risk, and only what reaches the goal throug
   it('CONTROL (DL condition 1): an option whose ONLY path runs through the risk stays REFUSED — never a silent "no effect"', () => {
     const x = g(base, [['opt', 'f'], ['f', 'r']]);
     expect(inertRiskBranch(x.nodes, x.edges, []).has('f'), 'what an option acts on never joins').toBe(false);
-    const graph = { nodes: [...base.map((n) => ({ ...n, label: n.id })), { id: 'dec', kind: 'decision', label: 'd' }, { id: 'opt2', kind: 'option', label: 'o2' }],
-      edges: [{ from: 'dec', to: 'opt' }, { from: 'dec', to: 'opt2' }, { from: 'opt', to: 'f' }, { from: 'opt2', to: 'f' }, { from: 'f', to: 'r' }] };
-    expect(validateGraphStructure(graph as never, { leaveOutInertRisks: true }).violations.map((v) => v.code)).toContain('NO_PATH_TO_GOAL');
+    // A comparison that otherwise runs (opt2 → f2 → goal), so the refusal is bound to the stranded factor's IDENTITY (CODEX).
+    const graph = { nodes: [...base.map((n) => ({ ...n, label: n.id })), { id: 'dec', kind: 'decision', label: 'd' }, { id: 'opt2', kind: 'option', label: 'o2' }, { id: 'f2', kind: 'factor', label: 'f2' }],
+      edges: [{ from: 'dec', to: 'opt' }, { from: 'dec', to: 'opt2' }, { from: 'opt', to: 'f' }, { from: 'opt2', to: 'f2' }, { from: 'f2', to: 'goal' }, { from: 'f', to: 'r' }] };
+    const noPath = validateGraphStructure(graph as never, { leaveOutInertRisks: true }).violations.filter((v) => v.code === 'NO_PATH_TO_GOAL');
+    // The stranded option AND what it acts on are refused by name; the left-out risk and the working comparison are not.
+    expect(noPath.map((v) => v.detail.match(/^Node "([^"]+)"/)?.[1])).toEqual(['opt', 'f']);
   });
 
   it('CONTROL: a dead-end FACTOR, a lever drawn only into the risk, a risk an option acts on, and a limited risk are never left out', () => {
