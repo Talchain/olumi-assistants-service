@@ -24,11 +24,25 @@ function masked(reply: string, labels: readonly (string | undefined)[]): string 
  * is the user's word), and never when it is nothing but banned words ('Odds', 'Leads': fails closed). An unrelated
  * common-word label ('Will') can never hide Olumi's claim 'This plan will fail' (CEE #2480 CR P1 #4).
  */
-function banned(text: string, ban: RegExp, labels: readonly (string | undefined)[]): boolean {
+function maskedFor(text: string, ban: RegExp, labels: readonly (string | undefined)[]): string {
   const whole = new RegExp(`^[^\\p{L}\\p{N}]*(?:${ban.source})[^\\p{L}\\p{N}]*$`, 'iu');
   const own = labels.filter((label): label is string => typeof label === 'string'
     && ban.test(foldQuotes(label)) && !whole.test(foldQuotes(label).trim()));
-  return ban.test(masked(text, own));
+  return masked(text, own);
+}
+function banned(text: string, ban: RegExp, labels: readonly (string | undefined)[]): boolean {
+  return ban.test(maskedFor(text, ban, labels));
+}
+const INTERNAL_VALUE = /\b(internal scale|normali[sz]ed (value|values|scale|figures?)|unit interval)\b/iu;
+/**
+ * shared.internal_value_terms: the internal/normalised value terms Olumi's own text uses, after per-ban label masking
+ * (a user label such as 'Internal scale-up plan' is the user's word). REPORTS lower-cased unique terms in order and never
+ * edits: AI HARNESS's first-run explanation guard replaces the WHOLE explanation on any hit (backstop; RC 5945450369).
+ * Deliberately NOT a RERUN-EXPLANATION post-check: that list is live on the served M2 path (HARNESS CR on #2505).
+ */
+export function internalValueTerms(text: string, labels: readonly (string | undefined)[] = []): string[] {
+  const hits = [...maskedFor(text, INTERNAL_VALUE, labels).matchAll(new RegExp(INTERNAL_VALUE.source, 'giu'))].map(match => match[0].toLowerCase());
+  return [...new Set(hits)];
 }
 /**
  * RX-NO-CONTRARY-SAME: every "nothing / no input changed" claim (seven forms passed the two-phrase ban once M2 relied on
