@@ -1,4 +1,4 @@
-import { scopeIssuesAfterWrite } from './agent-lane/goal-scope.js';
+import { assertNoPendingScopeAmendment, scopeIssuesAfterWrite } from './agent-lane/goal-scope.js';
 /**
  * V5 commit stage — slice B.
  *
@@ -1262,12 +1262,19 @@ export async function commitDirectAnswer(
   // then derive every hash-dependent decision from the projected bytes.
   // Stable entity refs go on the SAME projected bytes, before any hash is taken from them (`graph/entity-refs.ts`):
   // the base's ref for a node id wins, so an edit path that dropped `ref` cannot renumber an entity.
+  const baseForWrite = await refBaseFor(metadata, store);
+  if (graphWasProvided(metadata.graph)) {
+    const priorForScope = typeof store.readMostRecentPendingActions === 'function'
+      ? await store.readMostRecentPendingActions(metadata.scenario_id, { validation: 'strict' })
+      : metadata.priorPendingActions ?? [];
+    assertNoPendingScopeAmendment(metadata.graph, baseForWrite, priorForScope);
+  }
   const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
-  }), await refBaseFor(metadata, store)).graph;
+  }), baseForWrite).graph;
   const atomicVersionPlan = buildAtomicCommittedModelVersion(
     projectedGraphForStore,
     metadata,

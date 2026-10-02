@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { classifyValueSource } from '../../cee/graph-readiness/obligation-provenance.js';
 import { GOAL_SCOPE_UNRESOLVED_REASON, GoalScopeSchema, goalScopeMeaning, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
-import { RECONCILIATION_TOLERANCE, unitsCompose } from './reconciling-product.js';
+import { RECONCILIATION_TOLERANCE, unitsCompose, sameUnit, readMoneyTotal } from './reconciling-product.js';
 import { figureTheUserWrote } from './stated-by-user.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { isPendingActionExpired, PENDING_KIND_CLAIMS_BARE_NUMBER } from '../session/pending-action.js';
@@ -91,7 +91,12 @@ export function scopePendingResolved(action: GoalScopeReconciliation, graph: unk
   if (!goal) return true; // The referent was explicitly removed; never bind an answer to another node.
   if (!action.scope || !scopeOf(goal.goal_scope) || stableStringify(goalScopeMeaning(goal.goal_scope)) !== stableStringify(goalScopeMeaning(action.scope))) return false;
   if (identityConflictsWithScope(goal, action.scope)) return false;
-  if (action.current_level && native(goal)?.value !== action.current_level.value) return false;
+  if (action.current_level) {
+    const recorded = native(goal), claimed = action.current_level;
+    const a = readMoneyTotal(recorded?.unit, String(goal.label)), b = readMoneyTotal(claimed.unit, String(goal.label));
+    if (!recorded || recorded.value !== claimed.value || !(sameUnit(recorded.unit, claimed.unit)
+      || a && b && a.code === b.code && a.period === b.period)) return false;
+  }
   const check = goalScopeCheck(graph, action.goal_id, action.scope, action.current_level);
   return scopeReadyToApprove(action.scope, check);
 }

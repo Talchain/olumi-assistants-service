@@ -24,7 +24,7 @@ import type { HandlerInvocation } from '../../tools/registry.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { breakEvenFor } from '../break-even.js';
-import { buildAtomicCommittedModelVersion } from '../../commit.js';
+import { buildAtomicCommittedModelVersion, commitDirectAnswer } from '../../commit.js';
 import { appendCheckedGraphWrite } from '../../persist-graph-write.js';
 import { config } from '../../../config/index.js';
 
@@ -61,10 +61,10 @@ async function harness(g = g0()) {
   let app = Fastify(); apps.push(app); await registerRoute(app); await readRoute(app); await app.ready();
   const dispatch: InternalDispatch = async (path, body) => { const r = await app.inject({ method: 'POST', url: path, payload: body as Rec }); return { status: r.statusCode, json: r.json() as Rec }; };
   let proposals = new ProposalStore();
-  let caps = createAgentCapabilities(dispatch, proposals, undefined, 'live', undefined, { readPendingActions: store.readMostRecentPendingActions });
+  let caps = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { readPendingActions: store.readMostRecentPendingActions });
   const context = (words: string, extra: Rec = {}): AgentToolContext => ({ scenario_id: SID, authenticated_user_id: null, request_id: 'req-spine', user_turn_text: words, user_text: words, ...extra });
   const call = (name: string, args: Rec, words = '', extra: Rec = {}) => dispatchTool(name, JSON.stringify(args), context(words, extra), caps);
-  const restart = () => { row.graph = jsonb(row.graph); row.pending = jsonb(row.pending).map(p => parsePendingAction(p)!); proposals = new ProposalStore(); caps = createAgentCapabilities(dispatch, proposals, undefined, 'live', undefined, { readPendingActions: store.readMostRecentPendingActions }); };
+  const restart = () => { row.graph = jsonb(row.graph); row.pending = jsonb(row.pending).map(p => parsePendingAction(p)!); proposals = new ProposalStore(); caps = createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, { readPendingActions: store.readMostRecentPendingActions }); };
   const retain = (r: ToolResult) => { const p = parsePendingAction(r.pending_action); expect(p).not.toBeNull(); row.pending = [clone(p!)]; };
   const read = () => dispatch(`/assist/v1/scenarios/${SID}/graph`, {});
   const register = (g: Graph) => dispatch(`/assist/v1/scenarios/${SID}/graph/register`, { graph: g });
@@ -124,6 +124,9 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
     const h = await harness(); await open(h); await share(h);
     const fit = clone(h.row.graph); goal(fit).observed_state = { raw_value: 10000, baseline: .4, value: .4, cap: 25000, unit: '£/month', source: 'user_override' };
     expect((await h.register(fit)).status).toBe(422); expect(h.row.writes).toHaveLength(0);
+    await expect(commitDirectAnswer({ response_version: 2, assistant_text: 'Record the baseline', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'frame' } as never,
+      { scenario_id: SID, turn_id: 'silent-fit', turn_class: 'direct_answer', graph: fit, baseGraphForInvariants: h.row.graph } as never, h.store as never)).rejects.toMatchObject({ code: 'GOAL_SCOPE_IDENTITY_CONFLICT' });
+    expect(h.row.writes).toHaveLength(0);
     const confirmed = clone(h.row.graph); (goal(confirmed).nonlinear_identity as Rec).stated_in_brief = true;
     expect((await h.register(confirmed)).status).toBe(422); expect(count(h.row.graph)).toBe(300);
   });
@@ -137,7 +140,7 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
     expect(h.row.writes).toHaveLength(0); expect(goal(h.row.graph)).toHaveProperty('nonlinear_identity'); expect(count(h.row.graph)).toBe(300);
   });
   it('S6–S7: competing ask or expired binding requires a fresh question, retains the unresolved operands', async () => {
-    const h = await harness(); await open(h); h.row.pending[0]!.expires_at_turn_count = 0; h.restart();
+    const h = await harness(); await open(h); h.row.pending[0] = { ...h.row.pending[0]!, expires_at_turn_count: 0 }; h.restart();
     const r = await h.call('reconcile_goal_scope', { goal_label: 'MRR', component_share: .3, source_quote: '30% currently' }, '30% currently');
     expect(r).toMatchObject({ refusal: 'share_not_bound' }); h.retain(r);
     expect(h.row.pending[0]!.action).toMatchObject({ current_level: { value: 10000 }, expected: 'component_share' });
@@ -161,7 +164,7 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
     h.row.pending = []; expect(await approve(h, p)).toMatchObject({ refusal: 'superseded' });
   });
   it('S7: a full scope argument cannot bypass an expired bare-answer binding', async () => {
-    const h = await harness(); await open(h); h.row.pending[0]!.expires_at_turn_count = 0;
+    const h = await harness(); await open(h); h.row.pending[0] = { ...h.row.pending[0]!, expires_at_turn_count: 0 };
     const scope = { ...initialScope, component: { ...initialScope.component, share: .3, source: { quote: '30% currently' } } };
     expect(await h.call('reconcile_goal_scope', { goal_label: 'MRR', scope }, '30% currently')).toMatchObject({ refusal: 'share_not_bound' });
     expect(h.row.writes).toHaveLength(0);
@@ -188,7 +191,7 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
     h.clearHistory(); h.restart(); const read = await h.read(); expect(read.status).toBe(200); expect(read.json.brief_text).toBeNull();
     const canonical = GraphV3.parse(read.json.graph); expect(canonical.nodes.find(n => n.id === 'mrr')!.goal_scope?.extent).toBe('total');
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SID, 'req-load', h.store as never);
-    const run = vi.fn(async () => ({ meta: { seed_used: 1, n_samples: 1, response_hash: 'sha256:s' }, results: [], response_hash: 'sha256:t', analysis_status: 'completed' }));
+    const run = vi.fn(async (_input: unknown) => ({ meta: { seed_used: 1, n_samples: 1, response_hash: 'sha256:s' }, results: [], response_hash: 'sha256:t', analysis_status: 'completed' }));
     const handler = createRunAnalysisHandler({ plotClient: { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient, scenarioReader: vi.fn(async () => snapshot) });
     await handler({ context: { stage: 'analyse', entity_registry: { option_ids: [], goal_id: null }, capabilities: {}, messages: [], session_id: SID, request_id: 'req-run', budgets: { turn_ms: 180000, llm_narrate_ms: 60000 }, prior_turns: [], prior_facts: [], scenarioBriefText: null, persistedGraph: null }, payload: makeMessagePayload({ turn_id: 't-run', scenario_id: SID, message: 'run analysis', turn_class: 'decide', stage: 'analyse' }), requestId: 'req-run', signal: new AbortController().signal, orientationText: '' } as unknown as HandlerInvocation);
     expect(run).toHaveBeenCalledTimes(1);

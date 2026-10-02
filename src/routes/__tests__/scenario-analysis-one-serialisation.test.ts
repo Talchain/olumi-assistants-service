@@ -241,8 +241,9 @@ describe('Semantic spine: unresolved scope uses the existing claim licence', () 
     expect(gated.analysis_state?.run_state).toEqual(ordinary.analysis_state.run_state);
     expect(gated.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'goal_scope_unresolved' });
     expect(gated.analysis_result).not.toBeNull();
-    expect(gated.analysis_result?.leading_option_id).toBeNull();
-    expect((gated.analysis_result?.enrichment?.decision_brief as Rec)).not.toHaveProperty('headline');
+    if (gated.analysis_result?.type !== 'analysis_result') throw new Error('Expected the retained exploratory analysis result');
+    expect(gated.analysis_result.leading_option_id).toBeNull();
+    expect((gated.analysis_result.enrichment?.decision_brief as Rec)).not.toHaveProperty('headline');
     expect(gated.current_read.current_analysis_hash).toBe(ordinary.current_read.current_analysis_hash);
     expect(fact.result.leading_option_id).toBe('option-b');
   });

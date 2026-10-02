@@ -41,7 +41,13 @@ After the Phase 1 local chain passed, both free-month and per-seat controls pass
 
 The implementation was rebased onto staging CEE `aac1b37936cd2bc051ea48e78f10eef0e31578ad` (the newer final-licence join). Read-only health and Render evidence identified that CEE build alongside PLoT `4526e4322764ba9b33690cdcd87320bc9e77261f` and ISL `842254da5aab6ff9aa8caf9c2ace1a59cc42e600`. The historical captured export's UI build is not asserted to be the current UI build.
 
-Focused verification after the rebase passed 96 tests; the remaining regression failures from the first full run were closed by a 124-test targeted pass. Final source, lint and full required-suite results are recorded below when complete.
+Focused verification after the rebase passed 96 tests; regression closure passed 124 tests. The final withdrawal/restart check passed 16 tests, the pre-hash turn-writer check passed 51, the regression type repairs passed 68, and the final pricing/unit controls passed 23. These runs overlap and are not an aggregate test denominator.
+
+Whole-repository lint passed with zero errors and two existing unused-disable warnings; final changed files passed lint. Source-only typecheck passed in the isolated snapshot. On draft head `e8ceafa89`, Linux CI's required lint/typecheck/guards and all three test shards passed ([CI run](https://github.com/Talchain/olumi-assistants-service/actions/runs/37042292123)). CI exposed 11 new regression-test type errors; those were corrected without increasing the error allowance. The final required shards and type-drift check must pass on the final source head before this draft is ready.
+
+The first local full required run was RED. Its change-related failures were repaired and rechecked; a duplicate final local run was stopped after shared-machine timing stalls. Linux CI runs the complete required suite in the repository's existing three shards, with no suite exclusions or loosened CI limits.
+
+Unrelated advisories reproduce on base staging: graph evaluator (4 failures / 217 passes, [base run](https://github.com/Talchain/olumi-assistants-service/actions/runs/37031953191)) and conversation harness (5 failures / 614 passes, [base run](https://github.com/Talchain/olumi-assistants-service/actions/runs/37031953068)). The security audit was also red on the base CI run. This change does not alter dependencies or those advisories.
 
 Source typechecking uses an exact source snapshot with frozen dependencies under `/private/tmp`, avoiding an unrelated cloud-backed ancestor dependency lookup in the local OpenAI SDK. No project configuration or dependency versions were changed for that check.
 

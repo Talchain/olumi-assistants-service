@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import capture from './fixtures/semantic-spine/paul-20261002.json';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { goalScopeMeaning, type GoalScope } from '../../../schemas/goal-scope.js';
-import { goalScopeCheck, identityConflictsWithScope, reconciliationPending, refreshScopePending, scopeShareAnswerCanBind, scopeSourcesAreUserWords, assertNoScopedIdentityConflict } from '../goal-scope.js';
+import { goalScopeCheck, identityConflictsWithScope, reconciliationPending, refreshScopePending, scopeShareAnswerCanBind, scopeSourcesAreUserWords, assertNoScopedIdentityConflict, scopePendingResolved } from '../goal-scope.js';
 import { parsePendingAction, isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 import { computeSurvivingPriorPendingsDetailed } from '../../commit.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
@@ -49,13 +49,26 @@ describe('Paul 2 October: conversation to canonical goal meaning', () => {
     expect(GraphV3.parse(g).nodes.find(n => n.id === 'mrr')!.goal_scope).toEqual(scope);
     expect(scope).not.toHaveProperty('current_level');
   });
+  it('S5: a matching number in another currency or period cannot consume the baseline claim', () => {
+    const resolvedScope: GoalScope = { ...scope, component: { ...scope.component!, basis: 'different' } };
+    const g = graph(), goal = g.nodes.find(n => n.id === 'mrr')!;
+    goal.goal_scope = resolvedScope; delete goal.nonlinear_identity;
+    const action = { ...pa().action, kind: 'reconcile_goal_scope' as const, goal_id: 'mrr', goal_label: 'MRR', scope: resolvedScope,
+      current_level: current, expected: 'approval' as const, question: 'Approve', operands: [], derivations: [] };
+    goal.observed_state = { raw_value: 10000, unit: 'GBP/month', source: 'user_override' };
+    expect(scopePendingResolved(action, g)).toBe(true);
+    for (const unit of ['USD/month', 'GBP/year']) {
+      goal.observed_state = { raw_value: 10000, unit, source: 'user_override' };
+      expect(scopePendingResolved(action, g)).toBe(false);
+    }
+  });
   it('S6: issue survives JSON restart, unrelated revisions and exhausted answer TTL; the old share cannot bind', () => {
     const original = pa();
     const reloaded = parsePendingAction(JSON.parse(JSON.stringify(original)))!;
     expect(reloaded).toEqual(original);
   });
   it('S6: expiry retires answer binding, never the unresolved issue', () => {
-    const original = pa(); original.expires_at_turn_count = 0;
+    const original = { ...pa(), expires_at_turn_count: 0 };
     const restarted = parsePendingAction(JSON.parse(JSON.stringify(original)))!;
     expect(isPendingActionExpired(restarted, Date.now())).toBe(false);
     expect(scopeShareAnswerCanBind([restarted], 'mrr', Date.now())).toBe(false);
@@ -63,7 +76,7 @@ describe('Paul 2 October: conversation to canonical goal meaning', () => {
     expect(refreshScopePending(restarted, graph())?.action.kind).toBe('reconcile_goal_scope');
   });
   it('S7: bare share requires exactly one recent scoped ask without a competing number referent', () => {
-    const ask = pa(); ask.expires_at_iso = new Date(Date.now() + 10000).toISOString();
+    const ask = { ...pa(), expires_at_iso: new Date(Date.now() + 10000).toISOString() };
     expect(scopeShareAnswerCanBind([ask], 'mrr')).toBe(true);
     const competitor: PendingAction = { ...ask, id: 'other', chip_id: 'other', action: { kind: 'set_factor_value', factor_id: 'pro_paying_subscribers', value: 0, operator: 'set' } };
     expect(scopeShareAnswerCanBind([ask, competitor], 'mrr')).toBe(false);
