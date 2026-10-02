@@ -8,8 +8,19 @@ import { readMayNameLeadingOptionVerdictForFact } from '../../orchestrator-v5/co
 
 const mocks = vi.hoisted(() => ({
   getVersion: vi.fn(), facts: vi.fn(), identity: vi.fn(),
+  residualLeader: undefined as 'prior_leading_option_id' | 'current_leading_option_id' | undefined,
   session: { scenarioExists: vi.fn(), ensureScenarioExists: vi.fn(), getScenarioOwner: vi.fn(), loadGraph: vi.fn() },
 }));
+vi.mock('../../orchestrator-v5/coaching/build-run-delta.js', async (original) => {
+  const actual = await original<typeof import('../../orchestrator-v5/coaching/build-run-delta.js')>();
+  return { ...actual, buildRunDelta: (input: Parameters<typeof actual.buildRunDelta>[0]) => {
+    const built = actual.buildRunDelta(input);
+    if (built.kind !== 'ok' || mocks.residualLeader === undefined) return built;
+    // A residual from the real producer must be removed by the shared final egress.
+    return { ...built, delta: { ...built.delta,
+      leader: { ...built.delta.leader, [mocks.residualLeader]: 'opt-a' } } };
+  } };
+});
 vi.mock('../../orchestrator/user-identity.js', async (original) => ({
   ...await original<typeof import('../../orchestrator/user-identity.js')>(), resolveUserIdentity: mocks.identity,
 }));
@@ -28,6 +39,7 @@ import versionsRoute from '../assist.v1.scenario-versions.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.residualLeader = undefined;
   mocks.identity.mockResolvedValue({ mode: 'verified', userId: FIX_OWNER });
   mocks.session.scenarioExists.mockResolvedValue(true);
   mocks.session.ensureScenarioExists.mockResolvedValue({ user_id: FIX_OWNER });
@@ -105,6 +117,24 @@ describe('version result comparison uses the real route, service, binder and del
     if (value.status === 'available' && value.kind === 'paired_runs') {
       expect(value.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
       expect(value.run_delta.leader).not.toHaveProperty('current_leading_option_id');
+      expect(value.run_delta.win_probabilities).toStrictEqual([]);
+    }
+  });
+
+  it.each([
+    'prior_leading_option_id', 'current_leading_option_id',
+  ] as const)('final egress omits residual %s without nulling or losing the delta', async (field) => {
+    const withheld = clone(CURRENT);
+    result(withheld).constraint_verdict = { may_name_leading_option: false, constraint_verdict_state: 'evaluated_feasible' };
+    mocks.facts.mockResolvedValue({ factSet: factSet([PRIOR, withheld]), hotWindow: { status: 'ok', facts: [] } });
+    mocks.residualLeader = field;
+    const reply = await compare(); expect(reply.statusCode).toBe(200);
+    const value = ModelVersionDiffV2Schema.parse(reply.json()).result_comparison;
+    expect(value).toMatchObject({ kind: 'paired_runs', run_delta: { endpoints: {
+      prior: { run_id: 'bound-prior' }, current: { run_id: 'bound-current' },
+    } } });
+    if (value.status === 'available' && value.kind === 'paired_runs') {
+      expect(Object.hasOwn(value.run_delta.leader, field)).toBe(false);
       expect(value.run_delta.win_probabilities).toStrictEqual([]);
     }
   });

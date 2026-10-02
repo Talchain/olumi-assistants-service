@@ -129,6 +129,8 @@ import { AnalysisStateV1Schema, ModelVersionDiffV2Schema, type ModelVersionResul
 import { loadScenarioAnalysisFactsForRead } from "../orchestrator-v5/build-turn-context.js";
 import { bindVersionResults } from "../orchestrator-v5/model-management/version-result-binding.js";
 import { buildRunDelta } from "../orchestrator-v5/coaching/build-run-delta.js";
+import { enforceLeaderLicenceAtFinalEgress } from "../orchestrator-v5/agent-lane/leader-final-egress.js";
+import { leaderLicence } from "../orchestrator-v5/compose/leader-licence.js";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
@@ -832,11 +834,21 @@ export default async function route(app: FastifyInstance) {
           // This route alone requests an explicit pair; ordinary turns keep chronology.
           const built = buildRunDelta({ priorFacts: bound.facts, selectedPair: bound.selectedPair,
             mayNameLeadingOption: bound.mayNameLeadingOption });
-          resultComparison = built.kind === "ok"
-            ? { status: "available", kind: "paired_runs", prior_run: bound.selectedPair.prior,
-                current_run: bound.selectedPair.current, run_delta: built.delta }
-            : { status: "unavailable", reason: built.reason === "insufficient_runs" || built.reason === "echoes_incomplete"
-                ? "unconfirmed_identity" : "incompatible_results" };
+          // Reuse the same final licence check as turn/read egress (DL5955284206).
+          // Only the recorded delta is projected; the human-authored model diff is untouched.
+          if (built.kind === "ok") {
+            const licensed = enforceLeaderLicenceAtFinalEgress(
+              { run_delta: built.delta },
+              { requestId, exitPath: "scenario_versions_compare", graph: records.to.graph,
+                mayNameLeadingOption: bound.mayNameLeadingOption,
+                licence: leaderLicence({ mayNameLeadingOption: bound.mayNameLeadingOption }) },
+            ).response;
+            resultComparison = { status: "available", kind: "paired_runs", prior_run: bound.selectedPair.prior,
+              current_run: bound.selectedPair.current, run_delta: licensed.run_delta };
+          } else {
+            resultComparison = { status: "unavailable", reason: built.reason === "insufficient_runs" || built.reason === "echoes_incomplete"
+              ? "unconfirmed_identity" : "incompatible_results" };
+          }
         }
       }
       const v2 = ModelVersionDiffV2Schema.safeParse({ ...wireOutcome.data,
