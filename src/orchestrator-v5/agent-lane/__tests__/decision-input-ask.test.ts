@@ -25,6 +25,17 @@ describe('the lines, on the served goal', () => {
     expect(decisionInputAsk(graphWith(FX.goal_after_build), base)).toBe(ASK);
   });
 
+  it('RED (PANEL 5944136475): the ask already in a recent answer is still OPEN → not said again; A7 stays', () => {
+    const earlier = `Your results are ready. You can view them now or ask me to explain them. ${ASK}`;
+    expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, recentReplies: ['Unrelated.', earlier] })).toEqual([A7]);
+  });
+
+  it('CONTROL: no recent answer carries THIS ask (none read, or another goal\'s ask) → the ask is said, as before', () => {
+    expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, recentReplies: [] })).toEqual([A7, ASK]);
+    const other = ASK.replace('Funding secured', 'Monthly spend');
+    expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, recentReplies: [other] })).toEqual([A7, ASK]);
+  });
+
   it('CONTROL: once Paul stated "at least £1,000,000" → no ask; the deadline line stays (still not answered)', () => {
     expect(goalHasStatedTarget(FX.goal_after_target)).toBe(true);
     expect(decisionInputLines(graphWith(FX.goal_after_target), base)).toEqual([A7]);
@@ -225,7 +236,14 @@ describe('A7 is folded on the reply the user SEES — after the leader gate (R3 
 // ── The route: a Run button turn on the served no-target goal, model stubbed (0 LLM) ──
 // In memory, so a named turn's claim reads back and its answer row is what a replay returns.
 const rows = new Map<string, Rec>();
+let recentFails = false;
 const store = {
+  // The durable answers, newest first, as `readRecent` returns them (claims excluded); a switch makes the read fail.
+  // …and only the newest `limit` rows, as the store's own LIMIT does: a mock that returned every row hid the window (MG).
+  readRecent: vi.fn(async (sid: string, limit: number) => {
+    if (recentFails) throw new Error('read failed');
+    return [...rows.values()].filter((r) => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim')).reverse().slice(0, limit);
+  }),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, tid: string) => rows.get(`${sid}|${tid}`) ?? null),
   append: vi.fn(async (w: Rec) => { rows.set(`${String(w.scenario_id)}|${String(w.turn_id)}`, { ...w, assistant_message: w.assistantMessage ?? null }); return { id: `row-${rows.size}` }; }),
@@ -261,9 +279,10 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; n += 1; });
+  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; recentFails = false; n += 1; });
+  const scenarioNow = () => `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
   const runTurn = async (turnId?: string, explain = false) => {
-    const scenarioId = `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
+    const scenarioId = scenarioNow();
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     ...(turnId !== undefined ? { turn_id: turnId } : {}), kind: 'message', scenario_id: scenarioId, message: 'Run analysis.', source: 'chip',
     chip: { id: 'agent-run-analysis', action_type: 'run_analysis' },
@@ -302,5 +321,66 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const text = (await runTurn(undefined, true)).assistant_text;
     expect(text).not.toContain('as your target');
     expect(text.match(/\?/g) ?? []).toHaveLength(1);
+  });
+
+  it('RED (PANEL 5944136475): a Rerun on the same scenario does NOT repeat the open target ask; the A7 fact stays', async () => {
+    const first = (await runTurn('6d1e8f20-3b4c-4d5e-8f60-718293a4b5c6')).assistant_text;
+    expect(first.split(ASK).length - 1, 'control: the first Run asks').toBe(1);
+    const again = (await runTurn('7e2f9031-4c5d-4e6f-8071-8293a4b5c6d7')).assistant_text;
+    expect(again).not.toContain('as your target');
+    expect(again).toContain(A7);
+  });
+
+  it('RED (R3 5944174003, journey-12 shape): the first Run asks, then FOUR more Run + Explain pairs → the ask is said ONCE in all', async () => {
+    const first = (await runTurn('c374e586-91a2-43b4-a5c6-d7e8f90a1b23')).assistant_text;
+    expect(first.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    const ids = ['d485f697-a2b3-44c5-b6d7-e8f90a1b2c34', 'e596a7b8-b3c4-45d6-87e8-f90a1b2c3d45', 'f6a7b8c9-c4d5-46e7-98f9-0a1b2c3d4e56', '07b8c9d0-d5e6-47f8-a90a-1b2c3d4e5f67'];
+    for (const id of ids) await runTurn(id, true);
+    // Bound to the durable ANSWER ROWS — what each turn shipped and a replay returns (the Explain reply is not the Run's).
+    const sid = [...rows.values()].find((r) => r.turn_id === 'c374e586-91a2-43b4-a5c6-d7e8f90a1b23')?.scenario_id;
+    const answers = [...rows.values()].filter((r) => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim'));
+    expect(answers.length, 'precondition: 9 answers — beyond a 6-row window').toBe(9);
+    const asking = answers.filter((r) => String(r.assistant_message ?? '').includes(ASK)).map((r) => String(r.turn_id));
+    expect(asking, 'only the first Run asked').toEqual(['c374e586-91a2-43b4-a5c6-d7e8f90a1b23']);
+  });
+
+  it('RED (Codex P2 @4433c99f): a lost Rerun response retried stays ask-free; the first Run retried still asks', async () => {
+    const A = '1a2b3c4d-0e1f-4a2b-8c3d-4e5f6a7b8c90', B = '2b3c4d5e-1f2a-4b3c-9d4e-5f6a7b8c9d01';
+    expect((await runTurn(A)).assistant_text.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    expect((await runTurn(B)).assistant_text, 'precondition: the Rerun does not').not.toContain('as your target');
+    // A replay of a lost Run response is REBUILT from the current readback (never the stored words): it reads the history too.
+    expect((await runTurn(B)).assistant_text, 'B retried').not.toContain('as your target');
+    // …but never its OWN row: a response the user never received has not said the ask.
+    expect((await runTurn(A)).assistant_text.split(ASK).length - 1, 'A retried').toBe(1);
+  });
+
+  it('CONTROL (Codex): an in-process sub-turn row holding the ask text (never shown) does not count as said → the Run asks', async () => {
+    const sid = scenarioNow();
+    rows.set(`${sid}|sub-1`, { scenario_id: sid, turn_id: 'sub-1', request_hash: 'sha256:0f1e2d3c', assistant_message: `Earlier: ${ASK}` });
+    expect((await runTurn('3c4d5e6f-2a3b-4c4d-8e5f-6a7b8c9d0e12')).assistant_text.split(ASK).length - 1).toBe(1);
+  });
+
+  it('RED (Codex r2): 21 sub-turn rows NEWER than the ask do not push it out of the window — the cap counts AFTER the drop', async () => {
+    const first = (await runTurn('4d5e6f70-3b4c-4d5e-9f60-7a8b9c0d1e23')).assistant_text;
+    expect(first.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    const sid = scenarioNow();
+    for (let i = 0; i < 21; i += 1) rows.set(`${sid}|sub-${i}`, { scenario_id: sid, turn_id: `sub-${i}`, request_hash: `sha256:${i}`, assistant_message: 'handler text' });
+    expect((await runTurn('5e6f7081-4c5d-4e6f-8071-8b9c0d1e2f34')).assistant_text, 'the Rerun').not.toContain('as your target');
+  });
+
+  it('CONTROL (DL 5944162815): the goal CHANGES between Runs → its new ask is said (an open ask binds to its own goal)', async () => {
+    const first = (await runTurn('a152c364-7f80-4192-83a4-b5c6d7e8f901')).assistant_text;
+    expect(first.split(ASK).length - 1, 'precondition: the first Run asks').toBe(1);
+    goal = { ...FX.goal_after_build, label: 'Monthly spend' };
+    const again = (await runTurn('b263d475-8091-42a3-94b5-c6d7e8f90a12')).assistant_text;
+    expect(again.split(ASK.replace('Funding secured', 'Monthly spend')).length - 1, 'the changed goal is asked for').toBe(1);
+    expect(again).not.toContain(ASK);
+  });
+
+  it('CONTROL: the recent answers cannot be read → the Rerun asks again (today\'s behaviour, never a silent drop)', async () => {
+    await runTurn('8f30a142-5d6e-4f70-8182-93a4b5c6d7e8');
+    recentFails = true;
+    const again = (await runTurn('9041b253-6e7f-4081-8293-a4b5c6d7e8f9')).assistant_text;
+    expect(again.split(ASK).length - 1).toBe(1);
   });
 });
