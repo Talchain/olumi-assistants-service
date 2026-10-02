@@ -2951,7 +2951,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const durablePending = pendingCandidates.slice(0, PENDING_ACTIONS_PER_TURN_CAP);
 
     const lastRunBlocks = Array.isArray(lastRun?.blocks) ? lastRun.blocks : [];
-    const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult });
+    const runBound = bindRunBlocksToReadback(lastRunBlocks, { graphHash, analysisState, analysisResult, analysisReady });
     /**
      * ⭐ THE RUN-TURN COACHING CARD (CEE #1855), bound to the SAME readback. On this lane the run's own
      * blocks carry no coaching on the automatic first pass (leader withheld, no decision_review), so

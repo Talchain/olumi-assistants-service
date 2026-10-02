@@ -268,7 +268,11 @@ const COACHING_BLOCK_TYPES: ReadonlySet<string> = new Set(['review_card', 'coach
  */
 export function bindRunBlocksToReadback(
   runBlocks: readonly unknown[],
-  readback: { readonly graphHash: string | undefined; readonly analysisState: unknown; readonly analysisResult: unknown },
+  readback: {
+    readonly graphHash: string | undefined; readonly analysisState: unknown; readonly analysisResult: unknown;
+    /** The SAME readback's `analysis_ready`: its admission is half of the leader licence (P0 SHARED DATA, DL 4563ad). */
+    readonly analysisReady?: unknown;
+  },
 ): unknown[] {
   if (readback.graphHash === undefined || readback.analysisResult === undefined) return [];
   const state = readback.analysisState as { run_state?: { kind?: unknown }; usable_for_chips?: unknown; leader_claim?: { permitted?: unknown } } | undefined;
@@ -281,7 +285,10 @@ export function bindRunBlocksToReadback(
    * reached the user beside a reply saying the options are effectively tied. The Conventional route drops these
    * whole on a withheld turn (compose's filter); this reads the SAME definition, so the routes cannot disagree.
    */
-  const leaderMayBeNamed = state.leader_claim?.permitted === true;
+  // ⛔ THE ONE LICENCE, NOT THE BARE CLAIM (P0 SHARED DATA, #85 5963053136). `leader_claim.permitted` never reads the
+  // admission, so a separated Run of an `exploratory` model said `true` here while the reply, the block and the Agent's
+  // `claim_permissions` withheld the leader. A caveat licence (quantified_provisional) still binds, as the wire gate does.
+  const leaderMayBeNamed = leaderLicenceFromState(state, readback.analysisReady) !== 'withheld';
   return runBlocks.filter((b) => {
     const block = b as { type?: unknown; graph_hash_at_generation?: unknown; action_intent?: unknown; action_label?: unknown; action_prompt?: unknown } | null;
     if (block === null || typeof block !== 'object' || typeof block.type !== 'string') return false;
