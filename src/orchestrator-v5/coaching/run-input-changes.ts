@@ -28,6 +28,7 @@ import type { RunDeltaInputChange } from '@talchain/schemas/boundary';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
 import { edgeBandFromStrengthBand, edgeBandStd } from '../format/edge-strength-bands.js';
+import { valueWriteAuthorshipDigests } from '../tools/handlers/run-input-residual.js';
 
 type Value = { raw: number | string | boolean; unit?: string };
 type Row = RunDeltaInputChange;
@@ -115,6 +116,24 @@ function authorshipExplained(prior: { sizing?: string; authorship_digest?: strin
   return current.sizing === 'user' || (prior.sizing === 'placeholder' && current.sizing === 'olumi_accepted');
 }
 
+/**
+ * 0.73.0 (F1b lease #85 5945475375) — is a change in a factor's AUTHORSHIP (`authorship_digest`) explained? Only when BOTH
+ * hold: that factor's own value row moved, AND its current authorship is exactly what CEE's value writer leaves after
+ * writing a figure (`valueWriteAuthorshipDigests`: a typed figure or an approved adoption). Same-factor identity alone
+ * proves nothing (CODEX on 4c043a64 P1-2: an independent `extractionType` change beside a value write). Alone — a source
+ * moving at the same figure (CODEX r2), a digest on one Run only, a colleague's apply — it is unexplained.
+ */
+function factorAuthorshipExplained(
+  prior: { authorship_digest?: string },
+  current: { authorship_digest?: string; source?: string },
+  pair: ReturnType<typeof authoredPair>,
+): boolean {
+  if (prior.authorship_digest === current.authorship_digest) return true;
+  if (prior.authorship_digest === undefined || current.authorship_digest === undefined) return false;
+  if (pair === 'unexpressed' || pair[0] === null || pair[1] === null || same(pair[0], pair[1])) return false;
+  return current.source !== undefined && valueWriteAuthorshipDigests(current.source).includes(current.authorship_digest);
+}
+
 /** The rows, and `complete: false` when a sent input changed that no row states. */
 export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot): { rows: Row[]; complete: boolean } {
   const rows: Row[] = [];
@@ -173,7 +192,9 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
   for (const factorId of unionIds(pF, cF)) {
     const pf = pF.get(factorId);
     const cf = cF.get(factorId);
-    pushPair({ entity_kind: 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, authoredPair(pf, cf));
+    const pair = authoredPair(pf, cf);
+    pushPair({ entity_kind: 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, pair);
+    if (pf !== undefined && cf !== undefined && !factorAuthorshipExplained(pf, cf, pair)) complete = false;
   }
 
   // ── the goal ──────────────────────────────────────────────────────────────

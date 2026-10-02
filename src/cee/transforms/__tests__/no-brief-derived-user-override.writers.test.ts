@@ -76,6 +76,11 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // untruth 2.714 was reverted for, one seam downstream.
   "orchestrator-v5/tools/handlers/set-factor-value.ts":
     "the stamp site — user_override for a user-consented structured edit; stamps panel_elicited instead when CEE has VERIFIED the value is a named participant's panel answer",
+  // F1b 52f8cd (schemas 0.73.0, lease #85 5945475375): a READER. `VALUE_WRITE_USER_SOURCE` pins set-factor-value's own
+  // stamp (equal to USER_EDIT_SOURCE, bound by run-input-residual.test) so the Run input digest can recognise a factor
+  // whose authorship is EXACTLY that writer's output. It compares `observed_state.source`; it writes nothing.
+  "orchestrator-v5/tools/handlers/run-input-residual.ts":
+    "reader — compares observed_state.source with set-factor-value's stamp to recognise the value writer's exact output (Run input authorship digest); performs no write",
   // Comment only. Contains no write of any kind: it is a pure verifier that
   // reads the collab store and either returns a server-owned value or refuses.
   // The literal appears in its header, explaining the attribution untruth the

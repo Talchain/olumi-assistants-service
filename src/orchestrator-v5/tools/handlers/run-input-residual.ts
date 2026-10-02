@@ -24,11 +24,18 @@
  *      #2482 r3, option A);
  *   3. REVIEW METADATA (`reviewed_by_user`), removed identically on every node and from every recorded link's authorship:
  *      a review is not an analysis input (graph-hash vocabulary, R11); a link review's only analysis meaning, a confirm on
- *      Olumi's size, is the `olumi_accepted` sizing the snapshot records (DL ruling #2482 r3 P1-2).
+ *      Olumi's size, is the `olumi_accepted` sizing the snapshot records (DL ruling #2482 r3 P1-2);
+ *   4. a recorded factor's AUTHORSHIP members (exactly {@link FACTOR_AUTHORSHIP_MEMBERS}, plus `observed_state.std` only
+ *      where THIS Run's stated-level carry set it): 0.73.0 records them as the factor's `authorship_digest`, and the diff
+ *      credits a change only when that factor's value row moved AND the current authorship is exactly what CEE's value
+ *      writer produces (F1b lease #85 5945475375; served 5945463610: a user's value edit read `partial`).
  *
  * Pure.
  */
 import { createHash } from 'node:crypto';
+import { STATED_LEVEL_STD } from './stated-level-spread.js';
+import { APPROVED_ADOPTION_SOURCE } from '../../agent-lane/approved-adoption-context.js';
+import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -59,7 +66,7 @@ interface Recorded {
     readonly is_baseline?: true;
     readonly settings: ReadonlyArray<{ readonly factor_id: string; readonly encoded: number; readonly held?: true; readonly range?: { readonly low?: unknown; readonly high?: unknown; readonly meaning?: unknown } }>;
   }>;
-  readonly factors: ReadonlyArray<{ readonly factor_id: string; readonly raw?: number | string; readonly unit?: string; readonly encoded?: number }>;
+  readonly factors: ReadonlyArray<{ readonly factor_id: string; readonly raw?: number | string; readonly unit?: string; readonly encoded?: number; readonly authorship_digest?: string }>;
   readonly constraints: ReadonlyArray<{ readonly constraint_id: string; readonly node_id: string; readonly operator: string; readonly raw: number; readonly unit?: string; readonly frame?: string }>;
   readonly links: ReadonlyArray<{ readonly from: string; readonly to: string; readonly mean: number; readonly std?: number; readonly exists_probability?: number; readonly sizing?: string; readonly authorship_digest?: string }>;
 }
@@ -79,10 +86,83 @@ export function linkAuthorshipDigest(edge: Rec): string {
 }
 
 /**
+ * The members of a factor's AUTHORSHIP (schemas 0.73.0 `authorship_digest`), in one place: the digest and the strip.
+ * MEASURED, not listed from memory: the real `factor_value_edit` writer → `run_analysis` wire (`run-input-residual.test`
+ * F1) moves `observed_state.{source, extractionType}` and the node's `provenance` and `display_value`; `elicited_from` and
+ * the node's `extractionType` are the same writer's other authorship carriers (`set-factor-value.ts`). The wire also adds
+ * `observed_state.std` = {@link STATED_LEVEL_STD} where `carryStatedLevelSpread` sent a person's level exactly — a
+ * member ONLY where this Run's carry set it (the caller passes those ids): a stored σ, even of exactly that number, is the
+ * figure's own spread and stays in the residual (CODEX on 4c043a64 P1-1: numeric equality cannot prove the origin).
+ */
+export const FACTOR_AUTHORSHIP_MEMBERS = {
+  observed_state: ['source', 'extractionType', 'elicited_from'],
+  node: ['provenance', 'display_value', 'extractionType'],
+} as const;
+
+/** `set-factor-value.ts`'s stamp on a typed figure (`USER_EDIT_SOURCE`; pinned equal by `run-input-residual.test`). */
+export const VALUE_WRITE_USER_SOURCE = 'user_override';
+
+/**
+ * Is this factor's authorship EXACTLY what CEE's value writer (`set-factor-value.ts`) leaves after writing its figure —
+ * a typed figure (`user_override`, node `user_set`) or an approved adoption of Olumi's (`user_assumption`, node
+ * `ai_inferred`): both extraction stamps and `elicited_from` cleared, and `display_value` recomputed from the figure by
+ * `synthesiseDisplayValue` (the writer passes the edit's unit and cap only when the edit carried them: all four ways are
+ * accepted). A colleague's verified apply carries `elicited_from` and is NOT matched (its pairs stay `partial`).
+ */
+function isValueWriteOutput(node: Rec): boolean {
+  const os = isRec(node.observed_state) ? node.observed_state : {};
+  const source = os.source;
+  if (source !== VALUE_WRITE_USER_SOURCE && source !== APPROVED_ADOPTION_SOURCE) return false;
+  if (os.extractionType !== undefined || node.extractionType !== undefined || os.elicited_from !== undefined) return false;
+  if (node.provenance !== (source === APPROVED_ADOPTION_SOURCE ? 'ai_inferred' : 'user_set')) return false;
+  const value = typeof os.value === 'number' && Number.isFinite(os.value) ? os.value : undefined;
+  if (value === undefined) return false;
+  const raw = typeof os.raw_value === 'number' && Number.isFinite(os.raw_value) ? os.raw_value : undefined;
+  const factorType = typeof node.factor_type === 'string' ? node.factor_type : undefined;
+  const units = [undefined, typeof os.unit === 'string' ? os.unit : undefined];
+  const caps = [undefined, typeof os.cap === 'number' ? os.cap : undefined];
+  const written = new Set(units.flatMap((unit) => caps.map((cap) => synthesiseDisplayValue({
+    value,
+    ...(raw !== undefined ? { raw_value: raw } : {}),
+    ...(unit !== undefined ? { unit } : {}),
+    ...(factorType !== undefined ? { factor_type: factorType } : {}),
+    ...(cap !== undefined ? { cap } : {}),
+  }))));
+  return written.has(node.display_value as string | undefined);
+}
+
+function authorshipDigestOf(canonical: Rec): string {
+  return createHash('sha256').update(stableStringify(canonical)).digest('hex');
+}
+
+/**
+ * 0.73.0 — the canonical digest of a factor's authorship as the request carried it: `source`, whether THIS Run's
+ * stated-level carry set its σ, and either the token `value_write` (the rest is exactly the value writer's output —
+ * {@link isValueWriteOutput}) or every other {@link FACTOR_AUTHORSHIP_MEMBERS} member as sent (absent → `null`).
+ * Review metadata is never a member.
+ */
+export function factorAuthorshipDigest(node: Rec, statedLevelCarried: boolean): string {
+  const os = isRec(node.observed_state) ? node.observed_state : {};
+  const rest: Rec = {};
+  for (const m of FACTOR_AUTHORSHIP_MEMBERS.observed_state) if (m !== 'source') rest[`observed_state.${m}`] = os[m] ?? null;
+  for (const m of FACTOR_AUTHORSHIP_MEMBERS.node) rest[m] = node[m] ?? null;
+  return authorshipDigestOf({
+    source: os.source ?? null,
+    stated_level_carry: statedLevelCarried,
+    rest: isValueWriteOutput(node) ? 'value_write' : rest,
+  });
+}
+
+/** The digests a factor whose authorship is exactly the value writer's output, with recorded `source`, can carry. */
+export function valueWriteAuthorshipDigests(source: string): readonly string[] {
+  return [true, false].map((carried) => authorshipDigestOf({ source, stated_level_carry: carried, rest: 'value_write' }));
+}
+
+/**
  * The residual digest of `plotPayload` given what the snapshot `recorded` from it. `null` when the request carries no
  * graph (the snapshot then records no residual, and its pairs are never `complete`).
  */
-export function residualDigest(plotPayload: Rec, recorded: Recorded): string | null {
+export function residualDigest(plotPayload: Rec, recorded: Recorded, statedLevelCarried: ReadonlySet<string> = new Set()): string | null {
   if (!isRec(plotPayload.graph)) return null;
   const { request_id: _requestId, seed: _seed, ...request } = structuredClone(plotPayload) as Rec;
   const graph = request.graph as Rec;
@@ -97,10 +177,18 @@ export function residualDigest(plotPayload: Rec, recorded: Recorded): string | n
     const id = n.id;
     // Exception 3: review metadata, identically on every node (a factor's `confirm_current` records only this).
     if (isRec(n.observed_state)) delete n.observed_state.reviewed_by_user;
-    // A factor's value as the diff compares it (`authoredPair`: raw, unit, encoded). Its `source` is recorded but not
-    // compared, so it stays (CODEX r2: the source moving from Olumi's inference to the user's own, at the same value,
-    // moved no row).
+    // A factor's value as the diff compares it (`authoredPair`: raw, unit, encoded).
     const f = goal?.node_id === id ? undefined : factorById.get(id);
+    // Exception 4: the authorship members, only when the snapshot recorded THIS node's authorship digest. The diff then
+    // decides pairwise (CODEX r2: the source moving from Olumi's inference to the user's own at the same value moves no
+    // row, so it is unexplained there — `partial`).
+    const carried = statedLevelCarried.has(id) && isRec(n.observed_state) && n.observed_state.std === STATED_LEVEL_STD;
+    if (f?.authorship_digest !== undefined && f.authorship_digest === factorAuthorshipDigest(n, carried)) {
+      const os = isRec(n.observed_state) ? n.observed_state : {};
+      for (const m of FACTOR_AUTHORSHIP_MEMBERS.observed_state) delete os[m];
+      for (const m of FACTOR_AUTHORSHIP_MEMBERS.node) delete n[m];
+      if (carried) delete os.std;
+    }
     if (f !== undefined && isRec(n.observed_state)) {
       const os = n.observed_state;
       stripIfRecorded(os, 'value', f.encoded);

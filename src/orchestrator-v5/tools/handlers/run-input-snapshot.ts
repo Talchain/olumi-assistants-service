@@ -27,7 +27,8 @@ import { RunInputSnapshotSchema, type RunInputSnapshot } from '@talchain/schemas
 import { normalizeRunGoalUnit } from '../../context/run-goal-unit.js';
 import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { edgeBandFromMagnitude, strengthBandFromEdgeBand } from '../../format/edge-strength-bands.js';
-import { linkAuthorshipDigest, residualDigest } from './run-input-residual.js';
+import { factorAuthorshipDigest, linkAuthorshipDigest, residualDigest } from './run-input-residual.js';
+import { STATED_LEVEL_STD } from './stated-level-spread.js';
 
 type Rec = Record<string, unknown>;
 
@@ -90,6 +91,11 @@ export interface RunInputSnapshotInput {
    * the wire, so it is read here. Absent = sizing not recorded (an older caller); never inferred.
    */
   readonly persistedEdges?: ReadonlyArray<unknown>;
+  /**
+   * 0.73.0: the factor ids whose σ THIS Run's `carryStatedLevelSpread` set (`statedLevelNodeIds` on the graph it carried).
+   * Only those σ are authorship (`run-input-residual.ts` exception 4); absent = none (a stored σ is never assumed carried).
+   */
+  readonly statedLevelCarriedIds?: ReadonlySet<string>;
 }
 
 /** The snapshot, or `null` when it cannot be recorded honestly (over a bound, or refused by the contract). */
@@ -185,6 +191,7 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
   if (unrecordableRange) return null;
 
   // ── factor values ──────────────────────────────────────────────────────
+  const carried = input.statedLevelCarriedIds ?? new Set<string>();
   const factors = nodes.flatMap((n) => {
     const id = text(n.id);
     const os = isRec(n.observed_state) ? n.observed_state : null;
@@ -200,6 +207,9 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
       ...(text(os.unit, 64) !== undefined ? { unit: text(os.unit, 64) } : {}),
       ...(encoded !== undefined ? { encoded } : {}),
       ...(text(os.source, 64) !== undefined ? { source: text(os.source, 64) } : {}),
+      // 0.73.0 (F1b lease #85 5945475375): the factor's authorship as the request carried it, so the diff can credit a
+      // user's value edit pairwise instead of reading `partial` (`run-input-residual.ts` exception 4).
+      authorship_digest: factorAuthorshipDigest(n, carried.has(id) && os.std === STATED_LEVEL_STD),
     }];
   });
 
@@ -270,7 +280,7 @@ export function buildRunInputSnapshot(input: RunInputSnapshotInput): RunInputSna
   };
   // 0.71.0 (DL ruling #2482 5939864517): every analysis input this snapshot does NOT record, digested
   // (`run-input-residual.ts`) — a pair is `complete` only when both ends carry one and they are equal.
-  const residual = residualDigest(input.plotPayload, recorded);
+  const residual = residualDigest(input.plotPayload, recorded, carried);
   const candidate = {
     snapshot_version: 1 as const,
     sent_digest: sentDigest(input.plotPayload),
