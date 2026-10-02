@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import { FORBIDDEN_RESOLUTION_WORDS } from '../../../../collab/disagreement-copy.js';
 import { summariseDisagreementForPrompt, type DisagreementView } from '../../../../collab/disagreement-read-model.js';
+import type { CollabStore } from '../../../../collab/types.js';
 import { PREMORTEM_PRESS_ID } from '../method-turn.js';
 import {
   PANEL_CHALLENGE_PREFIX,
@@ -132,10 +133,12 @@ describe('D2 S1 — the decision (verified owner, own scenario, closed round)', 
 
 describe('D2 S1 — resolvePanelChallenge through the collab store (the reveal’s own gates, inherited)', () => {
   const OWNER_ID = SENTINELS.OWNER_USER_ID;
-  const closedStore = () => {
+  // The N-suite fixture store is the contract's shape, not the port's type: adapted the way the panel-apply suites do.
+  const asPort = (s: ReturnType<typeof seededOpenRoundStore>): CollabStore => s as unknown as CollabStore;
+  const closedStore = (): CollabStore => {
     const store = seededOpenRoundStore();
     store.state.rounds.set(FIXTURE_ROUND_ID, fixtureRound({ status: 'closed' }));
-    return store;
+    return asPort(store);
   };
 
   it('R3 (store): a closed owned round → context byte-equal to the summary of the reveal’s own disagreement view', async () => {
@@ -148,7 +151,7 @@ describe('D2 S1 — resolvePanelChallenge through the collab store (the reveal�
   });
 
   it('R4a (store): the seeded OPEN round → round_open', async () => {
-    const store = seededOpenRoundStore();
+    const store = asPort(seededOpenRoundStore());
     expect(await resolvePanelChallenge(() => store, { caller: OWNER_ID, scenarioId: FIXTURE_SCENARIO_ID, roundId: FIXTURE_ROUND_ID }))
       .toMatchObject({ kind: 'unavailable', reason: 'round_open' });
   });

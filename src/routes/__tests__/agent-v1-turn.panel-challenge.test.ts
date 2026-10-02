@@ -20,6 +20,7 @@ import {
   type FixtureCollabStore,
 } from '../../../tests/collab/contracts.js';
 import { assembleDisagreementView, summariseDisagreementForPrompt } from '../../collab/disagreement-read-model.js';
+import type { CollabStore } from '../../collab/types.js';
 import {
   PANEL_CHALLENGE_PREFIX,
   PANEL_CHALLENGE_UNAVAILABLE,
@@ -106,7 +107,8 @@ describe('D2 S1 — the press through the real route', () => {
     expect(r.statusCode, r.body).toBe(200);
     return r.json() as Body;
   };
-  const viewNow = () => assembleDisagreementView(collab, { round_id: ROUND, requested_by: { kind: 'owner', user_id: OWNER } });
+  // The N-suite fixture store is the contract's shape, not the port's type: adapted the way the panel-apply suites do.
+  const viewNow = () => assembleDisagreementView(collab as unknown as CollabStore, { round_id: ROUND, requested_by: { kind: 'owner', user_id: OWNER } });
 
   it('a closed owned round → ONE model call, NO tools, the round’s summary in the instructions; a passing draft is sent', async () => {
     const view = await viewNow();
