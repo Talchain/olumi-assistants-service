@@ -1,0 +1,1814 @@
+{
+ "_source": "SERVED run turn, CEE 03763318 (Render live), guest 4b218a76, captured by CANVAS 39e656 (#85 5943987710) at /private/tmp/canvas-39e6-work/slot2/02-run.json; the body verbatim (post-egress: run_delta.leader ids already null).",
+ "body": {
+  "response_version": 2,
+  "assistant_text": "Your results are ready. You can view them now or ask me to explain them.\n\nWhat figure should \"Quarterly revenue\" reach or stay under? I'll propose it as your target.",
+  "blocks": [
+   {
+    "type": "analysis_result",
+    "summary": "No single option can be put forward yet. The analysis was not told which way your goal points, so it assumed a higher value is better, and it could not test whether any option reaches your goal. The result is not yet robust — small changes could flip it. 'Continue Current Plan' was analysed as no change — the factors it compares against were held at the values your model records today. I supplied 16 of the values behind this, because your brief did not state them. They are mine rather than yours. Changing any of them changes what this model implies.",
+    "leading_option_id": null,
+    "win_probabilities": {
+     "Continue Current Plan": 0.11033333333333564,
+     "AI Reporting Module Sprint": 0.4218333333333474,
+     "Integration Bug Fix Sprint": 0.46783333333333704
+    },
+    "enrichment": {
+     "option_comparison": [
+      {
+       "id": "ai_reporting_module_sprint",
+       "label": "AI Reporting Module Sprint",
+       "status": "computed",
+       "outcome": {
+        "p10": -0.044799954678290045,
+        "p50": 0.013730814775982328,
+        "p90": 0.0974877499519436,
+        "std": 0.057539711842810794,
+        "mean": 0.02156671509496457,
+        "n_samples": 10000,
+        "validity_ratio": 1,
+        "n_valid_samples": 10000,
+        "percentiles_source": "samples"
+       },
+       "downside": {
+        "p05": -0.05789128953195553,
+        "cvar_10": -0.06453184147142783,
+        "expected_regret": 0.011751266517142407
+       },
+       "option_id": "ai_reporting_module_sprint",
+       "option_label": "AI Reporting Module Sprint",
+       "win_probability": 0.4218333333333474
+      },
+      {
+       "id": "integration_bug_fix_sprint",
+       "label": "Integration Bug Fix Sprint",
+       "status": "computed",
+       "outcome": {
+        "p10": -0.034730039647079616,
+        "p50": 0.021442806506989112,
+        "p90": 0.10137913454964684,
+        "std": 0.054976448435780284,
+        "mean": 0.028954683138644743,
+        "n_samples": 10000,
+        "validity_ratio": 1,
+        "n_valid_samples": 10000,
+        "percentiles_source": "samples"
+       },
+       "downside": {
+        "p05": -0.05033736854895464,
+        "cvar_10": -0.05661831331557542,
+        "expected_regret": 0.004363298473462236
+       },
+       "option_id": "integration_bug_fix_sprint",
+       "option_label": "Integration Bug Fix Sprint",
+       "win_probability": 0.46783333333333704
+      },
+      {
+       "id": "continue_current_plan",
+       "label": "Continue Current Plan",
+       "status": "computed",
+       "outcome": {
+        "p10": -0.047341825717009525,
+        "p50": 0.006299049567837854,
+        "p90": 0.08806039958859181,
+        "std": 0.05511298026810431,
+        "mean": 0.015105418800632032,
+        "n_samples": 10000,
+        "validity_ratio": 1,
+        "n_valid_samples": 10000,
+        "percentiles_source": "samples"
+       },
+       "downside": {
+        "p05": -0.06162672838330339,
+        "cvar_10": -0.06907009553390071,
+        "expected_regret": 0.018212562811474948
+       },
+       "option_id": "continue_current_plan",
+       "option_label": "Continue Current Plan",
+       "win_probability": 0.11033333333333564
+      }
+     ],
+     "factor_sensitivity": [
+      {
+       "source": "graph",
+       "direction": "positive",
+       "factor_id": "enterprise_prospect_signing_likelihood",
+       "confidence": 0.5992500000000001,
+       "elasticity": 1,
+       "evpi_method": "heuristic",
+       "driver_label": "biggest",
+       "factor_label": "Enterprise prospect signing likelihood",
+       "value_source": "cee_inference",
+       "evidence_hint": true,
+       "influence_rank": 1,
+       "rank_flip_rate": 0.3,
+       "importance_rank": 1,
+       "influence_basis": "isl_structural",
+       "influence_score": 1,
+       "importance_basis": "isl_structural",
+       "confidence_source": "plot_unified_from_isl_bootstrap",
+       "sensitivity_score": 0.5,
+       "flip_risk_category": "isolated",
+       "value_of_information": 0.05956921938165304,
+       "attribution_stability": "low",
+       "confidence_components": {
+        "sampling_stability": 0.25,
+        "structural_certainty": 0.8
+       },
+       "confidence_provenance": {
+        "input_quality": "standard",
+        "is_provisional": true,
+        "formula_version": "plot_unified_v3",
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "computation_source": "plot_unified_from_isl_bootstrap"
+       },
+       "value_extraction_type": "inferred",
+       "evpi_percentage_points": 0.3,
+       "range_derivation_source": "inferred_value"
+      },
+      {
+       "source": "graph",
+       "direction": "negative",
+       "factor_id": "trial_profile_abandonment_rate",
+       "confidence": 0.58275,
+       "elasticity": 0.5,
+       "evpi_method": "heuristic",
+       "driver_label": "moderate",
+       "factor_label": "Trial profile abandonment rate",
+       "value_source": "brief_extraction",
+       "evidence_hint": false,
+       "influence_rank": 2,
+       "rank_flip_rate": 0.3,
+       "importance_rank": 2,
+       "influence_basis": "isl_structural",
+       "influence_score": 0.4000000000000001,
+       "importance_basis": "isl_structural",
+       "confidence_source": "plot_unified_from_isl_bootstrap",
+       "sensitivity_score": -0.25,
+       "flip_risk_category": "negligible",
+       "value_of_information": 0,
+       "attribution_stability": "low",
+       "confidence_components": {
+        "sampling_stability": 0.25,
+        "structural_certainty": 0.8
+       },
+       "confidence_provenance": {
+        "input_quality": "standard",
+        "is_provisional": true,
+        "formula_version": "plot_unified_v3",
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "computation_source": "plot_unified_from_isl_bootstrap"
+       },
+       "evpi_percentage_points": 0,
+       "range_derivation_source": "explicit_cap"
+      },
+      {
+       "source": "graph",
+       "direction": "positive",
+       "factor_id": "integration_step_bug_resolution",
+       "confidence": 0.45,
+       "elasticity": 0.275,
+       "evpi_method": "heuristic",
+       "driver_label": "minor",
+       "factor_label": "Integration-step bug resolution",
+       "value_source": "cee_inference",
+       "evidence_hint": false,
+       "influence_rank": 3,
+       "rank_flip_rate": 0,
+       "importance_rank": 3,
+       "influence_basis": "isl_structural",
+       "influence_score": 0.17600000000000005,
+       "importance_basis": "isl_structural",
+       "confidence_source": "plot_unified_from_isl_bootstrap",
+       "sensitivity_score": 0.1375,
+       "flip_risk_category": "negligible",
+       "value_of_information": 0,
+       "attribution_stability": "negligible",
+       "confidence_components": {
+        "sampling_stability": 0,
+        "structural_certainty": 0.8
+       },
+       "confidence_provenance": {
+        "input_quality": "standard",
+        "is_provisional": true,
+        "formula_version": "plot_unified_v3",
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "computation_source": "plot_unified_from_isl_bootstrap"
+       },
+       "evpi_percentage_points": 0,
+       "range_derivation_source": "default"
+      },
+      {
+       "source": "graph",
+       "direction": "positive",
+       "factor_id": "ai_reporting_module_availability",
+       "confidence": 0.45,
+       "elasticity": 0.1,
+       "evpi_method": "heuristic",
+       "driver_label": "minor",
+       "factor_label": "AI reporting module availability",
+       "value_source": "cee_inference",
+       "evidence_hint": false,
+       "influence_rank": 4,
+       "rank_flip_rate": 0.1,
+       "importance_rank": 4,
+       "influence_basis": "isl_structural",
+       "influence_score": 0.08000000000000002,
+       "importance_basis": "isl_structural",
+       "confidence_source": "plot_unified_from_isl_bootstrap",
+       "sensitivity_score": 0.05,
+       "flip_risk_category": "isolated",
+       "value_of_information": 0.005399999999999999,
+       "attribution_stability": "negligible",
+       "confidence_components": {
+        "sampling_stability": 0,
+        "structural_certainty": 0.8
+       },
+       "confidence_provenance": {
+        "input_quality": "standard",
+        "is_provisional": true,
+        "formula_version": "plot_unified_v3",
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "computation_source": "plot_unified_from_isl_bootstrap"
+       },
+       "value_extraction_type": "inferred",
+       "evpi_percentage_points": 0,
+       "range_derivation_source": "default"
+      },
+      {
+       "source": "graph",
+       "direction": "positive",
+       "factor_id": "sprint_capacity_for_integration_fix",
+       "confidence": 0.3,
+       "elasticity": 0,
+       "zero_reason": "intervention_override",
+       "driver_label": "minor",
+       "factor_label": "Sprint capacity for integration fix",
+       "value_source": "cee_inference",
+       "influence_rank": 5,
+       "rank_flip_rate": 0.1,
+       "importance_rank": 5,
+       "influence_basis": "isl_structural",
+       "influence_score": 0.03520000000000001,
+       "importance_basis": "isl_structural",
+       "confidence_source": "plot_unified_from_isl_bootstrap",
+       "sensitivity_score": 0,
+       "flip_risk_category": "negligible",
+       "value_of_information": 0,
+       "attribution_stability": "negligible",
+       "confidence_components": {
+        "sampling_stability": 0,
+        "structural_certainty": 0.5
+       },
+       "confidence_provenance": {
+        "input_quality": "standard",
+        "is_provisional": true,
+        "formula_version": "plot_unified_v3",
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "computation_source": "plot_unified_from_isl_bootstrap"
+       },
+       "value_extraction_type": "inferred",
+       "range_derivation_source": "scale_frame"
+      },
+      {
+       "source": "graph",
+       "direction": "positive",
+       "factor_id": "sprint_capacity_for_ai_reporting",
+       "confidence": 0.3,
+       "elasticity": 0,
+       "zero_reason": "intervention_override",
+       "driver_label": "minor",
+       "factor_label": "Sprint capacity for AI reporting",
+       "value_source": "cee_inference",
+       "influence_rank": 6,
+       "rank_flip_rate": 0.1,
+       "importance_rank": 6,
+       "influence_basis": "isl_structural",
+       "influence_score": 0.016000000000000004,
+       "importance_basis": "isl_structural",
+       "confidence_source": "plot_unified_from_isl_bootstrap",
+       "sensitivity_score": 0,
+       "flip_risk_category": "isolated",
+       "value_of_information": 0,
+       "attribution_stability": "negligible",
+       "confidence_components": {
+        "sampling_stability": 0,
+        "structural_certainty": 0.5
+       },
+       "confidence_provenance": {
+        "input_quality": "standard",
+        "is_provisional": true,
+        "formula_version": "plot_unified_v3",
+        "calibration_status": "provisional_pending_pilot_calibration",
+        "computation_source": "plot_unified_from_isl_bootstrap"
+       },
+       "value_extraction_type": "inferred",
+       "range_derivation_source": "scale_frame"
+      }
+     ],
+     "robustness": {
+      "level": "very_low",
+      "near_tie": {
+       "gap": 0.04599999999998966,
+       "is_tie": true,
+       "threshold": 0.1
+      },
+      "is_robust": false,
+      "confidence": 0.46783333333333704,
+      "robust_edges": [
+       {
+        "to_id": "trial_profile_abandonment_rate",
+        "edge_id": "integration_step_bug_resolution->trial_profile_abandonment_rate",
+        "from_id": "integration_step_bug_resolution",
+        "to_label": "Trial profile abandonment rate",
+        "from_label": "Integration-step bug resolution",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null
+       },
+       {
+        "to_id": "quarterly_revenue",
+        "edge_id": "revenue_lost_to_trial_abandonment->quarterly_revenue",
+        "from_id": "revenue_lost_to_trial_abandonment",
+        "to_label": "Quarterly revenue",
+        "from_label": "Revenue lost to trial abandonment",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null
+       }
+      ],
+      "fragile_edges": [
+       {
+        "to_id": "quarterly_revenue",
+        "edge_id": "enterprise_prospect_signing_likelihood->quarterly_revenue",
+        "from_id": "enterprise_prospect_signing_likelihood",
+        "visible": true,
+        "severity": "warning",
+        "to_label": "Quarterly revenue",
+        "from_label": "Enterprise prospect signing likelihood",
+        "switch_probability": 0.2532,
+        "alternative_winner_id": "ai_reporting_module_sprint",
+        "alternative_winner_label": "AI Reporting Module Sprint",
+        "marginal_switch_probability": 0
+       },
+       {
+        "to_id": "ai_reporting_module_availability",
+        "edge_id": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+        "from_id": "sprint_capacity_for_ai_reporting",
+        "visible": true,
+        "severity": "warning",
+        "to_label": "AI reporting module availability",
+        "from_label": "Sprint capacity for AI reporting",
+        "switch_probability": 0.232,
+        "alternative_winner_id": "ai_reporting_module_sprint",
+        "alternative_winner_label": "AI Reporting Module Sprint",
+        "marginal_switch_probability": 0.08
+       },
+       {
+        "to_id": "enterprise_prospect_signing_likelihood",
+        "edge_id": "ai_reporting_module_availability->enterprise_prospect_signing_likelihood",
+        "from_id": "ai_reporting_module_availability",
+        "visible": true,
+        "severity": "warning",
+        "to_label": "Enterprise prospect signing likelihood",
+        "from_label": "AI reporting module availability",
+        "switch_probability": 0.2084,
+        "alternative_winner_id": "ai_reporting_module_sprint",
+        "alternative_winner_label": "AI Reporting Module Sprint",
+        "marginal_switch_probability": 0.09
+       }
+      ],
+      "display_verdict": "fragile",
+      "confidence_basis": "recommendation_stability_uncalibrated",
+      "display_verdict_reason": "small changes to your assumptions could change which option is most likely to achieve your goal",
+      "recommended_option_compliance": "not_applicable",
+      "recommended_option_compliance_reason": "no limits were set for this decision"
+     },
+     "option_comparison_status": "computed",
+     "edge_e_values": [
+      {
+       "to_id": "ai_reporting_module_availability",
+       "e_value": 2.2,
+       "edge_id": "sprint_capacity_for_ai_reporting::ai_reporting_module_availability",
+       "from_id": "sprint_capacity_for_ai_reporting",
+       "to_label": "AI reporting module availability",
+       "flip_mean": 0.55,
+       "stability": {
+        "n_seeds": 10,
+        "band_max": 0.524583,
+        "band_min": -1e-06,
+        "band_width": 0.524584,
+        "band_median": -1e-06,
+        "n_seeds_flipped": 5,
+        "seed_flip_means": [
+         null,
+         null,
+         -1e-06,
+         -1e-06,
+         null,
+         null,
+         -1e-06,
+         0.524583,
+         0.165143,
+         null
+        ]
+       },
+       "from_label": "Sprint capacity for AI reporting",
+       "current_mean": 0.25,
+       "flip_direction": "increase"
+      },
+      {
+       "to_id": "enterprise_prospect_signing_likelihood",
+       "e_value": 2.2,
+       "edge_id": "ai_reporting_module_availability::enterprise_prospect_signing_likelihood",
+       "from_id": "ai_reporting_module_availability",
+       "to_label": "Enterprise prospect signing likelihood",
+       "flip_mean": 0.220001,
+       "stability": {
+        "n_seeds": 10,
+        "band_max": 0.403543,
+        "band_min": -1e-06,
+        "band_width": 0.40354399999999996,
+        "band_median": -1e-06,
+        "n_seeds_flipped": 7,
+        "seed_flip_means": [
+         0.102646,
+         null,
+         -1e-06,
+         -1e-06,
+         0.270169,
+         null,
+         -1e-06,
+         0.403543,
+         null,
+         -1e-06
+        ]
+       },
+       "from_label": "AI reporting module availability",
+       "current_mean": 0.1,
+       "flip_direction": "increase"
+      },
+      {
+       "to_id": "integration_step_bug_resolution",
+       "e_value": 1,
+       "edge_id": "sprint_capacity_for_integration_fix::integration_step_bug_resolution",
+       "from_id": "sprint_capacity_for_integration_fix",
+       "to_label": "Integration-step bug resolution",
+       "flip_mean": 0.113635,
+       "stability": {
+        "n_seeds": 10,
+        "band_max": 0.280502,
+        "band_min": -1e-06,
+        "band_width": 0.28050299999999995,
+        "band_median": -1e-06,
+        "n_seeds_flipped": 4,
+        "seed_flip_means": [
+         -1e-06,
+         null,
+         null,
+         null,
+         -1e-06,
+         null,
+         null,
+         0.280502,
+         -1e-06,
+         null
+        ]
+       },
+       "from_label": "Sprint capacity for integration fix",
+       "current_mean": 0.25,
+       "flip_direction": "decrease"
+      },
+      {
+       "to_id": "trial_profile_abandonment_rate",
+       "e_value": 1,
+       "edge_id": "integration_step_bug_resolution::trial_profile_abandonment_rate",
+       "from_id": "integration_step_bug_resolution",
+       "to_label": "Trial profile abandonment rate",
+       "flip_mean": -0.249999,
+       "stability": {
+        "n_seeds": 10,
+        "band_max": 1e-06,
+        "band_min": -0.415484,
+        "band_width": 0.415485,
+        "band_median": 1e-06,
+        "n_seeds_flipped": 6,
+        "seed_flip_means": [
+         1e-06,
+         null,
+         null,
+         null,
+         1e-06,
+         null,
+         -0.017106,
+         -0.415484,
+         1e-06,
+         1e-06
+        ]
+       },
+       "from_label": "Integration-step bug resolution",
+       "current_mean": -0.55,
+       "flip_direction": "increase"
+      },
+      {
+       "to_id": "revenue_lost_to_trial_abandonment",
+       "e_value": 1,
+       "edge_id": "trial_profile_abandonment_rate::revenue_lost_to_trial_abandonment",
+       "from_id": "trial_profile_abandonment_rate",
+       "to_label": "Revenue lost to trial abandonment",
+       "flip_mean": 0.227272,
+       "stability": {
+        "n_seeds": 10,
+        "band_max": 0.366891,
+        "band_min": -1e-06,
+        "band_width": 0.366892,
+        "band_median": -1e-06,
+        "n_seeds_flipped": 4,
+        "seed_flip_means": [
+         -1e-06,
+         null,
+         null,
+         null,
+         -1e-06,
+         null,
+         null,
+         0.366891,
+         -1e-06,
+         null
+        ]
+       },
+       "from_label": "Trial profile abandonment rate",
+       "current_mean": 0.5,
+       "flip_direction": "decrease"
+      },
+      {
+       "to_id": "quarterly_revenue",
+       "e_value": 1,
+       "edge_id": "revenue_lost_to_trial_abandonment::quarterly_revenue",
+       "from_id": "revenue_lost_to_trial_abandonment",
+       "to_label": "Quarterly revenue",
+       "flip_mean": -0.227272,
+       "stability": {
+        "n_seeds": 10,
+        "band_max": 1e-06,
+        "band_min": -0.268739,
+        "band_width": 0.26874,
+        "band_median": 1e-06,
+        "n_seeds_flipped": 6,
+        "seed_flip_means": [
+         1e-06,
+         1e-06,
+         null,
+         -0.017902,
+         1e-06,
+         null,
+         null,
+         -0.268739,
+         1e-06,
+         null
+        ]
+       },
+       "from_label": "Revenue lost to trial abandonment",
+       "current_mean": -0.5,
+       "flip_direction": "increase"
+      }
+     ],
+     "inference_warnings": [
+      {
+       "code": "ZERO_FACTOR_HELD_EXACT",
+       "message": "Olumi holds the starting level of \"AI reporting module availability\" at 0 0-1 exactly; the options still move it.",
+       "severity": "info",
+       "node_label": "AI reporting module availability"
+      },
+      {
+       "code": "ZERO_FACTOR_HELD_EXACT",
+       "message": "Olumi holds the starting level of \"Integration-step bug resolution\" at 0 0-1 exactly; the options still move it.",
+       "severity": "info",
+       "node_label": "Integration-step bug resolution"
+      },
+      {
+       "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+       "message": "1 edge E-value entry was omitted from edge_e_values: 1 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+       "severity": "info"
+      },
+      {
+       "code": "GOAL_DIRECTION_UNATTESTED",
+       "field": "goal_direction",
+       "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+       "severity": "warning"
+      }
+     ],
+     "confidence_tier": "fair",
+     "flip_thresholds": [
+      {
+       "unit": "%",
+       "factor_id": "sprint_capacity_for_ai_reporting",
+       "flip_value": null,
+       "flip_reason": "no_effect_within_bounds",
+       "probes_used": 0,
+       "factor_label": "Sprint capacity for AI reporting",
+       "current_value": 0,
+       "iterations_used": 0,
+       "no_flip_in_range": true,
+       "alternative_winner_id": null,
+       "alternative_winner_label": null
+      },
+      {
+       "unit": "%",
+       "direction": "increase",
+       "factor_id": "sprint_capacity_for_integration_fix",
+       "flip_value": 54.55,
+       "flip_reason": "found",
+       "probes_used": 0,
+       "factor_label": "Sprint capacity for integration fix",
+       "current_value": 0,
+       "iterations_used": 0,
+       "alternative_winner_id": "ai_reporting_module_sprint",
+       "alternative_winner_label": "AI Reporting Module Sprint"
+      }
+     ],
+     "decision_brief": {
+      "options": [
+       {
+        "label": "AI Reporting Module Sprint",
+        "option_id": "ai_reporting_module_sprint",
+        "win_probability": 0.4218333333333474
+       },
+       {
+        "label": "Continue Current Plan",
+        "option_id": "continue_current_plan",
+        "win_probability": 0.11033333333333564
+       },
+       {
+        "label": "Integration Bug Fix Sprint",
+        "option_id": "integration_bug_fix_sprint",
+        "win_probability": 0.46783333333333704
+       }
+      ],
+      "version": "1",
+      "brief_id": "e92190fa-9bbc-4b4e-a956-4df2fff93593",
+      "warnings": [
+       {
+        "code": "M2_UNAVAILABLE",
+        "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+        "severity": "warning"
+       }
+      ],
+      "created_at": "2026-10-02T01:37:06.953Z",
+      "robustness": "fragile",
+      "top_drivers": [
+       {
+        "direction": "positive",
+        "sensitivity": 1,
+        "factor_label": "Enterprise prospect signing likelihood"
+       },
+       {
+        "direction": "negative",
+        "sensitivity": 0.5,
+        "factor_label": "Trial profile abandonment rate"
+       },
+       {
+        "direction": "positive",
+        "sensitivity": 0.275,
+        "factor_label": "Integration-step bug resolution"
+       },
+       {
+        "direction": "positive",
+        "sensitivity": 0.1,
+        "factor_label": "AI reporting module availability"
+       }
+      ],
+      "warning_codes": [
+       "GOAL_DIRECTION_UNATTESTED"
+      ],
+      "key_assumptions": [
+       "Enterprise prospect signing likelihood",
+       "Trial profile abandonment rate",
+       "Integration-step bug resolution"
+      ],
+      "analysis_summary": {
+       "robustness_band": "fragile"
+      },
+      "what_would_change": [
+       "Enterprise prospect signing likelihood → Quarterly revenue",
+       "AI reporting module availability → Enterprise prospect signing likelihood"
+      ],
+      "defaulted_assumptions": []
+     },
+     "factor_evppi": [
+      {
+       "evppi": 1e-06,
+       "units": "outcome",
+       "method": "regression_evppi_v1",
+       "status": "below_resolution",
+       "evppi_raw": 1e-06,
+       "factor_id": "enterprise_prospect_signing_likelihood",
+       "n_samples": 10000,
+       "clamped_low": false,
+       "noise_floor": 1e-06,
+       "clamped_high": false,
+       "status_reason": "at_or_below_noise_floor",
+       "regression_degree": 4,
+       "correlation_active": false,
+       "baseline_max_expected_utility": 0.028955,
+       "conditional_max_expected_utility": 0.028956
+      },
+      {
+       "evppi": 0,
+       "units": "outcome",
+       "method": "regression_evppi_v1",
+       "status": "below_resolution",
+       "evppi_raw": 0,
+       "factor_id": "ai_reporting_module_availability",
+       "n_samples": 10000,
+       "clamped_low": false,
+       "noise_floor": 0,
+       "clamped_high": false,
+       "status_reason": "at_or_below_noise_floor",
+       "regression_degree": 0,
+       "correlation_active": false,
+       "baseline_max_expected_utility": 0.028955,
+       "conditional_max_expected_utility": 0.028955
+      },
+      {
+       "evppi": 0,
+       "units": "outcome",
+       "method": "regression_evppi_v1",
+       "status": "below_resolution",
+       "evppi_raw": 0,
+       "factor_id": "integration_step_bug_resolution",
+       "n_samples": 10000,
+       "clamped_low": false,
+       "noise_floor": 0,
+       "clamped_high": false,
+       "status_reason": "at_or_below_noise_floor",
+       "regression_degree": 0,
+       "correlation_active": false,
+       "baseline_max_expected_utility": 0.028955,
+       "conditional_max_expected_utility": 0.028955
+      },
+      {
+       "evppi": 0,
+       "units": "outcome",
+       "method": "regression_evppi_v1",
+       "status": "below_resolution",
+       "evppi_raw": 0,
+       "factor_id": "trial_profile_abandonment_rate",
+       "n_samples": 10000,
+       "clamped_low": false,
+       "noise_floor": 1e-06,
+       "clamped_high": false,
+       "status_reason": "at_or_below_noise_floor",
+       "regression_degree": 4,
+       "correlation_active": false,
+       "baseline_max_expected_utility": 0.028955,
+       "conditional_max_expected_utility": 0.028955
+      }
+     ],
+     "decision_evpi": 0.004363298473462236,
+     "p_win_sensitivity": [
+      {
+       "method": "p_win_delta_at_mean_v1",
+       "status": "below_resolution",
+       "clamped": false,
+       "factor_id": "ai_reporting_module_availability",
+       "n_samples": 2000,
+       "metric_type": "p_win_recommended",
+       "noise_floor": 0.03099,
+       "p_win_delta": 0.022833,
+       "current_metric": 0.460583,
+       "perfect_metric": 0.483417,
+       "labelling_doctrine": "provisional_doctrine_v0",
+       "noise_floor_method": "z95_worst_case_bernoulli_diff",
+       "p_win_delta_percentage_points": 2.28
+      },
+      {
+       "method": "p_win_delta_at_mean_v1",
+       "status": "below_resolution",
+       "clamped": false,
+       "factor_id": "sprint_capacity_for_ai_reporting",
+       "n_samples": 2000,
+       "metric_type": "p_win_recommended",
+       "noise_floor": 0.03099,
+       "p_win_delta": 0.019417,
+       "current_metric": 0.460583,
+       "perfect_metric": 0.48,
+       "labelling_doctrine": "provisional_doctrine_v0",
+       "noise_floor_method": "z95_worst_case_bernoulli_diff",
+       "p_win_delta_percentage_points": 1.94
+      },
+      {
+       "method": "p_win_delta_at_mean_v1",
+       "status": "below_resolution",
+       "clamped": false,
+       "factor_id": "integration_step_bug_resolution",
+       "n_samples": 2000,
+       "metric_type": "p_win_recommended",
+       "noise_floor": 0.03099,
+       "p_win_delta": 0.017417,
+       "current_metric": 0.460583,
+       "perfect_metric": 0.478,
+       "labelling_doctrine": "provisional_doctrine_v0",
+       "noise_floor_method": "z95_worst_case_bernoulli_diff",
+       "p_win_delta_percentage_points": 1.74
+      },
+      {
+       "method": "p_win_delta_at_mean_v1",
+       "status": "below_resolution",
+       "clamped": false,
+       "factor_id": "sprint_capacity_for_integration_fix",
+       "n_samples": 2000,
+       "metric_type": "p_win_recommended",
+       "noise_floor": 0.03099,
+       "p_win_delta": 0.00775,
+       "current_metric": 0.460583,
+       "perfect_metric": 0.468333,
+       "labelling_doctrine": "provisional_doctrine_v0",
+       "noise_floor_method": "z95_worst_case_bernoulli_diff",
+       "p_win_delta_percentage_points": 0.78
+      },
+      {
+       "method": "p_win_delta_at_mean_v1",
+       "status": "below_resolution",
+       "clamped": false,
+       "factor_id": "enterprise_prospect_signing_likelihood",
+       "n_samples": 2000,
+       "metric_type": "p_win_recommended",
+       "noise_floor": 0.03099,
+       "p_win_delta": 0.000417,
+       "current_metric": 0.460583,
+       "perfect_metric": 0.461,
+       "labelling_doctrine": "provisional_doctrine_v0",
+       "noise_floor_method": "z95_worst_case_bernoulli_diff",
+       "p_win_delta_percentage_points": 0.04
+      },
+      {
+       "method": "p_win_delta_at_mean_v1",
+       "status": "below_resolution",
+       "clamped": true,
+       "factor_id": "trial_profile_abandonment_rate",
+       "n_samples": 2000,
+       "metric_type": "p_win_recommended",
+       "noise_floor": 0.03099,
+       "p_win_delta": 0,
+       "current_metric": 0.460583,
+       "perfect_metric": 0.456333,
+       "labelling_doctrine": "provisional_doctrine_v0",
+       "noise_floor_method": "z95_worst_case_bernoulli_diff",
+       "p_win_delta_percentage_points": 0
+      }
+     ],
+     "conditional_winners": []
+    },
+    "computed_against_hash": "4f63ccee7c91f73a"
+   },
+   {
+    "block_id": "6dfa8266-a275-513a-b7f4-ed31538f7359",
+    "signal_id": "coach:fragile_link:enterprise_prospect_signing_likelihood→quarterly_revenue:4f63ccee7c91f73a:2026-10-02T01:37:01.025Z:explicit_run:assumed",
+    "created_at": "2026-10-02T01:37:01.025Z",
+    "source_handler": "run_analysis",
+    "graph_hash_at_generation": "4f63ccee7c91f73a",
+    "freshness": "fresh",
+    "type": "coaching",
+    "coaching_kind": "assumption_check",
+    "title": "Check an assumption Olumi made",
+    "body": "The robustness check flagged the link from Enterprise prospect signing likelihood to Quarterly revenue as sensitive, and some of its numbers are Olumi's starting assumptions — worth saying what you believe about it.",
+    "source": "deterministic_signal",
+    "target_refs": [
+     {
+      "id": "enterprise_prospect_signing_likelihood→quarterly_revenue",
+      "label": "Enterprise prospect signing likelihood → Quarterly revenue",
+      "kind": "edge"
+     }
+    ],
+    "priority_rank": 15,
+    "action_label": "Share my view of this link",
+    "action_prompt": "Some numbers on the link from Enterprise prospect signing likelihood to Quarterly revenue are Olumi's starting assumptions. Ask me what I believe about it and what that rests on. If I answer, offer to record my answer for me to approve, and change nothing until I do."
+   }
+  ],
+  "suggested_actions": [
+   {
+    "id": "agent-explain-run:0ef0bef6edd7ece3",
+    "label": "Explain this result",
+    "message": "Explain this result"
+   }
+  ],
+  "insights": [],
+  "stage_indicator": "frame",
+  "analysis_state": {
+   "run_state": {
+    "kind": "complete_current",
+    "computed_at": "2026-10-02T01:37:01.025Z"
+   },
+   "readiness": {
+    "status": "ready",
+    "blockers": []
+   },
+   "leader_claim": {
+    "permitted": false,
+    "withheld_reason": "options_do_not_separate",
+    "separation": "near_tie"
+   },
+   "robustness": {
+    "aggregate_level": "very_low"
+   },
+   "usable_for_prose": true,
+   "usable_for_chips": true,
+   "usable_for_followup": true,
+   "requires_rerun": false,
+   "blocked_unusable": false,
+   "contradictions": []
+  },
+  "narration": {
+   "status": "pending",
+   "run_key": "0ef0bef6edd7ece3"
+  },
+  "graph_hash": "4f63ccee7c91f73a",
+  "analysis_ready": {
+   "options": [
+    {
+     "option_id": "ai_reporting_module_sprint",
+     "label": "AI Reporting Module Sprint",
+     "status": "ready",
+     "interventions": {
+      "sprint_capacity_for_ai_reporting": 1,
+      "sprint_capacity_for_integration_fix": 0
+     },
+     "is_baseline": false,
+     "intervention_details": {
+      "sprint_capacity_for_ai_reporting": {
+       "display_value": "100%",
+       "normalised_value": 1,
+       "raw_value": 100,
+       "unit": "%"
+      },
+      "sprint_capacity_for_integration_fix": {
+       "display_value": "0%",
+       "normalised_value": 0,
+       "raw_value": 0,
+       "unit": "%"
+      }
+     },
+     "raw_interventions": {
+      "sprint_capacity_for_ai_reporting": 100,
+      "sprint_capacity_for_integration_fix": 0
+     },
+     "status_reason": "2 intervention(s) ready for analysis"
+    },
+    {
+     "option_id": "integration_bug_fix_sprint",
+     "label": "Integration Bug Fix Sprint",
+     "status": "ready",
+     "interventions": {
+      "sprint_capacity_for_ai_reporting": 0,
+      "sprint_capacity_for_integration_fix": 1
+     },
+     "is_baseline": false,
+     "intervention_details": {
+      "sprint_capacity_for_ai_reporting": {
+       "display_value": "0%",
+       "normalised_value": 0,
+       "raw_value": 0,
+       "unit": "%"
+      },
+      "sprint_capacity_for_integration_fix": {
+       "display_value": "100%",
+       "normalised_value": 1,
+       "raw_value": 100,
+       "unit": "%"
+      }
+     },
+     "raw_interventions": {
+      "sprint_capacity_for_ai_reporting": 0,
+      "sprint_capacity_for_integration_fix": 100
+     },
+     "status_reason": "2 intervention(s) ready for analysis"
+    },
+    {
+     "option_id": "split_sprint_capacity",
+     "label": "Split Sprint Capacity",
+     "status": "ready",
+     "interventions": {
+      "sprint_capacity_for_ai_reporting": 0.5,
+      "sprint_capacity_for_integration_fix": 0.5
+     },
+     "is_baseline": false,
+     "intervention_details": {
+      "sprint_capacity_for_ai_reporting": {
+       "display_value": "50%",
+       "normalised_value": 0.5,
+       "raw_value": 50,
+       "unit": "%"
+      },
+      "sprint_capacity_for_integration_fix": {
+       "display_value": "50%",
+       "normalised_value": 0.5,
+       "raw_value": 50,
+       "unit": "%"
+      }
+     },
+     "raw_interventions": {
+      "sprint_capacity_for_ai_reporting": 50,
+      "sprint_capacity_for_integration_fix": 50
+     },
+     "status_reason": "2 intervention(s) ready for analysis"
+    },
+    {
+     "option_id": "continue_current_plan",
+     "label": "Continue Current Plan",
+     "status": "ready",
+     "interventions": {},
+     "is_baseline": true,
+     "status_reason": "Baseline: every factor holds at its observed value, so no effect values are needed"
+    }
+   ],
+   "goal_node_id": "quarterly_revenue",
+   "status": "ready",
+   "bias_findings": [],
+   "may_run": true,
+   "analysis_admission": {
+    "structurally_analysable": true,
+    "missing_important_inputs": [],
+    "semantic_quality_sufficient": true,
+    "permitted_analysis_mode": "comparative_leader",
+    "reasons": [
+     {
+      "field": "structurally_analysable",
+      "code": "READY_TO_COMPARE",
+      "message": "Analysis can run on this model as it stands."
+     },
+     {
+      "field": "semantic_quality_sufficient",
+      "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+      "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+     },
+     {
+      "field": "permitted_analysis_mode",
+      "code": "CONFIDENCE_PARAMETERS_PARTLY_USER_STATED",
+      "message": "At least one of the estimates this comparison rests on is yours, so a leading option can be named."
+     }
+    ],
+    "graph_hash": "4f63ccee7c91f73a45a4f7aff00db7fab89a23341619d5c9356819a2a475fa36",
+    "semantic_signals": {
+     "confidence_parameters_total": 15,
+     "confidence_parameters_user_stated": 3,
+     "confidence_parameters_machine_authored": 10,
+     "confidence_parameters_unattributed": 2,
+     "material_parameters_total": 13,
+     "material_parameters_user_stated": 3,
+     "intervened_factor_baselines_total": 2,
+     "intervened_factor_baselines_user_stated": 0,
+     "material_parameters_awaiting_user_node_ids": [
+      "sprint_capacity_for_ai_reporting",
+      "sprint_capacity_for_integration_fix",
+      "ai_reporting_module_availability",
+      "enterprise_prospect_signing_likelihood",
+      "integration_step_bug_resolution"
+     ],
+     "goal_target_stated": false
+    }
+   },
+   "freshness": "fresh",
+   "freshness_reason": "agent_readback_run_state_current",
+   "graph_hash_at_run": "4f63ccee7c91f73a",
+   "current_graph_hash": "4f63ccee7c91f73a",
+   "computed_at": "2026-10-02T01:37:01.025Z"
+  },
+  "draft_graph": {
+   "nodes": [
+    {
+     "id": "how_should_i_approach_this_trade_off",
+     "ref": "D1",
+     "kind": "decision",
+     "label": "How should I approach this trade-off?",
+     "provenance": "from_brief"
+    },
+    {
+     "id": "quarterly_revenue",
+     "ref": "G1",
+     "kind": "goal",
+     "label": "Quarterly revenue",
+     "provenance": "ai_inferred",
+     "goal_threshold_unit": "currency/quarter",
+     "goal_threshold_frame": "level"
+    },
+    {
+     "id": "ai_reporting_module_sprint",
+     "ref": "O1",
+     "kind": "option",
+     "label": "AI Reporting Module Sprint",
+     "provenance": "from_brief",
+     "interventions": {
+      "sprint_capacity_for_ai_reporting": {
+       "unit": "%",
+       "value": 1,
+       "source": "cee_hypothesis",
+       "raw_value": 100,
+       "target_match": {
+        "node_id": "sprint_capacity_for_ai_reporting",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "sprint_capacity_for_integration_fix": {
+       "unit": "%",
+       "value": 0,
+       "source": "cee_hypothesis",
+       "raw_value": 0,
+       "target_match": {
+        "node_id": "sprint_capacity_for_integration_fix",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "integration_bug_fix_sprint",
+     "ref": "O2",
+     "kind": "option",
+     "label": "Integration Bug Fix Sprint",
+     "provenance": "from_brief",
+     "interventions": {
+      "sprint_capacity_for_ai_reporting": {
+       "unit": "%",
+       "value": 0,
+       "source": "cee_hypothesis",
+       "raw_value": 0,
+       "target_match": {
+        "node_id": "sprint_capacity_for_ai_reporting",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "sprint_capacity_for_integration_fix": {
+       "unit": "%",
+       "value": 1,
+       "source": "cee_hypothesis",
+       "raw_value": 100,
+       "target_match": {
+        "node_id": "sprint_capacity_for_integration_fix",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "split_sprint_capacity",
+     "ref": "O3",
+     "kind": "option",
+     "label": "Split Sprint Capacity",
+     "provenance": "ai_inferred",
+     "proposed_by": "olumi",
+     "interventions": {
+      "sprint_capacity_for_ai_reporting": {
+       "unit": "%",
+       "value": 0.5,
+       "source": "cee_hypothesis",
+       "raw_value": 50,
+       "target_match": {
+        "node_id": "sprint_capacity_for_ai_reporting",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      },
+      "sprint_capacity_for_integration_fix": {
+       "unit": "%",
+       "value": 0.5,
+       "source": "cee_hypothesis",
+       "raw_value": 50,
+       "target_match": {
+        "node_id": "sprint_capacity_for_integration_fix",
+        "confidence": "high",
+        "match_type": "exact_id"
+       }
+      }
+     }
+    },
+    {
+     "id": "continue_current_plan",
+     "ref": "O4",
+     "kind": "option",
+     "label": "Continue Current Plan",
+     "provenance": "ai_inferred",
+     "is_baseline": true
+    },
+    {
+     "id": "sprint_capacity_for_ai_reporting",
+     "ref": "F1",
+     "kind": "factor",
+     "label": "Sprint capacity for AI reporting",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "scale_frame": 100,
+     "observed_state": {
+      "unit": "%",
+      "value": 0,
+      "source": "cee_inference",
+      "raw_value": 0,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "sprint_capacity_for_integration_fix",
+     "ref": "F2",
+     "kind": "factor",
+     "label": "Sprint capacity for integration fix",
+     "category": "controllable",
+     "provenance": "ai_inferred",
+     "scale_frame": 100,
+     "observed_state": {
+      "unit": "%",
+      "value": 0,
+      "source": "cee_inference",
+      "raw_value": 0,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "ai_reporting_module_availability",
+     "ref": "F3",
+     "kind": "factor",
+     "label": "AI reporting module availability",
+     "category": "observable",
+     "provenance": "ai_inferred",
+     "observed_state": {
+      "unit": "0-1",
+      "value": 0,
+      "source": "cee_inference",
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "enterprise_prospect_signing_likelihood",
+     "ref": "F4",
+     "kind": "factor",
+     "label": "Enterprise prospect signing likelihood",
+     "category": "observable",
+     "provenance": "ai_inferred",
+     "scale_frame": 100,
+     "observed_state": {
+      "unit": "%",
+      "value": 0.1,
+      "source": "cee_inference",
+      "raw_value": 10,
+      "extractionType": "inferred"
+     }
+    },
+    {
+     "id": "integration_step_bug_resolution",
+     "ref": "F5",
+     "kind": "factor",
+     "label": "Integration-step bug resolution",
+     "category": "observable",
+     "provenance": "ai_inferred",
+     "observed_state": {
+      "unit": "0-1",
+      "value": 0,
+      "source": "cee_inference"
+     }
+    },
+    {
+     "id": "trial_profile_abandonment_rate",
+     "ref": "F6",
+     "kind": "factor",
+     "label": "Trial profile abandonment rate",
+     "category": "observable",
+     "provenance": "from_brief",
+     "observed_state": {
+      "cap": 100,
+      "unit": "%",
+      "value": 0.15,
+      "source": "brief_extraction",
+      "raw_value": 15,
+      "declared_scale": "unit_interval"
+     }
+    },
+    {
+     "id": "revenue_lost_to_trial_abandonment",
+     "ref": "R1",
+     "kind": "risk",
+     "label": "Revenue lost to trial abandonment",
+     "provenance": "ai_inferred",
+     "scale_frame": 500000
+    }
+   ],
+   "edges": [
+    {
+     "to": "ai_reporting_module_sprint",
+     "from": "how_should_i_approach_this_trade_off",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "integration_bug_fix_sprint",
+     "from": "how_should_i_approach_this_trade_off",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "split_sprint_capacity",
+     "from": "how_should_i_approach_this_trade_off",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "continue_current_plan",
+     "from": "how_should_i_approach_this_trade_off",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "sprint_capacity_for_ai_reporting",
+     "from": "ai_reporting_module_sprint",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "sprint_capacity_for_integration_fix",
+     "from": "ai_reporting_module_sprint",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "sprint_capacity_for_ai_reporting",
+     "from": "integration_bug_fix_sprint",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "sprint_capacity_for_integration_fix",
+     "from": "integration_bug_fix_sprint",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "sprint_capacity_for_ai_reporting",
+     "from": "split_sprint_capacity",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "sprint_capacity_for_integration_fix",
+     "from": "split_sprint_capacity",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "sprint_capacity_for_ai_reporting",
+     "from": "continue_current_plan",
+     "origin": "repair",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "sprint_capacity_for_integration_fix",
+     "from": "continue_current_plan",
+     "origin": "repair",
+     "strength": {
+      "std": 0.01,
+      "mean": 1
+     },
+     "provenance": {
+      "source": "cee_hypothesis",
+      "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 1
+    },
+    {
+     "to": "ai_reporting_module_availability",
+     "from": "sprint_capacity_for_ai_reporting",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.25
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_estimate",
+      "natural_effect": {
+       "amount": 0.25,
+       "amount_unit": "0-1",
+       "strength_mean": 0.25,
+       "per_source_change": 100,
+       "strength_mean_frame": "edge_strength",
+       "per_source_change_unit": "%"
+      },
+      "reviewed_by_user": {
+       "at": "2026-10-02T01:08:30.834Z",
+       "intent": "confirm"
+      }
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "enterprise_prospect_signing_likelihood",
+     "from": "ai_reporting_module_availability",
+     "strength": {
+      "std": 0.05773502691896258,
+      "mean": 0.1
+     },
+     "provenance": {
+      "source": "user_specified"
+     },
+     "effect_direction": "positive",
+     "exists_defaulted": true,
+     "exists_probability": 0.8,
+     "provenance_display": "user_set"
+    },
+    {
+     "to": "quarterly_revenue",
+     "from": "enterprise_prospect_signing_likelihood",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "integration_step_bug_resolution",
+     "from": "sprint_capacity_for_integration_fix",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.25
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis",
+      "magnitude": "olumi_estimate",
+      "natural_effect": {
+       "amount": 0.25,
+       "amount_unit": "0-1",
+       "strength_mean": 0.25,
+       "per_source_change": 100,
+       "strength_mean_frame": "edge_strength",
+       "per_source_change_unit": "%"
+      },
+      "reviewed_by_user": {
+       "at": "2026-10-02T01:09:00.341Z",
+       "intent": "confirm"
+      }
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "trial_profile_abandonment_rate",
+     "from": "integration_step_bug_resolution",
+     "strength": {
+      "std": 0.08660254037844385,
+      "mean": -0.55
+     },
+     "provenance": {
+      "source": "user_specified"
+     },
+     "effect_direction": "negative",
+     "exists_defaulted": true,
+     "exists_probability": 0.8,
+     "provenance_display": "user_set"
+    },
+    {
+     "to": "revenue_lost_to_trial_abandonment",
+     "from": "trial_profile_abandonment_rate",
+     "strength": {
+      "std": 0.125,
+      "mean": 0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "positive",
+     "exists_probability": 0.8
+    },
+    {
+     "to": "quarterly_revenue",
+     "from": "revenue_lost_to_trial_abandonment",
+     "strength": {
+      "std": 0.125,
+      "mean": -0.5
+     },
+     "defaulted": true,
+     "provenance": {
+      "source": "cee_hypothesis"
+     },
+     "effect_direction": "negative",
+     "exists_probability": 0.8
+    }
+   ],
+   "node_count": 13,
+   "edge_count": 19
+  },
+  "run_delta": {
+   "attribution_case": "C0_identical",
+   "pair_provenance": {
+    "seed_equal": true,
+    "hash_equal": true,
+    "builds_equal": "equal",
+    "n_equal": true
+   },
+   "leader": {
+    "changed": false,
+    "prior_leading_option_id": null,
+    "current_leading_option_id": null,
+    "noise_verdict": "not_noise_qualified"
+   },
+   "win_probabilities": [
+    {
+     "option_id": "ai_reporting_module_sprint",
+     "prior": 0.4218333333333474,
+     "current": 0.4218333333333474,
+     "noise_verdict": "within_noise"
+    },
+    {
+     "option_id": "continue_current_plan",
+     "prior": 0.11033333333333564,
+     "current": 0.11033333333333564,
+     "noise_verdict": "within_noise"
+    },
+    {
+     "option_id": "integration_bug_fix_sprint",
+     "prior": 0.46783333333333704,
+     "current": 0.46783333333333704,
+     "noise_verdict": "within_noise"
+    }
+   ],
+   "flip_thresholds": [],
+   "endpoints": {
+    "prior": {
+     "run_id": "5c78bb20925e9557253711ec1be6129bd318186ba660bb6ffca64e0447893874",
+     "computed_at": "2026-10-02T01:33:54.512Z"
+    },
+    "current": {
+     "run_id": "5cd7e8cc8d901b04570f9307bcbb421a91e6276240d1d954911a2495f2949f6b",
+     "computed_at": "2026-10-02T01:37:01.025Z"
+    }
+   },
+   "input_coverage": "complete",
+   "input_changes": []
+  },
+  "_not_modelled": {
+   "graph_hash": "4f63ccee7c91f73a",
+   "manifest": {
+    "schema": "not_modelled.v1",
+    "status": "derived",
+    "unavailable_reason": null,
+    "scope": {
+     "searched": "quantities stated in the brief that carry a unit: money, percentages, counts with a unit word, calendar dates and fiscal periods",
+     "model_surface": [
+      "node and option values, caps, units, labels and encoding maps"
+     ],
+     "prose_surface": [
+      "coaching cards",
+      "draft warnings",
+      "validation warnings"
+     ],
+     "excluded_from_search": [
+      "bare numbers carrying no unit, currency or percent sign",
+      "everything in not_tracked"
+     ]
+    },
+    "quantities": {
+     "total": 1,
+     "in_model": 1,
+     "in_model_anchored": 1,
+     "in_model_unanchored": 0,
+     "prose_only": 0,
+     "absent": 0,
+     "truncated": false,
+     "items": [
+      {
+       "literal": "15%",
+       "kind": "percent",
+       "char_offset": 487,
+       "verdict": "in_model",
+       "matched_node_id": "trial_profile_abandonment_rate",
+       "stated_kind": "figure"
+      }
+     ]
+    },
+    "stated_kinds": {
+     "status": "derived",
+     "tally": {
+      "goal": 0,
+      "option": 0,
+      "constraint": 0,
+      "figure": 1,
+      "evidence": 0,
+      "assumption": 0,
+      "disagreement": 0,
+      "correction": 0
+     },
+     "sourced": [
+      "constraint",
+      "figure"
+     ],
+     "unsourced": [
+      "goal",
+      "option",
+      "evidence",
+      "assumption",
+      "disagreement",
+      "correction"
+     ],
+     "producers": {
+      "figure": "extractStatedQuantities (this module) — quantities stated in the brief",
+      "constraint": "graph.goal_constraints[] with source_quote (draft/anthropic-graph-schema.ts:447-467)"
+     }
+    },
+    "declared_exclusions": {
+     "status": "not_recorded",
+     "items": []
+    },
+    "inferred_factors": {
+     "status": "derived",
+     "items": [
+      {
+       "node_id": "sprint_capacity_for_ai_reporting",
+       "label": "Sprint capacity for AI reporting"
+      },
+      {
+       "node_id": "sprint_capacity_for_integration_fix",
+       "label": "Sprint capacity for integration fix"
+      },
+      {
+       "node_id": "ai_reporting_module_availability",
+       "label": "AI reporting module availability"
+      },
+      {
+       "node_id": "enterprise_prospect_signing_likelihood",
+       "label": "Enterprise prospect signing likelihood"
+      },
+      {
+       "node_id": "integration_step_bug_resolution",
+       "label": "Integration-step bug resolution"
+      }
+     ]
+    },
+    "not_tracked": [
+     "competing_or_dissenting_proposals",
+     "corrections_and_second_thoughts",
+     "named_evidence_sources_and_their_pedigree",
+     "qualitative_constraints_and_rules",
+     "stated_confidence_and_self_flagged_weakness",
+     "statements_the_drafting_model_did_not_report_discarding"
+    ]
+   }
+  },
+  "goal_certainty": [],
+  "option_participation": [
+   {
+    "option_id": "split_sprint_capacity",
+    "state": "excluded_olumi_proposed"
+   }
+  ],
+  "_diagnostic_trace": {
+   "exit_path": "agent_lane_v1",
+   "fast_path": "run",
+   "agent_mode": "full",
+   "hops": 1,
+   "stopped_reason": "answered",
+   "tools_called": [
+    "run_analysis"
+   ],
+   "timing": {
+    "total_ms": 9711,
+    "provider_ms": 0,
+    "tool_ms": 9711,
+    "overhead_ms": 0,
+    "tool_provider_ms": 0,
+    "provider_calls": 0,
+    "tool_calls": 1,
+    "hops": 1,
+    "route_total_ms": 10523,
+    "dispatches": [
+     {
+      "path": "/assist/v1/scenarios/:scenario/graph",
+      "ms": 1594,
+      "status": 200
+     },
+     {
+      "path": "/orchestrate/v2/turn",
+      "ms": 8107,
+      "status": 200
+     },
+     {
+      "path": "/assist/v1/scenarios/:scenario/graph",
+      "ms": 1603,
+      "status": 200
+     }
+    ],
+    "dispatch_ms": 11304
+   },
+   "write_claims_removed": 0,
+   "leader_claim_enforced": true,
+   "coaching": {
+    "eligible": true
+   },
+   "coaching_next_move": "link_view",
+   "coaching_caveats": []
+  },
+  "_agent": {
+   "session_id": "sess_4b218a76-3916-4106-87e5-500e84c8d6ac",
+   "mode": "full",
+   "tool_calls": [
+    {
+     "name": "run_analysis",
+     "ok": true,
+     "mutated": false
+    }
+   ],
+   "mutated": false,
+   "hops": 1,
+   "stopped_reason": "answered",
+   "turn_id": "3820996e-508a-43d9-af1c-2703615afeb2",
+   "durability": "recorded",
+   "receipts": []
+  },
+  "_provider_calls": []
+ }
+}
