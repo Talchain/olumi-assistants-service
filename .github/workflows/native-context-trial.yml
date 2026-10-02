@@ -1,0 +1,88 @@
+name: Isolated native context trial
+on:
+  push:
+    branches: [experiment/openai-native-context-20261002]
+    paths:
+      - src/config/native-context-trial.ts
+      - src/routes/agent-v1-turn.ts
+      - src/orchestrator-v5/agent-lane/runtime/agent-loop.ts
+      - src/orchestrator-v5/agent-lane/runtime/native-context-trial.ts
+      - src/orchestrator-v5/agent-lane/__tests__/native-context-*.integration.test.ts
+      - tests/native-context-trial/**
+      - .github/workflows/native-context-trial.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isolated-native-context-trial
+  cancel-in-progress: true
+jobs:
+  focused:
+    if: github.ref == 'refs/heads/experiment/openai-native-context-20261002'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Record exact committed source
+        run: |
+          mkdir -p native-context-evidence
+          git rev-parse HEAD | tee native-context-evidence/tested-sha.txt
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --check
+          grep -q 'nativeContextTrialEnvironment()' src/routes/agent-v1-turn.ts
+          grep -q 'input.nativeContext.call' src/orchestrator-v5/agent-lane/runtime/agent-loop.ts
+      - name: Focused transport and lifecycle tests
+        id: helper
+        continue-on-error: true
+        run: node --experimental-strip-types --test tests/native-context-trial/continuation.test.mjs 2>&1 | tee native-context-evidence/helper-tests.txt
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+      - name: Build real backend
+        id: build
+        continue-on-error: true
+        run: pnpm build 2>&1 | tee native-context-evidence/build.txt
+      - name: Lint changed runtime files
+        id: lint
+        continue-on-error: true
+        run: pnpm exec eslint src/config/native-context-trial.ts src/routes/agent-v1-turn.ts src/orchestrator-v5/agent-lane/runtime/agent-loop.ts src/orchestrator-v5/agent-lane/runtime/native-context-trial.ts 2>&1 | tee native-context-evidence/lint.txt
+      - name: Real-route trial, approval and existing compatibility tests
+        id: tests
+        continue-on-error: true
+        run: |
+          pnpm exec vitest run --maxWorkers=1 --no-file-parallelism \
+            src/orchestrator-v5/agent-lane/__tests__/native-context-*.integration.test.ts \
+            src/orchestrator-v5/agent-lane/__tests__/turn-state-given-not-fetched.test.ts \
+            src/orchestrator-v5/agent-lane/__tests__/provider-ledger-prompt-identity.test.ts \
+            2>&1 | tee native-context-evidence/route-tests.txt
+      - name: Focused verdict
+        if: always()
+        env:
+          HELPER: ${{ steps.helper.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          LINT: ${{ steps.lint.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+        run: |
+          mkdir -p native-context-evidence
+          printf 'helper=%s\nbuild=%s\nlint=%s\nroute_tests=%s\n' "$HELPER" "$BUILD" "$LINT" "$TESTS" | tee native-context-evidence/verdict.txt
+          test "$HELPER" = success && test "$BUILD" = success && test "$LINT" = success && test "$TESTS" = success
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-context-evidence
+          path: native-context-evidence/
+          retention-days: 7
