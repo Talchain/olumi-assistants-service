@@ -303,12 +303,12 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
     expect(b.briefRead()).toEqual([]);
   });
 
-  it('CONTRAST: a BUFFERED first brief reads ONLY to route it (T1 a): no stream, no frame, body untouched', async () => {
+  it('CONTRAST: a BUFFERED first brief makes no reading call at all (no stream, no frame, body untouched)', async () => {
+    script = [callTool('build_model_from_brief', { brief: BRIEF })];
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SID, message: BRIEF } });
     expect(r.statusCode).toBe(200);
     expect((r.json() as Body)._agent.tool_calls, 'control: it built').toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
-    expect(readingCalls, 'one reading, for the route').toBe(1);
-    expect(r.body).not.toContain('BRIEF_READ');
+    expect(readingCalls).toBe(0);
   });
 
   it('CONTRAST: a streamed turn on a POPULATED model makes no reading call', async () => {
@@ -377,9 +377,12 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
    * message, no chip, no method press, and a reading that names a goal or an option: the host makes the build call
    * itself, so no model call decides it; the call it replaced is still sent, capped and unawaited, only to warm the
    * provider's cache for the one call that answers, and is on the ledger as `prewarm`. Anything else: today's path.
+   * STREAMED ONLY (DL CR on #2496): routing reuses the display reading the stream already makes, so it adds no provider
+   * call; a buffered turn starts no reading at all. So every routing row below is streamed (`turn`).
    */
   describe('T1: a first brief goes straight to the Constructor; the call it replaced only warms the cache', () => {
     const atOf = () => steps.filter((x) => x.at !== 'frame').map((x) => x.at);
+    const turn = async (payload: Record<string, unknown>) => (await streamed(payload)).body;
     const buffered = async (payload: Record<string, unknown>) => {
       const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SID, ...payload } });
       expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
@@ -411,16 +414,17 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       expect(rows.get(`${SID}:${turnId}`)?.llm_calls_used, 'no hidden call').toBe(purposes.length);
     });
 
-    it('RED: buffered — the same route, with no frame', async () => {
+    it('CONTRAST (DL CR on #2496): a BUFFERED first brief starts NO reading — zero added calls, today\'s path', async () => {
+      script = [callTool('build_model_from_brief', { brief: BRIEF })];
       const body = await buffered({ message: BRIEF });
-      expect(body._agent.tool_calls).toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
-      const at = atOf();
-      expect(at.slice(0, at.indexOf('construction')), JSON.stringify(at)).toEqual(['reading', 'prewarm']);
-      expect(answering()).toHaveLength(1);
+      expect(body._agent.tool_calls, 'control: it built').toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
+      expect(readingCalls).toBe(0);
+      expect((body._provider_calls ?? []).map((c) => c.purpose), 'no reading, no prewarm').toEqual(['conversation', 'construction', 'conversation']);
+      todaysPath('buffered');
     });
 
     it('RED: the prewarm IS the answering call\'s prefix (same instructions, tools, leading items); then the host\'s call with the user\'s words verbatim', async () => {
-      await buffered({ message: BRIEF });
+      await turn({ message: BRIEF });
       const [pre] = prewarms();
       const [ans] = answering();
       expect(pre, 'control: a prewarm was sent').toBeDefined();
@@ -436,7 +440,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
     it('CONTRAST: a first message that names no goal and no option (a question with only a limit) → today\'s path, even with `build: true`', async () => {
       readingReply = { status: 200, text: JSON.stringify({ goal: null, options: [], limits: ['monthly churn under 4%'], build: true }) };
       script = [say('Happy to help — what are you deciding?')];
-      const body = await buffered({ message: 'Can we keep monthly churn under 4%?' });
+      const body = await turn({ message: 'Can we keep monthly churn under 4%?' });
       expect(readingCalls, 'control: the reading ran and found a span').toBe(1);
       expect(body._agent.tool_calls).toEqual([]);
       todaysPath('limit only');
@@ -446,7 +450,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       const msg = 'We want to reach £100k MRR within 6 months. Do not create a model yet; just challenge that goal.';
       readingReply = { status: 200, text: JSON.stringify({ goal: 'reach £100k MRR within 6 months', options: [], limits: [], build: false }) };
       script = [say('Before we model it: what makes six months the right horizon?')];
-      const body = await buffered({ message: msg });
+      const body = await turn({ message: msg });
       expect(readingCalls, 'control: the reading ran and kept the goal').toBe(1);
       expect(body._agent.tool_calls).toEqual([]);
       expect(atOf()).not.toContain('construction');
@@ -456,7 +460,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
     it('CONTRAST: a failed reading → today\'s path', async () => {
       readingReply = { status: 500, text: '' };
       script = [callTool('build_model_from_brief', { brief: BRIEF })];
-      const body = await buffered({ message: BRIEF });
+      const body = await turn({ message: BRIEF });
       expect(body._agent.tool_calls).toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
       todaysPath('failed reading');
     });
@@ -466,7 +470,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       readingHold = new Promise<void>((r) => { release = r; });
       script = [callTool('build_model_from_brief', { brief: BRIEF })];
       const t0 = Date.now();
-      const body = await buffered({ message: BRIEF });
+      const body = await turn({ message: BRIEF });
       const waited = Date.now() - t0;
       release();
       await flush();
@@ -479,51 +483,49 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
     it('CONTRAST (Codex pre-review): earlier words that could not be read → today\'s path (the follow-up is never built alone)', async () => {
       durableRead = 'fail';
       script = [callTool('build_model_from_brief', { brief: BRIEF })];
-      const body = await buffered({ message: BRIEF });
+      const body = await turn({ message: BRIEF });
       expect(store.readRecent, 'control: the durable read was attempted').toHaveBeenCalled();
       expect(body._agent.tool_calls).toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
       todaysPath('durable read failed');
     });
 
-    it('CONTRAST (Codex pre-review): not typed by the user — a chip source with no chip object, a retry → no reading, today\'s path', async () => {
+    it('CONTRAST (Codex pre-review): not typed by the user — a chip source with no chip object, a retry → not routed, today\'s path', async () => {
       script = [say('Noted.')];
-      await buffered({ message: BRIEF, source: 'chip_click' });
-      expect(readingCalls).toBe(0);
+      await turn({ message: BRIEF, source: 'chip_click' });
+      expect(readingCalls, 'control: the display reading ran and named options').toBe(1);
       todaysPath('chip source');
       nextScenario(); steps = []; conversationBodies = [];
       script = [say('Noted.')];
-      await buffered({ message: BRIEF, source: 'retry' });
-      expect(readingCalls).toBe(0);
+      await turn({ message: BRIEF, source: 'retry' });
       todaysPath('retry');
     });
 
-    it('CONTRAST: a chip press on an empty model → no reading, today\'s path', async () => {
+    it('CONTRAST: a chip press on an empty model → not routed, today\'s path', async () => {
       script = [say('Noted.')];
-      await buffered({ message: BRIEF, source: 'chip', chip: { id: 'agent-next-what-would-change' } });
-      expect(readingCalls).toBe(0);
+      await turn({ message: BRIEF, source: 'chip', chip: { id: 'agent-next-what-would-change' } });
       todaysPath('chip');
     });
 
-    it('CONTRAST: a brief that is NOT the first message → no reading, today\'s path (only the Agent can combine earlier words)', async () => {
+    it('CONTRAST: a brief that is NOT the first message → not routed, today\'s path (only the Agent can combine earlier words)', async () => {
       readingReply = { status: 200, text: JSON.stringify({ goal: null, options: [], limits: ['monthly churn under 4%'] }) };
       script = [say('What are you deciding?')];
-      await buffered({ message: 'Can we keep monthly churn under 4%?' });
+      await turn({ message: 'Can we keep monthly churn under 4%?' });
       expect(readingCalls, 'control: turn 1 read').toBe(1);
       steps = []; conversationBodies = [];
       readingReply = { status: 200, text: JSON.stringify({ goal: GOAL, options: OPTIONS, build: true }) };
       script = [callTool('build_model_from_brief', { brief: BRIEF })];
-      const body = await buffered({ message: BRIEF });
+      const body = await turn({ message: BRIEF });
       expect(body._agent.tool_calls, 'control: still an empty model, it built').toMatchObject([{ name: 'build_model_from_brief', ok: true }]);
-      expect(readingCalls, 'no reading on a second message').toBe(1);
+      expect(readingCalls, 'control: the display reading ran on turn 2 too').toBe(2);
       todaysPath('second message');
     });
 
     it('CONTRAST: a populated model → no reading, today\'s path', async () => {
-      await buffered({ message: BRIEF });
+      await turn({ message: BRIEF });
       expect(readingCalls).toBe(1);
       steps = []; conversationBodies = [];
       script = [say('Advertising and price both feed MRR.')];
-      await buffered({ message: BRIEF });
+      await turn({ message: BRIEF });
       expect(readingCalls).toBe(1);
       todaysPath('populated');
     });

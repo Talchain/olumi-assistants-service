@@ -51,9 +51,7 @@ describe('C6-1b: the first brief is given the empty model, not sent to fetch it'
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as { tools?: { name: string }[]; input?: unknown[]; text?: { format?: { name?: string } } };
-      // T1 (a): the first brief's reading is not a conversation call. With no reading the Agent decides, as this spec measures.
-      if (body.text?.format?.name === 'brief_spans') return new Response('{"error":"x"}', { status: 500 });
+      const body = JSON.parse(String(init?.body ?? '{}')) as { tools?: { name: string }[]; input?: unknown[] };
       bodies.push(body);
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'Here is where things stand.' }] }] }), { status: 200 });
     }));

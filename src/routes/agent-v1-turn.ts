@@ -2338,7 +2338,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * Agent, ONE fast call copies the user's own goal and options out of THEIR message (never the Agent's
          * restatement); each span must be an exact substring of it or it is dropped (`gateBriefReading`).
          *   · Streamed turns only: a buffered turn has no stage emitter, so nothing starts and its body is untouched.
-         *   · Never awaited: the turn's latency and outcome cannot depend on it; a failure is simply no frame.
+         *   · Never awaited for the frame: a failure is simply no frame. Only T1 (a)'s routing waits for it, capped (below).
          *   · Emitted only while the Agent turn is open AND before GRAPH_READY: the model supersedes the reading.
          * Display-only: nothing is persisted, and nothing reaches the Agent or the COMPLETE body.
          */
@@ -2354,10 +2354,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * (`hostFirstCall`) with the message verbatim, and one call answers from its result. No reading within
          * `BRIEF_ROUTE_WAIT_MS`, or neither → the Agent decides, exactly as before. A brief spread over earlier messages
          * is never routed, nor one whose earlier words could not be read (Codex pre-review): only the Agent combines them.
+         * ⛔ STREAMED TURNS ONLY (DL CR on #2496): routing REUSES the display reading the stream already makes, so it adds no
+         * provider call anywhere. A buffered turn starts no reading and is exactly today's path. (This block runs only for
+         * the request that WON the turn claim: a losing, refused or replayed request has already returned above.)
          */
-        const mayRouteBrief = knownEmpty && earlierWordsKnown && needsDurableSeed(history) && typedNow !== null && methodTurn === null;
-        const reading = knownEmpty && (emitStage !== undefined || mayRouteBrief) ? readBrief(message, callBriefReading) : undefined;
-        if (emitStage !== undefined && knownEmpty && reading !== undefined) {
+        const mayRouteBrief = emitStage !== undefined && knownEmpty && earlierWordsKnown && needsDurableSeed(history) && typedNow !== null && methodTurn === null;
+        const reading = emitStage !== undefined && knownEmpty ? readBrief(message, callBriefReading) : undefined;
+        if (reading !== undefined && emitStage !== undefined) {
           briefReadingOpen = true;
           void reading.then((r) => {
             if (!briefReadingOpen || r === null || graphPreviewEmitted()) return;
