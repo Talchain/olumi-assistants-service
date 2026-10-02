@@ -16,7 +16,7 @@ import { claimPermissionsFrom } from '../first-analysis.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { modelFacingToolResult, withoutLeaderDesignations } from '../licensed-run-view.js';
 import { enforceLeaderLicenceAtFinalEgress, FINAL_EGRESS_FAILED_TEXT, knownSafeEnvelope } from '../leader-final-egress.js';
-import { AnalysisResultBlockSchema } from '@talchain/schemas/boundary';
+import { AnalysisResultBlockSchema, OlumiResponseSchema, RunDeltaSchema } from '@talchain/schemas/boundary';
 import { LICENSED_LABEL_KEYS } from '../licensed-run-view.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -140,8 +140,9 @@ describe('the Agent lane fail-closed final egress', () => {
     const out = enforceLeaderLicenceAtFinalEgress(base({}), opts('withheld'));
     const body = out.response as unknown as Record<string, any>;
     expect(body.suggested_actions.map((c: { id: string }) => c.id)).toEqual(['agent-next-pre-mortem']);
-    expect(body.run_delta.leader.current_leading_option_id).toBeNull();
-    expect(body.run_delta.leader.prior_leading_option_id).toBeNull();
+    // REMOVED, not nulled: the contract types both optional + non-nullable (strip gap, CANVAS 5943987710).
+    expect(body.run_delta.leader).not.toHaveProperty('current_leading_option_id');
+    expect(body.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
     expect(body._agent).toEqual(Reflect.get(base({}), '_agent'));
     expect(error).toHaveBeenCalledWith(expect.objectContaining({ event: 'agent_lane.leader_claim_residual_removed', enforced: true }), expect.any(String));
   });
@@ -254,5 +255,58 @@ describe('the Agent lane fail-closed final egress', () => {
     const out = enforceLeaderLicenceAtFinalEgress(body, opts('withheld'));
     expect(out.response).toBe(body);
     expect(error).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ⭐ STRIP GAP (CANVAS #85 5943987710): on a withheld Run the egress NULLED `run_delta.leader.{prior,current}_leading_
+ * option_id`, which the contract types optional + non-nullable, so the UI quarantined the whole `run_delta` and the
+ * strip and Compare went empty. Served bytes: CEE 03763318, the run turn of Paul's step 10. The ids are restored from
+ * that guest's cold read (`current_read.run_delta.leader`: integration_bug_fix_sprint) to make the egress INPUT.
+ */
+describe('the final egress never adds a contract violation (served 03763318 withheld Run)', () => {
+  const SERVED_RUN = (JSON.parse(readFileSync(join(here, 'fixtures/served-withheld-run-03763318.json'), 'utf8')) as { body: Record<string, any> }).body;
+  const ID = 'integration_bug_fix_sprint';
+  /** C0 = as served; C1 = the same pair with a changed hash (the schema's own C1 entitlement); C2 = unpaired. */
+  const input = (attribution: 'C0_identical' | 'C1_attributable' | 'C2_unpaired' = 'C0_identical'): Record<string, any> => {
+    const b = structuredClone(SERVED_RUN);
+    b.run_delta.leader = { ...b.run_delta.leader, prior_leading_option_id: ID, current_leading_option_id: ID };
+    b.run_delta.attribution_case = attribution;
+    if (attribution === 'C1_attributable') b.run_delta.pair_provenance = { ...b.run_delta.pair_provenance, hash_equal: false };
+    return b;
+  };
+  const egress = (b: Record<string, any>) => enforceLeaderLicenceAtFinalEgress(b as unknown as OlumiResponse, {
+    requestId: 'req-strip', exitPath: 'test', licence: 'withheld', mayNameLeadingOption: false, graph: b.draft_graph, analysisReady: b.analysis_ready,
+  }).response as unknown as Record<string, any>;
+  const issues = (b: unknown) => {
+    const r = OlumiResponseSchema.safeParse(b);
+    return r.success ? [] : r.error.issues.map((i) => `${i.path.join('.')}|${i.code}`).sort();
+  };
+
+  it.each(['C0_identical', 'C1_attributable', 'C2_unpaired'] as const)('RED (%s): run_delta survives the withheld egress AND parses — the leader ids are absent, every other member kept', (attribution) => {
+    const before = input(attribution);
+    expect(RunDeltaSchema.safeParse(before.run_delta).success, 'control: the input run_delta parses').toBe(true);
+    const out = egress(before);
+    expect(RunDeltaSchema.safeParse(out.run_delta).success, JSON.stringify(out.run_delta?.leader)).toBe(true);
+    expect(out.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
+    expect(out.run_delta.leader).not.toHaveProperty('current_leading_option_id');
+    expect(JSON.stringify(out.run_delta.leader), 'no leader designation (option rows follow F1b\'s licences, not this scrub)').not.toContain(ID);
+    const { leader: _a, ...restIn } = before.run_delta; const { leader: _b, ...restOut } = out.run_delta;
+    expect(restOut, 'the delta the strip and Compare read is kept').toEqual(restIn);
+  });
+
+  it('SPEC: the egress output has no contract issue its input did not have (whole OlumiResponseSchema)', () => {
+    const before = input();
+    expect(issues(egress(before)).filter((i) => !issues(before).includes(i))).toEqual([]);
+  });
+
+  it('CONTROL: a required + nullable key keeps null — the analysis_result block\'s leading_option_id', () => {
+    const before = input();
+    const i = before.blocks.findIndex((x: { type?: string }) => x.type === 'analysis_result');
+    expect(i, 'control: the served turn carries the analysis block').toBeGreaterThanOrEqual(0);
+    before.blocks[i] = { ...before.blocks[i], leading_option_id: ID };
+    const out = egress(before);
+    expect(out.blocks[i]).toHaveProperty('leading_option_id', null);
+    expect(AnalysisResultBlockSchema.safeParse(out.blocks[i]).success).toBe(true);
   });
 });
