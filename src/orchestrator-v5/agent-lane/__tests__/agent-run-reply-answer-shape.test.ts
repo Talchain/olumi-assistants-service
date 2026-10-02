@@ -55,8 +55,12 @@ const RANKS_IN_BULLET_SENTENCE =
 const ONE_PARAGRAPH = reply('paired-57f903c/C2.rep3').text.split('\n\n')[0]!;
 /** No bullets, four paragraphs — 1,435 chars. */
 const PARAGRAPHS_NO_BULLETS = reply('paired-57f903c/M.rep1').text;
-/** Three served no-bullet replies back to back: longer than the collapse floor, and not one bullet. */
-const LONG_NO_BULLETS = ['paired-57f903c/M.rep1', 'paired-57f903c/M.rep3', 'paired-57f903c/M.rep5'].map((id) => reply(id).text).join('\n\n');
+/**
+ * Three served no-bullet replies back to back: longer than the collapse floor, and not one bullet. M.rep4, not M.rep3:
+ * M.rep3 says "normalised scale", which the first-run explanation's backstop now replaces WHOLE (HARNESS item 2,
+ * `explain-model-scale-outcome.test.ts` binds that served reply), so it no longer reaches the shape.
+ */
+const LONG_NO_BULLETS = ['paired-57f903c/M.rep1', 'paired-57f903c/M.rep4', 'paired-57f903c/M.rep5'].map((id) => reply(id).text).join('\n\n');
 
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 let readbackState: unknown = PERMITTED_STATE;

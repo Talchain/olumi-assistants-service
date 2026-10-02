@@ -219,6 +219,17 @@ describe('the explanation of a marked run (real route, stubbed provider)', () =>
     expect(b.narration?.status).toBe('unavailable');
   });
 
+  it('BACKSTOP on a SERVED reply (AIQ corpus `paired-57f903c/M.rep3`, which says "normalised scale") → replaced whole', async () => {
+    resultBlock = withMarker(null);
+    const served = (JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as
+      { replies: { id: string; text: string }[] }).replies.find((r) => r.id === 'paired-57f903c/M.rep3')!.text;
+    expect(served, 'the control: the served reply names an internal value').toMatch(/normalised scale/u);
+    const b = await explain(served, '7f6e5d4c-3b2a-4f1e-8d0c-000000000006');
+    expect(b.assistant_text).not.toMatch(/normalised scale/u);
+    expect(b.assistant_text.includes(served.slice(0, 60)), 'none of the narrator\'s words survive').toBe(false);
+    expect(b.narration?.status).toBe('unavailable');
+  });
+
   it('CONTROL (label masking): a user\'s own label that says "internal scale" is the user\'s word → the narration stands', async () => {
     resultBlock = withMarker(null);
     const named = structuredClone(RUN.graph);
