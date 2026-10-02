@@ -174,6 +174,7 @@ import {
   findScaleIncoherentBaselineFactorIds,
   decideAnalysisScaleBlock,
 } from '../plot-intervention-scale.js';
+import { wireInterventionRanges } from '../../intervention-range.js';
 import { isRecommendableOption } from './recommendable-option.js';
 import {
   buildAnalysisSubmissionDisclosure,
@@ -981,10 +982,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // shape. We only forward fields PLoT accepts. The options carry the
     // request-projected wire numbers; NOTHING may transform them between here
     // and `plotClient.run` (that gap was the round-3 defect).
-    const finalWireOptions = submittedOptions.map((opt, index) => ({
-      ...opt,
-      interventions: requestProjection.perOption[index] ?? {},
-    }));
+    // TEMPORAL (PLoT #424 / ISL #216): an option's stated range rides beside its wire number, ONLY where that number is
+    // the raw point the range brackets (`intervention-range.ts`). No range stated → no key (byte-identical wire).
+    const finalWireOptions = submittedOptions.map((opt, index) => {
+      const interventions = requestProjection.perOption[index] ?? {};
+      const intervention_ranges = wireInterventionRanges(rawObjectsPerOption[index] ?? {}, interventions);
+      return { ...opt, interventions, ...(intervention_ranges !== undefined ? { intervention_ranges } : {}) };
+    });
     // A level limit on a node the options move is checked against that node's CURRENT level: carried on this wire
     // copy only, never persisted, so a later edit of the level can never leave a stale copy behind
     // (`level-limit-baseline.ts`).
@@ -1224,7 +1228,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         : [];
     });
     const inputSnapshot = buildRunInputSnapshot({
-      submittedOptions: submittedOptions as ReadonlyArray<Record<string, unknown>>,
+      // The options AS DISPATCHED (CODEX CEE BUDDY 5921095058): `finalWireOptions` is what PLoT receives, stated
+      // ranges included, so a range-only edit is a recorded input change. Same order and ids as `submittedOptions`.
+      submittedOptions: finalWireOptions as ReadonlyArray<Record<string, unknown>>,
       rawObjectsPerOption,
       wirePerOption: requestProjection.perOption as ReadonlyArray<Readonly<Record<string, number>>>,
       heldFactorIdsByOptionId: scaffoldedFactorIdsByOptionId,

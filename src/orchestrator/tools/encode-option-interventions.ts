@@ -189,6 +189,8 @@ interface RawIntervention {
   readonly source?: string;
   readonly value_confidence?: string;
   readonly reasoning?: string;
+  /** TEMPORAL: a stated range the writer supplied with THIS figure (validated at persist, `intervention-range.ts`). */
+  readonly range?: Dict;
 }
 
 export interface EncodeOptionInterventionsResult<T> {
@@ -223,6 +225,7 @@ function toRawIntervention(src: unknown): RawIntervention {
     source?: string;
     value_confidence?: string;
     reasoning?: string;
+    range?: Dict;
   } = {};
   const v = finiteNum(src.value);
   if (v !== undefined) out.value = v;
@@ -231,6 +234,7 @@ function toRawIntervention(src: unknown): RawIntervention {
   if (typeof src.unit === 'string') out.unit = src.unit;
   const cap = finiteNum(src.cap);
   if (cap !== undefined) out.cap = cap;
+  if (isPlainObject(src.range)) out.range = { ...src.range };
   // Carried ONLY when explicitly stated and recognised; anything else falls
   // through to the unchanged default in `buildInterventionV3`.
   if (typeof src.source === 'string' && PRESERVED_INTERVENTION_SOURCES.has(src.source)) {
@@ -449,6 +453,8 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   // copies of both, so these are re-supplied from the NEW record or not at all.
   if (rec.value_confidence !== undefined) iv.value_confidence = rec.value_confidence;
   if (rec.reasoning !== undefined) iv.reasoning = rec.reasoning;
+  // TEMPORAL: a range supplied with this figure replaces the one carried from the old entry.
+  if (rec.range !== undefined) iv.range = rec.range;
   if (isPlainObject(existing) && typeof existing.source_quote === 'string'
     && QUOTED_FIGURE_KEYS.every((key) => isDeepStrictEqual(existing[key], iv[key]))) {
     iv.source_quote = existing.source_quote;

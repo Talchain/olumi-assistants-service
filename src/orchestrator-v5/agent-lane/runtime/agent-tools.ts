@@ -567,6 +567,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
               'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
+          likely_low: {
+            type: 'number',
+            description:
+              'Only with user_stated, and only when the user gave a LIKELY RANGE for this level in their own words ' +
+              '(“likely between 5 and 20 days”): its low end, in the same units as value. Never a range you ' +
+              'made up, and never for “at most”, “at least” or “no more than”. Send it with likely_high.',
+          },
+          likely_high: { type: 'number', description: 'The high end of that same likely range. Send it with likely_low.' },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
       whole_request: WHOLE_REQUEST,

@@ -2816,7 +2816,8 @@ export async function dispatchOptionLevelsBatch(
   payload: Pick<SystemEventTurnPayload, 'scenario_id' | 'turn_id' | 'stage'> & { readonly requestHash: string },
   batch: {
     readonly targets: readonly { readonly optionId: string; readonly factorId: string; readonly modelValue: number;
-      readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number } }[];
+      readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number;
+        readonly likely_range?: { readonly low: number; readonly high: number } } }[];
     readonly base_graph_hash: string;
     /** The links the approved proposal declared (`from::to`); a different set writes nothing. */
     readonly expectedLinks?: readonly string[];
@@ -3146,6 +3147,8 @@ export type CommitOptionLevelsInput = {
     readonly raw_value?: number;
     readonly unit?: string;
     readonly cap?: number;
+    /** TEMPORAL: the user's likely range for this level, raw units — kept on the cell beside their figure. */
+    readonly likely_range?: { readonly low: number; readonly high: number };
   }[];
   /**
    * ⭐ A compound approval's factor values (Canonical #70 5849037691), in the user's own units: applied by the canonical
@@ -3241,7 +3244,8 @@ export type CommitOptionLevelsResult =
 export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> {
   const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
     ...(l.raw_value !== undefined || l.cap !== undefined
-      ? { figure: { raw_value: Number(l.raw_value), cap: Number(l.cap), ...(l.unit !== undefined ? { unit: l.unit } : {}) } } : {}) }));
+      ? { figure: { raw_value: Number(l.raw_value), cap: Number(l.cap), ...(l.unit !== undefined ? { unit: l.unit } : {}),
+        ...(l.likely_range !== undefined ? { likely_range: l.likely_range } : {}) } } : {}) }));
   // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
   const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
     scenarioId: input.scenario_id, proposalId: input.turn_id, optionId: l.option_id, factorId: l.factor_id, modelValue: l.value }));

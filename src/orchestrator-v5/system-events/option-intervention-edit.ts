@@ -107,7 +107,9 @@ export interface OptionInterventionEditInput {
    * was normalised on. Without it a level on a factor with no range of its own (a NEW, value-less factor) is stored as a
    * bare model number and the figure is unrecoverable. It must normalise to `modelValue` exactly, or nothing is written.
    */
-  readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number };
+  readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number;
+    /** TEMPORAL: the user's likely range for this level, raw units (`intervention-range.ts` gates it at persist). */
+    readonly likely_range?: { readonly low: number; readonly high: number } };
 }
 
 /** Internal server invocation only: no member is added to the .50 wire union. */
@@ -1125,7 +1127,12 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     }
     // This adapter records changed values, not adoption/confirmation. A repeat
     // must not turn the old AI estimate into a new user-authored measurement.
-    if (entry.data.value === input.modelValue) return { kind: 'unchanged' };
+    // TEMPORAL: a likely range the user just gave for the SAME level is a change (the range is theirs, the level already
+    // was), so it is written; an identical range is still a repeat.
+    const storedRange = (existing as { range?: { low?: unknown; high?: unknown } } | undefined)?.range;
+    const likelyMoves = figure?.likely_range !== undefined
+      && (storedRange?.low !== figure.likely_range.low || storedRange?.high !== figure.likely_range.high);
+    if (entry.data.value === input.modelValue && !likelyMoves) return { kind: 'unchanged' };
   }
   const built = buildOptionEffectRawOperation({
     optionId: option.id, optionLabel: option.label,
@@ -1137,8 +1144,12 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   const levelFigure = figure ?? figureOnFactorRange(graph, factor, existing, input.modelValue);
   // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell
   // (`cap` only when it reproduces the level, which the check above has already required).
+  // TEMPORAL: the user's likely range, only from THIS approval's figure (never read back from another cell), recorded as
+  // theirs with the one meaning its wording licenses (R3 #75 5914230653).
+  const likely = figure?.likely_range;
   const operation = levelFigure === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
-    raw_value: levelFigure.raw_value, cap: levelFigure.cap, ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } };
+    raw_value: levelFigure.raw_value, cap: levelFigure.cap, ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}),
+    ...(likely !== undefined ? { range: { low: likely.low, high: likely.high, meaning: 'likely_range', source: 'user_specified' } } : {}) } };
   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
   // instead of defaulting the cell to `user_specified`, and the rationale says whose it is.

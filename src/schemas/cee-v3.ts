@@ -17,7 +17,7 @@ import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
-import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS, GoalPeriod, GoalHorizonSchema, GoalStatedAsSchema, OptionStatus, CountNounSchema } from "@talchain/schemas";
+import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, QuantityFrame, OBSERVED_STATE_SOURCE_LITERALS, GoalPeriod, GoalHorizonSchema, GoalStatedAsSchema, OptionStatus, CountNounSchema, InterventionRangeSchema, InterventionRangeMeaning } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
 import { OBSERVED_STATE_STATED_ROLES } from "../cee/context-integrity/stated-role-vocabulary.js";
@@ -815,6 +815,16 @@ export const RawInterventionValue = z.union([
 export type RawInterventionValueT = z.infer<typeof RawInterventionValue>;
 
 /**
+ * TEMPORAL — an option's stated RANGE for the value it sets, in RAW units, with its MEANING and its own author:
+ * schemas 0.66.0 `InterventionRangeSchema` (S1), IMPORTED — never re-spelled here. Declared on `InterventionV3` so
+ * the edit referee's intervention screen (`field-safety.ts`) types it from the contract; the writer rule (the range
+ * contains its value) lives at the persisted form (`intervention-range.ts`).
+ */
+export const InterventionRangeMeaningV3 = InterventionRangeMeaning;
+export const InterventionRangeV3 = InterventionRangeSchema;
+export type InterventionRangeV3T = z.infer<typeof InterventionRangeV3>;
+
+/**
  * A single intervention on a factor.
  *
  * Supports the Raw+Encoded pattern:
@@ -854,6 +864,8 @@ export const InterventionV3 = z.object({
    * read `value` (and optionally `raw_value`) only.
    */
   display_value: z.string().optional(),
+  /** TEMPORAL: the stated range for this value (schemas 0.66.0 S1). Absent = no range stated. */
+  range: InterventionRangeV3.optional(),
 }).passthrough(); // CIL Phase 0: preserve additive fields from LLM/enrichment
 export type InterventionV3T = z.infer<typeof InterventionV3>;
 

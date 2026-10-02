@@ -177,7 +177,7 @@ import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, likelyRangeStatementsOf, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -849,11 +849,49 @@ function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
  * they reproduce the stored level exactly: an op whose `normalised` is not `raw / cap` passes no figure (the writer would
  * refuse the whole batch as `level_frame_mismatch`).
  */
-function levelFigureOf(op: ProposalOperation): { raw_value: number; cap: number; unit?: string } | Record<string, never> {
-  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown };
+/**
+ * The option a span in `sentence` (starting at `at`) is about: the one named nearest BEFORE it ("For Re-platform, … 5 to
+ * 20 days; for Lift-and-shift, …" is Re-platform's), else the nearest after it ("5 to 20 days for Lift-and-shift");
+ * null when the sentence names none.
+ */
+function nearestOptionTo(sentence: string, at: number, labels: readonly string[]): string | null {
+  let before: { label: string; end: number } | null = null;
+  let after: { label: string; start: number } | null = null;
+  for (const label of labels) {
+    const re = new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    for (const m of sentence.matchAll(re)) {
+      const end = m.index + m[0].length;
+      if (end <= at) { if (before === null || end > before.end) before = { label, end }; }
+      else if (m.index >= at && (after === null || m.index < after.start)) after = { label, start: m.index };
+    }
+  }
+  return before?.label ?? after?.label ?? null;
+}
+
+/** Whether a unit word or currency sign the user wrote inside a likely-range span names this level's unit. */
+function unitWordMatches(word: string, unit: string): boolean {
+  const u = unit.toLowerCase();
+  if (u.trim() === '') return false;
+  const money: Record<string, readonly string[]> = { '£': ['£', 'gbp', 'pound'], '$': ['$', 'usd', 'dollar'], '€': ['€', 'eur', 'euro'] };
+  if (money[word] !== undefined) return money[word]!.some((m) => u.includes(m));
+  const stem = (w: string): string => w.replace(/s$/, '');
+  return u.split(/[^\p{L}\p{N}£$€%]+/u).filter((t) => t !== '').some((t) => stem(t) === stem(word));
+}
+
+/** A likely-range bound said in the level's own unit, exactly as the level itself is said. */
+function likelyBound(n: number, unit: string): string {
+  return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
+}
+
+function levelFigureOf(op: ProposalOperation): { raw_value: number; cap: number; unit?: string; likely_range?: { low: number; high: number } } | Record<string, never> {
+  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown; likely_range?: { low?: unknown; high?: unknown } };
   if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw) || typeof v.cap !== 'number' || !(v.cap > 0)) return {};
   if (Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
-  return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}) };
+  // TEMPORAL: the user's likely range rides with their figure (proposed only beside a level they gave).
+  const r = v.likely_range;
+  const likely = r !== undefined && typeof r.low === 'number' && typeof r.high === 'number' ? { low: r.low, high: r.high } : undefined;
+  return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
+    ...(likely !== undefined ? { likely_range: likely } : {}) };
 }
 
 /**
@@ -4125,6 +4163,8 @@ export function createAgentCapabilities(
         userStated: boolean;
         // The option is not yet linked to this factor: the link is added in the same change, before the level.
         needsLink: boolean;
+        /** The user's likely range for this level, raw units (TEMPORAL). */
+        likelyRange?: { low: number; high: number };
       }[] = [];
 
       for (const i of input) {
@@ -4213,6 +4253,50 @@ export function createAgentCapabilities(
           notAccepted.push({ option: option.label, factor: factor.label, value: i?.value, reason: 'No numeric value was given.' });
           continue;
         }
+        /**
+         * TEMPORAL (B6's ask, #2384; R3 #75 5914230653): the user's LIKELY RANGE for this level, recorded as theirs only
+         * when both ends are figures they wrote, beside a level they gave, and the level lies inside it. Anything else
+         * is not accepted, with the reason, so the Agent asks rather than inventing a range the user never stated.
+         */
+        const hasLow = i?.likely_low !== undefined;
+        const hasHigh = i?.likely_high !== undefined;
+        let likelyRange: { low: number; high: number } | undefined;
+        if (hasLow || hasHigh) {
+          const low = Number(i?.likely_low);
+          const high = Number(i?.likely_high);
+          const unitHere = factorUnitOf(g.raw, factor);
+          const scope = scopeIn(g, factor.label, option.label);
+          const optionLabels = optionNodes.nodes.map((n) => (typeof n.label === 'string' ? n.label : '')).filter((l) => l !== '');
+          const namesPhrase = (text: string, label: string): boolean => {
+            const words = (t: string): string => ` ${t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w !== '').join(' ')} `;
+            return words(label).trim() !== '' && words(text).includes(words(label));
+          };
+          const why = !hasLow || !hasHigh ? 'a likely range needs both its low and its high end'
+            : !(Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > low) ? 'a likely range needs a positive low end below its high end'
+            : !userWrote ? 'a likely range is recorded only beside a level the user gave (user_stated)'
+            // ONE affirmed statement with no comparator (AIQ CR 5918093025), and THAT statement is about this option's
+            // factor, both ends bound there with its unit (CODEX CEE BUDDY 5919274454): a span elsewhere in the turn,
+            // about another factor or another option, never pairs with this factor's separate figures.
+            // The span's own CLAUSE names this factor and no other quantity (AIQ 5919410219: "downtime is 10 days, and
+            // training time is likely between 5 and 20 days" is training time's range).
+            // The span's OWN option: the one named nearest to it in its sentence (CODEX CEE BUDDY 5919620573: two options
+            // in one sentence), and its OWN unit words match this level's unit ("20 weeks" is never 20 days).
+            : !likelyRangeStatementsOf(low, high, ctx.user_text).some((st) =>
+              factorTheUserNamed(factor.label, st.clause, { options: optionLabels, others: scope.others })
+              && !scope.others.some((l) => namesPhrase(st.clause, l))
+              && nearestOptionTo(st.sentence, st.spanAt, optionLabels) === option.label
+              && st.unitWords.every((w) => unitWordMatches(w, typeof unitHere === 'string' && unitHere !== '' ? unitHere : (statedUnit ?? '')))
+              && figureTheUserWroteFor(low, unitHere, st.clause, scope) && figureTheUserWroteFor(high, unitHere, st.clause, scope))
+              ? `the user did not state ${String(i?.likely_low)} to ${String(i?.likely_high)} as one likely range (not asked about, and not "at most" or "at least")`
+            : raw < low || raw > high ? `${raw} lies outside the likely range ${low}–${high} it was given with`
+            : null;
+          if (why !== null) {
+            notAccepted.push({ option: option.label, factor: factor.label, value: i?.value,
+              reason: `No likely range was recorded: ${why}. Ask the user for each option’s likely range in their own words, then propose it again.` });
+            continue;
+          }
+          likelyRange = { low, high };
+        }
 
         const os = (factor.observed_state ?? {}) as { cap?: unknown; unit?: unknown };
         /**
@@ -4292,9 +4376,11 @@ export function createAgentCapabilities(
           }
         }
 
-        const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
+        const current = (option.interventions ?? {})[factor.id] as { value?: unknown; range?: { low?: unknown; high?: unknown } } | number | undefined;
         const currentValue = typeof current === 'number' ? current : (current as { value?: unknown } | undefined)?.value;
-        if (currentValue === normalised || currentValue === raw) {
+        const currentRange = typeof current === 'object' ? current?.range : undefined;
+        const rangeMoves = likelyRange !== undefined && (currentRange?.low !== likelyRange.low || currentRange?.high !== likelyRange.high);
+        if ((currentValue === normalised || currentValue === raw) && !rangeMoves) {
           unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
           continue;
         }
@@ -4306,6 +4392,7 @@ export function createAgentCapabilities(
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? ''),
           basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
+          ...(likelyRange !== undefined ? { likelyRange } : {}),
         });
       }
 
@@ -4333,6 +4420,7 @@ export function createAgentCapabilities(
         value: {
           normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame,
           ...(i.unit !== '' ? { unit: i.unit } : {}),
+          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange } : {}),
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
         },
@@ -4345,7 +4433,9 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
-          ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${sayFigureExactly(i.raw, i.unit) ?? `${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`}`).join('; ') +
+          ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${sayFigureExactly(i.raw, i.unit) ?? `${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`}`
+            // TEMPORAL (AIQ 5909998288 / 5914439702): the reading is part of what the user approves, in their units.
+            + (i.likelyRange !== undefined ? `, likely between ${likelyBound(i.likelyRange.low, i.unit)} and ${likelyBound(i.likelyRange.high, i.unit)} (read as the middle half of what\u2019s likely)` : '')).join('; ') +
           ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
@@ -4362,6 +4452,7 @@ export function createAgentCapabilities(
           model_range: i.cap,
           ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
           ...(i.needsLink ? { adds_the_link: true } : {}),
+          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange } : {}),
           basis: i.basis,
           // Whose level this is, typed — the same flag the writer stamps (`authored_by` above). The one-call reply reads it.
           stated_by: i.userStated ? 'user' : 'olumi_estimate',

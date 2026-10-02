@@ -843,6 +843,58 @@ export function comparatorTheUserWrote(turnText: string | null | undefined): 'at
 }
 
 /**
+ * TEMPORAL (AIQ CR 5918093025 on #2382): a LIKELY RANGE is the user's only as ONE statement, never two figures that
+ * happen to be in the turn. True when `turnText` holds a span naming exactly `low` then `high` ("between 5 and 20
+ * days", "5 to 20 days", "5–20 days"), that is AFFIRMED (the `readingAt` rule: not asked, not denied), and whose
+ * clause carries no comparator ("at most", "no more than", "at least", "under"…): a hard bound is never a likely
+ * range. Every miss fails closed: the range is not recorded and the Agent asks.
+ */
+// Between the ends: at most ONE unit word ("5 days to 20 days"), never a phrase ("5 days of setup and 20 days", AIQ
+// 5918229950). A bare "and" joins a range only after "between"; "to" and a dash join one on their own.
+const RANGE_SPAN = /(\bbetween\s+)?([£$€])?(\d[\d,]*(?:\.\d+)?)(?:\s*([^\s\d.!?;,:\n]+))?\s*(\bto\b|\band\b|[–—-])\s*([£$€])?\s*(\d[\d,]*(?:\.\d+)?)(?:\s*([^\s\d.!?;,:\n]+))?/gi;
+const numberIn = (s: string): number => Number(s.replace(/,/g, ''));
+/**
+ * The STATEMENTS (each the sentence around one qualifying span) in which the user gave `low`–`high` as one affirmed,
+ * comparator-free range. The caller binds a statement to its option, factor and unit (CODEX CEE BUDDY 5919274454): a
+ * span that qualifies somewhere in the turn says nothing about WHICH quantity it ranges over.
+ */
+export interface LikelyRangeStatement {
+  /** The sentence the span sits in, and where the span starts within it (for the option nearest to it). */
+  readonly sentence: string;
+  readonly spanAt: number;
+  /** The span's own clause (AIQ 5919410219): the quantity it ranges over is named there. */
+  readonly clause: string;
+  /** The span's OWN unit words and currency signs ("weeks", "£"), lower case; empty when the span states none. */
+  readonly unitWords: readonly string[];
+}
+export function likelyRangeStatementsOf(low: number, high: number, turnText: string | null | undefined): LikelyRangeStatement[] {
+  if (typeof turnText !== 'string' || !Number.isFinite(low) || !Number.isFinite(high)) return [];
+  const out: LikelyRangeStatement[] = [];
+  for (const m of turnText.matchAll(RANGE_SPAN)) {
+    const [, between, curLow, lowText, midWord, joiner, curHigh, highText, afterWord] = m;
+    if (numberIn(lowText!) !== low || numberIn(highText!) !== high) continue;
+    if (joiner!.toLowerCase() === 'and' && between === undefined) continue;
+    const reading = readingAt(turnText, m.index);
+    if (reading.said !== 'affirmed') continue;
+    const afterSpan = m.index + m[0].length;
+    const endAt = turnText.slice(afterSpan).search(/[.!?\n;,:]/);
+    const clauseAfter = turnText.slice(afterSpan, endAt < 0 ? undefined : afterSpan + endAt);
+    const clause = `${reading.clauseBefore} ${m[0]} ${clauseAfter}`;
+    if ([...clause.matchAll(COMPARATOR_WORDS)].length > 0) continue;
+    const start = Math.max(turnText.lastIndexOf('.', m.index), turnText.lastIndexOf('!', m.index), turnText.lastIndexOf('?', m.index), turnText.lastIndexOf('\n', m.index)) + 1;
+    const sentenceEnd = turnText.slice(afterSpan).search(/[.!?\n]/);
+    const unitWords = [curLow, midWord, curHigh, afterWord].filter((w): w is string => w !== undefined && w !== '').map((w) => w.toLowerCase());
+    out.push({ sentence: turnText.slice(start, sentenceEnd < 0 ? undefined : afterSpan + sentenceEnd), spanAt: m.index - start, clause, unitWords });
+  }
+  return out;
+}
+
+/** Whether any such statement exists (unbound to a quantity; the door binds it with `likelyRangeStatementsOf`). */
+export function likelyRangeTheUserWrote(low: number, high: number, turnText: string | null | undefined): boolean {
+  return likelyRangeStatementsOf(low, high, turnText).length > 0;
+}
+
+/**
  * Whether this request is something the user TYPED: a composer message. A chip click is not — every chip's text is
  * Olumi's (an approval replaying the Agent's own labels, a suggestion, a coaching prompt) — and neither is a system
  * event such as a board edit.
