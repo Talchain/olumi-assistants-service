@@ -78,6 +78,7 @@ function repairedDraft(dealSize: Size = { amount: 1000000, per: 1, by: 'explicit
 
 async function build(drafts: readonly Record<string, unknown>[], brief: string = BRIEF) {
   let body: unknown = null;
+  let registeredBrief: unknown = null;
   const inputs: string[] = [];
   const call = (async (req: { input: string }) => {
     inputs.push(req.input);
@@ -86,13 +87,14 @@ async function build(drafts: readonly Record<string, unknown>[], brief: string =
   const d: InternalDispatch = async (path, b) => {
     if (path.endsWith('/graph/register')) {
       body = structuredClone((b as { graph: unknown }).graph);
+      registeredBrief = (b as { brief_text?: unknown }).brief_text;
       return { status: 200, json: { model_version: { version_number: 1 } } };
     }
     return { status: 200, json: { graph: { nodes: [], edges: [] }, graph_hash: 'h' } };
   };
   const out = await buildModelFromBrief('a4a4a4a4-0000-4a4a-8a4a-a4a4a4a4a4a4', brief, d, call) as Record<string, unknown>;
   expect(out.ok, JSON.stringify(out)).toBe(true);
-  return { graph: GraphV3.parse(body) as unknown as Graph, out, inputs };
+  return { graph: GraphV3.parse(body) as unknown as Graph, out, inputs, registeredBrief };
 }
 
 const dealLink = (g: Graph) => g.edges.find((e) => e.from === 'deals_closed' && e.to === 'securing_funding');
@@ -279,8 +281,10 @@ const PER_ONE = 'If it is a money size PER ONE of something the brief names (per
 
 describe('A4 first pass: the written range is asked of the FIRST construct', () => {
   it('RED: Paul\'s brief → the FIRST call already asks the per-one rule of "£1-2 million"; a draft that carries it is ONE call', async () => {
-    const { graph, inputs } = await build([repairedDraft()]);
+    const { graph, inputs, registeredBrief } = await build([repairedDraft()]);
     expect(inputs).toHaveLength(1);
+    // CODEX CEE BUDDY 5944923532: the notes ride the drafter's input ONLY — the persisted brief is the user's words, verbatim.
+    expect(registeredBrief).toBe(BRIEF);
     expect(inputs[0]).toBe(`${BRIEF}\n\nConstruction notes: ${JSON.stringify([`The brief writes "£1-2 million". ${PER_ONE} If it is not a size per one of anything, draw it as you otherwise would.`])}`);
     expect(dealLink(graph)?.provenance?.natural_effect?.stated_range?.end).toBe('low');
   });
