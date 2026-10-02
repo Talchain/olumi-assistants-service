@@ -2449,9 +2449,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * ⭐ "WHAT WOULD CHANGE THIS?" (SCIENCE ROBUSTNESS, EXPERIMENT; #85 lease 5950283606, hunk leased by HARNESS 5950400056;
      * `method-turn/what-changes-turn.ts`). A recognised press is TERMINAL and answered with NO model call: the measured
      * tipping points of the Run the user saw, in RC's link copy, or RC's honest limit. The fetch persists nothing.
+     * Kill switch: CEE_WHAT_CHANGES_MEASURED_ENABLED=false (default ON) leaves the press to the ordinary Agent turn.
      */
     let whatChangesTurn: WhatChangesTurn | null = null;
-    if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWhatChangesPress(pressedChipId)) {
+    if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null
+      && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)) {
       const rb = await readBackState(readingDispatch, scenarioId);
       whatChangesTurn = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
         payload: {

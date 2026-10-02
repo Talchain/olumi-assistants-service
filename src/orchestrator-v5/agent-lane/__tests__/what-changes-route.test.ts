@@ -97,6 +97,21 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(body.assistant_text).toMatch(/(^|\n\n)Your model has changed since its last analysis, so I can’t say what would change that result\. Run the analysis again, then ask\.$/);
   });
 
+  it('W3: the kill switch (CEE_WHAT_CHANGES_MEASURED_ENABLED=false) leaves the press to the ordinary Agent turn', async () => {
+    const { _resetConfigCache } = await import('../../../config/index.js');
+    process.env.CEE_WHAT_CHANGES_MEASURED_ENABLED = 'false';
+    _resetConfigCache();
+    try {
+      const body = await post(PRESS.id, PRESS.message);
+      expect(dispatch.calls).toHaveLength(0);
+      expect(modelCalls).toBeGreaterThan(0);
+      expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+    } finally {
+      delete process.env.CEE_WHAT_CHANGES_MEASURED_ENABLED;
+      _resetConfigCache();
+    }
+  });
+
   it('CONTROL: another next step never reaches the decision-flip dispatch', async () => {
     const other = NEXT_STEP_CHIPS.find((c) => c.id !== PRESS.id && c.id !== 'agent-next-strengthen' && c.id !== 'agent-next-pre-mortem') ?? NEXT_STEP_CHIPS.find((c) => c.id !== PRESS.id)!;
     await post(other.id, other.message);
