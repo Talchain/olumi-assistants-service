@@ -4,6 +4,8 @@ const readFactsFor = vi.fn();
 vi.mock('../../session/index.js', () => ({getSessionStore:()=>({readRecent:async()=>[{id:'row'}],readFactsFor,readAnalysisInvalidatedAt:async()=>null})}));
 import { buildAnalysisResultBlock, composeDirectAnswerResponse } from '../../compose.js';
 import { finaliseV5Response } from '../../response-finaliser.js';
+import { enforceLeadingOptionClaimsAtWire } from '../../compose/leading-option-wire-enforcement.js';
+import { WITHHELD_NEAR_TIE } from '../../compose/analysis-state-v1.js';
 import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-read.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { deriveAnalysisFreshness } from '../../context/freshness.js';
@@ -34,7 +36,7 @@ test('actual provisional producer/finaliser and canonical read may differ in sum
  expect(currentAnalysisCoaching({scenario_id:scenarioId,status:200,analysis_state:upstream.analysis_state,blocks:upstream.blocks},{scenarioId,graphHash:hash,analysisState:canonical.analysis_state,analysisResult:canonical.analysis_result})).toEqual([card]);
 });
 
-test('no-flagged-link card: the producer/finaliser readback and the canonical read yield the SAME card on an explicit run; the automatic first pass is refused on both', async()=>{
+test('route-v2 wire capture and the canonical read yield the SAME card on an explicit run; the automatic first pass is refused on both', async()=>{
  const scenarioId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
  const graph={nodes:[{id:'goal',kind:'goal',label:'Goal',goal_threshold:0.7}],edges:[]};
  const hash=computeAnalysisAffectingGraphHash(graph as never)!;
@@ -45,14 +47,29 @@ test('no-flagged-link card: the producer/finaliser readback and the canonical re
   const fact=RunAnalysisHandlerFactSchema.parse({fact_type:'run_analysis',fact_version:1,noop:false,result:{scenario_id:scenarioId,computed_at:time,graph_hash_at_run:hash,leading_option_id:'option-a',summary:'The model contains unresolved assumptions.',constraint_verdict:{may_name_leading_option:true,constraint_verdict_state:'evaluated_feasible'},enrichment:{analysis_status:'completed',robustness:served.analysis_result.enrichment.robustness,...(auto?{run_provenance:buildAutoRunProvenance('11111111-1111-4111-8111-111111111111')}:{})}}});
   readFactsFor.mockResolvedValue([fact]);
   const freshness=deriveAnalysisFreshness([fact],hash,undefined,{priorFactsReadOk:true});
-  const upstream=finaliseV5Response(composeDirectAnswerResponse({assistant_text:'Result.',stage:'analyse',answerKind:'substantive',blocks:[buildAnalysisResultBlock(fact,analysisReady)]}),{scenarioId,analysisReady:analysisReady as never,freshness,canonicalState:canonicalStateFromFreshness(freshness,{}),priorFacts:[fact],mayNameLeadingOption:!auto,
+  const finaliserContext={scenarioId,analysisReady:analysisReady as never,freshness,canonicalState:canonicalStateFromFreshness(freshness,{}),priorFacts:[fact],mayNameLeadingOption:!auto,
    // The refusing caller states WHY, bound to the same fact (#1876): the finaliser never derives it.
-   leaderWithheldBecauseUnrequested:!auto?false:leaderWithheldOnlyBecauseUnrequested(fact)});
+   leaderWithheldBecauseUnrequested:!auto?false:leaderWithheldOnlyBecauseUnrequested(fact)};
+  const upstream=finaliseV5Response(composeDirectAnswerResponse({assistant_text:'Result.',stage:'analyse',answerKind:'substantive',blocks:[buildAnalysisResultBlock(fact,analysisReady)]}),finaliserContext);
   const canonical=await readScenarioAnalysis({scenarioId,graph,requestId:'no-flagged-link-parity'});
-  const producerResult=upstream.blocks.find((b)=>b.type==='analysis_result');
   const trigger=auto?'auto_first_pass' as const:'explicit_run' as const;
-  const capture={scenario_id:scenarioId,status:200,analysis_state:upstream.analysis_state,blocks:upstream.blocks,trigger};
-  const fromProducer=runTurnCoaching(capture,{scenarioId,graphHash:hash,analysisState:upstream.analysis_state,analysisResult:producerResult});
+  if (!auto) {
+   // The untouched branch failed here because this is PRE-wire: a near tie still carries the fact's id.
+   expect(upstream.analysis_state?.leader_claim).toMatchObject({permitted:false,withheld_reason:WITHHELD_NEAR_TIE});
+   expect(upstream.blocks.find((b)=>b.type==='analysis_result')).toHaveProperty('leading_option_id','option-a');
+   expect(runTurnCoaching({scenario_id:scenarioId,status:200,analysis_state:upstream.analysis_state,blocks:upstream.blocks,trigger},{scenarioId,graphHash:hash,analysisState:canonical.analysis_state,analysisResult:canonical.analysis_result}).eligibility).toEqual({eligible:false,reason:'identity_mismatch'});
+  }
+  // route-v2 sendFinalised200: its shared wire gate, then re-finalise only if changed. No Agent gate here.
+  const claim=upstream.analysis_state?.leader_claim;
+  const enforced=enforceLeadingOptionClaimsAtWire(upstream,{
+   requestId:'coaching-parity',exitPath:'turn_executor',mayNameLeadingOption:!auto,graph:graph as never,analysisReady:analysisReady as never,
+   separationEstablished:claim?.separation==='separated',leaderClaimWithheldReason:claim?.withheld_reason,
+  });
+  const wire=enforced.changed?finaliseV5Response(enforced.response,finaliserContext):upstream;
+  const producerResult=wire.blocks.find((b)=>b.type==='analysis_result');
+  expect(producerResult).toHaveProperty('leading_option_id',null);
+  const capture={scenario_id:scenarioId,status:200,analysis_state:wire.analysis_state,blocks:wire.blocks,trigger};
+  const fromProducer=runTurnCoaching(capture,{scenarioId,graphHash:hash,analysisState:wire.analysis_state,analysisResult:producerResult});
   const fromRead=runTurnCoaching(capture,{scenarioId,graphHash:hash,analysisState:canonical.analysis_state,analysisResult:canonical.analysis_result});
   if (auto) {
    // The real first-pass pipeline confines the guards away, so the card fails closed on both readbacks.
