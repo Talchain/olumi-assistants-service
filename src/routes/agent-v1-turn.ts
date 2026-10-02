@@ -378,6 +378,9 @@ const MUTATION_INSTRUCTION =
     ? 'This is a read-only preview: you CANNOT change the model, and there is no tool that would let you. If the user asks for a change, say plainly that this preview cannot make it and describe what you would propose instead.'
     : 'To change the model you must first call a proposing tool \u2014 propose_model_change for a link (with the strength band the user named, or \u2014 when they described it in their own words \u2014 your reading of them, with their exact phrase as `from_words`; ask how strong first only when their words fit two bands equally or name no strength at all), propose_assumptions to give value-less factors a starting number, propose_option_interventions to record the level an option sets, propose_starting_point for both at once, propose_goal_target for the goal\u2019s success target the user has just stated (their figure, and whether they said at least or at most), propose_new_risk to add a risk the user asked for, propose_new_factor for new factors whose figures the user just stated, propose_limit_change for a new figure the user has just stated for a limit the model already holds \u2014 show the user exactly what it returned (in words: never print a proposal_id or any other internal id \u2014 the user approves by simply saying yes), and call authorise_change with that proposal_id ONLY after they have explicitly approved it.';
 
+/** How many recent answers the target ask reads to see whether it is already open (`decision-input-ask.ts`, PANEL 5944136475). */
+const RECENT_REPLIES_READ = 6;
+
 /** Marks a board edit in the Agent's history — defined beside `needsDurableSeed`, which must recognise it. */
 export { BOARD_EDIT_PREFIX } from '../orchestrator-v5/agent-lane/history-store.js';
 
@@ -2814,11 +2817,24 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         || result.tool_calls.some((c, i) => (c.name === 'build_model_from_brief' && c.mutated === true)
           || (c.name === 'run_analysis' && (result.tool_results[i] as { ran?: unknown } | undefined)?.ran === true)),
     };
-    const decisionLines = decisionInputLines(readbackGraph, {
+    const decisionCtx = {
       ...decisionTurn,
       restingText: textAtRest(composedWithout),
       questionsToggle: textAtRest(composedWithout) !== composedWithout,
-    });
+    };
+    let decisionLines = decisionInputLines(readbackGraph, decisionCtx);
+    // ⭐ ASKED ONCE (PANEL 5944136475): only when this turn would ask, read the recent answers as shipped (≤6 durable rows,
+    // restart-safe); an ask already among them stays open and is not repeated. A failed read asks, as before.
+    if (decisionLines.some((l) => l.endsWith('as your target.')) && typeof store.readRecent === 'function') {
+      try {
+        const recentReplies = (await store.readRecent(scenarioId, RECENT_REPLIES_READ))
+          .map((t) => (t as { assistant_message?: unknown }).assistant_message)
+          .filter((m): m is string => typeof m === 'string');
+        if (recentReplies.length > 0) decisionLines = decisionInputLines(readbackGraph, { ...decisionCtx, recentReplies });
+      } catch (err) {
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: recent answers could not be read — the target ask is said');
+      }
+    }
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
     const linkAsk = decisionLines.some((l) => l.endsWith('as your target.')) ? null : linkSizeAsk(readbackGraph, {

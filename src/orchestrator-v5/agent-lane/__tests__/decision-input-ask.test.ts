@@ -25,6 +25,17 @@ describe('the lines, on the served goal', () => {
     expect(decisionInputAsk(graphWith(FX.goal_after_build), base)).toBe(ASK);
   });
 
+  it('RED (PANEL 5944136475): the ask already in a recent answer is still OPEN → not said again; A7 stays', () => {
+    const earlier = `Your results are ready. You can view them now or ask me to explain them. ${ASK}`;
+    expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, recentReplies: ['Unrelated.', earlier] })).toEqual([A7]);
+  });
+
+  it('CONTROL: no recent answer carries THIS ask (none read, or another goal\'s ask) → the ask is said, as before', () => {
+    expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, recentReplies: [] })).toEqual([A7, ASK]);
+    const other = ASK.replace('Funding secured', 'Monthly spend');
+    expect(decisionInputLines(graphWith(FX.goal_after_build), { ...base, recentReplies: [other] })).toEqual([A7, ASK]);
+  });
+
   it('CONTROL: once Paul stated "at least £1,000,000" → no ask; the deadline line stays (still not answered)', () => {
     expect(goalHasStatedTarget(FX.goal_after_target)).toBe(true);
     expect(decisionInputLines(graphWith(FX.goal_after_target), base)).toEqual([A7]);
@@ -225,7 +236,13 @@ describe('A7 is folded on the reply the user SEES — after the leader gate (R3 
 // ── The route: a Run button turn on the served no-target goal, model stubbed (0 LLM) ──
 // In memory, so a named turn's claim reads back and its answer row is what a replay returns.
 const rows = new Map<string, Rec>();
+let recentFails = false;
 const store = {
+  // The durable answers, newest first, as `readRecent` returns them (claims excluded); a switch makes the read fail.
+  readRecent: vi.fn(async (sid: string) => {
+    if (recentFails) throw new Error('read failed');
+    return [...rows.values()].filter((r) => r.scenario_id === sid && !String(r.turn_id).endsWith(':claim')).reverse();
+  }),
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, tid: string) => rows.get(`${sid}|${tid}`) ?? null),
   append: vi.fn(async (w: Rec) => { rows.set(`${String(w.scenario_id)}|${String(w.turn_id)}`, { ...w, assistant_message: w.assistantMessage ?? null }); return { id: `row-${rows.size}` }; }),
@@ -261,7 +278,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; n += 1; });
+  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; recentFails = false; n += 1; });
   const runTurn = async (turnId?: string, explain = false) => {
     const scenarioId = `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
     const first = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -302,5 +319,20 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const text = (await runTurn(undefined, true)).assistant_text;
     expect(text).not.toContain('as your target');
     expect(text.match(/\?/g) ?? []).toHaveLength(1);
+  });
+
+  it('RED (PANEL 5944136475): a Rerun on the same scenario does NOT repeat the open target ask; the A7 fact stays', async () => {
+    const first = (await runTurn('6d1e8f20-3b4c-4d5e-8f60-718293a4b5c6')).assistant_text;
+    expect(first.split(ASK).length - 1, 'control: the first Run asks').toBe(1);
+    const again = (await runTurn('7e2f9031-4c5d-4e6f-8071-8293a4b5c6d7')).assistant_text;
+    expect(again).not.toContain('as your target');
+    expect(again).toContain(A7);
+  });
+
+  it('CONTROL: the recent answers cannot be read → the Rerun asks again (today\'s behaviour, never a silent drop)', async () => {
+    await runTurn('8f30a142-5d6e-4f70-8182-93a4b5c6d7e8');
+    recentFails = true;
+    const again = (await runTurn('9041b253-6e7f-4081-8293-a4b5c6d7e8f9')).assistant_text;
+    expect(again.split(ASK).length - 1).toBe(1);
   });
 });
