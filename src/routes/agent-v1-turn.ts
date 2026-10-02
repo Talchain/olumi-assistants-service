@@ -105,6 +105,8 @@ import {
   isWidenPress, nextStepsWithWiden, settleWidenTurn, widenGate, widenOffered, widenTurnForReadback,
   WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
+import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
+import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -2444,6 +2446,37 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const widenRun = widenTurn?.kind === 'run' ? widenTurn : undefined;
     /**
+     * ⭐ "WHAT WOULD CHANGE THIS?" (SCIENCE ROBUSTNESS, EXPERIMENT; #85 lease 5950283606, hunk leased by HARNESS 5950400056;
+     * `method-turn/what-changes-turn.ts`). A recognised press is TERMINAL and answered with NO model call: the measured
+     * tipping points of the Run the user saw, in RC's link copy, or RC's honest limit. The fetch persists nothing.
+     */
+    let whatChangesTurn: WhatChangesTurn | null = null;
+    if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null && isWhatChangesPress(pressedChipId)) {
+      const rb = await readBackState(readingDispatch, scenarioId);
+      whatChangesTurn = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
+        payload: {
+          kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
+          source: 'chip_click', message,
+        },
+        requestId: `${String(req.id)}:decision-flip`,
+        candidateLinks,
+      }));
+      if (whatChangesTurn !== null) {
+        fastPath = 'method';
+        result = {
+          assistant_text: whatChangesTurn.reply,
+          items: [],
+          tool_calls: [],
+          tool_results: [],
+          mutated: false,
+          hops: 0,
+          stopped_reason: 'answered',
+          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
+        };
+        log.info({ scenario_id: scenarioId, what_changes: whatChangesTurn.outcome }, 'agent-lane: what-would-change answered without a model call');
+      }
+    }
+    /**
      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
      */
@@ -2862,6 +2895,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Widen, terminal: the door's ONE card (its approval) and RC's follow-up, or the unavailable reply's own follow-up.
       : fastPath === 'method' && widenTurn !== null
       ? firstOfEachId([...approvals, ...(widenTurn.kind === 'run' ? widenActions : widenTurn.actions)])
+      // What would change, terminal: the turn's own follow-up only.
+      : fastPath === 'method' && whatChangesTurn !== null
+      ? firstOfEachId([...approvals, ...whatChangesTurn.actions])
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
