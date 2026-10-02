@@ -41,6 +41,9 @@
  *   F11 the user's edit plus an independent NODE-level `extractionType` → partial.
  *   F12 churn 3% → 4% AND gross additions retyped 60 → 61 → 60 (writer's shape, same figure): the churn row must not
  *       credit another factor's authorship → partial.
+ * DL HIGH PASS condition (the KNOWN one-off after deploy):
+ *   F13 a PRE-DEPLOY prior (no factor digests; its residual computed without exception 4, exactly as before) beside a
+ *       post-deploy Run, NO edit → partial, []; the next pair, both post-deploy → complete, [].
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -59,7 +62,7 @@ import { edgeBandStd } from '../../../format/edge-strength-bands.js';
 import { sentDigest } from '../run-input-snapshot.js';
 import { applyFactorValueEdit } from '../../../system-events/factor-value-edit.js';
 import { STATED_LEVEL_STD } from '../stated-level-spread.js';
-import { VALUE_WRITE_USER_SOURCE } from '../run-input-residual.js';
+import { VALUE_WRITE_USER_SOURCE, residualDigest } from '../run-input-residual.js';
 import { USER_EDIT_SOURCE } from '../../../../orchestrator/canonicalise-value-ops.js';
 import { APPROVED_ADOPTION_SOURCE, runWithApprovedAdoption } from '../../../agent-lane/approved-adoption-context.js';
 
@@ -455,6 +458,18 @@ describe('0.73.0 factor authorship — a user\'s value edit is credited pairwise
     expect(node(p.bGraph, 'monthly_gross_additions').observed_state.source, 'precondition: the writer restamped it').toBe(VALUE_WRITE_USER_SOURCE);
     expect(p.rows.map((r) => [r.entity_kind, r.entity_id])).toEqual([['factor_value', 'monthly_churn']]);
     expect(p.complete).toBe(false);
+  });
+
+  it('F13 (DL condition): the FIRST rerun after deploy pairs a pre-deploy prior → partial, [] even with no edit; the next → complete', async () => {
+    const p = await pair(() => {});
+    // The prior as the pre-0.73 producer recorded it: no factor digest, so exception 4 never strips its residual.
+    const { factors, residual_digest: _postDeploy, ...rest } = p.a.snapshot;
+    const preDeployFactors = factors.map(({ authorship_digest: _d, ...f }) => f);
+    const preDeployResidual = residualDigest(p.a.sent, { ...rest, factors: preDeployFactors } as never);
+    expect(preDeployResidual, 'precondition: the pre-deploy residual still holds the authorship members').not.toBe(p.a.snapshot.residual_digest);
+    const preDeploy = { ...rest, factors: preDeployFactors, residual_digest: preDeployResidual! } as RunInputSnapshot;
+    expect(diffRunInputs(preDeploy, p.b.snapshot)).toEqual({ rows: [], complete: false });
+    expect([p.complete, p.rows], 'the next rerun (both post-deploy)').toEqual([true, []]);
   });
 
   it('the typed-figure stamp the digest matches IS the value writer\'s own constant', () => {
