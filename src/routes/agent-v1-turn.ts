@@ -23,6 +23,7 @@
  * seam, deliberately.
  */
 
+import { NativeContextStore, NativeContextTrialError, nativeContextTrialEnabled, type NativeContextTurn } from '../orchestrator-v5/agent-lane/runtime/native-context-trial.js';
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
 import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
@@ -1144,6 +1145,7 @@ export function sameAgentTurnRequest(stored: string, requested: string, chipless
 
 export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
   if (config.proxy.agentLaneEnabled !== true) return;
+  const nativeContexts = nativeContextTrialEnabled(process.env) ? new NativeContextStore() : undefined;
 
   /**
    * READ-ONLY preview. Resolved ONCE at registration, not per request, so no
@@ -1230,6 +1232,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       model: budget.model,
       instructions: req.instructions,
       input: req.input,
+      ...(req.previous_response_id !== undefined ? { previous_response_id: req.previous_response_id } : {}),
+      ...(req.store !== undefined ? { store: req.store } : {}),
       tools: req.tools,
       // Fast path 3 answers over a run Olumi already made: it may interpret, never act.
       ...((req as { tool_choice?: unknown }).tool_choice === 'none' ? { tool_choice: 'none' } : {}),
@@ -1263,7 +1267,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         ...(typeof deadlineMs === 'number' && deadlineMs > 0 ? { signal: AbortSignal.timeout(deadlineMs) } : {}),
       }).then((res) => ({ r: res, usageHandle: handle }));
     };
-    const breakpoint = alias === 'agent.converse' && !instructionsBreakpointRefused;
+    // Native chains resend top-level instructions; do not accumulate cached developer copies in history.
+    const breakpoint = req.store !== true && alias === 'agent.converse' && !instructionsBreakpointRefused;
     let { r, usageHandle } = breakpoint
       ? await post(withInstructionsBreakpoint(plainBody), 'developer_breakpoint')
       : await post(plainBody, 'instructions');
@@ -1285,7 +1290,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         throw new Error(`openai_${r.status}: ${retryText.slice(0, 300)}`);
       }
     }
-    const j = (await r.json()) as { output: Record<string, unknown>[]; usage?: unknown; status?: unknown; incomplete_details?: { reason?: unknown } | null };
+    const j = (await r.json()) as { id?: unknown; output: Record<string, unknown>[]; usage?: unknown; status?: unknown; incomplete_details?: { reason?: unknown } | null };
     // Never throws, and records nothing for a malformed payload, so a successful call
     // cannot be turned into a failed one by the measurement of it.
     recordProviderUsage(usageHandle, j.usage);
@@ -1293,6 +1298,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // an `incomplete` 200 can carry a partial answer.
     return {
       output: j.output,
+      ...(typeof j.id === 'string' ? { id: j.id } : {}),
       ...(typeof j.status === 'string' ? { status: j.status } : {}),
       ...(typeof j.incomplete_details?.reason === 'string' ? { incomplete_reason: j.incomplete_details.reason } : {}),
     };
@@ -1657,6 +1663,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return reply.code(409).send({ error: 'SCENARIO_OWNERSHIP_UNVERIFIABLE', detail: 'Could not verify the scenario. Nothing was changed.' });
     }
 
+    // The trial owns only the response-chain cursor; existing ownership checks already ran.
+    let nativeTurn: NativeContextTurn | undefined;
+    if (nativeContexts !== undefined) {
+      try {
+        if (turnId === undefined) throw new NativeContextTrialError('NATIVE_CONTEXT_TURN_ID_REQUIRED', 'Use the normal test interface, which supplies a retry-safe turn identifier.');
+        nativeTurn = await nativeContexts.begin({ scenarioId, userId, sessionId }, async () => {
+          if (typeof store.readRecent !== 'function') throw new Error('Conversation store unavailable.');
+          return (await store.readRecent(scenarioId, 1)).length > 0;
+        });
+      } catch (err) {
+        return reply.code(409).send({ error: err instanceof NativeContextTrialError ? err.code : 'NATIVE_CONTEXT_UNAVAILABLE',
+          detail: err instanceof NativeContextTrialError ? err.message : 'The trial could not verify a fresh conversation. Nothing was run; try a new test decision.' });
+      }
+    }
+    try {
     const dispatchLedger: DispatchTiming[] = [];
     // Every in-process call the Agent makes for this turn is a SUB-TURN: a turn row it commits keeps no conversation
     // text, because the user never saw it (`agent-subturn-context.ts`, #75 5910983526). This route's own claim and
@@ -1937,6 +1958,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     // Counts every call that could WRITE, so a failed turn knows whether it is
     // safe to release its claim (nothing sent) or must leave it (outcome unknown).
+    nativeTurn?.startWork();
     let writesDispatched = 0;
     /**
      * ⭐ ONE READ OF THE MODEL PER WRITE EPOCH (C6; widens slice C1c, which reused a read only before the first
@@ -2532,6 +2554,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       result = await runAgentTurn(
         {
           ctx: toolCtx,
+          ...(nativeTurn !== undefined ? { nativeContext: nativeTurn } : {}),
           history,
           message,
           instructions: methodTurn?.kind === 'run' ? `${AGENT_INSTRUCTIONS}\n\n${methodTurn.directive}`
@@ -3318,6 +3341,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
 
     // A7: what of the brief the model does not carry — the final readback's own manifest, bound to its graph_hash.
+    nativeTurn?.finish(message, String(wireBody.assistant_text ?? text), durability === 'recorded');
     const notModelledCarrier = notModelledTurnCarrier(notModelled, graphHash);
     return reply.code(200).send({
       ...wireBody,
@@ -3413,6 +3437,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       _agent: {
         session_id: sessionId,
         mode,
+        ...(nativeTurn !== undefined ? { native_context: nativeTurn.diagnostic() } : {}),
         tool_calls: result.tool_calls,
         mutated: result.mutated,
         hops: result.hops,
@@ -3468,6 +3493,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       _provider_calls: recordedProviderCalls(),
         ...(providerLedgerTruncated() ? { _provider_calls_truncated: true } : {}),
     });
+    } finally { nativeTurn?.close(); }
   };
   app.post('/agent/v1/turn', (req: FastifyRequest, reply: FastifyReply) =>
     runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () => agentTurnHandler(req, reply)));

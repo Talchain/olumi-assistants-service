@@ -18,6 +18,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { NativeContextTrialError, type NativeContextTurn } from './native-context-trial.js';
 import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
 import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
@@ -30,6 +31,8 @@ import {
 } from './request-assembly.js';
 
 export interface ModelCallRequest {
+  readonly previous_response_id?: string;
+  readonly store?: boolean;
   readonly instructions: string;
   readonly input: readonly unknown[];
   readonly tools: readonly unknown[];
@@ -43,6 +46,7 @@ export interface ModelCallRequest {
 }
 
 export interface ModelCallResponse {
+  readonly id?: string;
   readonly output: readonly Record<string, unknown>[];
   readonly usage?: Record<string, unknown>;
   /**
@@ -75,6 +79,7 @@ const proposalIdArg = (raw: unknown): string | undefined => {
 };
 
 export interface AgentTurnInput {
+  readonly nativeContext?: NativeContextTurn;
   readonly ctx: AgentToolContext;
   /** Prior turns, already in Responses-API item shape. Olumi owns this record. */
   readonly history: readonly unknown[];
@@ -318,13 +323,19 @@ export async function runAgentTurn(
     && eligibility.omitted.some((o) => o.name === 'get_canonical_state')
     ? { role: 'developer', content: [{ type: 'input_text', text: `${CURRENT_MODEL_STATE_PREFIX}${JSON.stringify(input.canonicalContext.packet.state)}` }] }
     : undefined;
+  if (input.nativeContext !== undefined && stateItem === undefined) {
+    throw new NativeContextTrialError('NATIVE_CONTEXT_STATE_UNAVAILABLE', 'Current model state could not be verified. Nothing new was run; start a new test decision.');
+  }
   const items: unknown[] = [
     ...input.history,
     ...(stateItem !== undefined ? [stateItem] : []),
     { role: 'user', content: [{ type: 'input_text', text: input.message }] },
   ];
   /** What this turn hands on as history: everything but the state it was given. */
-  const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
+  const handedOn = (): unknown[] => {
+    input.nativeContext?.capture(items.slice(input.history.length));
+    return stateItem === undefined ? items : items.filter((i) => i !== stateItem);
+  };
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
   let mutated = false;
@@ -400,14 +411,17 @@ export async function runAgentTurn(
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
     };
     if (hostCall !== undefined) {
-      void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
+      // No detached prewarm in the trial: it cannot advance the native chain or warm its different prefix.
+      if (input.nativeContext === undefined) void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
         .catch((err: unknown) => { log.debug({ err: String(err) }, 'agent-lane: cache prewarm failed (nothing reads it)'); });
     } else {
       providerCalls += 1;
     }
     const resp: ModelCallResponse = hostCall !== undefined
       ? { output: [{ type: 'function_call', call_id: `${HOST_FIRST_CALL_ID}_${randomUUID()}`, name: hostCall.name, arguments: JSON.stringify(hostCall.args) }] }
-      : await callModel(request);
+      : input.nativeContext !== undefined
+        ? await input.nativeContext.call({ ...request, input: items.slice(input.history.length) }, callModel)
+        : await callModel(request);
     if (hostCall === undefined) providerMs += Math.max(0, now() - providerStartedAt);
     const out = resp.output ?? [];
     /**
