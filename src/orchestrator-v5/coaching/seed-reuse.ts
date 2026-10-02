@@ -45,6 +45,37 @@ export type SeedReuseReason =
 
 
 /**
+ * A Run's `computed_at` only when it is EXACTLY `toISOString`'s output for the instant it names — the one form in
+ * which the selectors' lexicographic order IS chronology. A round trip, not a pattern: `2026-02-30T…` and `…T24:00…`
+ * match the canonical shape yet `Date.parse` rolls them over (CODEX on c42258ed).
+ */
+function canonicalComputedAt(fact: HandlerFact | undefined): string | null {
+  if (fact === undefined || fact.fact_type !== 'run_analysis') return null;
+  const at = (fact as { result?: { computed_at?: unknown } }).result?.computed_at;
+  if (typeof at !== 'string') return null;
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) && new Date(ms).toISOString() === at ? at : null;
+}
+
+/**
+ * ⛔ May a durable run history be PAIRED with `currentRun` (F1b #2515; CODEX on 84f47072, 6b053a8b, 99b8728a)?
+ * Only when every Run in it is OLDER than `currentRun` IN THE ORDER THE SELECTORS USE: `freshness.ts` sorts
+ * `computed_at` lexicographically, which is chronology only for `toISOString`'s canonical form. So every timestamp —
+ * the current Run's included — must be canonical, and each history Run's must sort STRICTLY below the current Run's.
+ * Anything else (a Run dated at or after this one; an offset, second-precision or missing timestamp) could let a
+ * selector treat a history Run as newer than THIS Run: evade C2, become the claim-bearing Run (skipping F-LIMIT) or
+ * pair the wrong Runs. The caller then pairs from the window — staging's answer, an honest absence.
+ */
+export function historyPredatesRun(history: readonly HandlerFact[], currentRun: HandlerFact | undefined): boolean {
+  const current = canonicalComputedAt(currentRun);
+  if (current === null) return false;
+  return history.every((f) => {
+    const at = canonicalComputedAt(f);
+    return at !== null && at < current;
+  });
+}
+
+/**
  * C1 — the facts a Run's seed is lent from (DL lease 5944383317, narrowed to the seed; DL conditions on the narrowing).
  *
  * The turn's HOT WINDOW (its newest 20 turn rows) first: today's source, and the window the turn's own delta pairs

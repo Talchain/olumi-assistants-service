@@ -1110,7 +1110,7 @@ function interveningEditIsInert(
  * pinned by test in both directions, so a future edit that re-aligns them is
  * LOUD.
  */
-function hasPriorRunAnalysisShownToUser(facts: readonly HandlerFact[]): boolean {
+export function hasPriorRunAnalysisShownToUser(facts: readonly HandlerFact[]): boolean {
   return facts.some(
     (f) =>
       f.fact_type === 'run_analysis' &&
