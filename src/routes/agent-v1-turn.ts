@@ -26,7 +26,7 @@
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
 import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
 import { composeRerunExplanation, rerunPlanForGraph, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
-import { enforceComparisonAnswer } from '../orchestrator-v5/agent-lane/comparison-answer.js';
+import { comparisonViewFailures, enforceComparisonAnswer, isComparisonQuestion } from '../orchestrator-v5/agent-lane/comparison-answer.js';
 import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
 /** B8: a fence infrastructure refusal is the door's typed refusal — nothing was written (CODEX CR 5934133792). */
@@ -2666,12 +2666,15 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * and Olumi's record appended; the text then differs from the narrator's words, so it is never shaped. No Run ever (`none`) → no
      * comparison to invent, so nothing is checked; any other state without a pair → every licence refused (fail-closed).
      */
-    if (fastPath === undefined && narratorWords !== null && text === narratorWords
-      && (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind !== 'none') {
-      const labels = (Array.isArray((readbackGraph as { nodes?: unknown } | null)?.nodes) ? (readbackGraph as { nodes: { label?: unknown }[] }).nodes : [])
-        .map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== '');
-      const checked = enforceComparisonAnswer(text, rerunPlanForGraph(finalRead.runDelta, readbackGraph, false,
-        [...optionNameAliases(readbackGraph).values()].map((a) => a.display)), labels);
+    const comparisonChecked = fastPath === undefined
+      && (analysisState as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind !== 'none';
+    const comparisonLabels = (Array.isArray((readbackGraph as { nodes?: unknown } | null)?.nodes) ? (readbackGraph as { nodes: { label?: unknown }[] }).nodes : [])
+      .map((n) => n.label).filter((l): l is string => typeof l === 'string' && l.trim() !== '');
+    const comparisonPlan = comparisonChecked ? rerunPlanForGraph(finalRead.runDelta, readbackGraph, false,
+      [...optionNameAliases(readbackGraph).values()].map((a) => a.display)) : null;
+    const comparisonQuestion = isComparisonQuestion(message);
+    if (comparisonChecked && narratorWords !== null && text === narratorWords) {
+      const checked = enforceComparisonAnswer(text, comparisonPlan, comparisonLabels, comparisonQuestion);
       if (checked.dropped.length > 0) {
         log.info({ site: 'agent-v1-turn.comparison_answer', request_id: String(req.id), failed: checked.failed,
           dropped: checked.dropped.length, paired: finalRead.runDelta !== undefined }, 'agent-lane: comparison claim dropped from the narrator text');
@@ -3096,8 +3099,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // C5b: on the Run button the view is the one interpreting call's typed field (`fastPathView`) — the SAME checks follow.
     const rawView = provisionalViewOfTurn(result.tool_calls, result.tool_results) ?? fastPathView;
     // The Agent's own words pass the user-facing scrub first (`sanitiseProvisionalView`); a code left refuses the view.
-    const givenView = rawView === null ? null : sanitiseProvisionalView(rawView, parsedGraphOrNull(readbackGraph));
-    if (rawView !== null && givenView === null) log.warn({ scenario_id: scenarioId }, 'agent-lane: a provisional view carried an internal code after the scrub — it is not shown');
+    const scrubbedView = rawView === null ? null : sanitiseProvisionalView(rawView, parsedGraphOrNull(readbackGraph));
+    if (rawView !== null && scrubbedView === null) log.warn({ scenario_id: scenarioId }, 'agent-lane: a provisional view carried an internal code after the scrub — it is not shown');
+    // An ordinary turn's view passes the same COMPARISON-ANSWER check as its text (`comparison-answer.ts`); a failure hides it.
+    const viewComparisonFailures = scrubbedView !== null && comparisonChecked
+      ? comparisonViewFailures(scrubbedView, comparisonPlan, comparisonLabels, comparisonQuestion) : [];
+    if (viewComparisonFailures.length > 0) log.info({ site: 'agent-v1-turn.comparison_answer', request_id: String(req.id), failed: viewComparisonFailures }, 'agent-lane: a provisional view made an unlicensed comparison claim — it is not shown');
+    const givenView = viewComparisonFailures.length > 0 ? null : scrubbedView;
     const standing = givenView === null ? null : leaderStandingOf({ analysisState, analysisReady, analysisResult, limitVerdicts, limitAskIds: limitAskIdsOf(readbackGraph) });
     // Typed only (never appended to `assistant_text`): see `provisionalViewSidecar`.
     const provisionalView = givenView !== null && standing !== null && standing.analysis_on_record && standing.withheld

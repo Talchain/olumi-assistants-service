@@ -44,16 +44,19 @@ vi.mock('../../../orchestrator/user-identity.js', async (original) => ({
 
 let served: Read = C1_PARTIAL;
 let modelText = `${CLAIM} ${WHY}`;
+/** Scripted model outputs, in order; when empty the model answers `modelText`. */
+let outputs: unknown[][] = [];
 const requests: string[] = [];
 
-type Body = { assistant_text: string; _answer_shape?: unknown };
+type Body = { assistant_text: string; _answer_shape?: unknown; _agent: { provisional_view?: unknown } };
 
 describe('"Ask about this comparison" on the live route: an ordinary answer says only what the shown pair licenses', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: { body?: unknown }) => {
       requests.push(typeof init?.body === 'string' ? init.body : '');
-      return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: modelText }] }] }), { status: 200 });
+      const output = outputs.shift() ?? [{ type: 'message', content: [{ type: 'output_text', text: modelText }] }];
+      return new Response(JSON.stringify({ output }), { status: 200 });
     }));
     vi.resetModules();
     process.env.AGENT_LANE_ENABLED = 'true';
@@ -68,10 +71,10 @@ describe('"Ask about this comparison" on the live route: an ordinary answer says
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { rows.length = 0; requests.length = 0; served = C1_PARTIAL; modelText = `${CLAIM} ${WHY}`; });
+  beforeEach(() => { rows.length = 0; requests.length = 0; outputs = []; served = C1_PARTIAL; modelText = `${CLAIM} ${WHY}`; });
 
-  const ask = (turnId: string) => app.inject({ method: 'POST', url: '/agent/v1/turn',
-    payload: { scenario_id: SCENARIO, turn_id: turnId, message: 'Why did the result change?' } });
+  const ask = (turnId: string, message = 'Why did the result change?') => app.inject({ method: 'POST', url: '/agent/v1/turn',
+    payload: { scenario_id: SCENARIO, turn_id: turnId, message } });
 
   it('R2 (route): C1 on PARTIAL coverage → the cause is dropped from the wire, the stored rows and a replay; the code line is said', async () => {
     const t = randomUUID();
@@ -104,5 +107,27 @@ describe('"Ask about this comparison" on the live route: an ordinary answer says
     expect(requests.some((r) => r.includes('what_changed')), 'no comparison block').toBe(false);
     expect(body.assistant_text).toContain(WHY);
     expect(body.assistant_text).not.toContain('caused the difference');
+  });
+
+  it('THE NEXT-STEP CHIPS are never read as a comparison question (their answers talk about hypotheticals)', async () => {
+    const { NEXT_STEP_CHIPS } = await import('../../../routes/agent-v1-turn.js');
+    const { isComparisonQuestion } = await import('../comparison-answer.js');
+    expect(NEXT_STEP_CHIPS.length, 'the control: the route offers next-step chips').toBeGreaterThan(0);
+    expect(NEXT_STEP_CHIPS.filter((c) => isComparisonQuestion(c.message)).map((c) => c.id)).toEqual([]);
+  });
+
+  const VIEW = { view: 'I would lean towards keeping the current plan for now.', reasoning: 'It needs the least new capacity.', confirm_step: 'Size the abandonment link.' };
+  it.each([
+    ['P1-4 RED: the view\'s reasoning names a cause for the difference between the runs → the view is not shown', `${CLAIM}`, false],
+    ['P1-4 CONTROL: a clean view on the same withheld pair is shown', VIEW.reasoning, true],
+  ] as const)('%s', async (_n, reasoning, shown) => {
+    outputs = [
+      [{ type: 'function_call', name: 'give_provisional_view', arguments: JSON.stringify({ ...VIEW, reasoning }), call_id: 'v1' }],
+      [{ type: 'message', content: [{ type: 'output_text', text: WHY }] }],
+    ];
+    const body = (await ask(randomUUID(), 'So what would you do?')).json() as Body;
+    expect(outputs, 'the model made the view call and answered').toEqual([]);
+    expect(body._agent.provisional_view !== undefined, JSON.stringify(body._agent.provisional_view ?? null)).toBe(shown);
+    expect(JSON.stringify(body)).not.toContain('caused the difference');
   });
 });

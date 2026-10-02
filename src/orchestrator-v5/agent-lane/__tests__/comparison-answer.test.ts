@@ -6,7 +6,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { COMPARISON_BLOCK_RULE, comparisonBlockOf, enforceComparisonAnswer } from '../comparison-answer.js';
+import { COMPARISON_BLOCK_RULE, comparisonBlockOf, comparisonViewFailures, enforceComparisonAnswer, isComparisonQuestion } from '../comparison-answer.js';
+import { checkMethodTurn } from '../guidance/index.js';
 import { rerunPlanForGraph, RERUN_NO_CHANGE_LINES } from '../rerun-explanation.js';
 import { createAgentCapabilities } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
@@ -16,7 +17,10 @@ type Read = { _source: string; json: { graph: { nodes: Node[] }; current_read: {
 const read = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/comparison/${name}.json`, import.meta.url), 'utf8')) as Read;
 const planOf = (r: Read) => rerunPlanForGraph(r.json.current_read.run_delta, r.json.graph, false);
 const labelsOf = (r: Read) => r.json.graph.nodes.map((n) => n.label);
-const enforce = (reply: string, r: Read) => enforceComparisonAnswer(reply, planOf(r), labelsOf(r));
+const enforce = (reply: string, r: Read, question = false) => enforceComparisonAnswer(reply, planOf(r), labelsOf(r), question);
+/** The served pair's options whose own row is `signal`, by their current labels. */
+const signalLabelsOf = (r: Read) => (r.json.current_read.run_delta!.win_probabilities as { option_id: string; noise_verdict: string }[])
+  .filter((w) => w.noise_verdict === 'signal').map((w) => r.json.graph.nodes.find((n) => n.id === w.option_id)!.label);
 
 const C1_COMPLETE = read('c1-complete');
 const C1_PARTIAL = read('c1-partial');
@@ -44,7 +48,7 @@ describe('the served pairs are what the rows say they are (controls)', () => {
     expect(r.json.current_read.run_delta).toMatchObject({ attribution_case: wireCase, input_coverage: coverage });
   });
   it('the stale read carries no pair', () => {
-    expect((NO_PAIR.json as { analysis_state: { run_state: { kind: string } } }).analysis_state.run_state.kind).toBe('complete_stale');
+    expect((NO_PAIR.json as unknown as { analysis_state: { run_state: { kind: string } } }).analysis_state.run_state.kind).toBe('complete_stale');
     expect(NO_PAIR.json.current_read.run_delta).toBeUndefined();
   });
 });
@@ -57,16 +61,18 @@ describe('the comparison block: the read\'s own pair, in Olumi\'s words, with wh
       endpoints: { prior: { computed_at: d.endpoints.prior.computed_at }, current: { computed_at: d.endpoints.current.computed_at } },
       attribution_case: 'C1_attributable', input_coverage: 'complete',
       what_changed: planOf(C1_COMPLETE)!.codeLine,
-      cause_licensed: true, movement_licensed: true, beyond_noise: false, rule: COMPARISON_BLOCK_RULE,
+      cause_licensed: true, movement_licensed: true, options_moved_beyond_noise: signalLabelsOf(C1_COMPLETE),
+      beyond_noise: false, rule: COMPARISON_BLOCK_RULE,
     });
+    expect(signalLabelsOf(C1_COMPLETE), 'the control: two of three options moved beyond noise').toEqual(['AI Reporting Module Sprint', 'Integration Bug Fix Sprint']);
     expect(JSON.stringify(block)).not.toMatch(/win_probabilit|leader|run_id/u);
   });
   it.each([
     ['C1 + partial coverage: no cause, and no matched figures → no movement', C1_PARTIAL, false, false, 'no_matched_figures'],
     ['C2 + partial', C2_PARTIAL, false, true, undefined],
     ['C2 + complete', C2_COMPLETE, false, true, undefined],
-    ['C0', C0, false, true, undefined],
-    ['C3 (engine drift)', C3, false, true, undefined],
+    ['C0: every row within noise → no movement', C0, false, false, 'within_noise'],
+    ['C3 (engine drift): every row within noise → no movement', C3, false, false, 'within_noise'],
   ] as const)('%s', (_n, r, cause, movement, unavailable) => {
     const block = comparisonBlockOf(r.json.current_read.run_delta, planOf(r))!;
     expect(block.cause_licensed).toBe(cause);
@@ -159,6 +165,14 @@ describe('R6: the audit\'s 123 SERVED ordinary replies (over-drop guard)', () =>
   it.each([['C0', C0], ['C3', C3]] as const)('a pair with no rows (%s): no reply changes', (_n, pair) => {
     expect(corpus.replies.filter((r) => enforceComparisonAnswer(r.t, planOf(pair), r.labels).text !== r.t)).toEqual([]);
   });
+  it('WORST CASE (every reply read as the answer to "why did the result change?"): no pair → 0; rows → only the 2 "nothing changed" claims', () => {
+    expect(corpus.replies.filter((r) => enforceComparisonAnswer(r.t, null, r.labels, true).text !== r.t)).toEqual([]);
+    for (const pair of [C1_COMPLETE, C1_PARTIAL, C2_PARTIAL, C2_COMPLETE]) {
+      expect(corpus.replies.filter((r) => enforceComparisonAnswer(r.t, planOf(pair), r.labels, true).text !== r.t).map((r) => r.f))
+        .toEqual(['inv-d1/02-s1-run.json', 'rt-2470/5ccc6630-rt-2470-stale/07-s3-pill.json']);
+    }
+    for (const pair of [C0, C3]) expect(corpus.replies.filter((r) => enforceComparisonAnswer(r.t, planOf(pair), r.labels, true).text !== r.t)).toEqual([]);
+  });
 });
 
 describe('the CURRENT MODEL STATE carries the block from the SAME graph read (input half)', () => {
@@ -175,5 +189,97 @@ describe('the CURRENT MODEL STATE carries the block from the SAME graph read (in
     const st = await (await capsOver(NO_PAIR)).getCanonicalState(ctx as never) as Record<string, unknown>;
     expect(st.ok).toBe(true);
     expect('comparison' in st).toBe(false);
+  });
+});
+
+describe('Codex buddy pre-read regressions (each its exact input)', () => {
+  it('P1-1: on C3 every row is within noise → "rose from 71.8% to 81.8%" is dropped', () => {
+    const claim = 'Switch to GCP’s chance rose from 71.8% to 81.8% between the two runs.';
+    const out = enforce(`${claim} ${WHY}`, C3);
+    expect(out.failed).toEqual(['CA-NO-MOVEMENT-UNLICENSED']);
+    expect(out.dropped).toEqual([claim]);
+  });
+  it.each([
+    ['a beyond-noise option, no figure → kept', C1_COMPLETE, 'Integration Bug Fix Sprint rose since the last run.', true],
+    ['the same with a figure → dropped (Olumi gave none)', C1_COMPLETE, 'Integration Bug Fix Sprint rose to 47% since the last run.', false],
+    ['an option whose own row is within noise → dropped', C1_COMPLETE, 'Continue Current Plan fell since the last run.', false],
+  ] as const)('P1-1 movement: %s', (_n, pair, claim, kept) => {
+    expect(enforce(claim, pair).text === claim).toBe(kept);
+  });
+  it('P1-2: a comparison question + "because the rate was raised" on C1 PARTIAL → dropped; on C1 COMPLETE → kept', () => {
+    const claim = 'The result changed because the abandonment rate was raised from 15% to 20%.';
+    expect(enforce(claim, C1_PARTIAL, true).failed).toEqual(['CA-NO-CAUSE-UNLICENSED']);
+    expect(enforce(claim, C1_COMPLETE, true).text).toBe(claim);
+  });
+  it('P1-2 CONTROL: a reason about THIS Run inside a comparison answer is not a cause claim about the difference', () => {
+    const line = 'No option can be put forward yet because your limits remain unchecked.';
+    expect(enforce(line, C1_PARTIAL, true).text).toBe(line);
+  });
+  it('P1-3: asked "why did the result change?", "Nothing changed." and "The inputs are unchanged." are dropped beside recorded rows', () => {
+    expect(enforce('Nothing changed.', C2_PARTIAL, true).failed).toEqual(['CA-NO-CONTRARY-SAME']);
+    const out = enforce('The inputs are unchanged. The difference is from the rerun.', C2_PARTIAL, true);
+    expect(out.dropped[0]).toBe('The inputs are unchanged.');
+  });
+  it('P1-3 CONTROL: asked about the runs, a held write\'s "Nothing has changed yet." is kept', () => {
+    const line = 'Nothing has changed yet. Press the approval button to include it.';
+    expect(enforce(line, C2_PARTIAL, true).text).toBe(line);
+  });
+  it('P1-4: the provisional view\'s reasoning naming a cause for the difference fails on C1 PARTIAL; a clean view passes', () => {
+    const view = { view: 'I would lean towards Integration Bug Fix Sprint for now.', reasoning: 'Your change to Trial profile abandonment rate caused the difference between the two runs.', confirm_step: 'Size the link.' };
+    expect(comparisonViewFailures(view, planOf(C1_PARTIAL), labelsOf(C1_PARTIAL))).toEqual(['CA-NO-CAUSE-UNLICENSED']);
+    expect(comparisonViewFailures({ ...view, reasoning: 'It needs the least new capacity because the team is small.' }, planOf(C1_PARTIAL), labelsOf(C1_PARTIAL))).toEqual([]);
+  });
+  it.each([
+    ['no pair', null],
+    ['C1 partial', C1_PARTIAL],
+  ] as const)('P2-6: an unrelated recap is never touched (%s)', (_n, pair) => {
+    for (const line of ['The team dropped the migration idea after discussing the evidence.', 'The outage was caused by a vendor failure last year.',
+      'There is significant evidence for the price effect.']) {
+      expect(enforceComparisonAnswer(line, pair === null ? null : planOf(pair), pair === null ? labelsOf(NO_PAIR) : labelsOf(pair)).text).toBe(line);
+    }
+  });
+  it('P2-7: a proposal reply naming a pending risk ("Significant downtime") is not about the runs → untouched with no pair', () => {
+    const reply = 'I’ve prepared this change: add the risk ‘Significant downtime’. Approve this change?';
+    expect(isComparisonQuestion('Add a risk: significant downtime')).toBe(false);
+    expect(enforceComparisonAnswer(reply, planOf(NO_PAIR), labelsOf(NO_PAIR), false).text).toBe(reply);
+  });
+  it.each([
+    ['Why did the result change?', true], ['What changed since the last run?', true], ['How come Integration Bug Fix Sprint moved up?', true],
+    ['Add a risk: significant downtime', false], ['Run the analysis', false], ['Why is Integration Bug Fix Sprint different now?', true],
+    // The sensitivity chip asks about a hypothetical: its "if price rose…" answer is not about two Runs.
+    ['What would change the result?', false], ['What could change if the price rose?', false],
+  ] as const)('the question gate: "%s" → %s (it only widens what is judged)', (q, about) => {
+    expect(isComparisonQuestion(q)).toBe(about);
+  });
+});
+
+describe('RC 5949965940: RX-NO-CONTRARY-SAME keys on RECORDED rows (served crn-final2 11-cold-s4 shape)', () => {
+  const inputs = planOf(C2_COMPLETE)!.inputs;
+  it('the control: one presence row, no template → no named change, one recorded', () => {
+    expect(inputs.change_labels).toEqual([]);
+    expect(inputs.changes_recorded).toBe(1);
+  });
+  it('"Nothing changed between the two runs." → RX-NO-CONTRARY-SAME; "Nothing else changed." passes it', () => {
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'Nothing changed between the two runs.', inputs).failed).toContain('RX-NO-CONTRARY-SAME');
+    expect(checkMethodTurn('RERUN-EXPLANATION', 'Nothing else changed.', inputs).failed).not.toContain('RX-NO-CONTRARY-SAME');
+  });
+});
+
+describe('P1-5: a Run made in the turn hands the model the NEW pair (never the turn-start one)', () => {
+  const ctx = { scenario_id: '34276a19-0000-4000-8000-0000000000c2', authenticated_user_id: 'user-a', request_id: 'r' };
+  /** The run turn answers with C1_PARTIAL's own result and delta; the canonical read afterwards selects the same pair. */
+  const runCaps = (runDelta: unknown) => createAgentCapabilities(async (path: string) => path === '/orchestrate/v2/turn'
+    ? { status: 200, json: { analysis_state: (C1_PARTIAL.json as unknown as Record<string, unknown>).analysis_state, analysis_ready: { status: 'ready' },
+      blocks: [(C1_PARTIAL.json as unknown as Record<string, unknown>).analysis_result], ...(runDelta !== undefined ? { run_delta: runDelta } : {}) } }
+    : { status: 200, json: C1_PARTIAL.json as unknown as Record<string, unknown> }, new ProposalStore());
+  it('IDENTITY: the run result carries exactly the block of the canonical read\'s pair', async () => {
+    const out = await runCaps(C1_PARTIAL.json.current_read.run_delta).runAnalysis(ctx as never, { reason: 'compare' } as never) as Record<string, unknown>;
+    expect(out.ran).toBe(true);
+    expect(out.comparison).toEqual(comparisonBlockOf(C1_PARTIAL.json.current_read.run_delta, planOf(C1_PARTIAL)));
+  });
+  it('CONTROL: a Run that made no pair (a first Run) carries no block', async () => {
+    const out = await runCaps(undefined).runAnalysis(ctx as never, { reason: 'compare' } as never) as Record<string, unknown>;
+    expect(out.ran).toBe(true);
+    expect('comparison' in out).toBe(false);
   });
 });

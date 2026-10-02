@@ -171,10 +171,17 @@ export function rerunExplanationPlan(
   const wireCase = coverageComplete ? d.attribution_case : 'coverage_incomplete';
   const priorWithheld = d.win_probabilities_unavailable === 'prior_withheld';
   const noMatched = !priorWithheld && Array.isArray(d.win_probabilities) && d.win_probabilities.length === 0;
+  // COMPARISON-ANSWER's movement licence: which matched options moved beyond noise (each row's own `noise_verdict`).
+  const matchedRows = Array.isArray(d.win_probabilities) ? d.win_probabilities.map(rec).filter((r): r is Rec => r !== undefined) : [];
+  const optionLabelsOf = (rows: readonly Rec[]) => rows.map((r) => labelOf(String(r.option_id))).filter((l): l is string => l !== undefined);
+  const signalRows = matchedRows.filter((r) => r.noise_verdict === 'signal');
   const noise = text(rec(d.leader)?.noise_verdict);
   const inputs: MethodInputs = {
     change_labels: changes,
     changes_recorded: rows.length,
+    signal_movement: signalRows.length > 0,
+    matched_option_labels: optionLabelsOf(matchedRows),
+    signal_option_labels: optionLabelsOf(signalRows),
     attribution_case: checkCase(wireCase),
     leader_licensed: leaderLicensed,
     ...(noise !== undefined ? { noise_verdict: noise } : {}),

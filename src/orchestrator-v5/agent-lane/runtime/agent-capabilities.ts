@@ -7539,6 +7539,18 @@ export function createAgentCapabilities(
       const runAt = (r.json.analysis_state as { run_state?: { computed_at?: unknown } } | undefined)?.run_state?.computed_at;
       const runIdentity = typeof runHash === 'string' && typeof runAt === 'string'
         ? { scenario_id: ctx.scenario_id, graph_hash_at_run: runHash, computed_at: runAt } : undefined;
+      // ⭐ "Ask about this comparison": a Run that made a new pair hands the model that pair's block, read from the canonical
+      // read the final check uses (`comparison-answer.ts`), so a later call never explains the turn-start pair.
+      let comparison: ReturnType<typeof comparisonBlockOf>;
+      // Its own read variable: the confirm card below keys on whether `postRunRead` was made, and this must not change that.
+      if (result !== undefined && r.json.run_delta !== undefined && r.json.run_delta !== null) {
+        let pairRead: GraphRead | null = postRunRead ?? null;
+        if (postRunRead === undefined) {
+          try { pairRead = await readGraph(ctx.scenario_id); } catch { pairRead = null; }
+        }
+        comparison = comparisonBlockOf(pairRead?.run_delta, rerunPlanForGraph(pairRead?.run_delta, pairRead?.raw, false,
+          pairRead === null ? [] : [...optionNameAliasesForCurrentRun(pairRead).values()].map((a) => a.display)));
+      }
       // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
       const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;
       return {
@@ -7558,6 +7570,7 @@ export function createAgentCapabilities(
         // ⛔ The Agent reads decision sensitivity from EVPPI only, never PLoT's structural ranking (`../decision-sensitivity.ts`).
         ...(result !== undefined ? { result: analysisResultForAgent(result) } : {}),
         ...(runIdentity !== undefined ? { run_identity: runIdentity } : {}),
+        ...(comparison !== undefined ? { comparison } : {}),
         // The typed leader permission for THIS run, read from its own wire verdict — so the Agent names a
         // leader only when `leader_may_be_named` (see the route's reporting instruction). `requested`: every
         // run_analysis dispatch is one the user asked for (the Agent's own call, or the Run chip's fast path);
