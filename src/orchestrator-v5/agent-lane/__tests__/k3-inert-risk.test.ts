@@ -106,10 +106,17 @@ describe('the ONE definition: only a risk, and only what reaches the goal throug
   const g = (nodes: N[], edges: [string, string][]) => ({ nodes, edges: edges.map(([from, to]) => ({ from, to })) });
   const base: N[] = [{ id: 'goal', kind: 'goal' }, { id: 'opt', kind: 'option' }, { id: 'f', kind: 'factor' }, { id: 'r', kind: 'risk' }];
 
-  it('a risk with no onward edge (with or without a cause) is in; a cause drawn only into it joins', () => {
+  it('a risk with a cause drawn in and no onward edge is in; a cause drawn only into it joins', () => {
     const x = g([...base, { id: 'exo', kind: 'factor', category: 'external' }], [['opt', 'f'], ['f', 'goal'], ['f', 'r'], ['exo', 'r']]);
     expect([...inertRiskBranch(x.nodes, x.edges, [])].sort()).toEqual(['exo', 'r']);
-    expect([...inertRiskBranch(g(base, [['opt', 'f'], ['f', 'goal']]).nodes, g(base, [['opt', 'f'], ['f', 'goal']]).edges, [])]).toEqual(['r']);
+  });
+
+  it('CONTROL (CI: dual-draft G12): a risk with NO edge at all states nothing — never left out; it stays an ORPHAN_NODE', () => {
+    const bare = g(base, [['opt', 'f'], ['f', 'goal']]);
+    expect(inertRiskBranch(bare.nodes, bare.edges, []).has('r')).toBe(false);
+    const graph = { nodes: [...base.map((n) => ({ ...n, label: n.id })), { id: 'dec', kind: 'decision', label: 'd' }, { id: 'opt2', kind: 'option', label: 'o2' }],
+      edges: [{ from: 'dec', to: 'opt' }, { from: 'dec', to: 'opt2' }, { from: 'opt', to: 'f' }, { from: 'opt2', to: 'f' }, { from: 'f', to: 'goal' }] };
+    expect(validateGraphStructure(graph as never, { leaveOutInertRisks: true }).violations.map((v) => `${v.code} ${v.detail.match(/^Node "([^"]+)"/)?.[1]}`)).toEqual(['ORPHAN_NODE r']);
   });
 
   it('CONTROL (DL condition 1): an option whose ONLY path runs through the risk stays REFUSED — never a silent "no effect"', () => {
