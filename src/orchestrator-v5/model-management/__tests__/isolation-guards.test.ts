@@ -44,7 +44,15 @@ const ALLOWED_CROSS_BOUNDARY = new Set(
     // projection. These exact seams require owning HARNESS/DL review in this PR.
     '../context/analysis-interpretation-identity.js',
     '../context/freshness.js',
-    '../context/claim-safety-read.js',
+    // Saved-result permission reuses the canonical per-Run claim/licence composition.
+    '../context/canonical-analysis-state.js',
+    '../compose/analysis-state-v1.js',
+    '../compose/leader-licence.js',
+    '../compose/unrequested-analysis-confinement.js',
+    '../coaching/pick-raw-robustness.js',
+    '../agent-lane/admit-model.js',
+    '../../orchestrator/tools/analysis-ready-helper.js',
+    '../../orchestrator/context/constraint-feasibility.js',
     '../context/reconcile-scenario-analysis-facts.js', // fact-set type only
     '../coaching/build-run-delta.js', // selected-pair types only
     '../boundary/request-extensions.js', // GraphStateIngress (type-only)
@@ -297,7 +305,14 @@ describe('model-management isolation guards — meta-checks (the enforcer cannot
     expect(importAllowed(moduleDir, '../context/graph-identity.js')).toBe(true);
     expect(importAllowed(moduleDir, '../context/analysis-interpretation-identity.js')).toBe(true);
     expect(importAllowed(moduleDir, '../context/freshness.js')).toBe(true);
-    expect(importAllowed(moduleDir, '../context/claim-safety-read.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../context/canonical-analysis-state.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../compose/analysis-state-v1.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../compose/leader-licence.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../compose/unrequested-analysis-confinement.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../coaching/pick-raw-robustness.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../agent-lane/admit-model.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../../orchestrator/tools/analysis-ready-helper.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../../orchestrator/context/constraint-feasibility.js')).toBe(true);
     expect(importAllowed(moduleDir, '../context/reconcile-scenario-analysis-facts.js')).toBe(true);
     expect(importAllowed(moduleDir, '../coaching/build-run-delta.js')).toBe(true);
     expect(importAllowed(moduleDir, '../boundary/request-extensions.js')).toBe(true);

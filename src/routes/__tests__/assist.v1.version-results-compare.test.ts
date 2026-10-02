@@ -2,9 +2,11 @@ import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { ModelVersionDiffV1Schema, ModelVersionDiffV2Schema } from '@talchain/schemas/boundary';
-import { FROM, TO, PRIOR, CURRENT, factSet } from '../../orchestrator-v5/model-management/__tests__/version-result-fixtures.js';
+import { FROM, TO, PRIOR, CURRENT, factSet, savedRun } from '../../orchestrator-v5/model-management/__tests__/version-result-fixtures.js';
 import { FIX_SCENARIO, FIX_OWNER, versionRecord } from '../../orchestrator-v5/model-management/__tests__/fixtures.js';
 import { readMayNameLeadingOptionVerdictForFact } from '../../orchestrator-v5/context/claim-safety-read.js';
+import { GraphStateIngressSchema } from '../../orchestrator-v5/boundary/request-extensions.js';
+import { deriveEveryOptionLimitVerdict, readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
 
 const mocks = vi.hoisted(() => ({
   getVersion: vi.fn(), facts: vi.fn(), identity: vi.fn(),
@@ -59,7 +61,69 @@ async function compare(body: Record<string, unknown> = {}) {
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const result = (fact: HandlerFact) => (fact as unknown as { result: Record<string, unknown> }).result;
 
+function pairWithRatifiedLimits(priorSatisfaction: number, currentSatisfaction: number) {
+  const endpoints = [FROM, TO].map((version, i) => {
+    // Distinct limits prove each permission reads its own saved graph, not the live/TO graph.
+    const constraint = { constraint_id: `saved-limit-${i}`, node_id: 'n_revenue',
+      operator: '>=', value: 100, label: 'Revenue at least £100/month' };
+    const saved = versionRecord(GraphStateIngressSchema.parse({
+      ...GraphStateIngressSchema.parse(version.graph), goal_constraints: [constraint],
+    }), { id: version.id });
+    const run = savedRun(saved, i === 0 ? 'bound-prior' : 'bound-current',
+      i === 0 ? '2026-10-02T00:00:00.000Z' : '2026-10-02T01:00:00.000Z', i === 0 ? 0.62 : 0.45);
+    const enrichment = result(run).enrichment as Record<string, unknown>;
+    const satisfaction = i === 0 ? priorSatisfaction : currentSatisfaction;
+    enrichment.option_comparison = ['opt-a', 'opt-b'].map((option_id, j) => ({
+      option_id, constraints_decision_grade: true,
+      constraint_probabilities: { [constraint.constraint_id]: satisfaction + j * 0.1 },
+    }));
+    enrichment.constraint_results = [{ ...constraint,
+      scale_provenance: { decision_grade: true, range_unified: true, source: 'explicit_cap' } }];
+    return { saved, run };
+  });
+  const [prior, current] = endpoints;
+  mocks.getVersion.mockImplementation(async (_scenario: string, id: string) =>
+    id === FROM.id ? prior!.saved : id === TO.id ? current!.saved : null);
+  mocks.facts.mockResolvedValue({ factSet: factSet([current!.run, prior!.run]), hotWindow: { status: 'ok', facts: [] } });
+  return { prior: prior!, current: current! };
+}
+
 describe('version result comparison uses the real route, service, binder and delta producer', () => {
+  it.each([
+    ['N1', 'prior', 0.2, 0.8], ['N2', 'current', 0.8, 0.2],
+  ] as const)('%s: withholds both leaders when the %s Run has every option likely breaking its saved limit', async (_row, side, priorP, currentP) => {
+    const pair = pairWithRatifiedLimits(priorP, currentP);
+    const { saved, run } = pair[side];
+    const permission = readMayNameLeadingOptionVerdictForFact(run);
+    expect(permission.may_name_leading_option).toBe(true);
+    expect(permission.separation_withhold).toBeNull();
+    expect(deriveEveryOptionLimitVerdict(result(run), readRatifiedConstraints(saved.graph)))
+      .toEqual({ kind: 'likely_breaks', constraintId: side === 'prior' ? 'saved-limit-0' : 'saved-limit-1' });
+    const reply = await compare(); expect(reply.statusCode).toBe(200);
+    const value = ModelVersionDiffV2Schema.parse(reply.json()).result_comparison;
+    expect(value).toMatchObject({ status: 'available', kind: 'paired_runs' });
+    if (value.status === 'available' && value.kind === 'paired_runs') {
+      expect(value.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
+      expect(value.run_delta.leader).not.toHaveProperty('current_leading_option_id');
+      expect(value.run_delta.win_probabilities).toStrictEqual([]);
+    }
+  });
+
+  it('P1: a licensed pair retains the existing leader ids and win probabilities', async () => {
+    const baseline = ModelVersionDiffV2Schema.parse((await compare()).json()).result_comparison;
+    pairWithRatifiedLimits(0.8, 0.8);
+    const reply = await compare(); expect(reply.statusCode).toBe(200);
+    const value = ModelVersionDiffV2Schema.parse(reply.json()).result_comparison;
+    expect(value).toMatchObject({ status: 'available', kind: 'paired_runs', run_delta: {
+      leader: { prior_leading_option_id: 'opt-a', current_leading_option_id: 'opt-b', changed: true },
+    } });
+    if (value.status === 'available' && value.kind === 'paired_runs'
+      && baseline.status === 'available' && baseline.kind === 'paired_runs') {
+      expect(value.run_delta.win_probabilities).toStrictEqual(baseline.run_delta.win_probabilities);
+      expect(value.run_delta.win_probabilities).not.toHaveLength(0);
+    }
+  });
+
   it('serves the exact selected pair without extra version reads or raw result envelopes', async () => {
     const reply = await compare(); expect(reply.statusCode).toBe(200);
     const body = ModelVersionDiffV2Schema.parse(reply.json());

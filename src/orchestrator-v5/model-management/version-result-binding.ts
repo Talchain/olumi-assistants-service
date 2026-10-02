@@ -4,7 +4,16 @@ import { computeGraphIdentityHash, computeAnalysisAffectingHashRecord,
   computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 import { validateAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
 import { deriveAnalysisFreshness, isSuccessfulRunAnalysisFact } from '../context/freshness.js';
-import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
+import { selectCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
+import { composeAnalysisStateV1 } from '../compose/analysis-state-v1.js';
+import { leaderLicenceFromState } from '../compose/leader-licence.js';
+import { leaderWithheldOnlyBecauseUnrequested, mayPresentLeaderClaimForFact,
+  wasAnalysisRequestedByUser } from '../compose/unrequested-analysis-confinement.js';
+import { pickLatestRawRobustness } from '../coaching/pick-raw-robustness.js';
+import { nonlinearIdentityLeaderClaimCause, nodesUnderANonlinearIdentity } from '../agent-lane/admit-model.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { deriveEveryOptionLimitVerdict, leaderWithheldWithoutConstraintCause,
+  readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
 import type { ScenarioAnalysisFactSet } from '../context/reconcile-scenario-analysis-facts.js';
 import type { SelectedRunIdentity, SelectedRunPair } from '../coaching/build-run-delta.js';
 import type { ModelVersionRecord } from './types.js';
@@ -65,6 +74,35 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
   return duplicate === undefined ? selected : { reason: 'unconfirmed_identity' };
 }
 
+/** Compose the canonical claim and licence for this Run on the version it analysed. */
+function mayNameBoundRunLeader(run: BoundRun, version: ModelVersionRecord): boolean {
+  const fact = run.fact;
+  if (fact.fact_type !== 'run_analysis') return false;
+  const facts = [fact];
+  const graph = version.graph;
+  const graphHash = run.identity.graph_hash_at_run;
+  const readiness = buildCanonicalAnalysisReadyFromGraph(graph);
+  const identityCause = nonlinearIdentityLeaderClaimCause({ graph, graphHash,
+    result: fact.result, requested: wasAnalysisRequestedByUser(fact) });
+  const distrusted = nodesUnderANonlinearIdentity(graph);
+  const limit = deriveEveryOptionLimitVerdict(fact.result,
+    readRatifiedConstraints(graph).filter((c) => c.node_id == null || !distrusted.has(c.node_id)));
+  const state = composeAnalysisStateV1({
+    canonical: selectCanonicalAnalysisState({ priorFacts: facts, currentGraphHash: graphHash,
+      currentGraph: graph, readiness, priorFactsReadOk: true }),
+    readiness,
+    runFactBinding: { scenarioId: version.scenario_id, selectedResult: fact.result },
+    mayNameLeadingOption: mayPresentLeaderClaimForFact(fact),
+    withheldBecauseUnrequested: leaderWithheldOnlyBecauseUnrequested(fact)
+      || identityCause?.withheldBecauseUnrequested === true,
+    withheldBecauseNonlinearIdentity: identityCause?.withheldBecauseNonlinearIdentity === true,
+    withheldWithoutConstraintCause: leaderWithheldWithoutConstraintCause(fact.result),
+    ...(limit === null ? {} : { everyOptionLimit: limit.kind }),
+    rawRobustness: pickLatestRawRobustness(facts),
+  });
+  return leaderLicenceFromState(state, readiness) !== 'withheld';
+}
+
 /** Pure binding only; the compare route calls the existing delta builder for this pair. */
 export function bindVersionResults(input: {
   readonly scenarioId: string;
@@ -88,15 +126,12 @@ export function bindVersionResults(input: {
       && prior.identity.computed_at === current.identity.computed_at
       ? { kind: 'shared', recordedRun: prior.identity } : unavailable('unconfirmed_identity');
   }
-  const priorPermission = readMayNameLeadingOptionVerdictForFact(prior.fact);
-  const currentPermission = readMayNameLeadingOptionVerdictForFact(current.fact);
   return {
     kind: 'paired', selectedPair: { prior: prior.identity, current: current.identity },
     facts: [prior.fact, current.fact],
     // The existing builder's shared turn permission also confines figures by arithmetic.
-    // Narrow only this opt-in pair using the composed separation authority; do not
-    // change persisted verdicts or the chronological callers' permission semantics.
-    mayNameLeadingOption: currentPermission.may_name_leading_option
-      && priorPermission.separation_withhold === null && currentPermission.separation_withhold === null,
+    // Both canonical licences include the limit rule and fail closed on separation.
+    mayNameLeadingOption: mayNameBoundRunLeader(prior, input.from)
+      && mayNameBoundRunLeader(current, input.to),
   };
 }
