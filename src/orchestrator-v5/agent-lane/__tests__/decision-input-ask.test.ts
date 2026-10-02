@@ -259,6 +259,12 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   let goal: Rec = FX.goal_after_build;
   let modelSays = 'This run is a sketch, not a basis for choosing.';
   let blocked = false;
+  // ⭐ K3: a kept risk with a cause drawn in and no onward link (left out of the Run), or the same risk once connected.
+  let risk: 'none' | 'inert' | 'connected' = 'none';
+  const withRisk = (g: { nodes: Rec[]; edges: Rec[] }) => risk === 'none' ? g : {
+    nodes: [...g.nodes, { id: 'f_hours', kind: 'factor', label: 'Hours on outreach' }, { id: 'r_burn', kind: 'risk', label: 'Founder burnout' }],
+    edges: [...g.edges, { from: 'f_hours', to: 'r_burn' }, ...(risk === 'connected' ? [{ from: 'r_burn', to: String(goal.id) }] : [])],
+  };
   let n = 0;
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: modelSays }] }] }), { status: 200 })));
@@ -268,7 +274,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: graphWith(goal), graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true },
+      graph: withRisk(graphWith(goal)), graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true },
       analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, usable_for_chips: true },
       analysis_result: blocked ? undefined : { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } },
     }));
@@ -279,7 +285,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; recentFails = false; n += 1; });
+  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; recentFails = false; risk = 'none'; n += 1; });
   const scenarioNow = () => `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
   const runTurn = async (turnId?: string, explain = false) => {
     const scenarioId = scenarioNow();
@@ -366,6 +372,17 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const sid = scenarioNow();
     for (let i = 0; i < 21; i += 1) rows.set(`${sid}|sub-${i}`, { scenario_id: sid, turn_id: `sub-${i}`, request_hash: `sha256:${i}`, assistant_message: 'handler text' });
     expect((await runTurn('5e6f7081-4c5d-4e6f-8071-8b9c0d1e2f34')).assistant_text, 'the Rerun').not.toContain('as your target');
+  });
+
+  it('RED (K3, DL on lease 5945974225): the Run names the kept risk it LEFT OUT, once; the Explain reply does not; connected → gone', async () => {
+    const LEFT = '"Founder burnout" is left out of this analysis until you say whether it raises or lowers "Funding secured".';
+    risk = 'inert';
+    const ran = (await runTurn('6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f')).assistant_text;
+    expect(ran.split(LEFT).length - 1, 'the Run says it once').toBe(1);
+    expect((await runTurn('6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f')).assistant_text.split(LEFT).length - 1, 'a retried Run (the replay)').toBe(1);
+    expect((await runTurn('7d8e9f0a-1b2c-4d3e-9f40-5b6c7d8e9f0a', true)).assistant_text, 'the Explain reply').not.toContain('left out of this analysis');
+    risk = 'connected';
+    expect((await runTurn('8e9f0a1b-2c3d-4e4f-8051-6c7d8e9f0a1b')).assistant_text, 'connected').not.toContain('left out of this analysis');
   });
 
   it('CONTROL (DL 5944162815): the goal CHANGES between Runs → its new ask is said (an open ask binds to its own goal)', async () => {
