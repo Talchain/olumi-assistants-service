@@ -15,14 +15,16 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // MODEL GENERATION (2 Oct, M1 Accept receipt; Codex pre-review 2 on CEE mg/accept-receipt-authorship): the link-set sentence
 // no longer says a user-named band is always "recorded as theirs" — a band the link already sits in records review and stays
 // Olumi's estimate (R11): 26f7e9c0… → 913872bf…, +210 bytes. The template sha above is unchanged.
-const HOST_SHA = '913872bf3d462f2ff3185c6c19a74825cf96d5a5b59a29dd60de9a34cdfbb9b7';
+// AI HARNESS (2 Oct, RC 5950124321): none_measurable makes no claim; the sentence it was told to say is gone: 913872bf… → cd04fd8c….
+const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f68b';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
 // Derived from the request the real route SENT (harness raw body), never computed by hand.
 // + the link-set sentence above (MG, 2 Oct): 27,833 → 28,043 bytes.
-const RENDERED_SHA = 'b1049e78a74540041fb4c003d3ce0f94fa695402234b18d05847cf91da4ffc2b';
-const RENDERED_BYTES = 28_043;
+// + none_measurable makes no claim (AI HARNESS, RC 5950124321): 28,043 → 28,026 bytes.
+const RENDERED_SHA = 'b2653d0e2f2eda3c2387366ec33e3c6412508dc1bec9c7fbe35af6877037c739';
+const RENDERED_BYTES = 28_026;
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';
