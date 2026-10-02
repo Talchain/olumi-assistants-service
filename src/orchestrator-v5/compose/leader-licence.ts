@@ -16,6 +16,9 @@
  * 3. the admission does not license a leader, or the run looked and declined (a `withheld`-kind reason) → `withheld`;
  * 4. ruling (ii): a separation that could not be evaluated (`separation_unavailable`) → `withheld` (fail-closed);
  * 5. otherwise `permitted`.
+ * 0. (before all of these, P0 SHARED DATA) an admission that is absent, malformed, or on the run-refusal axis
+ *    (`structurally_analysable: false`) → `withheld`. Only M1 (comparative_leader) and M2 (quantified_provisional,
+ *    caveated) can license; the matrix is in programme-docs `output/p0-shared-data/AUDIT.md` §1b.
  *
  * PURE. Never throws.
  */
@@ -37,6 +40,13 @@ export interface LeaderLicenceInput {
 
 export function leaderLicence(o: LeaderLicenceInput): LeaderLicence {
   if (o.mayNameLeadingOption !== true) return 'withheld';
+  // ⛔ THE ONE MATRIX FAILS CLOSED (P0 SHARED DATA, #85 5963281356; DL ruling via PTL 5963175273 §3; AUDIT §1b). Only a
+  // published admission on the CLAIM-STRENGTH axis (`structurally_analysable: true` and a recognised mode) can license.
+  // `analysisReadyPermitsLeaderNaming` stands down on the run-refusal axis (`none`/refused `exploratory`) and on an absent
+  // admission — a deliberate choice for the V5 rails, which are not licence consumers (PR-L2). Through the licence those
+  // cells (M4-M6) said `permitted`, while `claimPermissionsFrom` told the Agent "not nameable" on the same turn
+  // (Context P0 M6c, 5963111350). Here they withhold.
+  if (!admissionOnClaimStrengthAxis(o.analysisReady)) return 'withheld';
   if (o.separationEstablished === true && permittedAnalysisModeFromAnalysisReady(o.analysisReady) === 'quantified_provisional') {
     return 'permitted_with_caveat';
   }
@@ -44,6 +54,14 @@ export function leaderLicence(o: LeaderLicenceInput): LeaderLicence {
   if (leaderClaimReasonKind(o.leaderClaimWithheldReason) === 'withheld') return 'withheld';
   if (o.leaderClaimWithheldReason === WITHHELD_SEPARATION_UNAVAILABLE) return 'withheld';
   return 'permitted';
+}
+
+/** A published admission that answers "how strong a claim?" (`structurally_analysable: true`, a recognised mode). */
+function admissionOnClaimStrengthAxis(analysisReady: unknown): boolean {
+  const admission = (analysisReady as { analysis_admission?: unknown } | null | undefined)?.analysis_admission;
+  if (admission === null || typeof admission !== 'object') return false;
+  if ((admission as { structurally_analysable?: unknown }).structurally_analysable !== true) return false;
+  return permittedAnalysisModeFromAnalysisReady(analysisReady) !== null;
 }
 
 /** The licence from a turn's `analysis_state` + `analysis_ready`, read the way the Agent lane's wire gate reads them. */
