@@ -20,12 +20,12 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     expect(cases).toHaveLength(35); expect(fixtures).toHaveLength(29);
     expect(new Set(cases.map(c => c.id)).size).toBe(cases.length);
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
-    expect(SPEC_SHA).toBe('c5c0c02fc9babecb04099ca2391e17faf56be1bd');
+    expect(SPEC_SHA).toBe('734de2c98790dd010873448e855bd11ab219b836');
   });
   it('vendors exact source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('422e3882f93f628ed1f0debffa60546ff6094a28aa1712ca28341f59503dc78e');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('dee8aa0a0cc9c08aa63269872c1a0cf30902180dab2f5284989ca21df2a0d7e2');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('6a50e594ea1aee4650ef1c6e2f1b06bdce5cdca6f93741b3df4c0b38ab8f9592');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
