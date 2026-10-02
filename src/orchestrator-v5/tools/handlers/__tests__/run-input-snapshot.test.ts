@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildRunInputSnapshot, runIdFor, sentDigest } from '../run-input-snapshot.js';
-import { linkAuthorshipDigest } from '../run-input-residual.js';
+import { factorAuthorshipDigest, linkAuthorshipDigest } from '../run-input-residual.js';
 import { normalizeRunGoalUnit } from '../../../context/run-goal-unit.js';
 
 const graph = {
@@ -75,9 +75,11 @@ describe('buildRunInputSnapshot — what the Run was sent', () => {
 
   it('factor values, limits and links are recorded as sent', () => {
     const s = buildRunInputSnapshot(input());
+    // 0.73.0: each factor's authorship as the wire node carried it (`run-input-residual.ts` exception 4).
+    const factorDigest = (id: string) => factorAuthorshipDigest((graph as unknown as { nodes: Record<string, unknown>[] }).nodes.find((n) => n.id === id)!, false);
     expect(s?.factors).toEqual([
-      { factor_id: 'fac_price', label: 'Pro price', raw: 49, unit: 'GBP', encoded: 49, source: 'user_override' },
-      { factor_id: 'fac_churn', label: 'Monthly churn', raw: 3.7, unit: '%', encoded: 0.037, source: 'cee_inference' },
+      { factor_id: 'fac_price', label: 'Pro price', raw: 49, unit: 'GBP', encoded: 49, source: 'user_override', authorship_digest: factorDigest('fac_price') },
+      { factor_id: 'fac_churn', label: 'Monthly churn', raw: 3.7, unit: '%', encoded: 0.037, source: 'cee_inference', authorship_digest: factorDigest('fac_churn') },
     ]);
     expect(s?.constraints).toEqual([{ constraint_id: 'c1', node_id: 'fac_churn', label: 'Churn cap', operator: '<=', raw: 5, unit: '%' }]);
     // 0.70.0: the band the sent strength sits in travels with it (0.4 is "strong" by CEE's cuts); no persisted edges

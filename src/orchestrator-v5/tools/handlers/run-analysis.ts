@@ -1237,6 +1237,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       plotPayload,
       // 0.70.0 (R3 DEFECT 3): who sized each link, read from the graph this Run was built from (never on the wire).
       persistedEdges: ((snapshot.rawPersistedGraph ?? snapshot.graph) as { edges?: ReadonlyArray<unknown> } | null | undefined)?.edges ?? [],
+      // 0.73.0: the σ this Run's stated-level carry set — the only σ that is authorship (`run-input-residual.ts`).
+      statedLevelCarriedIds: statedLevelNodeIds(cappedGraph),
     });
     if (inputSnapshot === null) {
       log.warn(

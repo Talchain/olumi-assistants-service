@@ -25,6 +25,18 @@
  *   W3  the Accept of a PREVIOUSLY REVIEWED placeholder → ONE sizing row, complete (review metadata on neither end).
  *   W4  a user-owned link confirmed as it is → only the review moves → complete, [].
  *   W5  a factor confirmed as it is → complete, [].
+ * FACTOR AUTHORSHIP (F1b lease #85 5945475375, schemas 0.73.0) — the REAL `factor_value_edit` writer:
+ *   F1  the user types a figure (served 5945463610) → the wire moves exactly the measured member set → complete + ONE row.
+ *   F2  authorship moves on one factor, the value on ANOTHER → partial (a row explains only its own factor).
+ *   F3  the user's edit plus a STATED σ (not the stated-level carry's) → partial: a σ is authorship only at that spread.
+ *   F4  an older Run that recorded no factor digest → partial.
+ * CODEX on 4c043a64 (P1-1, P1-2) — the credit needs the value writer's EXACT output and this Run's own carry:
+ *   F5  the user's edit plus an independently STORED σ of exactly 1e-4 (not carried) → partial.
+ *   F6  the user's edit plus an independent `extractionType: 'explicit'` on the same factor → partial.
+ *   F7  an approved ADOPTION of Olumi's figure through the real writer (`user_assumption`, node `ai_inferred`) → complete.
+ *   F8  the user's edit plus an independent node `display_value` (not the writer's) → partial.
+ *   F9  the user types 3% → 4% → 3% between Runs (the writer's exact shape, SAME figure; σ now exact) → partial, [].
+ *   F10 a colleague's figure: only WHO gave it changes (`elicited_from.participant_id`), same value → partial, [].
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -41,6 +53,11 @@ import { createRunAnalysisHandler } from '../run-analysis.js';
 import { createAdjustEdgeStrengthHandler } from '../adjust-edge-strength.js';
 import { edgeBandStd } from '../../../format/edge-strength-bands.js';
 import { sentDigest } from '../run-input-snapshot.js';
+import { applyFactorValueEdit } from '../../../system-events/factor-value-edit.js';
+import { STATED_LEVEL_STD } from '../stated-level-spread.js';
+import { VALUE_WRITE_USER_SOURCE } from '../run-input-residual.js';
+import { USER_EDIT_SOURCE } from '../../../../orchestrator/canonicalise-value-ops.js';
+import { APPROVED_ADOPTION_SOURCE, runWithApprovedAdoption } from '../../../agent-lane/approved-adoption-context.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'c96fc4bb-ccd1-4615-a6d9-52c652e3e0e4';
@@ -288,5 +305,135 @@ describe('0.71.0 residual on the real wire — complete means verified', () => {
     const p = await pair((g) => { node(g, 'monthly_churn').observed_state.reviewed_by_user = { intent: 'confirm_current', at: '2026-10-01T22:00:00.000Z' }; });
     expect(p.wireMoved, 'precondition: the review reached PLoT').toBe(true);
     expect([p.complete, p.rows]).toEqual([true, []]);
+  });
+});
+
+/** The REAL value writer, as the inspector's edit reaches it (`factor-value-edit-confirm-is-review.test.ts` shape). */
+async function writeFactor(g: Rec, target: string, event: Rec): Promise<Rec> {
+  const payload = { kind: 'system_event', scenario_id: SCENARIO, turn_id: '77777777-7777-4777-8777-777777777777', stage: 'analyse',
+    event: { kind: 'factor_value_edit', target_id: target, field: 'value', ...event } } as Rec;
+  const r = await applyFactorValueEdit({ payload, event: payload.event, requestId: 'req-f', persistedGraph: structuredClone(g), priorFacts: [] } as never);
+  expect(r.kind, 'the writer committed the edit').toBe('mutated');
+  return (r as { mutatedGraph: Rec }).mutatedGraph;
+}
+
+/** Every member of node `id` that differs between the two requests PLoT received. */
+function movedMembers(a: Rec, b: Rec, id: string): string[] {
+  const na = a.graph.nodes.find((n: Rec) => n.id === id);
+  const nb = b.graph.nodes.find((n: Rec) => n.id === id);
+  const out: string[] = [];
+  for (const k of new Set([...Object.keys(na), ...Object.keys(nb)])) {
+    if (k !== 'observed_state' && JSON.stringify(na[k]) !== JSON.stringify(nb[k])) out.push(k);
+  }
+  for (const k of new Set([...Object.keys(na.observed_state ?? {}), ...Object.keys(nb.observed_state ?? {})])) {
+    if (JSON.stringify(na.observed_state?.[k]) !== JSON.stringify(nb.observed_state?.[k])) out.push(`observed_state.${k}`);
+  }
+  return out.sort();
+}
+
+describe('0.73.0 factor authorship — a user\'s value edit is credited pairwise, on the real writer and wire', () => {
+  it('F1 (served 5945463610): the user types a figure (churn 3% → 4%) → complete + ONE factor row', async () => {
+    const p = await pair((g) => writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 }));
+    // The class, measured: the figure (recorded + compared) and the authorship members, nothing else.
+    expect(movedMembers(p.a.sent, p.b.sent, 'monthly_churn')).toEqual([
+      'display_value', 'observed_state.extractionType', 'observed_state.raw_value', 'observed_state.source',
+      'observed_state.std', 'observed_state.value', 'provenance',
+    ]);
+    expect(p.b.sent.graph.nodes.find((n: Rec) => n.id === 'monthly_churn').observed_state.std, 'the stated-level carry').toBe(STATED_LEVEL_STD);
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id, r.before?.raw, r.after?.raw])).toEqual([['factor_value', 'monthly_churn', 3, 4]]);
+    expect(p.complete).toBe(true);
+  });
+
+  it('F2: churn\'s authorship moves (same figure) while ANOTHER factor\'s value is typed → partial', async () => {
+    const p = await pair(async (g) => {
+      const written = await writeFactor(g, 'monthly_gross_additions', { value: 70, raw_value: 70 });
+      node(written, 'monthly_churn').observed_state.source = 'user_override';
+      return written;
+    });
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id])).toEqual([['factor_value', 'monthly_gross_additions']]);
+    expect(p.complete).toBe(false);
+  });
+
+  it('F3: the user\'s edit AND a stated σ (0.02, not the carry\'s spread) → partial', async () => {
+    const p = await pair(async (g) => {
+      const written = await writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 });
+      node(written, 'monthly_churn').observed_state.std = 0.02;
+      return written;
+    });
+    expect(p.b.sent.graph.nodes.find((n: Rec) => n.id === 'monthly_churn').observed_state.std, 'precondition: the stated σ was sent').toBe(0.02);
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id])).toEqual([['factor_value', 'monthly_churn']]);
+    expect(p.complete).toBe(false);
+  });
+
+  it('F4: an older Run that recorded no factor digest → partial (never credited by default)', async () => {
+    const p = await pair((g) => writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 }));
+    const older = { ...p.a.snapshot, factors: p.a.snapshot.factors.map(({ authorship_digest: _d, ...f }) => f) };
+    expect(diffRunInputs(older, p.b.snapshot).complete).toBe(false);
+  });
+
+  it('F5 (CODEX P1-1): the user\'s edit plus an independently STORED σ of exactly 1e-4 → partial (equality is not origin)', async () => {
+    const p = await pair(async (g) => {
+      const written = await writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 });
+      node(written, 'monthly_churn').observed_state.std = STATED_LEVEL_STD;
+      return written;
+    });
+    expect(p.b.sent.graph.nodes.find((n: Rec) => n.id === 'monthly_churn').observed_state.std, 'precondition: the same σ number').toBe(STATED_LEVEL_STD);
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id])).toEqual([['factor_value', 'monthly_churn']]);
+    expect(p.complete).toBe(false);
+  });
+
+  it('F6 (CODEX P1-2): the user\'s edit plus an independent extractionType on the same factor → partial', async () => {
+    const p = await pair(async (g) => {
+      const written = await writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 });
+      node(written, 'monthly_churn').observed_state.extractionType = 'explicit';
+      return written;
+    });
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id])).toEqual([['factor_value', 'monthly_churn']]);
+    expect(p.complete).toBe(false);
+  });
+
+  it('F7: an approved ADOPTION of Olumi\'s figure through the real writer → complete + ONE factor row', async () => {
+    const p = await pair((g) => runWithApprovedAdoption(
+      { scenarioId: SCENARIO, proposalId: 'prop_f7', targetId: 'monthly_churn', rawValue: 4 },
+      () => writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 }),
+    ));
+    const os = node(p.bGraph, 'monthly_churn').observed_state;
+    expect([os.source, node(p.bGraph, 'monthly_churn').provenance], 'precondition: the writer stored an adoption').toEqual([APPROVED_ADOPTION_SOURCE, 'ai_inferred']);
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id, r.before?.raw, r.after?.raw])).toEqual([['factor_value', 'monthly_churn', 3, 4]]);
+    expect(p.complete).toBe(true);
+  });
+
+  it('F8: the user\'s edit plus an independent display_value on the same factor → partial', async () => {
+    const p = await pair(async (g) => {
+      const written = await writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 });
+      node(written, 'monthly_churn').display_value = 'about four per cent';
+      return written;
+    });
+    expect(p.rows.map((r) => [r.entity_kind, r.entity_id])).toEqual([['factor_value', 'monthly_churn']]);
+    expect(p.complete).toBe(false);
+  });
+
+  it('F9: the user types 3% → 4% → 3% between Runs — writer\'s shape at the SAME figure, σ now exact → partial, []', async () => {
+    const p = await pair(async (g) => writeFactor(await writeFactor(g, 'monthly_churn', { value: 4, raw_value: 4 }), 'monthly_churn', { value: 3, raw_value: 3 }));
+    expect(node(p.bGraph, 'monthly_churn').observed_state.source, 'precondition: the writer restamped it').toBe(VALUE_WRITE_USER_SOURCE);
+    expect(p.b.sent.graph.nodes.find((n: Rec) => n.id === 'monthly_churn').observed_state.std, 'precondition: σ now exact on the wire').toBe(STATED_LEVEL_STD);
+    expect([p.complete, p.rows]).toEqual([false, []]);
+  });
+
+  it('F10 (CODEX surviving mutant): only the colleague who gave the figure changes → partial, []', async () => {
+    const from = (participant: string) => ({ round_id: '11111111-1111-4111-8111-111111111111', participant_id: participant });
+    const p = await pair(
+      (g) => { node(g, 'monthly_churn').observed_state.elicited_from = from('33333333-3333-4333-8333-333333333333'); },
+      (g) => {
+        const os = node(g, 'monthly_churn').observed_state;
+        Object.assign(os, { source: 'panel_elicited', std: 0.02, elicited_from: from('22222222-2222-4222-8222-222222222222') });
+      },
+    );
+    expect(p.wireMoved, 'precondition: who gave it reached the request').toBe(true);
+    expect([p.complete, p.rows]).toEqual([false, []]);
+  });
+
+  it('the typed-figure stamp the digest matches IS the value writer\'s own constant', () => {
+    expect(VALUE_WRITE_USER_SOURCE).toBe(USER_EDIT_SOURCE);
   });
 });
