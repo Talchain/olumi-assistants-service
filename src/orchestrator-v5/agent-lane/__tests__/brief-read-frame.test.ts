@@ -513,7 +513,10 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
 
     it('CONTRAST: a chip press on an empty model → not routed, today\'s path', async () => {
       script = [say('Noted.')];
-      await turn({ message: BRIEF, source: 'chip', chip: { id: 'agent-next-what-would-change' } });
+      // An ORDINARY chip (an Agent turn). Every next step now has its own answer — the pre-mortem and "What would change
+      // the result?" (SCIENCE ROBUSTNESS, #85 5950283606) are method turns with no model call, Strengthen opens a card —
+      // so the row presses "Talk it through", which nothing intercepts; its claim (a press is never routed) is unchanged.
+      await turn({ message: BRIEF, source: 'chip', chip: { id: 'agent-talk-it-through' } });
       todaysPath('chip');
     });
 
