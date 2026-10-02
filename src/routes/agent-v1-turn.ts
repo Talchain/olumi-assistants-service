@@ -58,7 +58,8 @@ import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { createAgentCapabilities, withNonlinearIdentity, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { goalCertaintyForAgent } from '../orchestrator-v5/agent-lane/goal-certainty-for-agent.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
@@ -109,7 +110,7 @@ import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/
 import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
-import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
+import { limitAskIdsOf, limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../orchestrator-v5/agent-lane/limit-checks.js';
 import type { RunOutcome } from '../orchestrator-v5/agent-lane/run-outcome.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import { runDeltaBoundToReadback, runTurnNextMove, withRunDelta, type CapturedAnalysis } from '../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
@@ -2199,8 +2200,21 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         option_display_names: [...optionNameAliases(st.graph).values()].map((a) => a.display),
       };
       // The interpreter reads the LICENSED run (`licensed-run-view.ts`, PR-L1), exactly as the Agent loop's model does.
+      // ⛔ P0 CONTEXT defect 3: the SAME guard fields the Run tool gives the Agent for this Run (`agent-capabilities.ts`
+      // runAnalysis), by the same helpers, from this one readback: the earned/unearned 0-or-1 decision, the withheld goal
+      // chance, and — when the leader is withheld — the per-limit checks and the C46 product cause.
+      const permissionsNow = claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true });
+      const leaderWithheld = st.analysisResult !== undefined && permissionsNow.leader_may_be_named !== true;
+      const limitChecksNow = leaderWithheld ? limitChecksForAgent(st.graph, st.limitVerdicts) : undefined;
+      const goalChanceNow = goalChanceWithheldForAgent(st.analysisResult);
+      const goalCertaintyNow = goalCertaintyForAgent(st.analysisResult, { scenario_id: scenarioId, analysis_state: st.analysisState },
+        { raw: st.graph, analysis_state: st.analysisState, analysis_result: st.analysisResult,
+          ...(st.goalCertainty !== undefined ? { goal_certainty: st.goalCertainty } : {}) });
       const selectedRun = { result: analysisResultForAgent(st.analysisResult),
-        claim_permissions: claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true }) };
+        claim_permissions: leaderWithheld && st.graph !== undefined ? withNonlinearIdentity(permissionsNow, st.graph, st.identityEvaluated) : permissionsNow,
+        ...(limitChecksNow !== undefined ? { limit_checks: { limits: limitChecksNow, note: LIMIT_CHECKS_NOTE } } : {}),
+        ...(goalChanceNow !== undefined ? { goal_chance: goalChanceNow } : {}),
+        ...(goalCertaintyNow !== undefined ? { goal_certainty: goalCertaintyNow } : {}) };
       const runForInterpreter = runToolOutputLicensesLeader(selectedRun)
         ? { ...selectedRun, canonical_state: canonicalAfterRun }
         : { ...modelFacingToolResult('run_analysis', selectedRun), canonical_state: withoutLeaderDesignations(canonicalAfterRun) };

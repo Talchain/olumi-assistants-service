@@ -1458,8 +1458,10 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   // model chance, as the Run chip's own result does. The retained history no longer holds that result (#2322), so
   // without it the Agent said "not confirmed" beside a Goal panel showing 25%. A withheld leader keeps AI Quality's
   // standing drop of per-option chances; an exact 0 or 1 travels only through its earned `goal_certainty` decision.
-  const chancePermitted = current && goalChance === undefined
-    && claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
+  // ⛔ P0 CONTEXT defect 6: ONE leader-permission spelling. The follow-up is given the same `claim_permissions` a Run turn
+  // reads (licence AND `comparative_leader`), never left to infer it from the raw `leader_claim.permitted`.
+  const claimPermissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true });
+  const chancePermitted = current && goalChance === undefined && claimPermissions.leader_may_be_named === true;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const optionNames = optionNameAliasesForCurrentRun(g);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
@@ -1497,6 +1499,7 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
       }))
     : undefined;
   return { ...context, analysis: { ...analysis,
+    claim_permissions: claimPermissions,
     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
     ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
