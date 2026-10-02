@@ -12,7 +12,9 @@
  *         driver" clause built from them;
  *   (ii)  `decision_sensitivity` is added, read ONLY from `factor_evppi` by CEE's own reader
  *         (`selectFactorEvppiPriority`): a factor above resolution → `measured`; every row below resolution →
- *         `none_measurable` with the one true sentence; anything else → `not_measured` (no claim);
+ *         `none_measurable` with NO sentence (RC 5950124321: EVPPI is flat in additive models and never varies links, so
+ *         "no single assumption changes which option leads" read as nothing would; it makes no claim); anything else →
+ *         `not_measured` (no claim);
  *   (iii) a factor no compared option acts on is therefore never ranked: nothing structural is left to rank;
  *   (iv)  LIMITS ARE NOT THE GOAL: every option row it keeps, in every carrier, has PLoT's limits-only joint
  *         `probability_of_joint_goal` renamed `all_limits_hold_probability` (with `limits_note`), and the brief's
@@ -25,8 +27,6 @@
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
-
-export const NO_SINGLE_ASSUMPTION = 'No single assumption measurably changes which option leads.';
 
 /**
  * WHOSE RANGE (AIQ ruling #72 5867782904, words ACK 5870069785; Core Stabilisation Plan §7). ISL echoes each
@@ -45,7 +45,7 @@ export type DecisionSensitivity =
     readonly most_sensitive: { readonly factor_id: string; readonly label: string; readonly range?: RangeSource };
     readonly say?: string;
   }
-  | { readonly status: 'none_measurable'; readonly say: typeof NO_SINGLE_ASSUMPTION }
+  | { readonly status: 'none_measurable' }
   | { readonly status: 'not_measured' };
 
 const recordOf = (x: unknown): Record<string, unknown> | undefined =>
@@ -78,7 +78,7 @@ export function decisionSensitivityOf(enrichment: unknown): DecisionSensitivity 
       ...(range === 'olumi_assumed' ? { say: olumiAssumedRangeSay(label) } : {}),
     };
   }
-  if (d.reason === 'all_below_resolution') return { status: 'none_measurable', say: NO_SINGLE_ASSUMPTION };
+  if (d.reason === 'all_below_resolution') return { status: 'none_measurable' };
   return { status: 'not_measured' };
 }
 
