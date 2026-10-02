@@ -375,7 +375,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   });
 
   it('RED (K3, DL on lease 5945974225): the Run names the kept risk it LEFT OUT, once; the Explain reply does not; connected → gone', async () => {
-    const LEFT = '"Founder burnout" is left out of this analysis until you say whether it raises or lowers "Funding secured".';
+    const LEFT = '"Founder burnout" (with "Hours on outreach", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "Funding secured".';
     risk = 'inert';
     const ran = (await runTurn('6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f')).assistant_text;
     expect(ran.split(LEFT).length - 1, 'the Run says it once').toBe(1);

@@ -101,15 +101,7 @@ const withinMonths = (goal: Rec): string => {
  * ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out of
  * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
  */
-function leftOutLines(graph: unknown, goalLabel: string, restingText: string): string[] {
-  // ⭐ ONCE PER RISK (DL on #2509 5af6a010): the build turn's narrator is handed admission's own line for it
-  // (`not_represented`) and may relay it; a risk the reply already says is left out is not said again by the host.
-  const sentences = restingText.split(/(?<=[.!?])\s+/);
-  // ⛔ A NEGATED sentence ("is not / no longer / never left out") says the opposite, and never suppresses it (DL): omission
-  // is the worse direction.
-  const negated = /\b(?:not|never|no longer)\s+(?:been\s+)?left out of this analysis|n't\s+(?:been\s+)?left out of this analysis/i;
-  const alreadySaid = (label: string): boolean => sentences.some((x) => x.includes(`"${label}"`)
-    && x.includes('left out of this analysis') && !negated.test(x));
+function leftOutLines(graph: unknown, goalLabel: string): string[] {
   const g = recordOf(graph);
   const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
   const edges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
@@ -118,8 +110,20 @@ function leftOutLines(graph: unknown, goalLabel: string, restingText: string): s
   const limits = (Array.isArray(g?.goal_constraints) ? g.goal_constraints : []).map((k) => recordOf(k)?.node_id)
     .filter((id): id is string => typeof id === 'string');
   const leftOut = inertRiskBranch(nodes as { id: string; kind?: unknown; category?: unknown }[], edges, limits);
-  return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string) && !alreadySaid(String(n.label ?? n.id)))
-    .map((n) => `"${String(n.label ?? n.id)}" is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`);
+  const labelOf = (n: Rec): string => String(n.label ?? n.id);
+  return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string)).map((r) => {
+    // ⭐ THE ONE WRITER (HARNESS CR on #2509): everything left out with this risk is named HERE, however many hops
+    // (DL condition 3), in words that stay true when one cause feeds two left-out risks.
+    const upstream = new Set<string>(); const walk = [r.id as string];
+    while (walk.length > 0) {
+      const at = walk.pop()!;
+      for (const e of edges) if (e.to === at && leftOut.has(e.from) && !upstream.has(e.from)) { upstream.add(e.from); walk.push(e.from); }
+    }
+    const named = nodes.filter((n) => n.kind !== 'risk' && upstream.has(n.id as string)).map((n) => `"${labelOf(n)}"`);
+    const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+    const withIt = named.length === 0 ? '' : ` (with ${list}, which ${named.length === 1 ? 'feeds' : 'feed'} only what is left out)`;
+    return `"${labelOf(r)}"${withIt} is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`;
+  });
 }
 
 /** A7's own opener: the one way A7 is told apart from the other owed lines (CODEX K3 P2: never "the first non-ask line"). */
@@ -130,9 +134,9 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return [];
-  // ⭐ K3 (DL on lease 5945974225; CODEX P1): HOST-said on the build turn (and its automatic first analysis) and on every
-  // Run — never left to the narrator, whose words may omit it.
-  const leftOut = leftOutLines(graph, label, ctx.restingText);
+  // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
+  // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
+  const leftOut = leftOutLines(graph, label);
   const within = withinMonths(goal);
   const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
   const wanted = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;

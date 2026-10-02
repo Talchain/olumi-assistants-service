@@ -1,7 +1,8 @@
 /**
  * ⭐ K3 — A KEPT RISK NOBODY HAS SAID THE DIRECTION OF NO LONGER BLOCKS THE WHOLE RUN (MG lease #85 5945974225; DL GO +
- * conditions). It is left out of the analysis, kept on the canvas, and said: by admission when the model is
- * built, and by the Run that left it out. ONE definition (`graph/inert-risk.ts`) for readiness, admission and the Run.
+ * conditions). It is left out of the analysis, kept on the canvas, recorded in admission's ledger, and said by ONE writer —
+ * the host, on the build turn and every Run (HARNESS CR on #2509; DL agreed): the narrator is never handed it.
+ * ONE definition (`graph/inert-risk.ts`) for readiness, admission and the Run.
  *
  * Real path: the RECORDED drafter answer (T2 Constructor Baseline v1.1, brief K3 rep 1, CEE ccfb1655 — its only
  * structural block: "the effect is unknown", so admission withheld the risk → goal link it will not guess) →
@@ -15,6 +16,7 @@ import { assessCanonicalAnalysisReadiness } from '../../../orchestrator/tools/an
 import { validateGraphStructure } from '../../../orchestrator/graph-structure-validator.js';
 import { inertRiskBranch } from '../../../graph/inert-risk.js';
 import { decisionInputLines, withA7AfterGate } from '../decision-input-ask.js';
+import { admitCandidateModel, type CandidateModel } from '../admit-model.js';
 import { structuralFacts } from '../structural-facts.js';
 
 type Rec = Record<string, any>;
@@ -40,7 +42,7 @@ async function build(draft: string = FX.output_text) {
 const riskId = (g: Rec): string => (g.nodes as Rec[]).find((n) => n.label === RISK)!.id;
 
 describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said', () => {
-  it('RED: the served K3 draft is SAFE TO ANALYSE, the risk is kept with its cause drawn in, and the build says it is left out', async () => {
+  it('RED: the served K3 draft is SAFE TO ANALYSE, the risk is kept with its cause drawn in — and the narrator is NOT handed it (one writer)', async () => {
     const { graph, out } = await build();
     const id = riskId(graph);
     expect((graph.edges as Rec[]).some((e) => e.to === id), 'its cause is still drawn into it').toBe(true);
@@ -48,8 +50,17 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     const ready = assessCanonicalAnalysisReadiness(graph);
     expect(ready.blockingIssues.map((i) => i.code), 'was ["NO_PATH_TO_GOAL"] on ccfb1655').toEqual([]);
     expect(ready.safeToAnalyse).toBe(true);
-    const said = (out.not_represented as string[]).filter((s) => s.includes('left out of this analysis'));
-    expect(said).toEqual([`"${RISK}" is kept in the model but left out of this analysis, because nothing says which way it moves "${GOAL}". Say whether it raises or lowers "${GOAL}" and it will count.`]);
+    // DL row (a): the narrator's input carries no left-out line — the host's line is the only one.
+    expect(JSON.stringify(out), 'nothing the narrator is handed says it').not.toContain('left out of this analysis');
+  });
+
+  it('DL row (d): admission\'s LEDGER still records it (the audit trail) — recorded, not narrated', () => {
+    const a = admitCandidateModel(JSON.parse(FX.output_text) as CandidateModel);
+    const id = a.nodes.find((n) => n.label === RISK)!.id;
+    expect(a.loss.filter((l) => l.field_path.endsWith('.left_out_of_analysis')).map((l) => [l.field_path, l.reason])).toEqual([[
+      `nodes[${id}].left_out_of_analysis`,
+      `"${RISK}" is kept in the model but left out of this analysis, because nothing says which way it moves "${GOAL}". Say whether it raises or lowers "${GOAL}" and it will count.`,
+    ]]);
   });
 
   it('CONTROL (DL condition 2): the chat-edit gate reads the validator WITHOUT the flag — a dead-ended risk is still refused there', async () => {
@@ -69,24 +80,14 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     expect(decisionInputLines(connected, at).filter((l) => l.includes('left out')), 'connected').toEqual([]);
   });
 
-  it('ONCE PER RISK on the build turn (DL): the narrator relaying admission\'s line → the host does not say it again', async () => {
-    const { graph, out } = await build();
-    const ledger = (out.not_represented as string[]).find((s) => s.includes('left out of this analysis'))!;
-    const narrated = `I built the model. ${ledger} Ask me to run it.`;
-    const owed = decisionInputLines(graph, { restingText: narrated, questionsToggle: false, awaitingApproval: false, builtOrRan: true });
-    const reply = [narrated, ...owed].join('\n\n');
-    expect(reply.split('left out of this analysis').length - 1, 'said once').toBe(1);
-    // CONTROL: a narrator that did not say it → the host says it, once; another risk's mention does not suppress it.
-    const silent = decisionInputLines(graph, { restingText: 'I built the model. "Founder burnout" matters too.', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
-    expect(silent.filter((l) => l.includes('left out of this analysis'))).toEqual([LEFT_OUT_RUN]);
-    // CONTROL (DL): a NEGATED sentence says the opposite → still said ("not", "no longer", "isn't").
-    for (const neg of [`"${RISK}" is not left out of this analysis.`, `"${RISK}" is no longer left out of this analysis.`, `"${RISK}" isn't left out of this analysis.`]) {
-      const said = decisionInputLines(graph, { restingText: `I built the model. ${neg}`, questionsToggle: false, awaitingApproval: false, builtOrRan: true });
-      expect(said.filter((l) => l.includes('left out of this analysis')), neg).toEqual([LEFT_OUT_RUN]);
+  it('DL row (b): ONCE per risk BY CONSTRUCTION — the host line never reads the narrator\'s words', async () => {
+    const { graph } = await build();
+    const at = { questionsToggle: false, awaitingApproval: false, builtOrRan: true };
+    // Whatever the narrator wrote — nothing, the risk's name, a sentence saying the opposite — the host says it, once.
+    for (const restingText of ['I built the model.', `"${RISK}" is a real worry.`, `"${RISK}" is no longer left out of this analysis.`]) {
+      const owed = decisionInputLines(graph, { ...at, restingText });
+      expect(owed.filter((l) => l.includes('left out of this analysis')), restingText).toEqual([LEFT_OUT_RUN]);
     }
-    // CONTROL: the narrator names THIS risk without saying it is left out → still said (the label alone never suppresses it).
-    const named = decisionInputLines(graph, { restingText: `I built the model. "${RISK}" is a real worry.`, questionsToggle: false, awaitingApproval: false, builtOrRan: true });
-    expect(named.filter((l) => l.includes('left out of this analysis'))).toEqual([LEFT_OUT_RUN]);
   });
 
   it('RED (CODEX P2): A7 is restored after the gate by its OWN words — never mistaken for the left-out line', () => {
@@ -94,7 +95,7 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     const g = { nodes: [goal, { id: 'opt_a', kind: 'option', label: 'Angel pilot' }, { id: 'f_x', kind: 'factor', label: 'Founder hours' }, { id: 'r_b', kind: 'risk', label: 'Founder burnout' }], edges: [{ from: 'f_x', to: 'r_b' }] };
     const owed = decisionInputLines(g, { restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
     const [left, a7, ask] = owed;
-    expect(left).toContain('"Founder burnout" is left out of this analysis');
+    expect(left).toBe('"Founder burnout" (with "Founder hours", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "Funding secured".');
     expect(a7).toMatch(/^This model doesn't yet say whether any option gets there/);
     const folded = `Your results are ready.\n\n${left}\n\n${ask}`;
     expect(withA7AfterGate(folded, g, { awaitingApproval: false, builtOrRan: true }, null)).toBe(`Your results are ready.\n\n${left}\n\n${a7}\n\n${ask}`);
@@ -107,7 +108,7 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     expect(facts.entities_with_no_connections).not.toContain(RISK);
   });
 
-  it('the WHOLE left-out branch is NAMED in the same line, however many hops (DL condition 3; CODEX P2)', async () => {
+  it('the WHOLE left-out branch is NAMED in the host\'s one line, however many hops — and in the ledger (DL condition 3; CODEX P2)', async () => {
     const d = JSON.parse(FX.output_text) as Rec;
     const ext = (label: string) => ({ label, role: 'external', baseline_known: false, baseline_value: null, unit: 'percent', provenance: 'ai_proposed', plausible_max: 100 });
     const link = (from: string, to: string) => ({ from, to, direction: 'positive', provenance: 'ai_proposed', effect_amount: null, effect_per_source_change: null, effect_provenance: null });
@@ -115,8 +116,23 @@ describe('K3 on the recorded draft: the Run proceeds, the risk is kept and said'
     d.links = [...d.links, link('Vendor contract churn', 'Vendor staff turnover'), link('Vendor staff turnover', RISK)];
     const { graph, out } = await build(JSON.stringify(d));
     expect(assessCanonicalAnalysisReadiness(graph).safeToAnalyse).toBe(true);
-    expect((out.not_represented as string[]).filter((s) => s.includes('left out of this analysis'))).toEqual([
+    expect(JSON.stringify(out), 'not handed to the narrator').not.toContain('left out of this analysis');
+    const owed = decisionInputLines(graph, { restingText: 'Your results are ready.', questionsToggle: false, awaitingApproval: false, builtOrRan: true });
+    expect(owed.filter((l) => l.includes('left out of this analysis'))).toEqual([
+      `"${RISK}" (with "Vendor contract churn" and "Vendor staff turnover", which feed only what is left out) is left out of this analysis until you say whether it raises or lowers "${GOAL}".`,
+    ]);
+    expect(admitCandidateModel(d as CandidateModel).loss.filter((l) => l.field_path.endsWith('.left_out_of_analysis')).map((l) => l.reason)).toEqual([
       `"${RISK}" is kept in the model but left out of this analysis, because nothing says which way it moves "${GOAL}", and so are "Vendor contract churn" and "Vendor staff turnover", which feed only what is left out. Say whether it raises or lowers "${GOAL}" and it will count.`,
+    ]);
+  });
+
+  it('DL row (b): TWO left-out risks sharing a cause → one line EACH, each naming the cause it shares (never a second line for the cause)', () => {
+    const g = { nodes: [{ id: 'goal', kind: 'goal', label: 'Revenue' }, { id: 'opt', kind: 'option', label: 'Raise' }, { id: 'f', kind: 'factor', category: 'controllable', label: 'Price' },
+      { id: 'exo', kind: 'factor', category: 'external', label: 'Market mood' }, { id: 'r1', kind: 'risk', label: 'Churn' }, { id: 'r2', kind: 'risk', label: 'Bad press' }],
+    edges: [{ from: 'opt', to: 'f' }, { from: 'f', to: 'goal' }, { from: 'exo', to: 'r1' }, { from: 'exo', to: 'r2' }] };
+    expect(decisionInputLines(g, { restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true }).filter((l) => l.includes('left out'))).toEqual([
+      '"Churn" (with "Market mood", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "Revenue".',
+      '"Bad press" (with "Market mood", which feeds only what is left out) is left out of this analysis until you say whether it raises or lowers "Revenue".',
     ]);
   });
 });
