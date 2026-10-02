@@ -1394,6 +1394,18 @@ const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<s
  * ⭐ "Ask about this comparison" (`../comparison-block.ts`): the read's own pair as ONE model-facing block, or none. Movement
  * is licensed by the same leader permission that gates the saved Run's per-option chances (`withSavedRunCertainty`).
  */
+/** Two pairs end on the same Run: the same `endpoints.current.run_id` when both carry one, else the same `computed_at`. */
+function samePairEnd(a: unknown, b: unknown): boolean {
+  const end = (d: unknown) => {
+    const cur = ((d as { endpoints?: { current?: { run_id?: unknown; computed_at?: unknown } } } | null | undefined)?.endpoints)?.current;
+    return { id: typeof cur?.run_id === 'string' && cur.run_id !== '' ? cur.run_id : undefined,
+      at: typeof cur?.computed_at === 'string' && cur.computed_at !== '' ? cur.computed_at : undefined };
+  };
+  const x = end(a); const y = end(b);
+  if (x.id !== undefined && y.id !== undefined) return x.id === y.id;
+  return x.at !== undefined && x.at === y.at;
+}
+
 function comparisonOfRead(g: GraphRead | null | undefined): ReturnType<typeof comparisonBlockOf> {
   if (g === null || g === undefined || g.run_delta === undefined) return undefined;
   const leaderLicensed = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
@@ -7547,13 +7559,15 @@ export function createAgentCapabilities(
         ? { scenario_id: ctx.scenario_id, graph_hash_at_run: runHash, computed_at: runAt } : undefined;
       // ⭐ A Run that made a new pair hands the model THAT pair's block (the canonical read's), so a later call in the turn never
       // explains the turn-start pair. Its own read variable: the confirm card below keys on whether `postRunRead` was made.
+      // ⛔ BOUND TO THIS RUN (Codex buddy on PR-A, P2): the read's pair is used only when its current end IS this Run (the run
+      // turn's own `run_delta.endpoints.current`, by run_id, else computed_at); another writer's later Run gives no block.
       let comparison: ReturnType<typeof comparisonBlockOf>;
       if (result !== undefined && r.json.run_delta !== undefined && r.json.run_delta !== null) {
         let pairRead: GraphRead | null = postRunRead ?? null;
         if (postRunRead === undefined) {
           try { pairRead = await readGraph(ctx.scenario_id); } catch { pairRead = null; }
         }
-        comparison = comparisonOfRead(pairRead);
+        if (pairRead !== null && samePairEnd(r.json.run_delta, pairRead.run_delta)) comparison = comparisonOfRead(pairRead);
       }
       // ⛔ A Run with no result says the ENGINE's typed outcome, never a readiness issue it did not stop on (`run-outcome.ts`).
       const runOutcome = result === undefined ? runOutcomeOf(r.json) : undefined;

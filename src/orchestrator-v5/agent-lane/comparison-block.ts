@@ -13,7 +13,9 @@
  *   · `movement_licensed`: matched figures, a row beyond noise, AND the leader may be named (F1b's licence, as the saved
  *     Run's per-option chances): then each option that moved beyond noise is named with its DIRECTION, never a figure;
  *   · `beyond_noise`: the leader's own noise verdict.
- * No figures and no leader identity: those reach the model only through the licensed run view. No pair → no block.
+ * No RESULT figure (win share, chance, outcome) and no leader identity: those reach the model only through the licensed run
+ * view. The code line may quote the user's own INPUT values ("15 % → 20 %"): it is the explanation's line verbatim, and those
+ * values are already the model's own state (each entity's level). No pair → no block.
  * Nothing is stored: the next turn reads the pair again.
  */
 import type { RerunExplanationPlan } from './rerun-explanation.js';

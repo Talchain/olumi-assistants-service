@@ -67,6 +67,15 @@ describe('the block: the read\'s own pair, in Olumi\'s words, with what may be s
     JSON.stringify(block, (_k, v: unknown) => { if (typeof v === 'number') numbers.push(v); return v; });
     expect(numbers, 'no figure travels in the block').toEqual([]);
   });
+  it('the code line may quote the user\'s own INPUT values, verbatim from the explanation; never a result figure', () => {
+    const rows = C1_PARTIAL.json.current_read.run_delta!.input_changes as { before: { raw: number; unit: string }; after: { raw: number; unit: string } }[];
+    const block = blockOf(C1_PARTIAL, true)!;
+    expect(block.what_changed).toBe(planOf(C1_PARTIAL)!.codeLine);
+    expect(block.what_changed).toContain(`${rows[0]!.before.raw} ${rows[0]!.before.unit} → ${rows[0]!.after.raw} ${rows[0]!.after.unit}`);
+    const shares = (C1_COMPLETE.json.current_read.run_delta!.win_probabilities ?? []).flatMap((w) => [w.prior, w.current]);
+    const text = JSON.stringify(blockOf(C1_COMPLETE, true));
+    for (const share of shares) for (const shown of [`${Math.round(share * 100)}%`, `${(share * 100).toFixed(1)}%`, String(share)]) expect(text).not.toContain(shown);
+  });
   it('cause: licensed ONLY on C1 + complete coverage', () => {
     expect(blockOf(C1_COMPLETE, true)!.cause_licensed).toBe(true);
     for (const r of [C1_PARTIAL, C2_PARTIAL, C2_COMPLETE, C0, C3]) expect(blockOf(r, true)!.cause_licensed).toBe(false);
@@ -121,6 +130,13 @@ describe('a Run made in the turn hands the model the NEW pair (never the turn-st
     const out = await runCaps(C1_PARTIAL.json.current_read.run_delta).runAnalysis(ctx as never, { reason: 'compare' } as never) as Record<string, unknown>;
     expect(out.ran).toBe(true);
     expect(out.comparison).toEqual(blockOf(C1_PARTIAL, false));
+  });
+  it('BOUND TO THIS RUN: when the read already selects ANOTHER Run\'s pair (a competing writer), the result carries no block', async () => {
+    const turnDelta = structuredClone(C1_PARTIAL.json.current_read.run_delta) as { endpoints: { current: { run_id?: string; computed_at: string } } };
+    turnDelta.endpoints.current = { ...turnDelta.endpoints.current, run_id: 'a'.repeat(64), computed_at: '2026-10-02T07:26:07.230Z' };
+    const out = await runCaps(turnDelta).runAnalysis(ctx as never, { reason: 'compare' } as never) as Record<string, unknown>;
+    expect(out.ran, 'the control: the Run itself succeeded').toBe(true);
+    expect('comparison' in out).toBe(false);
   });
   it('CONTROL: a Run that made no pair (a first Run) carries no block', async () => {
     const out = await runCaps(undefined).runAnalysis(ctx as never, { reason: 'compare' } as never) as Record<string, unknown>;
