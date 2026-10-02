@@ -16,7 +16,7 @@
  *   value moved (hash moves)   → the hold is re-pinned to the stored bytes' hash
  *   the hold's target removed  → the hold lapses (telemetry, site graph_registration)
  *   a non-hold pending         → carried as-is
- *   pending read FAILS         → today's write (no pending_actions key) + a warn
+ *   pending read FAILS         → refuse the write, preserve the authoritative row
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -184,11 +184,11 @@ describe('/graph/register threads live consent holds through its write', () => {
     await app.close();
   });
 
-  it('a FAILED pending read keeps today\'s write (no pending_actions key) and says so in a warn', async () => {
+  it('a FAILED pending read refuses the write and preserves the authoritative row', async () => {
     readMostRecentPendingActions.mockRejectedValue(new Error('store down'));
     const app = await buildApp();
-    expect((await register(app, GRAPH)).statusCode).toBe(200);
-    expect('pending_actions' in written()).toBe(false);
+    expect((await register(app, GRAPH)).statusCode).toBe(503);
+    expect(append).not.toHaveBeenCalled();
     expect(logWarn.mock.calls.some((c) => (c[0] as Rec)?.event === 'v5.scenario_graph_register.pending_wipe_risk')).toBe(true);
     await app.close();
   });

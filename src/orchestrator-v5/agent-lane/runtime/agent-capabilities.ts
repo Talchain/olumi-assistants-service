@@ -878,6 +878,8 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 }
 
 /** One internal dispatch, so every path is the product's own. */
+import { reconcileGoalScope } from '../reconcile-goal-scope.js';
+import { goalScopeCheck, scopeOf, refreshScopePending, scopeReconciliationKey, scopeClaimGate } from '../goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
 interface GraphRead {
@@ -914,6 +916,7 @@ interface GraphRead {
     analysis_participation?: unknown;
     /** MG F1 T6: the user's own word for an option (`option_status_edit`); absent = feasible. */
     option_status?: unknown;
+    goal_scope?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -1202,6 +1205,7 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             label: n.label,
             ...(n.description !== undefined ? { full_label: n.description } : {}),
             kind: n.kind,
+            ...(scopeOf(n.goal_scope) ? { goal_scope: n.goal_scope } : {}),
             // A value only when one is actually stored. Absence is reported as
             // unknown rather than as a zero.
             value: num(os.value) ? os.value : null,
@@ -1253,6 +1257,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
+      ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
         target: {
           value: trio.goal_threshold_raw,
@@ -2580,6 +2585,7 @@ export function createAgentCapabilities(
     if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
       return notApplied('model_changed_since_approval', 'The model changed after this was offered, so nothing was recorded. Read it again; offer the reading afresh only if it still applies.');
     }
+    if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return notApplied('goal_scope_unresolved', 'Resolve the retained scope question before confirming this identity. Nothing was written.');
     if (opts.commitOptionLevels === undefined) {
       return notApplied('identity_writer_unavailable', 'This reading could not be recorded here, so nothing was recorded.');
     }
@@ -2840,10 +2846,12 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const scopeIssues = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).flatMap(p => { const fresh = refreshScopePending(p, g.raw); return fresh?.action.kind === 'reconcile_goal_scope' ? [fresh.action] : []; });
       const optionNames = optionNameAliasesForCurrentRun(g);
       return {
         ok: true,
         mutated: false,
+        ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues, claim_permissions: { total_goal_claims_allowed: false, leader_may_be_named: false, exploratory_work_allowed: true } } : {}),
         graph_revision: g.graph_hash,
         empty: g.nodes.length === 0,
         entities: g.nodes.map((n) => {
@@ -3119,6 +3127,7 @@ export function createAgentCapabilities(
       if (g === null) {
         return { ok: false, mutated: false, refusal: 'unreadable_model', detail: 'The model could not be read, so no reading was offered. Nothing was changed.' };
       }
+      if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
       const card = proposeProductIdentity(g.raw);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
@@ -4411,7 +4420,10 @@ export function createAgentCapabilities(
       if (readOnly) return refuseReadOnly();
       const id = typeof args?.proposal_id === 'string' ? args.proposal_id : '';
       const notFound = { ok: false, mutated: false, refusal: 'not_proposed_this_turn', detail: 'No change with that id is awaiting approval. Nothing was withdrawn.' };
-      if (/^gmh_[0-9a-f]{12}$/.test(id)) {
+      if (id.startsWith('goal-scope:')) {
+        if (!(await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope' && p.chip_id === id)) return notFound;
+        withdrawnHolds.add(id);
+      } else if (/^gmh_[0-9a-f]{12}$/.test(id)) {
         withdrawnHolds.add(id);
       } else {
         const p = proposals.get(id);
@@ -4474,6 +4486,13 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
       }
 
+      const scopeRevision = pendingAdoption?.operations.find(op => op.op === 'update_node')?.value as { reconciliation_key?: string } | undefined;
+      if (scopeRevision?.reconciliation_key) {
+        const issues = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+        if (!issues.some(p => p.action.kind === 'reconcile_goal_scope' && scopeReconciliationKey(p.action) === scopeRevision.reconciliation_key)) {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', detail: 'The retained scope reading changed or was withdrawn after this card was offered. Nothing was written; ask for a fresh card.' };
+        }
+      }
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
 
@@ -7449,8 +7468,14 @@ export function createAgentCapabilities(
       };
     },
 
+    async reconcileGoalScope(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      return reconcileGoalScope({ readGraph, proposals, readPending: () => opts.readPendingActions ? opts.readPendingActions(ctx.scenario_id) : Promise.resolve([]) }, ctx, args);
+    },
     async proposeGoalCurrentLevel(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      const issues = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+      if (issues.some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Use reconcile_goal_scope to resolve the retained question before preparing the goal baseline. Nothing was prepared.' };
       return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
     },
 
@@ -7554,7 +7579,8 @@ export function createAgentCapabilities(
       // The run turn's own run-over-run block rides with its result; the route shows it only beside this run.
       onAnalysis?.({ scenario_id: ctx.scenario_id, status: r.status, analysis_state: r.json.analysis_state, analysis_ready: r.json.analysis_ready, blocks,
         ...(r.json.run_delta !== undefined ? { run_delta: r.json.run_delta } : {}) });
-      const permissions = claimPermissionsFrom(r.json.analysis_state, r.json.analysis_ready, { requested: true });
+      const scopeIssues = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).filter(p => p.action.kind === 'reconcile_goal_scope');
+      const permissions = { ...claimPermissionsFrom(scopeClaimGate(r.json.analysis_state, scopeIssues), r.json.analysis_ready, { requested: true }), ...(scopeIssues.length > 0 ? { total_goal_claims_allowed: false, goal_scope_reconciliation: scopeIssues.map(p => p.action) } : {}) };
       // ⛔ C46 (d): only a run that produced a result and withheld its leader is read against the model
       // (one graph read); a named leader means the Run's own stamp found no product in the way.
       let graphForProduct: unknown;

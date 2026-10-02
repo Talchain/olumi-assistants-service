@@ -107,6 +107,7 @@
  *   untouched here — this module is one CALL-GRAPH authority, which is a
  *   narrower claim than one storage generation.
  */
+import { assertNoScopedIdentityConflict, assertNoPendingScopeAmendment } from './agent-lane/goal-scope.js';
 import { log } from '../utils/telemetry.js';
 
 import {
@@ -337,6 +338,12 @@ export function assertNoIntroducedGraphViolations(
 export async function appendCheckedGraphWrite(
   params: CheckedGraphAppendParams,
 ): Promise<SessionAppendOutcome> {
+  if (params.writesGraph) {
+    assertNoScopedIdentityConflict(params.write.graph);
+    if (typeof params.store.readMostRecentPendingActions === 'function') {
+      assertNoPendingScopeAmendment(params.write.graph, params.baseGraphForInvariants, await params.store.readMostRecentPendingActions(params.write.scenario_id, { validation: 'strict' }));
+    }
+  }
   const { write, store, writesGraph, source } = params;
 
   // The check runs on `write.graph` — the same object handed to `store.append`

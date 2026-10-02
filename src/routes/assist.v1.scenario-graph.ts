@@ -1,3 +1,4 @@
+import { refreshScopePending, scopeClaimGate } from '../orchestrator-v5/agent-lane/goal-scope.js';
 /**
  * ROADMAP 2.312 track 2 (2) — THE SCENARIO-ADDRESSED GRAPH READ.
  *
@@ -613,6 +614,14 @@ export default async function route(app: FastifyInstance) {
         return unavailable();
       }
 
+      let scopeIssues: unknown[] = [];
+      if (typeof store.readMostRecentPendingActions === 'function') {
+        try {
+          scopeIssues = (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }))
+            .flatMap(p => { const fresh = refreshScopePending(p, graph); return fresh?.action.kind === 'reconcile_goal_scope' ? [fresh.action] : []; });
+        } catch { return unavailable(); }
+      }
+
       // An EMPTY graph is a valid answer, not an error: every scenario starts
       // there, and 404-ing it would make "no graph yet" indistinguishable from
       // "not yours" — collapsing the very distinction the UI needs.
@@ -752,7 +761,8 @@ export default async function route(app: FastifyInstance) {
         // `never_run` here as evidence against an in-flight run the DRAFT TURN
         // told it about (the H4 seam — the two authorities answer different
         // questions).
-        analysis_state: analysis.analysis_state,
+        analysis_state: scopeClaimGate(analysis.analysis_state, scopeIssues),
+        ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues, goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true } } : {}),
         analysis_result: analysis.analysis_result,
         // CURRENT-READ-v1: one selected Run's canonical freshness and typed
         // figures. The raw graph_hash above remains the edit/CAS token; the

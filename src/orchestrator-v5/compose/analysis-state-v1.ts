@@ -325,6 +325,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_LEADER_CAUSE_UNRECORDED]: 'withheld',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
   [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'withheld',
+  goal_scope_unresolved: 'withheld',
   [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'withheld',
   [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'withheld',
   [WITHHELD_NEAR_TIE]: 'withheld',

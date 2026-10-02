@@ -108,6 +108,7 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
       // + MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
       'goal_level_reading',
       // + MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
+      'goal_scope',
       'goal_sense_reading',
       // + the three saved-example stamps, CEE-owned since the writer audit (2026-09-27): declared on
       // NodeV3 so writes keep them, so a producer must never be able to set them.
@@ -137,7 +138,7 @@ describe('the six zero-reader smuggle names — enumerated at the bytes', () => 
     // + A6f's `std_defaulted` + G1's `goal_direction` / `goal_horizon_months` + E-A2's `goal_deadline_as_stated`
     // + #2306's `goal_sense_reading` + AIQ (b)'s `goal_level_reading` + F1 T6's option lifecycle `proposed_by` /
     // `option_status` / `analysis_participation`) + the 5 J2 names.
-    expect(all.length).toBe(24);
+    expect(all.length).toBe(25);
     expect(all.filter((k) => !SMUGGLE_NAMES.includes(k))).toEqual([
       'beliefexistssource',
       'directionsource',
