@@ -61,6 +61,8 @@ const LONG_NO_BULLETS = ['paired-57f903c/M.rep1', 'paired-57f903c/M.rep3', 'pair
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 let readbackState: unknown = PERMITTED_STATE;
 let readbackCarriesResult = true;
+/** The readback's graph: the corpus's served pricing graph, or a variant a row sets (reset before each row). */
+let readbackGraph: unknown = FX.state.draft_graph;
 /** The durable turn rows, keyed by turn id — the store fake from `agent-turn-withheld-leader-fail-closed.test.ts`. */
 type Row = { id: string; turn_id: string; request_hash: string; assistant_message: string | null };
 const rows = new Map<string, Row>();
@@ -118,14 +120,14 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     }));
     // The final readback — the ONLY source of the response's `analysis_result` block.
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: FX.state.draft_graph, graph_hash: GRAPH_HASH, analysis_state: readbackState, analysis_ready: FX.state.analysis_ready,
+      graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState, analysis_ready: FX.state.analysis_ready,
       ...(readbackCarriesResult ? { analysis_result: RESULT_BLOCK } : {}),
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; });
+  beforeEach(() => { rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; });
 
   let turnSeq = 0;
   const nextTurnId = () => { turnSeq += 1; return `5d4c3b2a-1f0e-4d9c-8b7a-${String(turnSeq).padStart(12, '0')}`; };
@@ -313,6 +315,40 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(await offersApprove(proposed), 'the control: ONE pending, so its approve chip').toBe(true);
     expect('_answer_shape' in proposed, 'a turn asking for approval in words is not shaped either').toBe(false);
     expect(proposed.assistant_text).toBe(PROPOSAL_REPLY);
+  });
+
+  /**
+   * ⛔ OLUMI'S OWN LINES STAY ON THE FACE (DL item 3; CODEX r2 P1 on #2509). The UI renders `_answer_shape` INSTEAD of the
+   * text, so a shape over the whole reply put the host's appended ask behind "Show more" whenever the narrator wrote
+   * bullets. The served pricing graph with its target removed: the Agent's own Run then owes D1's target ask (the host's
+   * exact string, `decision-input-ask.ts`), appended after the narrator's bulleted reply.
+   */
+  const runCall = [{ type: 'function_call', name: 'run_analysis', arguments: JSON.stringify({ reason: 'compare' }), call_id: 'run-1' }];
+  const noTargetGraph = () => {
+    const g = structuredClone(FX.state.draft_graph) as { nodes: Record<string, unknown>[] };
+    for (const n of g.nodes) if (n.kind === 'goal') { n.goal_threshold = null; n.goal_threshold_raw = null; n.success_threshold = null; }
+    return g;
+  };
+  /** D1's ask as the host writes it for this goal (`targetAsk`, neutral words: MRR's direction is not read as a floor). */
+  const TARGET_ASK = 'What figure should "MRR" reach or stay under? I\'ll propose it as your target.';
+
+  it('10. HOST LINES: the Agent’s Run, a bulleted reply, and D1’s target ask appended → NOT shaped; the ask is on the face', async () => {
+    readbackGraph = noTargetGraph();
+    const b = await askedTurn(CLEAN_BULLETS.text, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a14', [runCall], 'Run the analysis and tell me what it says.') as Offered;
+    expect(b._agent.tool_calls, 'the control: the Agent ran the analysis').toMatchObject([{ name: 'run_analysis', ok: true }]);
+    expect(carriesResult(b), 'the control: the reply carries the result').toBe(true);
+    expect(b.assistant_text.endsWith(`\n\n${TARGET_ASK}`), 'the control: the host appended its target ask').toBe(true);
+    const would = synthesiseAnswerShapeFromText(b.assistant_text)!;
+    expect(faceOf(would).includes(TARGET_ASK), 'the control: a shape would fold the ask away').toBe(false);
+    expect('_answer_shape' in b, 'a reply carrying a host line is not shaped').toBe(false);
+  });
+
+  it('11. CONTROL: the SAME Agent Run on the graph WITH its target → no host ask is owed → the reply is still shaped', async () => {
+    const b = await askedTurn(CLEAN_BULLETS.text, '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a15', [runCall], 'Run the analysis and tell me what it says.') as Offered;
+    expect(b._agent.tool_calls, 'the control: the Agent ran the analysis').toMatchObject([{ name: 'run_analysis', ok: true }]);
+    expect(b.assistant_text.includes(TARGET_ASK), 'nothing owed').toBe(false);
+    expect(b._answer_shape, 'shaped, as before').toBeDefined();
+    expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
   });
 });
 

@@ -680,10 +680,17 @@ export function leavesProposalAwaitingApproval(
  * approve chip (`offersApproval`), or a turn the route says left a proposal awaiting a yes whether or not a
  * chip names it (`turn.proposalAwaitingApproval`, from `approvalChipsFor`'s own rule), is returned by
  * reference, byte-identical.
+ *
+ * ⛔ OLUMI'S OWN LINES STAY ON THE FACE (DL item 3, 2 Oct; CODEX r2 P1 on #2509). The host appends its disclosures and asks
+ * AFTER the narrator's words: K3's "left out of this analysis", A7, D1's target ask, a withheld figure's sentence. The UI
+ * renders `_answer_shape` INSTEAD of the text (headline + ≤3 bullets, the rest behind "Show more"), so a shape built over
+ * the whole reply folds exactly those lines away whenever the narrator writes bullets. There is no face slot for them in
+ * the shape, so a reply that carries one (`turn.hostLinesInText`, the route's own strings by identity) ships whole, as a
+ * leader-gate edit does.
  */
 export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; blocks?: unknown; suggested_actions?: unknown }>(
   body: T,
-  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean } = {},
+  turn: { proposalAwaitingApproval?: boolean; leaderGateEditedText?: boolean; hostLinesInText?: boolean } = {},
 ): T {
   if ('_answer_shape' in body) return body;
   if (turn.proposalAwaitingApproval === true || offersApproval(body)) return body;
@@ -691,6 +698,7 @@ export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; bl
   // shape would put them behind "Show more" (independent review of #1914, 5832549611). Ship it whole, as
   // route-v2 does when its gate edits the text.
   if (turn.leaderGateEditedText === true) return body;
+  if (turn.hostLinesInText === true) return body;
   const blocks = body.blocks;
   const carriesResult = Array.isArray(blocks)
     && blocks.some((b) => b !== null && typeof b === 'object' && (b as { type?: unknown }).type === 'analysis_result');
@@ -3027,13 +3035,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ A7's fold, measured on the reply the user sees (`withA7AfterGate`; CODEX class 5924813281): HERE, after the leader gate
     // (which may drop a ranking sentence) and after every later prose rewrite (the break-even arithmetic), so the count
     // cannot go stale; before the shape, which is built from this prose, and before the answer row, so a replay is the same.
+    let a7Inserted = false;
     if (fastPath !== 'method' && typeof wireBody.assistant_text === 'string') {
       const withA7 = withA7AfterGate(wireBody.assistant_text, readbackGraph, decisionTurn, statusText);
-      if (withA7 !== wireBody.assistant_text) wireBody = { ...wireBody, assistant_text: withA7 };
+      if (withA7 !== wireBody.assistant_text) { wireBody = { ...wireBody, assistant_text: withA7 }; a7Inserted = true; }
     }
+    const finalText = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
     if (fastPath !== 'method') wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
+      // The host's own appended lines, by their exact strings (never a wording rule): still in the reply → no shape.
+      hostLinesInText: a7Inserted || [...owed, ...decisionLines].some((l) => l.trim() !== '' && finalText.includes(l)),
     });
     let pendingPreview: ProposalPreview | undefined;
     /**
