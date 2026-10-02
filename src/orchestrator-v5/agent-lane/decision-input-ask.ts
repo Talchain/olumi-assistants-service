@@ -38,6 +38,13 @@ export interface DecisionInputAskContext {
   readonly restingText: string;
   /** The composed reply puts questions behind the toggle (`textAtRest` split it): A7's fact is already there. */
   readonly questionsToggle: boolean;
+  /**
+   * ⭐ ASKED ONCE (PANEL #85 5944136475: each Rerun re-asked the target verbatim, ×3 in one session). The user-visible text
+   * of this conversation's recent answers (durable rows, as shipped). An ask already among them is still OPEN (the goal
+   * has no stated target, or there would be no ask), so it is not said again. Our own exact string, never a wording rule;
+   * the goal changing changes the ask, which is then new. Absent (no read, or a failed one) ⇒ ask, exactly as before.
+   */
+  readonly recentReplies?: readonly string[];
   /** A proposal awaits the user's yes: that card is the step, so nothing else is asked. */
   readonly awaitingApproval: boolean;
   /** This turn built the model or ran the analysis (the brief and Run turns). */
@@ -96,7 +103,8 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   if (goal === undefined || label === '') return [];
   const within = withinMonths(goal);
   const a7 = within !== '' && !hasDurationLimit(graph) ? `This model doesn't yet say whether any option gets there${within}.` : null;
-  const ask = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
+  const wanted = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
+  const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
     + ls.reduce((n, l) => n + (l === null ? 0 : words(l)), 0);
