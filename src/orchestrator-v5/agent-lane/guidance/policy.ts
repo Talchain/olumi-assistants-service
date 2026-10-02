@@ -1046,6 +1046,15 @@ export const POLICY = {
       "science": "Timely feedback on one's own change (Kahneman & Klein 2009); consider the implications (DSK-P-003).",
       "format": "Insight line, then up to 3 bullets (what changed, the assumption it touches, what may change), then the stale line only if stale."
     },
+    "COMPARISON-ANSWER": {
+      "purpose": "DRAFT (AI HARNESS 8e75e3; RC to own, #85 5949446291): an ordinary Agent answer that talks about the selected pair of Runs. Inputs = the RERUN-EXPLANATION MethodInputs from the same plan; no pair = C2_unpaired + no_matched_figures + no change_labels (fail-closed). Checked per sentence; a failing sentence is dropped and the plan's code line is appended.",
+      "post_checks": [
+        { "id": "CA-NO-CAUSE-UNLICENSED", "rule": "RX-NO-CAUSE-UNPAIRED's ban unless attribution_case is C1_attributable" },
+        { "id": "CA-NO-MOVEMENT-UNLICENSED", "rule": "RX-NO-MOVEMENT-WITHOUT-PRIOR's ban if prior_withheld or no_matched_figures" },
+        { "id": "CA-NOISE", "rule": "RX-NOISE's ban unless noise_verdict is signal" },
+        { "id": "CA-NO-CONTRARY-SAME", "rule": "RX-NO-CONTRARY-SAME's class, only if change_labels is non-empty and the same sentence is about the runs (pair context)" }
+      ]
+    },
     "RERUN-EXPLANATION": {
       "purpose": "DL moment (c): revise → rerun → explain the difference. The narration of a RERUN (request 2) follows this; owner AI HARNESS (narration), signals from run_delta (CEE, strict schema).",
       "inputs": [

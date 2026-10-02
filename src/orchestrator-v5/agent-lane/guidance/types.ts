@@ -102,7 +102,7 @@ export interface Selection {
   readonly suppressed: readonly { readonly policy_id: PolicyId; readonly reason: SuppressionReason }[];
 }
 
-export type MethodTurnId = PolicyId | 'RERUN-EXPLANATION';
+export type MethodTurnId = PolicyId | 'RERUN-EXPLANATION' | 'COMPARISON-ANSWER';
 /** One grounded input a pre-mortem story may rest on, in action-priority order (`grounded_inputs_shape`). */
 export interface SuppliedItem {
   readonly id: string;
@@ -133,6 +133,8 @@ export interface MethodInputs {
   readonly 'run.kind'?: string;
   /** RERUN-EXPLANATION (run_delta): the changed inputs' labels, the attribution case and the comparison's limits. */
   readonly change_labels?: readonly string[];
+  /** COMPARISON-ANSWER: how many input-change rows the pair records, named or not (a `presence` row has no template). */
+  readonly changes_recorded?: number;
   readonly attribution_case?: 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
   readonly leader_licensed?: boolean;
   readonly noise_verdict?: string;

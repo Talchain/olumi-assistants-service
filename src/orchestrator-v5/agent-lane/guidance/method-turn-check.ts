@@ -54,6 +54,11 @@ const CONTRARY_SAME = new RegExp(String.raw`\b(nothing(?:'s| has| had)? changed|
   + String.raw`|unchanged inputs?|(?:no|none of the) inputs? (?:were |was |have been |has been )?changed`
   + String.raw`|no changes? (?:were|was|have been|has been) made`
   + String.raw`|(?:didn'?t|did not|haven't|have not|hasn't|has not) changed? anything)\b`, 'iu');
+/**
+ * COMPARISON-ANSWER's pair-context gate (Compare audit rx-fp.mjs, measured): a sentence is about the comparison only when it
+ * names two Runs, a rerun or a change between Runs. "Nothing has changed yet." about a held write is true and kept.
+ */
+const PAIR_CONTEXT = /\b(since the (last|previous|earlier) (run|analysis)|between (the|these|both) (two )?(runs|analyses)|(last|previous|earlier|first|second|new) (run|analysis)|re-?ran|re-?run|this run|this time|compared with|than before|than last time)\b/iu;
 /** WHOLE-TOKEN match after normalise(): label 'B' never matches inside another word (HARNESS #2478 P1). */
 function labelMatches(text: string, labels: readonly string[]): boolean {
   const normal = ` ${normalise(text)} `;
@@ -133,6 +138,16 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('RX-NO-CONTRARY-SAME', (inputs.change_labels ?? []).length === 0 || !banned(reply, CONTRARY_SAME, labels));
     // The un-withheld transition must say so (MG 5939414835).
     check('RX-UNWITHHELD-LINE', inputs.prior_withheld !== true || labelMatches(reply, ['can now compare the options']));
+  } else if (policy_id === 'COMPARISON-ANSWER') {
+    const labels = [...model, ...(inputs.change_labels ?? []), ...(inputs.current_option_labels ?? [])];
+    check('CA-NO-CAUSE-UNLICENSED', inputs.attribution_case === 'C1_attributable'
+      || !banned(reply, /\b(because (you|of your)|caused|due to your|as a result of your|led to|held (the|its) comparison back)\b/iu, labels));
+    check('CA-NO-MOVEMENT-UNLICENSED', !(inputs.prior_withheld === true || inputs.no_matched_figures === true)
+      || !banned(reply, /\b(rose|fell|moved|increased|decreased|went (up|down)|up from|down from|jumped|dropped|climbed)\b/iu, labels));
+    check('CA-NOISE', inputs.noise_verdict === 'signal'
+      || !banned(reply, /\b(significant|meaningful(ly)? (better|worse)|clearly (better|worse))\b/iu, labels));
+    check('CA-NO-CONTRARY-SAME', Math.max(inputs.changes_recorded ?? 0, (inputs.change_labels ?? []).length) === 0
+      || !reply.split(/(?<=[.!?])\s+|\n/u).some(sentence => PAIR_CONTEXT.test(sentence) && banned(sentence, CONTRARY_SAME, labels)));
   } else if (policy_id === 'RC-WIDEN') {
     const items = reply.split(/\r?\n/u).filter(line => /^\s*-\s/u.test(line)).map(line => line.trim().slice(1).trim());
     check('WD-COUNT', items.length >= 1 && items.length <= 3);
