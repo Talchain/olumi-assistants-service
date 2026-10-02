@@ -2047,6 +2047,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * still exactly these words: any line the host added or edited ships whole (see `withAnalysisAnswerShape`).
      */
     let narratorWords: string | null = null;
+    /**
+     * The host COMPOSED this reply (CODEX r2 on #2517): it can strip a narrator sentence and restore an identical host line
+     * (the save receipt, a rerun's code line), so equal final text does not prove the narrator's words stand alone. Set where
+     * the host composes, never inferred from the bytes.
+     */
+    let hostComposed = false;
     let explanationBriefText: string | null = null;
     /** A Run with no result: its typed outcome's own chips (the identity ask's "Check the figures", a retry), `run-outcome.ts`. */
     let runOutcomeChips: OfferedAction[] = [];
@@ -2199,6 +2205,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           narratorWords = answer;
           // M2: Olumi's code line first, then the model's sentences that pass RC's checker (a hit drops that sentence only).
           const composed = rerunPlan !== null ? composeRerunExplanation(answer, rerunPlan) : null;
+          if (composed !== null) hostComposed = true;
           if (composed !== null && composed.dropped.length > 0) log.info({ scenario_id: scenarioId, failed: composed.failed, dropped: composed.dropped.length }, 'agent-lane: rerun explanation sentences failed RC checks — dropped');
           const said = composed?.text ?? answer;
           interpreted = typed !== null || composed !== null
@@ -3051,9 +3058,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (fastPath !== 'method') wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
-      // Complete by construction (CODEX on #2517: status line, break-even, rerun code line were missed by a list): the
-      // reply is shaped only while it is still EXACTLY the narrator's words; any host line, added or edited, ships whole.
-      hostLinesInText: narratorWords === null || finalText.trim() !== narratorWords.trim(),
+      // Shaped only while the reply is EXACTLY the narrator's words AND the host composed nothing into it (CODEX r1/r2 on
+      // #2517): a status line, an owed disclosure, a decision line or a rerun composition ships the reply whole, even when
+      // the host restored text identical to the narrator's.
+      hostLinesInText: narratorWords === null || finalText.trim() !== narratorWords.trim() || hostComposed
+        || (statusText ?? '').trim() !== '' || owed.length > 0 || decisionLines.length > 0,
     });
     let pendingPreview: ProposalPreview | undefined;
     /**
