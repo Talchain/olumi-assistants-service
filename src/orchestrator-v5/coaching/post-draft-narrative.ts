@@ -66,6 +66,7 @@
  */
 
 import type { GraphV3T, DraftCoachingWideningLog } from '../../orchestrator/types.js';
+import { sectionLabel, unmarkSectionLabel } from '../compose/section-label.js';
 
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 
@@ -1521,7 +1522,7 @@ function buildTradeOffBullet(
   if (opposingPair !== null) {
     const a = elideLabelAtWordBoundary(opposingPair[0], MAX_LABEL_CHARS);
     const b = elideLabelAtWordBoundary(opposingPair[1], MAX_LABEL_CHARS);
-    return `Main trade-off: ${a} balanced against ${b}`;
+    return `${sectionLabel('Main trade-off')} ${a} balanced against ${b}`;
   }
   if (trimmedFactors.length >= 2) {
     // Two factors, no opposition the model can show: name them without
@@ -1530,14 +1531,14 @@ function buildTradeOffBullet(
   }
   if (trimmedFactors.length === 1 && risks.length >= 1) {
     const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
-    return `Main trade-off: ${trimmedFactors[0]} against the risk of ${risk}`;
+    return `${sectionLabel('Main trade-off')} ${trimmedFactors[0]} against the risk of ${risk}`;
   }
   if (trimmedFactors.length === 1) {
-    return `Key consideration: ${trimmedFactors[0]}`;
+    return `${sectionLabel('Key consideration')} ${trimmedFactors[0]}`;
   }
   if (risks.length >= 1) {
     const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
-    return `Key consideration: the risk of ${risk}`;
+    return `${sectionLabel('Key consideration')} the risk of ${risk}`;
   }
   return null;
 }
@@ -1558,10 +1559,10 @@ function toAssumptionBullet(assumptionSentence: string): string {
   const trimmed = assumptionSentence.trim().replace(/\.$/, '');
   // `One assumption worth checking: <fragment>` (priority-1..4 sources)
   const colonForm = trimmed.match(/^One assumption worth checking:\s*(.+)$/i);
-  if (colonForm) return `Assumption to check: ${colonForm[1].trim()}`;
+  if (colonForm) return `${sectionLabel('Assumption to check')} ${colonForm[1].trim()}`;
   // `One assumption worth checking is whether <fragment>` (fixed-generic)
   const isForm = trimmed.match(/^One assumption worth checking is\s+(.+)$/i);
-  if (isForm) return `Assumption to check: ${isForm[1].trim()}`;
+  if (isForm) return `${sectionLabel('Assumption to check')} ${isForm[1].trim()}`;
   // Defensive: keep the text as-is if neither form matches.
   return trimmed;
 }
@@ -1990,7 +1991,7 @@ function extractBiasSignalText(signal: unknown): string | null {
  * would trip the egress success-claim guard).
  */
 function toCheckBullet(text: string): string {
-  return `Worth a look: ${text}`;
+  return `${sectionLabel('Worth a look')} ${text}`;
 }
 
 /**
@@ -2003,7 +2004,7 @@ function toCheckBullet(text: string): string {
  * clipping it is the defect this slot exists to end.
  */
 function toDirectionBullet(text: string): string {
-  return `Limit to confirm: ${text}`;
+  return `${sectionLabel('Limit to confirm')} ${text}`;
 }
 
 /**
@@ -2061,7 +2062,9 @@ function normaliseForDedup(s: string): string {
  * {@link toCheckBullet}.
  */
 function stripBulletLabel(bullet: string): string {
-  return bullet
+  // Unmark FIRST: the labels below are emitted through `sectionLabel`, so the
+  // bullet arrives marked and this alternation would not match it.
+  return unmarkSectionLabel(bullet)
     .replace(/^(?:Assumption to check|Main trade-off|Key consideration|Worth a look):\s*/i, '')
     .trim();
 }

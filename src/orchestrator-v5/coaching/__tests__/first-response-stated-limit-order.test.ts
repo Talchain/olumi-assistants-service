@@ -52,6 +52,7 @@
  * and 8 missing effect values").
  */
 import { describe, expect, it } from 'vitest';
+import { sectionLabel } from '../../compose/section-label.js';
 
 import {
   MAX_WORDS,
@@ -99,7 +100,10 @@ const PRODUCER_DIRECTION_ITEMS = renderDirectionClarifications([
 ]);
 
 const COACHING_HEADING = 'What the model is weighing';
-const LIMIT_MARKER = 'Limit to confirm:';
+// ⭐ DERIVED FROM THE COMPOSER'S OWN HELPER, never retyped. A literal here
+// would be a second copy free to drift from what the product emits — the spec
+// would keep passing while the panel stopped getting its paragraph gap.
+const LIMIT_MARKER = sectionLabel('Limit to confirm');
 const INVENTORY_MARKER = 'Options compared';
 
 /** Two unresolved limits from one brief (`MAX_DIRECTION_BULLETS` is 2). */
@@ -515,7 +519,13 @@ describe('the first response opens with the model, and still asks about the stat
       'PRECONDITION: the direction-only rung must fire here, or nothing below is exercised',
     ).not.toBeNull();
     const bullets = section!.split('\n').slice(1);
-    expect(bullets[0]).toMatch(/^• Limit to confirm: /);
+    // startsWith rather than a regex: the marker now carries `**`, which are
+    // regex metacharacters, and escaping them by hand would be a third copy of
+    // the label's spelling. Anchored at the head, same as the regex it replaces.
+    expect(
+      bullets[0]!.startsWith(`• ${LIMIT_MARKER} `),
+      `the promoted limit bullet must lead with the marker; got: ${bullets[0]}`,
+    ).toBe(true);
     expect(bullets[0]).toContain('£320');
     // Exactly two, and the telemetry says two — not the promoted line twice.
     expect(text.split(LIMIT_MARKER).length - 1).toBe(2);

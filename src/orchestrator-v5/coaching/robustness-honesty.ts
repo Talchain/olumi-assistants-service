@@ -17,6 +17,7 @@
  */
 
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
+import { sectionLabel } from '../compose/section-label.js';
 
 import type { RawRobustnessSignals } from './pick-raw-robustness.js';
 
@@ -177,7 +178,7 @@ export function closenessLead(args: {
   // override: prefer the real margin when finite (honest "narrowly ahead by N"),
   // otherwise a number-free near-tie line so we never anchor on a phantom gap.
   if (typeof marginPp === 'number' && Number.isFinite(marginPp)) {
-    return `This is a close call: ${lead} is narrowly ahead of ${runner} by about ${formatPercentagePoints(Math.abs(marginPp))}.`;
+    return `${sectionLabel('This is a close call')} ${lead} is narrowly ahead of ${runner} by about ${formatPercentagePoints(Math.abs(marginPp))}.`;
   }
-  return `This is a close call: the analysis treats ${lead} and ${runner} as a near-tie.`;
+  return `${sectionLabel('This is a close call')} the analysis treats ${lead} and ${runner} as a near-tie.`;
 }

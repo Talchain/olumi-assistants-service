@@ -49,6 +49,7 @@ import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { emit, TelemetryEvents } from '../../../utils/telemetry.js';
 import { Stage } from '@talchain/schemas/boundary';
+import { sectionLabel } from '../../compose/section-label.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -413,7 +414,7 @@ describe('dispatchDraftGraph', () => {
       expect(text).toContain('Delay');
       // Bound to the named pair, in the direction-derived order (positive
       // first), not to any text matching a trade-off-shaped regex.
-      expect(text).toContain('Main trade-off: Market size balanced against Cost');
+      expect(text).toContain(`${sectionLabel('Main trade-off')} Market size balanced against Cost`);
       expect(text).not.toContain('The model weighs Market size and Cost');
       expect(text).toContain('run the analysis');
       expect(text).not.toContain('nodes');

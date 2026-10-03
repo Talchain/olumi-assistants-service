@@ -25,6 +25,23 @@ import { UNAUTHORED_DECISION_LABEL } from '../../../cee/draft/records/objective-
 import type { GraphV3T, DraftCoachingWideningLog } from '../../../orchestrator/types.js';
 import type { AnalysisReadyPayloadT } from '../../../schemas/analysis-ready.js';
 
+import { sectionLabel } from '../../compose/section-label.js';
+
+/**
+ * ⭐ DERIVED FROM THE COMPOSER'S OWN HELPER, NEVER RETYPED.
+ *
+ * These expectations must move automatically if `sectionLabel` ever changes its
+ * markers. Retyping the bold form here would create exactly the hand-maintained
+ * mirror that goes stale silently (trap 12): the composer would emit one
+ * spelling while a green suite kept asserting the old one.
+ */
+const rxLabel = (label: string): string =>
+  sectionLabel(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The fixed-generic assumption bullet, emitted by the composer's fallback path. */
+const FIXED_ASSUMPTION = `${sectionLabel('Assumption to check')} whether the model's key inputs reflect your real delivery constraints`;
+
+
 const FORBIDDEN_TERMS = [
   'intervention',
   'schema',
@@ -281,7 +298,7 @@ describe('buildPostDraftNarrative', () => {
     expect(text).toContain('What the model is weighing');
     expect(text).toContain('Leadership quality');
     expect(text).toContain('Delivery capacity');
-    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+    expect(text).toMatch(new RegExp(`^• ${rxLabel('Main trade-off')}.+balanced against`, 'm'));
     assertCleanCopy(text);
   });
 
@@ -315,7 +332,7 @@ describe('buildPostDraftNarrative', () => {
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY]),
     });
     expect(text).toContain('What the model is weighing');
-    expect(text).toMatch(/^• Key consideration: Leadership quality$/m);
+    expect(text).toMatch(new RegExp(`^• ${rxLabel('Key consideration')} Leadership quality$`, 'm'));
     assertCleanCopy(text);
   });
 
@@ -323,7 +340,7 @@ describe('buildPostDraftNarrative', () => {
     const text = textOf({
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, RISK_RAMP]),
     });
-    expect(text).toMatch(/^• Key consideration: the risk of New hires take time to ramp up$/m);
+    expect(text).toMatch(new RegExp(`^• ${rxLabel('Key consideration')} the risk of New hires take time to ramp up$`, 'm'));
     assertCleanCopy(text);
   });
 
@@ -361,7 +378,7 @@ describe('buildPostDraftNarrative', () => {
       analysisReady,
     });
     expect(text).toContain(
-      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
+      FIXED_ASSUMPTION,
     );
     expect(text).not.toContain('per-month rate');
     assertCleanCopy(text);
@@ -775,7 +792,7 @@ describe('buildPostDraftNarrative', () => {
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, factorWithBadDriver]),
     });
     expect(text).toContain(
-      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
+      FIXED_ASSUMPTION,
     );
     // The bad driver itself must not appear verbatim — the guard short-circuits.
     expect(text).not.toContain('how the team will absorb');
@@ -796,7 +813,7 @@ describe('buildPostDraftNarrative', () => {
       graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, factorWithBadDriver]),
     });
     expect(text).toContain(
-      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
+      FIXED_ASSUMPTION,
     );
     expect(text).not.toContain('on time.');
   });
@@ -827,7 +844,7 @@ describe('buildPostDraftNarrative', () => {
       analysisReady,
     });
     expect(text).toContain(
-      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
+      FIXED_ASSUMPTION,
     );
     expect(text).not.toContain('we adjusted a threshold');
   });
@@ -1113,7 +1130,7 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
       strengthenItems: items,
     });
     expect(result.text).toContain(
-      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
+      FIXED_ASSUMPTION,
     );
     expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
     expect(result.telemetry.fallback_reason).toBe('gate_rejected');
@@ -1218,7 +1235,7 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY_NO_DRIVER, FACTOR_CAPACITY] as unknown as GraphV3T['nodes'],
   );
   const fixedAssumption =
-    "Assumption to check: whether the model's key inputs reflect your real delivery constraints";
+    FIXED_ASSUMPTION;
   const typedRecovery =
     `Next, choose the missing effect value for "${OPTION_A.label}" on "${FACTOR_QUALITY.label}" so the comparison can be prepared. ${MISSING_VALUE_ASK_FORMAT_HINT}`;
   const needsInputReadiness = {
@@ -3088,7 +3105,7 @@ describe('a direct edge establishes a sign; an indirect path may only veto it', 
     const text = textOf({
       graph: makeGraph(NODES, [edgeToGoal('f1', 'positive'), edgeToGoal('f2', 'negative')]),
     });
-    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+    expect(text).toMatch(new RegExp(`^• ${rxLabel('Main trade-off')}.+balanced against`, 'm'));
   });
 
   it('a MIXED-PATH factor is not proven by its direct edge alone', () => {
@@ -3135,7 +3152,7 @@ describe('a direct edge establishes a sign; an indirect path may only veto it', 
         edgeToGoal('f2', 'negative'),
       ]),
     });
-    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+    expect(text).toMatch(new RegExp(`^• ${rxLabel('Main trade-off')}.+balanced against`, 'm'));
   });
 });
 
@@ -3207,6 +3224,6 @@ describe('a truncated path search withholds rather than confirming', () => {
         ],
       ),
     });
-    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+    expect(text).toMatch(new RegExp(`^• ${rxLabel('Main trade-off')}.+balanced against`, 'm'));
   });
 });

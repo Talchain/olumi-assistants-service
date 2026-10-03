@@ -43,6 +43,7 @@ vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
 import { dispatchDraftGraph } from '../draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
+import { sectionLabel } from '../../compose/section-label.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -217,7 +218,7 @@ describe('dispatchDraftGraph — analysis_ready.coaching_summary (F1 PR A)', () 
     expect(res.response.assistant_text.toLowerCase()).not.toContain(freeformAction);
     expect(res.response.assistant_text).not.toMatch(/\brun the analysis\b/i);
     expect(res.response.assistant_text).toContain(
-      "Assumption to check: whether the model's key inputs reflect your real delivery constraints",
+      `${sectionLabel('Assumption to check')} whether the model's key inputs reflect your real delivery constraints`,
     );
     expect(res.response.assistant_text).toContain(
       'Next, choose the missing effect value for "Launch now" on "Revenue impact" so the comparison can be prepared. ' + MISSING_VALUE_ASK_FORMAT_HINT,

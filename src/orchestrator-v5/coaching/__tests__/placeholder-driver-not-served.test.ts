@@ -60,6 +60,7 @@ import {
   briefExtractionQuote,
 } from '../../../cee/factor-extraction/brief-extraction-claim.js';
 import type { GraphV3T } from '../../../orchestrator/types.js';
+import { sectionLabel } from '../../compose/section-label.js';
 
 function makeGraph(nodes: unknown[]): GraphV3T {
   return { nodes, edges: [] } as unknown as GraphV3T;
@@ -117,7 +118,7 @@ const NON_READY = {
  * composer rather than what the user reads.
  */
 const FIXED_GENERIC_BULLET =
-  "• Assumption to check: whether the model's key inputs reflect your real delivery constraints";
+  `• ${sectionLabel('Assumption to check')} whether the model's key inputs reflect your real delivery constraints`;
 
 /**
  * A driver that is true regardless of phase: it describes what is UNCERTAIN,
