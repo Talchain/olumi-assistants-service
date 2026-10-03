@@ -19,6 +19,8 @@ import { goalScopeAnalysisMeaning } from '../../schemas/goal-scope.js';
 import { createHash } from 'node:crypto';
 
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import { projectOptionForCanonicalBuilder } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { computeAnalysisReadyStatusWithReason } from '../../cee/transforms/option-status.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { CANONICAL_GRAPH_HASH_NESTED_PROJECTION as VOCABULARY } from '@talchain/schemas/boundary';
 import { resolveGoalDirection, resolveGoalThresholdStrict } from '../goal-target/goal-direction.js';
@@ -87,7 +89,9 @@ export function computeDeterministicGraphHash(
  *     nonlinear_identity (C46 carrier, as stored),
  *     scale_frame, goal_threshold_frame, goal_direction, quantity_frame, analysis_participation,
  *     interventions: per-factor { value, value_type, encoding_map,
- *                                  target_match: { node_id } }
+ *                                  target_match: { node_id } },
+ *     unresolved_targets: sorted distinct admission gaps from the canonical
+ *                         option carrier (unique matching mirror, else node)
  *   }
  *   edges: sorted by (from, to), each → {
  *     from, to, edge_type,
@@ -110,7 +114,7 @@ export function computeDeterministicGraphHash(
  *   origin, observed_state.{extractionType, reviewed_by_user, elicited_from},
  *   intervention.{unit, source, reasoning, value_confidence, display_value},
  *   target_match.{match_type, confidence}, edge.validation, edge.defaulted,
- *   option.{description, unresolved_targets, user_questions, brief_quote}.
+ *   option.{description, user_questions, brief_quote}.
  *
  * Also intentionally EXCLUDED — Monte Carlo configuration parameters
  * passed to PLoT alongside the graph (`seed`, `n_samples`, request_id):
@@ -154,8 +158,22 @@ export function computeAnalysisAffectingGraphHashSha256(
     return null;
   }
 
+  const factorIds = new Set(nodes.filter((node) => node.kind === 'factor').map((node) => node.id));
+  const mirroredOptions = Array.isArray(options)
+    ? options.map((option) => projectOptionForCanonicalBuilder(option, factorIds))
+        .filter((option) => option !== null)
+    : [];
+
   const canonical = stableStringify({
-    nodes: nodes.map(projectNode).sort((a, b) => a.id.localeCompare(b.id)),
+    nodes: nodes.map((node) => {
+      // Match canonical readiness: one valid mirror owns this option, even in
+      // a partial mirror; missing/invalid/duplicate mirrors fall back to the node.
+      const mirrors = mirroredOptions.filter((option) => option.id === node.id.trim());
+      const option = node.kind === 'option'
+        ? mirrors.length === 1 ? mirrors[0]! : projectOptionForCanonicalBuilder(node, factorIds)
+        : null;
+      return { ...projectNode(node), ...projectAdmissionGaps(option) };
+    }).sort((a, b) => a.id.localeCompare(b.id)),
     edges: edges
       .map(projectEdge)
       .sort((a, b) => {
@@ -374,6 +392,23 @@ function projectEdge(raw: unknown): EdgeProjection {
 interface OptionProjection {
   id: string;
   [key: string]: unknown;
+}
+
+function projectAdmissionGaps(
+  option: ReturnType<typeof projectOptionForCanonicalBuilder>,
+): Record<string, unknown> {
+  const targets = option?.unresolved_targets ?? [];
+  // Absence/empty is omitted entirely, preserving every pre-gap hash byte.
+  if (!option || targets.length === 0) return {};
+  // Reuse the status authority's unresolvedTargetCount override. Other inputs
+  // cannot override a carried gap; this does not re-decide numeric readiness.
+  const { status } = computeAnalysisReadyStatusWithReason(
+    Object.keys(option.interventions ?? {}).length, option.status, false, 0,
+    option.is_baseline === true, targets.length,
+  );
+  return status === 'needs_user_mapping'
+    ? { unresolved_targets: [...new Set(targets)].sort() }
+    : {};
 }
 
 function projectOption(raw: unknown): OptionProjection {
