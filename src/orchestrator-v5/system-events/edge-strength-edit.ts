@@ -24,11 +24,7 @@ import { composeToolCallResponse } from '../compose.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../compose/definitional-links.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
-import {
-  edgeBandFromMagnitude,
-  edgeBandFromStrengthBand,
-  edgeBandStd,
-} from '../format/edge-strength-bands.js';
+import { edgeBandFromMagnitude, edgeBandFromStrengthBand } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
@@ -39,6 +35,7 @@ import type { ProposalAction } from '../routing/types.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { formatEdgeStrengthConfirmed } from '../tools/handlers/d1-shared/format-confirmation.js';
+import { linkSizing, type LinkSizing } from '../../cee/magnitude/link-sizing.js';
 import {
   getDefaultRegistry,
   resolveHandler,
@@ -178,6 +175,12 @@ function rawExactEdge(
   return matches.length === 1 ? matches[0]! : null;
 }
 
+/** The link's sizing AS WRITTEN — the receipt's authorship — by 52f8cd's one predicate; no single exact edge → none. */
+function storedSizingOf(graph: unknown, from: string, to: string): LinkSizing | undefined {
+  const edge = rawExactEdge(graph, from, to);
+  return edge === null ? undefined : linkSizing(edge);
+}
+
 /**
  * ⭐ R11 — the ONE record a confirmation writes (AIQ #72 5872082179; storage by the Canonical lead, accepted by the DL
  * in the #2235 verdict): `provenance.reviewed_by_user = { intent: 'confirm', at: <ISO instant>, band? }`, with `band`
@@ -205,10 +208,9 @@ export function reviewIntentOf(provenance: unknown): unknown {
  * - `provenance.reviewed_by_user` becoming exactly the confirm's review record ({@link isConfirmReview}) — required
  *   whenever the edge has a provenance record to hold it (an edge with none has no source to keep and none may be
  *   invented, so its provenance must stay absent);
- * - ONLY when `statedBand` is given — the user named the band the link already sits in (the Agent's confirm, AIQ #70
- *   5855430153; or the canvas pill's 0.60.0 `band` on a `confirm_current`) — `strength.std` becoming exactly that
- *   band's spread (`edgeBandStd`), with that band in the review record. The mean never moves. No band, no std change:
- *   a figure confirm.
+ * - when `statedBand` is given (the user named the band the link already sits in: the Agent's confirm, or the canvas
+ *   pill's 0.60.0 `band` on a `confirm_current`), that band in the review record. The strength itself — mean AND std —
+ *   never moves on any confirm (#2473 CR, CODEX_CLI_OVERFLOW 5937437431; it once took the band's spread).
  * ⛔ Everything else is KEPT, and a change to any of it fails: `provenance.source` (so a confirm that stamps
  * `user_specified` — the bypass R11 closes — is refused), `magnitude`, `natural_effect`, `reasoning`,
  * `provenance_display`, and the edge's `defaulted` / `exists_defaulted` / `std_defaulted` flags. (Before R11 this
@@ -239,15 +241,12 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
   if (beforeEdges.length !== 1 || afterEdges.length !== 1) return false;
   const beforeEdge = beforeEdges[0]!;
   const afterEdge = afterEdges[0]!;
-  // A figure confirm keeps the whole strength. A band confirm keeps the mean and may
-  // move the std only to the stated band's own spread — and only when the link
-  // really sits in that band.
+  // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): EVERY confirm keeps the whole strength, byte-equal — a
+  // figure confirm and a band confirm alike (the band one once moved the std to the band's spread, σ 0.3 → 0.0866). A
+  // band confirm is still judged by the band: the link must really sit in it.
   const strengthAdmitted =
-    args.statedBand === undefined
-      ? isDeepStrictEqual(beforeEdge.strength, afterEdge.strength)
-      : edgeBandFromMagnitude(Math.abs(beforeEdge.strength.mean)) === args.statedBand &&
-        afterEdge.strength.mean === beforeEdge.strength.mean &&
-        afterEdge.strength.std === edgeBandStd(args.statedBand);
+    isDeepStrictEqual(beforeEdge.strength, afterEdge.strength) &&
+    (args.statedBand === undefined || edgeBandFromMagnitude(Math.abs(beforeEdge.strength.mean)) === args.statedBand);
   if (!strengthAdmitted || beforeEdge.effect_direction !== afterEdge.effect_direction) {
     return false;
   }
@@ -278,16 +277,6 @@ export function isProvenanceOnlyEdgeConfirmation(stored: {
     }
   } else if (afterProvenance !== beforeProvenance) {
     return false;
-  }
-
-  // The band's spread was checked on the parsed edges above; restore the stored
-  // std so the byte comparison below judges everything else.
-  if (
-    args.statedBand !== undefined &&
-    isRecord(rawBeforeEdge.strength) &&
-    isRecord(rawAfterEdge.strength)
-  ) {
-    rawAfterEdge.strength.std = structuredClone(rawBeforeEdge.strength.std);
   }
 
   return isDeepStrictEqual(normalisedAfter, args.before);
@@ -721,6 +710,8 @@ export async function applyEdgeStrengthEdit(
               graph.nodes.find((node) => node.id === event.from)?.label ?? event.from,
             toLabel:
               graph.nodes.find((node) => node.id === event.to)?.label ?? event.to,
+            // Whose figure: the link AS WRITTEN (R3 5942069984), by the one sizing predicate.
+            sizing: storedSizingOf(projectedGraph, event.from, event.to),
           })
         : outcome.assistant_text,
     coaching: null,

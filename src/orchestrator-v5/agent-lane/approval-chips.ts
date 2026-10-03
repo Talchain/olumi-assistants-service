@@ -22,6 +22,7 @@ import type { StructuredProposal } from './proposal.js';
 import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
+import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
@@ -32,6 +33,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   // #1788's add-option proposal: the same typed, zero-call approval as every other proposal.
   propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
   // The goal's current level, as the user stated it (`goal-current-level.ts`).
+  reconcile_goal_scope: { label: 'Record this goal reading', message: 'Yes, record this reading.' },
   propose_goal_current_level: { label: 'Record this current level', message: 'Yes, record it.' },
   // A link's strength recorded as the user's own (challenge → authorised revision): one button, carried like the rest.
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
@@ -41,6 +43,8 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_link_effect: { label: 'Record this reading', message: 'Yes, record that reading.' },
   // The goal's success target the user stated, written through the product's typed target writer.
   propose_goal_target: { label: 'Set this target', message: 'Yes, set that target.' },
+  // MG F1 T6: one option out of (or back into) the comparison, through the ONE option-status writer (`option_status_edit`).
+  propose_option_status: { label: 'Make this change', message: 'Yes, make that change.' },
   // SLICE C2: a new risk, held on the product's own seam like the add-option (`gmh_`, the product's words on the button).
   propose_new_risk: { label: 'Add this risk', message: 'Yes, add that risk.' },
   // PJ-E-FIG: new factors carrying the user's figures, held on the same seam as the add-risk (`gmh_`).
@@ -162,6 +166,9 @@ export function approvalChipsFor(
   // Adoption is a proposal about an EXISTING Olumi option. The card, including every displayed
   // level, is derived from the stored proposal; only its exact pressed words authorise the write.
   const stored = labelSourceFor?.(proposalId)?.proposal;
+  if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
+    return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
+  }
   const adoption = stored?.operations.length === 1 && stored.operations[0]?.op === 'adopt_olumi_option'
     ? stored.operations[0].value as { approval_message?: unknown } | undefined : undefined;
   if (adoption !== undefined && typeof adoption.approval_message === 'string' && adoption.approval_message !== '') {
@@ -201,8 +208,22 @@ export function approvalChipsFor(
       AMEND_CHIP,
     ];
   }
-  const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId));
+  const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
+    ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
+}
+
+/**
+ * ⭐ A LINK-STRENGTH APPROVAL SAYS WHAT IT RECORDS (CODEX_CLI_OVERFLOW P1 + DL ruling on #2481; ONE projection, shared
+ * with #2480's card): the button alone read "Record these links", so the band and whose estimate it is were hidden. The
+ * STORED proposal's own card — each link, its band and "Olumi's estimate" or "your estimate", as `proposeLinkStrengths`
+ * minted it — rides in `detail`. Identity: the store's proposal for THIS chip's id, every operation a link strength.
+ * Never the Agent's prose. Used live and on a replay, which rebuilds the chip from the same stored proposal.
+ */
+export function linkStrengthCardFor(proposalId: string, proposal: StructuredProposal | undefined): string | undefined {
+  if (proposal === undefined || proposal.proposal_id !== proposalId || proposal.operations.length === 0
+    || proposal.operations.some((o) => o.op !== 'set_link_strength')) return undefined;
+  return typeof proposal.public_label === 'string' && proposal.public_label.trim() !== '' ? proposal.public_label : undefined;
 }
 
 type Direction = 'at_least' | 'at_most';

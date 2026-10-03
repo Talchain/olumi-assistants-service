@@ -117,9 +117,12 @@ import {
 } from '../tools/registry.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { applyCoachingSignal } from '../coaching/coaching-signal-application.js';
+import { hasPriorRunAnalysisShownToUser } from '../signals/coaching-signals.js';
 import { applyDefaultedValueEgress } from '../compose/defaulted-value-egress.js';
 import { readDefaultedAssumptionsFromEnrichment } from '../coaching/pick-defaulted-assumptions.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
+import { historyPredatesRun, priorRunForSeed, seedHistoryFacts } from '../coaching/seed-reuse.js';
+import { bindAnalysisSnapshotForTurn, NO_CLAIM } from '../run-analysis-snapshot-binding.js';
 import type { V5TurnTimings } from '../telemetry/turn-timings.js';
 import { generateChips } from '../compose/chip-generator.js';
 import {
@@ -472,8 +475,9 @@ export type DispatchChipClickRunAnalysisResult =
       readonly commitPerformed: true;
       /**
        * ⭐ D1 — THE COMPLETED RUN'S FACT WINDOW, for the run-over-run block (`run_delta`). The SAME contract as
-       * `TurnExecutorRunResult.priorFacts`: the post-dispatch window `[...enrichedFacts, ...context.prior_facts]`
-       * that `freshness` is derived over, present ONLY when this turn produced a successful run.
+       * `TurnExecutorRunResult.priorFacts`: the post-dispatch window `[...enrichedFacts, ...runHistory]` (the hot window,
+       * or the scenario's durable Runs once it holds no successful Run — the history that lent the seed) that
+       * `freshness` is derived over, present ONLY when this turn produced a successful run.
        *
        * Served `a327556` (Canonical #70 5850113962, scenario `a87c883b`): every Run the user asks for — the Run
        * chip, the Agent's Run fast path, the Agent's `run_analysis` tool — reaches THIS exit, not the executor's,
@@ -762,8 +766,8 @@ function deriveChipClickFreshness(
    *
    * Threaded rather than derived here because this helper never reads the
    * store — its callers own the read. On the post-dispatch call `facts` is the
-   * UNIFIED array (`[...enrichedFacts, ...context.prior_facts]`), so the flag
-   * describes only the prior half; that is sound, because the degraded branch
+   * UNIFIED array (`[...enrichedFacts, ...runHistory]`), so the flag
+   * describes only the hot-window read; that is sound, because the degraded branch
    * in `deriveAnalysisFreshness` fires only when NO fact was selected at all,
    * which on that path means `enrichedFacts` was empty too and the emptiness of
    * the prior half is therefore genuinely unexplained.
@@ -1328,6 +1332,33 @@ export async function dispatchChipClickRunAnalysis(
   // handler invocation is indistinguishable from a Sonnet-routed call.
   const context = await buildTurnContext(payload, requestId);
 
+  // ⛔ C1 — THE RUN THE USER ASKS FOR COMES HERE, NEVER THROUGH `runTurnExecutor` (R3 #85 5939245408). The Run chip, the
+  // Agent's Run fast path and its `run_analysis` tool all post a typed chip turn, which route-v2 sends to this
+  // dispatcher. The seed binding lived only in the executor (`turn-executor.ts`), so on served 4e53dfa5 every Run
+  // logged `run_analysis.seed_reuse` `no_prior_run` although its own window held `run_analysis` facts (served
+  // `v5_turn_context_facts`), and every rerun drew fresh samples (`C2_unpaired`). Bound here from the SAME history this
+  // exit pairs from (`runHistory`, `postDispatchFacts` below), so the Run that lends its seed is the Run the delta
+  // compares against. The read-A guard stays down (`NO_CLAIM`, as with no binding): this dispatcher reads the snapshot
+  // once and hands the handler that exact copy, so there is no second read to compare.
+  //
+  // ⛔ ONE HISTORY FOR THE SEED AND THE PAIR (F1b lease #85 5947561416; R3 5945463416). #2503 let the SEED come from the
+  // scenario's durable Runs once the prior Run has left the 20-turn hot window, but the pair below still read the hot
+  // window: served `d0e566fc`, Run B borrowed Run A's seed while its own turn said `insufficient_runs` and showed no
+  // strip or Compare until a reload. `seedHistoryFacts` decides ONCE (the window while it holds a successful Run; else
+  // the attested, authoritative durable set), and that one array is the seed's donor AND the `run_delta` pair's history
+  // (`pairFacts` below). FRESHNESS stays on the window (CODEX on 84f47072 P1-1/P1-2: this exit's freshness cannot see a
+  // newer partial or skewed durable Run, so durable Runs there claimed `complete_current` for an older Run); the
+  // finaliser binds the pair's newest Run to freshness's (`runFactBinding`), so a pair whose current is not THIS Run is
+  // withheld, never shown (CLAUDE.md trap 12: one response describes one Run).
+  const runHistory = seedHistoryFacts({
+    scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set,
+  });
+  bindAnalysisSnapshotForTurn({
+    scenarioId: context.session_id,
+    analysisGraphHash: NO_CLAIM,
+    priorRunSeed: priorRunForSeed(runHistory),
+  });
+
   // V5 finaliser contract — single-source-of-truth for the scenario graph.
   //
   // Pre-load the scenario snapshot ONCE here. The handler invocation uses
@@ -1683,7 +1714,14 @@ export async function dispatchChipClickRunAnalysis(
     // contextPack is null on this path — the run_analysis branch signals
     // never consult it. The returned facts carry the signal marker on the
     // run_analysis fact and MUST be the array that chips/compose/commit see.
-    const coachingApplication = applyCoachingSignal({
+    // A Run the user SAW lies outside the window (the pair's history is durable): this turn's `run_delta` pairs with it,
+    // so "Your first analysis is ready" would contradict the strip, and the rerun copy needs the window's edits, which
+    // aged out with it (CODEX on 84f47072 P2-4). Suppressed, not reworded — the coaching slot's own degrade.
+    const priorShownOutsideWindow = runHistory !== undefined && runHistory !== context.prior_facts
+      && hasPriorRunAnalysisShownToUser(runHistory);
+    const coachingApplication = priorShownOutsideWindow
+      ? { coachingText: null, signalId: null, handlerFacts: enrichedFacts }
+      : applyCoachingSignal({
       proposedHandlerId: 'run_analysis',
       outcome,
       contextPack: null,
@@ -1794,6 +1832,20 @@ export async function dispatchChipClickRunAnalysis(
     const postDispatchFacts: readonly HandlerFact[] = [
       ...enrichedFacts,
       ...context.prior_facts,
+    ];
+    // The `run_delta` pair's history: the SAME history that lent the seed (`runHistory` above) — the window, or the
+    // durable Runs once it holds no successful Run. Freshness above stays on the window (see `runHistory`).
+    //
+    // ⛔ THIS Run is the newest by construction. A durable Run the selectors could order at or after it (clock skew, a
+    // delayed commit, a non-canonical timestamp) would let the finaliser miss a newer partial (C2), select it as the
+    // claim-bearing Run (skipping F-LIMIT) or pair the wrong Runs (CODEX on 84f47072, 6b053a8b, 99b8728a). So the durable
+    // history pairs only when `historyPredatesRun` proves it older IN THE SELECTORS' OWN ORDER; otherwise the pair keeps
+    // the window — staging's answer, an honest absence.
+    const durableHistoryPredatesThisRun = runHistory !== undefined && runHistory !== context.prior_facts
+      && historyPredatesRun(runHistory, enrichedFacts.find(isSuccessfulRunAnalysisFact));
+    const pairFacts: readonly HandlerFact[] = [
+      ...enrichedFacts,
+      ...(durableHistoryPredatesThisRun && runHistory !== undefined ? runHistory : context.prior_facts),
     ];
     // Defect 4 — nearly always inert here (this turn's `enrichedFacts` are
     // selected first), but it matters for a rerun that produced no usable
@@ -2320,7 +2372,7 @@ export async function dispatchChipClickRunAnalysis(
         graph: snapshotGraph,
         freshness,
         // D1 — the window `freshness` was derived over, gated exactly as the executor's exit gates it.
-        ...(enrichedFacts.some(isSuccessfulRunAnalysisFact) ? { priorFacts: postDispatchFacts } : {}),
+        ...(enrichedFacts.some(isSuccessfulRunAnalysisFact) ? { priorFacts: pairFacts } : {}),
         // Fix C: present only when the decision_review LLM call returned
         // under an enabled timings/trace gate (never fabricated).
         ...(chipTurnTimings !== undefined ? { turnTimings: chipTurnTimings } : {}),

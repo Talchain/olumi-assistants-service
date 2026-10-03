@@ -107,7 +107,10 @@ describe('the Agent records a link\'s strength as the user\'s own, through the p
     const p = await caps.proposeLinkStrength!(c, { from_label: 'Pro plan price', to_label: 'MRR', strength: 'weak', rationale: 'x' });
     expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false }));
     const label = String(p.public_label);
-    expect(label).toContain('as slight, as your own estimate (its strength stays as it is)');
+    // M1 Accept receipt (Codex pre-review P1): Olumi sized this link, and a confirm keeps who sized it (R11), so the
+    // card never calls it the user's own.
+    expect(label).toContain('as slight (its strength stays as it is)');
+    expect(label).not.toContain('your own');
     expect(label, 'band words only (AIQ 5923931082): no number at all, noisy or rounded').not.toMatch(/\d\.\d|0\u20131/);
     expect(label).not.toMatch(/0\.0499|9999/);
     // The result the model reads carries the band only (AIQ 5923931082): it can never quote a number, noisy or clean.
@@ -352,7 +355,8 @@ describe('a link strength is said as its band word, never as Olumi\'s internal n
     expect(String(p.public_label)).toContain('"Pro plan price" → "MRR" as moderate, Olumi’s estimate');
     expect(String(p.public_label)).not.toMatch(/\d|0–1|scale/);
     const links = (p as unknown as { links: { was: Record<string, unknown>; becomes: Record<string, unknown> }[] }).links;
-    expect(links[0]!.was).toEqual({ band: 'strong' });
+    // Who sized it before, by F1b's ONE rule (AI HARNESS, DL 5936996041): a word, never a number.
+    expect(links[0]!.was).toEqual({ band: 'strong', sizing: 'unmarked' });
     expect(links[0]!.becomes).toEqual({ band: 'moderate' });
     expect(String(p.note)).toContain('never a number or a scale');
     expect(JSON.stringify(p)).not.toMatch(/"strength":\s*\d|0\.3\b|0–1/);

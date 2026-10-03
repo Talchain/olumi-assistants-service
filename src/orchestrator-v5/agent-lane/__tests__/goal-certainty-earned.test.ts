@@ -243,3 +243,48 @@ describe('DL 5883245872: the decision is read from the STORED Run fact (`result.
     expect(byId(goalCertaintyOfStoredResult(FX.paul.graph, noEvals), 'raise_price_to_59')).toMatchObject({ earned: false, no_break_even: 'identity_not_evaluated' });
   });
 });
+
+/**
+ * ⛔ #2473 CR P2 (CODEX_CLI_OVERFLOW 5937437431, DL concur): goal certainty is a reader of "is this link sized" too, so it
+ * reads a unit-less node in its own LEVEL limit's unit like the limit verdict, the Agent's limit sentence and the size
+ * ask do (`limitUnitsOf`). Without it, an otherwise sized path through such a node read as unsized here only: a
+ * persisted `earned: false` and "isn't sized" beside readers that call the same link sized.
+ */
+describe('#2473 P2 — a sized path through a unit-less LIMITED node is earned (the limit\'s unit)', () => {
+  /** Paul's sized run, with `monthly_churn`'s own unit removed: only its level limit can say what unit it is read in. */
+  const unitLessChurn = (limitUnit: string | undefined): Run => {
+    const run = sizedPaul();
+    const churn = (run.graph.nodes as Json[]).find((n) => n.id === 'monthly_churn')!;
+    delete churn.observed_state;
+    delete churn.unit;
+    run.graph.goal_constraints = (run.graph.goal_constraints as Json[]).map((c) => {
+      if (c.node_id !== 'monthly_churn') return c;
+      const { unit: _u, ...rest } = c;
+      return limitUnit === undefined ? rest : { ...rest, unit: limitUnit };
+    });
+    return run;
+  };
+
+  it('PRECONDITION: the link into the node is sized in "percentage points"; the node has no unit; its limit is a level', () => {
+    const run = unitLessChurn('percentage points');
+    const into = (run.graph.edges as Json[]).find((e) => e.from === 'monthly_pro_price' && e.to === 'monthly_churn')!;
+    expect(into.provenance).toMatchObject({ magnitude: 'olumi_estimate', natural_effect: { amount_unit: 'percentage points' } });
+    const churn = (run.graph.nodes as Json[]).find((n) => n.id === 'monthly_churn')!;
+    expect(churn.unit ?? churn.observed_state ?? null).toBeNull();
+    expect((run.graph.goal_constraints as Json[]).find((c) => c.node_id === 'monthly_churn')).toMatchObject({ value_frame: 'level', unit: 'percentage points' });
+  });
+
+  it('RED: read in the limit\'s unit, £59\'s P = 1 is EARNED — the same link the limit readers call sized', () => {
+    expect(byId(decide(unitLessChurn('percentage points')), 'raise_price_to_59')).toMatchObject({ probability_of_goal: 1, earned: true });
+  });
+
+  it('CONTROL (wrong unit): a limit in another unit sizes nothing — not earned, the unsized path named', () => {
+    const d = byId(decide(unitLessChurn('hours')), 'raise_price_to_59')!;
+    expect(d).toMatchObject({ probability_of_goal: 1, earned: false });
+    expect(d.unsized_path?.from).toBe('monthly_pro_price');
+  });
+
+  it('CONTROL (no unit anywhere): the limit carries none — not earned', () => {
+    expect(byId(decide(unitLessChurn(undefined)), 'raise_price_to_59')).toMatchObject({ probability_of_goal: 1, earned: false });
+  });
+});

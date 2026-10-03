@@ -235,22 +235,31 @@ describe('the Agent sets the goal\'s success target the user stated, through the
     }
   });
 
-  it('RED: the direction the user\'s words DO hold must be the Agent\'s — contradictory, negated, asked, or both ways → refused, nothing prepared', async () => {
-    const cases: [string, 'at_least' | 'at_most', string?][] = [
-      ['We need at least £60k MRR, and keep it under £60k of spend.', 'at_least'],
-      ['It is not at least £60k we need.', 'at_least'],
-      ['Is at least £60k realistic?', 'at_least'],
-      ['We need at most £60k MRR.', 'at_least'],
+  it('⭐ DL 380e54 (#2447 follow-up 5931593767): NO REFUSAL ON DIRECTION — contradictory, negated, asked or both ways → a DECISION; the literal reading primary when there is one', async () => {
+    const cases: [string, 'at_least' | 'at_most', 'at_least' | 'at_most'][] = [
+      ['We need at least £60k MRR, and keep it under £60k of spend.', 'at_least', 'at_least'],
+      ['It is not at least £60k we need.', 'at_least', 'at_least'],
+      ['Is at least £60k realistic?', 'at_least', 'at_least'],
+      ['We need at most £60k MRR.', 'at_least', 'at_most'],
     ];
-    for (const [turn, type, earlier] of cases) {
+    for (const [turn, agentReading, chosen] of cases) {
       const w = world(graphWith());
       const store = new ProposalStore();
-      const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(turn, earlier !== undefined ? [earlier] : []), { constraint_type: type, value: 60000, unit: '£', rationale: 'x' });
-      expect(p, turn).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'direction_not_stated' }));
-      expect(String(p.detail)).toMatch(/at least or at most/);
-      expect(store.outstanding(SCENARIO, null)).toEqual([]);
+      const p = await createAgentCapabilities(w.d, store).proposeGoalTarget!(ctxOf(turn), { constraint_type: agentReading, value: 60000, unit: '£', rationale: 'x' });
+      const alternative = chosen === 'at_least' ? 'at_most' : 'at_least';
+      expect(p, turn).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen, alternative } }));
+      const stored = store.get(String(p.proposal_id));
+      expect(stored?.operations[0]?.value, turn).toEqual(expect.objectContaining({ constraint_type: chosen }));
+      expect(String(p.public_label), turn).toContain(chosen === 'at_least' ? 'at least £60' : 'at most £60');
       expect(w.sent).toEqual([]);
     }
+  });
+
+  it('CONTROL: the user\'s literal words AGREE with the Agent\'s reading → the card is theirs, no decision', async () => {
+    const w = world(graphWith());
+    const p = await createAgentCapabilities(w.d, new ProposalStore()).proposeGoalTarget!(ctxOf('We need at least £60k MRR.'), { constraint_type: 'at_least', value: 60000, unit: '£', rationale: 'x' });
+    expect(p).toEqual(expect.objectContaining({ ok: true, mutated: false }));
+    expect(p).not.toHaveProperty('direction_choice');
   });
 
   it('the goal must resolve to exactly one: none, or two → refused, nothing prepared, and the Agent asks', async () => {

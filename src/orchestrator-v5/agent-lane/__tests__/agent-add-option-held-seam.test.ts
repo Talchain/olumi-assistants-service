@@ -22,6 +22,7 @@
  * Every model call to anything but OpenAI throws; route-v2's LLM router throws if touched at all.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { asSent } from './helpers/as-sent.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -243,14 +244,16 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(openAiCalls, 'one model call').toBe(1);
     const tools = ((bodies[0]!['tools'] ?? []) as { name?: string }[]).map((x) => x.name);
     expect(tools).not.toContain('get_canonical_state');
-    const given = JSON.stringify((bodies[0]!['input'] ?? []) as unknown[]);
+    // T1 (b): read the request as sent before the instructions moved into input[0] (`helpers/as-sent.ts`), so the
+    // instructions' own mention of the state item is never counted as one.
+    const given = JSON.stringify((asSent(bodies[0]!)['input'] ?? []) as unknown[]);
     expect(given).toMatch(/CURRENT MODEL STATE/);
     expect(given).toContain('fac_price');
     expect(t._agent.tool_calls).toEqual([]);
     // The next turn is given its OWN state; the earlier one is not carried in the history.
     script = [(body) => { bodies.push(body); return say('Still price.'); }];
     await turn({ message: 'And now?' });
-    expect((JSON.stringify(bodies[1]!['input']).match(/CURRENT MODEL STATE/g) ?? []).length, 'exactly one state item on turn 2').toBe(1);
+    expect((JSON.stringify(asSent(bodies[1]!)['input']).match(/CURRENT MODEL STATE/g) ?? []).length, 'exactly one state item on turn 2').toBe(1);
   }, 120_000);
 
   /**
@@ -380,7 +383,7 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     const ref = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')?.proposal_id;
     expect(ref).toMatch(/^gmh_[0-9a-f]{12}$/);
     let seenByModel = '';
-    script = [() => fnCall('authorise_change', { proposal_id: ref }), (body) => { seenByModel = JSON.stringify(body['input']); return say('Added.'); }];
+    script = [() => fnCall('authorise_change', { proposal_id: ref }), (body) => { seenByModel = JSON.stringify(asSent(body)['input']); return say('Added.'); }];
     const t2 = await turn({ message: 'Yes, add it.' });
     // (B) the Agent is told what the model needs NOW, from the stored graph after the write — in plain words.
     expect(seenByModel, seenByModel.slice(-1500)).toMatch(/readiness_after/);

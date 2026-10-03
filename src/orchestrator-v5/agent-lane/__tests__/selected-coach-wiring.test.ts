@@ -1,3 +1,4 @@
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /** Selected coaching reaches the real Agent route on every conversation path. No provider is called. */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -5,15 +6,25 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../coach-route-v0_2.js';
 import { READY_GRAPH } from './fixtures/first-analysis-graphs.js';
+import { asSent } from './helpers/as-sent.js';
 
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
 const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c9ed66d';
-const HOST_SHA = '325bb61e58059ba4a10dc5d38472dbfa64b7b2e4080706a0c6a35a9067562ab6';
+// AI HARNESS (1 Oct, DL 5936996041 on R3 DEFECT 2): the links sentence defines `sizing` (F1b's linkSizing) and no longer
+// says `defaulted` means unsized: 325bb61e… → 26f7e9c0…. The template sha above is unchanged.
+// MODEL GENERATION (2 Oct, M1 Accept receipt; Codex pre-review 2 on CEE mg/accept-receipt-authorship): the link-set sentence
+// no longer says a user-named band is always "recorded as theirs" — a band the link already sits in records review and stays
+// Olumi's estimate (R11): 26f7e9c0… → 913872bf…, +210 bytes. The template sha above is unchanged.
+// AI HARNESS (2 Oct, RC 5950124321): none_measurable makes no claim; the sentence it was told to say is gone: 913872bf… → cd04fd8c….
+const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f68b';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
-// Derived from the request the real route SENT (harness raw body), never computed by hand; the template + host shas above are unchanged.
-const RENDERED_SHA = 'c9881d92e4230323acd2f278be86ec8255ceb8ffe5b99f3dbffc2933ab4a332f';
-const RENDERED_BYTES = 27_547;
+// + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
+// Derived from the request the real route SENT (harness raw body), never computed by hand.
+// + the link-set sentence above (MG, 2 Oct): 27,833 → 28,043 bytes.
+// + none_measurable makes no claim (AI HARNESS, RC 5950124321): 28,043 → 28,026 bytes.
+const RENDERED_SHA = 'b2653d0e2f2eda3c2387366ec33e3c6412508dc1bec9c7fbe35af6877037c739';
+const RENDERED_BYTES = 28_026;
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';
@@ -75,7 +86,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
 
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { body?: unknown }) => {
-      const body = JSON.parse(String(init.body)) as Sent;
+      const body = asSent(JSON.parse(String(init.body))) as Sent;
       sent.push(body);
       registeredAtCall.push(registered);
       if (body.text?.format?.name === 'whole_candidate') {
@@ -132,7 +143,7 @@ describe('selected Sol-high coach on the actual Agent route', () => {
       ...(chip ? { chip } : {}),
     } });
     expect(response.statusCode, response.body.slice(0, 300)).toBe(200);
-    expect(scripted, 'each scripted model hop was consumed').toEqual([]);
+    if (chip?.action_type !== 'run_analysis') expect(scripted, 'each scripted model hop was consumed').toEqual([]);
     return response.json() as { _diagnostic_trace?: { fast_path?: string } };
   };
   const selected = (body: Sent) => {
@@ -171,9 +182,16 @@ describe('selected Sol-high coach on the actual Agent route', () => {
     const response = await sendTurn('Run analysis.', [say('The Run is provisional.')],
       { id: 'agent-run-analysis', action_type: 'run_analysis' });
     expect(response._diagnostic_trace?.fast_path).toBe('run');
+    expect(sent).toHaveLength(0);
+    await explainRun(app, SCENARIO, { statusCode: 200, json: () => response });
+    expect(scripted, 'the separate narration consumed the answer').toEqual([]);
     expect(sent).toHaveLength(1);
     const body = sent[0]!;
-    selected(body);
+    // AI HARNESS 2a: the interpreting call keeps the selected model, prompt and cap, at the interpret role's measured
+    // effort (low; `model-budgets.ts` evidence). The ordinary conversation above stays high.
+    expect(body.model).toBe('gpt-6.1-sol');
+    expect(body.reasoning?.effort).toBe('low');
+    expect(body.max_output_tokens).toBe(3400);
     expect(body.tool_choice).toBe('none');
     expect(body.tools).toEqual([]);
     // A withheld Run inserts its view instruction before the interpret-only constraint.

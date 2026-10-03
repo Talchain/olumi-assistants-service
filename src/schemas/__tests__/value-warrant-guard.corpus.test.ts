@@ -294,7 +294,7 @@ describe("the live value-bearing contract, adjudicated", () => {
     expect(report.stale.map((d) => d.id)).toEqual([]);
   });
 
-  it("the first cut is an ENUMERATION: 45 sites, 32 findings, 20 OPEN, 12 accepted", () => {
+  it("the first cut is an ENUMERATION: 47 sites, 32 findings, 20 OPEN, 12 accepted", () => {
     // Pinned so the shape of the first cut cannot move quietly. There is no date
     // trigger anywhere in this check — a CI job that turns red on a calendar is a
     // time bomb. What this gives instead is an OPEN count a human can watch.
@@ -316,12 +316,16 @@ describe("the live value-bearing contract, adjudicated", () => {
     // +2 sites / +2 findings / +2 ACCEPTED, NONE (30 Sep, A4 CEE #2409): `natural_effect.stated_range.{low,high}` — the
     // written range a user's size is one end of. In the enclosing `amount_unit`, sourced by `text`, written only on the
     // user's own size (value-warrant-guard.ts records the inheritance).
-    expect(SITES.length).toBe(45);
+    // +1 site / +0 findings, LEVEL_SOLE (1 Oct, MG F1 T1, schemas 0.69.0): the contract's NodeV3 `goal_stated_as[].value`
+    // — a figure the user GAVE, kept verbatim — names its warrant in its own object (`unit`, with `period` + `quote`), so it
+    // is warranted where it stands. The level it implies is written into `goal_threshold_raw` in the same write (G1).
+    // +1 LEVEL_SOLE site (2 Oct): goal_scope.component.share is a bounded fraction with its own source.
+    expect(SITES.length).toBe(47);
     expect(FINDINGS.length).toBe(32);
     expect(report.open.length).toBe(20);
     expect(report.accepted.length).toBe(12);
     expect(SITES.filter((s) => s.verdict === "FIELD").length).toBe(9);
-    expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(4);
+    expect(SITES.filter((s) => s.verdict === "LEVEL_SOLE").length).toBe(6);
     expect(SITES.filter((s) => s.verdict === "LEVEL_SHARED").length).toBe(15);
     expect(SITES.filter((s) => s.verdict === "NONE").length).toBe(17);
   });

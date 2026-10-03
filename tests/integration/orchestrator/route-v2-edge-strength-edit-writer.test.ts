@@ -538,9 +538,30 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       provenance: { source: 'cee_hypothesis', reviewed_by_user: { intent: 'confirm' } },
       provenance_display: 'ai_inferred',
     });
-    expect(body.assistant_text).toContain('Confirmed the current strength');
-    expect(body.assistant_text).toContain('as your judgement');
+    // R3 5942069984: the stored link is Olumi's (cee_hypothesis, no sizing marker) — the receipt claims no authorship.
+    expect(body.assistant_text).toContain('Confirmed the current strength of the link between Demand and Growth.');
+    expect(body.assistant_text).not.toContain('your judgement');
     expect(body.assistant_text).not.toContain('Adjusted');
+  });
+
+  it('CONTROL (R3 5942069984): a USER-sized link confirmed → the receipt keeps "as your judgement" (the stored link is theirs)', async () => {
+    const graph = buildPersistedGraph();
+    graph.edges[0]!.strength.mean = 0;
+    graph.edges[0]!.effect_direction = 'negative';
+    (graph.edges[0] as Record<string, unknown>).provenance = { source: 'user_specified', reasoning: 'Initial hypothesis' };
+    persisted = graph;
+    const beforeHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    readRecentMock.mockResolvedValueOnce([{ id: 'prior-run-row' }]);
+    readFactsForMock.mockResolvedValueOnce([successfulRunFact(beforeHash)]);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(validEvent({ magnitude: 0, direction_intent: 'preserve', expected: { mean: 0, effect_direction: 'negative' }, intent: 'confirm_current' }), '94'),
+    });
+    expect(response.statusCode, response.body.slice(0, 400)).toBe(200);
+    expect(committedEdge()).toMatchObject({ provenance: { source: 'user_specified', reviewed_by_user: { intent: 'confirm' } } });
+    expect((JSON.parse(response.body) as { assistant_text: string }).assistant_text)
+      .toContain('Confirmed the current strength of the link between Demand and Growth as your judgement.');
   });
 
   it('refuses an unchanged set without graph, fact, or provenance write and carries prior pending canonically', async () => {
@@ -1274,7 +1295,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Demand changes Growth.");
       expect(committedEdge()).toMatchObject({
         strength: { mean: -0.4, std: 0.1 },
         // L4 (DL 5929790081): Olumi's default, approved, is sized as Olumi's estimate — authorship kept.
@@ -1320,8 +1341,11 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
      */
     // R11: the band's spread is still stored (A6e) and the band recorded in the review; every authorship byte is KEPT.
     // Before R11 this row pinned `user_specified`, `defaulted` → `exists_defaulted`, and the reasoning dropped.
-    it('⭐ A6e × R11: the Agent\'s band confirm keeps the mean, stores the band\'s spread, keeps every authorship byte — and the post-commit receipt guard admits it', async () => {
+    // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): this row used to pin the Agent's band confirm storing the
+    // band's spread. A no-change confirm keeps the whole strength byte-equal; the band is recorded in the review only.
+    it('⭐ A6e × R11 × #2473: the Agent\'s band confirm keeps the WHOLE strength, keeps every authorship byte, records the band — and the post-commit receipt guard admits it', async () => {
       persisted = withDefaultedEdges();
+      const strengthBefore = structuredClone(edgeOf(persisted, 'f-demand', 'g-growth')!.strength);
       const response = await runWithStatedLinkBand(
         { scenarioId: SCENARIO_ID, proposalId: 'p-route-a6e', from: 'f-demand', to: 'g-growth', band: 'strong' },
         // ⚠ AWAITED INSIDE the scope, as production's `dispatchFor` does: `app.inject()` returns a lazy thenable
@@ -1341,9 +1365,11 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode, response.body).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Demand changes Growth.");
+      expect(committedEdge()?.strength).toStrictEqual(strengthBefore);
+      expect((committedEdge()?.strength as { std: number }).std).not.toBe(edgeBandStd('strong'));
       expect(committedEdge()).toMatchObject({
-        strength: { mean: -0.4, std: edgeBandStd('strong') },
+        strength: { mean: -0.4 },
         effect_direction: 'negative',
         exists_probability: 0.9,
         defaulted: true,
@@ -1354,7 +1380,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
         },
       });
       expect(committedEdge()).not.toHaveProperty('exists_defaulted');
-      expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).toMatchObject({ defaulted: true, strength: { std: edgeBandStd('strong') } });
+      expect(edgeOf(body.draft_graph, 'f-demand', 'g-growth')).toMatchObject({ defaulted: true, strength: strengthBefore });
       // R11: flags kept exactly — none was present, none is added.
       expect(committedEdge()).not.toHaveProperty('std_defaulted');
     });
@@ -1490,7 +1516,7 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
 
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body.assistant_text).toContain('Confirmed the current strength');
+      expect(body.assistant_text).toContain("You accepted Olumi's estimate for how much Pro plan price changes Monthly churn.");
       const committed = edgeOf(lastAppend().graph, FROM, TO);
       const receipt = edgeOf(body.draft_graph, FROM, TO);
       for (const [where, edge] of [['commit', committed], ['receipt', receipt]] as const) {
@@ -1620,8 +1646,12 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(JSON.parse(response.body)).not.toHaveProperty('draft_graph');
     });
 
-    it('⭐ a band CONFIRM: mean kept, std becomes the band’s, the analysis hash moves, and the receipt guard admits it', async () => {
+    // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): the canvas pill's typed band on a confirm used to move std
+    // to the band's spread and the analysis hash with it. A no-change confirm is byte-equal through every door.
+    it('⭐ #2473: a band CONFIRM keeps the whole strength, the analysis hash does NOT move, and the receipt guard admits it', async () => {
       const beforeHash = computeAnalysisAffectingGraphHash(persisted as never);
+      const strengthBefore = structuredClone(((persisted as { edges: Array<Record<string, unknown>> }).edges
+        .find((e) => e.from === 'f-demand' && e.to === 'g-growth')!).strength);
       const response = await app.inject({
         method: 'POST',
         url: '/orchestrate/v2/turn',
@@ -1634,9 +1664,10 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
       expect(response.statusCode, response.body).toBe(200);
       const body = JSON.parse(response.body) as Record<string, unknown>;
       expect(body.assistant_text).toContain('Confirmed the current strength');
-      expect(committedEdge()).toMatchObject({ strength: { mean: -0.4, std: edgeBandStd('strong') }, effect_direction: 'negative' });
+      expect(committedEdge()?.strength).toStrictEqual(strengthBefore);
+      expect(committedEdge()).toMatchObject({ strength: { mean: -0.4 }, effect_direction: 'negative' });
       expect(committedEdge()).not.toHaveProperty('std_defaulted');
-      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).not.toBe(beforeHash);
+      expect(computeAnalysisAffectingGraphHash(lastAppend().graph as never)).toBe(beforeHash);
     });
   });
 
@@ -1744,5 +1775,112 @@ describe('R3-9 × AIQ 5867435409 (1) at the ROUTE: the canvas edit reads the DUR
     expect(String(body.assistant_text)).toMatch(/This link is defined by Growth = Demand × Price/);
     expect(appendMock.mock.calls.every((c) => (c[0] as { handler_id?: unknown }).handler_id !== 'adjust_edge_strength')).toBe(true);
     expect(JSON.stringify(persisted)).toBe(before);
+  });
+});
+
+/**
+ * ⭐ M1 ACCEPT RECEIPT AT THE AGENT CARD (R3 5942069984; DL 5942097719; Codex pre-review P1 on 63892196): the Agent's
+ * own propose → authorise, dispatched into the REAL route and link writer. Whose figure the approval says is read off the
+ * STORED link after the write (`linkSizing`), never off the card: a confirm is review (R11), so Olumi's estimate lands
+ * `olumi_accepted` and the user reads RC's accept sentence — the same one the system-event receipt says.
+ */
+describe('M1 Accept receipt at the Agent card: whose figure is read off the stored link', () => {
+  let app: FastifyInstance;
+  let createAgentCapabilities: typeof import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js').createAgentCapabilities;
+  let ProposalStore: typeof import('../../../src/orchestrator-v5/agent-lane/proposal.js').ProposalStore;
+  let linkSizing: typeof import('../../../src/cee/magnitude/link-sizing.js').linkSizing;
+  let acceptedOlumiEstimateSentence: typeof import('../../../src/orchestrator-v5/agent-lane/rerun-explanation.js').acceptedOlumiEstimateSentence;
+  let withoutAgentDirections: typeof import('../../../src/orchestrator-v5/agent-lane/write-outcome.js').withoutAgentDirections;
+  beforeAll(async () => {
+    app = Fastify(); await ceeOrchestratorRouteV2(app); await app.ready();
+    ({ createAgentCapabilities } = await import('../../../src/orchestrator-v5/agent-lane/runtime/agent-capabilities.js'));
+    ({ ProposalStore } = await import('../../../src/orchestrator-v5/agent-lane/proposal.js'));
+    ({ linkSizing } = await import('../../../src/cee/magnitude/link-sizing.js'));
+    ({ acceptedOlumiEstimateSentence } = await import('../../../src/orchestrator-v5/agent-lane/rerun-explanation.js'));
+    ({ withoutAgentDirections } = await import('../../../src/orchestrator-v5/agent-lane/write-outcome.js'));
+  });
+  afterAll(async () => { await app.close(); });
+
+  const FROM = 'price_sensitivity';
+  const TO = 'monthly_churn';
+  // Codex's probe link: μ 0.85, σ 0.3 — "very strong" on CEE's cuts.
+  const graphWithLink = (provenance: Record<string, unknown>, labels: readonly [string, string] = ['Price sensitivity', 'Monthly churn']) => {
+    const g = buildPersistedGraph() as { nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] };
+    g.nodes.push({ id: FROM, kind: 'factor', label: labels[0] }, { id: TO, kind: 'factor', label: labels[1] });
+    g.edges.push({ from: FROM, to: TO, strength: { mean: 0.85, std: 0.3 }, exists_probability: 0.9, effect_direction: 'positive', provenance });
+    return g;
+  };
+  const storedLink = () => ((persisted as { edges: Record<string, unknown>[] }).edges).find((e) => e.from === FROM && e.to === TO);
+  const SAYS = 'Record that link as very strong, as my own estimate.';
+  /** What the one-click path SHOWS: `follow_up` through the route's boundary (`agent-v1-turn.ts` → `withoutAgentDirections`). */
+  const shown = (followUp: unknown) => withoutAgentDirections(String(followUp));
+
+  beforeEach(() => {
+    graphCasRpcEnforce = true;
+    commitReceiptState.mode = 'normal';
+    appendMock.mockReset();
+    appendMock.mockResolvedValue({ id: 'mock-row-id' });
+    loadGraphMock.mockReset();
+    loadGraphMock.mockImplementation(async () => persisted);
+    readMostRecentPendingActionsMock.mockReset();
+    readMostRecentPendingActionsMock.mockResolvedValue([]);
+    readRecentMock.mockReset();
+    readRecentMock.mockResolvedValue([]);
+    readFactsForMock.mockReset();
+    readFactsForMock.mockResolvedValue([]);
+    readScenarioRunAnalysisFactsForMock.mockReset();
+    readScenarioRunAnalysisFactsForMock.mockResolvedValue({ facts: [], total_count: 0 });
+  });
+
+  /** The Agent's own dispatch, wired to the real route; the committed graph becomes the stored one the read-back reads. */
+  const approveOnTheCard = async (labels: readonly [string, string] = ['Price sensitivity', 'Monthly churn']) => {
+    const dispatch = async (path: string, body: unknown) => {
+      if (path.endsWith('/graph')) return { status: 200, json: { graph: persisted, graph_hash: computeAnalysisAffectingGraphHash(persisted as never) } };
+      const calls = appendMock.mock.calls.length;
+      const res = await app.inject({ method: 'POST', url: path, payload: body as Record<string, unknown> });
+      if (appendMock.mock.calls.length > calls && lastAppend().graph !== undefined) persisted = lastAppend().graph;
+      return { status: res.statusCode, json: JSON.parse(res.body) as Record<string, unknown> };
+    };
+    const caps = createAgentCapabilities(dispatch as never, new ProposalStore());
+    const ctx = { scenario_id: SCENARIO_ID, authenticated_user_id: null, request_id: 'r', user_text: SAYS, user_turn_text: SAYS };
+    const p = await caps.proposeLinkStrength!(ctx, { from_label: labels[0], to_label: labels[1], strength: 'very strong', rationale: 'x' });
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: true, link: { keeps_current_strength: true } });
+    const r = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, applied: true });
+    expect(lastAppend().handler_id).toBe('adjust_edge_strength');
+    return { p, r };
+  };
+
+  it('⭐ RED: Olumi\'s estimate confirmed on the card → stored olumi_accepted → the user reads RC\'s accept sentence, never "your own estimate"', async () => {
+    persisted = graphWithLink({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' });
+    const { p, r } = await approveOnTheCard();
+    expect(String(p.public_label)).not.toContain('your own');
+    expect(String(p.note)).toContain('never the user’s own');
+    expect(linkSizing(storedLink())).toBe('olumi_accepted');
+    expect(r.follow_up).toBe(acceptedOlumiEstimateSentence('"Price sensitivity"', '"Monthly churn"'));
+    expect(r.follow_up).toBe('You accepted Olumi\'s estimate for how much "Price sensitivity" changes "Monthly churn".');
+    expect(shown(r.follow_up)).toEqual({ text: r.follow_up, dropped: [] });
+    expect(String(r.note)).toMatch(/^Recorded as the user’s review: the strength stays Olumi’s estimate/);
+  });
+
+  it('CONTROL: the user\'s OWN link confirmed on the same card → stored user → "as your own estimate" is kept', async () => {
+    persisted = graphWithLink({ source: 'user_specified' });
+    const { p, r } = await approveOnTheCard();
+    expect(String(p.public_label)).toContain('as very strong, as your own estimate (its strength stays as it is)');
+    expect(linkSizing(storedLink())).toBe('user');
+    expect(r.follow_up).toBe('Recorded "Price sensitivity" → "Monthly churn" as very strong, as your own estimate (its strength stays as it is).');
+    expect(String(r.note)).toMatch(/^Recorded as the user’s own estimate\./);
+  });
+
+  it.each([
+    [['Size of the user base', 'cost_per_hire'], 'You accepted Olumi\'s estimate for how much "Size of the user base" changes "cost_per_hire".'],
+    // Codex pre-review 3 P2: a label holding its own straight quotes is held aside whole (curly quotes).
+    [['Size of "the user" base', 'cost_per_hire'], 'You accepted Olumi\'s estimate for how much “Size of "the user" base” changes "cost_per_hire".'],
+  ] as const)('⭐ RED (Codex pre-reviews 2+3 P2): labels %j that read as the user or a code — the accept sentence is SHOWN whole', async (labels, sentence) => {
+    persisted = graphWithLink({ source: 'cee_hypothesis', magnitude: 'olumi_estimate' }, labels);
+    const { r } = await approveOnTheCard(labels);
+    expect(linkSizing(storedLink())).toBe('olumi_accepted');
+    expect(r.follow_up).toBe(sentence);
+    expect(shown(r.follow_up)).toEqual({ text: r.follow_up, dropped: [] });
   });
 });

@@ -1,3 +1,4 @@
+import { explainRun, explanationContext } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ PAUL'S RULING, ON THE AGENT'S OWN PERMISSION (programme-docs#38 5576895511, 7 Sep: "caveat, not
  * withhold"). A run that SEPARATES its options, is entitled, and whose admission is `quantified_provisional`
@@ -73,10 +74,10 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: 'h1',
       blocks: [{ type: 'analysis_result', data: { marker: 'the-run' } }],
-      analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: true, separation: 'separated' } },
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: true, separation: 'separated' } },
       analysis_ready: { status: 'ready', options: [], blockers: [], analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional' } } }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Growth' }], edges: [] }, graph_hash: 'h1',
-      analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: true, separation: 'separated' } } }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Growth' }], edges: [] }, graph_hash: 'h1', analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } }, analysis_ready: { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional' } },
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: true, separation: 'separated' } } }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
@@ -84,12 +85,11 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
 
   it('RED: the explicit Run\u2019s interpreting call carries the provisional wording rule', async () => {
     bodies = [];
-    await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
+    await explainRun(app, '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } }));
     expect(bodies).toHaveLength(1);
     expect(String(bodies[0]!['instructions'])).toContain(PROVISIONAL_RULE);
     // …and the run it interprets carries the provisional permission, read from the run's own verdict.
-    const out = (bodies[0]!['input'] as { type?: string; output?: string }[]).find((i) => i.type === 'function_call_output');
-    const run = JSON.parse(String(out?.output ?? '{}')) as { claim_permissions?: { leader_may_be_named?: boolean; provisional?: true } };
+    const run = explanationContext(bodies[0]!['input']) as { claim_permissions?: { leader_may_be_named?: boolean; provisional?: true } };
     expect(run.claim_permissions).toMatchObject({ leader_may_be_named: true, provisional: true });
   });
 
@@ -98,7 +98,7 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
     // (measured 2/4 "no option can be put forward"). Writing "When … not true" instead let a WITHHELD run name the
     // separated option (3/4, blind-labelled). This order measured 0/4 and 0/4 (provisional-clause/labels-1900.json).
     bodies = [];
-    await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } });
+    await explainRun(app, '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: '6b2d8f3a-1c4e-4f5a-9b7c-2d3e4f5a6b7c', message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' } } }));
     const sent = String(bodies[0]!['instructions']);
     const anchor = 'never name a leader from it.';
     expect(sent.slice(sent.indexOf(anchor) + anchor.length).trimStart().startsWith('Otherwise do not name, rank or hint at one'), 'Otherwise binds to the permission').toBe(true);

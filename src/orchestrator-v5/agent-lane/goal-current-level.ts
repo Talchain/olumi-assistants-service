@@ -59,10 +59,10 @@ import { admitStatedGoalLevel, admitStatedGoalLevelOnScale } from './admit-model
 import { readHeldGoalComparator } from '../goal-target/goal-direction.js';
 import { retireNormalisingGoalFrame } from './normalising-goal-frame.js';
 import { figureTheUserWrote } from './stated-by-user.js';
-import { isAmountStatedInBrief } from '../../cee/provenance/stated-amounts.js';
+import { isAmountStatedInBrief, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
 import { canonicaliseLimitUnit } from './admit-constraint.js';
-import { unitPhraseFamily, unitPhraseHead, unitPhraseTail, unitsConflict } from './unit-conflict.js';
-import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { unitPhraseFamily, unitPhraseHead, unitPhraseTail } from './unit-conflict.js';
+import { ratePeriodOf, unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { createProposal, type ProposalOperation, type ProposalStore, type ReceiptSummary, type StructuredProposal } from './proposal.js';
 import { registrationTurnId } from '../graph-registration/registration-identity.js';
@@ -71,6 +71,11 @@ import type { AgentToolContext, ToolResult } from './runtime/agent-tools.js';
 import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
+import { isUnnamedCurrencyUnit, unitAlreadyOnGoal, unitNamingCurrency } from './unnamed-currency.js';
+import { scopeOf, identityConflictsWithScope, scopeSourcesAreUserWords, goalScopeCheck, scopeCanRecord, SCOPE_APPROVE_PREFIX } from './goal-scope.js';
+import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWithdrawalReading } from '../system-events/identity-confirm-edit.js';
+import { goalScopeMeaning } from '../../schemas/goal-scope.js';
+import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -79,6 +84,8 @@ export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
 const OPERATOR_OF: Readonly<Record<string, string>> = { at_least: '>=', above: '>', at_most: '<=', below: '<' };
 
 export interface GoalCurrentLevelArgs {
+  readonly goal_scope?: unknown;
+  readonly reconciliation_key?: string;
   readonly goal_label?: unknown;
   readonly value?: unknown;
   readonly unit?: unknown;
@@ -287,17 +294,28 @@ function sameUnitPhrase(stated: string, goalUnit: string): boolean {
  *      The accepted suffixes are therefore exactly the M-rung's; anything else falls to rung 3.
  *   3. FAIL CLOSED: no unit, or one no classifier reads ("subscribers", "$k"), is refused and the user is asked
  *      for the figure in the goal's own unit — the headline goal-fit number is never fed by an unclassified figure.
- *   4. Another kind of unit ("%", "users") is refused (`unitsConflict`).
+ *   4. Another kind of unit ("%", "users") is refused (`unitsConflict`'s rule, on the families read as below).
  *   5. Another currency is refused: both heads must be ONE currency (`sameUnit`: £ ≡ GBP). No rate is applied.
  *   6. Another measure or unit of the same kind is refused ("GBP ARR" or "GBP per year" for "GBP MRR", "weeks"
  *      for "months", "pp" for "%"): `sameUnitPhrase`.
+ *
+ * ⛔ CEE #2468 CHANGES_REQUIRED (CODEX_CLI_OVERFLOW @ f1eda736, P1): typed "¥ per year" for "¥100,000" was stored as the
+ * goal's ¥/quarter. The family classifier (`unitPhraseFamily`, the routing table: £ $ € and three codes) reads no family
+ * for "¥", so rung 1 fell open. Two rules close it, each typed, neither a word read:
+ *   · MONEY IS ALSO READ BY THE ONE SHARED ALPHABET (`readCurrencyUnitWithQualifiers` over `CURRENCY_SYMBOL_TO_CODE`: ¥ ₹ A$
+ *     C$ NZ$ CHF kr too) wherever the routing table reads nothing, so a goal in any currency the estate knows never reaches
+ *     rung 1's open door, and a figure for it with no unit, or one nobody reads, is refused (rung 3). A stated unit carrying
+ *     a magnitude letter the M-rung did not scale ("$k") stays unread, as before.
+ *   · A TYPED PERIOD IS THE GOAL'S OWN, before any other rung: when the stated unit is a rate over a period ("¥ per year",
+ *     "customers/month"; `ratePeriodOf`, the closed table `unitComparisonKey` folds with), the goal's unit must be per the
+ *     SAME period. A unit with no period ("£") is not a period claim and is read by the rungs above as before.
  */
 export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { readonly label: string; readonly unit: string | undefined }): StatedLevel {
   const stated = typeof statedUnit === 'string' ? statedUnit.trim() : '';
   if (goal.unit === undefined) return { ok: true, raw: value };
-  const goalFamily = unitPhraseFamily(goal.unit);
+  const goalFamily = unitPhraseFamily(goal.unit) ?? (moneyInAlphabet(goal.unit) ? 'currency' : null);
   const goalHead = unitPhraseHead(goal.unit) ?? '';
-  const statedFamily = unitPhraseFamily(stated);
+  const statedFamily = unitPhraseFamily(stated) ?? (moneyInAlphabet(stated) ? 'currency' : null);
 
   const askInstead =
     `Nothing was prepared; ask the user for the current level of "${goal.label}" in ${goal.unit}, written out in full.`;
@@ -307,6 +325,15 @@ export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { 
       'A figure given for something else is never recorded as the goal’s current level. Nothing was prepared; ask ' +
       `the user for the current level of "${goal.label}" itself.`,
   };
+  const anotherMeasure: StatedLevel = {
+    ok: false, refusal: 'unit_mismatch',
+    detail: `${value} ${stated} is not in ${goal.unit}, the unit "${goal.label}" is measured in, and nothing is ` +
+      'converted. If this figure IS the user’s current level of the goal, pass it in the goal’s own unit; if it is ' +
+      `another measure or period, it is never recorded as the goal's current level. ${askInstead}`,
+  };
+
+  const statedPeriod = ratePeriodOf(stated);
+  if (statedPeriod !== null && statedPeriod !== ratePeriodOf(goal.unit)) return anotherMeasure;
 
   if (goalFamily === null) return statedFamily !== null ? anotherKind : { ok: true, raw: value };
 
@@ -329,7 +356,7 @@ export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { 
         `so ${value} ${stated} is never recorded as its current level. ${askInstead}`,
     };
   }
-  if (unitsConflict(stated, goal.unit) !== null) return anotherKind;
+  if (statedFamily !== goalFamily) return anotherKind;
   if (goalFamily === 'currency' && !sameUnit(unitPhraseHead(stated) ?? '', goalHead)) {
     return {
       ok: false, refusal: 'unit_mismatch',
@@ -337,15 +364,17 @@ export function readStatedGoalLevel(value: number, statedUnit: unknown, goal: { 
         `exchange rate is ever applied, so it is never recorded as the goal's current level. ${askInstead}`,
     };
   }
-  if (!sameUnitPhrase(stated, goal.unit)) {
-    return {
-      ok: false, refusal: 'unit_mismatch',
-      detail: `${value} ${stated} is not in ${goal.unit}, the unit "${goal.label}" is measured in, and nothing is ` +
-        'converted. If this figure IS the user’s current level of the goal, pass it in the goal’s own unit; if it is ' +
-        `another measure or period, it is never recorded as the goal's current level. ${askInstead}`,
-    };
-  }
+  if (!sameUnitPhrase(stated, goal.unit)) return anotherMeasure;
   return { ok: true, raw: value };
+}
+
+/**
+ * Whether the ONE shared currency alphabet reads `unit` as money at its own scale (`readCurrencyUnitWithQualifiers`):
+ * "¥", "¥ per year", "CHF/quarter", "GBP MRR". A magnitude letter ("$k", "£bn") is the M-rung's to scale, never read here.
+ */
+function moneyInAlphabet(unit: string): boolean {
+  const reading = readCurrencyUnitWithQualifiers(unit);
+  return reading.kind === 'currency' && reading.multiplier === 1;
 }
 
 function goalLevelOf(op: ProposalOperation | undefined): GoalObservedState | undefined {
@@ -410,6 +439,94 @@ export function statedGoalLevelInUsersWords(
     };
   }
   return { ok: true, raw, statedUnit, ...(stated.normalised !== undefined ? { normalised: stated.normalised } : {}), quote: writtenIn(userText ?? '', raw)?.quote ?? null };
+}
+
+/**
+ * ⭐ THE UNIT TODAY'S LEVEL IS RECORDED IN, WHEN THE GOAL'S UNIT NAMES NO CURRENCY (R3 F5 D1, #85 5934208404; served CEE
+ * `2166aa0b`, guest 6bc6cae6; owner ruling MG; DL 380e54 (1)–(4)).
+ *
+ * The brief named no currency, so the drafter copied its own schema placeholder and the goal held "currency/quarter"
+ * (`unnamed-currency.ts`). Every spelling of the user's "£100,000" was then "a different kind of unit" (`unitPhraseFamily`
+ * reads no family for "currency"), and the goal's own unit failed the words rule (`isAmountStatedInBrief` never lets a £
+ * amount ground the unread unit "currency") — three refusals, no card. The placeholder is OUR token, never the user's: the
+ * goal's unit is money with its currency ABSENT, so:
+ *   · the currency comes ONLY from the level card's TYPED `unit` (DL (1)): ONE currency, read by the estate's strict reader
+ *     (`readCurrencyUnitWithQualifiers`: "£", "GBP", "£ per quarter", "£k"; never "pounds", "GBP widgets", "£ and $").
+ *     The user's text is never scanned for one here; the level door's own words rule, run next on the ADOPTED unit,
+ *     refuses a currency the user did not write ("$" for their "£100,000");
+ *   · the level is then read exactly as in a goal already named in that currency, the placeholder head replaced and the
+ *     stored tail kept byte for byte ("currency/quarter" + "£" → "£/quarter", DL (3)): the same M-rung, the same period
+ *     rule ("£ per year" is refused for "/quarter"), nothing converted;
+ *   · no unit → `unit_unstated`; another kind ("%") → `unit_mismatch`; a unit naming no one currency (the goal's own
+ *     "currency/quarter" included) → `unit_unrecognised` — a figure is never assumed to be in a currency.
+ * A goal whose unit names its currency is untouched (DL (4): "GBP per quarter" + "$" is still refused by the rule above).
+ *
+ * ⛔ CEE #2468 CHANGES_REQUIRED (CODEX_CLI_OVERFLOW @ f1eda736; DL note to MG: keep it narrow):
+ *   · P1 — A UNIT THE GOAL ALREADY HOLDS IS NEVER REPLACED. A level in "USD/quarter" beside the target's "currency/quarter"
+ *     was overwritten, with the target's unit, by "£/quarter" on a card that said no currency was set. Any unit on the goal
+ *     other than our placeholder (its level's, or a limit row's on it: `unitAlreadyOnGoal`) refuses the card
+ *     (`currency_already_named`), here and again at apply.
+ *   · P2 — ONLY THE TEMPLATE'S OWN FORMS TAKE A CURRENCY: "currency/<period>" and "<currency>/<period>", the period one the
+ *     estate folds (`unitNamingCurrency`). Any other unnamed-currency unit ("currency (USD)/quarter", "currency per year per
+ *     quarter", a bare "currency", an unfilled "<period>") refuses the card (`unit_unrecognised`), never adopts.
+ */
+export function levelUnitForGoal(
+  value: number,
+  statedUnitArg: unknown,
+  goal: { readonly label: string; readonly unit: string | undefined; readonly heldUnit?: string | null },
+):
+  | { readonly ok: true; readonly unit: string | undefined; readonly adopted: boolean }
+  | { readonly ok: false; readonly refusal: 'unit_unstated' | 'unit_mismatch' | 'unit_unrecognised' | 'currency_already_named'; readonly detail: string } {
+  if (goal.unit === undefined || !isUnnamedCurrencyUnit(goal.unit)) return { ok: true, unit: goal.unit, adopted: false };
+  const stated = typeof statedUnitArg === 'string' ? statedUnitArg.trim() : '';
+  if (typeof goal.heldUnit === 'string') {
+    return {
+      ok: false, refusal: 'currency_already_named',
+      detail: `"${goal.label}" already holds a figure in ${goal.heldUnit}, so the unit it is measured in is never replaced by ` +
+        `a level card. Nothing was prepared. Say plainly that today's level of "${goal.label}" could not be recorded in ` +
+        'another unit, and never record it as if no currency were set.',
+    };
+  }
+  const money = `"${goal.label}" is an amount of money (${goal.unit}) whose currency the model has not named`;
+  const ask = 'Nothing was prepared; pass the figure with the currency the user wrote it in (for example "£" or "GBP"), ' +
+    `or ask the user for today's figure for "${goal.label}" with its currency.`;
+  if (stated === '') {
+    return { ok: false, refusal: 'unit_unstated', detail: `${value} was given with no unit, and ${money}. A figure is never assumed to be in a currency. ${ask}` };
+  }
+  const reading = readCurrencyUnitWithQualifiers(stated);
+  const named = reading.kind === 'currency' ? (reading.currencyDisplay ?? reading.currencyCode) : undefined;
+  if (named !== undefined) {
+    const adopted = unitNamingCurrency(goal.unit, named);
+    if (adopted !== null) return { ok: true, unit: adopted, adopted: true };
+    return {
+      ok: false, refusal: 'unit_unrecognised',
+      detail: `${money}, and its unit is not one a currency can be named in, so ${value} ${stated} is never recorded as its ` +
+        `current level. Nothing was prepared. Say plainly that the unit of "${goal.label}" has to be set before today's ` +
+        'level can be recorded.',
+    };
+  }
+  const family = unitPhraseFamily(stated);
+  if (family !== null && family !== 'currency') {
+    return {
+      ok: false, refusal: 'unit_mismatch',
+      detail: `${value} ${stated} is in a different kind of unit from "${goal.label}", which is an amount of money (${goal.unit}). ` +
+        'A figure given for something else is never recorded as the goal’s current level. Nothing was prepared; ask the user ' +
+        `for the current level of "${goal.label}" itself.`,
+    };
+  }
+  return { ok: false, refusal: 'unit_unrecognised', detail: `"${stated}" names no one currency, and ${money}, so ${value} ${stated} is never recorded as its current level. ${ask}` };
+}
+
+/** The card's clause for an adopted unit: the unit, naming its currency, the goal is measured in from this approval on. */
+function sayAdoptedUnit(goalLabel: string, adopted: string | undefined): string {
+  return adopted === undefined ? '' : `, and measure "${goalLabel}" in ${adopted} (no currency was set for it before)`;
+}
+
+/** The Agent's instruction for an adopted unit: say it, as part of what the approval changes. */
+function noteAdoptedUnit(goalLabel: string, stored: string | undefined, adopted: string | undefined): string {
+  return adopted === undefined ? ''
+    : `. "${goalLabel}" had no currency set (its unit was ${String(stored)}): say plainly that this approval also measures it in ` +
+      `${adopted}, the currency the user wrote`;
 }
 
 /**
@@ -480,7 +597,13 @@ export async function proposeGoalCurrentLevel(
       'one to show. Nothing was prepared. Ask the user what level they are aiming for first.',
     );
   }
-  const goalUnit = typeof node.goal_threshold_unit === 'string' && node.goal_threshold_unit.trim() !== '' ? node.goal_threshold_unit : undefined;
+  const storedUnit = typeof node.goal_threshold_unit === 'string' && node.goal_threshold_unit.trim() !== '' ? node.goal_threshold_unit : undefined;
+  // ── A GOAL WHOSE UNIT NAMES NO CURRENCY TAKES THE ONE THE TYPED UNIT NAMES (`levelUnitForGoal`); every other goal keeps
+  // its own unit. From here `goalUnit` is the unit the level is read, said and written in.
+  const forLevel = levelUnitForGoal(value, args?.unit, { label: goal.label, unit: storedUnit, heldUnit: unitAlreadyOnGoal(goal, g.raw, storedUnit) });
+  if (!forLevel.ok) return refuse(forLevel.refusal, forLevel.detail);
+  const goalUnit = forLevel.unit;
+  const adoptedUnit = forLevel.adopted ? forLevel.unit : undefined;
 
   // ── IN THE GOAL'S OWN UNIT, AND IN THE USER'S OWN WORDS? One rule, shared with the target card (`statedGoalLevelInUsersWords`).
   const inWords = statedGoalLevelInUsersWords(value, args?.unit, { label: goal.label, unit: goalUnit }, ctx.user_text);
@@ -488,8 +611,8 @@ export async function proposeGoalCurrentLevel(
   const stated = inWords;
   const raw = inWords.raw;
   const statedUnit = inWords.statedUnit;
-
-  if (isChange) return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit);
+  if (isChange && args.goal_scope !== undefined) return refuse('scope_frame_unresolved', 'Clarify the level of the total goal before recording its scope. Nothing was prepared.');
+  if (isChange) return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit, adoptedUnit, storedUnit);
 
   let normalisedLevel: number;
   let levelCap: number;
@@ -537,7 +660,7 @@ export async function proposeGoalCurrentLevel(
 
   const existing = goal.observed_state;
   const existingRaw = num(existing?.raw_value) ? existing!.raw_value as number : undefined;
-  if (existingRaw === raw && existing?.source === USER_EDIT_SOURCE) {
+  if (args.goal_scope === undefined && existingRaw === raw && existing?.source === USER_EDIT_SOURCE) {
     return refuse('already_recorded', `${sayFigureExactly(raw, goalUnit ?? '') ?? `${raw}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`} is already recorded as the user’s current level of "${goal.label}". Nothing to change.`);
   }
   const observed: GoalObservedState = {
@@ -553,30 +676,53 @@ export async function proposeGoalCurrentLevel(
   const withUnit = (x: number) => sayFigureExactly(x, goalUnit ?? '') ?? `${x}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`;
   // ⛔ THE USER'S OWN FIGURE AND UNIT, as they gave it — never relabelled in the goal's unit — plus, when a stated
   // suffix was scaled, what it is recorded as. The target and a replaced record are the goal's own, in its unit.
-  const asStated = sayFigureExactly(value, statedUnit) ?? `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
+  // ⭐ THE CARD SHOWS THE PERIOD IT RECORDS (DL 380e54 ruling on #2468): a bare "£" on a goal per quarter is RECORDED per
+  // quarter, so the card says "£100,000 per quarter" — the user sees the reading before confirming. That confirm is the
+  // structural control for a figure the user meant monthly (never read from their words: a word read is banned).
+  const shownUnit = statedUnit !== '' && ratePeriodOf(statedUnit) === null && ratePeriodOf(goalUnit) !== null
+    ? `${statedUnit} per ${ratePeriodOf(goalUnit)}` : statedUnit;
+  const asStated = sayFigureExactly(value, shownUnit) ?? `${value}${shownUnit !== '' ? ` ${shownUnit}` : ''}`;
   const figure = stated.normalised !== undefined ? `${asStated}, which is ${withUnit(raw)}` : asStated;
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   // Carried INSIDE the goal's one op, so this stays one goal-level proposal with one write.
-  const rederived = rederivedEstimatedPart(g.nodes, goal.id, raw);
+  const scope = args.goal_scope === undefined ? undefined : scopeOf(args.goal_scope);
+  if (args.goal_scope !== undefined && (!scope || !scopeSourcesAreUserWords(scope, ctx.user_text ?? '', scopeOf((goal as Record<string, unknown>).goal_scope)))) {
+    return refuse('scope_not_grounded', 'The scope is not bound to the user’s stated words. Nothing was prepared.');
+  }
+  if (scope && !scopeCanRecord(scope, goalScopeCheck(g.raw, goal.id, scope, { value: raw, unit: goalUnit ?? '', source: scope.source }))) return refuse('goal_scope_unresolved', 'Resolve the goal scope and its factor references before approving this reading. Nothing was prepared.');
+  const withdrawal = scope ? identityWithdrawalFor(goal as Record<string, unknown>, scope) : undefined;
+  if (!scope && identityConflictsWithScope(goal as Record<string, unknown>)) return refuse('goal_scope_unresolved', 'Resolve the goal’s scope before changing its current level. Nothing was prepared.');
+  const rederived = withdrawal ? null : rederivedEstimatedPart(g.nodes, goal.id, raw);
+  // A figure recorded BEFORE this card is said, and matched on other nodes, in the unit it was recorded in (the stored one).
+  const withStoredUnit = (x: number) => sayFigureExactly(x, storedUnit ?? '') ?? `${x}${storedUnit !== undefined ? ` ${storedUnit}` : ''}`;
   const earlierHeld = replaces === undefined ? null
-    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, goalUnit), withUnit(replaces));
+    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, storedUnit), withStoredUnit(replaces));
   const proposal = createProposal({
     scenario_id: ctx.scenario_id,
     user_id: ctx.authenticated_user_id,
     base_graph_identity_hash: g.graph_hash,
     operations: [{
       op: GOAL_CURRENT_LEVEL_OP, path: goal.id,
-      value: { goal_current_level: observed, against: targetOf(node), ...(rederived !== null ? { rederived_part: rederived } : {}) },
+      value: {
+        goal_current_level: observed, against: targetOf(node),
+        ...(scope ? { goal_scope: scope, reconciliation_key: args.reconciliation_key } : {}),
+        ...(withdrawal ? { identity_withdrawal: withdrawal } : {}),
+        ...(rederived !== null ? { rederived_part: rederived } : {}),
+        ...(adoptedUnit !== undefined ? { adopted_unit: adoptedUnit } : {}),
+      },
     }],
     provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     // ⭐ With no target yet, the card says today's level only (DL #85 5930770727): there is no target to name.
     public_label:
       (noTargetYet ? `Record today's level of "${goal.label}" as your figure: ` : `Record the current level of "${goal.label}" as your figure: `) +
-      (replaces !== undefined ? `${sayFigureRead(replaces, goalUnit ?? '')} → ${figure}` : figure) +
+      (replaces !== undefined ? `${sayFigureRead(replaces, storedUnit ?? '')} → ${figure}` : figure) +
       (num(target) ? ` (target ${withUnit(target)})` : '') +
+      sayAdoptedUnit(goal.label, adoptedUnit) +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
-      (earlierHeld !== null ? earlierHeld.label : ''),
+      (earlierHeld !== null ? earlierHeld.label : '') +
+      (scope ? `. Goal scope: ${scope.modelled}${scope.component?.share !== undefined ? `; ${scope.component.label} contributes ${scope.component.share * 100}%` : ''}${scope.component?.count_basis ? `; count means ${scope.component.count_basis}` : ''}${scope.component ? (scope.component.basis === 'unknown' ? '; the count population and billing basis remain unresolved' : `; revenue share and rate/count are on ${scope.component.basis === 'different' ? 'different' : 'the same'} billing bases`) : ''}.` : '') +
+      (withdrawal ? ` ${withdrawal.words}` : ''),
   });
   deps.proposals.put(proposal);
   return {
@@ -606,6 +752,7 @@ export async function proposeGoalCurrentLevel(
         ? `. "${goal.label}" has no target yet: say this records where it stands today, and that the chance of reaching a ` +
           'target appears once they set one; never name a target they have not given'
         : '') +
+      noteAdoptedUnit(goal.label, storedUnit, adoptedUnit) +
       ', and call authorise_change with this proposal_id only once they agree.',
   };
 }
@@ -716,6 +863,8 @@ function changeGoalLevel(
   statedUnit: string,
   normalised: UnitNormalised | undefined,
   goalUnit: string | undefined,
+  adoptedUnit: string | undefined,
+  storedUnit: string | undefined,
 ): ToolResult {
   const cap = node.goal_threshold_cap;
   // Construction's own rule for a change goal (`admit-model.ts`, the brief's level): the frame holds both today's level
@@ -752,9 +901,15 @@ function changeGoalLevel(
   };
   const change = sayGoalChange(node.goal_threshold_frame, node.goal_threshold_raw as number, goalUnit, (x) => withUnit(x),
     (goal as { goal_direction?: unknown }).goal_direction) ?? '';
-  const asStated = sayFigureExactly(value, statedUnit) ?? `${value}${statedUnit !== '' ? ` ${statedUnit}` : ''}`;
+  // ⭐ THE CARD SHOWS THE PERIOD IT RECORDS (DL 380e54 ruling on #2468): a bare "£" on a goal per quarter is RECORDED per
+  // quarter, so the card says "£100,000 per quarter" — the user sees the reading before confirming. That confirm is the
+  // structural control for a figure the user meant monthly (never read from their words: a word read is banned).
+  const shownUnit = statedUnit !== '' && ratePeriodOf(statedUnit) === null && ratePeriodOf(goalUnit) !== null
+    ? `${statedUnit} per ${ratePeriodOf(goalUnit)}` : statedUnit;
+  const asStated = sayFigureExactly(value, shownUnit) ?? `${value}${shownUnit !== '' ? ` ${shownUnit}` : ''}`;
   const figure = normalised !== undefined ? `${asStated}, which is ${withUnit(raw)}` : asStated;
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
+  const withStoredUnit = (x: number) => sayFigureExactly(x, storedUnit ?? '') ?? `${x}${storedUnit !== undefined ? ` ${storedUnit}` : ''}`;
   const rederived = rederivedEstimatedPart(g.nodes, goal.id, raw);
   /**
    * ⭐ AIQ 5902364862: the NUMBER is now the user's; the JOIN is not. Where Olumi read the brief's figure as this goal's
@@ -778,7 +933,7 @@ function changeGoalLevel(
   // `identity_inconsistent`) — never scored silently on the old figure.
   const product = rederived === null ? productStillGives(g.nodes, goal) : null;
   const earlierHeld = replaces === undefined ? null
-    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, goalUnit), withUnit(replaces));
+    : sayEarlierFigureHeld(nodesHoldingEarlierFigure(g, goal.id, replaces, storedUnit), withStoredUnit(replaces));
   const productSaid = product === null ? '' : `"${goal.label}" is worked out as ${product.parts}, and those figures still give ` +
     `${withUnit(product.value)}, so the Run cannot use your ${withUnit(raw)} until one of them changes`;
   const proposal = createProposal({
@@ -792,14 +947,16 @@ function changeGoalLevel(
         ...(reframed !== null && reframed.cap !== cap ? { reframed_cap: reframed.cap } : {}),
         ...(prior !== undefined ? { level_reading: levelReading } : {}),
         ...(rederived !== null ? { rederived_part: rederived } : {}),
+        ...(adoptedUnit !== undefined ? { adopted_unit: adoptedUnit } : {}),
       },
     }],
     provenance: { authored_by: 'user_stated', basis: 'the current level of the goal, as the user stated it' },
     validation: { admitted: true, loss_count: 0, refusals: [] },
     public_label:
       `Record today's level of "${goal.label}" as your figure: ` +
-      (replaces !== undefined ? `${sayFigureRead(replaces, goalUnit ?? '')} → ${figure}` : figure) +
+      (replaces !== undefined ? `${sayFigureRead(replaces, storedUnit ?? '')} → ${figure}` : figure) +
       (change !== '' ? ` (your target: ${change})` : '') +
+      sayAdoptedUnit(goal.label, adoptedUnit) +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
       (productSaid !== '' ? `. ${productSaid}` : '') +
       (earlierHeld !== null ? earlierHeld.label : ''),
@@ -822,6 +979,7 @@ function changeGoalLevel(
       (productSaid !== '' ? `. Say plainly: ${productSaid}` : '') +
       (levelReading !== null ? `. Reading "${goal.label}" as what they call it stays Olumi's reading; say so` : '') +
       (earlierHeld !== null ? earlierHeld.note : '') +
+      noteAdoptedUnit(goal.label, storedUnit, adoptedUnit) +
       '. Call authorise_change with this proposal_id only once they agree.',
   };
 }
@@ -860,10 +1018,32 @@ export async function applyGoalCurrentLevel(
     };
   }
 
+  /**
+   * ⛔ AN ADOPTED UNIT (`levelUnitForGoal`) IS RE-DERIVED AT APPLY TIME: written only onto a goal whose stored unit still names
+   * no currency (the target check above holds it unchanged since the card), only as the unit the level itself carries, and
+   * only as that stored unit with its placeholder head replaced and its tail kept byte for byte — and only while the goal
+   * holds no other unit, on its level or on a limit row (`unitAlreadyOnGoal`, #2468 P1). Anything else writes nothing.
+   */
+  const carriedAdopted = (op.value as { adopted_unit?: unknown } | undefined)?.adopted_unit;
+  const adoptedUnit = typeof carriedAdopted === 'string' ? carriedAdopted : undefined;
+  if (carriedAdopted !== undefined && (adoptedUnit === undefined || os.unit !== adoptedUnit || now.goal_threshold_unit === null ||
+    unitNamingCurrency(now.goal_threshold_unit, unitPhraseHead(adoptedUnit) ?? '') !== adoptedUnit ||
+    unitAlreadyOnGoal(goal, approved.raw, now.goal_threshold_unit) !== null)) {
+    return notApplied(`The unit this level of "${goal.label}" was prepared in no longer fits the goal, so nothing was written. Read the model again and propose afresh.`);
+  }
+
   // ⛔ THE RE-DERIVED ESTIMATE IS RE-DERIVED AT APPLY TIME, and must come out exactly as the user approved it — or,
   // when none was approved, still none: the approval text said what would change, and nothing else is written.
   const carried = (op.value as { rederived_part?: RederivedPart } | undefined)?.rederived_part ?? null;
-  const part = rederivedEstimatedPart(approved.nodes, goal.id, os.raw_value);
+  const scoped = op.value as { goal_scope?: unknown; identity_withdrawal?: IdentityWithdrawalReading };
+  const scope = scoped.goal_scope === undefined ? undefined : scopeOf(scoped.goal_scope);
+  if (scoped.goal_scope !== undefined && (!scope || ctx.typed_approval_of !== proposal.proposal_id || ctx.typed_approval_words !== SCOPE_APPROVE_PREFIX + proposal.public_label)) {
+    return notApplied('Approve the card showing this exact scope and identity correction. Nothing was written.');
+  }
+  if (scope && !scopeCanRecord(scope, goalScopeCheck(approved.raw, goal.id, scope, { value: os.raw_value, unit: os.unit ?? '', source: scope.source }))) return notApplied('Resolve the scope and its factor references before approving this reading. Nothing was written.');
+  const withdrawal = scope ? identityWithdrawalFor(goal as Record<string, unknown>, scope) : undefined;
+  if (stableStringify(withdrawal) !== stableStringify(scoped.identity_withdrawal)) return notApplied('The identity changed after this reading was offered. Nothing was written.');
+  const part = withdrawal ? null : rederivedEstimatedPart(approved.nodes, goal.id, os.raw_value);
   if (JSON.stringify(part) !== JSON.stringify(carried)) {
     return {
       ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'superseded',
@@ -881,7 +1061,13 @@ export async function applyGoalCurrentLevel(
   const reframedCap = num(carriedOp?.reframed_cap) ? carriedOp!.reframed_cap as number : undefined;
   const nodes = approved.nodes.map((n) => {
     if (n.id !== op.path) return part !== null && n.id === part.node_id ? { ...n, observed_state: part.observed_state } : n;
-    const written: Record<string, unknown> = { ...n, observed_state: { ...kept, ...os }, ...(reframedCap !== undefined ? { goal_threshold_cap: reframedCap } : {}) };
+    const written: Record<string, unknown> = {
+      ...(scope && withdrawal ? applyIdentityWithdrawalToGoal(n as Record<string, unknown>, scope, withdrawal)! : n), observed_state: { ...kept, ...os },
+      ...(scope ? { goal_scope: scope } : {}),
+      ...(reframedCap !== undefined ? { goal_threshold_cap: reframedCap } : {}),
+      // The goal is measured in the adopted unit from this write on — its target too — in the SAME registration as its level.
+      ...(adoptedUnit !== undefined ? { goal_threshold_unit: adoptedUnit } : {}),
+    };
     // Olumi's reading of the replaced figure is refreshed from the user's words, or goes when they could not be read.
     if (carriedOp !== undefined && 'level_reading' in carriedOp) {
       if (carriedOp.level_reading === null) delete written.goal_level_reading;
@@ -932,7 +1118,12 @@ export async function applyGoalCurrentLevel(
   // have widened it — `reframed` moves value, baseline, cap and threshold together). Unretired, that is `os` byte for byte.
   const capHeld = (reframedCap === undefined && !retired) ||
     (after?.nodes.find((n) => n.id === op.path) as { goal_threshold_cap?: unknown } | undefined)?.goal_threshold_cap === writtenGoal?.goal_threshold_cap;
-  const landed = held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld &&
+  // An adopted unit is read back byte for byte, on the goal and on its level.
+  const unitHeld = adoptedUnit === undefined || (held?.unit === adoptedUnit &&
+    (after?.nodes.find((n) => n.id === op.path) as { goal_threshold_unit?: unknown } | undefined)?.goal_threshold_unit === adoptedUnit);
+  const scopeHeld = !scope || (after !== null && stableStringify(goalScopeMeaning((after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.goal_scope)) === stableStringify(goalScopeMeaning(scope))
+    && (!withdrawal || !(after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.nonlinear_identity));
+  const landed = scopeHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {

@@ -44,12 +44,18 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { PriorRunForSeed } from './coaching/seed-reuse.js';
 
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 
 /** What the turn's freshness verdict was derived from, for this turn only. */
 export interface BoundAnalysisSnapshot {
   readonly scenarioId: string;
+  /**
+   * C1 seed reuse (`coaching/seed-reuse.ts`): what this turn's prior facts say about the Run a rerun would pair with —
+   * its PLoT seed echo and draw-structure key — or why there is none. Optional: a binding without it lends no seed.
+   */
+  readonly priorRunSeed?: PriorRunForSeed | 'no_prior_run' | 'prior_not_recorded';
   /**
    * `computeAnalysisAffectingGraphHash` of read A's graph; `null` when the
    * scenario has no graph; `NO_CLAIM` when the graph exists but cannot be

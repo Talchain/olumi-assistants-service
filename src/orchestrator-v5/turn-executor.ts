@@ -623,6 +623,7 @@ import {
   analysisGraphIdentityForRead,
   bindAnalysisSnapshotForTurn,
 } from './run-analysis-snapshot-binding.js';
+import { priorRunForSeed, seedHistoryFacts } from './coaching/seed-reuse.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -1225,6 +1226,11 @@ export async function runTurnExecutor(
       context.persistedGraph,
       context.persistedGraphRead,
     ),
+    // C1 — the Run a rerun this turn would pair with, from the SAME prior facts, or the durable
+    // scenario set when the window lost every Run (`seedHistoryFacts`, `coaching/seed-reuse.ts`).
+    priorRunSeed: priorRunForSeed(seedHistoryFacts({
+      scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set,
+    })),
   });
 
   // Track 2 — pending-confirmation truth, derived ONCE at ORIENT time from the

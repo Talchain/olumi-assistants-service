@@ -42,7 +42,7 @@ const getScenarioOwner = vi.fn();
 const scenarioExists = vi.fn();
 const readCommittedTurn = vi.fn();
 
-const store = { append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn };
+const store = { readMostRecentPendingActions: vi.fn(async () => []), append, loadGraph, ensureScenarioExists, getScenarioOwner, scenarioExists, readCommittedTurn };
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () => store,
 }));

@@ -211,7 +211,7 @@ describe('(d) CONTRAST: the same event WITHOUT `band` is an exact figure (A6f)',
 // ─────────────────────────────────────────────────────────────────────────────
 // (e) confirm_current + band
 // ─────────────────────────────────────────────────────────────────────────────
-describe('(e) confirm_current with a band: the mean stays, the std becomes the band’s, the hash moves', () => {
+describe('(e) confirm_current with a band: the whole strength stays byte-equal (#2473 CR), the band is recorded', () => {
   /** A link the user earlier set to 0.55 by figure: Olumi's relative spread, flagged. */
   const figureSet = () =>
     graph({
@@ -230,17 +230,20 @@ describe('(e) confirm_current with a band: the mean stays, the std becomes the b
     });
 
   // R11 (AIQ #72 5872082179): a confirm is review, so the flag is KEPT and the band recorded in `reviewed_by_user`
-  // (before R11 this row pinned the flag CLEARED on a band confirm).
-  it('⭐ RED: mean unchanged, std = the band std, flag KEPT (R11), band recorded, analysis hash MOVES', async () => {
+  // (before R11 this row pinned the flag CLEARED on a band confirm). ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL
+  // concur): this row used to pin std → the band's spread and the hash MOVING — a no-change approval that staled the
+  // Run. A no-change confirm is byte-equal for every author, through every door; only the review records the band.
+  it('⭐ RED (#2473): mean AND std unchanged, flag KEPT (R11), band recorded, analysis hash does NOT move', async () => {
     const base = figureSet();
     const result = await apply(base, confirm('strong'));
     const edge = persistedEdge(result);
-    expect(edge.strength).toStrictEqual({ mean: 0.55, std: STRONG_BAND_STD });
+    expect(edge.strength).toStrictEqual({ mean: 0.55, std: 0.275 });
+    expect(edge.strength).not.toStrictEqual({ mean: 0.55, std: STRONG_BAND_STD });
     expect(edge.std_defaulted).toBe(true);
     expect((edge.provenance as Record<string, unknown>).reviewed_by_user).toMatchObject({ intent: 'confirm', band: 'strong' });
     if (result.kind !== 'mutated') return;
     expect(result.statedBand).toBe('strong');
-    expect(computeAnalysisAffectingGraphHash(result.graph)).not.toBe(
+    expect(computeAnalysisAffectingGraphHash(result.graph)).toBe(
       computeAnalysisAffectingGraphHash(GraphV3.parse(base)),
     );
   });
@@ -284,8 +287,8 @@ describe('(f) the event is parsed by the real 0.60.0 schema and `band` survives 
     },
   });
 
-  it('the vendored contract is 0.68.0 (band unchanged since 0.60.0; re-derived in schemas-0.42-edge-strength-edit-reader)', () => {
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.68.0');
+  it('the vendored contract is 0.74.0 (band unchanged since 0.60.0; re-derived in schemas-0.42-edge-strength-edit-reader)', () => {
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.74.0');
   });
 
   it('⭐ SystemEventTurnPayloadSchema keeps `band`, and the writer stores that band’s spread', async () => {

@@ -26,6 +26,7 @@
  * S0); the door stamps `USER_EDIT_SOURCE`, the product's literal for a figure the user typed in chat.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { asSent } from './helpers/as-sent.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -231,7 +232,7 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
     let given = '';
-    script = [(body) => { given = JSON.stringify(body['input']); return say('Your salary limit is £400,000.'); }];
+    script = [(body) => { given = JSON.stringify(asSent(body)['input']); return say('Your salary limit is £400,000.'); }];
     await turn({ message: 'What is my salary limit?' });
     expect(given).toMatch(/CURRENT MODEL STATE/);
     expect(given).toContain('400000');

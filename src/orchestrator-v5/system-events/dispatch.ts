@@ -94,6 +94,7 @@ import {
   InvalidPersistedAddEdgeGraphError,
 } from './structural-add-edge.js';
 import { applyStructuralRename, findStaleRenamedLabel } from './structural-rename.js';
+import { applyOptionStatusEdit, optionStatusHolds, type OptionStatusEditEvent, type OptionStatusEditResult } from './option-status-edit.js';
 // TYPE-ONLY — binds READER_ONLY_CHAT_ROUTE_OPS to the canonical structural-edit
 // grammar at typecheck time without adding a runtime edge into the tools layer.
 import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
@@ -245,6 +246,19 @@ export interface DispatchSystemEventResult {
   readonly committedVersion?: { readonly version: number; readonly version_id: string; readonly mutation_id: string; readonly source_turn_id: string | null } | null;
   /** Olumi's own links a committed value/range re-sized to fit the new level (P1-a): ids only, never a graph diff. */
   readonly linksResized?: readonly { readonly from: string; readonly to: string }[];
+  /**
+   * ⭐ THE OPTION-STATUS WRITER'S OWN ACCOUNT OF THIS ATTEMPT (MG F1 T6, #2471; CODEX overflow 5937013605 + DL). Set by
+   * `dispatchOptionStatusEdit` only, and never put on the wire (`OlumiResponseSchema` is strict): the Agent reads it
+   * in-process (`commitOptionStatusInProcess`). Display bytes cannot stand in for it — a no-write replay also carries
+   * `draft_graph` (`replyForAttemptThatWroteNothing`).
+   *   · `attempt_wrote`: THIS turn's commit wrote the status, or this is a replay whose stored receipt proves this same
+   *     turn wrote it and the change is still visible (`earlierWriteByThisTurnProven && visible`).
+   *   · `version_minted`: the COMMIT says it minted a model version (`CommitResult.modelVersionReceipt !== null`); the
+   *     response's receipt then rides UNPARSED, for the Agent's one parser (`receiptSummaryOf`), and must name this turn —
+   *     a minted version whose receipt is missing is never "applied" (CODEX overflow 5937013605 P2).
+   * Absent ⇒ no typed evidence ⇒ the Agent says UNCONFIRMED, never "not changed".
+   */
+  readonly writeOutcome?: { readonly attempt_wrote: boolean; readonly version_minted: boolean; readonly model_version_receipt: unknown };
   /**
    * V5 finaliser contract — system event readiness, by event kind:
    *
@@ -807,6 +821,8 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // writes a turn row and NO graph, so the target the user set would vanish on
   // the next reload.
   goal_target_edit: 'mutating',
+  // 0.69.0 (MG, F1 T6): ONE option's lifecycle — status + derived participation, one commit (`option-status-edit.ts`).
+  option_status_edit: 'mutating',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -1183,6 +1199,12 @@ export async function dispatchSystemEvent(
     payload.event.kind === 'goal_target_edit'
   ) {
     return await dispatchGoalTargetEdit(payload, payload.event, requestId, startedAt);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'option_status_edit'
+  ) {
+    return await dispatchOptionStatusEdit(payload, payload.event, requestId, startedAt);
   }
 
   // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
@@ -2808,6 +2830,8 @@ export async function dispatchOptionLevelsBatch(
     readonly linkEffect?: ApprovedLinkEffect;
     /** ⭐ One approved product confirmation (DL #72 5887510885; Canonical 5887564539): ONE commit, alone. */
     readonly identityConfirm?: ApprovedIdentityConfirm;
+    /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
+    readonly fenceRefusalReachesCaller?: boolean;
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
@@ -2867,6 +2891,7 @@ export async function dispatchOptionLevelsBatch(
     requestHash: payload.requestHash,
     freshness,
     hasExistingAnalysis,
+    ...(batch.fenceRefusalReachesCaller === true ? { fenceRefusalReachesCaller: true } : {}),
   };
   // The single event keeps its own entry (itself the one-target form of the batch core); a batch — or a single
   // level whose approved links are declared — goes through the batch entry.
@@ -3234,6 +3259,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
   const r = await runWithApprovedLevelAdoptions(adoptions, () => dispatchOptionLevelsBatch(payload, {
     targets, base_graph_hash: input.base_graph_hash, expectedLinks: input.links.map(l => `${l.option_id}::${l.factor_id}`),
+    fenceRefusalReachesCaller: true,
     ...(input.values !== undefined && input.values.length > 0 ? { values: input.values.map(v => ({ factorId: v.factor_id, value: v.value,
       ...(v.unit !== undefined ? { unit: v.unit } : {}), ...(v.author === 'model_proposed' ? { adopted: true } : {}) })) } : {}),
     ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames.map(f => ({ factorId: f.factor_id, cap: f.cap })) } : {}),
@@ -3241,7 +3267,9 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       from: l.from, to: l.to, magnitude: l.magnitude, intent: l.intent, expected: l.expected, band: l.band,
       // L4 (c): Olumi's band on a placeholder already at it is a REVIEW (`confirm_current`), never an adoption — the adoption
       // authority is for a `set` only (`adopted_estimate_not_a_set`).
-      adopted: l.author === 'model_proposed' && l.intent === 'set' })) } : {}),
+      adopted: l.author === 'model_proposed' && l.intent === 'set',
+      // DEFECT 1: Olumi's band kept on its own link is a review, which holds the figure (`ApprovedLinkStrength.review`).
+      ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) } : {}),
     ...(input.link_effect !== undefined ? { linkEffect: { from: input.link_effect.from, to: input.link_effect.to, effect: input.link_effect.effect,
       edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token } } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
@@ -3589,6 +3617,7 @@ export async function commitLimitEditInProcess(input: CommitLimitEditInput, requ
         priorFacts,
       }),
       reportRefusalReason: true,
+      fenceRefusalReachesCaller: true,
     },
     requestId,
     Date.now(),
@@ -3986,6 +4015,358 @@ async function dispatchStructuralRename(
     analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForEgress),
     freshness,
   };
+}
+
+/**
+ * `option_status_edit` (0.69.0, MG F1 T6) — commit ONE option's status + its derived participation, verify both in the
+ * committed bytes (`optionStatusHolds`). The same atomic CAS / fence / no-write-replay / receipt path as
+ * `structural_rename` (its doctrine comments are there); unlike a rename it MOVES the analysis hash
+ * (`analysis_participation` is projected), so the freshness derivation below reports the last Run as stale.
+ */
+async function dispatchOptionStatusEdit(
+  payload: SystemEventTurnPayload,
+  event: OptionStatusEditEvent,
+  requestId: string,
+  startedAt: number,
+  // B8 (#2456, DL): the in-process port lets the turn fence's refusal reach `runFencedInProcessWrite` (never swallowed).
+  opts: { readonly fenceRefusalReachesCaller?: boolean } = {},
+): Promise<DispatchSystemEventResult> {
+  let persistedGraph: unknown;
+  let priorPendingActions: Awaited<
+    ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
+  >;
+  let factsRead: WriteReplyAnalysisInputs;
+  try {
+    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+      loadPersistedGraphStrict(payload.scenario_id),
+      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+      loadWriteReplyAnalysisInputs(payload.scenario_id, requestId),
+    ]);
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 option_status_edit — authoritative graph/pending read failed; refusing any append',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  let result: OptionStatusEditResult;
+  try {
+    result = applyOptionStatusEdit({ payload, event, requestId, persistedGraph });
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 option_status_edit — adapter failed before commit',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  const persistedParse = GraphV3.safeParse(persistedGraph);
+  const contentGraph = persistedParse.success ? persistedParse.data : null;
+  const currentAnalysisHash = persistedParse.success
+    ? computeAnalysisAffectingGraphHash(
+        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      )
+    : null;
+
+  if (result.kind === 'refused') {
+    const response: OlumiResponse =
+      currentAnalysisHash !== null
+        ? { ...result.response, graph_hash: currentAnalysisHash }
+        : result.response;
+    if (result.baseHashConflict !== undefined) {
+      return {
+        response,
+        commitPerformed: false,
+        graph: contentGraph,
+        graphConflict: {
+          recovery_action: result.baseHashConflict.recovery_action,
+          conflict_category: result.baseHashConflict.conflict_category,
+          expected_base_graph_hash: result.baseHashConflict.expected_base_graph_hash,
+        },
+      };
+    }
+    try {
+      await commitDirectAnswer(response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+        pending_actions: [],
+        priorPendingActions,
+        ...(currentAnalysisHash !== null ? { graph_hash: currentAnalysisHash } : {}),
+        ...(contentGraph !== null ? { contentGraph } : {}),
+        coaching_state: null,
+      });
+    } catch (err) {
+      if (opts.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          refusal_reason: result.reason,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 option_status_edit — refusal commit failed',
+      );
+      return { response, commitPerformed: false, graph: null };
+    }
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        refusal_reason: result.reason,
+      },
+      'V5 option_status_edit refused — committed honestly, no graph written',
+    );
+    return { response, commitPerformed: true, graph: contentGraph };
+  }
+
+  let persistedAnalysisGraphHash: string | null = null;
+  let persistedGraphBytes: unknown = null;
+  let graphPersisted = false;
+  let thisAttemptWrote: boolean | null = null;
+  // The commit's own typed account of the version mint (`CommitResult.modelVersionReceipt`: null = no version minted).
+  let versionMinted = false;
+  let committedResponse: OlumiResponse = result.response;
+  try {
+    const cas = computeExpectedGraphCasHashes(result.baseGraph);
+    const holds = threadHoldsThroughSystemEventMutation({
+      priorPendingActions,
+      mutatedGraph: result.mutatedGraph,
+      appliedOperations: result.appliedOperations,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+    });
+    const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: result.handlerFacts,
+      graph: result.mutatedGraph,
+      baseGraphForInvariants: result.baseGraph,
+      pending_actions: [],
+      ...(holds.threaded !== undefined ? { priorPendingActions: holds.threaded } : {}),
+      contentGraph: result.mutatedGraph,
+      ...cas,
+      coaching_state: null,
+    });
+    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+    persistedGraphBytes = commitResult.persistedGraph;
+    graphPersisted = commitResult.graphPersisted;
+    thisAttemptWrote = commitResult.thisAttemptWrote;
+    versionMinted = commitResult.modelVersionReceipt !== null;
+    committedResponse = commitResult.response;
+  } catch (err) {
+    if (opts.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
+    if (err instanceof GraphStaleWriteError) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          conflict_category: err.conflict_category,
+        },
+        'V5 option_status_edit — atomic graph CAS conflict; refresh and reconfirm',
+      );
+      return {
+        response: result.response,
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: err.conflict_category,
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
+        },
+      };
+    }
+    const fenceConflict = await turnFenceConflict(err, {
+      requestId,
+      eventKind: event.kind,
+      scenarioId: payload.scenario_id,
+    });
+    if (fenceConflict !== null) {
+      return { response: result.response, commitPerformed: false, graph: null, graphConflict: fenceConflict };
+    }
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 option_status_edit — atomic mutation commit failed',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+
+  if (thisAttemptWrote === false) {
+    const replay = replyForAttemptThatWroteNothing({
+      writer: 'option_status_edit',
+      payload,
+      requestId,
+      committedResponse,
+      persistedGraphBytes,
+      persistedAnalysisGraphHash,
+      analysisInputs: factsRead,
+      requestedChangeVisibleIn: (snapshot) => optionStatusHolds(snapshot, result.optionId, result.status),
+      logFields: { requested_option_id: result.optionId, requested_status: result.status },
+    });
+    // A replay is THIS operation's write only when the stored receipt names this turn AND the change is still visible —
+    // the replay reply's own attribution rule. Otherwise it attests nothing (a reused-id conflict, another writer).
+    const earlierWriteByThisTurnProven = committedResponse.model_version_receipt?.source_turn_id === payload.turn_id
+      && optionStatusHolds(persistedGraphBytes, result.optionId, result.status);
+    return {
+      ...replay,
+      writeOutcome: { attempt_wrote: earlierWriteByThisTurnProven, version_minted: versionMinted,
+        model_version_receipt: committedResponse.model_version_receipt },
+    };
+  }
+
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const renameLanded =
+    committedParse.success && optionStatusHolds(persistedGraphBytes, result.optionId, result.status);
+  if (
+    thisAttemptWrote !== true ||
+    graphPersisted !== true ||
+    persistedAnalysisGraphHash === null ||
+    !committedParse.success ||
+    !renameLanded
+  ) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        this_attempt_wrote: thisAttemptWrote,
+        graph_persisted: graphPersisted,
+        has_analysis_hash: persistedAnalysisGraphHash !== null,
+        graph_parse_ok: committedParse.success,
+        status_landed: renameLanded,
+      },
+      'V5 option_status_edit — committed graph receipt invalid; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+  const graphForEgress = committedParse.data;
+
+  const response: OlumiResponse = {
+    ...committedResponse,
+    graph_hash: persistedAnalysisGraphHash,
+    draft_graph: buildAppliedGraphWireField(graphForEgress),
+  };
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      option_id: result.optionId, status: result.status,
+    },
+    'V5 option_status_edit committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
+  );
+  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+  emitFreshnessTelemetry(
+    freshness,
+    {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'system_event.option_status_edit',
+    },
+    {
+      prior_fact_count: factsRead.hotWindow.facts.length,
+      prior_fact_read_status: factsRead.hotWindow.status,
+      scenario_fact_set_status: factsRead.factSet.status,
+    },
+  );
+  return {
+    response,
+    commitPerformed: true,
+    graph: graphForEgress,
+    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForEgress),
+    freshness,
+    // This attempt wrote, and the committed bytes hold the status (verified above). A signed-in write minted a version.
+    writeOutcome: { attempt_wrote: true, version_minted: versionMinted,
+      model_version_receipt: committedResponse.model_version_receipt },
+  };
+}
+
+/** The Agent's option-status door, in-process (MG F1 T6 fix-forward #2471; the `commitLimitEdit` pattern). */
+export interface CommitOptionStatusInput {
+  readonly scenario_id: string;
+  readonly turn_id: string;
+  readonly option_node_id: string;
+  readonly expected_status: OptionStatusEditEvent['status'];
+  readonly status: OptionStatusEditEvent['status'];
+  readonly base_graph_hash: string;
+}
+
+/**
+ * What the writer itself says happened — the ONLY evidence the Agent may call "applied" on (CODEX overflow 5937013605 +
+ * DL: never inferred from display bytes, never from a missing receipt).
+ *   · `written`: the writer's `writeOutcome.attempt_wrote` (this turn wrote, or a replay proven to be this turn's own
+ *     write). `version_minted` + the unparsed receipt let the Agent require a receipt naming this turn when one was minted.
+ *   · `stale`: the CAS / expected-status conflict, or the turn fence's superseded/stopped verdict — nothing written.
+ *   · `refused`: the turn fence refused before any write (unclaimed / unavailable; set by the route's wrapper).
+ *   · `unconfirmed`: no typed evidence either way (a refusal reply, an unproven replay, a commit that could not be verified).
+ */
+export type CommitOptionStatusResult =
+  | { readonly status: 'written'; readonly version_minted: boolean; readonly model_version_receipt: unknown }
+  | { readonly status: 'stale' }
+  | { readonly status: 'refused'; readonly reason: string }
+  | { readonly status: 'unconfirmed' };
+
+export async function commitOptionStatusInProcess(input: CommitOptionStatusInput, requestId: string): Promise<CommitOptionStatusResult> {
+  const event = {
+    kind: 'option_status_edit' as const, option_node_id: input.option_node_id, expected_status: input.expected_status,
+    status: input.status, base_graph_hash: input.base_graph_hash,
+  } as OptionStatusEditEvent;
+  const payload = { kind: 'system_event', turn_id: input.turn_id, scenario_id: input.scenario_id, stage: 'frame', event } as SystemEventTurnPayload;
+  const r = await dispatchOptionStatusEdit(payload, event, requestId, Date.now(), { fenceRefusalReachesCaller: true });
+  if (r.graphConflict !== undefined) return { status: 'stale' };
+  if (r.writeOutcome?.attempt_wrote !== true) return { status: 'unconfirmed' };
+  return { status: 'written', version_minted: r.writeOutcome.version_minted, model_version_receipt: r.writeOutcome.model_version_receipt };
 }
 
 /**
@@ -4767,6 +5148,11 @@ async function dispatchAddConstraintEdit(
     readonly apply: (persistedGraph: unknown, priorFacts: readonly HandlerFact[]) => Promise<GoalTargetEditResult>;
     /** Carry the adapter's refusal reason on the result (the in-process limit edit only). */
     readonly reportRefusalReason?: boolean;
+    /**
+     * B8 (DL CR 5934735711): let a turn-fence refusal reach the caller (the in-process limit edit only), whose
+     * `runFencedInProcessWrite` maps every verdict. The wire event keeps its existing handling.
+     */
+    readonly fenceRefusalReachesCaller?: boolean;
   },
   requestId: string,
   startedAt: number,
@@ -4887,6 +5273,8 @@ async function dispatchAddConstraintEdit(
     persistedGraphBytes = commitResult.persistedGraph;
     committedResponse = commitResult.response;
   } catch (err) {
+    // The store refused before writing: nothing was saved, so this is never "commit failed, may have been saved".
+    if (spec.fenceRefusalReachesCaller === true && err instanceof TurnFenceRejectedError) throw err;
     if (err instanceof GraphStaleWriteError) {
       log.warn(
         {

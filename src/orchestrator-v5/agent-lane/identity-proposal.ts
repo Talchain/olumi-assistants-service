@@ -1,3 +1,4 @@
+import { identityConflictsWithScope, scopeOf } from './goal-scope.js';
 /**
  * ⛔ THE CARD FOR A PRODUCT THE MINT COULD NOT PROVE (DL 5888399097; AIQ 5886967509 step (2); R3 served witness 5888379558).
  *
@@ -103,6 +104,8 @@ function goalAndParents(graph: unknown): { goal: Rec2; goalId: string; goalLabel
   const goalLabel = text(goal.label);
   const o = usersLevel(goal);
   if (goalId === undefined || goalLabel === undefined || o === null) return null;
+  const scope = scopeOf(goal.goal_scope);
+  if (scope?.extent === 'total' && scope.component && identityConflictsWithScope({ ...goal, nonlinear_identity: { operation: 'product', factor_ids: [scope.component.rate_id, scope.component.count_id] } })) return null;
   const byId = new Map(nodes.flatMap((n) => (typeof n.id === 'string' ? [[n.id, n] as const] : [])));
   const parentIds = [...new Set(edges.filter((e) => e.to === goalId && typeof e.from === 'string').map((e) => e.from as string))]
     // A node kept out of the calculation (`retained_excluded`) is not a parent the analysis sees: the run guard hands PLoT

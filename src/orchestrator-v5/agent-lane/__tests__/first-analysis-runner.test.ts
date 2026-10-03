@@ -258,8 +258,13 @@ describe('RED: a card that presumes a leader is bound only when a leader may be 
   it('RED: no leader_claim at all is not a permission (fail closed)', () => {
     expect(bindRunBlocksToReadback([served, ...neutral], { graphHash: H, analysisState: current, analysisResult: result })).toEqual(neutral);
   });
-  it('CONTROL: permitted → the same blocks are all bound', () => {
-    expect(bindRunBlocksToReadback([...presuming, ...neutral], { graphHash: H, analysisState: permitted, analysisResult: result })).toEqual([...presuming, ...neutral]);
+  // P0 SHARED DATA: the readback's admission is half of the ONE licence; the route always hands it over (agent-v1-turn.ts).
+  const comparative = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } };
+  it('CONTROL: permitted (comparative_leader admission) → the same blocks are all bound', () => {
+    expect(bindRunBlocksToReadback([...presuming, ...neutral], { graphHash: H, analysisState: permitted, analysisResult: result, analysisReady: comparative })).toEqual([...presuming, ...neutral]);
+  });
+  it('CONTROL: permitted but NO admission (matrix M6) → fails closed, leader-presuming blocks dropped', () => {
+    expect(bindRunBlocksToReadback([...presuming, ...neutral], { graphHash: H, analysisState: permitted, analysisResult: result })).toEqual(neutral);
   });
 });
 

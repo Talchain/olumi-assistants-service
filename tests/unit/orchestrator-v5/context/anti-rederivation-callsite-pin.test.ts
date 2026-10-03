@@ -103,6 +103,12 @@ function scanRepo(ident: string): Record<string, number> {
 const EXPECTED: Record<string, Record<string, number>> = {
   deriveAnalysisFreshness: {
     'src/orchestrator-v5/context/freshness.ts': 1, // authority (definition)
+    // VERSION RESULT-DIFF: import + one call while binding a saved version to
+    // its recorded Run. This compare route is outside a turn: no context frame
+    // exists for the historical version. Reuse the canonical Run-attested goal
+    // unit/currentness verdict over that version's graph and matching Run hash;
+    // do not invent another freshness rule. Owning HARNESS/DL review in this PR.
+    'src/orchestrator-v5/model-management/version-result-binding.ts': 2,
     // 21 Sep 2026 — NEW APPROVED SEAM, with the justification this map demands.
     // The replacement conversation controller BYPASSES THE TURN-EXECUTOR BY
     // DESIGN, so there is no CanonicalContextFrame for it to read from: the
@@ -361,10 +367,25 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // the route) would have been the mirror this guard exists to prevent.
     // Deliberate, reviewed, and NOT precedent for a turn-path caller.
     'src/routes/scenario-graph-analysis-read.ts': 2,
+    // 2026-10-02 T1(d): import + one call at the AFTER-narration read seam.
+    // The typed Agent explanation bypasses TurnExecutor. Its initial canonical
+    // read predates the provider wait, so its freshness cannot vouch for a
+    // newer Run, model edit or restore committed during that wait. The one
+    // joined query supplies the SAME scoped Run/model/restore inputs to the
+    // canonical authority; this is a bounded reuse check, not a second analysis
+    // projection. A mismatch refreshes through the existing canonical reader.
+    // Requires owning HARNESS/DL review in this PR; remove this entry if a
+    // canonical frame from that post-wait snapshot becomes available here.
+    'src/orchestrator-v5/agent-lane/run-currentness.ts': 2,
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)
     'src/orchestrator-v5/context/context-pack-assembler.ts': 2, // approved seam
+    // VERSION RESULT-DIFF — DL-approved historical comparison seam: import + one call.
+    // No turn frame exists for these saved versions. The binder judges each bound
+    // Run on its own saved graph and matching Run identity through the canonical
+    // selector and claim composition; it defines no alternative permission rule.
+    'src/orchestrator-v5/model-management/version-result-binding.ts': 2,
     // C2 Phase-3 lifecycle: freshness deliberately selects the older successful
     // Run for historical cards, while this one card-builder seam needs the
     // canonical contradiction from the same prior-fact set to suppress those

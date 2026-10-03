@@ -24,7 +24,7 @@
  *               from it rather than re-declare it.
  *   EDGE        `DecisionStage` survives as the DSK BUNDLE's vocabulary, with
  *               ONE declaration (`src/dsk/types.ts`) and ONE translation point
- *               (`mapStageToDecisionStage`, edit-graph-dispatch.ts).
+ *               (`mapStageToDecisionStage`, dsk/stage-edge.ts).
  *
  * ── ⚠ WHAT THIS TEST CANNOT DO, STATED SO NOBODY OVER-READS IT ───────────────
  * It is a DERIVED guard, and a derived guard proves AGREEMENT, never
@@ -77,7 +77,9 @@ const DECLARATION_OWNERS = ['dsk/types.ts'] as const;
  * Files permitted to TRANSLATE between the canonical wire vocabulary and the
  * DSK/V4 one. Exactly one entry: the named edge.
  */
-const TRANSLATION_EDGES = ['orchestrator-v5/handlers/edit-graph-dispatch.ts'] as const;
+// Moved (not added) from `orchestrator-v5/handlers/edit-graph-dispatch.ts`, which still calls it, so the pure
+// agent-lane science context can read the edge without importing a handler (SCIENCE/DSK, 1 Oct).
+const TRANSLATION_EDGES = ['dsk/stage-edge.ts'] as const;
 
 /** The literals that can only belong to the five-member vocabulary. */
 const DISTINGUISHING = ['ideate', 'evaluate', 'optimise'] as const;

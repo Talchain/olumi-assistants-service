@@ -23,6 +23,7 @@
  *
  * It never throws: every failure is an outcome the route can say out loud.
  */
+import { GOAL_SCOPE_UNRESOLVED_REASON } from '../../schemas/goal-scope.js';
 import { withoutStrongestDriverClause } from './decision-sensitivity.js';
 import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
@@ -36,6 +37,7 @@ import { dispatchChipClickRunAnalysis, type ChipClickAutoRunTrigger } from '../h
 import { AGENT_RUN_ANALYSIS_CHIP_ID } from '../handlers/agent-chip-ids.js';
 import { RUN_PROVENANCE_ENRICHMENT_KEY } from '../context/run-initiator.js';
 import { permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
+import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { blockPresumesLeadingOption } from '../compose.js';
 
 /**
@@ -218,6 +220,8 @@ export function firstAnalysisSentence(outcome: FirstAnalysisOutcome): string | n
 
 /** The typed leader permission, as the Agent is given it. Absent is never permission. */
 export interface ClaimPermissions {
+  readonly total_goal_claims_allowed?: false;
+  readonly exploratory_work_allowed?: true;
   readonly leader_may_be_named: boolean;
   /** Present (true) only when the leader may be named as a PROVISIONAL finding (separable, quantified_provisional). */
   readonly provisional?: true;
@@ -237,15 +241,18 @@ export function claimPermissionsFrom(
 ): ClaimPermissions {
   const claim = (analysisState as { leader_claim?: { permitted?: unknown; withheld_reason?: unknown; separation?: unknown } } | null | undefined)?.leader_claim;
   const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
-  // Paul's ruling (programme-docs#38 5576895511): a SEPARABLE run whose only objection is that every estimate
-  // is machine-authored is "caveat, not withhold" — the wire gate's separable-provisional arm, mirrored here so
-  // the Agent and the wire agree. It is named as provisional; every other population is unchanged.
+  // ONE licence (`compose/leader-licence.ts`), the same one the wire gate reads, so what the Agent is told and what the
+  // wire lets through cannot disagree. Paul's ruling (programme-docs#38 5576895511): a SEPARABLE run whose only
+  // objection is that every estimate is machine-authored is "caveat, not withhold" — the licence's caveat arm.
   // ⛔ REQUESTED RUNS ONLY (RC #63 5826599698): Paul's 24 Sep "keep the unrequested-analysis claim policy"
   // governs the AUTOMATIC first run, so `describeFirstAnalysisForAgent` passes nothing and keeps today's answer.
-  const separableProvisional = run.requested === true
-    && claim?.permitted === true && claim?.separation === 'separated' && mode === 'quantified_provisional';
+  // The admission must also be `comparative_leader` for a plain naming: absent admission fails CLOSED for the Agent.
+  const licence = leaderLicenceFromState(analysisState, analysisReady);
+  const separableProvisional = run.requested === true && licence === 'permitted_with_caveat';
   return {
-    leader_may_be_named: (claim?.permitted === true && mode === 'comparative_leader') || separableProvisional,
+    leader_may_be_named: (licence === 'permitted' && mode === 'comparative_leader') || separableProvisional,
+    ...(claim?.withheld_reason === GOAL_SCOPE_UNRESOLVED_REASON
+      ? { total_goal_claims_allowed: false as const, exploratory_work_allowed: true as const } : {}),
     ...(separableProvisional ? { provisional: true } : {}),
     ...(typeof claim?.withheld_reason === 'string' && claim.withheld_reason !== '' ? { withheld_reason: claim.withheld_reason } : {}),
     permitted_analysis_mode: mode,
@@ -266,7 +273,11 @@ const COACHING_BLOCK_TYPES: ReadonlySet<string> = new Set(['review_card', 'coach
  */
 export function bindRunBlocksToReadback(
   runBlocks: readonly unknown[],
-  readback: { readonly graphHash: string | undefined; readonly analysisState: unknown; readonly analysisResult: unknown },
+  readback: {
+    readonly graphHash: string | undefined; readonly analysisState: unknown; readonly analysisResult: unknown;
+    /** The SAME readback's `analysis_ready`: its admission is half of the leader licence (P0 SHARED DATA, DL 4563ad). */
+    readonly analysisReady?: unknown;
+  },
 ): unknown[] {
   if (readback.graphHash === undefined || readback.analysisResult === undefined) return [];
   const state = readback.analysisState as { run_state?: { kind?: unknown }; usable_for_chips?: unknown; leader_claim?: { permitted?: unknown } } | undefined;
@@ -279,7 +290,10 @@ export function bindRunBlocksToReadback(
    * reached the user beside a reply saying the options are effectively tied. The Conventional route drops these
    * whole on a withheld turn (compose's filter); this reads the SAME definition, so the routes cannot disagree.
    */
-  const leaderMayBeNamed = state.leader_claim?.permitted === true;
+  // ⛔ THE ONE LICENCE, NOT THE BARE CLAIM (P0 SHARED DATA, #85 5963053136). `leader_claim.permitted` never reads the
+  // admission, so a separated Run of an `exploratory` model said `true` here while the reply, the block and the Agent's
+  // `claim_permissions` withheld the leader. A caveat licence (quantified_provisional) still binds, as the wire gate does.
+  const leaderMayBeNamed = leaderLicenceFromState(state, readback.analysisReady) !== 'withheld';
   return runBlocks.filter((b) => {
     const block = b as { type?: unknown; graph_hash_at_generation?: unknown; action_intent?: unknown; action_label?: unknown; action_prompt?: unknown } | null;
     if (block === null || typeof block !== 'object' || typeof block.type !== 'string') return false;

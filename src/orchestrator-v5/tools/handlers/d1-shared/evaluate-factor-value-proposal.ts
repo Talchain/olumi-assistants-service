@@ -233,6 +233,30 @@ export function unitComparisonKey(unit: string | undefined): string | undefined 
 }
 
 /**
+ * The ONE period a single denominator word names, on the closed table above ("quarters" → quarter, "annum" → year), or null
+ * for any other word. Exported so a typed unit's period is read on the SAME vocabulary `unitComparisonKey` folds with
+ * (CEE #2468 CHANGES_REQUIRED, DL note to MG): never a second list.
+ */
+export function ratePeriodWord(word: string): string | null {
+  const folded = word.trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(RATE_DENOMINATOR_SPELLINGS, folded) ? RATE_DENOMINATOR_SPELLINGS[folded]! : null;
+}
+
+/**
+ * The period a TYPED rate unit is per — its denominator, split exactly as `unitComparisonKey` splits it (the first "/" or
+ * "per") and read by `ratePeriodWord` — or null when the unit is no rate over a period ("£", "GBP MRR", "£ per seat").
+ * "£ per year" → year, "£/quarter" → quarter, "GBP per annum" → year. Reads a unit string only, never the user's words.
+ */
+export function ratePeriodOf(unit: string | undefined): string | null {
+  const display = canonicaliseUnitForDisplay(unit);
+  if (display === undefined) return null;
+  const sepMatch = RATE_SEPARATOR_PATTERN.exec(display);
+  if (sepMatch === null || sepMatch.index === 0) return null;
+  if (display.slice(0, sepMatch.index).trim().length === 0) return null;
+  return ratePeriodWord(display.slice(sepMatch.index + sepMatch[0].length));
+}
+
+/**
  * Granular rejection reasons. Bound to the telemetry enum — additions
  * here require a plan amendment (see "Locked telemetry enums" in the
  * workstream plan). Reasons are ordered roughly by check sequence:

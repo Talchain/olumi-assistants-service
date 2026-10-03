@@ -13,6 +13,8 @@
 
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
+import { inertRiskBranch } from '../../graph/inert-risk.js';
+import { withoutProposalIds } from './display-ids.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -38,6 +40,13 @@ export interface DecisionInputAskContext {
   readonly restingText: string;
   /** The composed reply puts questions behind the toggle (`textAtRest` split it): A7's fact is already there. */
   readonly questionsToggle: boolean;
+  /**
+   * ⭐ ASKED ONCE (PANEL #85 5944136475: each Rerun re-asked the target verbatim, ×3 in one session). The user-visible text
+   * of this conversation's recent answers (durable rows, as shipped). An ask already among them is still OPEN (the goal
+   * has no stated target, or there would be no ask), so it is not said again. Our own exact string, never a wording rule;
+   * the goal changing changes the ask, which is then new. Absent (no read, or a failed one) ⇒ ask, exactly as before.
+   */
+  readonly recentReplies?: readonly string[];
   /** A proposal awaits the user's yes: that card is the step, so nothing else is asked. */
   readonly awaitingApproval: boolean;
   /** This turn built the model or ran the analysis (the brief and Run turns). */
@@ -72,6 +81,20 @@ export function textAtRest(text: string): string {
   return after ? `${lead} ${after}` : lead;
 }
 
+/** Keep selected host obligations visible using the existing consumer split. */
+export function withB3LinesAtRest(text: string, lines: readonly (string | null)[]): string {
+  let out = text;
+  for (const line of lines) {
+    if (line === null || textAtRest(out).includes(line)) continue;
+    // Only the caller's bound basis/selected objective moves. Other prose stays verbatim.
+    const body = out.split(line).join('').trimEnd();
+    const at = textAtRest(out) === out ? -1 : body.indexOf(QUESTIONS_MARKER);
+    out = at < 0 ? `${body}\n\n${line}`
+      : `${body.slice(0, at).trimEnd()}\n\n${line}\n\n${body.slice(at)}`;
+  }
+  return out;
+}
+
 /** DL #75 5923219186 (R3 K4): words on screen per turn — the reply at rest plus the toggle's label. */
 export const AT_REST_WORD_BOUND = 160;
 const words = (s: string): number => s.split(/\s+/).filter(Boolean).length;
@@ -89,19 +112,72 @@ const withinMonths = (goal: Rec): string => {
  * question; D1 never does. When the reply on screen would pass `AT_REST_WORD_BOUND` and a questions toggle holds A7's
  * fact, A7 stays behind it.
  */
+/**
+ * ⭐ K3 (`graph/inert-risk.ts`, ONE definition with readiness): a kept risk nobody has said the direction of is left out of
+ * the Run, which proceeds — so the Run says so, or its results would silently ignore a risk the user can see on the canvas.
+ */
+function leftOutLines(graph: unknown, goalLabel: string): string[] {
+  const g = recordOf(graph);
+  const nodes = (Array.isArray(g?.nodes) ? g.nodes : []).map(recordOf).filter((n): n is Rec => n !== undefined && typeof n.id === 'string');
+  const edges = (Array.isArray(g?.edges) ? g.edges : []).map(recordOf)
+    .filter((e): e is Rec => e !== undefined && e.edge_type !== 'bidirected' && typeof e.from === 'string' && typeof e.to === 'string')
+    .map((e) => ({ from: e.from as string, to: e.to as string }));
+  const limits = (Array.isArray(g?.goal_constraints) ? g.goal_constraints : []).map((k) => recordOf(k)?.node_id)
+    .filter((id): id is string => typeof id === 'string');
+  const leftOut = inertRiskBranch(nodes as { id: string; kind?: unknown; category?: unknown }[], edges, limits);
+  const labelOf = (n: Rec): string => String(n.label ?? n.id);
+  return nodes.filter((n) => n.kind === 'risk' && leftOut.has(n.id as string)).map((r) => {
+    // ⭐ THE ONE WRITER (HARNESS CR on #2509): everything left out with this risk is named HERE, however many hops
+    // (DL condition 3), in words that stay true when one cause feeds two left-out risks.
+    const upstream = new Set<string>(); const walk = [r.id as string];
+    while (walk.length > 0) {
+      const at = walk.pop()!;
+      for (const e of edges) if (e.to === at && leftOut.has(e.from) && !upstream.has(e.from)) { upstream.add(e.from); walk.push(e.from); }
+    }
+    const named = nodes.filter((n) => n.kind !== 'risk' && upstream.has(n.id as string)).map((n) => `"${labelOf(n)}"`);
+    const list = named.length <= 1 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+    const withIt = named.length === 0 ? '' : ` (with ${list}, which ${named.length === 1 ? 'feeds' : 'feed'} only what is left out)`;
+    return `"${labelOf(r)}"${withIt} is left out of this analysis until you say whether it raises or lowers "${goalLabel}".`;
+  });
+}
+
+/** A7's own opener: the one way A7 is told apart from the other owed lines (CODEX K3 P2: never "the first non-ask line"). */
+const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
+
+/** The one ask writer, before display scrubbing or turn eligibility. */
+function rawDecisionInputAsk(graph: unknown): string | null {
+  const goal = goalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  if (goal === undefined || label === '') return null;
+  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
+    : !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
+}
+
+/** Normalise only exact narrator copies of this graph's host ask before placement. */
+export function withDecisionInputAskDisplay(text: string, graph: unknown): string {
+  const raw = rawDecisionInputAsk(graph);
+  return raw === null ? text : text.split(raw).join(withoutProposalIds(raw));
+}
+
 export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext): string[] {
   if (!ctx.builtOrRan) return [];
   const goal = goalOf(graph);
   const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
   if (goal === undefined || label === '') return [];
+  // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
+  // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
+  const leftOut = leftOutLines(graph, label);
   const within = withinMonths(goal);
-  const a7 = within !== '' && !hasDurationLimit(graph) ? `This model doesn't yet say whether any option gets there${within}.` : null;
-  const ask = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
+  const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
+  const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
+  // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
+  const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
+  const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
     + ls.reduce((n, l) => n + (l === null ? 0 : words(l)), 0);
-  const keepA7 = a7 !== null && !(ctx.questionsToggle && onScreen([a7, ask]) > AT_REST_WORD_BOUND);
-  return [keepA7 ? a7 : null, ask].filter((l): l is string => l !== null);
+  const keepA7 = a7 !== null && !(ctx.questionsToggle && onScreen([...leftOut, a7, ask]) > AT_REST_WORD_BOUND);
+  return [...leftOut, keepA7 ? a7 : null, ask].filter((l): l is string => l !== null);
 }
 
 /**
@@ -114,9 +190,14 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
   return `What figure should "${label}" reach or stay under${within}? I'll propose it as your target.`;
 }
 
-/** The one ask (D1), or null. */
+/** The host's framing or target ask, recognised by every selector and replay reader. */
+export function isDecisionInputAsk(line: string): boolean {
+  return line.endsWith('as your target.') || line.endsWith('What should this model help you explore?');
+}
+
+/** The one framing or target ask, or null. */
 export function decisionInputAsk(graph: unknown, ctx: DecisionInputAskContext): string | null {
-  return decisionInputLines(graph, ctx).find((l) => l.endsWith('as your target.')) ?? null;
+  return decisionInputLines(graph, ctx).find(isDecisionInputAsk) ?? null;
 }
 
 /**
@@ -134,11 +215,11 @@ export function withA7AfterGate(
 ): string {
   // Unfolded: the lines owed with nothing at rest yet; only A7 is ever inserted here.
   const owedLines = decisionInputLines(graph, { ...ctx, restingText: '', questionsToggle: false });
-  const a7 = owedLines.find((l) => !l.endsWith('as your target.'));
+  const a7 = owedLines.find((l) => l.startsWith(A7_OPENER));
   if (a7 === undefined || text.includes(a7)) return text;
   const rest = textAtRest(text);
   if (rest !== text && words(rest) + TOGGLE_LABEL_WORDS + words(a7) > AT_REST_WORD_BOUND) return text;
-  const ask = owedLines.find((l) => l.endsWith('as your target.'));
+  const ask = owedLines.find(isDecisionInputAsk);
   if (ask !== undefined && text.split(ask).length === 2) return text.replace(ask, `${a7}\n\n${ask}`);
   if (statusText === null) return text;
   const at = text.lastIndexOf(`\n\n${statusText}`);

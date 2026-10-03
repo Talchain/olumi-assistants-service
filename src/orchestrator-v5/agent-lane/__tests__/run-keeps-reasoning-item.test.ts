@@ -1,3 +1,4 @@
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⛔ A RUN'S INTERPRETATION IS KEPT IN HISTORY WITH ITS REASONING ITEM, OR THE NEXT TURN IS REFUSED.
  *
@@ -69,7 +70,7 @@ describe('the turn after a typed Run is accepted by the model API', () => {
       blocks: [{ type: 'analysis_result', data: { marker: 'the-run' } }], analysis_ready: { status: 'ready', options: [], blockers: [] } }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
-      graph_hash: 'h1',
+      graph_hash: 'h1', analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' } }, analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } },
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
@@ -82,6 +83,7 @@ describe('the turn after a typed Run is accepted by the model API', () => {
     } });
     expect(run.statusCode).toBe(200);
     expect((run.json() as { _diagnostic_trace: { fast_path?: string } })._diagnostic_trace.fast_path, 'the control: fast path 3 ran').toBe('run');
+    await explainRun(app, SCENARIO, run);
     const sessionId = (run.json() as { _agent: { session_id?: string } })._agent.session_id;
 
     const next = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {

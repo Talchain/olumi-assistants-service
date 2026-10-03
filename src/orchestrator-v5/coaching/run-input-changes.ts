@@ -26,6 +26,9 @@
 
 import type { RunDeltaInputChange } from '@talchain/schemas/boundary';
 import type { RunInputSnapshot } from '@talchain/schemas/orchestrator';
+import { olumiSpreadForMean } from '../../cee/magnitude/olumi-spread.js';
+import { edgeBandFromStrengthBand, edgeBandStd } from '../format/edge-strength-bands.js';
+import { valueWriteAuthorshipDigests } from '../tools/handlers/run-input-residual.js';
 
 type Value = { raw: number | string | boolean; unit?: string };
 type Row = RunDeltaInputChange;
@@ -84,10 +87,61 @@ export function diffRunInputSnapshots(prior: RunInputSnapshot, current: RunInput
   return diffRunInputs(prior, current).rows;
 }
 
+const sameNumber = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a));
+
+/**
+ * A link's new spread is EXPLAINED by its band move only when it is exactly a spread CEE's own writer derives for that
+ * move (`adjust-edge-strength.ts`): the TYPED band's own spread (`edgeBandStd` of the band the link moved into — the
+ * user named a band; DL ruling #2482 r3 P1-1), or, for an exact figure, Olumi's spread carried to the new mean
+ * (`olumiSpreadForMean` from the prior Run's mean and spread). Anything else — another stated spread, a spread on one
+ * Run only — is a change no row states.
+ */
+function spreadFollowsBand(prior: { mean: number; std?: number }, current: { mean: number; std?: number; band?: RunInputSnapshot['links'][number]['band'] }): boolean {
+  if (prior.std === current.std) return true;
+  if (prior.std === undefined || current.std === undefined) return false;
+  if (current.band !== undefined && sameNumber(edgeBandStd(edgeBandFromStrengthBand(current.band)), current.std)) return true;
+  return sameNumber(olumiSpreadForMean({ oldMean: prior.mean, oldStd: prior.std, newMean: current.mean }), current.std);
+}
+
+/**
+ * 0.72.0 (DL ruling #2482 r3, option A) — is a change in a link's AUTHORSHIP (`authorship_digest`) the one a `sizing`
+ * row states? Only two writers move authorship as part of an edit the pair shows: the user's own write (the link is now
+ * `user`) and the Accept (Olumi's `placeholder` → `olumi_accepted`). Any other authorship change — a source moving
+ * inside one sizing class (CODEX r2), a digest on one Run only — is unexplained.
+ */
+function authorshipExplained(prior: { sizing?: string; authorship_digest?: string }, current: { sizing?: string; authorship_digest?: string }): boolean {
+  if (prior.authorship_digest === current.authorship_digest) return true;
+  if (prior.authorship_digest === undefined || current.authorship_digest === undefined) return false;
+  if (prior.sizing === undefined || current.sizing === undefined || prior.sizing === current.sizing) return false;
+  return current.sizing === 'user' || (prior.sizing === 'placeholder' && current.sizing === 'olumi_accepted');
+}
+
+/**
+ * 0.73.0 (F1b lease #85 5945475375) — is a change in a factor's AUTHORSHIP (`authorship_digest`) explained? Only when BOTH
+ * hold: that factor's own value row moved, AND its current authorship is exactly what CEE's value writer leaves after
+ * writing a figure (`valueWriteAuthorshipDigests`: a typed figure or an approved adoption). Same-factor identity alone
+ * proves nothing (CODEX on 4c043a64 P1-2: an independent `extractionType` change beside a value write). Alone — a source
+ * moving at the same figure (CODEX r2), a digest on one Run only, a colleague's apply — it is unexplained.
+ */
+function factorAuthorshipExplained(
+  prior: { authorship_digest?: string },
+  current: { authorship_digest?: string; source?: string },
+  pair: ReturnType<typeof authoredPair>,
+): boolean {
+  if (prior.authorship_digest === current.authorship_digest) return true;
+  if (prior.authorship_digest === undefined || current.authorship_digest === undefined) return false;
+  if (pair === 'unexpressed' || pair[0] === null || pair[1] === null || same(pair[0], pair[1])) return false;
+  return current.source !== undefined && valueWriteAuthorshipDigests(current.source).includes(current.authorship_digest);
+}
+
 /** The rows, and `complete: false` when a sent input changed that no row states. */
 export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot): { rows: Row[]; complete: boolean } {
   const rows: Row[] = [];
-  let complete = true;
+  // ⭐ 0.71.0 — `complete` means VERIFIED (DL ruling #2482 5939864517): the rows below can only speak for the fields the
+  // snapshots record, so the pair is complete only when every OTHER analysis input is proven unchanged — both Runs
+  // carry a residual digest (`run-input-residual.ts`) and they are equal. An older Run without one is never complete.
+  let complete =
+    prior.residual_digest !== undefined && current.residual_digest !== undefined && prior.residual_digest === current.residual_digest;
   const push = (r: Row | null) => {
     if (r !== null) rows.push(r);
   };
@@ -138,7 +192,9 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
   for (const factorId of unionIds(pF, cF)) {
     const pf = pF.get(factorId);
     const cf = cF.get(factorId);
-    pushPair({ entity_kind: 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, authoredPair(pf, cf));
+    const pair = authoredPair(pf, cf);
+    pushPair({ entity_kind: 'factor_value', entity_id: factorId, field: 'value', ...labels(pf?.label, cf?.label) }, pair);
+    if (pf !== undefined && cf !== undefined && !factorAuthorshipExplained(pf, cf, pair)) complete = false;
   }
 
   // ── the goal ──────────────────────────────────────────────────────────────
@@ -195,8 +251,29 @@ export function diffRunInputs(prior: RunInputSnapshot, current: RunInputSnapshot
     }
     // A link's mean, spread and existence probability are the ENGINE's numbers on the model scale — the user never
     // wrote them and they carry no unit. None is a row figure (AIQ 5918134795, the class rule already applied to
-    // `encoded`): any of them changing makes the pair partial.
-    if (pl.mean !== cl.mean || pl.std !== cl.std || pl.exists_probability !== cl.exists_probability) complete = false;
+    // `encoded`).
+    // ⭐ 0.70.0 (R3 DEFECT 3; DL 5937207590): each Run also records the link in the user's terms, and those ARE rows:
+    //   - its BAND moving (`moderate` → `strong`) is a `strength` row, raw = the contract's band literals; the engine
+    //     numbers that moved with it (mean, and the spread that follows the band) are what that row states;
+    //   - WHO SIZED it changing (`placeholder` → `olumi_accepted`: the user accepted Olumi's estimate, no number moved)
+    //     is a `sizing` row.
+    // Still partial, never a row: a mean/spread move INSIDE one band (or with a band unrecorded on either Run), any
+    // existence-probability move, and sizing recorded on one Run only (whether it changed cannot be known).
+    const linkBase = { entity_kind: 'link' as const, entity_id: id, link: { from: ends.from, to: ends.to } };
+    const bandMoved = pl.band !== undefined && cl.band !== undefined && pl.band !== cl.band;
+    if (bandMoved) push(changeRow({ ...linkBase, field: 'strength' }, { raw: pl.band! }, { raw: cl.band! }));
+    if (pl.sizing !== undefined && cl.sizing !== undefined) {
+      if (pl.sizing !== cl.sizing) push(changeRow({ ...linkBase, field: 'sizing' }, { raw: pl.sizing }, { raw: cl.sizing }));
+    } else if (pl.sizing !== cl.sizing) {
+      complete = false;
+    }
+    // A band row states the move of the MEAN and nothing else (DL ruling #2482, P1 #1): the band never absorbs a sign
+    // flip or a spread the move does not explain. Either is a change no row states → partial.
+    if (pl.mean !== cl.mean && !bandMoved) complete = false;
+    if (Math.sign(pl.mean) !== Math.sign(cl.mean)) complete = false;
+    if (!(bandMoved ? spreadFollowsBand(pl, cl) : pl.std === cl.std)) complete = false;
+    if (pl.exists_probability !== cl.exists_probability) complete = false;
+    if (!authorshipExplained(pl, cl)) complete = false;
   }
 
   return { rows, complete };

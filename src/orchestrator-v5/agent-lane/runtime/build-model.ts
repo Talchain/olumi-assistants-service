@@ -1,3 +1,4 @@
+import { reconciliationPending } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
  *
@@ -846,10 +847,28 @@ export function uncarriedRangeIssues(brief: string, admitted: Pick<AdmittedModel
     .filter((r) => !carried.has(r.text) && !heldAsOne(r) && !inAQuestion(brief, r.high.index))
     // `written`, never a one-letter name: a quoted `"${t}"` reads as a currency token to the currency-vocabulary guard.
     .map((r) => r.text).map((written) =>
-    `The brief writes "${written}" and no link in the model carries it. If it is a money size PER ONE of something the brief names `
-    + '(per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the '
-    + `money goal, and size that link per one at the LOW end of "${written}" (effect_provenance "explicit"). If it is not a size `
+    `The brief writes "${written}" and no link in the model carries it. ${perOneRangeRule(written)} If it is not a size `
     + 'per one of anything, change nothing for it.');
+}
+
+/** What the per-one rule asks of ONE written range: the same words for the first construct and the repair retry. */
+function perOneRangeRule(written: string): string {
+  return 'If it is a money size PER ONE of something the brief names '
+    + '(per deal, per contract, per customer), apply the per-one rule: keep that countable as its own quantity, link it to the '
+    + `money goal, and size that link per one at the LOW end of "${written}" (effect_provenance "explicit").`;
+}
+
+/**
+ * ⭐ A4 FIRST PASS (MG #85 lease 5944839798; AI HARNESS 5944602546): the range is asked BEFORE the first draft, not only
+ * of the retry. On Paul's brief the first pass left his written deal-size range uncarried on 5 of 8 served first briefs (7 of 8
+ * paid a second construct, median +15.7 s), and that range retry was adopted 5 times in 6: the first pass skipped real work. Every range the brief
+ * writes outside a question gets the retry's own per-one words; the retry stays the backstop, unchanged. A brief that
+ * writes no range is sent exactly as before, byte for byte.
+ */
+export function firstConstructInput(brief: string): string {
+  const notes = [...new Set(findStatedRanges(brief).filter((r) => !inAQuestion(brief, r.high.index)).map((r) => r.text))]
+    .map((written) => `The brief writes "${written}". ${perOneRangeRule(written)} If it is not a size per one of anything, draw it as you otherwise would.`);
+  return notes.length === 0 ? brief : `${brief}\n\nConstruction notes: ${JSON.stringify(notes)}`;
 }
 
 export function loopIssues(admitted: Pick<AdmittedModel, 'withheld'>): string[] {
@@ -1359,7 +1378,7 @@ export async function buildModelFromBrief(
     const out = await callStructured({
       model: budget.model,
       instructions: BUILD_INSTRUCTIONS,
-      input: brief,
+      input: firstConstructInput(brief),
       max_output_tokens: budget.max_output_tokens,
       reasoning_effort: budget.reasoning_effort,
       schema: strictForTheDrafter(buildCandidateSchema()),
@@ -1968,6 +1987,12 @@ export async function buildModelFromBrief(
     mutated: true,
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     ...(replayed ? { replayed: true } : {}),
+    ...(candidate.goal.scope && admitted.loss.some(l => /\.goal_scope$/.test(l.field_path)) && goalNodes.find(n => n.kind === 'goal') ? {
+      pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
+        goal_id: goalNodes.find(n => n.kind === 'goal')!.id, goal_label: candidate.goal.metric,
+        declared_scope: candidate.goal.scope, expected: 'scope',
+        question: admitted.loss.find(l => /\.goal_scope$/.test(l.field_path))!.reason, operands: [], derivations: [] }),
+    } : {}),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
     // The compact verdict travels with the success, so a caller never has to

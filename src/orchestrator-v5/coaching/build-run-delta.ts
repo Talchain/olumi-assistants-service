@@ -53,17 +53,20 @@ import {
   type RunDeltaAttributionCaseLiteral,
   type RunDeltaBuildsEqualityLiteral,
   type RunDeltaNoiseVerdictLiteral,
+  type RunDeltaWinProbabilitiesUnavailableLiteral,
   type RunDeltaWinProbabilityDelta,
 } from '@talchain/schemas/boundary';
 
 import {
-  isUsableWinProbability,
-  winnerOptionResultSource,
+  identityBoundWinProbabilities,
+  runWithheldWinShares,
 } from '../../orchestrator/context/option-result-source.js';
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
 import { mayPresentComparedRunLeader, mayPresentComparedRunVerdicts } from './compared-run-leader.js';
 
-import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.js';
+import { projectRunFact, selectTwoNewestRunAnalysisFacts, type RunPair } from './compare-runs.js';
+import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { validateAnalysisRunFactIdentity, type AnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
 // ⭐ THE BAND LIVES IN ITS OWN MODULE NOW, AND IT HAS TWO READERS. The
 // constants and `noiseVerdictForProportions` moved out of this file VERBATIM
 // when the deterministic rerun PROSE acquired the same question. Two
@@ -72,6 +75,7 @@ import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.
 // (CLAUDE.md trap #12). Behaviour here is unchanged by the move.
 import { noiseVerdictForProportions } from './win-probability-noise-band.js';
 import { diffRunInputs } from './run-input-changes.js';
+import { islDrawStructureKeyOfFact } from './draw-structure.js';
 
 /**
  * Why no delta was produced. A DISCRIMINATED reason rather than a bare `null`,
@@ -122,6 +126,22 @@ export type BuildRunDeltaResult =
 /** The four PLoT `_meta.builds` members, in a fixed order. */
 const BUILD_KEYS = ['ui', 'cee', 'plot', 'isl'] as const;
 
+/**
+ * ⭐ M2 cause (52f8cd, DL 5934109147): the two COMPUTE builds from PLoT's ALWAYS-ON `_meta.evidence` when `_meta.builds`
+ * is absent. PLoT sends `_meta.builds` only under `UI_CANONICAL_META` (off on staging), but `evidence.plot_build` /
+ * `evidence.isl_build` are "deliberately NOT gated" (PLoT `run.ts` ~5174), so without this `builds_equal` was permanently
+ * 'unknown' on staging and C0/C1 unreachable. Still PLoT's own echo, never CEE's record. PLoT's literal `'unknown'` (no
+ * build stamped) is not a build: it reads as absent, so it can never make two Runs look equal.
+ */
+function evidenceBuilds(underscoreMeta: Record<string, unknown>): Readonly<Record<string, unknown>> | null {
+  const evidence = asRecord(underscoreMeta.evidence);
+  if (evidence === null) return null;
+  const build = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' && v.trim() !== 'unknown' ? v.trim() : null);
+  const plot = build(evidence.plot_build);
+  const isl = build(evidence.isl_build);
+  return plot === null && isl === null ? null : { plot, isl };
+}
+
 interface RunEchoes {
   /** PLoT `meta.seed_used`, normalised. PLoT echoes it as a STRING. */
   readonly seedUsed: string;
@@ -136,7 +156,8 @@ interface RunEchoes {
    */
   readonly builds: Readonly<Record<string, unknown>> | null;
   /**
-   * The byte-for-byte PLoT envelope itself. Carried on this value rather than
+   * PLoT's envelope as stored (its own `meta`, CEE's claim withholds applied —
+   * see `readRunEchoes`). Carried on this value rather than
    * re-read at the call site so a caller cannot pair one run's echoes with
    * another run's option records — the same construction as `RunProjection`
    * in `compare-runs.ts`: make the coupling a property of one value, not an
@@ -181,6 +202,15 @@ function finiteNumber(value: unknown): number | null {
  * `builds` is the exception and is allowed to be null: the contract models its
  * absence explicitly as the tri-state 'unknown'.
  */
+/**
+ * PLoT's `meta.seed_used` echo for ONE Run, read by the SAME reader `seed_equal` compares — so the seed C1 seed reuse
+ * lends (`seed-reuse.ts`) is byte-identical to what the next pair's `seed_equal` will read. Null when the Run could
+ * not be paired at all (no graph hash, no echo, no sample count).
+ */
+export function runSeedEcho(fact: HandlerFact): string | null {
+  return readRunEchoes(fact)?.seedUsed ?? null;
+}
+
 function readRunEchoes(fact: HandlerFact): RunEchoes | null {
   const result = asRecord((fact as { result?: unknown }).result);
   if (result === null) return null;
@@ -191,9 +221,12 @@ function readRunEchoes(fact: HandlerFact): RunEchoes | null {
       : null;
   if (graphHashAtRun === null) return null;
 
-  // `enrichment` is the byte-for-byte PLoT envelope (`run-analysis.ts` writes
-  // it with no projection and no stripping), so `meta` and `_meta` below are
-  // PLoT's own, not a CEE reconstruction.
+  // `enrichment` is PLoT's envelope AS `run-analysis.ts` STORED IT: `meta` and
+  // `_meta` below are PLoT's own, never a CEE reconstruction — but the option
+  // figures are AFTER CEE's claim withholds (`withholdOptionGoalFigures` /
+  // `withholdOptionLimitScores` strip withheld figures and append a typed
+  // warning: `GOAL_FIGURES_WITHHELD_CODES`, `win_shares_withheld`). So a share
+  // missing here may have been withheld, not absent from PLoT.
   const enrichment = asRecord(result.enrichment);
   if (enrichment === null) return null;
 
@@ -213,7 +246,7 @@ function readRunEchoes(fact: HandlerFact): RunEchoes | null {
   if (nSamples === null || nSamples <= 0) return null;
 
   const underscoreMeta = asRecord(enrichment._meta);
-  const builds = underscoreMeta === null ? null : asRecord(underscoreMeta.builds);
+  const builds = underscoreMeta === null ? null : asRecord(underscoreMeta.builds) ?? evidenceBuilds(underscoreMeta);
 
   return { seedUsed, nSamples, graphHashAtRun, builds, enrichment };
 }
@@ -369,22 +402,38 @@ function deriveBuildsEquality(
  * fixture). So build DRIFT is observable today, flag-off; build EQUALITY —
  * which is what C1 needs — is not.
  */
-function classifyAttribution(provenance: {
-  readonly seed_equal: boolean;
-  readonly hash_equal: boolean;
-  readonly builds_equal: RunDeltaBuildsEqualityLiteral;
-  readonly n_equal: boolean;
-}): RunDeltaAttributionCaseLiteral | null {
+function classifyAttribution(
+  provenance: {
+    readonly seed_equal: boolean;
+    readonly hash_equal: boolean;
+    readonly builds_equal: RunDeltaBuildsEqualityLiteral;
+    readonly n_equal: boolean;
+  },
+  /**
+   * Both Runs' PLoT-recorded ISL draw-structure keys compared (`draw-structure.ts` `islDrawStructureKeyOfFact`; PLoT computes them):
+   * `equal` / `unequal` when both were recorded, `unrecorded` when either was not.
+   * C1 needs `equal`: the same seed on a different draw structure misaligns the draws, so the movement is not
+   * attributable (R3 #75 5920859011). Fails CLOSED: an `unrecorded` pair cannot show its draws line up (AI EXPERIENCE
+   * BUILD CR 5921519604).
+   * ⛔ A KNOWN MISMATCH IS AN OBSERVED DIVERGENCE (AI EXPERIENCE BUILD CR 5922160590): it outranks C0 as well as C1. An
+   * equal analysis hash does NOT imply an identical request: `computeAnalysisAffectingGraphHash` sorts nodes and edges,
+   * while ISL draws in list order, so a reordered stochastic node list keeps the hash and moves every draw. C0 on an
+   * `unrecorded` pair (the legacy control) is unchanged.
+   */
+  drawStructure: 'equal' | 'unequal' | 'unrecorded',
+): RunDeltaAttributionCaseLiteral | null {
   // Observed divergences first, most fundamental first. Each of these is a
   // fact we measured off two echoes.
   if (!provenance.seed_equal) return 'C2_unpaired';
+  if (drawStructure === 'unequal') return 'C2_unpaired';
   if (!provenance.n_equal) return 'C4_budget_drift';
   if (provenance.builds_equal === 'unequal') return 'C3_engine_drift';
 
   // Past every observed divergence. Only the two VERIFIED cases remain, and
   // both require a positively-confirmed builds equality.
   if (provenance.builds_equal === 'equal') {
-    return provenance.hash_equal ? 'C0_identical' : 'C1_attributable';
+    if (provenance.hash_equal) return 'C0_identical';
+    return drawStructure === 'equal' ? 'C1_attributable' : 'C2_unpaired';
   }
 
   // seed, n and hash all agree but builds is unverifiable. Nothing in the table
@@ -394,57 +443,12 @@ function classifyAttribution(provenance: {
 }
 
 /**
- * Every option whose identity is STRUCTURALLY SAFE, mapped to its win
- * probability.
- *
- * ⚠ WHY NOT `result.win_probabilities`, WHICH IS RIGHT THERE AND ALREADY
- * PERSISTED. Because it is LABEL-KEYED. `run-analysis.ts:2286-2302`
- * (`extractWinProbabilities`) keys that record by `option_label` FIRST and only
- * falls back to `option_id`, so on any ordinary run its keys are DISPLAY
- * STRINGS. `RunDeltaWinProbabilityDeltaSchema.option_id` is identity-bound —
- * *"Option id — identity-bound (trap 19), never a label"* — and feeding labels
- * into it would reintroduce exactly the defect `compare-runs.ts` documents at
- * length: a rename is invisible to the analysis-affecting hash, so two runs
- * that differ only in a label would be reported as different options.
- *
- * ⚠ AND NOT `compactAnalysis(...).summary.options[]` either: that projection
- * carries the SAME `option_id <- option_label` fallback, which is precisely why
- * `readLeaderOptionId` exists to confirm the winner's id against the raw
- * records. Only the raw source plus an explicit id check is safe.
- *
- * A DUPLICATE ID DROPS BOTH ENTRIES. If two records claim one id we cannot tell
- * which is which, and picking either would attach a number to an option by
- * guess. Fail-closed.
- */
-function identityBoundWinProbabilities(
-  enrichment: Record<string, unknown>,
-): ReadonlyMap<string, number> {
-  const found = new Map<string, number>();
-  const ambiguous = new Set<string>();
-
-  for (const entry of winnerOptionResultSource(enrichment)) {
-    const id = entry.option_id;
-    if (typeof id !== 'string' || id.length === 0) continue;
-    // The SHARED predicate, imported rather than re-implemented: a usable
-    // win probability is a finite number in [0, 1]. Re-stating that inequality
-    // here would be a second definition free to drift from the first.
-    if (!isUsableWinProbability(entry.win_probability)) continue;
-    if (found.has(id)) {
-      ambiguous.add(id);
-      continue;
-    }
-    found.set(id, entry.win_probability);
-  }
-
-  for (const id of ambiguous) found.delete(id);
-  return found;
-}
-
-/**
  * SC-24 (schemas 0.68.0) — the pair's endpoints and its exact input changes, read off the two facts' own
  * `run_id` / `input_snapshot` (what each Run was SENT; `run-analysis.ts` §3.9).
- *   - `compared`: both Runs recorded their inputs → the diff (possibly `[]`), `input_coverage: 'complete'` — or
- *     `'partial'` when a sent input changed that no authored row can state (`run-input-changes.ts` RULES).
+ *   - `compared`: both Runs recorded their inputs → the diff (possibly `[]`), `input_coverage: 'complete'` ONLY when
+ *     every sent input is VERIFIED the same outside the rows (equal 0.71 residuals on both ends + the link rules,
+ *     `run-input-changes.ts`) — else `'partial'`, which means "can't verify", NEVER "an input changed": an end with no
+ *     recorded residual (a Run before 0.71) is `partial` on a no-edit rerun (DL 5939864517; F1b 5943379851).
  *   - `not_recorded`: an end predates snapshots → the coverage says so and NO list travels (never an empty diff).
  *   - `same_run`: both ends are one Run re-delivered → no delta at all.
  */
@@ -481,6 +485,39 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
   return { kind: 'not_recorded', members: { ...endpoints, input_coverage: 'not_recorded' } };
 }
 
+/** Exact historical execution identity resolved by the selected-version binding. */
+export type SelectedRunIdentity = AnalysisRunFactIdentity & { readonly run_id: string };
+export interface SelectedRunPair {
+  readonly prior: SelectedRunIdentity;
+  readonly current: SelectedRunIdentity;
+}
+
+function selectRecordedPair(facts: readonly HandlerFact[], selected: SelectedRunPair): RunPair | null {
+  if (selected.prior.scenario_id !== selected.current.scenario_id) return null;
+  const find = (identity: SelectedRunIdentity): HandlerFact | null => {
+    if (validateAnalysisRunFactIdentity(identity).status !== 'confirmed'
+      || typeof identity.run_id !== 'string' || identity.run_id.trim() === '' || identity.run_id.trim() !== identity.run_id || identity.run_id.length > 200) return null;
+    const matches = facts.filter((fact) => {
+      if (!isSuccessfulRunAnalysisFact(fact)) return false;
+      const result = asRecord((fact as { result?: unknown }).result);
+      const checked = validateAnalysisRunFactIdentity(result);
+      return result?.run_id === identity.run_id && checked.status === 'confirmed'
+        && checked.identity.scenario_id === identity.scenario_id
+        && checked.identity.graph_hash_at_run === identity.graph_hash_at_run
+        && checked.identity.computed_at === identity.computed_at;
+    });
+    // Ambiguous records cannot be repaired by taking the first or newest fact.
+    return matches.length === 1 ? matches[0]! : null;
+  };
+  const prior = find(selected.prior);
+  const current = find(selected.current);
+  return prior === null || current === null ? null : {
+    prior, current,
+    prior_graph_hash_at_run: selected.prior.graph_hash_at_run,
+    current_graph_hash_at_run: selected.current.graph_hash_at_run,
+  };
+}
+
 /**
  * The wire block, or a discriminated refusal.
  *
@@ -495,8 +532,12 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
 export function buildRunDelta(input: {
   readonly priorFacts: readonly HandlerFact[];
   readonly mayNameLeadingOption: boolean;
+  /** Compare route only: FROM → TO, retaining the recorded dates. No fallback. */
+  readonly selectedPair?: SelectedRunPair;
 }): BuildRunDeltaResult {
-  const pair = selectTwoNewestRunAnalysisFacts(input.priorFacts);
+  const pair = input.selectedPair === undefined
+    ? selectTwoNewestRunAnalysisFacts(input.priorFacts)
+    : selectRecordedPair(input.priorFacts, input.selectedPair);
   if (pair === null) return { kind: 'none', reason: 'insufficient_runs' };
   // ⛔ A pair with a run nobody asked for has no honest delta: its scores and trust verdict are
   // confined (review of #1857, B5), and withholding only its leader id still lets
@@ -531,7 +572,11 @@ export function buildRunDelta(input: {
   // so a true £59 → £60 input change showed nothing. When both Runs recorded their inputs, the pair is emitted as
   // `C5_unattributed` — no causal reading, no magnitude — so the input rows can travel. Without recorded inputs there
   // is still nothing honest to show, and the old refusal stands.
-  const classified = classifyAttribution(pairProvenance);
+  const priorDrawStructure = islDrawStructureKeyOfFact(pair.prior);
+  const currentDrawStructure = islDrawStructureKeyOfFact(pair.current);
+  const drawStructure = priorDrawStructure === null || currentDrawStructure === null ? 'unrecorded'
+    : priorDrawStructure === currentDrawStructure ? 'equal' : 'unequal';
+  const classified = classifyAttribution(pairProvenance, drawStructure);
   if (classified === null && inputs.kind !== 'compared') {
     return { kind: 'none', reason: 'no_honest_attribution_case' };
   }
@@ -604,12 +649,39 @@ export function buildRunDelta(input: {
   }
   // Deterministic order so a captured wire body is byte-stable across replays.
   winProbabilities.sort((a, b) => a.option_id.localeCompare(b.option_id));
+  // ⭐ 0.70.0 (CANVAS 5936762171, RC 5936776917): WHY there are no shares, typed — only when the cause is known:
+  //   - `prior_withheld`: THIS Run may show its shares, the earlier Run's were withheld → "compared for the first time";
+  //   - `no_matched_option`: both Runs show shares, and no option has one on both sides.
+  // Any other empty list (this Run's own shares withheld, a Run with no shares recorded) carries no reason: the
+  // consumer keeps its cause-neutral words, never a reason it cannot back.
+  // ⛔ `prior_withheld` is a CAUSE CLAIM, so it needs the earlier Run's OWN RECORDED withhold — never the absence of a
+  // stamp (DL ruling #2482 r3 P1-3; CODEX reproduced the cause claim from missing evidence). Two records qualify:
+  //   (a) its typed `constraint_verdict` says it may not name a leader (the Run is then not entitled here);
+  //   (b) it has NO shares and its own envelope records that the goal-figure withholder REMOVED shares it had
+  //       (`runWithheldWinShares`: a `GOAL_FIGURES_WITHHELD_CODES` warning carrying `win_shares_withheld: true`, set by
+  //       the withholder only when the envelope held ≥1 identity-bound usable share). A code alone is not enough: PLoT
+  //       may have sent no shares at all (CODEX pre-review on 864e915c, P1). The Run stays entitled, but the withholder
+  //       took every share with the figures (R3 journey-8 5942780839: an unsized Olumi link on the way; after the
+  //       Accept, "No option has figures from both runs" was shown where the options can now be compared).
+  // A historical Run with neither record is "not entitled" (fail closed) or share-less, but its cause is unknown,
+  // so no reason travels.
+  const priorVerdictWithheld = (() => {
+    const verdict = pair.prior.fact_type === 'run_analysis' ? (pair.prior.result as { constraint_verdict?: unknown }).constraint_verdict : undefined;
+    return verdict !== null && typeof verdict === 'object' && !Array.isArray(verdict)
+      && (verdict as { may_name_leading_option?: unknown }).may_name_leading_option === false;
+  })();
+  const priorFiguresWithheld = priorWins.size === 0 && runWithheldWinShares(priorEchoes.enrichment);
+  const winProbabilitiesUnavailable: RunDeltaWinProbabilitiesUnavailableLiteral | undefined = winProbabilities.length > 0 ? undefined
+    : currentEntitled && currentWins.size > 0 && ((!priorEntitled && priorVerdictWithheld) || priorFiguresWithheld) ? 'prior_withheld'
+      : priorEntitled && currentEntitled && priorWins.size > 0 && currentWins.size > 0 ? 'no_matched_option'
+        : undefined;
 
   const candidate = {
     attribution_case: attributionCase,
     pair_provenance: pairProvenance,
     leader,
     win_probabilities: winProbabilities,
+    ...(winProbabilitiesUnavailable !== undefined ? { win_probabilities_unavailable: winProbabilitiesUnavailable } : {}),
     // ⭐ THE WITHHELD FLIP-THRESHOLD SLOT, TAKEN FROM THE CAGE — NEVER WRITTEN
     // HERE. `flip_thresholds` is a ratified Tier-3 deny key and
     // `claim-safety-cage.ts` is its sole owner, so this producer carries no

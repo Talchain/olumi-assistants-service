@@ -192,6 +192,20 @@ describe('run_delta outcome disclosure', () => {
     expect(got[0].run_analysis_facts_count).toBe(1);
   });
 
+  it('RED (AI HARNESS, F5 I3.1): a caller that binds the delta itself is named as such, never as prior_facts_absent', () => {
+    const before = response(BOUND_PAIR[0]!);
+    const finalised = finaliseV5Response(response(BOUND_PAIR[0]!), { scenarioId: SCENARIO_ID, runDeltaBoundByCaller: true, mayNameLeadingOption: true });
+
+    const got = outcomeEvents();
+    expect(got).toHaveLength(1);
+    expect(got[0].outcome).toBe('skipped');
+    expect(got[0].reason).toBe('caller_binds_run_delta');
+    expect(got[0].wire_reason_carried).toBeNull();
+    // Telemetry only: the exit's wire is what it was (no delta built here, no reason stamped).
+    expect('run_delta' in finalised).toBe('run_delta' in before);
+    expect(wireReason(finalised)).toBeUndefined();
+  });
+
   it('names prior_facts_absent — the caller-owned cause the producer cannot see', () => {
     finalise(undefined, BOUND_PAIR[0]!);
 

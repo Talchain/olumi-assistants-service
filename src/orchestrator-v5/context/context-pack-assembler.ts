@@ -1862,12 +1862,14 @@ export function assembleContextPackWithSummary(
   const runDeltaForPack: ContextPackRunDelta | null = (() => {
     if (runDeltaBuild === null || runDeltaBuild.kind !== 'ok') return null;
     // SC-24's pair members stay OFF the prompt too (see `ContextPackRunDeltaSchema`): an input row has no author.
+    // 0.70.0: the typed reason for empty win shares stays off the prompt too (RC's bound UI sentence; parity guard).
     const {
       flip_thresholds: _flipThresholdsNotComputed,
       endpoints: _endpoints, input_coverage: _inputCoverage, input_changes: _inputChanges,
+      win_probabilities_unavailable: _winProbabilitiesUnavailable,
       ...rest
     } = runDeltaBuild.delta;
-    void _flipThresholdsNotComputed; void _endpoints; void _inputCoverage; void _inputChanges;
+    void _flipThresholdsNotComputed; void _endpoints; void _inputCoverage; void _inputChanges; void _winProbabilitiesUnavailable;
     return rest;
   })();
   // Plain/direct arrays predate the durable carrier. They may still provide a

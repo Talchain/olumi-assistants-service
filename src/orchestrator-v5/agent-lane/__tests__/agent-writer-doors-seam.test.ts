@@ -20,6 +20,7 @@
  * only; route-v2's LLM router throws if touched.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { asSent } from './helpers/as-sent.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { randomUUID } from 'node:crypto';
 
@@ -223,7 +224,7 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
     let given = '';
-    script = [(body) => { given = JSON.stringify(body['input']); return say('Your spend limit is £20,000.'); }];
+    script = [(body) => { given = JSON.stringify(asSent(body)['input']); return say('Your spend limit is £20,000.'); }];
     await turn({ message: 'What is my spend limit?' });
     expect(given).toMatch(/CURRENT MODEL STATE/);
     expect(given).toContain('20000');

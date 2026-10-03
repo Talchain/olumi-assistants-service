@@ -270,6 +270,8 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // Graph-mutating: applying the persisted operator/value changes
   // the graph. Hash divergence between emit and resume is unsafe.
   set_factor_value: 'mutating',
+  // This carrier records an issue; its answers prepare a separate, consented canonical proposal.
+  reconcile_goal_scope: 'non_mutating',
   // Reserved-but-not-emitted graph-mutating kinds. Classified as
   // mutating now so they fail closed by default when wired.
   apply_proposed_change: 'mutating',

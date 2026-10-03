@@ -123,6 +123,9 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
     emitted_at_iso: '2026-07-03T11:59:00.000Z',
   };
   switch (kind) {
+    case 'reconcile_goal_scope':
+      return { ...base, action: { kind, goal_id: 'goal_revenue', goal_label: 'Revenue', expected: 'scope',
+        question: 'Does revenue cover all plans?', operands: [], derivations: [] } };
     case 'run_analysis':
     case 'what_would_flip':
       return { ...base, action: { kind } };
@@ -269,6 +272,7 @@ describe('derivePendingActivity — single ORIENT-time pending tally, per kind',
     ['proposed_concept', 1],
     ['set_factor_value', 0],
     ['clarify_v2_round', 0],
+    ['reconcile_goal_scope', 0],
     ['edit_graph_add_risk', 0],
     // ROADMAP 2.1352 — the asked cell is an ELICITATION, not a proposal: a
     // bare "yes" answers no "give me a number from 0 to 1" question, so it

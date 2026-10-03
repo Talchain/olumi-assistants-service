@@ -18,6 +18,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { readFileSync } from 'node:fs';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
+import { asSent } from './helpers/as-sent.js';
 
 const CC_SERVED = JSON.parse(readFileSync(new URL('./fixtures/cc-olumi-levels-unset-20260930.json', import.meta.url), 'utf8')) as { graph: unknown };
 
@@ -54,6 +55,8 @@ let knobs: {
   analysisReady?: Record<string, unknown>;
   /** F3: extra fields on the readback's analysis_result (the run's brief). */
   analysisResultExtra?: Record<string, unknown>;
+  /** P0 SHARED DATA: the run's review card kind (default `evidence_priority`, neutral; `narrative` presumes a leader). */
+  cardKind?: string;
 } = { graph: READY_GRAPH, coachingHash: 'readback', runStateKind: 'complete_current', leaderClaim: { permitted: false, withheld_reason: 'auto_initiated' } };
 
 const { runStub } = vi.hoisted(() => ({ runStub: { impl: null as null | ((a: unknown) => Promise<unknown>) } }));
@@ -102,7 +105,7 @@ const callTool = (name: string, args: Record<string, unknown>) => ({ output: [{ 
 
 function installFetch() {
   vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> & { text?: { format?: { type?: string } } };
+    const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown> & { text?: { format?: { type?: string } } };
     if (body.text?.format?.type === 'json_schema') {
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(candidate) }] }] }), { status: 200 });
     }
@@ -191,7 +194,7 @@ function installRunStub() {
           { type: 'analysis_result', summary: 'the run’s own copy' },
           {
             type: 'review_card', block_id: '11111111-2222-4333-8444-555555555555', signal_id: 'evidence_priority:x', created_at: '2026-09-24T18:00:00.000Z',
-            source_handler: 'run_analysis', graph_hash_at_generation: coachingHash, card_kind: 'evidence_priority',
+            source_handler: 'run_analysis', graph_hash_at_generation: coachingHash, card_kind: knobs.cardKind ?? 'evidence_priority',
             title: 'Where evidence would help most', body: 'Delivery reliability carries the most uncertainty.', target_refs: [], priority_rank: 10,
           },
         ],
@@ -444,7 +447,14 @@ describe('the Agent route runs the first analysis itself, once', () => {
    * first. The prose is a SERVED Run reply's (AI Quality corpus W.V2.rep1, labelled clean), used for its
    * shape — first sentence, three bullets, a closing line. See `agent-run-reply-answer-shape.test.ts`.
    */
-  it('RED: a build turn whose first analysis ran → its bulleted narration carries `_answer_shape`, and the text is its derivation', async () => {
+  /**
+   * ⛔ DL item 3 (2 Oct; CODEX r2 P1 on #2509, CODEX on #2517): this row used to require a shape here, and that shape put
+   * the host's OWN build lines ("The model was saved as version 1.", what is held fixed, the questions the model does not
+   * answer yet) behind "Show more", because the UI renders `_answer_shape` instead of the text. The build turn's narration
+   * is still the narrator's, but the reply is no longer ONLY the narrator's words, so it ships whole with every host line
+   * on the face. CONTROL: `agent-run-reply-answer-shape.test.ts` rows 8/11 (the narrator's words alone are still shaped).
+   */
+  it('a build turn whose first analysis ran → its narration PLUS the host\'s own build lines → NOT shaped; every host line on the face', async () => {
     const { readFileSync } = await import('node:fs');
     const corpus = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as { replies: { id: string; text: string }[] };
     const prose = corpus.replies.find((r) => r.id === 'stack-1854-714677d5/pricing-run-complete.W.V2.rep1')!.text;
@@ -452,11 +462,9 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const b = await turn(app, { message: BRIEF }) as Body & { _answer_shape?: { headline: string; bullets: string[]; detail: string } };
     expect(b._diagnostic_trace.first_analysis, 'the control: the first pass ran').toMatchObject({ ran: true });
     expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'the control: an analysis-bearing turn').toBe(true);
-    expect(b._answer_shape).toBeDefined();
-    expect(b._answer_shape!.headline).toBe(prose.split('\n')[0]);
-    expect(b._answer_shape!.bullets).toHaveLength(3);
-    const { deriveAnswerTextFromShape } = await import('../../routing/answer-shape.js');
-    expect(deriveAnswerTextFromShape(b._answer_shape as never)).toBe(b.assistant_text);
+    expect(b.assistant_text.startsWith(prose), 'the control: the narrator\'s words lead, untouched').toBe(true);
+    expect(b.assistant_text, 'the control: the host appended its own build line').toContain('The model was saved as version 1.');
+    expect(b._answer_shape, 'not the narrator\'s words alone → not shaped').toBeUndefined();
   });
 
   /**
@@ -532,6 +540,24 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const b = await buildTurn(app);
     expect(st(SID).inProcessRuns, 'control: the run happened').toHaveLength(1);
     expect((b.blocks ?? []).some((x) => x.type === 'review_card')).toBe(false);
+  });
+
+  /**
+   * P0 SHARED DATA (#85 5963053136): the route hands `bindRunBlocksToReadback` the readback's `analysis_ready`, so a
+   * leader-presuming card follows the ONE leader licence. A separated Run (`permitted: true`) of a model the admission
+   * holds at `exploratory` withholds the leader everywhere else on the turn; its `narrative` card must not ship.
+   */
+  it.each([
+    ['exploratory', false],
+    ['comparative_leader', true],
+  ] as const)('RED: a leader-presuming card under a %s admission (separated Run) → shown: %s', async (mode, shown) => {
+    knobs.leaderClaim = { permitted: true, separation: 'separated' };
+    knobs.analysisReady = { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode } };
+    knobs.cardKind = 'narrative';
+    const b = await buildTurn(app);
+    expect(st(SID).inProcessRuns, 'control: the run happened').toHaveLength(1);
+    expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'control: an analysis-bearing turn').toBe(true);
+    expect((b.blocks ?? []).some((x) => x.type === 'review_card')).toBe(shown);
   });
 });
 

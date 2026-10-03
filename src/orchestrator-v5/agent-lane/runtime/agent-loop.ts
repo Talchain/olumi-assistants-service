@@ -17,7 +17,9 @@
  *     sessions unchanged if they recover.
  */
 
+import { randomUUID } from 'node:crypto';
 import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
+import { modelFacingToolResult } from '../licensed-run-view.js';
 import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
 import { log } from '../../../utils/telemetry.js';
@@ -34,6 +36,10 @@ export interface ModelCallRequest {
   readonly max_output_tokens: number;
   /** The ONE tool this call must make (`AgentTurnInput.firstCallTool`), sent only on the turn's first call. */
   readonly tool_choice?: { readonly type: 'function'; readonly name: string };
+  /** A caller-set deadline: the call aborts at it and is never retried (`withTransportRetry`). */
+  readonly deadline_ms?: number;
+  /** T1 (b): the ledger's purpose for a cache prewarm (`PREWARM_OUTPUT_TOKENS`); never sent to the provider. */
+  readonly purpose?: 'prewarm';
 }
 
 export interface ModelCallResponse {
@@ -121,7 +127,31 @@ export interface AgentTurnInput {
    * Absent ⇒ exactly as before.
    */
   readonly firstCallTool?: string;
+  /**
+   * ⭐ T1 (a): THE HOST MAKES THE FIRST CALL ITSELF (DL 5942371176). On a first brief the first model call only ever decided
+   * to call `build_model_from_brief` with the user's words: a whole call (13.6–14k input tokens, ~4 s served) to name a
+   * tool the host already knows. When set, hop 0 makes NO model call: this call is put in the conversation exactly as a
+   * model-made call would be and goes through the SAME dispatch (withheld check, one-change rule, bookkeeping, licensed
+   * output), then the next hop's call answers from its result. Applied only when that tool is offered on this turn;
+   * otherwise hop 0 calls the model as before. Absent ⇒ exactly as before.
+   */
+  readonly hostFirstCall?: { readonly name: string; readonly args: Readonly<Record<string, unknown>> };
 }
+
+/**
+ * ⭐ T1 (b): THE CALL THE HOST REPLACED STILL WARMS THE CACHE. When the host makes the first call (`hostFirstCall`), the
+ * model call it replaces is still SENT, capped and never awaited: its prompt (instructions + tools + this turn's items)
+ * is the exact prefix of the next hop's call, so that call reads it from the provider's cache as it did when the model
+ * made the first call (~14k cached tokens served). No `prompt_cache_key`: the static prefix is already shared ACROSS
+ * scenarios by prefix routing (served 2 Oct: a new scenario's first call read 14,116 cached tokens another scenario
+ * wrote), and a per-scenario key would route each scenario apart. Nothing reads its output; a failure costs nothing. It is a real
+ * provider call, so it is on the turn's ledger under its own purpose (`prewarm`) and counts in `llm_calls_used` (DL).
+ */
+export const PREWARM_OUTPUT_TOKENS = 16;
+export const PREWARM_DEADLINE_MS = 15_000;
+
+/** The prefix of the call id a host-made first call carries in the conversation (never a model's id; unique per turn). */
+export const HOST_FIRST_CALL_ID = 'host_first_call';
 
 /**
  * Where a turn's wall time actually went.
@@ -353,22 +383,32 @@ export async function runAgentTurn(
 
   for (let hop = 0; hop < maxHops; hop++) {
     const providerStartedAt = now();
-    providerCalls += 1;
     // Eligibility, not the raw catalogue. `eligibleTools` starts from
     // `toolsFor(mode)` and can only REMOVE, so the mode remains the authority
     // and a context packet can never widen the surface.
     const offered = (eligibility === undefined ? toolsFor(input.mode ?? 'full') : eligibility.tools)
       .filter((t) => !withheld.has(t.name));
-    const forced = hop === 0 && input.firstCallTool !== undefined && offered.some((t) => t.name === input.firstCallTool)
+    const hostCall = hop === 0 && input.hostFirstCall !== undefined && offered.some((t) => t.name === input.hostFirstCall!.name)
+      ? input.hostFirstCall : undefined;
+    const forced = hop === 0 && hostCall === undefined && input.firstCallTool !== undefined && offered.some((t) => t.name === input.firstCallTool)
       ? input.firstCallTool : undefined;
-    const resp = await callModel({
+    const request: ModelCallRequest = {
       instructions: input.instructions,
       input: items,
       tools: offered as readonly unknown[],
       max_output_tokens: input.maxOutputTokens,
       ...(forced !== undefined ? { tool_choice: { type: 'function' as const, name: forced } } : {}),
-    });
-    providerMs += Math.max(0, now() - providerStartedAt);
+    };
+    if (hostCall !== undefined) {
+      void callModel({ ...request, input: [...items], max_output_tokens: PREWARM_OUTPUT_TOKENS, deadline_ms: PREWARM_DEADLINE_MS, purpose: 'prewarm' })
+        .catch((err: unknown) => { log.debug({ err: String(err) }, 'agent-lane: cache prewarm failed (nothing reads it)'); });
+    } else {
+      providerCalls += 1;
+    }
+    const resp: ModelCallResponse = hostCall !== undefined
+      ? { output: [{ type: 'function_call', call_id: `${HOST_FIRST_CALL_ID}_${randomUUID()}`, name: hostCall.name, arguments: JSON.stringify(hostCall.args) }] }
+      : await callModel(request);
+    if (hostCall === undefined) providerMs += Math.max(0, now() - providerStartedAt);
     const out = resp.output ?? [];
     /**
      * ⛔ EVERY CALL IN THE OUTPUT, NOT THE FIRST ONE.
@@ -440,7 +480,8 @@ export async function runAgentTurn(
           ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
           // ⛔ Only a change THIS turn proposed and still offers can be withdrawn: one an earlier turn showed the user
           // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`).
-          : String(call.name) === WITHDRAW_PROPOSAL && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
+          : String(call.name) === WITHDRAW_PROPOSAL && !(proposalIdArg(call.arguments) ?? '').startsWith('goal-scope:')
+            && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
             ? {
                 ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
                 detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
@@ -496,7 +537,9 @@ export async function runAgentTurn(
       items.push({
         type: 'function_call_output',
         call_id: call.call_id,
-        output: JSON.stringify(result),
+        // ⭐ The model reads the LICENSED run (`licensed-run-view.ts`): on a turn it may not name a leader, no leader
+        // identity and no producer prose reach it. The route keeps the raw result in `toolResults`.
+        output: JSON.stringify(modelFacingToolResult(String(call.name), result)),
       });
     }
     // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.

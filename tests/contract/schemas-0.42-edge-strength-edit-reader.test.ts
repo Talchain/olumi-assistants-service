@@ -239,7 +239,40 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // naming `edge_strength_edit` is identical (the same six files); `enums.*` and `turn-payload.js` are byte-unchanged.
     // Of the changed lines, 3 name a strength: an IMPORT LIST in `fixtures/index.js` (appends UnitReading/EntityRef/
     // RefHighWater schemas) and one SC-24 input-row fixture (`field: 'strength'`), neither the member nor its band.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.68.0');
+    //
+    // 0.68.0 → 0.69.0 (schemas #78, MG F1: semantic node fields, `option_status_edit`, goal_target_edit metadata; main
+    // `5b0ca7f5`), RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `5a401a9a…` → `939f5c9e…`): the FILE SET
+    // naming `edge_strength_edit` is identical (the same five dist files). Of the changed lines in them, 2 pairs name a
+    // strength: the `SystemEventKind` declaration (appends `option_status_edit` after `goal_target_edit`) and the
+    // fixtures IMPORT LIST (appends GoalHorizon/GoalStatedAs/CountNoun schemas) — neither the member nor its band.
+    //
+    // 0.69.0 → 0.70.0 (schemas #80, F1b: Run snapshot link band/sizing, `sizing` input row, typed empty win shares; main
+    // `cace462d`), RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `939f5c9e…` → `a987224c…`): the FILE SET
+    // naming `edge_strength_edit` is identical (the same five dist files); `enums.*` and `turn-payload.*` are
+    // byte-unchanged; the one changed file is `fixtures/index.js`, and 0 of its changed lines name a strength.
+    //
+    // 0.70.0 → 0.71.0 (schemas #81, F1b: Run snapshot `residual_digest` — `complete` means verified; main `56888181`),
+    // RE-DERIVED on 1 Oct against the PUBLISHED tarballs (sha1 `a987224c…` → `c783076e…`): the FILE SET naming
+    // `edge_strength_edit` is identical and all five files are byte-unchanged; 0 changed dist lines name a strength or a
+    // band (contrast: the same diff finds `residual_digest`).
+    //
+    // 0.71.0 → 0.72.0 (schemas #82, F1b: Run snapshot link `authorship_digest`; main `cd1e868e`), RE-DERIVED on 1 Oct
+    // against the PUBLISHED tarballs (sha1 `c783076e…` → `fd389b22…`): the FILE SET naming `edge_strength_edit` is
+    // identical and all five files are byte-unchanged; 0 changed dist lines name a strength or a band (contrast: the
+    // same diff finds 42 lines naming `authorship_digest`).
+    //
+    // 0.72.0 → 0.73.0 (schemas #83, F1b: Run snapshot FACTOR `authorship_digest`; main `b447da6f`), RE-DERIVED on 2 Oct
+    // against the PUBLISHED tarballs (sha1 `fd389b22…` → `ab0b2c9a…`): the FILE SET naming `edge_strength_edit` is identical and
+    // all five files are byte-unchanged; 0 changed dist lines name a strength or a band (contrast: the same diff finds 42
+    // lines naming `authorship_digest`).
+    // 0.73.0 -> 0.74.0 (schemas #84, version result-diff; published c47767f9).
+    // Registry SHA1 ab0b2c9af7e9441ba88e45837f1cff89bd449379 ->
+    // ea5d0acdf3a277c243dfa391161450e1b2675df5, verified against both tarballs.
+    // All FOUR runtime reader files (enums + turn-payload, .js/.d.ts) are
+    // byte-identical. The fifth file, fixtures/index.js, adds the three v2
+    // fixtures and registry rows: all 177 prior fixture initializers remain
+    // byte-identical; no prior export is removed. Reader assertions stay intact.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.74.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
@@ -413,6 +446,8 @@ describe('schema 0.42 — pre-0.42 system-event corpus is byte-compatible', () =
       // 0.59.0 appends `goal_target_edit` the same way — proven append-only
       // by string equality at the vendored bytes (see the version pin above).
       'goal_target_edit',
+      // 0.69.0 appends `option_status_edit` (MG F1 T6) the same way.
+      'option_status_edit',
     ]);
   });
 

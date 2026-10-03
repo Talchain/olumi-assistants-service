@@ -54,9 +54,21 @@ describe('F5 D1: Paul\'s "aiming to double that" is a target card — a decision
     expect(p).toEqual(expect.objectContaining({ ok: true, direction_choice: { chosen: 'at_least', alternative: 'at_most' } }));
   });
 
-  it('CONTROL (contradiction): "at most £200k" while the Agent proposes at least → refused, nothing prepared', async () => {
-    const p = await propose('It should be at most £200,000.', [S1], { constraint_type: 'at_least', value: 200000 });
-    expect(p).toEqual(expect.objectContaining({ ok: false, refusal: 'direction_not_stated' }));
+  it('RED (DL #2447 follow-up 5931593767): a CONTRADICTION is a decision too — "at most £200k" while the Agent reads at least → the literal reading primary', async () => {
+    const store = new ProposalStore();
+    const p = await propose('It should be at most £200,000.', [S1], { constraint_type: 'at_least', value: 200000 }, store);
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen: 'at_most', alternative: 'at_least' } }));
+    expect(p.public_label).toBe('Set the goal "Quarterly revenue" to at most £200,000');
+    const chips = approvalChipsFor([{ name: 'propose_goal_target', ok: true, mutated: false, proposal_id: String(p.proposal_id) }],
+      (id) => ({ proposal: store.get(id), result: p }));
+    expect(chips.map((c) => c.label)).toEqual(['Yes, at most', 'At least instead', 'Change something first']);
+  });
+
+  it('RED (the DL\'s row): "cut costs to £34k over the next year" — `over` reads a direction against the Agent\'s at most → a decision, never a dead end', async () => {
+    const turn = 'We need to cut costs to £34k over the next year.';
+    expect(comparatorTheUserWrote(turn), 'precondition: the literal reading is at least (the old `over`)').toBe('at_least');
+    const p = await propose(turn, [], { constraint_type: 'at_most', value: 34000 });
+    expect(p, JSON.stringify(p)).toEqual(expect.objectContaining({ ok: true, mutated: false, direction_choice: { chosen: 'at_least', alternative: 'at_most' } }));
   });
 
   it('CONTROL: the user\'s own literal words carry it — no decision is offered, the card is theirs', async () => {

@@ -106,14 +106,16 @@ export interface GenerativeCall {
   readonly cee_build?: string;
   readonly environment?: string;
   readonly environment_source?: string;
+  /** T1 (b): where the Agent instructions rode — `developer_breakpoint` (an explicit cache breakpoint) or `instructions`. */
+  readonly instructions_carrier?: string;
 }
 
 /** What a caller may say about its call; every field is optional and recorded only when given. */
 export type ProviderCallDetail = Readonly<Partial<Pick<GenerativeCall,
   'model' | 'purpose' | 'prompt_alias' | 'prompt_sha256' | 'tools_sha256' | 'schema_sha256' | 'reasoning_effort'
-  | 'max_output_tokens' | 'cee_build' | 'environment' | 'environment_source'>>>;
+  | 'max_output_tokens' | 'cee_build' | 'environment' | 'environment_source' | 'instructions_carrier'>>>;
 /** The identity fields, in the order a row carries them. */
-const IDENTITY_FIELDS = ['prompt_alias', 'prompt_sha256', 'tools_sha256', 'schema_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source'] as const;
+const IDENTITY_FIELDS = ['prompt_alias', 'prompt_sha256', 'tools_sha256', 'schema_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source', 'instructions_carrier'] as const;
 
 /**
  * ⭐ WHAT A CALL COST, SO CACHING CAN BE MEASURED RATHER THAN ASSUMED.
@@ -320,6 +322,18 @@ export function isProviderAllowed(provider: LlmProvider): boolean {
 /** Whether the current request's ledger dropped an attempt at the cap. False outside a policy. */
 export function providerLedgerTruncated(): boolean {
   return store.getStore()?.truncated === true;
+}
+
+/**
+ * How many generative calls the current request actually SENT: the allowed attempts in its ledger, every choke point
+ * included (the Agent's own calls and any made beneath its tools). `undefined` outside a policy, or once the ledger
+ * dropped attempts at its cap: the count is then unknown here, and the caller chooses its own fallback (the Agent
+ * route's answer row keeps its per-path estimate for exactly that case).
+ */
+export function providerCallsMade(): number | undefined {
+  const policy = store.getStore();
+  if (policy === undefined || policy.truncated) return undefined;
+  return policy.calls.filter((c) => c.outcome === 'allowed').length;
 }
 
 /** The current request's ledger, or `[]` outside a policy. A copy — the wire must not alias it. */

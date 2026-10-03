@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
-import { analysisResultForAgent, decisionSensitivityOf, NO_SINGLE_ASSUMPTION } from '../decision-sensitivity.js';
+import { analysisResultForAgent, decisionSensitivityOf } from '../decision-sensitivity.js';
 
 const SERVED = (JSON.parse(readFileSync(new URL('./fixtures/served-levelless-pin2-turn3-result.json', import.meta.url), 'utf8')) as { analysis_result: Record<string, unknown> }).analysis_result;
 const ENR = SERVED.enrichment as Record<string, unknown>;
@@ -77,7 +77,7 @@ describe('⛔ the Agent says whose range makes a factor decision-sensitive (AIQ 
 
   it('CONTROL (AIQ precondition 5870069785): "could change which option leads" is a DECISION claim, so a template row below resolution ("decision_gain_not_significant") says nothing of the kind', () => {
     const rows = ROWS.map((r, k) => ({ ...r, status: 'below_resolution', ...(k === 0 ? { status_reason: 'decision_gain_not_significant', spread_source: 'template' } : {}) }));
-    expect(decisionSensitivityOf({ ...ENR, factor_evppi: rows })).toEqual({ status: 'none_measurable', say: NO_SINGLE_ASSUMPTION });
+    expect(decisionSensitivityOf({ ...ENR, factor_evppi: rows })).toEqual({ status: 'none_measurable' });
   });
 
   it('RED (through the real runAnalysis): the Agent’s tool result carries the attribution', async () => {

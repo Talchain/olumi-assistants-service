@@ -627,6 +627,28 @@ export interface SessionStore {
    * chip-click-dispatch) can read the brief from canonical state instead
    * of an out-of-band option field.
    */
+  /** One existing row, without an upsert; null distinguishes absence from a guest owner. */
+  readExistingScenario?(scenarioId: string): Promise<{
+    readonly userId: string | null;
+    readonly graph: unknown | null;
+    readonly briefText: string | null;
+    readonly analysisInvalidatedAt: string | null;
+  } | null>;
+  /**
+   * ⛔ A READ GRANT, AND ONLY FOR THE GRAPH-READ ROUTE (`assist.v1.scenario-graph`). Whether `userId` (a VERIFIED token
+   * subject) is a viewer member of this owned scenario: DGAI `share_scenario` / `scenario_members`, resolved by the
+   * service_role-only SQL `is_scenario_member` (ACCOUNTS "Invite a colleague", #85 5947474393). No write route, turn
+   * path or run path may consult it: a member is a non-owner everywhere else.
+   */
+  isScenarioMember?(scenarioId: string, userId: string): Promise<boolean>;
+  /** One uncached query binds the newest Run fact to the current graph and restore marker. */
+  readRunCurrentness?(scenarioId: string): Promise<{
+    readonly userId: string | null;
+    readonly graph: unknown | null;
+    readonly briefText: string | null;
+    readonly analysisInvalidatedAt: string | null;
+    readonly fact: HandlerFact;
+  } | null>;
   loadGraphAndBriefText(scenarioId: string): Promise<{
     readonly graph: unknown | null;
     readonly briefText: string | null;

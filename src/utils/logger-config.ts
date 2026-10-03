@@ -452,11 +452,22 @@ export function createRedactConfig() {
 }
 
 /**
+ * Write the level as its LABEL ("error"), not pino's number (50). Render's log explorer reads a JSON line's `level`
+ * as a label only, so a numeric 50 was shown as `info` and an error search missed every leak event
+ * (`agent_lane.leader_claim_residual_removed`, DL 380e54 programme-docs#85 5932495794 item 3). No CEE code or
+ * script reads the numeric level back.
+ */
+export const LEVEL_AS_LABEL = {
+  level: (label: string) => ({ level: label }),
+};
+
+/**
  * Create full Pino logger options
  */
 export function createLoggerConfig(level: string) {
   return {
     level,
     redact: createRedactConfig(),
+    formatters: LEVEL_AS_LABEL,
   };
 }

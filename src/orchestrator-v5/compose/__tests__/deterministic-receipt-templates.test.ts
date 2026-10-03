@@ -86,6 +86,7 @@ import {
   findForbiddenPhraseHit,
 } from '../forbidden-user-facing-phrases.js';
 import * as receipts from '../../tools/handlers/d1-shared/format-confirmation.js';
+import type { LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 
 // ---------------------------------------------------------------------------
 // Template derivation.
@@ -205,7 +206,7 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
   formatEdgeStrengthUnchanged: () =>
     receipts.formatEdgeStrengthUnchanged({ fromLabel: SLOT, toLabel: SLOT2, mean: 0.5 }),
   formatEdgeStrengthConfirmed: () =>
-    receipts.formatEdgeStrengthConfirmed({ fromLabel: SLOT, toLabel: SLOT2 }),
+    receipts.formatEdgeStrengthConfirmed({ fromLabel: SLOT, toLabel: SLOT2, sizing: 'user' }),
 };
 
 /** Exported helpers that are NOT user-facing receipts, with the reason. */
@@ -232,6 +233,21 @@ describe('every deterministic receipt TEMPLATE is doctrine-clean', () => {
         `${name} composes user-facing copy that trips the forbidden-phrase guard: ` +
           JSON.stringify(template),
       ).toBeNull();
+      expect(applyEgressForbiddenPhraseGuard(template).remedy).toBe('none');
+    });
+  }
+
+  // R3 5942069984: `formatEdgeStrengthConfirmed` switches on the link's STORED sizing — every branch is checked, both
+  // directions guarded exactly as the reask list below (a new `LinkSizing` member is a type error here).
+  const SIZINGS = ['user', 'olumi_accepted', 'olumi_estimate', 'placeholder', 'unmarked'] as const satisfies readonly LinkSizing[];
+  const _everySizingIsListed: (typeof SIZINGS)[number] = undefined as unknown as LinkSizing;
+  void _everySizingIsListed;
+  for (const sizing of [...SIZINGS, undefined]) {
+    it(`formatEdgeStrengthConfirmed(${String(sizing)}) is doctrine-clean`, () => {
+      const template = slotShape(receipts.formatEdgeStrengthConfirmed({ fromLabel: SLOT, toLabel: SLOT2, sizing }));
+      expect(template, `${String(sizing)}: no slot marker`).toContain('{label}');
+      expect(template).not.toContain(SLOT);
+      expect(findForbiddenPhraseHit(template), `${String(sizing)} trips the forbidden-phrase guard: ${JSON.stringify(template)}`).toBeNull();
       expect(applyEgressForbiddenPhraseGuard(template).remedy).toBe('none');
     });
   }

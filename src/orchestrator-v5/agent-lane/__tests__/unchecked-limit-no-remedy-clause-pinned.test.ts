@@ -1,3 +1,4 @@
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⛔ THE UNCHECKED-LIMIT CLAUSE IS PINNED ON THE WIRE (AI Quality, programme-docs #63 5826106622).
  *
@@ -11,6 +12,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { asSent } from './helpers/as-sent.js';
 
 const SCENARIO = '6b2d8f3c-4e5a-4b7c-9d0e-1f2a3b4c5d6e';
 const store = {
@@ -48,7 +50,7 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
   let modelBodies: Record<string, unknown>[] = [];
   beforeAll(async () => {
     vi.stubGlobal('fetch', vi.fn(async (_u: unknown, init?: { body?: string }) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const body = asSent(JSON.parse(String(init?.body ?? '{}'))) as Record<string, unknown>;
       modelBodies.push(body);
       return new Response(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'That limit cannot be checked in this model yet.' }] }] }), { status: 200 });
     }));
@@ -63,8 +65,8 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: { nodes: [{ id: 'g', kind: 'goal', label: 'MRR' }, { id: 'f', kind: 'factor', label: 'Monthly churn' }], edges: [{ from: 'f', to: 'g' }] },
-      graph_hash: 'h1',
-      analysis_state: { run_state: { kind: 'complete_current' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
+      graph_hash: 'h1', analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } },
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld' } },
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
@@ -73,9 +75,9 @@ describe('the unchecked-limit clause reaches the model on every reply-writing ca
   beforeEach(() => { modelBodies = []; });
 
   it('RED: the explicit Run’s one interpreting call carries the clause, right after the fragile/near-tie rule', async () => {
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    const r = await explainRun(app, SCENARIO, await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
       kind: 'message', scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
-    } });
+    } }));
     expect(r.statusCode).toBe(200);
     expect(modelBodies, 'exactly one interpreting call').toHaveLength(1);
     expect(modelBodies[0]!['tool_choice']).toBe('none');

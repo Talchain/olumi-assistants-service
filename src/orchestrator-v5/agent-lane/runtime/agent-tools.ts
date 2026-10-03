@@ -11,6 +11,7 @@
  * turn's own verified identity before any tool runs. That is why this is a
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
+import type { ReconcileGoalScopeArgs } from '../reconcile-goal-scope.js';
 import { sendableQuery } from './public-research.js';
 
 /**
@@ -203,7 +204,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'withdraw_proposal',
     description:
       'Withdraw a change you proposed earlier in THIS turn that you now think is wrong, before you reply. It is never applied '
-      + 'and no approve button is shown. Never ask the user not to approve a change you leave offered.',
+      + 'and no approve button is shown. Never ask the user not to approve a change you leave offered. '
+      + 'An unresolved goal reading (goal-scope: ID) may also be withdrawn, but only when the user writes exactly '
+      + '"Withdraw this unresolved goal reading: <goal_id>". Otherwise retain its question.',
     parameters: obj({ proposal_id: { type: 'string' } }, ['proposal_id']),
   },
   {
@@ -370,7 +373,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'and returns its id, which you keep for authorise_change: show the user what it records, never the id, before they approve. '
       + NODE_SIZE_MEANS_LINK_FROM + ' ' + A_FIGURE_IS_THE_FACTORS_VALUE + ' ' + THE_BAND_MUST_REACH_THE_OUTCOME + ' '
       + 'The user\u2019s word is one of Olumi\u2019s strength bands. If the link already sits in that band, its strength is kept and only '
-      + 'recorded as theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
+      + 'their review is recorded: it stays Olumi\u2019s estimate unless it was already theirs; otherwise it is set to the middle of that band, and the result says the figure so you can tell them. '
       + 'Give `direction` ONLY when the user said the link pushes the other way. When they described the strength in their own words '
       + '("very high", "hardly at all"), give your reading in `strength` and their exact phrase in `from_words`: the user approves your reading. '
       + 'Never use this for a strength the user did not state: if they said nothing about how strong it is, ask which band it is first '
@@ -444,6 +447,23 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
         unit: { type: 'string', description: 'The unit the user gave it in (for example £).' },
       }, ['value', 'unit']),
     }, ['constraint_type', 'value', 'unit', 'rationale']),
+  },
+  {
+    type: 'function',
+    name: 'propose_option_status',
+    description:
+      'Take ONE option out of the comparison, or put it back, when the user asks (for example "drop carry on as now", '
+      + '"we can\u2019t do option B, take it out", "put option B back"). The baseline (carry on as now) can be taken out too. '
+      + 'This does NOT change anything: it prepares ONE change and returns its id, which you keep for authorise_change: '
+      + 'show the user what it does, never the id, before they approve. The option stays in their model with its wording; '
+      + 'only whether it is compared changes. Use `removed` when they want it out, `infeasible` when they say it cannot be '
+      + 'done, `feasible` to put it back. Never use it to delete an option, and never for Olumi\u2019s own suggestion '
+      + 'the user has not added.',
+    parameters: obj({
+      option_label: { type: 'string', description: 'The option exactly as get_canonical_state names it.' },
+      status: { type: 'string', enum: ['removed', 'infeasible', 'feasible'], description: 'removed = out of the comparison; infeasible = cannot be done, out of the comparison; feasible = back in.' },
+      rationale: { type: 'string', description: 'What the user said, in their words.' },
+    }, ['option_label', 'status', 'rationale']),
   },
   {
     type: 'function',
@@ -599,6 +619,20 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     }, ['assumptions', 'option_levels']),
   },
   {
+    type: 'function', name: 'reconcile_goal_scope',
+    description: 'Retain the user’s goal scope or component share, and reconcile it with the existing rate and count. Use when they correct a whole/component reading or answer its share question (including “30% currently”). This retains one durable question; it never writes a derived number. Supply the exact user quote and existing operand ids. If a current_level is supplied, the ordinary baseline writer prepares ONE approval for the scope, baseline and withdrawal of any incompatible product identity. Never use propose_goal_current_level alone to force a total onto a component product.',
+    parameters: obj({
+      goal_label: { type: 'string' },
+      scope: obj({ modelled: { type: 'string' }, alternative: { type: 'string' }, extent: { type: 'string', enum: ['total', 'component'] },
+        stated_in_brief: { type: 'boolean', enum: [true] }, source: obj({ quote: { type: 'string' } }, ['quote']),
+        component: obj({ label: { type: 'string' }, rate_id: { type: 'string' }, count_id: { type: 'string' }, share: { type: 'number' },
+          basis: { type: 'string', enum: ['unknown', 'same', 'different'] }, count_basis: { type: 'string' }, basis_source: obj({ quote: { type: 'string' } }, ['quote']), source: obj({ quote: { type: 'string' } }, ['quote']) }, ['label', 'rate_id', 'count_id', 'basis', 'source']) }, ['modelled', 'alternative', 'extent', 'stated_in_brief', 'source']),
+      current_level: obj({ value: { type: 'number' }, unit: { type: 'string', description: 'Their native currency and the goal’s stated period, e.g. GBP/month for MRR; never a normalized value.' }, quote: { type: 'string' } }, ['value', 'unit', 'quote']),
+      component_share: { type: 'number', description: 'The user’s share as 0–1; bind a short answer only to the retained share question.' },
+      component_basis: { type: 'string', enum: ['same', 'different'] }, count_basis: { type: 'string' }, source_quote: { type: 'string' },
+    }, ['goal_label']),
+  },
+  {
     type: 'function',
     name: 'propose_goal_current_level',
     description:
@@ -614,14 +648,17 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       unit: { type: 'string', description: 'The unit the user stated, if any (e.g. GBP).' },
       goal_is: {
         type: 'string', enum: ['at_least', 'above', 'at_most', 'below'],
-        description: 'How the user put the goal’s target: reach at least it, get strictly above it, stay at most it, or stay strictly below it. If they have not said, ask them; never guess.',
+        description: 'ONLY when the user has said how the goal’s target is put: reach at least it, get strictly above it, stay at most it, or stay strictly below it. Otherwise leave it out: today’s level is a fact about today and is recorded on its own, with or without a target, and you never ask for a target first. Never guess it.',
       },
       user_stated: {
         type: 'boolean',
         description: 'true ONLY when the USER gave this figure as the goal’s current level. Never set it for a figure you estimated.',
       },
       whole_request: WHOLE_REQUEST,
-    }, ['goal_label', 'value', 'unit', 'goal_is', 'user_stated']),
+    // ⭐ R3 F5 I1.1 (#85 5933250962, CEE `fe8c9ab0`): #2450 made the door take a level with NO comparator and NO target, but this
+    // schema still REQUIRED `goal_is` and said "ask them", so "Our quarterly revenue is £100,000." got no card, only a
+    // question asking for a target. `goal_is` is optional, as the door already reads it.
+    }, ['goal_label', 'value', 'unit', 'user_stated']),
   },
   {
     type: 'function',
@@ -691,7 +728,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -766,6 +803,10 @@ export interface AgentCapabilities {
     /** The goal's level today, when the user stated it beside the target: ONE card, ONE approval (AIQ 5913897396). */
     current_level?: { value: number; unit: string };
   }): Promise<ToolResult>;
+  /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). MG F1 T6. */
+  proposeOptionStatus?(ctx: AgentToolContext, args: {
+    option_label: string; status: 'removed' | 'infeasible' | 'feasible'; rationale: string;
+  }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {
     label: string; rationale: string;
@@ -810,8 +851,9 @@ export interface AgentCapabilities {
     option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
   }): Promise<ToolResult>;
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
+  reconcileGoalScope?(ctx: AgentToolContext, args: ReconcileGoalScopeArgs): Promise<ToolResult>;
   proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
-    goal_label: string; value: number; unit: string; goal_is: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
+    goal_label: string; value: number; unit: string; goal_is?: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
   }): Promise<ToolResult>;
   /** The user confirms Olumi's reading of their goal as a product (`../identity-card.ts`). Optional: absent ⇒ refused plainly. */
   proposeIdentity?(ctx: AgentToolContext): Promise<ToolResult>;
@@ -882,6 +924,10 @@ export async function dispatchTool(
       return caps.proposeGoalTarget !== undefined
         ? caps.proposeGoalTarget(ctx, args as never)
         : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'A goal’s target cannot be set here. Nothing was changed.' };
+    case 'propose_option_status':
+      return caps.proposeOptionStatus !== undefined
+        ? caps.proposeOptionStatus(ctx, args as never)
+        : { ok: false, mutated: false, refusal: 'unknown_tool', detail: 'An option cannot be taken out or put back here. Nothing was changed.' };
     case 'propose_new_risk':
       return caps.proposeNewRisk !== undefined
         ? caps.proposeNewRisk(ctx, args as never)
@@ -898,6 +944,8 @@ export async function dispatchTool(
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
       return caps.proposeStartingPoint(ctx, args as never);
+    case 'reconcile_goal_scope':
+      return caps.reconcileGoalScope ? caps.reconcileGoalScope(ctx, args as never) : { ok: false, mutated: false, refusal: 'scope_writer_unavailable' };
     case 'propose_goal_current_level':
       return caps.proposeGoalCurrentLevel(ctx, args as never);
     case 'propose_identity':

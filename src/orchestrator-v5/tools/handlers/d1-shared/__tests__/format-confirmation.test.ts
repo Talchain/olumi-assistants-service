@@ -195,14 +195,16 @@ describe('formatEdgeAdjustment', () => {
 });
 
 describe('formatEdgeStrengthConfirmed', () => {
-  it('names the provenance act without fabricating a number or direction', () => {
-    const text = formatEdgeStrengthConfirmed({
-      fromLabel: 'Demand',
-      toLabel: 'Growth',
-    });
-    expect(text).toBe(
-      'Confirmed the current strength of the link between Demand and Growth as your judgement.',
-    );
+  // ⛔ R3 5942069984: whose figure follows the STORED sizing after the write (`linkSizing`), never the act.
+  it.each([
+    ['olumi_accepted (an Accept: still Olumi\'s figure) → RC\'s accept_olumi_estimate sentence', 'olumi_accepted', "You accepted Olumi's estimate for how much Demand changes Growth."],
+    ['user (the user\'s own size) → their judgement', 'user', 'Confirmed the current strength of the link between Demand and Growth as your judgement.'],
+    ['olumi_estimate → no authorship claim', 'olumi_estimate', 'Confirmed the current strength of the link between Demand and Growth.'],
+    ['unmarked → no authorship claim', 'unmarked', 'Confirmed the current strength of the link between Demand and Growth.'],
+    ['no link read → no authorship claim', undefined, 'Confirmed the current strength of the link between Demand and Growth.'],
+  ] as const)('%s, and never a number or direction', (_n, sizing, said) => {
+    const text = formatEdgeStrengthConfirmed({ fromLabel: 'Demand', toLabel: 'Growth', sizing });
+    expect(text).toBe(said);
     expect(text).not.toMatch(RAW_DECIMAL);
     expect(text).not.toMatch(/positive|negative/i);
     expect(text).not.toContain('Adjusted');

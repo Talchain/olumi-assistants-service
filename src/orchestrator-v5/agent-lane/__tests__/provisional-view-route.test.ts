@@ -1,3 +1,4 @@
+import { explainRun } from './fixtures/run-explanation-follow-up.js';
 /**
  * ⭐ C5 THROUGH THE ROUTE — the Agent's provisional view on a WITHHELD turn (Paul's ruling, DL #70 5855324470).
  *
@@ -25,7 +26,8 @@ const REPLY = FX.replies.find((r) => r.id === 'stack-1854-714677d5/pricing-run-c
 /** The one ranking sentence in REPLY, exactly as served (trailing space included — it rides with the sentence). */
 const RANKING_SENTENCE =
   'Its unconstrained comparison favours the £59-at-release path, driven by higher MRR per Pro subscriber and the assumed **100%** price–release alignment. ';
-const WITHHELD_STATE = FX.state.analysis_state;
+const RESULT = { type: 'analysis_result', computed_against_hash: '0123456789abcdef', summary: 'Synthetic completed comparison' };
+const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' } };
 const PERMITTED_STATE = { ...WITHHELD_STATE, leader_claim: { permitted: true, separation: 'separated' } };
 
 const VIEW = {
@@ -97,11 +99,11 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/orchestrate/v2/turn', async () => ({
-      response_version: 2, assistant_text: 'ok', suggested_actions: [], insights: [], graph_hash: 'h-run', blocks: [],
+      response_version: 2, assistant_text: 'ok', suggested_actions: [], insights: [], graph_hash: 'h-run', blocks: [RESULT],
       analysis_ready: FX.state.analysis_ready, analysis_state: readbackState,
     }));
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: FX.state.draft_graph, graph_hash: 'h-corpus', analysis_state: readbackState, analysis_ready: FX.state.analysis_ready,
+      graph: FX.state.draft_graph, graph_hash: 'h-corpus', analysis_result: RESULT, analysis_state: readbackState, analysis_ready: FX.state.analysis_ready,
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
@@ -216,12 +218,12 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
   });
 
-  const pressRun = (interpretation: string = REPLY.text) => {
+  const pressRun = async (interpretation: string = REPLY.text) => {
     turnSeq += 1;
     turnId = `7a1b2c3d-4e5f-4a6b-8c7d-${String(turnSeq).padStart(12, '0')}`;
     callModelOutputs = [[{ type: 'message', content: [{ type: 'output_text', text: interpretation }] }]];
-    return app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
-      stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } });
+    return await explainRun(app, SCENARIO, await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, turn_id: turnId,
+      stage: 'analyse', source: 'chip', message: 'Run analysis.', chip: { id: 'agent-run-analysis', action_type: 'run_analysis' } } }));
   };
 
   /**
@@ -237,7 +239,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     const r = await pressRunAnswering(REPLY.text, VIEW);
     expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
     const b = r.json() as Body & { _diagnostic_trace?: { fast_path?: string } };
-    expect(b._diagnostic_trace?.fast_path).toBe('run');
+    expect(b._diagnostic_trace?.fast_path).toBe('explain');
     expect(modelRequests, 'exactly one model call').toHaveLength(1);
     expect(modelRequests[0]!['tool_choice']).toBe('none');
     expect(modelRequests[0]!['tools']).toEqual([]);
@@ -250,7 +252,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     const instructions = String(modelRequests[0]!['instructions']);
     expect(instructions.endsWith(`${RUN_INTERPRETATION_VIEW_INSTRUCTION}\n\n${INTERPRET_ONLY_CONSTRAINT}\n\n${INTERPRETER_V02_BANKED}`)).toBe(true);
     // No tool was called: the view is a field of the interpreting call, never a fabricated tool call.
-    expect(b._agent.tool_calls.map((c) => c.name)).toEqual(['run_analysis']);
+    expect(b._agent.tool_calls.map((c) => c.name)).toEqual([]);
     // The gate is unchanged over the ANSWER: its ranking sentence is gone and the no-leader sentence is there.
     expect(b.assistant_text).not.toContain(RANKING_SENTENCE.trim());
     expect(b.assistant_text).toContain(noLeaderSentence);
@@ -259,7 +261,7 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(b.assistant_text).not.toContain(VIEW.view);
     expect(b.assistant_text).not.toContain('Provisional view');
     expect(b._agent.provisional_view).toEqual({ heading, ...VIEW, because });
-    expect(rows.get(turnId)?.assistant_message, 'the answer row a replay returns holds the same text').toBe(b.assistant_text);
+    expect([...rows.values()].at(-1)?.assistant_message, 'the separate explanation is saved as its own answer row').toBe(b.assistant_text);
   });
 
   it('C5b: a view the leader gate would NOT strip (it ranks nothing) still never reaches the prose — typed only', async () => {
@@ -309,13 +311,14 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });
 
-  it('CONTRAST: a readback that PERMITS the leader refuses the tool — no view, the reply byte-identical', async () => {
+  it('CONTRAST: a readback that PERMITS the leader refuses the tool — no view, narrator prose plus the unavailable bounded basis', async () => {
     readbackState = PERMITTED_STATE;
     const r = await runViewThenReply();
     const b = r.json() as Body;
     expect(callModelOutputs).toEqual([]);
     expect(b._agent.tool_calls.find((c) => c.name === 'give_provisional_view')).toMatchObject({ ok: false, refusal: 'not_withheld' });
-    expect(b.assistant_text).toBe(REPLY.text);
+    expect(b.assistant_text.replace(/^• /gm, '- ')).toBe(`${REPLY.text}\n\nThe sources of this comparison’s factor starting values are unavailable.`);
+    expect('_answer_shape' in b, 'the host disclosure stays visible').toBe(false);
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });
 });

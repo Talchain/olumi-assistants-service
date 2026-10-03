@@ -132,6 +132,12 @@ const AGENT_IMPERATIVE = /^(?:[-•*>\s]*)(?:Offer\b|Say (?:so|that|it|plainly)\
 const AGENT_ID = /\bnever the id\b|\bproposal[ _]id\b/i;
 const CODE_TOKEN = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/;
 const QUOTED = /"[^"]*"|“[^”]*”/g;
+/**
+ * A label quoted so the boundary below holds it aside WHOLE (M1 Accept receipt, Codex pre-review 3 P2): straight quotes,
+ * or curly ones when the label itself holds a straight quote (`Size of "the user" base` would otherwise end the span early
+ * and drop the sentence). A label holding both kinds keeps straight quotes, its own `”` read as text.
+ */
+export const quoteLabelForUser = (label: string): string => (label.includes('"') && !label.includes('”') ? `“${label}”` : `"${label.replace(/"/g, '”')}"`);
 /** A quoted span, held aside while the sentence is judged: private-use delimiters no label or rule can contain. */
 const HELD_SPAN = /(\d+)/g;
 

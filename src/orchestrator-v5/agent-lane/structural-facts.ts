@@ -14,6 +14,7 @@
  */
 
 import { limitSinkBranch } from '../../graph/limit-sink-branch.js';
+import { inertRiskBranch } from '../../graph/inert-risk.js';
 import { isRepairAuthoredOptionFactorEdge } from '../../graph/repair-authored-edge.js';
 import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline, type BaselineFlagSurfaces } from '../../cee/baseline-identity.js';
@@ -179,7 +180,11 @@ export function structuralFacts(
    */
   limitNodeIds: Iterable<string> = [],
 ): StructuralFacts {
-  const sinkBranch = limitSinkBranch(nodes, edges, limitNodeIds);
+  const limitIds = [...limitNodeIds];
+  const sinkBranch = limitSinkBranch(nodes, edges, limitIds);
+  // ⭐ K3 (`graph/inert-risk.ts`): left out of the Run and asked about by admission — never "cannot reach the goal",
+  // which the Agent raises as a blocker the Run no longer has.
+  const leftOut = inertRiskBranch(nodes, edges, limitIds);
   const adjacency = new Map<string, string[]>();
   const touched = new Set<string>();
   for (const e of edges) {
@@ -208,14 +213,14 @@ export function structuralFacts(
       if (n.id === goal.id) continue;
       const hit = reachable(adjacency, n.id).has(goal.id);
       if (n.kind === 'option') (hit ? reaching : notReaching).push(labelOf(n.id));
-      else if (!hit && touched.has(n.id) && !sinkBranch.has(n.id)) strandedNonOptions.push(labelOf(n.id));
+      else if (!hit && touched.has(n.id) && !sinkBranch.has(n.id) && !leftOut.has(n.id)) strandedNonOptions.push(labelOf(n.id));
     }
   }
 
   return {
     options_reaching_goal: reaching,
     options_not_reaching_goal: notReaching,
-    entities_with_no_connections: nodes.filter((n) => !touched.has(n.id)).map((n) => labelOf(n.id)),
+    entities_with_no_connections: nodes.filter((n) => !touched.has(n.id) && !leftOut.has(n.id)).map((n) => labelOf(n.id)),
     entities_that_cannot_reach_goal: strandedNonOptions,
     factors_without_a_value: nodes.filter(
       (n) => n.kind === 'factor' && typeof n.observed_state?.value !== 'number',

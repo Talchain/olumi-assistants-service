@@ -26,7 +26,9 @@ import { z } from 'zod';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type { AdjustEdgeStrengthHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { DEFAULT_STRENGTH_STD } from '../../../cee/constants.js';
+import { ADJUST_EDGE_STRENGTH_STD_MAX, olumiSpreadForMean } from '../../../cee/magnitude/olumi-spread.js';
+// Moved to a pure module (#2482 r2); re-exported so every existing importer is unchanged.
+export { ADJUST_EDGE_STRENGTH_STD_MAX, olumiSpreadForMean };
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, identityRunUseFromFacts } from '../../compose/definitional-links.js';
 import { parseEdgeAddress } from '../../compose/edge-address.js';
@@ -44,11 +46,6 @@ import {
 import { ADJUST_EDGE_STRENGTH_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
 export const AdjustEdgeStrengthSchema = z.number().min(-1).max(1);
-/**
- * The top of a link's std on this writer — the bound `AdjustEdgeStrengthStdSchema` has always enforced, named once so
- * the spread this writer derives itself (`olumiSpreadForMean`) is held to the same bound, not a second copy of it.
- */
-export const ADJUST_EDGE_STRENGTH_STD_MAX = 0.5;
 // V5 D1 (P1-6 follow-up): EdgeStrengthV3.std requires `.positive()`,
 // so a value of 0 would pass parameter validation but fail the
 // post-mutation `GraphV3.parse`, surfacing as a misleading
@@ -56,35 +53,6 @@ export const ADJUST_EDGE_STRENGTH_STD_MAX = 0.5;
 // bound here so the user-visible error is the right class.
 export const AdjustEdgeStrengthStdSchema = z.number().gt(0).max(ADJUST_EDGE_STRENGTH_STD_MAX);
 
-/**
- * ⭐ A6f — OLUMI'S SPREAD, CARRIED TO THE MEAN THE USER WROTE (AIQ N1 on #2096, 5856128077).
- *
- * An exact figure states a mean and no range, so the link's std stays Olumi's. It must not stay Olumi's ABSOLUTE std:
- * that was sized for Olumi's mean. Paul's `price_sensitivity → monthly_churn` (captures `17d1cd3a` / `08bf9a1f`) kept
- * std 0.00375 — sized for 0.0075 — on the user's 0.85, a CV of 0.4 %, so the analysis ran near-certain on a spread
- * nobody chose. Olumi's RELATIVE spread is kept instead: std × |new| / |old| (0.00375 → 0.425, CV 0.5 either side).
- *
- *  - The magnitude did not move (a confirm, or a sign flip): the std is returned exactly — nothing to rescale.
- *  - |old| > 0 and a finite std: the relative spread, computed CV-first so an exact ratio stays exact, held to the
- *    writer's own top bound (`ADJUST_EDGE_STRENGTH_STD_MAX`).
- *  - Otherwise — Olumi's mean was 0 (no relative spread exists), the stored std is unusable, or the new mean is 0 (a
- *    relative spread of 0 breaks `EdgeStrengthV3.std > 0`): the estate's default spread, `DEFAULT_STRENGTH_STD`.
- */
-export function olumiSpreadForMean(args: {
-  readonly oldMean: number;
-  readonly oldStd: number;
-  readonly newMean: number;
-}): number {
-  const oldAbs = Math.abs(args.oldMean);
-  const newAbs = Math.abs(args.newMean);
-  const usableStd = Number.isFinite(args.oldStd) && args.oldStd > 0;
-  if (usableStd && newAbs === oldAbs) return args.oldStd;
-  if (usableStd && Number.isFinite(oldAbs) && oldAbs > 0) {
-    const relative = (args.oldStd / oldAbs) * newAbs;
-    if (Number.isFinite(relative) && relative > 0) return Math.min(relative, ADJUST_EDGE_STRENGTH_STD_MAX);
-  }
-  return DEFAULT_STRENGTH_STD;
-}
 /**
  * Optional explicit direction for callers whose intent cannot be represented
  * by the sign of the numeric strength — specifically a zero-strength edge.
@@ -409,9 +377,9 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       }
       // ⭐ A6e — A NAMED BAND STATES A RANGE, SO ITS SPREAD IS THE LINK'S STD (AIQ #70 5855345225, 5855430153).
       // The band rides the trusted side band, set only when the approval that sent this write carried the band the
-      // user named for this exact link (`stated-link-band-context.ts`). The std is the band of the RESULTING |mean|,
-      // whether the mean moved to the band's midpoint (`set`) or was kept (`confirm_current`); a band that does not
-      // contain the result is a contradiction and refuses rather than storing a spread for the wrong range.
+      // user named for this exact link (`stated-link-band-context.ts`). The std is the band of the RESULTING |mean| when
+      // the mean MOVED to the band's midpoint (`set`); a kept strength keeps its own std (#2473 CR, below). A band that
+      // does not contain the result is a contradiction and refuses rather than storing a spread for the wrong range.
       const bandAuthority = invocation.edgeStrengthBandAuthority;
       let bandStd: number | undefined;
       if (bandAuthority !== undefined) {
@@ -431,13 +399,19 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
       // none, so the spread stays OLUMI'S — carried to the new mean as Olumi's relative spread, never the stale absolute
       // std sized for Olumi's mean (A6f, AIQ N1 on #2096) — and is flagged as Olumi's below (`std_defaulted`).
       const statedStd = bandStd ?? newStd;
-      const finalStd =
-        statedStd ??
-        olumiSpreadForMean({
-          oldMean: beforeMean,
-          oldStd: targetEdge.strength.std,
-          newMean,
-        });
+      // ⛔ #2473 CR (CODEX_CLI_OVERFLOW 5937437431, DL concur): a NO-CHANGE confirm is byte-equal for every author,
+      // through every door — chat words, chip, a restored proposal, the canvas pill's typed band. Naming the band a link
+      // already sits in states nothing new about its uncertainty, so its spread is KEPT (it once became the band's own
+      // spread, σ 0.3 → 0.0866, staling the Run). Only an explicit typed std changes σ on a write that keeps the mean.
+      const keepsStrength = newMean === beforeMean && newDirection === targetEdge.effect_direction && newStd === undefined;
+      const finalStd = keepsStrength
+        ? targetEdge.strength.std
+        : statedStd ??
+          olumiSpreadForMean({
+            oldMean: beforeMean,
+            oldStd: targetEdge.strength.std,
+            newMean,
+          });
       const afterSnapshot = {
         from: targetEdge.from,
         to: targetEdge.to,
@@ -459,7 +433,8 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             { userGuidance: ADJUST_EDGE_STRENGTH_USER_GUIDANCE },
           );
         }
-        edge.strength = { mean: newMean, std: finalStd };
+        // A kept strength is left exactly as stored (every byte), never rebuilt.
+        if (!keepsStrength) edge.strength = { mean: newMean, std: finalStd };
         edge.effect_direction = newDirection;
 
         // ⭐ R11 — A CONFIRMATION IS REVIEW, NOT AUTHORSHIP (AIQ #72 5872082179, adopted by the DL; storage by the
@@ -469,7 +444,7 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
         // byte of who-authored-what stays exactly as it was: `provenance.source`, `magnitude`, `natural_effect`,
         // `reasoning`, `provenance_display`, `defaulted` / `exists_defaulted` / `std_defaulted`. The act is RECORDED
         // (`provenance.reviewed_by_user`, on the `.passthrough()` provenance — no schema change), with the band when the
-        // user named one; a band confirm still stores that band's spread (A6f/A6e, above). An edge with no provenance
+        // user named one; the strength itself is kept byte-equal (#2473 CR, above). An edge with no provenance
         // has no source to keep, and none may be invented, so nothing is recorded on it.
         if (reviewOnly) {
           if (edge.provenance !== undefined) {

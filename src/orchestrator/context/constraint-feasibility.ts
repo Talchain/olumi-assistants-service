@@ -38,13 +38,14 @@ import {
 } from "@talchain/schemas/orchestrator";
 import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
 
-import { readOptionResultSources } from "./option-result-source.js";
+import { identityBoundWinProbabilities, readOptionResultSources } from "./option-result-source.js";
 import {
   OLUMI_GUESS_LIMIT_REASON,
   PARTS_IDENTITY_UNMODELLED_REASON,
   PLACEHOLDER_PARTS_REASON,
   optionIdOf,
   placeholderMovedOptions,
+  limitUnitsOf,
   type PlaceholderPartsReason,
 } from "./placeholder-parts.js";
 import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
@@ -306,7 +307,15 @@ export function withholdOptionGoalFigures<E>(
   }
   for (const k of COMPARISON_DERIVED_KEYS) delete out[k];
   if (readRecord(env.robustness) !== null) out.robustness = { fragile_edges: [], robust_edges: [] };
-  const recorded = opts.keepOutcome === true ? { ...warning, withheld_claims: [...OUTCOME_KEPT_CLAIMS] } : warning;
+  // `win_shares_withheld`: this withhold REMOVED identity-bound usable shares (the run-delta producer's own rule, read
+  // off the envelope BEFORE the strip). Every entry's share goes above, so a later reader sees none and cannot tell a
+  // removed share from one PLoT never sent; only this record can (`runWithheldWinShares`, CODEX on CEE 864e915c P1).
+  const sharesRemoved = identityBoundWinProbabilities(env).size > 0;
+  const recorded = {
+    ...warning,
+    ...(opts.keepOutcome === true ? { withheld_claims: [...OUTCOME_KEPT_CLAIMS] } : {}),
+    ...(sharesRemoved ? { win_shares_withheld: true } : {}),
+  };
   out.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), recorded];
   return out as E;
 }
@@ -1067,10 +1076,12 @@ export function collectLimitLevelOwners(
   if (options !== undefined) {
     const nodes = rawNodes.map(readRecord).filter((n): n is Record<string, unknown> => n !== null);
     const edges = Array.isArray(rawEdges) ? rawEdges.map(readRecord).filter((e): e is Record<string, unknown> => e !== null) : [];
+    // A unit-less node is read in its own level limit's unit (the stored rows: `RatifiedConstraint` carries no frame).
+    const limitUnits = limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints);
     for (const c of ratified) {
       if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
       if (nodes.find((n) => n.id === c.node_id)?.kind === 'goal') continue;
-      const moved = placeholderMovedOptions(c.node_id, nodes, edges, options);
+      const moved = placeholderMovedOptions(c.node_id, nodes, edges, options, limitUnits);
       if (moved.size === 0) continue;
       out.placeholderMovedOptionIds.set(c.constraint_id, new Set(moved.keys()));
       const scored = options.map((o) => optionIdOf(o)).filter((id): id is string => id !== undefined);

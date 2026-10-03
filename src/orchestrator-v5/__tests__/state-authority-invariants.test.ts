@@ -87,6 +87,10 @@ describe('RELOAD — the graph read carries the readiness authority, not just by
     // readiness — while these two sat on the same response, with a complete UI
     // consumer. A field name is not its meaning.
     expect(GRAPH_READ).toContain('analysis_state: analysis.analysis_state');
+    // The canonical producer already consumes scope before claim composition;
+    // the read must not introduce a second, late permission overlay.
+    expect(GRAPH_READ).toContain('goalScopeClaimInput:');
+    expect(GRAPH_READ).not.toContain('scopeClaimGate(');
     expect(GRAPH_READ).toContain('analysis_result: analysis.analysis_result');
   });
 

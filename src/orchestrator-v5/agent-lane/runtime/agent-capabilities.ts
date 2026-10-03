@@ -17,7 +17,9 @@
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
+import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
+import { acceptedOlumiEstimateSentence } from '../rerun-explanation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
@@ -154,7 +156,7 @@ export function receiptSummaryOf(json: unknown): { summary: ReceiptSummary | nul
 import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type NewFactorRequest } from '../propose-new-option.js';
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
-import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
+import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
 import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
@@ -175,11 +177,12 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
+import { savedRunContextFacts } from '../saved-run-context-facts.js';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, comparatorWordsIn, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, readingOfLinkEffectApproval } from '../approval-chips.js';
-import { formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
+import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from '../../tools/handlers/d1-shared/normalise-factor-value.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE, SUCCESS_TARGET_POSITIVE_USER_GUIDANCE } from '../../tools/handlers/d1-shared/user-guidance.js';
 
@@ -195,19 +198,20 @@ import { readLimitVerdicts, type StoredLimitVerdicts } from '../../../orchestrat
 import { applyFactorValueEdit } from '../../system-events/factor-value-edit.js';
 import { howStronglyWords } from '../strength-authorship-words.js';
 import { holdsByDefinition, nodeUnitOf } from '../../../orchestrator/context/placeholder-parts.js';
+import { isUnadoptedOlumiSuggestion, optionStatusConfirmationText, optionStatusHolds, PARTICIPATION_FOR_STATUS } from '../../system-events/option-status-edit.js';
 import { registrationTurnId } from '../../graph-registration/registration-identity.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { applyGoalCurrentLevel, isGoalCurrentLevelProposal, proposeGoalCurrentLevel, statedGoalLevelInUsersWords, writtenIn } from '../goal-current-level.js';
 import { sayFigureExactly, sayFigureRead } from '../say-figure.js';
 import { isAcceptedOlumiEstimate, nodeProvenanceDisplay, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { isPercentScaledUnit } from '../../../cee/draft/records/projector.js';
-import type { NotSavedValue } from '../write-outcome.js';
+import { quoteLabelForUser, type NotSavedValue } from '../write-outcome.js';
 import { isChangeFrame, sayGoalChange, sayLimitInFrame } from '../limit-frame.js';
 import { runOutcomeOf } from '../run-outcome.js';
 import { checkProvisionalView, type LeaderStanding } from '../provisional-view.js';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import { groupResizedLinks, type ResizedLinksGroup } from '../../../cee/magnitude/frame-defaulted-links.js';
-import { approvalSizes } from '../../../cee/magnitude/link-sizing.js';
+import { approvalSizes, isAcceptedOlumiSize, linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { notModelledContext, notModelledOfRead } from '../not-modelled-carrier.js';
 import type { NotModelledManifest } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import { FRACTION_SPELLED_UNIT } from '../../coaching/bound-graph.js';
@@ -875,6 +879,9 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 }
 
 /** One internal dispatch, so every path is the product's own. */
+import { reconcileGoalScope } from '../reconcile-goal-scope.js';
+import { goalScopeCheck, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
+import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
 interface GraphRead {
@@ -909,6 +916,9 @@ interface GraphRead {
     proposed_by?: unknown;
     /** A user-approved participation decision; origin remains `proposed_by: 'olumi'`. */
     analysis_participation?: unknown;
+    /** MG F1 T6: the user's own word for an option (`option_status_edit`); absent = feasible. */
+    option_status?: unknown;
+    goal_scope?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -938,6 +948,8 @@ interface GraphRead {
    * `permitted_analysis_mode` is the mode half of the selected Run's leader permission (`claimPermissionsFrom`).
    */
   readonly analysis_admission?: unknown;
+  /** Refreshed issues from the same canonical read; explanatory data, never a second permission gate. */
+  readonly goal_scope_reconciliation?: readonly GoalScopeReconciliation[];
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
   /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
@@ -952,10 +964,15 @@ interface GraphRead {
   readonly identity_run_use?: IdentityRunUse | null;
   /** The selected run's per-limit rows (`analysis_limit_verdicts`), read off the SAME graph read (`limit-checks.ts`). */
   readonly limit_verdicts?: StoredLimitVerdicts;
+  /** Selected canonical sidecars; narrowed by the existing verdict reader in savedRunContextFacts. */
+  readonly constraint_verdict_state?: unknown;
+  readonly leader_limit_risks?: readonly unknown[] | null;
   /** The read's `analysis_result` block — the selected Run, present only when the route delivers it (`goal-certainty-for-agent.ts`). */
   readonly analysis_result?: unknown;
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
+  /** The selected Run's recorded participation via the canonical reader; absent = not recorded. */
+  readonly option_participation?: StoredOptionParticipation;
 }
 
 // An edited graph can still carry an earlier Run. Its old result must not be
@@ -1057,11 +1074,64 @@ function keptFigureFor(node: { scale_frame?: unknown; observed_state?: unknown }
  * One function, so the projection that reads a level back can never use a different range
  * from the write that stored it.
  */
-function levelFrameOf(factor: { observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined): number | null {
+export function levelFrameOf(factor: { observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined): number | null {
   const cap = (factor?.observed_state ?? {}).cap;
   if (typeof cap === 'number' && Number.isFinite(cap) && cap > 0) return cap;
   const frame = factor?.scale_frame;
   return typeof frame === 'number' && Number.isFinite(frame) && frame > 1 ? frame : null;
+}
+
+/**
+ * ⛔ THE ADD-OPTION DOOR'S OWN PER-LEVEL RULE, EXPORTED (DL on CEE #2512, 5950820450): `propose_new_option` stores or
+ * leaves unset each option level through exactly these stages, and the Widen gate (`method-turn/widen-turn.ts`) judges
+ * a proposal by calling them, never by a copy that drifts (four review rounds of the same class).
+ * - `doorLevelOf`: the level as the door reads one `acts_on` entry: a finite value, its unit trimmed when given.
+ * - `factorUnitConflict`: a figure in another kind of unit is never this factor's level (`unit-conflict.ts`: a price
+ *   as churn). The factor's unit is its own, else a limit's on it in the RAW graph.
+ * - `placeLevel`: the name rule (Olumi's figure only), then the writer's range (`levelFrameOf`) → the stored cell.
+ * - `estimateLevelPersists`: both, in the door's order, for a level that is Olumi's estimate.
+ */
+export interface DoorLevel { readonly value: number; readonly unit?: string }
+type LevelFactor = { readonly id?: unknown; observed_state?: Record<string, unknown>; scale_frame?: unknown } | undefined;
+
+export function doorLevelOf(level: unknown): DoorLevel | undefined {
+  const l = level as { value?: unknown; unit?: unknown } | null | undefined;
+  const v = l?.value;
+  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
+  return { value: v, ...(typeof l?.unit === 'string' && l.unit.trim() !== '' ? { unit: l.unit.trim() } : {}) };
+}
+
+export function factorUnitConflict(lvl: DoorLevel, factor: LevelFactor, rawGraph: unknown): { readonly factorUnit: string | undefined; readonly conflict: boolean } {
+  const factorUnit = factorUnitOf(rawGraph, factor);
+  return { factorUnit, conflict: unitsConflict(lvl.unit, factorUnit) !== null };
+}
+
+export type LevelPlacement =
+  | { readonly kind: 'contradicts_name' }
+  | { readonly kind: 'out_of_range'; readonly range: number }
+  | { readonly kind: 'no_range' }
+  | { readonly kind: 'set'; readonly value: number; readonly raw_value?: number; readonly unit?: string };
+
+export function placeLevel(lvl: DoorLevel, factor: LevelFactor, factorUnit: string | undefined, optionLabel: string, nameRule: boolean): LevelPlacement {
+  if (nameRule && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, optionLabel)) return { kind: 'contradicts_name' };
+  const frame = levelFrameOf(factor);
+  if (frame !== null) {
+    const v = lvl.value / frame;
+    if (!(v >= 0 && v <= 1)) return { kind: 'out_of_range', range: frame };
+    const os = (factor?.observed_state ?? {}) as { unit?: unknown };
+    const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
+    return { kind: 'set', value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}) };
+  }
+  if (lvl.value >= 0 && lvl.value <= 1) return { kind: 'set', value: lvl.value };
+  return { kind: 'no_range' };
+}
+
+export function estimateLevelPersists(lvl: DoorLevel, factor: LevelFactor, rawGraph: unknown, optionLabel: string):
+  { readonly ok: true; readonly value: number } | { readonly ok: false; readonly kind: 'unit_mismatch' | 'contradicts_name' | 'out_of_range' | 'no_range' } {
+  const { factorUnit, conflict } = factorUnitConflict(lvl, factor, rawGraph);
+  if (conflict) return { ok: false, kind: 'unit_mismatch' };
+  const placed = placeLevel(lvl, factor, factorUnit, optionLabel, true);
+  return placed.kind === 'set' ? { ok: true, value: placed.value } : { ok: false, kind: placed.kind };
 }
 
 /**
@@ -1166,6 +1236,8 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             ...(n.kind === 'option' && n.proposed_by === 'olumi' ? { proposed_by: 'olumi' } : {}),
             ...(n.kind === 'option' && (n.analysis_participation === 'included' || n.analysis_participation === 'retained_excluded')
               ? { analysis_participation: n.analysis_participation } : {}),
+            // MG F1 T6: the user's own word for the option (absent = feasible): "removed" / "infeasible" is out of the comparison.
+            ...(n.kind === 'option' && (n.option_status === 'removed' || n.option_status === 'infeasible') ? { option_status: n.option_status } : {}),
           };
         }
 
@@ -1191,6 +1263,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
+      ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
         target: {
           value: trio.goal_threshold_raw,
@@ -1267,7 +1340,13 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
       // "slight" as on the pill, never the enum's `weak` (the model relays what it reads; tool calls still pass `weak`, #2017).
       ...(st !== undefined && num(st.mean) ? { band: CANVAS_BAND_WORD[edgeBandFromMagnitude(Math.abs(st.mean))] } : {}),
       ...(num(e.exists_probability) ? { exists_probability: e.exists_probability } : {}),
-      ...(e.defaulted === true ? { defaulted: true } : {}),
+      /**
+       * ⭐ WHO SIZED IT, by F1b's ONE rule (`linkSizing`; AI HARNESS, DL 5936996041 on R3 DEFECT 2 5936673643). `defaulted`
+       * is NOT a sizing mark: construction sets it on Olumi's estimates too (a projected spread or existence), and the
+       * Agent read it as "no one has estimated its strength yet", so "fix them all" re-sized two estimates and left the
+       * two real placeholders. It is no longer projected; a link that holds by definition is arithmetic and carries none.
+       */
+      ...(holdsByDefinition(e as Record<string, unknown>, unitOfNode) ? {} : { sizing: linkSizing(e) }),
       ...(str(e.origin) ? { origin: e.origin } : {}),
     };
   });
@@ -1390,8 +1469,11 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   // model chance, as the Run chip's own result does. The retained history no longer holds that result (#2322), so
   // without it the Agent said "not confirmed" beside a Goal panel showing 25%. A withheld leader keeps AI Quality's
   // standing drop of per-option chances; an exact 0 or 1 travels only through its earned `goal_certainty` decision.
-  const chancePermitted = current && goalChance === undefined
-    && claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
+  // The selected Run uses the same existing requested-Run licence, including separable provisional caveats.
+  const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true });
+  const selectedPermissions = current && g.analysis_result !== undefined && permissions.leader_may_be_named !== true
+    ? withNonlinearIdentity(permissions, g.raw, g.identity_evaluated) : permissions;
+  const chancePermitted = current && goalChance === undefined && permissions.leader_may_be_named === true;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const optionNames = optionNameAliasesForCurrentRun(g);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
@@ -1414,10 +1496,27 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
       ...(decision !== undefined ? { goal_certainty: decision } : {}),
     }];
   }) : [];
+  // Participation belongs to the same selected, delivered current Run. Only labels come from this read's graph;
+  // today's option authorship, adoption and status never reinterpret the Run's recorded reason.
+  const labels = new Map(g.nodes.filter((n) => n.kind === 'option').map((n) => [n.id, n.label]));
+  const labelledOption = (id: string): { option_id: string; label?: string } => ({
+    option_id: id, ...(labels.has(id) ? { label: labels.get(id)! } : {}),
+  });
+  const participation = current && g.analysis_result !== undefined && g.option_participation !== undefined
+    ? g.option_participation
+      .map((entry) => ({ ...entry, ...labelledOption(entry.option_id),
+        ...(entry.unanalysable_user_option_ids === undefined ? {} : {
+          unanalysable_user_options: entry.unanalysable_user_option_ids.map(labelledOption),
+        }),
+      }))
+    : undefined;
   return { ...context, analysis: { ...analysis,
+    claim_permissions: selectedPermissions,
+    ...savedRunContextFacts(scenarioId, g, selectedPermissions),
     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
     ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
+    ...(participation !== undefined ? { option_participation: participation } : {}),
   } };
 }
 
@@ -1699,6 +1798,11 @@ export function createAgentCapabilities(
      * and frame kept, stamped as the user's, ONE CAS commit with the base-hash gate. Absent ⇒ unavailable.
      */
     readonly commitLimitEdit?: (input: CommitLimitEditInput) => Promise<CommitLimitEditResult>;
+    /**
+     * ⭐ MG F1 T6 (#2471): the option-status door, in-process (`commitOptionStatusInProcess`), fenced like the limit door.
+     * It returns the WRITER's own typed outcome, the only evidence "applied" may rest on. Absent ⇒ never "applied".
+     */
+    readonly commitOptionStatus?: (input: CommitOptionStatusInput) => Promise<CommitOptionStatusResult>;
   } = {},
 ): AgentCapabilities {
   const readOnly = mode === 'preview';
@@ -1787,12 +1891,18 @@ export function createAgentCapabilities(
         return readiness === undefined ? {} : { analysis_ready: readiness };
       })(),
       ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
+      ...(Array.isArray(r.json.goal_scope_reconciliation) ? { goal_scope_reconciliation: r.json.goal_scope_reconciliation as GoalScopeReconciliation[] } : {}),
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
+      ...(r.json.analysis_constraint_verdict_state !== undefined
+        ? { constraint_verdict_state: r.json.analysis_constraint_verdict_state } : {}),
+      ...(() => { const risks = r.json.analysis_leader_limit_risks;
+        return risks === null || Array.isArray(risks) ? { leader_limit_risks: risks } : {}; })(),
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
+      ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),
     };
   };
 
@@ -2491,6 +2601,7 @@ export function createAgentCapabilities(
     if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
       return notApplied('model_changed_since_approval', 'The model changed after this was offered, so nothing was recorded. Read it again; offer the reading afresh only if it still applies.');
     }
+    if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return notApplied('goal_scope_unresolved', 'Resolve the retained scope question before confirming this identity. Nothing was written.');
     if (opts.commitOptionLevels === undefined) {
       return notApplied('identity_writer_unavailable', 'This reading could not be recorded here, so nothing was recorded.');
     }
@@ -2614,13 +2725,26 @@ export function createAgentCapabilities(
         detail: 'These links were sent as one change, but reading the model back did not show all of them as approved. Say exactly that; never say they were recorded or not recorded.' };
     }
     proposals.markApplied(parent.proposal_id, receipts);
-    const olumis = sent.filter((l) => l.author === 'model_proposed').length;
+    /**
+     * ⭐ M1 ACCEPT RECEIPT (DL 5942097719; Codex pre-review 2 P1): whose figure each link holds is read off the STORED link
+     * after the write (`linkSizing`), never off the card. Every link stored `olumi_accepted` says RC's accept sentence (the
+     * one the system-event receipt and the M2 rerun line say); only a link stored as the user's is "your estimate"; any
+     * other claims nobody. Labels are quoted: this is shown through `withoutAgentDirections`, where an unquoted
+     * "Size of the user base" or `cost_per_hire` would drop the sentence.
+     */
+    const storedSizing = (l: { from: string; to: string }) => linkSizing(check!.edges.find((x) => x.from === l.from && x.to === l.to));
+    const quotedLabel = (id: string): string => quoteLabelForUser(labelOf(id));
+    const parts = sent.map((l) => `${quotedLabel(l.from)} \u2192 ${quotedLabel(l.to)} as ${linkBandWord(l.band)}${storedSizing(l) === 'user' ? ', your estimate' : ''}`);
+    const accepted = sent.filter((l) => storedSizing(l) === 'olumi_accepted').map((l) => acceptedOlumiEstimateSentence(quotedLabel(l.from), quotedLabel(l.to)));
+    // Olumi's estimates as STORED (Codex pre-review 3 P1): a model-proposed link the sizer never marked (`unmarked`) is no one's.
+    const olumisStored = sent.filter((l) => l.author === 'model_proposed' && ['olumi_accepted', 'olumi_estimate', 'placeholder'].includes(storedSizing(l))).length;
     return {
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       // What the user reads (typed-approval fast path); the Agent's next step stays in `note`.
-      follow_up: `${parent.public_label.replace(/^Record /, 'Recorded ')}.`
-        + (olumis > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
+      follow_up: `Recorded ${sent.length === 1 ? 'this link strength' : `these ${sent.length} link strengths`}: ${parts.join('; ')}.`
+        + (accepted.length > 0 ? ` ${accepted.join(' ')}` : '')
+        + (olumisStored > 0 ? ' Olumi\u2019s estimates stay marked as Olumi\u2019s, not yours: your approval applied them, it did not make them your judgement.' : ''),
       note: 'Recorded as one change. Offer to run the analysis again so they can see what these links change.',
     };
   };
@@ -2738,10 +2862,14 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const scopeIssues = g.goal_scope_reconciliation ?? [];
+      const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission });
       const optionNames = optionNameAliasesForCurrentRun(g);
       return {
         ok: true,
         mutated: false,
+        ...(permissions.total_goal_claims_allowed === false ? { claim_permissions: permissions } : {}),
+        ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
         graph_revision: g.graph_hash,
         empty: g.nodes.length === 0,
         entities: g.nodes.map((n) => {
@@ -2864,8 +2992,11 @@ export function createAgentCapabilities(
             + 'Give "direction" only when the user said it runs the other way, with their exact words in "direction_from_words": words that themselves say which way it runs.' };
       }
       const currentBand = edgeBandFromMagnitude(Math.abs(mean));
-      // Already in the band the user named, pushing the same way: KEEP the figure, record it as theirs.
+      // Already in the band the user named, pushing the same way: KEEP the figure. A confirm is REVIEW, never authorship
+      // (R11): the writer keeps who sized the link, so only a link the user ALREADY sized may be called theirs (M1 Accept
+      // receipt, R3 5942069984; DL 5942097719 — on Olumi's estimate it lands `olumi_accepted`, Olumi's figure).
       const confirm = currentBand === band && wanted === current;
+      const keptIsTheirs = linkSizing(edge) === 'user';
       const magnitude = confirm ? Math.abs(mean) : bandMidpoint(band);
       const value = {
         magnitude,
@@ -2885,7 +3016,7 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label: confirm
-          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate (its strength stays as it is)`
+          ? `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}${keptIsTheirs ? ', as your own estimate' : ''} (its strength stays as it is)`
           : `Record "${from.label}" \u2192 "${to.label}" as ${linkBandWord(band)}${yourWords}, as your own estimate${reverses ? `, and REVERSE its direction so that it ${wanted === 'positive' ? 'raises' : 'lowers'} "${to.label}" (your "${directionWords}")` : ''}`,
         ...(interpretation === undefined ? {} : { interpretation }),
       });
@@ -2899,7 +3030,9 @@ export function createAgentCapabilities(
           becomes: { band: linkBandWord(band), direction: wanted }, keeps_current_strength: confirm },
         ...(interpretation === undefined ? {} : { interpretation }),
         note: (interpretation === undefined ? '' : readingNote(interpretation)) + (confirm
-          ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
+          ? (keptIsTheirs
+            ? `Nothing has changed yet. The link already sits in that band, so its strength is kept and only recorded as the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`
+            : `Nothing has changed yet. The link already sits in that band, so its strength is kept exactly as it is and only the user\u2019s review of it is recorded: the figure stays whoever\u2019s it was (Olumi\u2019s estimate stays Olumi\u2019s), never the user\u2019s own. Say so, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`)
           : `Nothing has changed yet. Tell the user it will be recorded as ${linkBandWord(band)}, as their own estimate — never the id — and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`),
       };
     },
@@ -3012,6 +3145,7 @@ export function createAgentCapabilities(
       if (g === null) {
         return { ok: false, mutated: false, refusal: 'unreadable_model', detail: 'The model could not be read, so no reading was offered. Nothing was changed.' };
       }
+      if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
       const card = proposeProductIdentity(g.raw);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
@@ -3069,7 +3203,7 @@ export function createAgentCapabilities(
       const namedByTheUser = (band: InfluenceBand, words: unknown, fromLabel: string, toLabel: string): boolean =>
         typeof words === 'string' && wordsTheUserWrote(words, ctx.user_turn_text) && bandTheUserWrote(band, words)
         && [fromLabel, toLabel].some((end) => factorTheUserNamed(end, words, { options: [], others: labels.filter((x) => x !== end) }));
-      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand };
+      type Shown = { from: string; to: string; band: InfluenceBand; magnitude: number; yours: boolean; keeps: boolean; was: InfluenceBand; sizedBefore: LinkSizing };
       const ops: ProposalOperation[] = [];
       const shown: Shown[] = [];
       const already: string[] = [];
@@ -3134,10 +3268,17 @@ export function createAgentCapabilities(
           // REVIEW, never authorship: a confirm, which the link writer records as `reviewed_by_user` with the band (#2257)
           // and never credits. Only a band that MOVES the link is theirs.
           const keeps = currentBand === band;
+          // #2473 CR (CODEX_CLI_OVERFLOW 5937437431): the user's OWN strength, named in the band it already sits in, is
+          // "already" — nothing to approve. Any other kept link is a review whose figure the writer holds byte-equal.
+          if (keeps && (edge.provenance as { source?: unknown } | undefined)?.source === 'user_specified'
+            && (edge as { defaulted?: unknown }).defaulted !== true) {
+            already.push(`${pair} is already ${linkBandWord(band)}, as the user set it`);
+            continue;
+          }
           const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
           ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set',
             expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'user_stated' } });
-          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand });
+          shown.push({ from: from.label, to: to.label, band, magnitude, yours: true, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
           continue;
         }
         // Olumi's estimate. A strength the user set is theirs: an estimate never replaces it.
@@ -3148,15 +3289,17 @@ export function createAgentCapabilities(
           return refuseSet('users_own_strength', `The strength of ${pair} is the user\u2019s own (${linkBandWord(currentBand)}), and an estimate never replaces it. `
             + 'NEXT CALL: the same links without this one \u2014 unless the user names its band in their own words.');
         }
-        const magnitude = bandMidpoint(band);
-        // ⭐ L4 (c) (DL 5929790081; CODEX preflight 5929956793): a PLACEHOLDER already at Olumi's band is still unsized —
-        // approving that band is what sizes it (`sizedByApproval`). Skipped as "already sits at", no card could ever clear
-        // "Olumi hasn't sized…" on it: Paul's e-12/e-13 sit at 0.85, the very-strong midpoint (`96c6f5f4`).
-        const keeps = Math.abs(mean) === magnitude;
-        if (keeps && !approvalSizes(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
+        // ⛔ R3 DEFECT 1 (5936673643, served dcd72dc3; DL GO 1 Oct): approving the band a link ALREADY SITS IN keeps its
+        // figure. Matching only the band's midpoint re-set a sized estimate μ 0.6 → 0.55 (σ 0.3 → 0.275, its sizing note
+        // dropped) and Paul's placeholders 0.5 → 0.55 on a no-change approval, staling the Run. Kept, it is a REVIEW
+        // (`confirm_current`); on a PLACEHOLDER that review is what sizes it (L4 (c), DL 5929790081: `sizedByApproval`).
+        // An estimate already accepted in that band is "already". Only a band that MOVES the link sets its midpoint.
+        const keeps = currentBand === band;
+        const magnitude = keeps ? Math.abs(mean) : bandMidpoint(band);
+        if (keeps && !approvalSizes(edge) && isAcceptedOlumiSize(edge)) { already.push(`${pair} already sits at ${linkBandWord(band)}`); continue; }
         // Kept at its value it is a REVIEW of Olumi's band (`confirm_current`): the writer refuses a `set` that changes nothing.
         ops.push({ op: 'set_link_strength', path: key, value: { magnitude, intent: keeps ? 'confirm_current' : 'set', expected: { mean, effect_direction: direction, reviewed_at: reviewedAt }, band, author: 'model_proposed' } });
-        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand });
+        shown.push({ from: from.label, to: to.label, band, magnitude, yours: false, keeps, was: currentBand, sizedBefore: linkSizing(edge) });
       }
       if (ops.length === 0) {
         if (definitional.length > 0) {
@@ -3169,6 +3312,15 @@ export function createAgentCapabilities(
       const whose = (x: Shown): string => x.yours
         ? (x.keeps ? 'reviewed by you, kept as it is' : 'your estimate')
         : 'Olumi\u2019s estimate';
+      /**
+       * Whose figure each link holds AFTER the approval (M1 Accept receipt, Codex pre-review P2): naming the band a link
+       * already sits in is review (R11), never authorship — the writer keeps who sized it, so a kept link is the user's
+       * only if they had ALREADY sized it (`sizedBefore`, F1b's `linkSizing`). Its two literals are a typed contract
+       * (`proposal-reply.ts` `LINK_WHOSE`, fail-closed on any other).
+       */
+      const whoseFigure = (x: Shown): 'yours' | 'Olumi\u2019s estimate' =>
+        x.yours && (!x.keeps || x.sizedBefore === 'user') ? 'yours' : 'Olumi\u2019s estimate';
+      const keptNotTheirs = shown.filter((x) => x.yours && x.keeps && x.sizedBefore !== 'user').length;
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -3181,19 +3333,27 @@ export function createAgentCapabilities(
       });
       proposals.put(proposal);
       const olumis = shown.filter((x) => !x.yours).length;
+      // A link Olumi had ALREADY estimated is re-sized, not sized: the Agent says so, never "your placeholders" (R3 DEFECT 2).
+      const reEstimated = shown.filter((x) => !x.yours && !x.keeps && (x.sizedBefore === 'olumi_estimate' || x.sizedBefore === 'olumi_accepted'));
       return {
         ok: true, mutated: false,
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was) },
-          becomes: { band: linkBandWord(x.band) }, whose: x.yours ? 'yours' : 'Olumi\u2019s estimate', keeps_current_strength: x.keeps })),
+        links: shown.map((x) => ({ from: x.from, to: x.to, was: { band: linkBandWord(x.was), sizing: x.sizedBefore },
+          becomes: { band: linkBandWord(x.band) }, whose: whoseFigure(x), keeps_current_strength: x.keeps })),
         ...(already.length > 0 ? { already } : {}),
         ...(definitional.length > 0 ? { left_out_definitional: definitional } : {}),
         note: 'Nothing has changed yet. ONE approval records every link in this set, all together or none. '
           + (definitional.length > 0 ? 'Some links were left out because a calculation the model declares defines them (`left_out_definitional`): say so in those words, and never offer to change them. ' : '')
           + (olumis > 0
             ? `${olumis === shown.length ? 'Every strength here is' : `${olumis} of these strengths are`} Olumi\u2019s estimate, not the user\u2019s: say so, and that approving applies them while they stay marked as Olumi\u2019s, never as theirs. `
+            : '')
+          + (keptNotTheirs > 0
+            ? `${keptNotTheirs === shown.length ? 'Every link here' : `${keptNotTheirs} of these links`} already sits in the band the user named, so approving records only their review: its strength is kept exactly as it is and is never the user\u2019s own (\`whose\`). `
+            : '')
+          + (reEstimated.length > 0
+            ? `${reEstimated.length === shown.length ? 'Every link here' : `${reEstimated.length} of these links`} already held Olumi\u2019s estimate (\`was.sizing\`), so this REPLACES an earlier estimate; it does not size a placeholder: never call ${reEstimated.length === 1 ? 'it a placeholder' : 'them placeholders'}. The links nobody has sized are the ones whose \`sizing\` is \`placeholder\` in the model state. `
             : '')
           + `Tell the user what each link will hold, never the id, and call authorise_change with this proposal_id once they agree. ${BAND_WORDS_ONLY}`,
       };
@@ -3205,12 +3365,64 @@ export function createAgentCapabilities(
      * goal's target at all. Nothing is recorded as the user's that the user did not say: the figure must be in their
      * own words (`figureTheUserWrote`) and the direction in THIS turn's (`comparatorTheUserWrote`); every miss asks.
      */
+    /**
+     * ⭐ ONE OPTION OUT OF THE COMPARISON, OR BACK IN (MG F1 T6; spec §3 O1/O2; F5 I1.3) — the SAME writer as the UI's
+     * option control (`option_status_edit`), carrying the proposal's base hash. Paul, 1 Oct: "I can't remove it with the
+     * available tools" — the baseline included. The option stays in the model; only whether it is compared changes.
+     * Resolved by the ONE label resolver; an ambiguous or unknown name prepares nothing and asks.
+     */
+    async proposeOptionStatus(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      const status = args?.status;
+      const requested = typeof args?.option_label === 'string' ? args.option_label.trim() : '';
+      if ((status !== 'removed' && status !== 'infeasible' && status !== 'feasible') || requested === '') {
+        return { ok: false, mutated: false, refusal: 'unreadable_option_status',
+          detail: 'Say which option, and whether to take it out, mark it not feasible, or put it back. Nothing was prepared.' };
+      }
+      const g = await readGraph(ctx.scenario_id);
+      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const res = resolveNamed(g, requested, (n) => n.kind === 'option');
+      if (res.kind === 'ambiguous') {
+        return { ok: false, mutated: false, refusal: 'ambiguous_option', ambiguous_targets: [describeAmbiguity(g, requested, res.candidates)],
+          detail: AMBIGUOUS_NOTE };
+      }
+      if (res.kind !== 'one') {
+        return { ok: false, mutated: false, refusal: 'option_not_found',
+          detail: `No option in the model is called "${requested}", so nothing was prepared. Use the option's name exactly as get_canonical_state gives it, or ask the user which option they mean.` };
+      }
+      const option = res.node as GraphRead['nodes'][number] & { option_status?: unknown; analysis_participation?: unknown; proposed_by?: unknown };
+      if (isUnadoptedOlumiSuggestion(option as Record<string, unknown>)) {
+        return { ok: false, mutated: false, refusal: 'olumi_suggestion_not_adopted',
+          detail: `"${option.label}" is Olumi's suggestion, which the user has not added to their options; putting it into the comparison is adding it, which is a different change. Nothing was prepared.` };
+      }
+      if ((option.option_status ?? 'feasible') === status && (option.analysis_participation ?? 'included') === PARTICIPATION_FOR_STATUS[status]) {
+        return { ok: false, mutated: false, refusal: 'no_effect',
+          detail: `"${option.label}" is already ${status === 'feasible' ? 'in the comparison' : status === 'removed' ? 'taken out' : 'marked not feasible'}, so nothing was prepared. Tell the user plainly.` };
+      }
+      const proposal = createProposal({
+        scenario_id: ctx.scenario_id,
+        user_id: ctx.authenticated_user_id,
+        // The writer's stale gate is the ANALYSIS hash (`analysis_participation` is projected): the base this card was read on.
+        base_graph_identity_hash: g.graph_hash,
+        // `expected_status` is what THIS card was read on (absent = feasible): the writer refuses if it has moved since.
+        operations: [{ op: 'set_option_status', path: option.id, value: { status, expected_status: option.option_status ?? 'feasible' } }],
+        provenance: { authored_by: 'user_stated', basis: String(args.rationale ?? '') },
+        validation: { admitted: true, loss_count: 0, refusals: [] },
+        public_label: status === 'feasible' ? `Put "${option.label}" back into the comparison`
+          : status === 'removed' ? `Take "${option.label}" out of the comparison (it stays in your model)`
+          : `Mark "${option.label}" as not feasible and take it out of the comparison (it stays in your model)`,
+      });
+      proposals.put(proposal);
+      return { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label, base_revision: g.graph_hash,
+        note: 'Show the user exactly this change, never the id, and call authorise_change with this proposal_id once they agree.' };
+    },
+
     async proposeGoalTarget(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
-      const type = args?.constraint_type;
+      const typed = args?.constraint_type;
       const value = args?.value;
       const unit = typeof args?.unit === 'string' ? args.unit.trim() : '';
-      if ((type !== 'at_least' && type !== 'at_most') || typeof value !== 'number' || !Number.isFinite(value) || unit === '') {
+      if ((typed !== 'at_least' && typed !== 'at_most') || typeof value !== 'number' || !Number.isFinite(value) || unit === '') {
         return { ok: false, mutated: false, refusal: 'unreadable_target',
           detail: 'A target needs the figure, its unit, and whether the goal must be at least or at most that figure. Nothing was prepared; ask the user for whichever is missing.' };
       }
@@ -3242,22 +3454,16 @@ export function createAgentCapabilities(
           detail: `${targetFigure(derived.base, unit)} is not a figure the user wrote, so nothing was prepared: a target derived from it would be recorded as theirs. Ask them for the figure.` };
       } else if (!figureTheUserWrote(value, unit, ctx.user_text)) return targetNotStated;
       /**
-       * ⭐ WHICH WAY IT BINDS (DL 380e54 on #2447, the product ruling 5930770727 kept): the Agent's typed `constraint_type` is
-       * its READING. Only the user's own literal comparator words can overrule it — when they CONTRADICT it, nothing is
-       * prepared (as before). When they are SILENT ("double that", "our target is £200k"), the card is prepared with the
-       * Agent's reading as the primary decision button and the other direction as the alternative; the user's click is
-       * the authorship. One path for neutral wording and an increase; no word list over the user's wording.
+       * ⭐ WHICH WAY IT BINDS (DL 380e54 on #2447, the product ruling 5930770727 kept; follow-up 5931593767): NO REFUSAL ON
+       * DIRECTION. The Agent's typed `constraint_type` is its READING; the user's own literal comparator words, when they
+       * read one way, are THEIRS. When the two agree, the card is the user's. Otherwise the card is a DECISION: the literal
+       * reading primary when there is one ("cut costs to £34k over the next year" reads `over`), the Agent's reading
+       * primary when the words are silent, asked, denied or both ways ("double that", "our target is £200k"); the other
+       * direction is the alternative button, and the user's click is the authorship. No word list over the user's wording.
        */
       const said = comparatorTheUserWrote(ctx.user_turn_text);
-      const silent = said === null && !comparatorWordsIn(ctx.user_turn_text);
-      if (said !== type && !silent) {
-        return { ok: false, mutated: false, refusal: 'direction_not_stated',
-          detail: (said === null
-            ? 'The user\u2019s words in this message are unclear on whether the goal must be at least or at most this figure (they asked, denied it, or said both), so nothing was prepared. '
-            : `The user said ${DIRECTION_WORDS[said]}, not ${DIRECTION_WORDS[type]}, so nothing was prepared. `)
-            + 'Ask them whether the goal must be at least or at most the figure, and never choose it for them.' };
-      }
-      const directionReadByAgent = silent;
+      const type: 'at_least' | 'at_most' = said ?? typed;
+      const directionIsADecision = said !== typed;
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
       // Exactly ONE goal: the event is id-addressed, and choosing between two goals would be a guess.
@@ -3372,7 +3578,7 @@ export function createAgentCapabilities(
         ...(levelLeftOut !== undefined ? { current_level_left_out: levelLeftOut } : {}),
         // ⭐ DL 380e54 (#2447): the user's words were silent on the direction, so the card is a DECISION — the Agent's
         // reading is the primary button, the other the alternative (`approval-chips.ts`); the user's click is the authorship.
-        ...(directionReadByAgent ? { direction_choice: { chosen: type, alternative: type === 'at_least' ? 'at_most' : 'at_least' } } : {}),
+        ...(directionIsADecision ? { direction_choice: { chosen: type, alternative: type === 'at_least' ? 'at_most' : 'at_least' } } : {}),
         note: `Nothing has changed yet. Tell the user it will set the goal "${goal.label}" to ${DIRECTION_WORDS[type]} ${figure}, as their own target`
           + (today !== undefined ? `, and record ${today} as its level today, their own figure, on the same approval` : '')
           + ' — never the id — and call authorise_change with this proposal_id once they agree.'
@@ -4232,7 +4438,14 @@ export function createAgentCapabilities(
       if (readOnly) return refuseReadOnly();
       const id = typeof args?.proposal_id === 'string' ? args.proposal_id : '';
       const notFound = { ok: false, mutated: false, refusal: 'not_proposed_this_turn', detail: 'No change with that id is awaiting approval. Nothing was withdrawn.' };
-      if (/^gmh_[0-9a-f]{12}$/.test(id)) {
+      if (id.startsWith('goal-scope:')) {
+        const issue = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).find(p => p.action.kind === 'reconcile_goal_scope' && p.chip_id === id);
+        if (issue?.action.kind !== 'reconcile_goal_scope') return notFound;
+        const words = scopeWithdrawalWords(issue.action.goal_id);
+        if ((ctx.user_turn_text ?? ctx.user_text ?? '').trim() !== words) return { ok: false, mutated: false, refusal: 'withdrawal_not_approved', approval_words: words,
+          detail: 'This unresolved reading belongs to the user. It is retained until they explicitly withdraw it with the displayed words.' };
+        withdrawnHolds.add(id);
+      } else if (/^gmh_[0-9a-f]{12}$/.test(id)) {
         withdrawnHolds.add(id);
       } else {
         const p = proposals.get(id);
@@ -4295,6 +4508,13 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
       }
 
+      const scopeRevision = pendingAdoption?.operations.find(op => op.op === 'update_node')?.value as { reconciliation_key?: string } | undefined;
+      if (scopeRevision?.reconciliation_key) {
+        const issues = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+        if (!issues.some(p => p.action.kind === 'reconcile_goal_scope' && scopeReconciliationKey(p.action) === scopeRevision.reconciliation_key)) {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', detail: 'The retained scope reading changed or was withdrawn after this card was offered. Nothing was written; ask for a fresh card.' };
+        }
+      }
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
 
@@ -4438,14 +4658,35 @@ export function createAgentCapabilities(
          * `bdba963b`): one click on "Record this link" showed this `follow_up` verbatim — "Recorded as the user's own
          * estimate: … Offer to run the analysis again so they can see what it changes." The typed-approval fast path
          * shows `follow_up` to the user and no model reads the result there; on the loop path the Agent reads both.
-         * So the sentence the user reads is addressed to them (the label already says "as your own estimate"), and
-         * the next step for the Agent stays in `note`, where only the Agent reads it.
+         * So the sentence the user reads is addressed to them, and the next step for the Agent stays in `note`, where
+         * only the Agent reads it.
          */
+        /**
+         * ⭐ M1 ACCEPT RECEIPT (R3 5942069984; DL 5942097719): WHOSE FIGURE IS READ OFF THE STORED LINK after the write
+         * (`linkSizing`, F1b's one predicate), never off the card. A confirm is review (R11), so on Olumi's estimate it
+         * lands `olumi_accepted` and says RC's accept sentence — the one the system-event receipt and the M2 rerun line
+         * say (`formatEdgeStrengthConfirmed`). Only a link the user sized is "your own estimate"; any other claims nobody.
+         */
+        const storedEdge = after.edges.find((e) => e.from === fromId && e.to === toId);
+        const sizing = storedEdge === undefined ? undefined : linkSizing(storedEdge);
+        const fromLabel = after.nodes.find((n) => n.id === fromId)?.label;
+        const toLabel = after.nodes.find((n) => n.id === toId)?.label;
+        const followUp = sizing === 'user'
+          ? `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`
+          : typeof fromLabel === 'string' && typeof toLabel === 'string'
+            // Quoted: shown through `withoutAgentDirections`, where an unquoted label can drop the sentence (Codex P2).
+            ? formatEdgeStrengthConfirmed({ fromLabel: quoteLabelForUser(fromLabel), toLabel: quoteLabelForUser(toLabel), sizing })
+            : 'Recorded your review of this link; its strength stays as it was.';
+        const whoseNote = sizing === 'user'
+          ? 'Recorded as the user’s own estimate.'
+          : sizing === 'olumi_accepted'
+            ? 'Recorded as the user’s review: the strength stays Olumi’s estimate, which they accepted. Never call it their own.'
+            : 'Recorded as the user’s review: the strength stays exactly as it was, and who sized it did not change. Never call it their own.';
         return {
           ok: true, mutated: true, applied: true, proposal_id: decision.proposal.proposal_id, operation_id: operationId, receipts,
           ...(receipt.unreadable ? { receipt_unreadable: true } : {}),
-          follow_up: `${decision.proposal.public_label.replace(/^Record /, 'Recorded ')}.`,
-          note: 'Recorded as the user’s own estimate. Offer to run the analysis again so they can see what it changes.',
+          follow_up: followUp,
+          note: `${whoseNote} Offer to run the analysis again so they can see what it changes.`,
         };
       }
 
@@ -4455,6 +4696,58 @@ export function createAgentCapabilities(
        * stored target holds exactly what was approved (`goalTargetHolds`); a write that answered 200 but cannot be read
        * back is "could not be confirmed", never "not saved".
        */
+      /**
+       * ⭐ MG F1 T6: ONE option's status through the ONE writer (`option_status_edit`), carrying the proposal's base hash.
+       * "Done" only when the model HOLDS the status and its participation (`optionStatusHolds`, the writer's own read-back).
+       */
+      if (ops.length === 1 && ops[0]!.op === 'set_option_status') {
+        const op = ops[0]!;
+        const { status, expected_status } = op.value as { status: 'feasible' | 'infeasible' | 'removed'; expected_status: 'feasible' | 'infeasible' | 'removed' };
+        const pid = decision.proposal.proposal_id;
+        if (opts.commitOptionStatus === undefined) {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            detail: 'The option cannot be changed here, so nothing was written. Tell the user plainly.' };
+        }
+        const operationId = authorisationTurnId(pid);
+        const res = await opts.commitOptionStatus({
+          scenario_id: ctx.scenario_id, turn_id: operationId, option_node_id: op.path, expected_status, status,
+          base_graph_hash: decision.proposal.base_graph_identity_hash,
+        });
+        // The CAS / expected-status conflict, or the turn fence's superseded/stopped verdict: nothing written.
+        if (res.status === 'stale') {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', proposal_id: pid,
+            detail: 'The model changed just before this was written, so nothing was changed. Offer to prepare it again.' };
+        }
+        // The turn fence refused before any write.
+        if (res.status === 'refused') {
+          return { ok: false, mutated: false, applied: false, refusal: 'not_applied', proposal_id: pid,
+            detail: 'The option was not changed, and nothing on the model changed. Tell the user plainly and ask what they would like instead.' };
+        }
+        /**
+         * ⛔ APPLIED ONLY ON THE WRITER'S OWN TYPED OUTCOME (CODEX overflow #2471 5937013605 + DL). Served b213138f said
+         * "could not be confirmed" on 4 of 4 presses that landed, because a guest's write mints no version and #2467
+         * required a receipt (R3 5936732295). Display bytes cannot stand in (a no-write replay carries them too). So:
+         * the writer says THIS attempt wrote (`written`), a minted version's receipt names THIS turn, and the model read
+         * back holds the status. Anything less is UNCONFIRMED — never "did not change" (CODEX delta P2-1).
+         */
+        const receipt = res.status === 'written' ? receiptSummaryOf({ model_version_receipt: res.model_version_receipt }) : null;
+        const receiptBindsThisTurn = res.status === 'written' && receipt !== null && !receipt.unreadable
+          && (res.version_minted ? receipt.summary !== null && receipt.summary.source_turn_id === operationId : receipt.summary === null);
+        const after = await readGraph(ctx.scenario_id);
+        const landed = receiptBindsThisTurn && after !== null && optionStatusHolds(after.raw, op.path, status);
+        if (!landed) {
+          return { ok: false, mutated: true, applied: false, refusal: 'not_confirmed', proposal_id: pid,
+            detail: 'The change was sent but could not be confirmed in the saved model. Tell the user it could not be confirmed (never that it was saved, never that it failed) and offer to check.' };
+        }
+        // The exact proposal is APPLIED (CODEX P2): it is no longer offered, and a retry reads "already applied", never "superseded".
+        const receipts = receipt!.summary !== null ? [receipt!.summary] : [];
+        proposals.markApplied(pid, receipts);
+        return { ok: true, mutated: true, applied: true, proposal_id: pid, operation_id: operationId, receipts,
+          // The writer's own sentence, about the option the model now holds (one wording for the UI and the Agent).
+          follow_up: optionStatusConfirmationText(String(after!.nodes.find((n) => n.id === op.path)?.label ?? ''), status),
+          note: 'The last analysis no longer reflects the options compared. Offer to run the analysis again.' };
+      }
+
       if (ops.length === 1 && ops[0]!.op === 'set_goal_target') {
         const op = ops[0]!;
         const v = op.value as { constraint_type: 'at_least' | 'at_most'; raw_value: number; unit: string };
@@ -6267,12 +6560,12 @@ export function createAgentCapabilities(
         type Lvl = { value: number; unit?: string; estimate?: string; by?: 'user' | 'olumi' };
         const levelById = new Map<string, Lvl>();
         for (const a of spec.acts_on) {
-          const v = a.level?.value;
-          if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+          const lv = doorLevelOf(a.level);
+          if (lv === undefined) continue;
           const f = rawNodes.find((x) => x.kind === 'factor' && (norm(x.label) === norm(a.factor_label) || norm(x.description) === norm(a.factor_label)));
           // Olumi's own suggested figure, with its basis (ChatGPT 5839692762 A: an EXPLICIT hypothesis, never silent).
           const basis = a.level?.estimate === true && typeof a.level?.basis === 'string' && a.level.basis.trim() !== '' ? a.level.basis.trim() : undefined;
-          if (f !== undefined) levelById.set(f.id, { value: v, ...(typeof a.level?.unit === 'string' && a.level.unit.trim() !== '' ? { unit: a.level.unit.trim() } : {}), ...(basis !== undefined ? { estimate: basis } : {}) });
+          if (f !== undefined) levelById.set(f.id, { ...lv, ...(basis !== undefined ? { estimate: basis } : {}) });
         }
         /**
          * ⛔ THE USER'S OWN SPLIT (AI Quality ruling #70 5859388817; served C08 "Let's spit it 50/50" of the £30,000 limit the
@@ -6291,8 +6584,8 @@ export function createAgentCapabilities(
           if (lvl === undefined) return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           const factor = g.nodes.find((x) => x.id === f.id);
           // ⛔ A figure in another kind of unit is never this factor's level (`unit-conflict.ts`: a price as churn).
-          const factorUnit = factorUnitOf(g.raw, factor);
-          if (unitsConflict(lvl.unit, factorUnit) !== null) {
+          const { factorUnit, conflict } = factorUnitConflict(lvl, factor, g.raw);
+          if (conflict) {
             unitMismatch.push({ option: plan.label, factor: f.label, value: lvl.value, unit: String(lvl.unit), factor_unit: String(factorUnit) });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
@@ -6326,26 +6619,24 @@ export function createAgentCapabilities(
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           // The user's split's figure in the name ("50/50") is its RATIO, never a level it contradicts.
-          if (!byUser && derived === undefined && contradictsItsName(lvl.value, lvl.unit ?? factorUnit, plan.label)) {
+          // The name rule, then the writer's range: `placeLevel`, the stage the Widen gate calls too.
+          const placed = placeLevel(lvl, factor, factorUnit, plan.label, !byUser && derived === undefined);
+          if (placed.kind === 'contradicts_name') {
             levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
               reason: `Olumi's estimate of ${lvl.value} for ${f.label} does not match the figure in the option's own name ("${plan.label}"), so that level is left unset. Use the figure in the name, or name the option for the figure you mean.` });
             return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
           lvl.by = byUser ? 'user' : 'olumi';
           const stamp = byUser ? {} : { source: 'cee_hypothesis' as const };
-          const frame = levelFrameOf(factor);
-          if (frame !== null) {
-            const v = lvl.value / frame;
-            if (!(v >= 0 && v <= 1)) {
-              outOfRange.push({ option: plan.label, factor: f.label, value: lvl.value, range: frame });
-              return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
-            }
-            const os = (factor?.observed_state ?? {}) as { unit?: unknown };
-            const unit = lvl.unit ?? (typeof os.unit === 'string' && os.unit !== '' ? os.unit : undefined);
-            set.set(f.id, lvl);
-            return { factor_id: f.id, value: v, raw_value: lvl.value, ...(unit !== undefined ? { unit } : {}), ...stamp };
+          if (placed.kind === 'out_of_range') {
+            outOfRange.push({ option: plan.label, factor: f.label, value: lvl.value, range: placed.range });
+            return { factor_id: f.id, value: null, ...linkAuthor(f.label) };
           }
-          if (lvl.value >= 0 && lvl.value <= 1) { set.set(f.id, lvl); return { factor_id: f.id, value: lvl.value, ...stamp }; }
+          if (placed.kind === 'set') {
+            set.set(f.id, lvl);
+            return { factor_id: f.id, value: placed.value, ...(placed.raw_value !== undefined ? { raw_value: placed.raw_value } : {}),
+              ...(placed.unit !== undefined ? { unit: placed.unit } : {}), ...stamp };
+          }
           levelsNotSet.push({ option: plan.label, factor: f.label, value: lvl.value,
             reason: `The model has no range for ${f.label} to read ${lvl.value} against, so this change leaves that level unset. `
               + `Once the option is added, propose that level with propose_option_interventions, which records a range for ${f.label}.` });
@@ -7199,8 +7490,14 @@ export function createAgentCapabilities(
       };
     },
 
+    async reconcileGoalScope(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      return reconcileGoalScope({ readGraph, proposals, readPending: () => opts.readPendingActions ? opts.readPendingActions(ctx.scenario_id) : Promise.resolve([]) }, ctx, args);
+    },
     async proposeGoalCurrentLevel(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      const issues = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+      if (issues.some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Use reconcile_goal_scope to resolve the retained question before preparing the goal baseline. Nothing was prepared.' };
       return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
     },
 

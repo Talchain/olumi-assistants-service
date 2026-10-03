@@ -108,8 +108,11 @@ describe('the Agent route is OpenAI-only, all the way down', () => {
     // ⭐ PTL row 4 (#72 5871228357): the rest of the request identity is INTENDED too, added to the exact key set the
     // same way; each field's binding to the body actually sent is proved in `provider-ledger-request-identity.test.ts`.
     const REQUEST_IDENTITY = ['tools_sha256', 'reasoning_effort', 'max_output_tokens', 'cee_build', 'environment', 'environment_source'];
+    // ⭐ T1 (b): the instructions' CARRIER is intended too (#2492's ledger counts every request made), pinned by value:
+    // a converse call carries them as the developer block with the explicit breakpoint (`instructions-breakpoint-refusal`).
     for (const c of calls) {
-      expect(Object.keys(c).sort()).toEqual([...PURITY, 'duration_ms', 'prompt_alias', 'prompt_sha256', ...REQUEST_IDENTITY].sort());
+      expect(Object.keys(c).sort()).toEqual([...PURITY, 'duration_ms', 'prompt_alias', 'prompt_sha256', 'instructions_carrier', ...REQUEST_IDENTITY].sort());
+      expect((c as { instructions_carrier?: string }).instructions_carrier).toBe('developer_breakpoint');
       expect((c as { prompt_alias?: string }).prompt_alias).toBe('agent.converse');
       expect((c as { prompt_sha256?: string }).prompt_sha256).toMatch(/^[0-9a-f]{64}$/);
     }

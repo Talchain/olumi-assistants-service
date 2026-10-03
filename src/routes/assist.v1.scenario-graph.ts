@@ -1,3 +1,5 @@
+import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
+import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
 /**
  * ROADMAP 2.312 track 2 (2) — THE SCENARIO-ADDRESSED GRAPH READ.
  *
@@ -216,6 +218,7 @@ import {
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { scenarioAccessDecision } from '../orchestrator-v5/agent-lane/scenario-access.js';
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -453,109 +456,150 @@ export default async function route(app: FastifyInstance) {
       }
 
       const store = getSessionStore();
+      const extensions = parseRequestExtensions(req.body, requestId);
+      if (!extensions.ok) return refuse();
 
-      // ── 2. EXISTENCE — before ownership, so the read cannot CREATE ──────
-      // Error discipline is the INVERSE of turn-stop's fail-open: a Stop
-      // fails open because a DB blip must not cost a user their Stop, and the
-      // worst case is a spurious tombstone. Here the worst case is serving or
-      // fabricating someone's decision graph, so a thrown read fails CLOSED
-      // and says 503 — it never degrades into 404 or into an empty graph.
-      //
-      // ⚠ A MISSING `scenarioExists` FAILS CLOSED, and this is the one place
-      //   this route deliberately diverges from turn-stop.ts's structural
-      //   probe. `scenarioExists` is OPTIONAL on the SessionStore interface.
-      //   turn-stop can skip it when absent, because skipping only costs it a
-      //   hardening check. Skipping it HERE would fall straight through to the
-      //   ownership pre-flight — the call that UPSERTS — so "I could not check
-      //   whether this scenario exists" would become "create it and read it".
-      //   Defaulting to `true` (assume it exists) is exactly the dangerous
-      //   direction, and it would make the invariant this route advertises
-      //   ("a read never creates the row it reads") conditional on a store
-      //   shape rather than structural. An unverifiable precondition is
-      //   refused, not assumed.
-      let exists: boolean;
-      try {
-        if (typeof store.scenarioExists !== "function") {
-          log.error(
+      // Production reads one existing row: absence stays distinct from a guest owner,
+      // and this read has no create-on-read path. Legacy stores retain their original ladder.
+      let snapshot: Awaited<ReturnType<NonNullable<typeof store.readExistingScenario>>> | undefined;
+      // True only when access came from viewer membership (never for the owner or a guest row). See §6.
+      let memberRead = false;
+      if (typeof store.readExistingScenario === "function") {
+        try {
+          snapshot = await store.readExistingScenario(scenarioId);
+        } catch {
+          return unavailable();
+        }
+        if (snapshot === null) return refuse();
+        const caller = resolved.identity.mode === 'verified' ? resolved.identity.userId : null;
+        let access = scenarioAccessDecision(snapshot.userId, caller);
+        // ⭐ A VIEWER MEMBER MAY READ (ACCOUNTS "Invite a colleague", DL #85 5947426886). THIS ROUTE ONLY: it is a
+        // read, and every write door (turns, register, versions, the Supabase saves) keeps its owner-only check, so a
+        // member is a non-owner everywhere else. Only a VERIFIED caller on an OWNED row is asked. A membership read
+        // that fails answers the SAME refusal bytes (logged), never 503: a distinct status for "exists but your
+        // membership could not be checked" would tell a stranger the scenario exists.
+        if (access !== 'allow' && caller !== null && snapshot.userId !== null && typeof store.isScenarioMember === 'function') {
+          let member = false;
+          try {
+            member = await store.isScenarioMember(scenarioId, caller);
+          } catch (err) {
+            log.warn(
+              {
+                event: 'v5.scenario_graph.member_check_failed',
+                request_id: requestId,
+                scenario_id: scenarioId,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'Scenario graph read — membership check failed; refusing',
+            );
+          }
+          if (member) {
+            access = 'allow';
+            memberRead = true;
+            log.info({ event: 'v5.scenario_graph.member_read', request_id: requestId, scenario_id: scenarioId }, 'Scenario graph read by a viewer member');
+          }
+        }
+        if (access !== 'allow') return refuse();
+      } else {
+        // ── 2. EXISTENCE — before ownership, so the read cannot CREATE ──────
+        // Error discipline is the INVERSE of turn-stop's fail-open: a Stop
+        // fails open because a DB blip must not cost a user their Stop, and the
+        // worst case is a spurious tombstone. Here the worst case is serving or
+        // fabricating someone's decision graph, so a thrown read fails CLOSED
+        // and says 503 — it never degrades into 404 or into an empty graph.
+        //
+        // ⚠ A MISSING `scenarioExists` FAILS CLOSED, and this is the one place
+        //   this route deliberately diverges from turn-stop.ts's structural
+        //   probe. `scenarioExists` is OPTIONAL on the SessionStore interface.
+        //   turn-stop can skip it when absent, because skipping only costs it a
+        //   hardening check. Skipping it HERE would fall straight through to the
+        //   ownership pre-flight — the call that UPSERTS — so "I could not check
+        //   whether this scenario exists" would become "create it and read it".
+        //   Defaulting to `true` (assume it exists) is exactly the dangerous
+        //   direction, and it would make the invariant this route advertises
+        //   ("a read never creates the row it reads") conditional on a store
+        //   shape rather than structural. An unverifiable precondition is
+        //   refused, not assumed.
+        let exists: boolean;
+        try {
+          if (typeof store.scenarioExists !== "function") {
+            log.error(
+              {
+                event: "v5.scenario_graph.existence_check_unavailable",
+                request_id: requestId,
+              },
+              "Scenario graph read — store cannot check scenario existence; refusing rather than risking a create-on-read",
+            );
+            return unavailable();
+          }
+          exists = await store.scenarioExists(scenarioId);
+        } catch (err) {
+          log.warn(
             {
-              event: "v5.scenario_graph.existence_check_unavailable",
+              event: "v5.scenario_graph.existence_read_failed",
               request_id: requestId,
+              scenario_id: scenarioId,
+              err: err instanceof Error ? err.message : String(err),
             },
-            "Scenario graph read — store cannot check scenario existence; refusing rather than risking a create-on-read",
+            "Scenario graph read — existence read failed; failing closed",
           );
           return unavailable();
         }
-        exists = await store.scenarioExists(scenarioId);
-      } catch (err) {
-        log.warn(
-          {
-            event: "v5.scenario_graph.existence_read_failed",
-            request_id: requestId,
-            scenario_id: scenarioId,
-            err: err instanceof Error ? err.message : String(err),
-          },
-          "Scenario graph read — existence read failed; failing closed",
-        );
-        return unavailable();
-      }
-      if (!exists) {
-        return refuse();
-      }
+        if (!exists) {
+          return refuse();
+        }
 
-      // ── 3. Ownership — the SAME pre-flight the turn route runs ──────────
-      // The caller-supplied `user_id` is read by the SAME parser the turn
-      // route uses, not a hand-rolled `body.user_id` read that would drift the
-      // day the extension contract moves.
-      const extensions = parseRequestExtensions(req.body, requestId);
-      if (!extensions.ok) {
-        return refuse();
-      }
+        // ── 3. Ownership — the SAME pre-flight the turn route runs ──────────
+        // The caller-supplied `user_id` is read by the SAME parser the turn
+        // route uses, not a hand-rolled `body.user_id` read that would drift the
+        // day the extension contract moves.
+        let owned: Awaited<ReturnType<typeof authorizeScenarioOwnership>>;
+        try {
+          owned = await authorizeScenarioOwnership(
+            scenarioId,
+            // Ownership on this surface is derived from the verified token
+            // subject. A request-supplied identifier is not an input to that
+            // decision, so the sentinel is passed rather than the parsed
+            // extension. See the constant for why this is expressed here and not
+            // in the shared function.
+            CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
+            resolved.identity,
+            requestId,
+          );
+        } catch (err) {
+          log.warn(
+            {
+              event: "v5.scenario_graph.ownership_read_failed",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            "Scenario graph read — ownership pre-flight threw; failing closed",
+          );
+          return unavailable();
+        }
+        if (!owned.ok) {
+          // Reason is LOGGED, never returned — including the oracle-down case,
+          // which is fail-CLOSED here (see the header).
+          log.warn(
+            {
+              event: "v5.scenario_graph.refused_not_owner",
+              request_id: requestId,
+              scenario_id: scenarioId,
+              reason: owned.reason,
+            },
+            "Scenario graph read — caller is not authorized for this scenario",
+          );
+          return refuse();
+        }
 
-      let owned: Awaited<ReturnType<typeof authorizeScenarioOwnership>>;
-      try {
-        owned = await authorizeScenarioOwnership(
-          scenarioId,
-          // Ownership on this surface is derived from the verified token
-          // subject. A request-supplied identifier is not an input to that
-          // decision, so the sentinel is passed rather than the parsed
-          // extension. See the constant for why this is expressed here and not
-          // in the shared function.
-          CALLER_ASSERTED_IDENTITY_NOT_ADMISSIBLE,
-          resolved.identity,
-          requestId,
-        );
-      } catch (err) {
-        log.warn(
-          {
-            event: "v5.scenario_graph.ownership_read_failed",
-            request_id: requestId,
-            scenario_id: scenarioId,
-            err: err instanceof Error ? err.message : String(err),
-          },
-          "Scenario graph read — ownership pre-flight threw; failing closed",
-        );
-        return unavailable();
-      }
-      if (!owned.ok) {
-        // Reason is LOGGED, never returned — including the oracle-down case,
-        // which is fail-CLOSED here (see the header).
-        log.warn(
-          {
-            event: "v5.scenario_graph.refused_not_owner",
-            request_id: requestId,
-            scenario_id: scenarioId,
-            reason: owned.reason,
-          },
-          "Scenario graph read — caller is not authorized for this scenario",
-        );
-        return refuse();
       }
 
       // ── 4. The read ─────────────────────────────────────────────────────
       let graph: unknown;
       let briefText: string | null;
       try {
-        const loaded = await store.loadGraphAndBriefText(scenarioId);
+        const loaded = snapshot ?? await store.loadGraphAndBriefText(scenarioId);
         graph = loaded.graph;
         briefText = loaded.briefText;
       } catch (err) {
@@ -570,6 +614,13 @@ export default async function route(app: FastifyInstance) {
         );
         return unavailable();
       }
+
+      if (typeof store.readMostRecentPendingActions !== 'function') return unavailable();
+      let scopeInput: ReturnType<typeof goalScopeClaimInput>;
+      try {
+        scopeInput = goalScopeClaimInput(await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }), graph);
+      } catch { return unavailable(); }
+      const scopeIssues = scopeInput.issues;
 
       // An EMPTY graph is a valid answer, not an error: every scenario starts
       // there, and 404-ing it would make "no graph yet" indistinguishable from
@@ -599,11 +650,16 @@ export default async function route(app: FastifyInstance) {
         scenarioId,
         graph: graphPresent ? graph : null,
         requestId,
+        goalScopeClaimInput: scopeInput,
+        ...(snapshot !== undefined && snapshot !== null ? { analysisInvalidatedAt: snapshot.analysisInvalidatedAt } : {}),
       });
       // The selected block already has one public carrier, `analysis_result`.
       // The current-read sidecar exposes its bounded identity and typed figures
       // without a second copy of raw enrichment/probability fields.
       const { result: _selectedBlock, ...currentReadWire } = analysis.current_read;
+      // Compatibility projection reads the common canonical claim, never the
+      // issue count. The pending actions remain explanatory data only.
+      const scopePermissions = claimPermissionsFrom(analysis.analysis_state, undefined);
 
       // ── 6. THE CONVERSATION, OPT-IN (DL lease #75 5907582591; Canvas 5907308286) ──
       //
@@ -618,7 +674,12 @@ export default async function route(app: FastifyInstance) {
       // byte-identical and no extra query runs. The stored `assistant_message` is the
       // POST-WIRE text the user saw (AIQ 5907360564), served as stored — never
       // re-derived. `null` = this leg did not answer, never "no conversation".
-      const conversationTurns = wantsConversationTurns(req.body)
+      //
+      // ⚠ A VIEWER MEMBER GETS THE MODEL AND THE RUN, NEVER THE OWNER'S CONVERSATION. The premise above ("the caller
+      // entitled to read the graph is exactly the caller entitled to read its conversation") holds for the owner and
+      // a guest row. A colleague the owner shared the decision with was given the decision, not the owner's chat
+      // with Olumi. So a member read leaves the field out, exactly as if it had not been asked for.
+      const conversationTurns = wantsConversationTurns(req.body) && !memberRead
         ? await readConversationTurns(store, scenarioId, requestId)
         : undefined;
 
@@ -705,6 +766,10 @@ export default async function route(app: FastifyInstance) {
         // told it about (the H4 seam — the two authorities answer different
         // questions).
         analysis_state: analysis.analysis_state,
+        ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
+        ...(scopePermissions.total_goal_claims_allowed === false ? {
+          goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
+        } : {}),
         analysis_result: analysis.analysis_result,
         // CURRENT-READ-v1: one selected Run's canonical freshness and typed
         // figures. The raw graph_hash above remains the edit/CAS token; the

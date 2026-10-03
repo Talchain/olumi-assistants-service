@@ -97,8 +97,11 @@ const scenarioExists = vi.fn();
 const loadGraphAndBriefText = vi.fn();
 const ensureScenarioExists = vi.fn();
 const getScenarioOwner = vi.fn();
+const readExistingScenario = vi.fn();
 
 const store = {
+  readMostRecentPendingActions: async () => [],
+  readExistingScenario: undefined as typeof readExistingScenario | undefined,
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,
@@ -183,6 +186,7 @@ async function read(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  store.readExistingScenario = undefined;
   // Default posture: the scenario exists, is UNOWNED (guest), and holds a graph.
   scenarioExists.mockResolvedValue(true);
   // The signed-in owner is the default caller. Cases about a DIFFERENT user
@@ -661,6 +665,51 @@ describe("READ FAILURES ARE UNKNOWNS, NOT ABSENCES", () => {
     const res = await read(app, SCENARIO, { user_id: OWNER });
 
     expect(res.statusCode).toBeGreaterThanOrEqual(500);
+    await app.close();
+  });
+});
+
+
+describe("coalesced existing-scenario read", () => {
+  const snapshot = () => ({ userId: OWNER, graph: GRAPH_NO_LAYOUT, briefText: "Should I take the job?", analysisInvalidatedAt: null });
+  it("reads presence, owner, graph and restore marker once without an upsert", async () => {
+    store.readExistingScenario = readExistingScenario;
+    readExistingScenario.mockResolvedValue(snapshot());
+    const app = await buildApp();
+    const res = await read(app, SCENARIO);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().graph).toEqual(GRAPH_NO_LAYOUT);
+    expect(readExistingScenario).toHaveBeenCalledExactlyOnceWith(SCENARIO);
+    expect(scenarioExists).not.toHaveBeenCalled();
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(loadGraphAndBriefText).not.toHaveBeenCalled();
+    await app.close();
+  });
+  it("absence and a different owner have the same refusal and neither creates a row", async () => {
+    store.readExistingScenario = readExistingScenario;
+    const app = await buildApp();
+    readExistingScenario.mockResolvedValue(null);
+    const absent = await read(app, SCENARIO);
+    readExistingScenario.mockResolvedValue({ ...snapshot(), userId: OTHER_USER });
+    const wrongOwner = await read(app, SCENARIO);
+    expect(absent.statusCode).toBe(404);
+    expect(wrongOwner.statusCode).toBe(404);
+    const strip = (response: typeof absent) => ({ ...response.json(), request_id: undefined });
+    expect(strip(wrongOwner)).toEqual(strip(absent));
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(loadGraphAndBriefText).not.toHaveBeenCalled();
+    await app.close();
+  });
+  it("a guest row still reads, while an unreadable snapshot fails closed", async () => {
+    store.readExistingScenario = readExistingScenario;
+    const app = await buildApp();
+    readExistingScenario.mockResolvedValue({ ...snapshot(), userId: null, graph: null });
+    const guest = await read(app, SCENARIO);
+    expect(guest.statusCode).toBe(200);
+    expect(guest.json().graph_present).toBe(false);
+    readExistingScenario.mockRejectedValue(new Error("read unavailable"));
+    expect((await read(app, SCENARIO)).statusCode).toBe(503);
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
     await app.close();
   });
 });

@@ -2197,70 +2197,7 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
 
-    const facts: IdentifiedHandlerFact[] = [];
-    for (const row of data as Array<{
-      id?: unknown;
-      scenario_id?: unknown;
-      v5_conversation_turn_id?: unknown;
-      payload?: unknown;
-      handler_id?: unknown;
-      action_type?: unknown;
-      noop?: unknown;
-      created_at?: unknown;
-    }>) {
-      if (
-        typeof row.id !== 'string' ||
-        row.id.length === 0 ||
-        row.scenario_id !== scenarioId ||
-        typeof row.v5_conversation_turn_id !== 'string' ||
-        row.v5_conversation_turn_id.length === 0 ||
-        row.handler_id !== 'run_analysis' ||
-        row.action_type !== 'run_analysis' ||
-        row.noop !== false ||
-        typeof row.created_at !== 'string' ||
-        !Number.isFinite(Date.parse(row.created_at))
-      ) {
-        throw new SessionReadError(
-          'Scenario analysis-fact row metadata is invalid',
-          { code: 'analysis_fact_corrupt' },
-        );
-      }
-
-      const payloadObj =
-        row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
-          ? (row.payload as Record<string, unknown>)
-          : {};
-      const parsed = HandlerFactSchema.safeParse({
-        ...payloadObj,
-        noop: row.noop,
-      });
-      if (!parsed.success) {
-        throw new SessionReadError(
-          'Scenario analysis-fact payload is invalid',
-          { cause: parsed.error, code: 'analysis_fact_corrupt' },
-        );
-      }
-
-      const result = parsed.data.result;
-      if (
-        parsed.data.fact_type !== 'run_analysis' ||
-        parsed.data.noop !== false ||
-        result === null ||
-        typeof result !== 'object' ||
-        Array.isArray(result) ||
-        (result as { readonly scenario_id?: unknown }).scenario_id !== scenarioId
-      ) {
-        throw new SessionReadError(
-          'Scenario analysis-fact payload contradicts its indexed authority',
-          { code: 'analysis_fact_corrupt' },
-        );
-      }
-      facts.push({
-        fact: parsed.data,
-        fact_row_id: row.id,
-        fact_created_at: row.created_at,
-      });
-    }
+    const facts = parseScenarioRunAnalysisRows(data, scenarioId);
 
     return Object.freeze({
       facts: Object.freeze(facts),
@@ -2365,6 +2302,46 @@ export class SupabaseSessionStore implements SessionStore {
 
   async loadGraph(scenarioId: string): Promise<unknown | null> {
     return (await this.loadGraphAndBriefText(scenarioId)).graph;
+  }
+
+  /** Presence, ownership and read contents come from one uncached, readonly row. */
+  async readExistingScenario(scenarioId: string) {
+    const { data, error } = await this.client
+      .from('scenarios')
+      .select('id, user_id, graph, brief_text, analysis_invalidated_at')
+      .eq('id', scenarioId)
+      .maybeSingle();
+    if (error) throw new SessionReadError('Existing scenario read failed', { cause: error, code: errCode(error) });
+    if (data === null) return null;
+    return parseExistingScenarioRow(data, scenarioId);
+  }
+
+  /** Viewer membership (READ grant for the graph-read route only; see the port). Throws on a store failure. */
+  async isScenarioMember(scenarioId: string, userId: string): Promise<boolean> {
+    const { data, error } = await this.client.rpc('is_scenario_member', { p_scenario_id: scenarioId, p_user_id: userId });
+    if (error) throw new SessionReadError('Scenario membership read failed', { cause: error, code: errCode(error) });
+    return data === true;
+  }
+
+  /** A scoped parent join keeps the graph, restore marker and newest Run in one read. */
+  async readRunCurrentness(scenarioId: string) {
+    const { data, error } = await this.client
+      .from('v5_handler_facts')
+      .select('id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at, scenario:scenarios!inner(id, user_id, graph, brief_text, analysis_invalidated_at)')
+      .eq('scenario_id', scenarioId)
+      .eq('handler_id', 'run_analysis')
+      .eq('noop', false)
+      // The canonical selector orders by the Run's computed_at, not fact insertion time.
+      .order('payload->result->>computed_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new SessionReadError('Run currentness read failed', { cause: error, code: errCode(error) });
+    if (data === null) return null;
+    const snapshot = parseExistingScenarioRow(data?.scenario, scenarioId);
+    const fact = parseScenarioRunAnalysisRows([data], scenarioId)[0]!.fact;
+    return { userId: snapshot.userId, graph: snapshot.graph, briefText: snapshot.briefText, analysisInvalidatedAt: snapshot.analysisInvalidatedAt, fact };
   }
 
   async loadGraphAndBriefText(scenarioId: string): Promise<{
@@ -2666,4 +2643,92 @@ function serialiseHandlerFacts(
     noop: f.noop,
     payload: { fact_type: f.fact_type, fact_version: f.fact_version, result: f.result },
   }));
+}
+
+/** Shared strict parser for the durable page and the bounded currentness read. */
+function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string): IdentifiedHandlerFact[] {
+  const facts: IdentifiedHandlerFact[] = [];
+  for (const row of data as Array<{
+    id?: unknown;
+    scenario_id?: unknown;
+    v5_conversation_turn_id?: unknown;
+    payload?: unknown;
+    handler_id?: unknown;
+    action_type?: unknown;
+    noop?: unknown;
+    created_at?: unknown;
+  }>) {
+    if (
+      typeof row.id !== 'string' ||
+      row.id.length === 0 ||
+      row.scenario_id !== scenarioId ||
+      typeof row.v5_conversation_turn_id !== 'string' ||
+      row.v5_conversation_turn_id.length === 0 ||
+      row.handler_id !== 'run_analysis' ||
+      row.action_type !== 'run_analysis' ||
+      row.noop !== false ||
+      typeof row.created_at !== 'string' ||
+      !Number.isFinite(Date.parse(row.created_at))
+    ) {
+      throw new SessionReadError(
+        'Scenario analysis-fact row metadata is invalid',
+        { code: 'analysis_fact_corrupt' },
+      );
+    }
+
+    const payloadObj =
+      row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+        ? (row.payload as Record<string, unknown>)
+        : {};
+    const parsed = HandlerFactSchema.safeParse({
+      ...payloadObj,
+      noop: row.noop,
+    });
+    if (!parsed.success) {
+      throw new SessionReadError(
+        'Scenario analysis-fact payload is invalid',
+        { cause: parsed.error, code: 'analysis_fact_corrupt' },
+      );
+    }
+
+    const result = parsed.data.result;
+    if (
+      parsed.data.fact_type !== 'run_analysis' ||
+      parsed.data.noop !== false ||
+      result === null ||
+      typeof result !== 'object' ||
+      Array.isArray(result) ||
+      (result as { readonly scenario_id?: unknown }).scenario_id !== scenarioId
+    ) {
+      throw new SessionReadError(
+        'Scenario analysis-fact payload contradicts its indexed authority',
+        { code: 'analysis_fact_corrupt' },
+      );
+    }
+    facts.push({
+      fact: parsed.data,
+      fact_row_id: row.id,
+      fact_created_at: row.created_at,
+    });
+  }
+  return facts;
+}
+
+function parseExistingScenarioRow(data: unknown, scenarioId: string) {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    throw new SessionReadError('Existing scenario row is malformed', { code: 'scenario_snapshot_invalid' });
+  }
+  const row = data as Record<string, unknown>;
+  if (typeof row.id !== 'string' || row.id.toLowerCase() !== scenarioId.toLowerCase()
+    || !(row.user_id === null || typeof row.user_id === 'string' && row.user_id.trim() !== '')
+    || !(row.analysis_invalidated_at === null || typeof row.analysis_invalidated_at === 'string'
+      && Number.isFinite(Date.parse(row.analysis_invalidated_at)))) {
+    throw new SessionReadError('Existing scenario row is malformed', { code: 'scenario_snapshot_invalid' });
+  }
+  return {
+    userId: row.user_id as string | null,
+    graph: row.graph ?? null,
+    briefText: typeof row.brief_text === 'string' && row.brief_text.length > 0 ? row.brief_text : null,
+    analysisInvalidatedAt: row.analysis_invalidated_at as string | null,
+  };
 }
