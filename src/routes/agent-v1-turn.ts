@@ -314,6 +314,14 @@ function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
  * Run, as the words the user received (`sentText`: the stored reply, so the leader wire gate's caveat stays with it);
  * after a restart, or once the Run has moved, it is today's coaching, as a coaching replay always was.
  */
+/**
+ * The ONE recorded operation a measured answer is ever given under: the what-changes chip with no `action_type` (as
+ * `NEXT_STEP_CHIPS` offers it). A replay recognises its turn from that recorded typed identity, durably: the press resent
+ * with its chip, or the UI's chipless retry (`source: 'retry'`) whose stored hash is exactly this operation's (Codex
+ * delta P1: a chipless retry skipped the selector and resent the measured words under a withheld licence, warm or cold).
+ * A press carrying any other `action_type` is never measured, so its recorded answer is coaching, which names no option.
+ */
+const WHAT_CHANGES_CHIP_OPERATION = chipOperationOf({ chip: { id: TIPPING_POINT_PRESS_ID } });
 const MEASURED_WHAT_CHANGES_MAX = 500;
 type MeasuredWhatChanges = { readonly runKey: string; readonly turn: WhatChangesTurn };
 const measuredWhatChanges = new Map<string, MeasuredWhatChanges>();
@@ -1764,7 +1772,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let replayText = prior.assistant_message ?? 'That request was already completed.';
       let replayNarration: { status: 'pending' | 'ready' | 'unavailable' | 'stale'; run_key: string } | undefined;
       const boundControl: OfferedAction[] = [];
-      if (approvedProposal === undefined && explanationId === TIPPING_POINT_PRESS_ID) {
+      const whatChangesReplay = approvedProposal === undefined && (explanationId === TIPPING_POINT_PRESS_ID
+        || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, WHAT_CHANGES_CHIP_OPERATION)));
+      if (whatChangesReplay) {
         // This unbound question asks about today's result: retry/cold read reconstructs today's answer, never Run A's
         // words. The SAME owner as the live turn (`whatWouldChangeAnswer`): this turn's measured answer while its Run is
         // still the bound one, else today's coaching. Never measured again here.
@@ -2479,7 +2489,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const rb = await readBackState(readingDispatch, scenarioId);
       const boundRun = runExplanationChip(scenarioId, rb);
       let measured: MeasuredWhatChanges | null = null;
-      if (boundRun !== null && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)) {
+      if (boundRun !== null && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)
+        && chipOperationOf(body) === WHAT_CHANGES_CHIP_OPERATION) {
         const turn = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
           payload: {
             kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',

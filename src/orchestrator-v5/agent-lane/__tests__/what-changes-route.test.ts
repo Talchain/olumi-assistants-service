@@ -58,6 +58,24 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
 const served: { state: Rec; result: Rec; ready: Rec | undefined; reads: number; afterRead: null | ((n: number) => void) } = { state: D3.body.analysis_state, result: D3.body.analysis_result, ready: undefined, reads: 0, afterRead: null };
 const RUN_NOT_CURRENT = 'I can’t explain that result as current. Check the current results before asking again.';
 
+// Each of RC's three measured sentence kinds, from ISL's real D3 links.
+const [savings, overspend] = ISL_D3_BLOCK.links;
+const STATUSES: Record<string, { block: Rec; said: RegExp }> = {
+  quoted: { block: { ...ISL_D3_BLOCK, links: [savings] }, said: /would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter/ },
+  below_a_tenth: { block: { ...ISL_D3_BLOCK, links: [{ ...savings, threshold: -0.02, replicate_thresholds: [-0.02, -0.02, -0.02, -0.02], replicate_range: 0 }] },
+    said: /would come out ahead only if monthly cloud savings's effect on monthly spend all but disappeared/ },
+  no_change: { block: { ...ISL_D3_BLOCK, links: [overspend] }, said: /would still lead even if monthly cloud overspend during migration's average effect/ },
+};
+const canonical = buildCanonicalAnalysisReadyFromGraph(D3.body.draft_graph) as Rec;
+// The SAME Run (scenario, computed_against_hash, computed_at untouched): only the permission or the admission moves.
+const WITHHELD: Record<string, () => void> = {
+  'leader claim revoked': () => { served.state = { ...D3.body.analysis_state, leader_claim: { ...D3.body.analysis_state.leader_claim, permitted: false } }; },
+  'admission absent': () => { served.ready = { ...canonical, analysis_admission: undefined }; },
+  'admission malformed': () => { served.ready = { ...canonical, analysis_admission: 'admitted' }; },
+  'admission refused': () => { served.ready = { ...canonical, analysis_admission: { ...canonical.analysis_admission, structurally_analysable: false } }; },
+  'admission exploratory': () => { served.ready = { ...canonical, analysis_admission: { ...canonical.analysis_admission, permitted_analysis_mode: 'exploratory' } }; },
+};
+
 describe('the real route: "What would change the result?" → measured tipping points, 0 model calls', () => {
   let app: FastifyInstance;
   let modelCalls = 0;
@@ -68,9 +86,13 @@ describe('the real route: "What would change the result?" → measured tipping p
     }));
     process.env.AGENT_LANE_ENABLED = 'true';
     process.env.AGENT_LANE_PREVIEW = 'false';
+    app = await buildApp();
+  }, 120_000);
+  /** A fresh import of the route is a fresh PROCESS: nothing remembered, the same store of committed rows. */
+  const buildApp = async (): Promise<FastifyInstance> => {
     vi.resetModules();
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
-    app = Fastify({ logger: false });
+    const app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => {
       const read = { graph: D3.body.draft_graph, graph_hash: 'h-d3', analysis_state: served.state,
         analysis_result: served.result, analysis_option_participation: D3.body.option_participation,
@@ -83,7 +105,8 @@ describe('the real route: "What would change the result?" → measured tipping p
     app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'ok', blocks: [] }));
     await app.register(agentV1TurnRoute);
     await app.ready();
-  }, 120_000);
+    return app;
+  };
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
     modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; dispatch.during = null; dispatch.run = null; dispatch.block = null;
@@ -91,6 +114,12 @@ describe('the real route: "What would change the result?" → measured tipping p
     n += 1; SCENARIO = `${SCENARIO_BASE}${String(n).padStart(2, '0')}`;
   });
 
+  /** The UI's retry (DGAI `retryLast`): the same words under the same turn_id, `source: 'retry'`, the chip omitted or null. */
+  const retryChipless = async (on: FastifyInstance, turnId: string, chip: 'omitted' | 'null') => {
+    const r = await on.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: PRESS.message, source: 'retry', turn_id: turnId, ...(chip === 'null' ? { chip: null } : {}) } });
+    expect(r.statusCode, r.body).toBe(200);
+    return r.json() as { assistant_text: string };
+  };
   const post = async (chipId: string, message: string, turnId?: string) => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, source: 'chip', chip: { id: chipId }, ...(turnId !== undefined ? { turn_id: turnId } : {}) } });
     expect(r.statusCode, r.body).toBe(200);
@@ -230,23 +259,6 @@ describe('the real route: "What would change the result?" → measured tipping p
   });
 
   describe('a measured answer is reused on replay only under TODAY\'s leader licence (Codex round 2 P1)', () => {
-    // Each of RC's three measured sentence kinds, from ISL's real D3 links.
-    const [savings, overspend] = ISL_D3_BLOCK.links;
-    const STATUSES: Record<string, { block: Rec; said: RegExp }> = {
-      quoted: { block: { ...ISL_D3_BLOCK, links: [savings] }, said: /would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter/ },
-      below_a_tenth: { block: { ...ISL_D3_BLOCK, links: [{ ...savings, threshold: -0.02, replicate_thresholds: [-0.02, -0.02, -0.02, -0.02], replicate_range: 0 }] },
-        said: /would come out ahead only if monthly cloud savings's effect on monthly spend all but disappeared/ },
-      no_change: { block: { ...ISL_D3_BLOCK, links: [overspend] }, said: /would still lead even if monthly cloud overspend during migration's average effect/ },
-    };
-    const canonical = buildCanonicalAnalysisReadyFromGraph(D3.body.draft_graph) as Rec;
-    // The SAME Run (scenario, computed_against_hash, computed_at untouched): only the permission or the admission moves.
-    const WITHHELD: Record<string, () => void> = {
-      'leader claim revoked': () => { served.state = { ...D3.body.analysis_state, leader_claim: { ...D3.body.analysis_state.leader_claim, permitted: false } }; },
-      'admission absent': () => { served.ready = { ...canonical, analysis_admission: undefined }; },
-      'admission malformed': () => { served.ready = { ...canonical, analysis_admission: 'admitted' }; },
-      'admission refused': () => { served.ready = { ...canonical, analysis_admission: { ...canonical.analysis_admission, structurally_analysable: false } }; },
-      'admission exploratory': () => { served.ready = { ...canonical, analysis_admission: { ...canonical.analysis_admission, permitted_analysis_mode: 'exploratory' } }; },
-    };
     it('the served D3 admission is M2 (caveated permission): the measured replay R1 stands under it', () => {
       expect(canonical.analysis_admission).toMatchObject({ structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional' });
     });
@@ -268,9 +280,66 @@ describe('the real route: "What would change the result?" → measured tipping p
     }
   });
 
+  describe('the UI\'s CHIPLESS retry is the same press: the same owner, under today\'s licence (Codex delta P1)', () => {
+    for (const chip of ['omitted', 'null'] as const) {
+      it(`R5 control · chip ${chip}: licence still permitted (M2), the chipless retry repeats the measured answer, no new measurement`, async () => {
+        const turn = randomUUID();
+        const first = await post(PRESS.id, PRESS.message, turn);
+        const again = await retryChipless(app, turn, chip);
+        expect(again.assistant_text).toBe(first.assistant_text);
+        expect(dispatch.calls).toHaveLength(1);
+      });
+      for (const [status, { block, said }] of Object.entries(STATUSES)) {
+        for (const [how, withhold] of Object.entries(WITHHELD)) {
+          it(`R5 chip ${chip} · ${status} · ${how}: the chipless retry is today's coaching, never the measured words`, async () => {
+            dispatch.block = block;
+            const turn = randomUUID();
+            expect((await post(PRESS.id, PRESS.message, turn)).assistant_text).toMatch(said);
+            withhold();
+            const again = await retryChipless(app, turn, chip);
+            expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+            expect(again.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\./);
+            expect(dispatch.calls).toHaveLength(1);
+          });
+        }
+      }
+    }
+  });
+
+  it('R6: a press carrying an action_type is not the canonical operation: never measured, so never recorded as a measured answer', async () => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: PRESS.message, source: 'chip', chip: { id: PRESS.id, action_type: 'what_would_flip' } } });
+    expect(r.statusCode, r.body).toBe(200);
+    expect(dispatch.calls).toHaveLength(0);
+    expect((r.json() as { assistant_text: string }).assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+  });
+
   it('CONTROL: another next step never reaches the decision-flip dispatch', async () => {
     const other = NEXT_STEP_CHIPS.find((c) => c.id !== PRESS.id && c.id !== 'agent-next-strengthen' && c.id !== 'agent-next-pre-mortem') ?? NEXT_STEP_CHIPS.find((c) => c.id !== PRESS.id)!;
     await post(other.id, other.message);
     expect(dispatch.calls).toHaveLength(0);
+  });
+
+  describe('COLD: after a restart nothing is remembered; every retry form is today\'s coaching under today\'s licence', () => {
+    let restarted: FastifyInstance;
+    beforeAll(async () => { restarted = await buildApp(); }, 120_000);
+    afterAll(async () => { await restarted.close(); });
+    for (const form of ['chip', 'omitted', 'null'] as const) {
+      for (const [status, { block, said }] of Object.entries(STATUSES)) {
+        for (const [how, withhold] of Object.entries(WITHHELD)) {
+          it(`R7 ${form} · ${status} · ${how}: the retry on a restarted process never resends the measured words`, async () => {
+            dispatch.block = block;
+            const turn = randomUUID();
+            expect((await post(PRESS.id, PRESS.message, turn)).assistant_text).toMatch(said);
+            withhold();
+            const again = form === 'chip'
+              ? (await restarted.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message: PRESS.message, source: 'chip', chip: { id: PRESS.id }, turn_id: turn } })).json() as { assistant_text: string }
+              : await retryChipless(restarted, turn, form);
+            expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+            expect(again.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\./);
+            expect(dispatch.calls).toHaveLength(1);
+          });
+        }
+      }
+    }
   });
 });
