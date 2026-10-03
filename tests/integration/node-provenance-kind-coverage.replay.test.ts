@@ -699,6 +699,12 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // is read in and WHO read it ({unit, source, source_quote}, closed), never HOW MUCH: the sibling of
       // `quantity_frame`. A node carrying only a unit reading carries no value; joining would let a unit read as a figure.
       "unit_reading",
+      // B3 model fidelity, 3 Oct — THE VALUE-BEARING DECISION: `unresolved_targets` and `user_questions` are NOT
+      // value-bearing and must NOT join `carriesValue` (nor `NODE_QUANTITY_FIELDS`). They name what an option does that
+      // the model does NOT carry ("free first month") and the question that asks for it — an ABSENCE of a figure, the
+      // option-node siblings of `OptionV3`'s same-named fields. Joining would let a declared gap read as a value.
+      "unresolved_targets",
+      "user_questions",
     ]);
   });
 });

@@ -289,9 +289,10 @@ describe('loadScenarioSnapshotForRunAnalysis', () => {
     // `false` on BOTH options: the readiness helper distinguishes "detected as
     // not the baseline" from "detection did not run", and that distinction is
     // load-bearing — the gate treats a MISSING verdict as "exclude", not "hold".
+    // ⭐ B3: the readiness verdict (`status`) is carried the same way, for the run gate's incomplete-option exclusion.
     expect(snapshot.options).toEqual([
-      { id: 'opt_lead', option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 }, is_baseline: false },
-      { id: 'opt_devs', option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 }, is_baseline: false },
+      { id: 'opt_lead', option_id: 'opt_lead', label: 'Hire Tech Lead', interventions: { fac_cost: 1, fac_velocity: 1 }, is_baseline: false, status: 'ready' },
+      { id: 'opt_devs', option_id: 'opt_devs', label: 'Hire Two Developers', interventions: { fac_cost: 0.6, fac_velocity: 0.7 }, is_baseline: false, status: 'ready' },
     ]);
     // Lane 28 — no brief persisted → the snapshot carries none (the PLoT leg
     // will then attach nothing, so PLoT's `no_brief` skip stays honest).

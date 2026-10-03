@@ -260,10 +260,15 @@ function hasEmptyInterventions(option: Dict): boolean {
  * emptiness rule above already owns; a target list on a `ready` option does not occur (the status owner returns
  * `needs_user_mapping` first) and is not read as a verdict here.
  */
-export function incompleteMissingOf(option: Dict): readonly string[] | null {
+export function incompleteMissingOf(option: Dict, modelNodeIds: ReadonlySet<string>): readonly string[] | null {
   if (option.status !== 'needs_user_mapping') return null;
+  // ⚠ ONLY WHAT THE MODEL DOES NOT CARRY AT ALL. A target that IS a node of the model (the option→risk hypothesis:
+  // `buildAnalysisReadyPayload` names the risk node whose relationship is unresolved) is an unsettled RELATIONSHIP on
+  // something modelled, and keeps its own refusal path ("One thing in your model isn't settled yet"), unchanged. A
+  // target that names nothing in the model — "free first month", "billable seats" — is a mechanism the option has
+  // and the model lacks: that option is incomplete. A structural test over ids, never a reading of the words.
   const targets = Array.isArray(option.unresolved_targets)
-    ? option.unresolved_targets.filter((t): t is string => typeof t === 'string' && t.trim() !== '')
+    ? option.unresolved_targets.filter((t): t is string => typeof t === 'string' && t.trim() !== '' && !modelNodeIds.has(t))
     : [];
   return targets.length > 0 ? targets : null;
 }
@@ -319,6 +324,10 @@ function duplicateExclusions(options: readonly Dict[], graph: unknown): Map<Dict
   const groups = new Map<string, Dict[]>();
   for (const opt of options) {
     if (optionIdOf(opt) === null) continue;
+    // Only options the readiness authority calls COMPLETE (`ready`; absent = no verdict carried, as on a hand-built
+    // snapshot). An option still waiting on a level or an encoding is not "the same option" — it is unfinished, and
+    // keeps its own readiness path (and PLoT's own dedup) exactly as before.
+    if (opt.status !== undefined && opt.status !== 'ready') continue;
     const identity = submittedVectorIdentity(opt);
     if (identity === null) continue;
     const group = groups.get(identity);
@@ -591,8 +600,11 @@ export function gateAnalysableOptions(
     // option that cannot be named cannot be disclosed, so it stays to PLoT exactly as before); then, among the complete
     // valued options, a second option with the same submitted vector is the SAME arm and leaves naming its twin.
     const incomplete = new Map<Dict, readonly string[]>();
+    const modelNodeIds = new Set<string>([
+      ...nodesOf(input.graph), ...nodesOf(input.rawPersistedGraph),
+    ].flatMap((n) => (typeof n.id === 'string' ? [n.id] : [])));
     for (const opt of options) {
-      const missing = incompleteMissingOf(opt);
+      const missing = incompleteMissingOf(opt, modelNodeIds);
       if (missing !== null && optionIdOf(opt) !== null) incomplete.set(opt, missing);
     }
     const valuedComplete = options.filter((o) => !incomplete.has(o) && !hasEmptyInterventions(o));

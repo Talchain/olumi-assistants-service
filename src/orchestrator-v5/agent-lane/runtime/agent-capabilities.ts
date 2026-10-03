@@ -2374,7 +2374,7 @@ export function createAgentCapabilities(
           && levels.every((l) => heldLevelOf(check, l.option_id, l.factor_id) === l.value)
           && links.every((k) => check.edges.some((e) => e.from === k.option_id && e.to === k.factor_id))
           && [...expectedValueOf].every(([id, v]) => (check.nodes.find((n) => n.id === id)?.observed_state as { value?: unknown } | undefined)?.value === v)
-          && optionGapsHeld(check.nodes as unknown as ReadonlyArray<Record<string, unknown>>, optionGaps);
+          && optionGapsHeld(check.nodes, optionGaps);
         if (!holds) {
           return {
             ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id,

@@ -77,12 +77,15 @@ export function optionGapFields(
  * Apply one option's declaration to a node, returning a NEW node (never mutating): `undefined` leaves it untouched,
  * `[]` removes both fields, a list sets both.
  */
-export function withOptionGaps<N extends Record<string, unknown>>(node: N, mechanisms: readonly string[] | undefined): N {
+export function withOptionGaps<N extends { readonly id?: unknown; readonly label?: unknown; readonly unresolved_targets?: unknown; readonly user_questions?: unknown }>(
+  node: N,
+  mechanisms: readonly string[] | undefined,
+): N | (Omit<N, 'unresolved_targets' | 'user_questions'> & { unresolved_targets?: string[]; user_questions?: string[] }) {
   if (mechanisms === undefined) return node;
   const { unresolved_targets: _t, user_questions: _q, ...rest } = node;
   const label = typeof node.label === 'string' ? node.label : String(node.id ?? 'this option');
   const fields = optionGapFields(label, mechanisms);
-  return (fields === null ? rest : { ...rest, ...fields }) as unknown as N;
+  return fields === null ? rest : { ...rest, ...fields };
 }
 
 /** The approval card's words for one option's declaration, so the user approves the gap with the level. */
@@ -112,7 +115,7 @@ export function optionGapsOfLevelOps(
 
 /** LANDED = WHAT THE MODEL HOLDS: every declared gap read back on its option node exactly (a cleared one: absent). */
 export function optionGapsHeld(
-  nodes: ReadonlyArray<Record<string, unknown>>,
+  nodes: ReadonlyArray<{ readonly id?: unknown; readonly kind?: unknown; readonly unresolved_targets?: unknown }>,
   gaps: ReadonlyArray<{ readonly option_id: string; readonly mechanisms: readonly string[] }>,
 ): boolean {
   return gaps.every((g) => {
@@ -135,5 +138,9 @@ export function declaredGapsOf(rawGraph: unknown, optionId: string): string[] {
     ? xs.filter((x): x is Record<string, unknown> => x !== null && typeof x === 'object' && (x as { id?: unknown }).id === optionId)
       .flatMap((x) => strings(x.unresolved_targets))
     : []);
-  return [...new Set([...of(g.nodes), ...of(g.options)])];
+  // A target that is a node of the model is an unsettled relationship, not a missing mechanism (the run gate's rule).
+  const nodeIds = new Set(Array.isArray(g.nodes)
+    ? g.nodes.flatMap((n) => (n !== null && typeof n === 'object' && typeof (n as { id?: unknown }).id === 'string' ? [(n as { id: string }).id] : []))
+    : []);
+  return [...new Set([...of(g.nodes), ...of(g.options)])].filter((t) => !nodeIds.has(t));
 }

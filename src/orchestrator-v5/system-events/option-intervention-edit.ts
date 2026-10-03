@@ -1012,10 +1012,10 @@ function applyOptionGaps(
   const nodes = graph.nodes.map((node) => {
     const mechanisms = node.kind === 'option' ? byId.get(String(node.id)) : undefined;
     if (mechanisms === undefined) return node;
-    const next = withOptionGaps(node as unknown as Record<string, unknown>, mechanisms);
+    const next = withOptionGaps(node, mechanisms);
     if (isDeepStrictEqual(next, node)) return node;
     changed = true;
-    return next as unknown as typeof node;
+    return next;
   });
   return changed ? { ...graph, nodes } : graph;
 }

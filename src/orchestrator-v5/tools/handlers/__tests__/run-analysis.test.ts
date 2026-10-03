@@ -1104,8 +1104,11 @@ describe('run_analysis handler — PLoT payload construction', () => {
     });
     const outcome = await handler(makeInvocation());
     const payload = (plotClient.run as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    // ⭐ B3-2: B is A's twin, so it is left out BY CEE, named with A, rather than sent for PLoT to collapse silently.
     expect((payload.options as Array<{ option_id: string }>).map((option) => option.option_id))
-      .toEqual(['opt_a', 'opt_b', 'opt_olumi']);
+      .toEqual(['opt_a', 'opt_olumi']);
+    expect((outcome as { __excluded_options?: unknown }).__excluded_options)
+      .toEqual([expect.objectContaining({ option_id: 'opt_b', reason: 'duplicate', duplicate_of: 'opt_a' })]);
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(false);
