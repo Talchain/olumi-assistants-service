@@ -3,10 +3,11 @@
 Bounded acceptance support for SCI-HERO. This uses two existing served fixtures;
 it neither computes science nor calls a provider, edits a scenario, or drives a browser.
 
-Run from the CEE repository root with Node 20, without installing dependencies:
+Run from the CEE repository root with Node 20, without installing dependencies.
+The native-checks file uses Node’s built-in runner explicitly; it is not a Vitest suite:
 
 ```sh
-node --test tools/v5-journey-replay/science-tipping-point/replay.test.mjs
+node --test tools/v5-journey-replay/science-tipping-point/replay.native-checks.mjs
 node tools/v5-journey-replay/science-tipping-point/replay.mjs served-price-tipping-point
 node tools/v5-journey-replay/science-tipping-point/replay.mjs served-no-signal
 node tools/v5-journey-replay/science-tipping-point/replay.mjs served-price-tipping-point /absolute/path/r3-capture.json
