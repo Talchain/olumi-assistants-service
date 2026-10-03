@@ -3,18 +3,23 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FROM, PRIOR } from '../../model-management/__tests__/version-result-fixtures.js';
 import { goalScopeClaimInput } from '../../compose/goal-scope-claim-input.js';
-import { composeAnalysisStateV1 } from '../../compose/analysis-state-v1.js';
+import { composeAnalysisStateV1, WITHHELD_NEAR_TIE } from '../../compose/analysis-state-v1.js';
 import { selectCanonicalAnalysisState } from '../../context/canonical-analysis-state.js';
 import { pickLatestRawRobustness } from '../../coaching/pick-raw-robustness.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { reconciliationPending } from '../goal-scope.js';
+import { enforceLeaderLicenceAtFinalEgress, FINAL_EGRESS_FAILED_TEXT } from '../leader-final-egress.js';
+import { buildAppliedGraphWireField } from '../../compose/applied-graph-emit.js';
+import { HandlerFactSchema } from '@talchain/schemas/orchestrator';
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { PendingAction } from '../../session/pending-action.js';
 
 // Real Fastify route, scripted tool results and in-memory persistence; no provider or network.
 const scripted = vi.hoisted(() => ({ results: [] as Record<string, unknown>[], prior: [] as PendingAction[],
   rows: [] as Record<string, unknown>[], concurrent: false, calls: 0, toolName: 'get_canonical_state',
   measured: false, measureCalls: 0, duringMeasure: null as null | (() => void), joinScopeRead: true,
-  concurrentText: 'Offshore partner leads.', hideAnswerOnce: false }));
+  concurrentText: 'Offshore partner leads.', hideAnswerOnce: false,
+  graphMode: 'ok', modelNames: false, retireOnAppend: false, durableNearTie: false, durableUnavailable: false }));
 vi.mock('../../handlers/decision-flip-dispatch.js', async original => ({
   ...await original<Record<string, unknown>>(),
   dispatchDecisionFlip: vi.fn(async (params: { candidateLinks: { from_id: string; to_id: string }[] }) => {
@@ -40,12 +45,20 @@ vi.mock('../runtime/agent-loop.js', async original => ({
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => ({
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readRecent: vi.fn(async () => []),
+  readScenarioRunAnalysisFactsFor: vi.fn(async (sid: string) => {
+    expect(sid).toBe(SID); expect(RESULT.scenario_id).toBe(sid); expect(RESULT.run_id).toBe('bound-prior');
+    if (scripted.durableUnavailable) throw new Error('canonical facts unavailable');
+    const fact = scripted.durableNearTie ? HandlerFactSchema.parse({ ...DURABLE_PRIOR,
+      result: { ...DURABLE_PRIOR.result, enrichment: { ...DURABLE_PRIOR.result.enrichment, robustness: { level: 'high', near_tie: { is_tie: true } } } } }) : DURABLE_PRIOR;
+    return { facts: [{ fact, fact_row_id: 'bound-prior-row', fact_created_at: RESULT.computed_at }], total_count: 1 };
+  }),
   readCommittedTurn: vi.fn(async (_sid: string, tid: string) => {
     if (tid === TID && scripted.hideAnswerOnce) { scripted.hideAnswerOnce = false; return null; }
     return scripted.rows.find(row => row.turn_id === tid) ?? null;
   }),
   readMostRecentPendingActions: vi.fn(async () => scripted.prior),
   append: vi.fn(async (row: Record<string, unknown>) => {
+    if (scripted.retireOnAppend && row.turn_id === TID) scripted.prior = [];
     scripted.rows.push({ ...row, assistant_message: scripted.concurrent ? scripted.concurrentText : row.assistantMessage,
       // The concurrent winner did not observe the losing request's fresh issue.
       ...(scripted.concurrent ? { pending_actions: [] } : {}) });
@@ -62,6 +75,8 @@ const TID = '88888888-8888-4888-8888-888888888888';
 const PENDING_ID = '77777777-7777-4777-8777-777777777777';
 const AT = '2026-10-02T00:10:00.000Z';
 const RESULT = (PRIOR as unknown as { result: { scenario_id: string; run_id: string; graph_hash_at_run: string; computed_at: string } }).result;
+const DURABLE_PRIOR = HandlerFactSchema.parse({ ...PRIOR, fact_version: 1,
+  result: { ...(PRIOR as unknown as { result: Record<string, unknown> }).result, leading_option_id: 'opt-a', summary: 'Bound canonical result.' } });
 const baselineUrl = new URL('./fixtures/fresh-goal-scope-permitted-baseline.json', import.meta.url);
 const measuredBaselineUrl = new URL('./fixtures/fresh-goal-scope-measured-baseline.json', import.meta.url);
 const PRESS = { id: 'agent-next-what-would-change' };
@@ -82,7 +97,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     scripted.results = []; scripted.prior = []; scripted.rows = []; scripted.concurrent = false; scripted.calls = 0; scripted.toolName = 'get_canonical_state';
     scripted.measured = false; scripted.measureCalls = 0; scripted.duringMeasure = null; scripted.joinScopeRead = true;
     scripted.concurrentText = 'Offshore partner leads.';
-    scripted.hideAnswerOnce = false;
+    scripted.hideAnswerOnce = false; scripted.graphMode = 'ok'; scripted.modelNames = false; scripted.retireOnAppend = false; scripted.durableNearTie = false; scripted.durableUnavailable = false;
     vi.resetModules();
     const readiness = buildCanonicalAnalysisReadyFromGraph(FROM.graph);
     const canonical = selectCanonicalAnalysisState({ priorFacts: [PRIOR], currentGraphHash: RESULT.graph_hash_at_run,
@@ -94,27 +109,46 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     expect(RESULT.run_id).toBe('bound-prior');
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async req => {
+    app.post('/assist/v1/scenarios/:id/graph', async (req, reply) => {
       expect((req.params as { id: string }).id).toBe(SID);
       const state = scripted.prior.length === 0 || !scripted.joinScopeRead ? readState : composeAnalysisStateV1({ canonical, readiness,
         mayNameLeadingOption: true, runFactBinding: { scenarioId: SID, selectedResult: RESULT },
         rawRobustness: pickLatestRawRobustness([PRIOR]), goalScopeClaimInput: goalScopeClaimInput(scripted.prior, FROM.graph) });
-      return { graph: FROM.graph, graph_hash: RESULT.graph_hash_at_run, analysis_ready: readiness, analysis_state: state,
+      if (scripted.graphMode === '503') return reply.code(503).send({ error: 'unavailable' });
+      if (scripted.graphMode === 'throw') throw new Error('graph reader threw');
+      const graph = readGraph();
+      const ready = readReady();
+      return { ...(scripted.graphMode !== 'missing-roster' ? { graph, analysis_ready: ready } : {}),
+        graph_hash: RESULT.graph_hash_at_run, ...(scripted.graphMode !== 'missing-analysis' ? { analysis_state: scripted.graphMode === 'malformed-analysis' ? {} : state } : {}),
         ...(scripted.measured ? { analysis_result: { type: 'analysis_result', leading_option_id: 'opt-a',
           computed_against_hash: RESULT.graph_hash_at_run } } : {}) };
     });
     await app.register(agentV1TurnRoute); await app.ready();
+    const inject = app.inject.bind(app);
+    vi.spyOn(app, 'inject').mockImplementation(((opts: any) => {
+      if (scripted.graphMode === 'throw' && opts.url === `/assist/v1/scenarios/${SID}/graph`) return Promise.reject(new Error('graph dispatch threw'));
+      return inject(opts);
+    }) as typeof app.inject);
   }, 60000);
   afterEach(async () => { await app?.close(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  const readGraph = () => scripted.modelNames ? { ...FROM.graph, nodes: FROM.graph.nodes.map(n => n.kind === 'option'
+    ? { ...n, label: n.id === 'opt-a' ? 'Hire leads' : n.label, description: `Hire leads: user-authored description for ${n.id}.` } : n) } : FROM.graph;
+  const readReady = () => {
+    const ready = buildCanonicalAnalysisReadyFromGraph(readGraph());
+    return scripted.modelNames ? { ...ready, options: ready!.options.map(o => ({ ...o, description: `Hire leads: user-authored description for ${o.option_id}.` })) } : ready;
+  };
   const turn = async (overrides: Record<string, unknown> = {}) => {
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message',
       scenario_id: SID, session_id: 'fresh-scope-baseline', turn_id: TID, message: 'Compare the options.', ...overrides } });
     expect(response.statusCode, response.body).toBe(200);
     expect(fetch).not.toHaveBeenCalled();
+    expect(scripted.rows.every(row => row.graph === undefined)).toBe(true);
     const body = response.json();
-    expect(body.graph_hash).toBe(RESULT.graph_hash_at_run);
-    expect(body.analysis_state.run_state).toEqual(readState?.run_state);
-    expect(body.analysis_state.run_state.computed_at).toBe(RESULT.computed_at);
+    if (!['503', 'throw', 'missing-analysis', 'malformed-analysis'].includes(scripted.graphMode)) {
+      expect(body.graph_hash).toBe(RESULT.graph_hash_at_run);
+      expect(body.analysis_state.run_state).toEqual(readState?.run_state);
+      expect(body.analysis_state.run_state.computed_at).toBe(RESULT.computed_at);
+    }
     return { body, bytes: response.body };
   };
   const assertWithheld = (body: Record<string, any>) => {
@@ -130,6 +164,111 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
     expect(scripted.calls).toBe(0);
     expect(scripted.measureCalls).toBe(1);
   };
+
+
+  const seedReplay = async () => {
+    const { agentTurnRequestHash } = await import('../../../routes/agent-v1-turn.js');
+    scripted.rows = [{ id: 'original-answer', scenario_id: SID, turn_id: TID,
+      request_hash: agentTurnRequestHash(SID, null, 'Compare the options.'),
+      assistant_message: 'Offshore partner leads.', pending_actions: [pending()], llm_calls_used: 0 }];
+    scripted.rows.push({ id: 'original-claim', turn_id: `${TID}:claim`,
+      request_hash: `${agentTurnRequestHash(SID, null, 'Compare the options.')}#claim:other-request`, assistant_message: null });
+  };
+  for (const exit of ['main', 'append-repair', 'existing-row', 'claim-wait'] as const) {
+    for (const carrier of ['draft_graph', 'analysis_ready'] as const) {
+      it(`P1-1 ${exit}: Hire leads ${carrier} model identity and schema survive withholding`, async () => {
+        scripted.modelNames = true;
+        const issue = pending();
+        expect(issue).toMatchObject({ scenario_id: SID, id: PENDING_ID });
+        if (exit === 'main' || exit === 'append-repair') {
+          scripted.results = [{ ok: true, pending_action: issue }];
+          scripted.concurrent = exit === 'append-repair';
+        } else {
+          scripted.prior = [issue]; await seedReplay(); scripted.hideAnswerOnce = exit === 'claim-wait';
+        }
+        const { body } = await turn();
+        expect(body.analysis_state.leader_claim.permitted).toBe(false);
+        const expected = carrier === 'draft_graph' ? buildAppliedGraphWireField(readGraph()) : readReady();
+        const key = carrier === 'draft_graph' ? 'nodes' : 'options';
+        expect(JSON.stringify(body[carrier][key])).toBe(JSON.stringify(expected![key]));
+        expect(body[carrier][key].filter((n: any) => (n.id ?? n.option_id) === 'opt-a' || (n.id ?? n.option_id) === 'opt-b').map((n: any) => n.id ?? n.option_id)).toEqual(['opt-a', 'opt-b']);
+        expect(body[carrier][key].find((n: any) => (n.id ?? n.option_id) === 'opt-a')).toMatchObject({ label: 'Hire leads', description: 'Hire leads: user-authored description for opt-a.' });
+        expect(OlumiResponseSchema.shape.draft_graph.safeParse(body.draft_graph).success).toBe(true);
+        expect(OlumiResponseSchema.shape.analysis_ready.safeParse(body.analysis_ready).success).toBe(true);
+      });
+    }
+  }
+  // The route emits graph as draft_graph; pin the other shared egress carrier directly against the SAME readback.
+  for (const carrier of ['draft_graph', 'graph', 'analysis_ready'] as const) {
+    it(`P1-1 final envelope: ${carrier} model bytes survive unavailable roster/egress failure`, () => {
+      scripted.modelNames = true;
+      const input = { assistant_text: 'Offshore partner leads.', draft_graph: buildAppliedGraphWireField(readGraph()), graph: readGraph(), analysis_ready: readReady() };
+      const out = enforceLeaderLicenceAtFinalEgress(input, { requestId: TID, exitPath: 'test', licence: 'withheld', mayNameLeadingOption: false,
+        graph: { get nodes() { throw new Error('roster read failed'); } } }).response;
+      expect(JSON.stringify(carrier === 'analysis_ready' ? out[carrier]!.options : out[carrier])).toBe(JSON.stringify(carrier === 'analysis_ready' ? input[carrier]!.options : input[carrier]));
+    });
+    it(`P1-1 shared final egress: ${carrier} model bytes survive a healthy withheld read`, () => {
+      scripted.modelNames = true;
+      const input = { assistant_text: 'Offshore partner leads.', draft_graph: buildAppliedGraphWireField(readGraph()), graph: readGraph(), analysis_ready: readReady() };
+      const out = enforceLeaderLicenceAtFinalEgress(input, { requestId: TID, exitPath: 'test', licence: 'withheld', mayNameLeadingOption: false,
+        graph: readGraph(), analysisReady: readReady() }).response;
+      expect(JSON.stringify(carrier === 'analysis_ready' ? out[carrier]!.options : out[carrier])).toBe(JSON.stringify(carrier === 'analysis_ready' ? input[carrier]!.options : input[carrier]));
+    });
+  }
+  it('P1-2 persisted-issue withdrawal recomposes the same canonical Run after removal', async () => {
+    scripted.prior = [pending()];
+    scripted.results = [{ ok: true, withdrawn: true, proposal_id: pending().chip_id }];
+    const { body } = await turn();
+    expect(body.analysis_state.leader_claim).toEqual(readState!.leader_claim);
+    expect(body.assistant_text).toBe('Offshore partner leads.');
+    expect(scripted.rows.find(row => row.turn_id === TID)?.pending_actions ?? []).toEqual([]);
+  });
+  for (const unavailable of [false, true]) {
+    it(`P1-2 withdrawal cannot grant permission from ${unavailable ? 'unavailable' : 'near-tied'} canonical inputs`, async () => {
+      scripted.prior = [pending()]; scripted.durableNearTie = !unavailable; scripted.durableUnavailable = unavailable;
+      scripted.results = [{ ok: true, withdrawn: true, proposal_id: pending().chip_id }];
+      const { body } = await turn();
+      expect(body.analysis_state.leader_claim).toEqual(unavailable
+        ? { permitted: false, withheld_reason: 'constraint_verdict_withheld' }
+        : { permitted: false, withheld_reason: WITHHELD_NEAR_TIE, separation: 'near_tie' });
+      expect(body.assistant_text).not.toContain('Offshore partner leads.');
+      expect(scripted.rows.find(row => row.turn_id === TID)?.pending_actions ?? []).toEqual([]);
+    });
+  }
+  it('P1-2 prior-issue retirement during concurrent repair cannot revive a prior carrier', async () => {
+    scripted.prior = [pending()]; scripted.concurrent = true; scripted.retireOnAppend = true;
+    const { body } = await turn();
+    expect(body._agent.replayed).toBe(true);
+    expect(body.analysis_state.leader_claim).toEqual(readState!.leader_claim);
+    expect(body.assistant_text).toBe('Offshore partner leads.');
+  });
+  for (const mode of ['503', 'throw', 'missing-analysis', 'malformed-analysis', 'missing-roster']) {
+    for (const exit of ['main', 'append-repair', 'existing-row', 'claim-wait'] as const) {
+      it(`P1-3 ${exit}: ${mode} readback with surviving scope is structurally leader-free`, async () => {
+        const issue = pending();
+        expect(issue).toMatchObject({ scenario_id: SID, id: PENDING_ID });
+        if (exit === 'main' || exit === 'append-repair') {
+          scripted.results = [{ ok: true, pending_action: issue }]; scripted.concurrent = exit === 'append-repair';
+        } else {
+          scripted.prior = [issue]; await seedReplay(); scripted.hideAnswerOnce = exit === 'claim-wait';
+        }
+        scripted.graphMode = mode;
+        const { body } = await turn();
+        expect(body.analysis_state.leader_claim).toEqual({ permitted: false, withheld_reason: 'goal_scope_unresolved' });
+        expect(body.assistant_text).not.toContain('Offshore partner');
+        expect(body.assistant_text).toContain(FINAL_EGRESS_FAILED_TEXT);
+        expect(body.suggested_actions).toEqual([]);
+        expect(body.run_delta).toBeUndefined();
+        if (exit === 'main') expect(scripted.rows.find(row => row.turn_id === TID)?.assistantMessage).toBe(body.assistant_text);
+        else expect(body._agent.replayed).toBe(true);
+      });
+    }
+    it(`P1-3 control: ${mode} without a surviving issue preserves pre-fix behaviour`, async () => {
+      scripted.graphMode = mode;
+      const { body } = await turn();
+      expect(body.assistant_text).toBe(['missing-analysis', 'malformed-analysis'].includes(mode) ? FINAL_EGRESS_FAILED_TEXT : 'Offshore partner leads.');
+    });
+  }
 
   it('measured control: live and chipless replay without a scope issue keep every pre-fix byte', async () => {
     scripted.measured = true;

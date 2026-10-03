@@ -217,22 +217,25 @@ describe('the Agent lane fail-closed final egress', () => {
     return out;
   };
 
-  it('RED (CODEX 5932438459): a forced egress error ships NO leader prose from ANY carrier — summary, block prose, sidecars, model members', () => {
+  it('RED (CODEX 5932438459): a forced egress error projects derived claims and preserves user-model carriers', () => {
     const hostile = { get nodes(): never { throw new Error('boom'); } };
     const out = enforceLeaderLicenceAtFinalEgress(everyCarrier(), { ...opts('withheld'), graph: hostile });
     const body = out.response as Record<string, any>;
     expect(body.assistant_text).toBe(FINAL_EGRESS_FAILED_TEXT);
-    const all = strings(body, undefined, []);
-    // No leader sentence anywhere; the option's NAME survives only as a user-given name under a label key.
+    const { draft_graph, graph, analysis_ready, ...derived } = body;
+    const { options, ...readyDerived } = analysis_ready;
+    const all = strings({ ...derived, analysis_ready: readyDerived }, undefined, []);
+    // Derived prose is leader-free; model labels/descriptions are human-authored content, not claims.
     expect(all.filter(([, v]) => /performs best|leading|strongest/i.test(v) && v !== FINAL_EGRESS_FAILED_TEXT)).toEqual([]);
     for (const [k, v] of all) if (v.includes('AI Reporting Sprint')) expect(k !== undefined && LICENSED_LABEL_KEYS.has(k) && v === 'AI Reporting Sprint', `${k}=${v}`).toBe(true);
     expect(JSON.stringify(body)).not.toMatch(/leading_option_id":"ai_reporting_sprint/);
-    // The deterministic result survives, schema-valid; every prose block is gone; the model members are omitted whole.
+    // The deterministic result survives, schema-valid; every prose block is gone; model definitions remain intact.
     expect(body.blocks).toHaveLength(1);
     expect(body.blocks[0]).toMatchObject({ type: 'analysis_result', summary: '', leading_option_id: null, computed_against_hash: SERVED.block.computed_against_hash });
     expect(body.blocks[0].enrichment).toBeUndefined();
     expect(AnalysisResultBlockSchema.safeParse(body.blocks[0]).success).toBe(true);
-    expect(body.draft_graph).toBeUndefined();
+    expect(draft_graph).toEqual(everyCarrier().draft_graph);
+    expect(options).toEqual((everyCarrier().analysis_ready as { options: unknown }).options);
     expect(body.run_delta).toBeUndefined();
     expect(body.suggested_actions).toEqual([]);
     expect(body.analysis_state.leader_claim).toEqual({ permitted: false, withheld_reason: 'constraint_verdict_withheld', leading_option_id: null });

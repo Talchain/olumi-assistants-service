@@ -106,9 +106,11 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
-import { composeLeaderClaim } from '../orchestrator-v5/compose/analysis-state-v1.js';
+import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../orchestrator-v5/compose/analysis-state-v1.js';
+import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
+import { readScenarioAnalysis } from './scenario-graph-analysis-read.js';
 import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
-import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
+import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import {
   isWidenPress, nextStepsWithWiden, settleWidenTurn, widenGate, widenOffered, widenTurnForReadback,
@@ -921,19 +923,31 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-/** Add this answer's surviving scope input through the same authority as the canonical graph read. */
-function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string, pending: readonly PendingAction[]): typeof read {
+/** Compose additions AND removals through the canonical authority; a prior claim cannot license its own removal. */
+async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string, pending: readonly PendingAction[], requestId: string): Promise<typeof read> {
   const scopeInput = goalScopeClaimInput(pending.filter(p => p.scenario_id === scenarioId), read.graph);
   const state = read.analysisState as AnalysisStateV1 | undefined;
-  // No additive scope input: preserve the readback and all permitted bytes exactly.
-  if (scopeInput.issues.length === 0 || state === undefined) return read;
-  return { ...read, scopeOpen: true, analysisState: { ...state,
+  if (scopeInput.issues.length === 0) {
+    // Preserve ordinary permitted bytes. Only a scope-withheld verdict needs its canonical inputs reread on removal.
+    if (state?.leader_claim?.withheld_reason !== WITHHELD_GOAL_SCOPE_UNRESOLVED) return read;
+    const current = await readScenarioAnalysis({ scenarioId, graph: read.graph, requestId, goalScopeClaimInput: scopeInput });
+    // A different selected Run must never license the old readback's result. An unavailable/moved authority stays closed.
+    if (current.analysis_state === null || JSON.stringify(current.analysis_state.run_state) !== JSON.stringify(state.run_state)) {
+      return { ...read, scopeOpen: false, analysisState: { ...state,
+        leader_claim: composeLeaderClaim({ canonical: null, rawRobustness: null, goalScopeClaimInput: scopeInput }, state.run_state, false),
+      } };
+    }
+    return { ...read, scopeOpen: false, analysisState: current.analysis_state };
+  }
+  const authorityAvailable = AnalysisStateV1Schema.safeParse(state).success;
+  const base = authorityAvailable ? state! : composeAnalysisStateV1({ canonical: canonicalStateFromFreshness(NO_ANALYSIS_CONTEXT_DERIVATION), rawRobustness: null })!;
+  return { ...read, scopeOpen: true, scopeAuthorityUnavailable: !authorityAvailable, analysisState: { ...base,
     leader_claim: composeLeaderClaim({ goalScopeClaimInput: scopeInput, canonical: null, rawRobustness: null },
-      state.run_state, state.contradictions?.includes('fact_status_success_but_degraded_newer') === true),
+      base.run_state, base.contradictions?.includes('fact_status_success_but_degraded_newer') === true),
   } };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean; scopeAuthorityUnavailable?: boolean }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -1768,7 +1782,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     };
     const replayed = async (prior: CommittedTurnRecord, scopeIssues: readonly PendingAction[] = []) => {
-      const state = withRetainedScopeIssues(await readBackState(dispatch, scenarioId), scenarioId, scopeIssues);
+      const read = await readBackState(dispatch, scenarioId);
+      // Failed readback cannot erase today's pending authority; never recover issues from the old answer row.
+      const currentScope = typeof store.readMostRecentPendingActions === 'function'
+        ? (await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' })).filter(p => p.action.kind === 'reconcile_goal_scope') : [];
+      const state = await withRetainedScopeIssues(read, scenarioId, [...currentScope, ...scopeIssues], String(req.id));
       /**
        * ⭐ RESULT-FIRST REPLAY (#2470; CODEX_CLI_OVERFLOW P1 + P2 5936280278). A retried turn of the two-request Run is
        * rebuilt from the canonical readback, never from what the first attempt had in memory:
@@ -1897,6 +1915,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       return enforceLeaderLicenceAtFinalEgress(replayBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_replay',
+        scopeAuthorityUnavailable: state.scopeAuthorityUnavailable,
         licence: leaderLicenceFromState(state.analysisState, state.analysisReady),
         mayNameLeadingOption: replayClaim?.permitted === true,
         separationEstablished: replayClaim?.separation === 'separated',
@@ -2889,11 +2908,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const scopeWithdrawals = new Set(result.tool_results.filter(r => r.withdrawn === true).map(r => r.proposal_id));
     const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
-    const composedRead = withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues);
+    const composedRead = await withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues, String(req.id));
     const { analysisState } = composedRead;
     if (whatChangesRead !== undefined) {
       const answer = whatWouldChangeAnswer(scenarioId,
-        withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues), measuredCandidate);
+        await withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues, String(req.id)), measuredCandidate);
       text = answer.text;
       result = { ...result, assistant_text: text };
       tippingTurn = answer.tippingTurn;
@@ -3401,11 +3420,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * it ships — after the leader gate, break-even, A7 and the answer shape, before the answer row so a replay is the
      * same. One licence (`leaderLicenceFromState`) from this same final readback; a permitted turn is untouched.
      */
+    let leaderFreeEnvelope = false;
     {
       const claim = (analysisState as { leader_claim?: { permitted?: unknown; separation?: unknown; withheld_reason?: unknown } } | undefined)?.leader_claim;
       const finalEgress = enforceLeaderLicenceAtFinalEgress(wireBody, {
         requestId: String(req.id),
         exitPath: 'agent_lane_v1_final',
+        scopeAuthorityUnavailable: composedRead.scopeAuthorityUnavailable,
         licence: leaderLicenceFromState(analysisState, analysisReady),
         mayNameLeadingOption: claim?.permitted === true,
         separationEstablished: claim?.separation === 'separated',
@@ -3413,6 +3434,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         graph: readbackGraph ?? null,
         analysisReady,
       });
+      leaderFreeEnvelope = finalEgress.leaderFreeEnvelope === true;
       if (finalEgress.response !== wireBody) {
         const { _answer_shape: _stale, ...withoutShape } = finalEgress.response as OlumiResponse & { _answer_shape?: unknown };
         wireBody = (finalEgress.proseEdited ? withoutShape : finalEgress.response) as OlumiResponse & Record<string, unknown>;
@@ -3423,7 +3445,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       if (preview !== undefined) wireBody = { ...wireBody, proposal_preview: preview };
     }
     // Bind the question that is actually delivered after every prose gate.
-    if (freshScopeQuestion !== null) {
+    if (freshScopeQuestion !== null && !leaderFreeEnvelope) {
       const resting = textAtRest(String(wireBody.assistant_text ?? ''));
       wireBody = { ...wireBody, assistant_text: resting.includes(freshScopeQuestion) ? resting : `${resting} ${freshScopeQuestion}`.trim() };
     }
@@ -3496,7 +3518,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // An identical concurrent request committed first: ITS answer is the
           // record, so it is the one returned.
           const first = await store.readCommittedTurn(scenarioId, turnId);
-          if (first !== null) return reply.code(200).send(await replayed(first, retainedScopeIssues));
+          if (first !== null) return reply.code(200).send(await replayed(first, retainedScopeIssues.filter(p => freshScopeIssues.some(f => f.chip_id === p.chip_id))));
         }
         durability = 'recorded';
         // Only a row that was written moves the slot: the next answer row carries what THIS one did.
