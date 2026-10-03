@@ -208,7 +208,7 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
 
   it('the route judges the ask on the composed reply at rest — model words + owed lines + host status (source pin)', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(src).toContain('const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narration.text, owed), statusText), [basis]);');
+    expect(src).toContain('const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narration.text, owed), statusText), [basis, freshScopeQuestion]);');
     expect(src).toContain('restingText: textAtRest(composedWithout),');
     expect(src).toContain('...decisionTurn,');
     expect(src).toContain('questionsToggle: textAtRest(composedWithout) !== composedWithout,');
@@ -331,6 +331,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   let modelSays = 'This run is a sketch, not a basis for choosing.';
   let blocked = false;
   let licensedBasis = false;
+  let basisRunnable: boolean | undefined = true;
   let basisSource = 'cee_inference';
   let basisLabel = 'Subscribers';
   let staleBasis = false;
@@ -351,7 +352,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: licensedBasis ? { nodes: [goal, { id: 'subscribers', kind: 'factor', label: basisLabel, observed_state: { value: 300, source: basisSource } }, { id: 'a', kind: 'option' }, { id: 'b', kind: 'option' }], edges: [] } : withRisk(graphWith(goal)),
       graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true,
-        ...(licensedBasis ? { analysis_admission: { permitted_analysis_mode: 'comparative_leader', semantic_signals: { material_parameters_awaiting_user_node_ids: ['subscribers'] } } } : {}),
+        ...(licensedBasis ? { analysis_admission: { ...(basisRunnable === undefined ? {} : { structurally_analysable: basisRunnable }), permitted_analysis_mode: 'comparative_leader', semantic_signals: { material_parameters_awaiting_user_node_ids: ['subscribers'] } } } : {}),
       },
       analysis_state: { run_state: { kind: staleBasis ? 'complete_stale' : 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, usable_for_chips: true,
         ...(licensedBasis ? { leader_claim: { permitted: true, separation: 'separated' } } : {}),
@@ -367,7 +368,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; licensedBasis = false; basisSource = 'cee_inference'; basisLabel = 'Subscribers'; staleBasis = false; recentFails = false; risk = 'none'; n += 1; });
+  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; licensedBasis = false; basisRunnable = true; basisSource = 'cee_inference'; basisLabel = 'Subscribers'; staleBasis = false; recentFails = false; risk = 'none'; n += 1; });
   const scenarioNow = () => `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
   const runTurn = async (turnId?: string, explain = false) => {
     const scenarioId = scenarioNow();
@@ -405,6 +406,13 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect(text.split(line)).toHaveLength(2);
     expect(text).toContain(question);
     captureB3('actual Agent route; stubbed model/Run/readback', text, line, question);
+  });
+
+  it.each([undefined, false])('CONTROL: a missing/refused run axis (%s) cannot gain a named basis from a true claim flag', async (runnable) => {
+    licensedBasis = true; basisRunnable = runnable; goal = FX.goal_after_target;
+    const text = (await runTurn(undefined, true)).assistant_text;
+    expect(text).not.toContain('Olumi’s estimates');
+    expect(text).not.toContain('This comparison uses');
   });
 
   it('RED: host objective placement cannot restore a proposal ID from the goal label', async () => {
