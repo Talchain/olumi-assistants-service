@@ -1,10 +1,10 @@
-# Guidance selector leaf — INERT
+# Guidance selector and checker leaf
 
 Policy source: Talchain/olumi-programme-docs, rc/reasoning-coach-20261001 @
 `712625a1c484943ad330214504634121a44216e7` (board #85; T1 re-pin, REASONING COACH lease 5937451355).
 
-The adjacent policy JSON and the acceptance fixture are byte-identical to that commit (35 cases, 29 checker
-fixtures). `policy.ts` contains its typed selection, row, copy and method-turn constants; tests assert their
+The acceptance fixture remains byte-identical to that commit (35 cases, 29 checker fixtures). The adjacent policy
+JSON includes the Paul-approved SCI-HERO tipping-point amendment (#85 5963520834), separately hash-pinned in CEE. `policy.ts` contains its typed selection, row, copy and method-turn constants; tests assert their
 equality. The contract's reference implementations are `tools/select_ref.py` and `tools/check_method_turn.py` in the
 same commit: every case agrees with them, and each of their 16 mutants turns at least one case red.
 
@@ -31,5 +31,8 @@ same commit: every case agrees with them, and each of their 16 mutants turns at 
 `GuidanceState` entries are the on-disk form `{status, state_key_hash, turn_id}`; `state_key_fields` is still read
 when present. Only hashes leave the selector; this module neither stores nor reads conversation state.
 
-There is no production caller. AI HARNESS owns signal construction (`turn-context/guidance-signals.ts`),
-`coaching_state` persistence, method dispatch, and replacing the static chips.
+Production callers use `turn-context/guidance-signals.ts` and `guidance-wire.ts`; method turns use this checker.
+SCI-HERO's `tipping-point-coaching.ts` consumes the existing selected-current Run guard and passes its typed fact
+to RC-WHAT-CHANGES. Its deterministic sentence needs neither a measured EVPPI factor nor a named leader, and
+invalid elaboration falls back to that sentence. Priority/order and the other methods are unchanged.
+Context P0 retains canonical follow-up projection; this leaf adds no persistence or currentness authority.

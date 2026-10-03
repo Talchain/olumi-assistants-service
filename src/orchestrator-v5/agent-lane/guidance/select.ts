@@ -102,6 +102,14 @@ function evaluate(id: PolicyId, s: GuidanceSignals): Evaluation {
     return { candidates: [{ policy_id: id, variant, target, priority, fields: keyOf(fields) }] };
   }
   if (id === 'RC-WHAT-CHANGES') {
+    const tipping = s['run.tipping_point'];
+    if (tipping?.status === 'found') {
+      if (s['run.kind'] !== 'complete_current') return none();
+      if (!s['run.run_key']) return none('pending_signal');
+      return { candidates: [{ policy_id: id, priority: 'P2', item: tipping.factor_id,
+        fields: keyOf({ run_key: s['run.run_key'], factor_id: tipping.factor_id,
+          threshold: tipping.threshold, direction: tipping.direction }) }] };
+    }
     if (s['run.kind'] === undefined || s['run.leader_licensed'] === undefined || !sensitivity || sensitivity.status === 'pending') return none('pending_signal');
     if (s['run.kind'] !== 'complete_current' || s['run.leader_licensed'] !== true || sensitivity.status !== 'measured') return none();
     if (!sensitivity.most_sensitive?.factor_id || !sensitivity.most_sensitive.label) return none('pending_signal');
@@ -151,10 +159,14 @@ function selected(d: Draft, s: GuidanceSignals): SelectedRow | undefined {
     const action = POLICY.rows[0].primary_action;
     primary_action = { label: action.label[d.target!], action_kind: action.action_kind, intent: action.intent[d.target!] };
   } else if (d.policy_id === 'RC-WHAT-CHANGES') {
-    const action = s['run.decision_sensitivity']?.most_sensitive?.range === 'olumi_assumed'
-      ? POLICY.rows[1].primary_action.when_range_olumi_assumed : POLICY.rows[1].primary_action.otherwise;
-    primary_action = { label: action.label, action_kind: action.action_kind,
-      ...(action.action_kind === 'edit_inline' ? { target: d.item } : {}) };
+    if (s['run.tipping_point']?.status === 'found') {
+      primary_action = { label: 'Talk it through', action_kind: 'discuss' };
+    } else {
+      const action = s['run.decision_sensitivity']?.most_sensitive?.range === 'olumi_assumed'
+        ? POLICY.rows[1].primary_action.when_range_olumi_assumed : POLICY.rows[1].primary_action.otherwise;
+      primary_action = { label: action.label, action_kind: action.action_kind,
+        ...(action.action_kind === 'edit_inline' ? { target: d.item } : {}) };
+    }
   } else if (d.policy_id === 'RC-STRENGTHEN-ITEM') primary_action = { label: POLICY.rows[2].primary_action.label, action_kind: 'edit_inline', target: d.item };
   else if (d.policy_id === 'RC-PREMORTEM') primary_action = { label: POLICY.rows[3].primary_action.label, action_kind: 'discuss', intent: 'pre_mortem' };
   else primary_action = { label: POLICY.rows[4].primary_action.label, action_kind: 'discuss' };
@@ -173,7 +185,9 @@ export function selectGuidance(signals: GuidanceSignals, guidance: GuidanceState
     if (!requested || !IDS.includes(requested)) return suppressAll('not_eligible');
     const options = signals['model.non_sq_option_ids'] ?? [];
     let mode: Pick<Selection, 'mode' | 'item' | 'choices'> = {};
-    if (requested === 'RC-WHAT-CHANGES' && signals['run.decision_sensitivity']?.status !== 'measured') {
+    if (requested === 'RC-WHAT-CHANGES' && signals['run.decision_sensitivity']?.status !== 'measured'
+      && !(signals['run.kind'] === 'complete_current' && signals['run.run_key']
+        && signals['run.tipping_point']?.status === 'found')) {
       const item = honestLimitItem(signals);
       mode = { mode: 'honest_limit', ...(item ? { item } : {}) };
     }
