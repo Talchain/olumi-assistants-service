@@ -86,6 +86,7 @@
  * No imports from V4 pipeline (pipeline-v4, response-assembler, handlers).
  */
 
+import { readGoalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import type { FastifyInstance } from 'fastify';
 import type { BoundaryError, OlumiResponse, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import { isReplayedTurnSource } from '../orchestrator-v5/routing/turn-source-authorship.js';
@@ -1114,7 +1115,7 @@ async function sendFinalised200(
         scenarioFreshness: ctx.scenarioFreshness,
         ...(ctx.analysisReady ? { readiness: ctx.analysisReady } : {}),
       });
-  const finaliserContext = analysisAuthorityUnavailable
+  const analysisFinaliserContext = analysisAuthorityUnavailable
     ? {
         ...ctx,
         freshness: ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
@@ -1136,6 +1137,11 @@ async function sendFinalised200(
           analysisStateCanonical: scenarioSupersession.canonicalState,
         }
       : ctx;
+  const scopeInput = ctx.scenarioId === undefined ? undefined : await readGoalScopeClaimInput(
+    ctx.graph,
+    () => loadMostRecentPendingActionsIntegrityStrict(ctx.scenarioId!, requestId),
+  );
+  const finaliserContext = { ...analysisFinaliserContext, goalScopeClaimInput: scopeInput };
   let analysisAuthorityUnavailableEgressMode: AnalysisAuthorityUnavailableEgressMode =
     'substantive_replaced';
   // ── ROADMAP 2.709 invariant 6 — surface a STANDING draft loss ─────────

@@ -20,9 +20,10 @@ const readFactsFor = vi.fn();
 const readFactsWithTurnFor = vi.fn();
 const readScenarioRunAnalysisFactsFor = vi.fn();
 const readAnalysisInvalidatedAt = vi.fn();
+const readMostRecentPendingActions = vi.fn().mockResolvedValue([]);
 vi.mock('../../orchestrator-v5/session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../orchestrator-v5/session/index.js')>()),
-  getSessionStore: () => ({ readRecent, readFactsFor, readFactsWithTurnFor, readScenarioRunAnalysisFactsFor, readAnalysisInvalidatedAt }),
+  getSessionStore: () => ({ readRecent, readFactsFor, readFactsWithTurnFor, readScenarioRunAnalysisFactsFor, readAnalysisInvalidatedAt, readMostRecentPendingActions }),
 }));
 vi.mock('../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -38,6 +39,7 @@ import { enforceLeaderLicenceAtFinalEgress } from '../../orchestrator-v5/agent-l
 import { leaderLicenceFromState } from '../../orchestrator-v5/compose/leader-licence.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { currentAnalysisCoaching } from '../../orchestrator-v5/agent-lane/analysis-coaching-pass-through.js';
+import { reconciliationPending } from '../../orchestrator-v5/agent-lane/goal-scope.js';
 import type { GraphStateIngress } from '../../orchestrator-v5/boundary/request-extensions.js';
 
 type Rec = Record<string, any>;
@@ -112,6 +114,7 @@ const optionIds = (block: Rec | null | undefined) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  readMostRecentPendingActions.mockResolvedValue([]);
   readAnalysisInvalidatedAt.mockResolvedValue(null);
 });
 
@@ -242,5 +245,36 @@ describe('one Run, one serialisation — the reload\'s run_delta names no leader
     expect(delta.leader).not.toHaveProperty('current_leading_option_id');
     expect(delta.leader).not.toHaveProperty('prior_leading_option_id');
     expect(RunDeltaSchema.safeParse(delta).success).toBe(true);
+  });
+});
+
+
+describe('Semantic spine: unresolved scope uses the existing claim licence', () => {
+  it('withholds an unavailable pending read instead of treating it as an empty row', async () => {
+    const fact = runFact({ separated: true });
+    const ordinary = await reload(fact, 'scope-read-premise');
+    expect(ordinary.analysis_state.leader_claim.permitted).toBe(true);
+    readMostRecentPendingActions.mockRejectedValueOnce(new Error('pending read unavailable'));
+    const unavailable = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'scope-unavailable' });
+    expect(unavailable.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'goal_scope_unresolved' });
+    expect(fact.result.leading_option_id).toBe('option-b');
+  });
+  it('withholds the formerly licensed conclusion while keeping the Run current and exploratory result available', async () => {
+    const fact = runFact({ separated: true });
+    const ordinary = await reload(fact, 'scope-premise');
+    expect(ordinary.analysis_state.leader_claim.permitted).toBe(true);
+    readMostRecentPendingActions.mockResolvedValue([reconciliationPending(SCENARIO, {
+      kind: 'reconcile_goal_scope', goal_id: 'goal', goal_label: 'Synthetic goal',
+      expected: 'scope', question: 'Confirm this goal scope', operands: [], derivations: [],
+    })]);
+    const gated = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'scope-open' });
+    expect(gated.analysis_state?.run_state).toEqual(ordinary.analysis_state.run_state);
+    expect(gated.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'goal_scope_unresolved' });
+    expect(gated.analysis_result).not.toBeNull();
+    if (gated.analysis_result?.type !== 'analysis_result') throw new Error('Expected the retained exploratory analysis result');
+    expect(gated.analysis_result.leading_option_id).toBeNull();
+    expect((gated.analysis_result.enrichment?.decision_brief as Rec)).not.toHaveProperty('headline');
+    expect(gated.current_read.current_analysis_hash).toBe(ordinary.current_read.current_analysis_hash);
+    expect(fact.result.leading_option_id).toBe('option-b');
   });
 });

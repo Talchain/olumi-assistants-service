@@ -32,6 +32,13 @@ const CELLS = {
   M6_no_ready: undefined,
   /** The `/graph` read's top-level projection spells the run-axis flag `admitted` (`analysis-admission-projection.ts`). */
   M1_projection: { analysis_admission: { admitted: true, permitted_analysis_mode: 'comparative_leader', semantic_quality_sufficient: true } },
+  M2_projection: { analysis_admission: { admitted: true, permitted_analysis_mode: 'quantified_provisional' } },
+  M3_projection: { analysis_admission: { admitted: true, permitted_analysis_mode: 'exploratory' } },
+  M5_admitted_none: { analysis_admission: { admitted: true, permitted_analysis_mode: 'none' } },
+  M6_projection_malformed: { analysis_admission: { admitted: true, permitted_analysis_mode: 'leader_please' } },
+  M6_projection_non_boolean: { analysis_admission: { admitted: 'true', permitted_analysis_mode: 'comparative_leader' } },
+  M6_canonical_false_precedes_alias: { analysis_admission: { structurally_analysable: false, admitted: true, permitted_analysis_mode: 'comparative_leader' } },
+  M6_canonical_undefined_precedes_alias: { analysis_admission: { structurally_analysable: undefined, admitted: true, permitted_analysis_mode: 'comparative_leader' } },
   M5_projection: { analysis_admission: { admitted: false, permitted_analysis_mode: 'none', semantic_quality_sufficient: false } },
 } as const;
 
@@ -65,6 +72,13 @@ const EXPECTED_WHEN_A_TRUE: Record<keyof typeof CELLS, LeaderLicence> = {
   M6_malformed: 'withheld',
   M6_no_ready: 'withheld',
   M1_projection: 'permitted',
+  M2_projection: 'permitted_with_caveat',
+  M3_projection: 'withheld',
+  M5_admitted_none: 'withheld',
+  M6_projection_malformed: 'withheld',
+  M6_projection_non_boolean: 'withheld',
+  M6_canonical_false_precedes_alias: 'withheld',
+  M6_canonical_undefined_precedes_alias: 'withheld',
   M5_projection: 'withheld',
 };
 
@@ -91,5 +105,13 @@ describe('RED: the Agent wrapper is a pure function of the licence (one answer, 
       expect(claimPermissionsFrom(state, ready, { requested: true }).leader_may_be_named).toBe(licence !== 'withheld');
       expect(claimPermissionsFrom(state, ready).leader_may_be_named).toBe(licence === 'permitted');
     }
+  });
+});
+
+it('a separated provisional caveat cannot override an unresolved scope restriction', () => {
+  const state = { ...A_TRUE, leader_claim: { ...A_TRUE.leader_claim, withheld_reason: 'goal_scope_unresolved' } };
+  expect(leaderLicenceFromState(state, CELLS.M2_projection)).toBe('withheld');
+  expect(claimPermissionsFrom(state, CELLS.M2_projection, { requested: true })).toMatchObject({
+    leader_may_be_named: false, total_goal_claims_allowed: false, exploratory_work_allowed: true,
   });
 });

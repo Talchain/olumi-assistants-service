@@ -145,13 +145,26 @@ export function checkMethodTurn(policy_id: MethodTurnId, reply: string, inputs: 
     check('WD-NO-NEW-FIGURES', numberTokens(reply).every(token => supplied(token, figures)));
     check('WD-W1-NO-MEETS', inputs.variant !== 'W1' || !items.some(item => /\b(meets?|clears?|stays? (within|under)|within)\b[^.]{0,40}\blimit\b/iu.test(item)));
   } else if (policy_id === 'RC-WHAT-CHANGES') {
+    const tipping = inputs.tipping_point;
     check('WC-NAMES-FACTOR', labelMatches(reply, [inputs.factor_label ?? '']));
+    const prefixMatches = tipping !== undefined && (reply === tipping.say || reply.startsWith(`${tipping.say} `)
+      || reply.startsWith(`${tipping.say}\n`));
+    const elaboration = prefixMatches ? reply.slice(tipping!.say.length) : reply;
     const figures = [...(inputs.user_figures ?? []), ...(inputs.user_messages ?? []).flatMap(numberTokens),
-      ...(inputs.factor_current_value === undefined ? [] : [String(inputs.factor_current_value)])];
-    check('WC-NO-NEW-FIGURES', numberTokens(reply).every(token => supplied(token, figures)));
+      ...(inputs.factor_current_value === undefined ? [] : [String(inputs.factor_current_value)]),
+      ...(tipping === undefined ? [] : [String(tipping.threshold), ...numberTokens(tipping.say)])];
+    check('WC-NO-NEW-FIGURES', tipping === undefined ? numberTokens(reply).every(token => supplied(token, figures))
+      : prefixMatches && numberTokens(elaboration).length === 0);
+    // The threshold sentence is code-owned. Additional prose cannot restate a crossing, change units or name a winner.
+    check('WC-TIPPING-FACT', tipping === undefined || inputs['run.kind'] === 'complete_current'
+      && inputs.factor_label === tipping.label && prefixMatches
+      && !/\b(cross(?:es|ing)?|above|below|rises?|falls?|threshold|leads?|ahead|wins?|favou?rs?|best)\b/iu.test(elaboration)
+      && numberTokens(elaboration).length === 0);
     const labels = [...model, inputs.factor_label];
     check('WC-NO-NOTHING', !banned(reply, /nothing would change|no single (assumption|factor)/iu, labels));
-    check('WC-BANNED', !banned(reply, /\b(EVPI|EVPPI|sensitivity score|elasticity)\b/iu, labels) && !banned(reply, /%/u, labels));
+    check('WC-BANNED', !banned(reply, /\b(EVPI|EVPPI|sensitivity score|elasticity)\b/iu, labels)
+      && !banned(tipping === undefined ? reply : elaboration,
+        tipping === undefined ? /%/u : /%|\b(probability|odds|chance)\b/iu, labels));
   } else if (policy_id === 'RC-STRENGTHEN-ITEM') {
     const labels = inputs.item_labels ?? [];
     check('ST-NAMES-ITEM', labels.length > 0 && labels.every(label => labelMatches(reply, [label])));

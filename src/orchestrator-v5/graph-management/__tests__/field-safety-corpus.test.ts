@@ -119,6 +119,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level — construction only.
       'goal_level_reading',
       // MG #2306 (29 Sep): Olumi's reading of a decrease target — CEE-owned; only construction writes it.
+      'goal_scope',
       'goal_sense_reading',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
       'interventionkeys',
@@ -166,6 +167,7 @@ const SIX_SMUGGLE_NAMES = [
   // PJ-E-A2 part 2 (28 Sep): the deadline in the brief's own words — the same G1 class.
   'goal_deadline_as_stated',
   // MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
+  'goal_scope',
   'goal_sense_reading',
   // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
   'goal_level_reading',

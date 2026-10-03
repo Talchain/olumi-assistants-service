@@ -1,3 +1,5 @@
+import type { TippingPoint } from '../decision-sensitivity.js';
+
 export type PolicyId = 'RC-WIDEN' | 'RC-WHAT-CHANGES' | 'RC-STRENGTHEN-ITEM' | 'RC-PREMORTEM' | 'RC-COACH-EDITS';
 export type Priority = 'P1' | 'P2' | 'P3' | 'P4' | 'P5';
 export type Variant = 'W1' | 'W2Z' | 'W2' | 'W3' | 'W4' | 'W5' | 'W6' | 'W7' | 'S1' | 'S2' | 'S3L' | 'S3V';
@@ -49,6 +51,7 @@ export interface GuidanceSignals {
   /** Copy/key metadata already present in the acceptance contract. */
   readonly 'run.leader_option_id'?: string | null;
   readonly 'run.run_key'?: string;
+  readonly 'run.tipping_point'?: TippingPoint;
   readonly 'run.decision_sensitivity'?: {
     readonly status: 'measured' | 'none_measurable' | 'not_measured' | 'pending';
     readonly most_sensitive?: { readonly factor_id: string; readonly label: string; readonly range?: 'olumi_assumed' | 'yours' };
@@ -127,6 +130,8 @@ export interface MethodInputs {
   readonly variant?: Variant;
   readonly factor_label?: string;
   readonly factor_current_value?: string | number;
+  /** Recorded crossing; the containing turn consumes canonical Run currentness. */
+  readonly tipping_point?: Extract<TippingPoint, { status: 'found' }>;
   readonly item_labels?: readonly string[];
   readonly item_current_value?: string | number;
   readonly edited_labels?: readonly string[];

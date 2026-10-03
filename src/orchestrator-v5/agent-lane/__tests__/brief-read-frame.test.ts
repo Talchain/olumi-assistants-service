@@ -511,9 +511,9 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       todaysPath('retry');
     });
 
-    it('CONTRAST: a chip press on an empty model → not routed, today\'s path', async () => {
+    it('CONTRAST: a conversational chip on an empty model → not routed, today\'s path', async () => {
       script = [say('Noted.')];
-      await turn({ message: BRIEF, source: 'chip', chip: { id: 'agent-next-what-would-change' } });
+      await turn({ message: BRIEF, source: 'chip', chip: { id: 'agent-talk-it-through' } });
       todaysPath('chip');
     });
 

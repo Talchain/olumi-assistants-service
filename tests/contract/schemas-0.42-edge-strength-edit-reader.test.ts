@@ -265,7 +265,14 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // against the PUBLISHED tarballs (sha1 `fd389b22…` → `ab0b2c9a…`): the FILE SET naming `edge_strength_edit` is identical and
     // all five files are byte-unchanged; 0 changed dist lines name a strength or a band (contrast: the same diff finds 42
     // lines naming `authorship_digest`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.73.0');
+    // 0.73.0 -> 0.74.0 (schemas #84, version result-diff; published c47767f9).
+    // Registry SHA1 ab0b2c9af7e9441ba88e45837f1cff89bd449379 ->
+    // ea5d0acdf3a277c243dfa391161450e1b2675df5, verified against both tarballs.
+    // All FOUR runtime reader files (enums + turn-payload, .js/.d.ts) are
+    // byte-identical. The fifth file, fixtures/index.js, adds the three v2
+    // fixtures and registry rows: all 177 prior fixture initializers remain
+    // byte-identical; no prior export is removed. Reader assertions stay intact.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.74.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

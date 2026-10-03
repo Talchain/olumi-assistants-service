@@ -20,7 +20,7 @@ import { detectSameLeverOptions } from '../../../cee/structure/index.js';
 import { linkSizing, type LinkSizing } from '../../../cee/magnitude/link-sizing.js';
 import { isAcceptedOlumiEstimate, observedValueAuthorship } from '../../../cee/transforms/provenance-display.js';
 import { placeholderGoalPaths } from '../goal-certainty.js';
-import { decisionSensitivityOf } from '../decision-sensitivity.js';
+import { decisionSensitivityOf, tippingPointOf, type TippingPoint } from '../decision-sensitivity.js';
 import { readStoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { computeResponseHash } from '../../../utils/response-hash.js';
 import { NodeKindV3 } from '../../../schemas/cee-v3.js';
@@ -62,6 +62,7 @@ export interface GuidanceSignals {
   readonly 'run.withheld_reason': string | null;
   readonly 'run.leader_option_id': string | null;
   readonly 'run.decision_sensitivity': DecisionSensitivitySignal;
+  readonly 'run.tipping_point': TippingPoint;
   readonly 'model.goal_present': boolean;
   readonly 'model.goal_label': string | null;
   readonly 'model.goal_horizon': unknown;
@@ -333,6 +334,7 @@ export function assembleGuidanceSignals(i: GuidanceSignalInputs): GuidanceSignal
     'run.withheld_reason': str(claim?.withheld_reason),
     'run.leader_option_id': leader,
     'run.decision_sensitivity': sensitivityOf(block),
+    'run.tipping_point': tippingPointOf(enrichmentOf(block)),
     'model.goal_present': goal !== undefined,
     'model.goal_label': typeof goal?.label === 'string' ? goal.label : null,
     'model.goal_horizon': goal?.goal_horizon ?? null,

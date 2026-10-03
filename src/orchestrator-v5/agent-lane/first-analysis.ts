@@ -23,6 +23,7 @@
  *
  * It never throws: every failure is an outcome the route can say out loud.
  */
+import { GOAL_SCOPE_UNRESOLVED_REASON } from '../../schemas/goal-scope.js';
 import { withoutStrongestDriverClause } from './decision-sensitivity.js';
 import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
@@ -219,6 +220,8 @@ export function firstAnalysisSentence(outcome: FirstAnalysisOutcome): string | n
 
 /** The typed leader permission, as the Agent is given it. Absent is never permission. */
 export interface ClaimPermissions {
+  readonly total_goal_claims_allowed?: false;
+  readonly exploratory_work_allowed?: true;
   readonly leader_may_be_named: boolean;
   /** Present (true) only when the leader may be named as a PROVISIONAL finding (separable, quantified_provisional). */
   readonly provisional?: true;
@@ -248,6 +251,8 @@ export function claimPermissionsFrom(
   const separableProvisional = run.requested === true && licence === 'permitted_with_caveat';
   return {
     leader_may_be_named: (licence === 'permitted' && mode === 'comparative_leader') || separableProvisional,
+    ...(claim?.withheld_reason === GOAL_SCOPE_UNRESOLVED_REASON
+      ? { total_goal_claims_allowed: false as const, exploratory_work_allowed: true as const } : {}),
     ...(separableProvisional ? { provisional: true } : {}),
     ...(typeof claim?.withheld_reason === 'string' && claim.withheld_reason !== '' ? { withheld_reason: claim.withheld_reason } : {}),
     permitted_analysis_mode: mode,

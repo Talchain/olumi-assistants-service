@@ -1,3 +1,4 @@
+import { GoalScopeIdentityConflict, assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, scopeIssuesAfterWrite, scopeOf } from '../orchestrator-v5/agent-lane/goal-scope.js';
 /**
  * ROADMAP 2.467 — `register_graph`: THE DETERMINISTIC WHOLE-GRAPH WRITE SEAM.
  *
@@ -199,6 +200,17 @@ function withStoredLimitsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: un
   return carried.length === 0 ? graph : { ...graph, goal_constraints: carried };
 }
 
+/** A UI that omits the approved CEE scope makes no statement about it. */
+function withStoredGoalScopeWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: unknown }> }>(graph: T, stored: unknown): T {
+  const ns = stored !== null && typeof stored === 'object' && Array.isArray((stored as {nodes?: unknown}).nodes)
+    ? (stored as {nodes: Record<string, unknown>[]}).nodes : [];
+  return { ...graph, nodes: graph.nodes.map(n => {
+    const matches = ns.filter(old => old.id === n.id && old.kind === 'goal');
+    if ('goal_scope' in n || matches.length !== 1 || !scopeOf(matches[0]!.goal_scope)) return n;
+    return { ...n, goal_scope: matches[0]!.goal_scope };
+  }) };
+}
+
 type EdgeRecord = Record<string, unknown>;
 
 const isEdgeRecord = (value: unknown): value is EdgeRecord =>
@@ -311,9 +323,8 @@ const UUID_PATTERN =
  * offer — it may re-send the very graph the offer was made on.
  *
  * NOT a conversational turn, so no turn-TTL decrement (the commit carry-forward
- * owns that on real turns). Returns `undefined` — today's write, no
- * `pending_actions` key — when there is nothing to thread or the read failed;
- * the failure is logged, never silent.
+ * owns that on real turns). Always carries the surviving pending set. A failed
+ * authoritative read refuses registration instead of erasing an unresolved issue.
  */
 async function threadLiveHoldsThroughRegistration(input: {
   readonly scenarioId: string;
@@ -333,11 +344,11 @@ async function threadLiveHoldsThroughRegistration(input: {
         scenario_id: input.scenarioId,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
-      "Graph registration — prior pending read failed; the register writes without threading live holds",
+      "Graph registration — prior pending read failed; refusing to erase live holds or scope issues",
     );
-    return undefined;
+    throw err; // Never erase an unresolved issue because its authoritative read failed.
   }
-  if (prior.length === 0) return undefined;
+  // Even with no earlier issue, an approved scope may now contradict a canvas value.
   const result = threadHoldsThroughMutatingCommit({
     priorPendingActions: prior,
     graphAfterCommit: input.graphForStore,
@@ -354,7 +365,7 @@ async function threadLiveHoldsThroughRegistration(input: {
     turnId: input.turnId,
     site: "graph_registration",
   });
-  return result.threaded;
+  return scopeIssuesAfterWrite(result.threaded, input.graphForStore, input.scenarioId);
 }
 
 export default async function route(app: FastifyInstance) {
@@ -733,7 +744,7 @@ export default async function route(app: FastifyInstance) {
       // stored CEE-owned facts the caller omitted (see the helpers). Both are bound to the SAME
       // server read as the CAS base above.
       const graphToRegister = withStoredEdgeFactsWhenUnstated(
-        withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants),
+        withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
         baseGraphForInvariants,
       );
 
@@ -982,6 +993,15 @@ export default async function route(app: FastifyInstance) {
       // which a graph is persisted". Hashing before it would advertise an
       // identity for bytes we do not store, which is the exact ordering defect
       // `commit.ts` was restructured to close.
+      try {
+        // Same deterministic check as the proposal writer and final append floor.
+        assertNoScopedIdentityConflict(graphToRegister);
+        assertNoPendingScopeAmendment(graphToRegister, baseGraphForInvariants, await loadMostRecentPendingActionsIntegrityStrict(scenarioId, requestId));
+      } catch (err) {
+        if (err instanceof GoalScopeIdentityConflict) return reply.code(422).send(buildErrorV1('BAD_INPUT', err.message, { code: err.code }, requestId));
+        log.warn({ event: 'v5.scenario_graph_register.pending_wipe_risk', request_id: requestId, scenario_id: scenarioId }, 'Graph registration refused because the authoritative reconciliation read failed');
+        return unavailable();
+      }
       const graphForStore = withEntityRefs(projectGraphForPersistence(graphToRegister, {
         scenarioId,
         turnClass: "direct_answer",
@@ -1145,6 +1165,7 @@ export default async function route(app: FastifyInstance) {
           });
         });
       } catch (err) {
+        if (err instanceof GoalScopeIdentityConflict) return reply.code(422).send(buildErrorV1('BAD_INPUT', err.message, { code: err.code }, requestId));
         if (err instanceof TurnFenceRejectedError) {
           // A later-started write on this scenario owns the graph now, or the
           // user stopped it: nothing was written, and saying so is a 409 the

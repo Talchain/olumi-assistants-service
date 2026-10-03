@@ -480,7 +480,8 @@ export async function runAgentTurn(
           ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
           // ⛔ Only a change THIS turn proposed and still offers can be withdrawn: one an earlier turn showed the user
           // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`).
-          : String(call.name) === WITHDRAW_PROPOSAL && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
+          : String(call.name) === WITHDRAW_PROPOSAL && !(proposalIdArg(call.arguments) ?? '').startsWith('goal-scope:')
+            && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
             ? {
                 ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
                 detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
