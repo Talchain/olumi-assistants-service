@@ -144,6 +144,21 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
 /** A7's own opener: the one way A7 is told apart from the other owed lines (CODEX K3 P2: never "the first non-ask line"). */
 const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
 
+/** The one ask writer, before display scrubbing or turn eligibility. */
+function rawDecisionInputAsk(graph: unknown): string | null {
+  const goal = goalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  if (goal === undefined || label === '') return null;
+  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
+    : !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
+}
+
+/** Normalise only exact narrator copies of this graph's host ask before placement. */
+export function withDecisionInputAskDisplay(text: string, graph: unknown): string {
+  const raw = rawDecisionInputAsk(graph);
+  return raw === null ? text : text.split(raw).join(withoutProposalIds(raw));
+}
+
 export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext): string[] {
   if (!ctx.builtOrRan) return [];
   const goal = goalOf(graph);
@@ -154,9 +169,7 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   const leftOut = leftOutLines(graph, label);
   const within = withinMonths(goal);
   const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
-  const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null
-    : goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
-    : !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
+  const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
   const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
   const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;

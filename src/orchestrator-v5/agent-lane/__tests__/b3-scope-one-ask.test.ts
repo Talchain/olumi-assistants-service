@@ -81,6 +81,24 @@ describe('B3 one-ask ownership with the retained construction scope issue', () =
   });
 
   it.each([
+    { label: 'Quarterly revenue', otherId: false },
+    { label: 'Quarterly revenue prop_deadbeef', otherId: false },
+    { label: 'Quarterly revenue prop_deadbeef', otherId: true },
+  ])('raw hidden objective RED/control: one visible offer with durable/replay parity (%j)', async ({ label, otherId }) => {
+    nodes[0]!.label = label;
+    const raw = `I used "${label}" as a provisional objective. What should this model help you explore?`;
+    if (otherId) scripted.text += ' Inspect prop_abcdef.';
+    scripted.text += ` Questions this model does not answer yet: ${raw}`;
+    const { text, row } = await turn();
+    expect(text).not.toMatch(/prop_[0-9a-f]+/);
+    expect(text.match(/provisional objective/g)).toHaveLength(1);
+    expect(textAtRest(text)).toContain(withoutProposalIds(raw));
+    expect(textAtRest(text).match(/\?/g)).toHaveLength(1);
+    expect(row.pending_actions ?? []).toEqual([]);
+    expect(nodes[0]!.label).toBe(label);
+  });
+
+  it.each([
     { label: 'Pro', hidden: false, otherId: false },
     { label: 'Pro prop_deadbeef', hidden: false, otherId: false },
     { label: 'Pro prop_deadbeef', hidden: true, otherId: false },
