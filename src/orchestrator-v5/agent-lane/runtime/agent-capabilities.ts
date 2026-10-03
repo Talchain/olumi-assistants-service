@@ -863,9 +863,9 @@ function levelFigureOf(op: ProposalOperation): { raw_value?: number; cap?: numbe
   const likely = r !== undefined && typeof r.low === 'number' && typeof r.high === 'number' ? { low: r.low, high: r.high } : undefined;
   if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw)) return {};
   // An unscaled level needs no cap. Carry its approved range without inventing a scale frame.
-  if (v.cap == null && v.raw === v.normalised) return { raw_value: v.raw,
+  if (v.cap == null && v.raw === v.normalised) return likely !== undefined ? { raw_value: v.raw,
     ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
-    ...(likely !== undefined ? { likely_range: likely } : {}) };
+    likely_range: likely } : {};
   if (typeof v.cap !== 'number' || !(v.cap > 0) || Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
   return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
     ...(likely !== undefined ? { likely_range: likely } : {}) };
