@@ -20,7 +20,14 @@ import {
   DRAFT_RECORDS_INSTRUCTION,
   buildDraftRecordsSchema,
   draftRecordsInstructionHash,
+  projectDraftRecords,
 } from '../../../cee/draft/records/index.js';
+import {
+  CEE_MINTED_GOAL_FIELDS,
+  stripModelAuthoredGoalThreshold,
+} from '../normalisation.js';
+
+let RECORDS_PROJECTOR_GOAL_TARGET_FIELDS: readonly string[];
 
 const h = vi.hoisted(() => ({
   bodies: [] as Array<Record<string, unknown>>,
@@ -72,6 +79,7 @@ const GRAPH_RESPONSE = JSON.stringify({
 });
 
 let draftGraphWithAnthropic: typeof import('../anthropic.js').draftGraphWithAnthropic;
+let scrubProjectedDraftGoalTargets: typeof import('../anthropic.js').scrubProjectedDraftGoalTargets;
 const prior: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
@@ -80,7 +88,7 @@ beforeAll(async () => {
   process.env.CEE_ANTHROPIC_STRUCTURED_OUTPUTS = 'true';
   const { _resetConfigCache } = await import('../../../config/index.js');
   _resetConfigCache();
-  ({ draftGraphWithAnthropic } = await import('../anthropic.js'));
+  ({ draftGraphWithAnthropic, scrubProjectedDraftGoalTargets, RECORDS_PROJECTOR_GOAL_TARGET_FIELDS } = await import('../anthropic.js'));
 });
 
 afterAll(async () => {
@@ -94,10 +102,13 @@ afterAll(async () => {
 
 afterEach(() => { h.bodies = []; });
 
-async function draft(responseText: string) {
+async function draft(
+  responseText: string,
+  brief = 'Should we open a second warehouse in Leeds?',
+) {
   h.payload.text = responseText;
   const result = await draftGraphWithAnthropic(
-    { brief: 'Should we open a second warehouse in Leeds?', docs: [], seed: 1, model: 'claude-sonnet-4-6' },
+    { brief, docs: [], seed: 1, model: 'claude-sonnet-4-6' },
     { timeoutMs: 120_000, forceDefault: true },
   ).then(
     (r) => ({ ok: true as const, result: r }),
@@ -216,5 +227,335 @@ describe('3. the projection seam, and its honest failure', () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.message).not.toContain('nodes');
+  });
+});
+
+describe('4. records-projector goal targets at the legacy scrub boundary', () => {
+  const brief = [
+    'Success means restoring renewal to at least 88%.',
+    'We can open a second warehouse or stay with one warehouse.',
+  ].join(' ');
+  const responseObject = {
+    stated_items: [
+      {
+        kind: 'goal',
+        source_quote: 'Success means restoring renewal to at least 88%.',
+        value: 88,
+        unit: '%',
+        role: 'target',
+      },
+      { kind: 'option', source_quote: 'open a second warehouse' },
+      { kind: 'option', source_quote: 'stay with one warehouse' },
+    ],
+    claims: [
+      { claim_kind: 'factor', label: 'retention work', basis: [0], category: 'controllable' },
+      { claim_kind: 'causal_link', label: 'warehouse change affects retention work', basis: [0], from_stated: 1, to_claim: 0, effect: 'positive' },
+      { claim_kind: 'causal_link', label: 'retention work supports renewal', basis: [0], from_claim: 0, to_stated: 0, effect: 'positive' },
+    ],
+  };
+  const response = JSON.stringify(responseObject);
+
+  function withGoal(overrides: Record<string, unknown>): string {
+    const changed = structuredClone(responseObject);
+    Object.assign(changed.stated_items[0]!, overrides);
+    return JSON.stringify(changed);
+  }
+
+  function graphGoal(result: Awaited<ReturnType<typeof draftGraphWithAnthropic>>) {
+    return result.graph.nodes.find((node) => node.kind === 'goal');
+  }
+
+  function expectNoGoalContract(goal: unknown): void {
+    for (const field of CEE_MINTED_GOAL_FIELDS) {
+      expect(goal, `${field} must not survive without a verified explicit target`).not.toHaveProperty(field);
+    }
+  }
+
+  it.each([
+    ['the original brief', brief],
+    ['an unrelated-object wording addition', `${brief} A blue teapot is in the meeting room.`],
+  ])('retains the complete typed target for %s', async (_caseName, testBrief) => {
+    const r = await draft(response, testBrief);
+    expect(r.ok, r.ok ? '' : `draft threw: ${r.error?.message}`).toBe(true);
+    if (!r.ok) return;
+    const goal = graphGoal(r.result);
+    expect(goal).toMatchObject({
+      goal_threshold: 0.88,
+      goal_threshold_raw: 88,
+      goal_threshold_unit: '%',
+      goal_threshold_cap: 100,
+      goal_threshold_frame: 'level',
+    });
+    // Participation controls: this is the real Anthropic draft route with the
+    // records grammar and appended instruction, not a direct helper fixture.
+    expect(r.body.model).toBe('claude-sonnet-4-6');
+    expect(
+      ((r.body.system as Array<{ text?: string }>).at(-1)?.text),
+    ).toBe(DRAFT_RECORDS_INSTRUCTION);
+    expect(
+      ((r.body.output_config as { format?: { schema?: unknown } }).format?.schema),
+    ).toEqual(buildDraftRecordsSchema());
+  });
+
+  it('strips a contradicted magnitude even when the quoted words are genuine', async () => {
+    const r = await draft(
+      withGoal({ value: 90 }),
+      `${brief} A separate planning estimate is 90%.`,
+    );
+    expect(r.ok, r.ok ? '' : `draft threw: ${r.error?.message}`).toBe(true);
+    if (!r.ok) return;
+    const goal = graphGoal(r.result);
+    expect(goal?.provenance).toMatchObject({
+      provenance_class: 'stated',
+      brief_binding: 'unverified',
+    });
+    expectNoGoalContract(goal);
+  });
+
+  it('uses the projector authority for an omitted optional role', async () => {
+    const changed = JSON.parse(response) as typeof responseObject;
+    delete (changed.stated_items[0] as Record<string, unknown>).role;
+    const r = await draft(JSON.stringify(changed), brief);
+    expect(r.ok, r.ok ? '' : `draft threw: ${r.error?.message}`).toBe(true);
+    if (!r.ok) return;
+    expect(graphGoal(r.result)).toMatchObject({
+      goal_threshold: 0.88,
+      goal_threshold_raw: 88,
+      goal_threshold_unit: '%',
+      goal_threshold_cap: 100,
+      goal_threshold_frame: 'level',
+    });
+  });
+
+  it('retains a later verified target carried onto an unverified duplicate-goal survivor', async () => {
+    const duplicateQuote = 'Margin is -5% now; success is 10%.';
+    const duplicateBrief = [
+      duplicateQuote,
+      'We can open a second warehouse or stay with one warehouse.',
+    ].join(' ');
+    const duplicateResponse = JSON.stringify({
+      stated_items: [
+        { kind: 'goal', source_quote: duplicateQuote, value: -5, unit: '%', role: 'baseline' },
+        { kind: 'goal', source_quote: duplicateQuote, value: 10, unit: '%', role: 'target' },
+        { kind: 'option', source_quote: 'open a second warehouse' },
+        { kind: 'option', source_quote: 'stay with one warehouse' },
+      ],
+      claims: [
+        { claim_kind: 'factor', label: 'margin work', basis: [1], category: 'controllable' },
+        { claim_kind: 'causal_link', label: 'warehouse change affects margin work', basis: [1], from_stated: 2, to_claim: 0, effect: 'positive' },
+        { claim_kind: 'causal_link', label: 'margin work supports success', basis: [1], from_claim: 0, to_stated: 1, effect: 'positive' },
+      ],
+    });
+
+    const r = await draft(duplicateResponse, duplicateBrief);
+    expect(r.ok, r.ok ? '' : `draft threw: ${r.error?.message}`).toBe(true);
+    if (!r.ok) return;
+    const goals = r.result.graph.nodes.filter((node) => node.kind === 'goal');
+    expect(goals).toHaveLength(1);
+    expect(goals[0]).toMatchObject({
+      provenance: {
+        provenance_class: 'stated',
+        brief_binding: 'unverified',
+      },
+      goal_threshold: 0.1,
+      goal_threshold_raw: 10,
+      goal_threshold_unit: '%',
+      goal_threshold_cap: 100,
+      goal_threshold_frame: 'level',
+    });
+  });
+
+  it.each(['baseline', 'context'] as const)(
+    'does not reclassify a current %s reading as the target',
+    async (role) => {
+      const currentQuote = 'Renewal is currently 72%.';
+      const r = await draft(
+        withGoal({ source_quote: currentQuote, value: 72, unit: '%', role }),
+        `${currentQuote} We can open a second warehouse or stay with one warehouse.`,
+      );
+      expect(r.ok, r.ok ? '' : `draft threw: ${r.error?.message}`).toBe(true);
+      if (!r.ok) return;
+      const goal = graphGoal(r.result);
+      expect(goal?.provenance).toMatchObject({
+        provenance_class: 'stated',
+        brief_binding: 'verified',
+      });
+      expectNoGoalContract(goal);
+    },
+  );
+
+  it('keeps a qualitative goal valid without inventing a numeric contract', async () => {
+    const qualitativeQuote = 'Improve renewal quality.';
+    const changed = JSON.parse(withGoal({ source_quote: qualitativeQuote })) as typeof responseObject;
+    delete (changed.stated_items[0] as Record<string, unknown>).value;
+    delete (changed.stated_items[0] as Record<string, unknown>).unit;
+    delete (changed.stated_items[0] as Record<string, unknown>).role;
+    const r = await draft(
+      JSON.stringify(changed),
+      `${qualitativeQuote} We can open a second warehouse or stay with one warehouse.`,
+    );
+    expect(r.ok, r.ok ? '' : `draft threw: ${r.error?.message}`).toBe(true);
+    if (!r.ok) return;
+    expect(graphGoal(r.result)?.label).toMatch(/renewal quality/i);
+    expectNoGoalContract(graphGoal(r.result));
+  });
+
+  it('retains the raw/legacy anti-fabrication control unchanged', () => {
+    const raw = {
+      nodes: [{
+        id: 'legacy-model-goal',
+        kind: 'goal',
+        label: 'Grow renewal',
+        goal_threshold: 0.88,
+        goal_threshold_raw: 88,
+        goal_threshold_unit: '%',
+        goal_threshold_cap: 100,
+        goal_threshold_frame: 'level',
+        goal_baseline: 0.72,
+        goal_baseline_raw: 72,
+      }],
+    };
+    const stripped = stripModelAuthoredGoalThreshold(raw);
+    expect(stripped.nodeIds).toEqual(['legacy-model-goal']);
+    expectNoGoalContract(raw.nodes[0]);
+  });
+
+  it('protects only projector target fields, never injected baseline fields', () => {
+    const seam = projectDraftRecords(responseObject, brief);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) return;
+    const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')!;
+    Object.assign(goal, {
+      goal_baseline: 0.72,
+      goal_baseline_raw: 72,
+    });
+
+    const scrubbed = scrubProjectedDraftGoalTargets({
+      rawJson: seam.projection.graph,
+      records: seam.records,
+      projection: seam.projection,
+      brief,
+    });
+    // The verified target is attestable and sound, so nothing is left
+    // unprotected on this path — the baseline fields are stripped anyway.
+    expect(scrubbed.unprotected).toEqual([]);
+    expect(scrubbed.stripped.nodeIds).toEqual([goal.id]);
+    expect(scrubbed.stripped.fields).toEqual(expect.arrayContaining([
+      'goal_baseline',
+      'goal_baseline_raw',
+    ]));
+    expect(goal).toMatchObject({
+      goal_threshold: 0.88,
+      goal_threshold_raw: 88,
+      goal_threshold_unit: '%',
+      goal_threshold_cap: 100,
+      goal_threshold_frame: 'level',
+    });
+    expect(goal).not.toHaveProperty('goal_baseline');
+    expect(goal).not.toHaveProperty('goal_baseline_raw');
+  });
+
+  // OPPOSITE-DIRECTION TWIN of the retention cases above. An unattestable
+  // target must degrade to EXACTLY the pre-PR behaviour — a label-only goal on
+  // a draft that SUCCEEDS — never a refusal. The existing scrub is already the
+  // fail-closed policy for this class; escalating it to a thrown draft turns a
+  // silent degradation into a non-retryable HTTP 400 whose recovery copy tells
+  // the user to "describe what success looks like", which is what they did.
+  it.each([
+    ['omitted', undefined],
+    ['incompatible', 'days'],
+    ['word alias', 'percent'],
+    ['long word alias', 'percentage'],
+    ['whitespace-padded alias', ' % '],
+    ['short alias', 'pct'],
+  ])('degrades to a label-only goal for a percent target whose unit is %s', async (_caseName, unit) => {
+    const changed = JSON.parse(response) as typeof responseObject;
+    if (unit === undefined) delete (changed.stated_items[0] as Record<string, unknown>).unit;
+    else changed.stated_items[0]!.unit = unit;
+    const r = await draft(JSON.stringify(changed), brief);
+    expect(r.ok, r.ok ? '' : `draft threw instead of degrading: ${r.error?.message}`).toBe(true);
+    if (!r.ok) return;
+    const goal = graphGoal(r.result);
+    expect(goal, 'the goal node itself must survive').toBeDefined();
+    expectNoGoalContract(goal);
+    // The number still reaches the user as prose in the label, exactly as it
+    // does on staging today — the degrade loses the typed field, not the draft.
+    expect(goal?.label).toContain('88');
+  });
+
+  // DEGENERATE DENOMINATOR. `resolveGoalThresholdCap` rule 1 returns 100 for any
+  // '%' target with 0 < raw <= 100, BEFORE the `existingCap > raw` soundness
+  // test that the same module's own comment justifies. A 100% target therefore
+  // mints cap === raw === 100 => goal_threshold 1.0, which that comment names as
+  // forbidden. At base this was always stripped; retention is what would make it
+  // reachable, so retention is where it is excluded.
+  it('leaves a degenerate denominator to the scrub rather than shipping goal_threshold 1.0', async () => {
+    const degenerateBrief = 'Renewal must reach 100%. We can open a second warehouse or stay with one warehouse.';
+    const r = await draft(
+      withGoal({ source_quote: 'Renewal must reach 100%.', value: 100, unit: '%' }),
+      degenerateBrief,
+    );
+    expect(r.ok, r.ok ? '' : `draft threw: ${r.error?.message}`).toBe(true);
+    if (!r.ok) return;
+    const goal = graphGoal(r.result);
+    expect(goal, 'the goal node itself must survive').toBeDefined();
+    expect(goal).not.toHaveProperty('goal_threshold');
+    expect(goal).not.toHaveProperty('goal_threshold_cap');
+    expectNoGoalContract(goal);
+  });
+
+  // PRECONDITION PIN for the case above: the projector really does mint the
+  // degenerate pair, so the assertion is the scrub's doing and not the
+  // fixture failing to reach the mint site.
+  it('pins that the projector mints cap === raw for a 100% target', () => {
+    const degenerateBrief = 'Renewal must reach 100%. We can open a second warehouse or stay with one warehouse.';
+    const changed = structuredClone(responseObject);
+    Object.assign(changed.stated_items[0]!, { source_quote: 'Renewal must reach 100%.', value: 100, unit: '%' });
+    const seam = projectDraftRecords(changed, degenerateBrief);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) return;
+    const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')!;
+    expect(goal.goal_threshold_raw).toBe(100);
+    expect(goal.goal_threshold_cap).toBe(100);
+    expect(goal.goal_threshold).toBe(1);
+  });
+
+  it('degrades, rather than refusing, when a verified numeric target leaves projection label-only', () => {
+    const seam = projectDraftRecords(responseObject, brief);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) return;
+    const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')!;
+    for (const field of CEE_MINTED_GOAL_FIELDS) Reflect.deleteProperty(goal, field);
+
+    const scrubbed = scrubProjectedDraftGoalTargets({
+      rawJson: seam.projection.graph,
+      records: seam.records,
+      projection: seam.projection,
+      brief,
+    });
+    // Reported for observability...
+    expect(scrubbed.unprotected).toEqual([
+      { statedItemIndex: 0, reason: 'target_unrepresented' },
+    ]);
+    // ...and NOT escalated: the caller still receives a usable strip result.
+    expect(scrubbed.stripped).toBeDefined();
+    expect(Array.isArray(scrubbed.stripped.nodeIds)).toBe(true);
+  });
+
+  // UNION ASSERTION (trap 12d). The protected set is DERIVED from the scrub's
+  // list by a `goal_threshold` prefix filter, which proves the two copies agree
+  // and can never prove the list is COMPLETE. This pins it against what the
+  // projector actually writes, so a future target field named outside that
+  // prefix REDs here instead of being silently stripped.
+  it('protects every goal field the projector actually mints for a stated target', () => {
+    const seam = projectDraftRecords(responseObject, brief);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) return;
+    const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')!;
+    const minted = Object.keys(goal).filter((key) => key.startsWith('goal_')).sort();
+    // Precondition: the fixture must actually reach the mint site, or this
+    // assertion would pass by comparing two empty sets.
+    expect(minted.length, 'fixture minted no goal fields — it no longer exercises applyStatedGoalTarget').toBeGreaterThan(0);
+    expect(minted).toEqual([...RECORDS_PROJECTOR_GOAL_TARGET_FIELDS].sort());
   });
 });
