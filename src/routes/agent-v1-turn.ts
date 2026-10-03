@@ -106,6 +106,9 @@ import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lan
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
+import { composeLeaderClaim } from '../orchestrator-v5/compose/analysis-state-v1.js';
+import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
+import type { AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import {
   isWidenPress, nextStepsWithWiden, settleWidenTurn, widenGate, widenOffered, widenTurnForReadback,
@@ -916,6 +919,18 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
       if (ledger.length < DISPATCH_LEDGER_MAX) ledger.push({ path: masked(path), ms: Date.now() - t0, status });
     }
   };
+}
+
+/** Add this answer's surviving scope input through the same authority as the canonical graph read. */
+function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackState>>, scenarioId: string, pending: readonly PendingAction[]): typeof read {
+  const scopeInput = goalScopeClaimInput(pending.filter(p => p.scenario_id === scenarioId), read.graph);
+  const state = read.analysisState as AnalysisStateV1 | undefined;
+  // No additive scope input: preserve the readback and all permitted bytes exactly.
+  if (scopeInput.issues.length === 0 || state === undefined) return read;
+  return { ...read, scopeOpen: true, analysisState: { ...state,
+    leader_claim: composeLeaderClaim({ goalScopeClaimInput: scopeInput, canonical: null, rawRobustness: null },
+      state.run_state, state.contradictions?.includes('fact_status_success_but_degraded_newer') === true),
+  } };
 }
 
 export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean }> {
@@ -1752,8 +1767,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         return [];
       }
     };
-    const replayed = async (prior: CommittedTurnRecord) => {
-      const state = await readBackState(dispatch, scenarioId);
+    const replayed = async (prior: CommittedTurnRecord, scopeIssues: readonly PendingAction[] = []) => {
+      const state = withRetainedScopeIssues(await readBackState(dispatch, scenarioId), scenarioId, scopeIssues);
       /**
        * ⭐ RESULT-FIRST REPLAY (#2470; CODEX_CLI_OVERFLOW P1 + P2 5936280278). A retried turn of the two-request Run is
        * rebuilt from the canonical readback, never from what the first attempt had in memory:
@@ -2485,10 +2500,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      */
     let whatChangesTurn: WhatChangesTurn | null = null;
     let measuredRunKey: string | null = null;
+    let whatChangesRead: Awaited<ReturnType<typeof readBackState>> | undefined;
+    let measuredCandidate: MeasuredWhatChanges | null = null;
     if (result === undefined && approvedProposal === undefined && pressedChipId === TIPPING_POINT_PRESS_ID) {
       const rb = await readBackState(readingDispatch, scenarioId);
+      whatChangesRead = rb;
       const boundRun = runExplanationChip(scenarioId, rb);
-      let measured: MeasuredWhatChanges | null = null;
       if (boundRun !== null && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)
         && chipOperationOf(body) === WHAT_CHANGES_CHIP_OPERATION) {
         const turn = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
@@ -2499,16 +2516,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           requestId: `${String(req.id)}:decision-flip`,
           candidateLinks,
         }));
-        if (turn?.outcome === 'measured') measured = { runKey: boundRun.id, turn };
-        log.info({ scenario_id: scenarioId, what_changes: turn?.outcome ?? null, answered: measured !== null }, 'agent-lane: what-would-change measured attempt');
+        if (turn?.outcome === 'measured') measuredCandidate = { runKey: boundRun.id, turn };
+        log.info({ scenario_id: scenarioId, what_changes: turn?.outcome ?? null, answered: measuredCandidate !== null }, 'agent-lane: what-would-change measured attempt');
       }
-      const answer = whatWouldChangeAnswer(scenarioId, rb, measured);
-      if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
-      tippingTurn = answer.tippingTurn;
-      whatChangesTurn = answer.measured?.turn ?? null;
-      measuredRunKey = answer.measured?.runKey ?? null;
+      // Selection and cache insertion wait for the final pending read and canonical scope composition below.
+      measuredRunKey = measuredCandidate?.runKey ?? null;
       fastPath = 'method';
-      result = { assistant_text: answer.text, items: [], tool_calls: [], tool_results: [], mutated: false,
+      result = { assistant_text: '', items: [], tool_calls: [], tool_results: [], mutated: false,
         hops: 0, stopped_reason: 'answered',
         timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
     }
@@ -2843,16 +2857,56 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // A successful bound check reuses the exact read that supplied the narration. A mismatch/failure
     // reads current wire state, but never restores the old explanation's licence.
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
-      : await readBackState(fastPath === 'explain' || tippingTurn !== null || measuredRunKey !== null
+      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
-    const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
+    const { graphHash, analysisReady, draftGraph, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
+    let liveHolds: readonly PendingAction[] = [];
+    let liveScopeIssues: readonly PendingAction[] = [];
+    if (typeof store.readMostRecentPendingActions === 'function') {
+      try {
+        const priorPendings = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
+        const held = priorPendings.filter((pa) => pa.action.kind === 'apply_proposed_change'
+          && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID);
+        /*
+         * ⛔ CARRIED BY THE PRODUCT'S OWN SURVIVAL RULE, never copied verbatim (Canonical, #70 5841421182,
+         * condition 2): a hold whose pinned model has moved (this turn's write, or anyone's) could only be refused,
+         * so it is not carried to be offered as a dead button; the turn count runs down once per answer row; the
+         * wall clock bounds it. Same function, same order, as every route-v2 commit (`commit.ts`).
+         */
+        /*
+         * ⛔ A HOLD THE AGENT WITHDREW THIS TURN IS NOT CARRIED (`WITHDRAW_PROPOSAL`): this row is the latest, so
+         * leaving it off retires the hold, and the next turn finds nothing to confirm.
+         */
+        const withdrawn = withdrawnThisTurn(result.tool_calls);
+        liveScopeIssues = computeSurvivingPriorPendingsDetailed(priorPendings.filter(p => p.action.kind === 'reconcile_goal_scope'), freshScopeIssues, [], graphHash, Date.now()).survivors;
+        liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors
+          .filter((pa) => typeof pa.chip_id !== 'string' || !withdrawn.has(pa.chip_id));
+      } catch (err) {
+        log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: refusing to erase unresolved scope or approval on a failed pending read');
+        throw err;
+      }
+    }
+    const scopeWithdrawals = new Set(result.tool_results.filter(r => r.withdrawn === true).map(r => r.proposal_id));
+    const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
+    const composedRead = withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues);
+    const { analysisState } = composedRead;
+    if (whatChangesRead !== undefined) {
+      const answer = whatWouldChangeAnswer(scenarioId,
+        withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues), measuredCandidate);
+      text = answer.text;
+      result = { ...result, assistant_text: text };
+      tippingTurn = answer.tippingTurn;
+      whatChangesTurn = answer.measured?.turn ?? null;
+      measuredRunKey = answer.measured?.runKey ?? null;
+      if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
+    }
     // Every bound coaching answer, a "no threshold" one included, is about ITS Run: re-checked on the fresh read (Codex P1 #2542).
-    if ((tippingTurn?.kind === 'found' || tippingTurn?.kind === 'no_signal') && !runExplanationMatches(tippingTurn.run_key, scenarioId, finalRead)) {
+    if ((tippingTurn?.kind === 'found' || tippingTurn?.kind === 'no_signal') && !runExplanationMatches(tippingTurn.run_key, scenarioId, composedRead)) {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
     }
     // The measured answer waited on ISL (up to the 70 s cap): the same re-check, so an edit meanwhile is never answered.
-    if (measuredRunKey !== null && !runExplanationMatches(measuredRunKey, scenarioId, finalRead)) {
+    if (measuredRunKey !== null && !runExplanationMatches(measuredRunKey, scenarioId, composedRead)) {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
     }
     if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
@@ -3047,34 +3101,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * inner write: a hold this turn confirmed is already consumed and is not carried. Holds go first; the row
      * holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). A failed read carries none, loudly.
      */
-    let liveHolds: readonly PendingAction[] = [];
-    let liveScopeIssues: readonly PendingAction[] = [];
-    if (typeof store.readMostRecentPendingActions === 'function') {
-      try {
-        const priorPendings = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
-        const held = priorPendings.filter((pa) => pa.action.kind === 'apply_proposed_change'
-          && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID);
-        /*
-         * ⛔ CARRIED BY THE PRODUCT'S OWN SURVIVAL RULE, never copied verbatim (Canonical, #70 5841421182,
-         * condition 2): a hold whose pinned model has moved (this turn's write, or anyone's) could only be refused,
-         * so it is not carried to be offered as a dead button; the turn count runs down once per answer row; the
-         * wall clock bounds it. Same function, same order, as every route-v2 commit (`commit.ts`).
-         */
-        /*
-         * ⛔ A HOLD THE AGENT WITHDREW THIS TURN IS NOT CARRIED (`WITHDRAW_PROPOSAL`): this row is the latest, so
-         * leaving it off retires the hold, and the next turn finds nothing to confirm.
-         */
-        const withdrawn = withdrawnThisTurn(result.tool_calls);
-        liveScopeIssues = computeSurvivingPriorPendingsDetailed(priorPendings.filter(p => p.action.kind === 'reconcile_goal_scope'), freshScopeIssues, [], graphHash, Date.now()).survivors;
-        liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors
-          .filter((pa) => typeof pa.chip_id !== 'string' || !withdrawn.has(pa.chip_id));
-      } catch (err) {
-        log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: refusing to erase unresolved scope or approval on a failed pending read');
-        throw err;
-      }
-    }
-    const scopeWithdrawals = new Set(result.tool_results.filter(r => r.withdrawn === true).map(r => r.proposal_id));
-    const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
     const pendingCandidates = [
       ...retainedScopeIssues,
       ...liveHolds,
@@ -3470,7 +3496,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // An identical concurrent request committed first: ITS answer is the
           // record, so it is the one returned.
           const first = await store.readCommittedTurn(scenarioId, turnId);
-          if (first !== null) return reply.code(200).send(await replayed(first));
+          if (first !== null) return reply.code(200).send(await replayed(first, retainedScopeIssues));
         }
         durability = 'recorded';
         // Only a row that was written moves the slot: the next answer row carries what THIS one did.
