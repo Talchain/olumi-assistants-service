@@ -142,7 +142,7 @@ function evidenceBuilds(underscoreMeta: Record<string, unknown>): Readonly<Recor
   return plot === null && isl === null ? null : { plot, isl };
 }
 
-interface RunEchoes {
+export interface RunEchoes {
   /** PLoT `meta.seed_used`, normalised. PLoT echoes it as a STRING. */
   readonly seedUsed: string;
   /** PLoT `meta.n_samples`. */
@@ -211,7 +211,7 @@ export function runSeedEcho(fact: HandlerFact): string | null {
   return readRunEchoes(fact)?.seedUsed ?? null;
 }
 
-function readRunEchoes(fact: HandlerFact): RunEchoes | null {
+export function readRunEchoes(fact: HandlerFact): RunEchoes | null {
   const result = asRecord((fact as { result?: unknown }).result);
   if (result === null) return null;
 
@@ -261,7 +261,7 @@ function readRunEchoes(fact: HandlerFact): RunEchoes | null {
  * "equal" would assert pipeline equality on ground we never checked, which is
  * the same fabrication as defaulting absence to 'equal', wearing a comparison.
  */
-function deriveBuildsEquality(
+export function deriveBuildsEquality(
   prior: RunEchoes,
   current: RunEchoes,
 ): RunDeltaBuildsEqualityLiteral {

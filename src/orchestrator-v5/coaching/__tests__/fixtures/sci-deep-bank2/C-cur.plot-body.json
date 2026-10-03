@@ -1,0 +1,99 @@
+{
+ "_source": {
+  "repo": "Talchain/Inference-Service-Layer",
+  "commit": "c40a6c2ede4c46d82facdd477f2616fbad5a2630",
+  "path": "acceptance-evidence/structural-robustness-2nd-20260930/plot-responses/C-cur-s1254899477.plot-response.json",
+  "sha256": "2ed695bce697cc0f93fc6ccaec23341bc7b3a0c6b6d649f2efbec5fcd795b2fe",
+  "note": "PLoT /v2/run body, trimmed to the members the structural-challenge comparator reads; values unchanged."
+ },
+ "analysis_status": "computed",
+ "option_comparison_status": "computed",
+ "option_comparison": [
+  {
+   "option_id": "raise_pro_price_to_59",
+   "option_label": "Raise Pro price to \u00a359",
+   "win_probability": 1,
+   "probability_of_goal": 1,
+   "constraint_probabilities": {
+    "agent-lane:monthly_churn:<=": 1
+   },
+   "outcome": {
+    "mean": 90901.6264449427,
+    "std": 713.5935443078788,
+    "p10": 90306.12244897959,
+    "p50": 90683.3784395077,
+    "p90": 91909.5830981139,
+    "n_samples": 10000,
+    "n_valid_samples": 10000
+   }
+  },
+  {
+   "option_id": "status_quo",
+   "option_label": "Status quo",
+   "win_probability": 0,
+   "probability_of_goal": 0,
+   "constraint_probabilities": {
+    "agent-lane:monthly_churn:<=": 1
+   },
+   "outcome": {
+    "mean": 74999.99999999999,
+    "std": 2.3592239273284576e-11,
+    "p10": 75000,
+    "p50": 75000,
+    "p90": 75000,
+    "n_samples": 10000,
+    "n_valid_samples": 10000
+   }
+  }
+ ],
+ "constraint_results": [
+  {
+   "constraint_id": "agent-lane:monthly_churn:<=",
+   "node_id": "monthly_churn",
+   "operator": "<=",
+   "value": 5,
+   "probability": 1,
+   "option_id": "raise_pro_price_to_59",
+   "scale_provenance": {
+    "source": "unit_percent",
+    "range_unified": true,
+    "decision_grade": true
+   },
+   "frame_verdict": "scored"
+  }
+ ],
+ "identity_evaluations": [
+  {
+   "node_id": "mrr",
+   "operation": "product",
+   "factor_ids": [
+    "pro_plan_price",
+    "paying_subscribers"
+   ],
+   "addends": [],
+   "stated_in_brief": true,
+   "evaluated": true,
+   "level_source": "stated_level",
+   "reconciliation": {
+    "reconstructed": 73500,
+    "stated": 75000,
+    "mismatch_share": 0.02
+   }
+  }
+ ],
+ "inference_warnings": [
+  {
+   "code": "EDGE_E_VALUE_NON_FINITE_DROPPED"
+  },
+  {
+   "code": "GOAL_DIRECTION_UNATTESTED"
+  }
+ ],
+ "meta": {
+  "seed_used": "1254899477",
+  "seed_source": "client_generated",
+  "n_samples": 10000,
+  "build": "af4cd56"
+ },
+ "_meta": {}
+}
