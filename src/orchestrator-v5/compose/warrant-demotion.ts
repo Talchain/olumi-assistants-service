@@ -43,6 +43,13 @@ import {
   SetFactorValueValueSchema,
 } from '../tools/handlers/set-factor-value.js';
 import {
+  isUnitAmbiguousConstraintValue,
+  // ⭐ The handler's OWN unit precedence and operator map, imported rather than
+  // restated. Restating both is what produced the false refusal this fixes.
+  resolveConstraintUnit,
+  TYPE_TO_OPERATOR,
+} from '../tools/handlers/add-constraint.js';
+import {
   AddConstraintTypeSchema,
   AddConstraintValueSchema,
 } from '../tools/handlers/add-constraint.js';
@@ -211,6 +218,206 @@ export function findUnsupportedOfferTargetKind(
 }
 
 /**
+ * ⭐⭐ UNIT-SUFFICIENCY PRECONDITION — the FOURTH sibling, and the one the
+ * measured failure needed.
+ *
+ * ── THE WITNESS (deployed staging, 20 Sep 2026) ───────────────────────────
+ * The product offered "a limit keeping <a risk> at or below 30 … Say the word
+ * and I will make it." The user replied *"Yes, treat it as a 0-1 fraction of
+ * revenue at risk, so 30% is 0.3. Please go ahead."* — and nothing happened;
+ * the graph hash never moved and the held change lapsed two turns later.
+ *
+ * The obvious reading was that the confirmation predicate was too narrow. It
+ * is not: a held change replays from its STORED parameters and never re-reads
+ * the message, so honouring that sentence as a bare "yes" would have written
+ * 30 and discarded the user's 0.3. The gate was right to refuse it.
+ *
+ * ⛔ THE REAL DEFECT IS ONE TURN EARLIER: **the offer could not have been
+ * honoured by ANY answer.** `add_constraint`'s Gate-1 throws on a unit-less
+ * value outside [0,1] targeting a probability-domain node, and `formatBound`
+ * renders a stored unit — the offer read "at or below 30", bare — so a plain
+ * "yes" would have reached the handler and thrown. The user supplied the unit
+ * unprompted because the offer's own wording left it missing. **They were
+ * answering a question the product had not asked.**
+ *
+ * ── WHY NOT `OFFER_REQUIRED_PARAMETERS` ───────────────────────────────────
+ * Because that was already considered and rejected, in terms: its comment
+ * records that `unit` is "deliberately NOT required, because requiring them
+ * would suppress legitimate offers". That judgement is correct and stands — a
+ * unit-less "at most 30" on a headcount factor is perfectly good. The
+ * condition here is not "unit is missing"; it is the handler's own compound
+ * precondition, which is false for exactly those legitimate offers.
+ *
+ * ── DERIVED, NOT MIRRORED ─────────────────────────────────────────────────
+ * The predicate is `isUnitAmbiguousConstraintValue`, IMPORTED from the handler
+ * that throws on it. One expression, two callers; a change to the rule moves
+ * both in the same commit (CLAUDE.md trap 12). Same shape as
+ * `findUnsupportedOfferTargetKind` consuming
+ * `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`.
+ *
+ * ── FAIL-OPEN ON IGNORANCE, NEVER ON KNOWLEDGE ────────────────────────────
+ * Returns non-null ONLY on positive knowledge that the resumer would throw.
+ * Four fail-opens, each because this site cannot know the answer:
+ *   · target not in the graph we hold — the kind is unknown;
+ *   · value not a number — `findInsufficientOfferParameters` already owns it;
+ *   · a goal with `at_least` — the handler may stamp a threshold cap that
+ *     EXEMPTS the value (`capToStamp`), and that computation lives in the
+ *     handler. Not knowing, this does not refuse;
+ *   · any other intent.
+ * Suppressing a legitimate offer would be a worse defect than the one this
+ * closes.
+ */
+export interface UnitLookupNode {
+  readonly id?: unknown;
+  readonly kind?: unknown;
+  /** ⚠ `unit` was ABSENT from this type, which is why the corpus could not
+   *  observe the false-refusal class: the handler resolves the unit from
+   *  here, and this side could not even see the field. */
+  readonly observed_state?: { readonly cap?: unknown; readonly unit?: unknown } | null;
+  readonly goal_threshold_cap?: unknown;
+  /** The node's own goal-threshold channel — the handler's
+   *  `nodeChannelUnchanged` limb reads exactly these two. */
+  readonly goal_threshold_raw?: unknown;
+  readonly goal_threshold_unit?: unknown;
+}
+
+/** The action's declared constraint type, or undefined when absent/unknown.
+ *  Kept beside the caller because it is two lines and the mapping it feeds is
+ *  the handler's, imported. */
+function constraintTypeOf(action: ProposalAction): 'at_least' | 'at_most' | undefined {
+  const raw = param(action, 'constraint_type')?.value;
+  return raw === 'at_least' || raw === 'at_most' ? raw : undefined;
+}
+
+export function findUnitAmbiguousOffer(
+  action: ProposalAction,
+  graphNodes: readonly UnitLookupNode[],
+  existingConstraints: readonly PersistedConstraintRow[] = [],
+): { readonly label: string; readonly value: number } | null {
+  if (action.handler_id !== 'add_constraint') return null;
+
+  const rawUnit = param(action, 'unit')?.value;
+  const paramUnit =
+    typeof rawUnit === 'string' && rawUnit.trim().length > 0 ? rawUnit.trim() : undefined;
+
+  const value = param(action, 'value')?.value;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+
+  const targetId = action.entity.id;
+  if (typeof targetId !== 'string' || targetId.length === 0) return null;
+  const targetNode = graphNodes.find((n) => typeof n.id === 'string' && n.id === targetId);
+  if (targetNode === undefined) return null;
+  const targetKind = targetNode.kind;
+  if (typeof targetKind !== 'string' || targetKind.length === 0) return null;
+
+  // ⛔⛔ THE UNIT IS RESOLVED THE HANDLER'S WAY, NOT READ OFF THE PARAMETER —
+  // and the comment that used to sit further down, asserting the divergence
+  // was "benign in the only direction that matters", was MEASURED FALSE.
+  //
+  // A reviewer ran this predicate beside the real handler:
+  //   NODE_UNIT_PRESENT   offerRefuses=true   handlerThrew=false  ← FALSE REFUSAL
+  //   NODE_UNIT_ABSENT    offerRefuses=true   handlerThrew=true   ← control
+  //   existing-row        offerRefuses=true   handlerThrew=false  ← FALSE REFUSAL
+  // "raise my ARR floor 250k → 300k" — an ordinary phrasing whose unit the
+  // handler resolves from the existing row — had its offer withheld.
+  //
+  // ⛔ That is the trade this estate rejects: a disclosed refusal bought with a
+  // silent capability loss. This function exists to refuse EXACTLY where the
+  // handler would refuse; reading one of its four sources made it refuse more.
+  //
+  // ⚠ And my own corpus could not see it: no fixture carried
+  // `observed_state.unit`, and `UnitLookupNode` did not declare the field. A
+  // corpus that omits a class cannot certify the code over that class.
+  //
+  // The precedence is IMPORTED from the handler, never restated — restating is
+  // what broke it (trap 12).
+  const existingRowForTarget = existingConstraints.find(
+    (row) =>
+      row.node_id === targetId &&
+      row.operator === TYPE_TO_OPERATOR[constraintTypeOf(action) ?? 'at_least'],
+  );
+  const unit = resolveConstraintUnit({
+    paramUnit,
+    existingUnit: typeof existingRowForTarget?.unit === 'string' ? existingRowForTarget.unit : undefined,
+    // ⚠ KNOWN-UNRESOLVED: the handler's third source is a MOVED row
+    // (`corrects_node_id`), whose prior state this site cannot load. Left
+    // undefined deliberately, so the residue is a possible FALSE OFFER on a
+    // correction — the permissive direction, which costs a clarifying
+    // round-trip rather than a lost capability. Named, not hidden.
+    sourceRowUnit: undefined,
+    observedUnit:
+      typeof targetNode.observed_state?.unit === 'string' ? targetNode.observed_state.unit : undefined,
+  });
+
+  // ⭐⭐ THE GOAL + `at_least` FAIL-OPEN, NARROWED — it was too wide, and the
+  // review is right about why.
+  //
+  // The handler throws on `isUnitAmbiguousConstraintValue(...) && capToStamp
+  // === null` (`add-constraint.ts:1084-1093`), and `capToStamp` is non-null
+  // ONLY when `stampGoalThreshold` is true — which is
+  // `ownsGoalThresholdChannel && !valueUnchanged` (`:1037`). My first version
+  // returned null for EVERY goal + `at_least` action on the grounds that this
+  // site cannot compute the stamp. But one limb of it IS computable here, and
+  // it is the limb that decides: `valueUnchanged`.
+  //
+  // A VALUE-IDENTICAL RESTATEMENT sets `valueUnchanged` true, so
+  // `stampGoalThreshold` is false, so `capToStamp` is null, so the handler
+  // throws — and the old blanket return let the product offer that change
+  // anyway. The handler's comment says so in terms: the guard "deliberately
+  // fires even when the ambiguous row is ALREADY persisted and the turn is a
+  // value-identical restatement".
+  //
+  // So the fail-open now survives only where a stamp is still POSSIBLE (the
+  // value would genuinely change). `ownsGoalThresholdChannel` depends on
+  // turn machinery this site has no access to, so its absence can still make a
+  // permitted offer un-appliable — that residue is unchanged and is the only
+  // remaining fail-open in this branch, deliberately in the permissive
+  // direction (a false refusal costs a clarifying round-trip; a false offer
+  // costs a change no answer can apply).
+  //
+  // ⚠ The two limbs below mirror the handler's own `rowValueUnchanged` /
+  // `nodeChannelUnchanged` (`:1011-1023`), read from the SAME persisted
+  // sources the resuming handler will load.
+  if (targetKind === 'goal' && param(action, 'constraint_type')?.value === 'at_least') {
+    // ⛔ WAS `row.operator === 'at_least'` — a string a persisted row NEVER
+    // carries. `TYPE_TO_OPERATOR` maps it to `'>='`, so this lookup could not
+    // hit and the whole limb was dead. The fixtures encoded the same wrong
+    // vocabulary, so the suite agreed with the defect.
+    const existingRow = existingRowForTarget;
+    const rowValueUnchanged =
+      existingRow !== undefined && existingRow.value === value && existingRow.unit === unit;
+    const nodeChannelUnchanged =
+      typeof targetNode.goal_threshold_raw === 'number' &&
+      targetNode.goal_threshold_raw === value &&
+      targetNode.goal_threshold_unit === unit;
+    // ⚠ WITHDRAWN: this said the parameter-only read was "benign in the only
+    // direction that matters". It was measured FALSE — see the block above.
+    // Both limbs now compare against the RESOLVED unit, which is what the
+    // handler's own `rowValueUnchanged` compares (`newConstraint.unit`).
+    if (!(rowValueUnchanged || nodeChannelUnchanged)) return null;
+    // Falls through: the restatement cannot stamp, so the handler will throw
+    // unless the ambiguity check below clears it on its own terms.
+  }
+
+  if (
+    !isUnitAmbiguousConstraintValue({
+      unit,
+      value,
+      targetKind,
+      observedCap: targetNode.observed_state?.cap,
+      goalThresholdCap: targetNode.goal_threshold_cap,
+    })
+  ) {
+    return null;
+  }
+
+  const rawLabel = action.entity.label;
+  const label =
+    typeof rawLabel === 'string' && rawLabel.trim().length > 0 ? rawLabel.trim() : targetId;
+  return { label, value };
+}
+
+/**
  * ⭐⭐ PARAMETER-SUFFICIENCY PRECONDITION — the THIRD sibling of the
  * registry-executable and target-kind checks above, asking the one question
  * neither of them asks: are the PARAMETERS ones the handler accepts?
@@ -368,6 +575,10 @@ export interface PersistedConstraintRow {
   readonly node_id?: unknown;
   readonly operator?: unknown;
   readonly label?: unknown;
+  /** Present on real rows; read by the unit-sufficiency precondition to
+   *  reproduce the handler's `rowValueUnchanged` test. */
+  readonly value?: unknown;
+  readonly unit?: unknown;
 }
 
 export type WarrantDemotionBuild =

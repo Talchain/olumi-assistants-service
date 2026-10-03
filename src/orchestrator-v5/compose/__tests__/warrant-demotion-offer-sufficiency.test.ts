@@ -56,6 +56,7 @@ import {
   findInsufficientOfferParameters,
   buildIncompleteOfferRefusalText,
   OFFER_REQUIRED_PARAMETERS,
+  findUnitAmbiguousOffer,
 } from '../warrant-demotion.js';
 import { tryShortConfirmResume } from '../../routing/deterministic-short-confirm.js';
 import type { PendingAction } from '../../session/pending-action.js';
@@ -332,5 +333,215 @@ describe('offer sufficiency — the required-parameter table', () => {
 
   it('returns null for an action it has no authority over, rather than refusing blind', () => {
     expect(findInsufficientOfferParameters(action('add_factor', []))).toBeNull();
+  });
+});
+
+/**
+ * ⭐⭐ THE FALSE REFUSAL — this predicate refused offers the handler would have
+ * ACCEPTED, and the suite above could not see it.
+ *
+ * Found in review, measured beside the real handler:
+ *   NODE_UNIT_PRESENT   offerRefuses=true   handlerThrew=false   ← FALSE REFUSAL
+ *   NODE_UNIT_ABSENT    offerRefuses=true   handlerThrew=true    ← control
+ *   existing-row unit   offerRefuses=true   handlerThrew=false   ← FALSE REFUSAL
+ *
+ * Cause: this function read ONLY the parameter's unit, while the handler
+ * resolves FOUR sources. "Raise my ARR floor 250k → 300k" — an ordinary
+ * phrasing whose unit the handler resolves from the existing row — had its
+ * offer withheld and the capability was lost silently.
+ *
+ * ⛔ A disclosed refusal bought with a silent capability loss is the trade this
+ * estate rejects, and the question I had asked the reviewer to answer — does
+ * it narrow a fail-open or WIDEN a fail-closed? — came back with the bad
+ * answer.
+ *
+ * ⚠⚠ WHY MY OWN CORPUS WAS BLIND, which matters more than the bug: no fixture
+ * carried `observed_state.unit`, and `UnitLookupNode` DID NOT DECLARE THE
+ * FIELD. A corpus that omits a class the contract admits cannot certify the
+ * code over that class — and a type that omits it makes the omission
+ * invisible. Both are fixed here.
+ *
+ * ⚠ A SECOND defect found while fixing the first: the existing-row lookup
+ * matched `operator === 'at_least'`, a string a persisted row NEVER carries
+ * (`TYPE_TO_OPERATOR` maps it to `'>='`). The limb was dead, and the fixtures
+ * encoded the same wrong vocabulary — so the suite agreed with it.
+ */
+describe('the offer must refuse EXACTLY where the handler refuses — no more', () => {
+  const AMBIGUOUS_VALUE = 300_000; // outside [0,1]: ambiguous iff no unit resolves
+
+  const arrAction = () =>
+    action(
+      'add_constraint',
+      [
+        // ⚠ `at_most`, NOT `at_least`, and the reason is a real discrimination
+        // problem rather than a preference. A goal + `at_least` whose value
+        // would CHANGE takes the narrowed fail-open branch above and returns
+        // null whatever the unit does — so it cannot tell a resolved unit from
+        // an unresolved one, and a control built on it would pass vacuously.
+        // The first version of this block did exactly that and both controls
+        // failed, which is how it was caught.
+        { name: 'constraint_type', value: 'at_most' },
+        { name: 'value', value: AMBIGUOUS_VALUE },
+        // ⛔ NO `unit` parameter — that is the whole point. The handler
+        // resolves it from elsewhere; this predicate used not to.
+      ],
+      { id: 'g-arr', kind: 'goal', label: 'ARR' },
+    );
+
+  it('NODE_UNIT_PRESENT: a unit on the node is resolvable, so the offer must NOT be refused', () => {
+    expect(
+      findUnitAmbiguousOffer(
+        arrAction(),
+        [{ id: 'g-arr', kind: 'goal', observed_state: { unit: 'GBP' } }],
+        [],
+      ),
+      'the handler resolves this unit from observed_state and accepts — withholding the offer is a silent capability loss',
+    ).toBeNull();
+  });
+
+  /**
+   * ⚠ THE CONTROL, and without it the assertion above is not evidence: if this
+   * predicate had simply been disabled, every case would return null and the
+   * test above would pass by testing nothing (trap 13).
+   */
+  it('NODE_UNIT_ABSENT: with no unit anywhere the handler DOES throw, so the refusal must stand', () => {
+    expect(
+      findUnitAmbiguousOffer(
+        arrAction(),
+        [{ id: 'g-arr', kind: 'goal', observed_state: {} }],
+        [],
+      ),
+      'the predicate must still refuse where the handler genuinely would — or it discriminates nothing',
+    ).not.toBeNull();
+  });
+
+  it('EXISTING ROW: "raise my ARR floor 250k → 300k" — the row supplies the unit, so no refusal', () => {
+    expect(
+      findUnitAmbiguousOffer(arrAction(), [{ id: 'g-arr', kind: 'goal' }], [
+        // ⭐ `'<='`, the operator a persisted row ACTUALLY carries. Spelling
+        // the parameter word here is what made the old lookup look correct.
+        { node_id: 'g-arr', operator: '<=', value: 250_000, unit: 'GBP' },
+      ]),
+      'the handler resolves the unit from the existing row and accepts',
+    ).toBeNull();
+  });
+
+  it('the row lookup matches the PERSISTED operator vocabulary, not the parameter words', () => {
+    // Same row, mis-spelled operator: it must NOT be found, so the unit does
+    // not resolve, so the refusal stands. This is the dead-limb defect stated
+    // as a behaviour rather than a comment.
+    expect(
+      findUnitAmbiguousOffer(arrAction(), [{ id: 'g-arr', kind: 'goal' }], [
+        { node_id: 'g-arr', operator: 'at_most', value: 250_000, unit: 'GBP' },
+      ]),
+      "a parameter word is not an operator any row carries — it must not resolve a unit",
+    ).not.toBeNull();
+  });
+});
+
+/**
+ * ⭐⭐ THE SOURCE MAPPING, NOT THE PRECEDENCE — and the distinction is the
+ * whole reason this block is four lines rather than four cases.
+ *
+ * A reviewer asked whether this corpus exercises two unit sources that
+ * DISAGREE, on the grounds that a corpus offering one source at a time proves
+ * the predicate reads *a* unit and never that it reads the *right* one. The
+ * question was right and the answer was no. Measured by mutant rather than by
+ * grep: inverting `resolveConstraintUnit`'s precedence outright REDs **five**
+ * tests, and **every one of them is in the handler's own suite** —
+ * `add-constraint-unit-integrity.test.ts` carries an explicit *"ordering pin:
+ * the existing row unit outranks the node observed unit"*. **Nothing in this
+ * file moved.**
+ *
+ * ⛔ SO THE PRECEDENCE IS ALREADY GUARDED, AT ITS OWNER, AND COPYING THOSE
+ * ASSERTIONS HERE WOULD BE THE MIRROR. This side IMPORTS
+ * `resolveConstraintUnit`; it does not reimplement the order, so it inherits
+ * that guarantee. A second copy would prove the two copies agree — never that
+ * the order is right — which is the trap-12d shape.
+ *
+ * ⭐ WHAT IS GENUINELY THIS SIDE'S RISK is narrower and is not covered
+ * anywhere: **whether this call site maps ITS sources onto the RIGHT
+ * PARAMETERS.** If `observedUnit` were passed where `existingUnit` belongs,
+ * every precedence test at the handler would still pass and this corpus would
+ * not notice — because the function would be resolving correctly over
+ * arguments this file assembled wrongly.
+ *
+ * One case settles it: two sources present and disagreeing, asserting WHICH
+ * unit came back by its consequence.
+ *
+ * ── ⭐ AND THE MAPPING RISK IS PER PARAMETER, SO IT WAS MEASURED PER
+ *    PARAMETER, rather than assumed from this one case ──────────────────────
+ *
+ * A reviewer's refinement, and it is right: a case exercising
+ * row→`existingUnit` cannot observe a slip in param→`paramUnit`. So the
+ * correct size is one case per mapping THIS call site actually populates —
+ * not four by default, and not one. Each mapping was dropped in turn and the
+ * suites re-run:
+ *
+ *   paramUnit     mapping dropped → 1 test REDs   already guarded
+ *   existingUnit  mapping dropped → 2 tests RED   guarded by the case below
+ *   observedUnit  mapping dropped → 1 test REDs   already guarded
+ *
+ * ⇒ **All three populated mappings are individually guarded, so no further
+ * cases are warranted.** Recorded here as a measurement so it is not
+ * re-derived, and because "we added one case" and "every mapping is covered"
+ * are different claims and only the second is true.
+ *
+ * ⛔ THE FOURTH PARAMETER IS NOT POPULATED FROM THIS CALL SITE AND CANNOT BE.
+ * `sourceRowUnit` is the prior state of a MOVED row (`corrects_node_id`),
+ * which this site cannot load — it is passed `undefined` deliberately. There
+ * is no mapping to slip, so there is nothing to cover; the residue is a
+ * possible FALSE OFFER on a correction, which is the permissive direction and
+ * is named at the call site rather than hidden.
+ */
+describe('this call site maps its own sources onto the right parameters', () => {
+  it('the existing ROW unit wins over the NODE observed unit — proving the mapping, not the order', async () => {
+    const { resolveConstraintUnit } = await import('../../tools/handlers/add-constraint.js');
+
+    // ⚠ THE PRECONDITION, ASSERTED: the two sources must actually disagree, or
+    // the case below cannot discriminate and would pass by coincidence.
+    expect(
+      resolveConstraintUnit({ existingUnit: 'GBP', observedUnit: '%' }),
+      'the shared resolver must prefer the row over the node — if this flips, the case below is meaningless',
+    ).toBe('GBP');
+
+    // A goal target whose NODE says '%' while its persisted ROW says 'GBP'.
+    // 300,000 is ambiguous with no unit, unambiguous with either — so the only
+    // way this can be silent is if SOME unit resolved. What proves the mapping
+    // is the arm below, where only the ROW carries one.
+    const rowOnly = findUnitAmbiguousOffer(
+      action(
+        'add_constraint',
+        [
+          { name: 'constraint_type', value: 'at_most' },
+          { name: 'value', value: 300_000 },
+        ],
+        { id: 'g-arr', kind: 'goal', label: 'ARR' },
+      ),
+      // the NODE carries NO unit — so a resolution can only have come from the row
+      [{ id: 'g-arr', kind: 'goal', observed_state: {} }],
+      [{ node_id: 'g-arr', operator: '<=', value: 250_000, unit: 'GBP' }],
+    );
+    expect(
+      rowOnly,
+      'the existing row was passed as `existingUnit`, so the unit resolves and no refusal is due',
+    ).toBeNull();
+
+    // ⭐ THE DISCRIMINATING TWIN: strip the row, leave the node empty, and the
+    // same shape must refuse. Without it, "null" above could mean this
+    // function stopped refusing for any reason at all.
+    const neither = findUnitAmbiguousOffer(
+      action(
+        'add_constraint',
+        [
+          { name: 'constraint_type', value: 'at_most' },
+          { name: 'value', value: 300_000 },
+        ],
+        { id: 'g-arr', kind: 'goal', label: 'ARR' },
+      ),
+      [{ id: 'g-arr', kind: 'goal', observed_state: {} }],
+      [],
+    );
+    expect(neither, 'with no unit in any source the refusal must stand').not.toBeNull();
   });
 });
