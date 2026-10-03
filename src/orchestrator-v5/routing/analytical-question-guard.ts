@@ -129,11 +129,11 @@ const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
 
 
 /**
- * ⚠⚠ THESE TWO ARE VETOED BY `hasMutationSignal`, AND THE VETO IS THE WHOLE
- * DIFFERENCE BETWEEN THEM AND THE ARRAY ABOVE.
+ * ⚠⚠ EVERY PATTERN IN THIS ARRAY IS VETOED BY `hasMutationSignal`, AND THE VETO
+ * IS THE WHOLE DIFFERENCE BETWEEN IT AND THE ARRAY ABOVE.
  *
- * Both patterns are UNANCHORED: they match wherever the phrase appears in the
- * message. Shipped without a veto that was a blanket mutation stop, and an
+ * The first two patterns are UNANCHORED: they match wherever the phrase appears
+ * in the message (the third is clause-anchored at both ends — see its own note). Shipped without a veto that was a blanket mutation stop, and an
  * independent route-level comparison (CX-20260916-42, executed through the real
  * Fastify route) found three explicit commands newly losing the edit lane:
  *
@@ -169,6 +169,46 @@ const ADVICE_SEEKING_QUESTION_PATTERNS: readonly RegExp[] = [
   // "we should add the risk" is a commitment and does NOT match; only
   // "should we" / "should I" does.
   /\bshould\s+(?:i|we)\b/i,
+  // ⭐ "What's one update based on this discussion that you recommend we make
+  // now?" — the user's own words, deployed staging, 16 Sep 2026 ~23:30Z. The
+  // NOUN `update` in "one update" matched EDIT_GRAPH_POSITIVE_REGEX, nothing
+  // else in the chain fired, and the user's request for a RECOMMENDATION was
+  // answered with GM_REJECTED_ASSISTANT_TEXT — "I couldn't take that change
+  // forward, so the model is unchanged." An advice question returning a
+  // change-application error.
+  //
+  // The entry above owns `how do you recommend ...`. This one owns the
+  // wh-headed form the same session produced, and it is deliberately NOT a
+  // widening of that pattern: every conjunct is a grammatical property,
+  // measured over a corpus BEFORE it was written, never a tuning constant
+  // (CLAUDE.md trap 22f: two arbitrary length constants with hard cliffs on
+  // either side is how the four-round oscillation happened).
+  //
+  //   1. `(?:^|[.?!;,\n]|\band\b|\bbut\b|\bso\b)\s*`  — the wh-word must HEAD
+  //      a clause. Without it, "Now add what you recommend." matches, because
+  //      there the wh-word is the OBJECT of an imperative edit verb. Measured:
+  //      the unanchored candidate lost that row and "Just update what you
+  //      recommend, please."
+  //   2. `(?!\s*you\b)` — excludes the HEADLESS RELATIVE "What you recommend
+  //      is fine, add it.", where the wh-clause is the sentence's SUBJECT and
+  //      the message is a statement plus a command. An interrogative has
+  //      something between the wh-word and the second-person pronoun ("What's",
+  //      "What do", "Which change do"); a free relative does not.
+  //   3. `[^?.!\n]*[?.!]?\s*$` — the advice clause must END the message. This
+  //      is the file's own doctrine made structural: "a message that asks for
+  //      advice AND issues a command is an instruction; only a message that
+  //      just asks is a question." It is what holds "So what do you recommend
+  //      we add? Add it.", whose trailing bare imperative `hasMutationSignal`
+  //      does not see (its imperative pattern is LINE-anchored, and both
+  //      clauses sit on one line — reported, not widened here: that predicate
+  //      is shared by six guards and widening it is a separate change with its
+  //      own evidence).
+  //
+  // Measured over a 34-message corpus (the 16 Sep capture, the 15 Sep captured
+  // corpus this file already carries, and an adversarial mixed command/question
+  // set): pristine 27/34, this pattern 34/34, both directions. The veto below
+  // is load-bearing on exactly two of those rows.
+  /(?:^|[.?!;,\n]|\band\b|\bbut\b|\bso\b)\s*wh(?:at|ich)\b(?!\s*you\b)[^?.!\n]*\byou\s+(?:recommend|suggest|advise|propose)\b[^?.!\n]*[?.!]?\s*$/i,
 ];
 
 /**
