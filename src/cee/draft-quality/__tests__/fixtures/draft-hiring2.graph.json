@@ -1,0 +1,154 @@
+{
+ "edges": [
+  {
+   "from": "00f89f37",
+   "to": "5fa16524"
+  },
+  {
+   "from": "00f89f37",
+   "to": "8b8722a8"
+  },
+  {
+   "from": "00f89f37",
+   "to": "da9c7829"
+  },
+  {
+   "from": "0b1c1aa5",
+   "to": "0dde265b"
+  },
+  {
+   "from": "2fad8248",
+   "to": "0dde265b"
+  },
+  {
+   "from": "2fd31114",
+   "to": "0dde265b"
+  },
+  {
+   "from": "4242a3ba",
+   "to": "5fa16524"
+  },
+  {
+   "from": "4242a3ba",
+   "to": "8b8722a8"
+  },
+  {
+   "from": "4242a3ba",
+   "to": "da9c7829"
+  },
+  {
+   "from": "5fa16524",
+   "to": "c8acb70a"
+  },
+  {
+   "from": "8b8722a8",
+   "to": "2fad8248"
+  },
+  {
+   "from": "8b8722a8",
+   "to": "2fd31114"
+  },
+  {
+   "from": "be215545",
+   "to": "0b1c1aa5"
+  },
+  {
+   "from": "be215545",
+   "to": "5fa16524"
+  },
+  {
+   "from": "be215545",
+   "to": "da9c7829"
+  },
+  {
+   "from": "c8acb70a",
+   "to": "0dde265b"
+  },
+  {
+   "from": "da9c7829",
+   "to": "2fd31114"
+  },
+  {
+   "from": "e70301eb",
+   "to": "0b1c1aa5"
+  },
+  {
+   "from": "e70301eb",
+   "to": "5fa16524"
+  },
+  {
+   "from": "e70301eb",
+   "to": "8b8722a8"
+  },
+  {
+   "from": "f937361a",
+   "to": "00f89f37"
+  },
+  {
+   "from": "f937361a",
+   "to": "4242a3ba"
+  },
+  {
+   "from": "f937361a",
+   "to": "be215545"
+  },
+  {
+   "from": "f937361a",
+   "to": "e70301eb"
+  }
+ ],
+ "nodes": [
+  {
+   "id": "00f89f37",
+   "kind": "option"
+  },
+  {
+   "id": "0b1c1aa5",
+   "kind": "risk"
+  },
+  {
+   "id": "0dde265b",
+   "kind": "goal"
+  },
+  {
+   "id": "2fad8248",
+   "kind": "outcome"
+  },
+  {
+   "id": "2fd31114",
+   "kind": "outcome"
+  },
+  {
+   "id": "4242a3ba",
+   "kind": "option"
+  },
+  {
+   "id": "5fa16524",
+   "kind": "factor"
+  },
+  {
+   "id": "8b8722a8",
+   "kind": "factor"
+  },
+  {
+   "id": "be215545",
+   "kind": "option"
+  },
+  {
+   "id": "c8acb70a",
+   "kind": "risk"
+  },
+  {
+   "id": "da9c7829",
+   "kind": "factor"
+  },
+  {
+   "id": "e70301eb",
+   "kind": "option"
+  },
+  {
+   "id": "f937361a",
+   "kind": "decision"
+  }
+ ]
+}
