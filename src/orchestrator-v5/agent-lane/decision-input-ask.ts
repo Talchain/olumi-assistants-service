@@ -14,6 +14,7 @@
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch } from '../../graph/inert-risk.js';
+import { withoutProposalIds } from './display-ids.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -153,9 +154,11 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   const leftOut = leftOutLines(graph, label);
   const within = withinMonths(goal);
   const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
-  const wanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null
+  const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null
     : goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
     : !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
+  // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
+  const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
   const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)

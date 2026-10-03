@@ -337,8 +337,9 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   let staleBasis = false;
   // ⭐ K3: a kept risk with a cause drawn in and no onward link (left out of the Run), or the same risk once connected.
   let risk: 'none' | 'inert' | 'connected' = 'none';
+  let riskLabel = 'Founder burnout';
   const withRisk = (g: { nodes: Rec[]; edges: Rec[] }) => risk === 'none' ? g : {
-    nodes: [...g.nodes, { id: 'f_hours', kind: 'factor', label: 'Hours on outreach' }, { id: 'r_burn', kind: 'risk', label: 'Founder burnout' }],
+    nodes: [...g.nodes, { id: 'f_hours', kind: 'factor', label: 'Hours on outreach' }, { id: 'r_burn', kind: 'risk', label: riskLabel }],
     edges: [...g.edges, { from: 'f_hours', to: 'r_burn' }, ...(risk === 'connected' ? [{ from: 'r_burn', to: String(goal.id) }] : [])],
   };
   let n = 0;
@@ -350,7 +351,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: licensedBasis ? { nodes: [goal, { id: 'subscribers', kind: 'factor', label: basisLabel, observed_state: { value: 300, source: basisSource } }, { id: 'a', kind: 'option' }, { id: 'b', kind: 'option' }], edges: [] } : withRisk(graphWith(goal)),
+      graph: withRisk(licensedBasis ? { nodes: [goal, { id: 'subscribers', kind: 'factor', label: basisLabel, observed_state: { value: 300, source: basisSource } }, { id: 'a', kind: 'option' }, { id: 'b', kind: 'option' }], edges: [] } : graphWith(goal)),
       graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true,
         ...(licensedBasis ? { analysis_admission: { ...(basisRunnable === undefined ? {} : { structurally_analysable: basisRunnable }), permitted_analysis_mode: 'comparative_leader', semantic_signals: { material_parameters_awaiting_user_node_ids: ['subscribers'] } } } : {}),
       },
@@ -368,7 +369,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; licensedBasis = false; basisRunnable = true; basisSource = 'cee_inference'; basisLabel = 'Subscribers'; staleBasis = false; recentFails = false; risk = 'none'; n += 1; });
+  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; licensedBasis = false; basisRunnable = true; basisSource = 'cee_inference'; basisLabel = 'Subscribers'; staleBasis = false; recentFails = false; risk = 'none'; riskLabel = 'Founder burnout'; n += 1; });
   const scenarioNow = () => `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
   const runTurn = async (turnId?: string, explain = false) => {
     const scenarioId = scenarioNow();
@@ -415,19 +416,26 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect(text).not.toContain('This comparison uses');
   });
 
-  it('RED: host objective placement cannot restore a proposal ID from the goal label', async () => {
+  it.each([false, true])('RED: an ID-bearing objective stays scrubbed on replay and is not re-asked (other ID: %s)', async (otherId) => {
     goal = { ...inferredGoal, label: 'Quarterly revenue prop_deadbeef' };
-    const text = (await runTurn()).assistant_text;
-    expect(text).not.toContain('prop_deadbeef');
+    if (otherId) { risk = 'inert'; riskLabel = 'Founder burnout prop_abcdef'; }
+    const id = 'abbeb81d-131e-4b60-a8eb-337bac8397dc';
+    const text = (await runTurn(id)).assistant_text;
+    expect(text).not.toMatch(/prop_[0-9a-f]{6,}/);
+    if (otherId) expect(text).toContain('Founder burnout');
     expect(text.match(/provisional objective/g)).toHaveLength(1);
-    expect(text).toContain('Quarterly revenue this proposal');
+    expect((await runTurn(id)).assistant_text).toBe(text);
+    expect((await runTurn()).assistant_text).not.toContain('provisional objective');
   });
-  it('RED: host basis placement cannot restore a proposal ID from a factor label', async () => {
+  it.each([false, true])('RED: an ID-bearing licensed basis stays scrubbed on replay (other ID: %s)', async (otherId) => {
     licensedBasis = true; basisLabel = 'Subscribers prop_deadbeef'; goal = FX.goal_after_target;
-    const text = (await runTurn()).assistant_text;
-    expect(text).not.toContain('prop_deadbeef');
+    if (otherId) { risk = 'inert'; riskLabel = 'Founder burnout prop_abcdef'; }
+    const id = '43808654-6509-4e76-8949-0f2945fe8f8b';
+    const text = (await runTurn(id)).assistant_text;
+    expect(text).not.toMatch(/prop_[0-9a-f]{6,}/);
+    if (otherId) expect(text).toContain('Founder burnout');
     expect(text.match(/This comparison uses Olumi’s estimates/g)).toHaveLength(1);
-    expect(text).toContain('Subscribers this proposal');
+    expect((await runTurn(id)).assistant_text).toBe(text);
   });
 
   it('B3-8 RED: licensed current Run carries named input basis in served and durable bytes, including replay', async () => {

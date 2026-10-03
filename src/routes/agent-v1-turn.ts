@@ -1802,7 +1802,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           modelExists: state.draftGraph !== undefined,
         });
       const composedReplay = composeDirectAnswerResponse({
-        assistant_text: replayText,
+        assistant_text: withoutProposalIds(replayText),
         stage: 'frame',
         answerKind: 'substantive',
         // The bound Explain control is re-derived from the canonical readback above, so it is valid by construction.
