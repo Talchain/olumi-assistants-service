@@ -39,9 +39,14 @@ permissions:
 jobs:
   # ── Job A: THE REQUIRED GATE, split into three jobs (no secrets needed) ─────
   #
-  # Branch protection on `staging` requires exactly ONE context:
-  # `Lint, TypeCheck, Unit Tests`. That context is now the `unit-tests` job
-  # further down, and it decides the verdict of the whole split gate:
+  # The merge gate is ONE context: `Lint, TypeCheck, Unit Tests`. ⚠ Live
+  # `staging` protection currently lists NO required context (derive it:
+  # `gh api repos/<org>/<repo>/branches/staging/protection --jq
+  # '.required_status_checks.contexts'` → []), so GitHub itself blocks nothing;
+  # the estate's merge rule (an exact-head APPROVE + this context green, checked
+  # by the pre-merge guard) is what gates. If protection is re-enabled, this is
+  # the context to name. It is the `unit-tests` job further down, and it decides
+  # the verdict of the whole split gate:
   #
   #   required-static  every lint / build / guard step, verbatim   (~2.5 min)
   #   required-tests   `pnpm test:required`, sharded 3 ways        (~8.5 min each, in parallel)
@@ -273,6 +278,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: required-tests-expected
+          # A re-run of this job alone re-uploads under the same name (v4 409s otherwise).
+          overwrite: true
           path: .vitest-reports/expected.json
           if-no-files-found: error
           retention-days: 3
@@ -360,6 +367,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: required-tests-shard-${{ matrix.shard }}
+          # A re-run of this job alone re-uploads under the same name (v4 409s otherwise).
+          overwrite: true
           path: .vitest-reports/shard-${{ matrix.shard }}.json
           if-no-files-found: error
           retention-days: 3
