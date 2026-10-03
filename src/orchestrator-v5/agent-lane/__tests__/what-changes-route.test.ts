@@ -16,11 +16,12 @@ const D3 = SERVED.cases.find((c) => c.id === 'A-WHAT-CHANGES-NONE-MEASURABLE-SIL
 const ISL_D3_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"switch_to_gcp","replicates":4,"bound_abs":0.01,"bound_rel":0.15,"grid_step":0.0025,"links":[{"from_id":"monthly_cloud_savings","to_id":"monthly_spend","status":"quoted","reason":null,"current_mean":-0.3555555555555555,"threshold":-0.09324009324009322,"replicate_thresholds":[-0.09324009324009322,-0.09572649572649569,-0.08578088578088575,-0.09324009324009322],"replicate_range":0.009945609945609946,"to_option_id":"stay_on_aws"},{"from_id":"monthly_cloud_overspend_during_migration","to_id":"monthly_spend","status":"no_change","reason":null,"current_mean":0.17777777777777776,"threshold":null,"replicate_thresholds":[null,null,null,null],"replicate_range":null,"to_option_id":null}]};
 const PRESS = NEXT_STEP_CHIPS.find((c) => c.id === 'agent-next-what-would-change')!;
 
-const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' | 'unavailable' }));
+const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' | 'unavailable', during: null as null | (() => void) }));
 vi.mock('../../handlers/decision-flip-dispatch.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatchDecisionFlip: vi.fn(async (params: Rec) => {
     dispatch.calls.push(params);
+    dispatch.during?.();
     return dispatch.answer === 'stale' ? { status: 'stale' }
       : dispatch.answer === 'unavailable' ? { status: 'unavailable', reason: 'client_without_decision_flip' }
       : { status: 'measured', block: ISL_D3_BLOCK, links: params.candidateLinks.slice(0, 2) };
@@ -46,6 +47,10 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()), resolveUserIdentity: async () => ({ mode: 'off' }),
 }));
 
+// What the product's graph read serves; rows change it to model an edit or a Run the Explain control cannot bind.
+const served: { state: Rec; result: Rec } = { state: D3.body.analysis_state, result: D3.body.analysis_result };
+const RUN_NOT_CURRENT = 'I can’t explain that result as current. Check the current results before asking again.';
+
 describe('the real route: "What would change the result?" → measured tipping points, 0 model calls', () => {
   let app: FastifyInstance;
   let modelCalls = 0;
@@ -60,15 +65,19 @@ describe('the real route: "What would change the result?" → measured tipping p
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: D3.body.draft_graph, graph_hash: 'h-d3', analysis_state: D3.body.analysis_state,
-      analysis_result: D3.body.analysis_result, analysis_option_participation: D3.body.option_participation,
+      graph: D3.body.draft_graph, graph_hash: 'h-d3', analysis_state: served.state,
+      analysis_result: served.result, analysis_option_participation: D3.body.option_participation,
     }));
     app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'ok', blocks: [] }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; n += 1; SCENARIO = `${SCENARIO_BASE}${String(n).padStart(2, '0')}`; });
+  beforeEach(() => {
+    modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; dispatch.during = null;
+    served.state = D3.body.analysis_state; served.result = D3.body.analysis_result;
+    n += 1; SCENARIO = `${SCENARIO_BASE}${String(n).padStart(2, '0')}`;
+  });
 
   const post = async (chipId: string, message: string) => {
     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, source: 'chip', chip: { id: chipId } } });
@@ -89,13 +98,6 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(body.assistant_text === answer || body.assistant_text.endsWith(`\n\n${answer}`), body.assistant_text).toBe(true);
     expect(body.assistant_text).not.toMatch(/no single (assumption|factor)|nothing would change/i);
     expect(body.suggested_actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
-  });
-
-  it('W2: a model changed since its Run is said as such, with no model call', async () => {
-    dispatch.answer = 'stale';
-    const body = await post(PRESS.id, PRESS.message);
-    expect(modelCalls).toBe(0);
-    expect(body.assistant_text).toMatch(/(^|\n\n)Your model has changed since its last analysis, so I can’t say what would change that result\. Run the analysis again, then ask\.$/);
   });
 
   // One chip, two grounded answers (#2536 SCI-HERO coaching shares `agent-next-what-would-change`): anything the
@@ -129,6 +131,33 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(body.assistant_text).toBe(await coaching());
     expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|can't yet measure what would change/);
     expect(body.suggested_actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
+  });
+
+  it('W2: #2522\'s digest disagreeing with a canonically current Run (stale) is the coaching, never "your model has changed"', async () => {
+    dispatch.answer = 'stale';
+    const body = await post(PRESS.id, PRESS.message);
+    expect(dispatch.calls).toHaveLength(1);
+    expect(modelCalls).toBe(0);
+    expect(body.assistant_text).toBe(await coaching());
+    expect(body.assistant_text).not.toMatch(/Your model has changed since|would come out ahead|would still lead/);
+  });
+
+  it('W5: an edit while ISL measures (the bound Run is no longer current at the final read) is never answered', async () => {
+    dispatch.during = () => { served.state = { ...D3.body.analysis_state, run_state: { ...D3.body.analysis_state.run_state, kind: 'complete_stale' } }; };
+    const body = await post(PRESS.id, PRESS.message);
+    expect(dispatch.calls).toHaveLength(1);
+    expect(modelCalls).toBe(0);
+    expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
+    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+  });
+
+  it('W6: a Run the Explain control cannot bind (no computed_against_hash) is never measured', async () => {
+    const { computed_against_hash: _unbound, ...result } = D3.body.analysis_result;
+    served.result = result;
+    const body = await post(PRESS.id, PRESS.message);
+    expect(dispatch.calls).toHaveLength(0);
+    expect(modelCalls).toBe(0);
+    expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
   });
 
   it('CONTROL: another next step never reaches the decision-flip dispatch', async () => {
