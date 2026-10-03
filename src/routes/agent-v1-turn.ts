@@ -77,7 +77,8 @@ import { SessionBindingRegistry } from '../orchestrator-v5/agent-lane/session-bi
 import { budgetFor, conversationBudgetFor, type CallBudget, INTERPRET_DEADLINE, interpretBudget } from '../orchestrator-v5/agent-lane/model-budgets.js';
 import { HOST_TOOL_CONTRACT, SELECTED_COACH_V02_TEMPLATE } from '../orchestrator-v5/agent-lane/coach-route-v0_2.js';
 import { narrateWriteOutcome, notAdoptedLine, openQuestionsForReply, staleResultLine, withoutAgentDirections, withWriteOutcome } from '../orchestrator-v5/agent-lane/write-outcome.js';
-import { decisionInputLines, textAtRest, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { decisionInputLines, isDecisionInputAsk, textAtRest, withA7AfterGate, type DecisionInputAskContext } from '../orchestrator-v5/agent-lane/decision-input-ask.js';
+import { conditionalInputBasis, analysedOptionIds } from '../orchestrator-v5/agent-lane/conditional-input-basis.js';
 import { isAgentAnswerRow } from '../orchestrator-v5/session/conversation-as-seen.js';
 import { linkSizeAsk } from '../orchestrator-v5/agent-lane/link-size-ask.js';
 import { typedByUser, userWordsOf } from '../orchestrator-v5/agent-lane/stated-by-user.js';
@@ -435,7 +436,7 @@ async function decisionLinesAskedOnce(
   graph: unknown, ctx: DecisionInputAskContext, store: RecentRowsReader, scenarioId: string, exceptTurnId: string | undefined,
 ): Promise<string[]> {
   const lines = decisionInputLines(graph, ctx);
-  if (!lines.some((l) => l.endsWith('as your target.')) || typeof store.readRecent !== 'function') return lines;
+  if (!lines.some(isDecisionInputAsk) || typeof store.readRecent !== 'function') return lines;
   try {
     const recentReplies = (await store.readRecent(scenarioId, DURABLE_SEED_ROWS_READ))
       .filter((t) => isAgentAnswerRow(t) && (exceptTurnId === undefined || t.turn_id !== exceptTurnId))
@@ -1748,6 +1749,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const atRest = { awaitingApproval: executableWaitingProposal(scenarioId, userId, state.graphHash) !== undefined, builtOrRan: true };
           const say = goalChanceWithheldForAgent(state.analysisResult)?.say;
           const owedNow = typeof say === 'string' && say.trim() !== '' ? [say] : [];
+          if (claimPermissionsFrom(state.analysisState, state.analysisReady, { requested: true }).leader_may_be_named) {
+            const basis = conditionalInputBasis({ graph: state.graph,
+              admission: (state.analysisReady as { analysis_admission?: unknown } | undefined)?.analysis_admission,
+              analysedOptionIds: analysedOptionIds(state.analysisResult) });
+            if (basis !== null) owedNow.push(basis);
+          }
           const withoutAsks = withDisclosures(RUN_RESULT_READY_TEXT, owedNow);
           const lines = await decisionLinesAskedOnce(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks }, store, scenarioId, turnId);
           let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow, ...lines]);
@@ -3033,7 +3040,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ D1 + A7 (DL #75 5923918068; AIQ words 5923963470): on the brief and Run turns, at rest — the deadline the model holds
     // but cannot answer, said as a fact; and, while the goal has no stated target, ONE ask for it (`decision-input-ask.ts`).
     const statusText = [narration.status, notAdoptedLine(result.tool_calls, result.tool_results), staleLine, readinessLine, askLine].filter((x): x is string => x !== null && x !== '').join(' ') || null;
-    const composedWithout = withWriteOutcome(withDisclosures(narration.text, owed), statusText);
+    const basis = fastPath !== 'method'
+      && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
+      && claimPermissionsFrom(analysisState, analysisReady, { requested: fastPath === 'run' }).leader_may_be_named
+      ? conditionalInputBasis({ graph: readbackGraph,
+        admission: (analysisReady as { analysis_admission?: unknown } | undefined)?.analysis_admission,
+        analysedOptionIds: analysedOptionIds(analysisResult) }) : null;
+    const resultDisclosures = basis === null ? owed : [...owed, basis];
+    const composedWithout = withWriteOutcome(withDisclosures(narration.text, resultDisclosures), statusText);
     const decisionTurn = {
       awaitingApproval: offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
         || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined,
@@ -3051,7 +3065,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const decisionLines = await decisionLinesAskedOnce(readbackGraph, decisionCtx, store, scenarioId, undefined);
     // ⭐ L1 (DL #75 5925649954 item 5; AIQ words 5925678816): the user asks about ONE link Olumi has not sized → the host asks
     // for its size, at rest, unless this turn already asks (D1 above, the model, the host status) or a card awaits a yes.
-    const linkAsk = decisionLines.some((l) => l.endsWith('as your target.')) ? null : linkSizeAsk(readbackGraph, {
+    const linkAsk = decisionLines.some(isDecisionInputAsk) ? null : linkSizeAsk(readbackGraph, {
       message, restingText: textAtRest(composedWithout), awaitingApproval: decisionTurn.awaitingApproval,
     });
     if (linkAsk !== null) decisionLines.push(linkAsk);
@@ -3062,7 +3076,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
       assistant_text: fastPath === 'method' ? narration.text
-        : withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)),
+        : withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...resultDisclosures, ...decisionLines]), statusText)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".

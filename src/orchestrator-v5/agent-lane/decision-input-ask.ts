@@ -139,7 +139,9 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   const leftOut = leftOutLines(graph, label);
   const within = withinMonths(goal);
   const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
-  const wanted = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
+  const wanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null
+    : goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
+    : !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
   const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
@@ -158,9 +160,14 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
   return `What figure should "${label}" reach or stay under${within}? I'll propose it as your target.`;
 }
 
-/** The one ask (D1), or null. */
+/** The host's framing or target ask, recognised by every selector and replay reader. */
+export function isDecisionInputAsk(line: string): boolean {
+  return line.endsWith('as your target.') || line.endsWith('What should this model help you explore?');
+}
+
+/** The one framing or target ask, or null. */
 export function decisionInputAsk(graph: unknown, ctx: DecisionInputAskContext): string | null {
-  return decisionInputLines(graph, ctx).find((l) => l.endsWith('as your target.')) ?? null;
+  return decisionInputLines(graph, ctx).find(isDecisionInputAsk) ?? null;
 }
 
 /**
@@ -182,7 +189,7 @@ export function withA7AfterGate(
   if (a7 === undefined || text.includes(a7)) return text;
   const rest = textAtRest(text);
   if (rest !== text && words(rest) + TOGGLE_LABEL_WORDS + words(a7) > AT_REST_WORD_BOUND) return text;
-  const ask = owedLines.find((l) => l.endsWith('as your target.'));
+  const ask = owedLines.find(isDecisionInputAsk);
   if (ask !== undefined && text.split(ask).length === 2) return text.replace(ask, `${a7}\n\n${ask}`);
   if (statusText === null) return text;
   const at = text.lastIndexOf(`\n\n${statusText}`);
