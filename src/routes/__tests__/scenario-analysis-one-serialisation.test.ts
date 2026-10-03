@@ -43,7 +43,21 @@ import type { GraphStateIngress } from '../../orchestrator-v5/boundary/request-e
 type Rec = Record<string, any>;
 
 const SCENARIO = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-const GRAPH: GraphStateIngress = { nodes: [{ id: 'goal', kind: 'goal', label: 'Synthetic goal', goal_threshold: 0.7 }], edges: [] };
+// P0 SHARED DATA (#85 5963281356): a model the product can RUN. The ONE leader licence reads the admission, and a
+// goal-only graph is refused (`structurally_analysable: false`, matrix M5), so no leader could ever be named from it.
+// Admitted here at `quantified_provisional` (matrix M2): a separated leader ships with its caveat.
+const linkOf = (from: string, to: string, mean = 1) => ({ from, to, strength: { mean, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const });
+const GRAPH: GraphStateIngress = {
+  nodes: [
+    { id: 'decision', kind: 'decision', label: 'Choose' },
+    { id: 'goal', kind: 'goal', label: 'Synthetic goal', goal_threshold: 0.7 },
+    { id: 'factor', kind: 'factor', label: 'Synthetic factor' },
+    { id: 'option-a', kind: 'option', label: 'Option A', interventions: { factor: 1 } },
+    { id: 'option-b', kind: 'option', label: 'Option B', interventions: { factor: 0 } },
+  ],
+  edges: [linkOf('decision', 'option-a'), linkOf('decision', 'option-b'), linkOf('option-a', 'factor'), linkOf('option-b', 'factor', 0.01), linkOf('factor', 'goal')],
+  goal_node_id: 'goal',
+} as unknown as GraphStateIngress;
 const HASH = computeAnalysisAffectingGraphHash(GRAPH)!;
 const RUN_AT = '2026-10-02T10:00:00.000Z';
 

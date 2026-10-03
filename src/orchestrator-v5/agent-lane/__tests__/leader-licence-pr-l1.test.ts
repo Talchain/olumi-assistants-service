@@ -38,7 +38,10 @@ describe('ONE leader licence', () => {
     ['entitled, comparative, looked and declined (near tie)', { mayNameLeadingOption: true, analysisReady: ready('comparative_leader'), leaderClaimWithheldReason: WITHHELD_NEAR_TIE }, 'withheld'],
     ['ruling (ii): separation could not be evaluated', { mayNameLeadingOption: true, analysisReady: ready('comparative_leader'), leaderClaimWithheldReason: WITHHELD_SEPARATION_UNAVAILABLE }, 'withheld'],
     ['entitled, comparative, nothing declined', { mayNameLeadingOption: true, analysisReady: ready('comparative_leader') }, 'permitted'],
-    ['entitled, admission absent (fails open, as the shared gate)', { mayNameLeadingOption: true, analysisReady: ready(null) }, 'permitted'],
+    // P0 SHARED DATA matrix M6 (#85 5963281356, DL ruling via PTL 5963175273 §3): the licence fails CLOSED here; the shared
+    // V5 gate's `analysisReadyPermitsLeaderNaming` still stands down (PR-L2), a named residual.
+    ['entitled, admission absent (fails CLOSED — matrix M6)', { mayNameLeadingOption: true, analysisReady: ready(null) }, 'withheld'],
+    ['entitled, run-refusal axis (structurally_analysable:false — matrix M5)', { mayNameLeadingOption: true, analysisReady: { status: 'blocked', analysis_admission: { structurally_analysable: false, permitted_analysis_mode: 'none' } } }, 'withheld'],
   ];
   it.each(rows)('%s', (_name, input, expected) => {
     expect(leaderLicence(input)).toBe(expected);
