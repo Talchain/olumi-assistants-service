@@ -110,7 +110,8 @@ async function build(wire: Record<string, unknown>): Promise<Graph> {
 
 /** The persisted fact the real handler writes, PLoT faked with £59 first at 0.94 — a REQUESTED run. */
 async function runOn(registered: Graph): Promise<RunAnalysisHandlerFact> {
-  const store = { loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }) } as unknown as SessionStore;
+  const store = {
+    readMostRecentPendingActions: async () => [], loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }) } as unknown as SessionStore;
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, REQUEST_ID, store);
   const env = structuredClone(happyFixture) as unknown as Record<string, unknown>;
   env.results = [

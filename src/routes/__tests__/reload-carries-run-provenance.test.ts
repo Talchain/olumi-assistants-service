@@ -27,7 +27,8 @@ const readRecent = vi.fn();
 const readFactsFor = vi.fn();
 const readAnalysisInvalidatedAt = vi.fn();
 vi.mock('../../orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({ readRecent, readFactsFor, readAnalysisInvalidatedAt }),
+  getSessionStore: () => ({
+    readMostRecentPendingActions: async () => [], readRecent, readFactsFor, readAnalysisInvalidatedAt }),
 }));
 vi.mock('../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },

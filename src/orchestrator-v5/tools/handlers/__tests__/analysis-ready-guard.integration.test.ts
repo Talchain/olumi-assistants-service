@@ -127,6 +127,7 @@ function stubStore(graph: unknown): SessionStore {
   // both methods so the stub matches the real interface (loadGraph drives the seam;
   // loadGraphAndBriefText kept for any brief-reading path).
   return {
+    readMostRecentPendingActions: async () => [],
     loadGraph: async () => graph,
     loadGraphAndBriefText: async () => ({ graph, briefText: null }),
   } as unknown as SessionStore;
@@ -135,6 +136,7 @@ function stubStore(graph: unknown): SessionStore {
 // must classify as a retryable scenario_read_failed, NOT a genuinely-missing graph.
 function throwingStore(err: Error): SessionStore {
   return {
+    readMostRecentPendingActions: async () => [],
     loadGraph: async () => { throw err; },
     loadGraphAndBriefText: async () => { throw err; },
   } as unknown as SessionStore;
@@ -252,6 +254,23 @@ describe('EP2 integration — freshness/hash consistency (deriveDecisionContextG
 });
 
 describe('EP2 integration — run_analysis handler blocked/analysed', () => {
+  it.each(['missing', 'failed'] as const)('pending-scope reader %s blocks before PLoT and fact creation', async (failure) => {
+    const { readMostRecentPendingActions: _reader, ...graphStore } = stubStore(makeBase());
+    const store = (failure === 'missing' ? graphStore : {
+      ...graphStore,
+      readMostRecentPendingActions: async () => { throw new SessionReadError('pending read unavailable'); },
+    }) as unknown as SessionStore;
+    const calls = { n: 0 };
+    const handler = makeHandlerForStore(store, calls);
+    let outcome: Awaited<ReturnType<typeof handler>> | undefined;
+    let err: unknown;
+    try { outcome = await handler(invocation); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(HandlerInvocationFailedError);
+    expect((err as HandlerInvocationFailedError).cause_kind).toBe('scenario_read_failed');
+    expect(calls.n).toBe(0);
+    expect(outcome).toBeUndefined();
+  });
+
   it('unreachable controllable factor is blocked in the default/legacy-false posture (NO PLoT, no fact)', async () => {
     // The compatibility input still defaults false, but no production seam
     // reads it. This exact canonical whole-status discriminator used to run.

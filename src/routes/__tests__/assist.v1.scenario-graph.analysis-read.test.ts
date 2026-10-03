@@ -77,6 +77,7 @@ const getScenarioOwner = vi.fn();
 const readRecent = vi.fn();
 const readFactsFor = vi.fn();
 const store = {
+  readMostRecentPendingActions: async () => [],
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,

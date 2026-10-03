@@ -47,6 +47,9 @@ const ALLOWED_CROSS_BOUNDARY = new Set(
     // Saved-result permission reuses the canonical per-Run claim/licence composition.
     '../context/canonical-analysis-state.js',
     '../compose/analysis-state-v1.js',
+    // Shared Data: the pure common licence consumes both bound saved-Run
+    // claim/admission verdicts. No independent permission policy in Compare.
+    '../compose/leader-licence.js',
     '../agent-lane/first-analysis.js',
     '../compose/unrequested-analysis-confinement.js',
     '../coaching/pick-raw-robustness.js',
