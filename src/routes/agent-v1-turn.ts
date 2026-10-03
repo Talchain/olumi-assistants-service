@@ -3076,8 +3076,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
       assistant_text: fastPath === 'method' ? narration.text
-        : withB3LinesAtRest(withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)),
-          [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))]),
+        : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText),
+          [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))])),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
