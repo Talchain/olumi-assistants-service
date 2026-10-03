@@ -34,7 +34,8 @@
  *          worth checking. Assumption source priority chain:
  *          strengthen.detail → strengthen.label → bias_finding.
  *          explanation → coaching_bias_signal.detail → uncertainty
- *          driver → fixed-generic. Each candidate passes a copy-
+ *          driver → convergent opposed drivers → fixed-generic.
+ *          Each candidate passes a copy-
  *          quality gate before being adopted. The block is omitted
  *          entirely when no factor / risk / assumption survives.
  *
@@ -88,6 +89,7 @@ import {
 } from './copy-quality-gate.js';
 import { buildReadinessNextStep } from './readiness-recovery.js';
 import { elideLabelAtWordBoundary } from '../../utils/label-elision.js';
+import { isDirectedEdge, type EdgeTypeT } from '../../schemas/graph.js';
 
 /**
  * RC4 proportionate remedies: run a candidate through
@@ -378,6 +380,26 @@ interface EdgeLite {
    *   edge license a trade-off claim.
    */
   readonly exists_probability?: number;
+  /**
+   * ⛔⛔ READ, AND THE OMISSION WAS A LIVE DEFECT. The drafter mints
+   * `edge_type: "bidirected"` to say *"unmeasured common cause, I am asserting
+   * NO direction"*, and pins sentinel parameters beside it:
+   * `mean=0, std=0.01, exists_probability=1.0, effect_direction: "positive"`
+   * (`defaults-v187.ts:191,198`; `defaults-v19.ts:409` states it outright —
+   * *"effect_direction is a placeholder"*).
+   *
+   * `edgeSign` consults `effect_direction` BEFORE the zero-mean guard, and
+   * `exists_probability` is 1.0, so a bidirected sentinel reads as a confident
+   * `+1`. Without this field the convergent-driver scan could not tell that
+   * apart from a real positive edge and would serve, as the first thing the
+   * user reads, a conflict it invented from a schema placeholder.
+   *
+   * `schemas/graph.ts:597-622` is the estate's single directed-edge policy
+   * point and nine consumers already filter on it; `unreachable-factors.ts`
+   * records this exact omission as a defect fixed once before. The field is
+   * declared here so that policy can be IMPORTED rather than re-derived.
+   */
+  readonly edge_type?: EdgeTypeT;
 }
 
 interface NodeLite {
@@ -462,6 +484,13 @@ export type AssumptionSource =
   | 'bias_finding'
   | 'coaching_bias_signal'
   | 'uncertainty_driver'
+  /**
+   * A structural coaching line derived from the drafted model's own edges:
+   * two non-option drivers with DIRECT, oppositely-signed edges into the same
+   * factor. Deterministic template over the model's labels — no LLM bytes are
+   * read to produce it, which is why it may cross the ready-only gate.
+   */
+  | 'convergent_drivers'
   | 'deterministic_fallback';
 
 /**
@@ -741,11 +770,46 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // The goal is identified the same way `findGoalLabel` identifies it — by node
   // kind — so the two cannot disagree about which node the goal is.
   const goalId = nodes.find((n) => n?.kind === 'goal')?.id ?? null;
-  const tradeOffBullet = buildTradeOffBullet(
-    factors,
-    risks,
-    findOpposingFactorPair(nodes, edges, goalId),
-  );
+  const opposingPair = findOpposingFactorPair(nodes, edges, goalId);
+  const tradeOffBullet = buildTradeOffBullet(factors, risks, opposingPair);
+  /**
+   * ⭐ COMPUTED ONCE, FOR BOTH BRANCHES BELOW.
+   *
+   * This line REPLACES the assumption slot's content rather than adding a
+   * bullet beside it, so the weighing section keeps its BULLET COUNT.
+   *
+   * ⛔⛔ AND THE SENTENCE THAT USED TO STAND HERE — *"it costs the ladder
+   * nothing"* — WAS FALSE, so it is quoted rather than deleted (CLAUDE.md trap
+   * 14). `assembleSectionedNarrative` meters `countWords(text) <= MAX_WORDS`
+   * (140). It sheds on WORDS, not on bullets. This line renders ~23 words where
+   * the constant it replaces renders ~13, so it charges roughly +10 words to
+   * every rung at which the assumption bullet survives — and a rung can be
+   * tripped by ten words.
+   *
+   * ⚠ WHAT IS AND IS NOT ESTABLISHED, stated precisely. Reachable: on a READY
+   * turn `pickAssumption` reads `strengthenItems[0]` only while
+   * `pickAdditionalChecks` iterates, so a gate-rejected `[0]` with a later
+   * acceptable item yields BOTH a `convergent_drivers` assumption AND a
+   * `Worth a look:` bullet — the rung-1→2 boundary where +10 words sheds the
+   * extra check. On a NON-READY turn the same pressure reaches rung 3b. What is
+   * NOT established is how often real drafts sit within ten words of a rung
+   * boundary; the fixtures in this file's suite sit far below 140, which is
+   * exactly why no test observed this.
+   *
+   * ⛔ THIS IS NOT CLOSED, and it is a trade the file forbids one screen
+   * further down: *"a fix that surfaces the question by silencing the coaching
+   * is a trade, not a fix"*. The smallest enabling change, named so the next
+   * lane does not re-derive it: `assembleSectionedNarrative` already takes
+   * three weighing-block variants (`weighingBlock`, `weighingBlockCore`,
+   * `weighingBlockDirectionOnly`) and ladders over them. A FOURTH variant built
+   * with the SHORTER assumption, tried at each rung before that rung sheds a
+   * bullet, keeps the coaching and spends the question only out of genuine
+   * headroom. That is a contained change to the assembly signature and its
+   * caller, and it is deliberately NOT made here: it is a second reviewable
+   * unit, and bundling it would put an assembly-ladder change inside a
+   * coaching-content PR.
+   */
+  const convergentDriverText = buildConvergentDriverLine(nodes, edges, goalId, opposingPair);
   const mayServeFreeformCoaching = analysisReady?.status === 'ready';
 
   // A direction clarification gets its OWN slot and is therefore removed from
@@ -837,8 +901,43 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         analysisReady,
         strengthenItems: generalStrengthenItems,
         coachingBiasSignals,
+        convergentDriverText,
       })
-    : pickDeterministicAssumption({ nodes, freeformCandidatesSuppressed });
+    : /**
+       * ⭐⭐ THE NON-READY BRANCH IS WHERE THIS EARNS ITS PLACE, AND IT IS THE
+       * MAJORITY OF TURNS. The gate above is unchanged and still refuses to
+       * inspect a single freeform coaching byte here — correctly, and this
+       * line does not ask it to. What changes is only which DETERMINISTIC
+       * item is preferred: the person gets a question about the conflict
+       * their own model contains, when it contains one.
+       *
+       * The precedent is the direction-clarification bullet three declarations
+       * above, which crosses the same gate on the same grounds: deterministic
+       * copy from a fixed template, gated, dropped whole on a trip.
+       *
+       * ⚠ REBASE NOTE (17 Sep, coaching lane). This branch was authored when
+       * the fallback here was the bare `FIXED_GENERIC_ASSUMPTION` constant.
+       * Staging has SINCE replaced that with `pickDeterministicAssumption`,
+       * which tries a real `uncertainty_driver` first and keeps the constant
+       * as its OWN terminal rung (:1863, :1870) while reporting an honest
+       * `fallbackReason` (`gate_rejected` / `readiness_gated` / `no_candidate`)
+       * that this branch could not distinguish. Both lanes improved the same
+       * fallback, so both are kept and ORDERED: the convergent-driver question
+       * is the more specific finding and goes first; everything it does not
+       * settle falls through to staging's picker, unchanged. Neither side is
+       * discarded and the constant is still nobody's first answer.
+       *
+       * `fallbackReason: null` matches the sibling precedent — the picker sets
+       * null whenever it found a real signal (:1856) and names a reason only
+       * when it genuinely fell back. A convergent-driver hit is not a fallback.
+       */
+      convergentDriverText !== null
+      ? {
+          text: convergentDriverText,
+          source: 'convergent_drivers',
+          fallbackReason: null,
+        }
+      : pickDeterministicAssumption({ nodes, freeformCandidatesSuppressed });
   const assumptionBullet = assumption.text ? toAssumptionBullet(assumption.text) : null;
 
   // One extra "check" bullet from the next unused coaching signal. Seed the
@@ -1507,6 +1606,221 @@ function findOpposingFactorPair(
 }
 
 /**
+ * ⭐ TWO DRIVERS, ONE FACTOR, OPPOSITE WAYS — the one structural conflict this
+ * model can prove it contains.
+ *
+ * Finds a factor with DIRECT inbound edges from two DISTINCT non-option
+ * drivers whose settled signs disagree. That is a property the drafted model
+ * literally carries, established the same way {@link factorDirectionOnGoal}
+ * establishes a direction: from a direct edge, via {@link edgeSign}, which
+ * already refuses a sign for `exists_probability: 0` and for a zero mean.
+ *
+ * ⚠ FOUR THINGS IT DELIBERATELY REFUSES TO DO, each of which would turn a true
+ * line into an invented one:
+ *
+ *  1. ⭐⭐ OPTIONS ARE NEVER DRIVERS. Every option set pushes a shared factor
+ *     both ways by construction — that IS the comparison. Counting options
+ *     here would fire on nearly every drafted model and report the ordinary
+ *     act of comparing options as a conflict in the user's thinking. The
+ *     `decision` node is excluded for the same reason.
+ *  2. NO INDIRECT PATHS. A sign composed down a chain the person never sees
+ *     summarised is not something to open their reply with. Unknown stays
+ *     unknown, exactly as `factorDirectionOnGoal` rules for the goal.
+ *  3. A SOURCE WITH SELF-CONTRADICTING EDGES INTO THE TARGET IS DROPPED, not
+ *     resolved. Two edges from one driver disagreeing is the model failing to
+ *     settle it, and picking one would be inventing the answer.
+ *  4. THE GOAL IS NEVER THE TARGET. Opposition on the goal is already the
+ *     trade-off bullet's claim ({@link findOpposingFactorPair}); saying it
+ *     again one line below is the same sentence twice.
+ *
+ * Ordering is by `nodes` array position for both target and drivers, so the
+ * same model always yields the same line.
+ */
+interface ConvergentDrivers {
+  readonly target: string;
+  /** The driver the model has pushing the target UP. */
+  readonly raises: string;
+  /** The driver the model has pushing the target DOWN. */
+  readonly lowers: string;
+}
+
+/** Node kinds that may never count as a driver — see refusal (1) above. */
+/**
+ * Kinds that may not be named as a DRIVER of a factor.
+ *
+ * ⚠ `action` IS INCLUDED THOUGH ITS REACHABILITY IS NOT ESTABLISHED — and that
+ * is the honest state of it, not a claim. `NodeKindV3` admits `action`, and the
+ * exclusion rationale for `option`/`decision` applies to it verbatim: it is a
+ * lever the person CHOOSES, not a quantity their model moves, so asking which of
+ * two levers "dominates" is a different question from the one this line asks.
+ * A sweep of `defaults-v187.ts` found no `action` emission, so this may be
+ * unreachable today — it is closed on cost, since a drafter that starts
+ * emitting the kind would otherwise reopen it silently.
+ */
+const NON_DRIVER_KINDS: ReadonlySet<string> = new Set(['option', 'decision', 'action']);
+
+function findConvergingOpposedDrivers(
+  nodes: readonly NodeLite[],
+  edges: readonly EdgeLite[],
+  goalId: string | null,
+): ConvergentDrivers | null {
+  const labelOf = new Map<string, string>();
+  const kindOf = new Map<string, string>();
+  for (const n of nodes) {
+    if (typeof n?.id !== 'string' || typeof n.label !== 'string') continue;
+    labelOf.set(n.id, n.label);
+    kindOf.set(n.id, typeof n.kind === 'string' ? n.kind : '');
+  }
+
+  for (const target of nodes) {
+    if (target?.kind !== 'factor') continue;
+    if (typeof target.id !== 'string' || typeof target.label !== 'string') continue;
+    if (goalId !== null && target.id === goalId) continue;
+
+    // Settled sign per distinct source; `null` marks a source the model
+    // contradicts itself about, which is dropped rather than resolved.
+    const signBySource = new Map<string, 1 | -1 | null>();
+    for (const e of edges) {
+      if (e?.to !== target.id) continue;
+      // ⛔ F1 — A BIDIRECTED EDGE ASSERTS NO DIRECTION, SO IT MAY NOT ESTABLISH
+      // ONE HERE. Its `effect_direction` is a declared placeholder beside a
+      // zero mean and `exists_probability: 1.0`, which `edgeSign` reads as a
+      // confident sign. See the note on `EdgeLite.edge_type`.
+      //
+      // ⭐ THE POLICY IS IMPORTED, NOT RESTATED. `isDirectedEdge` is the
+      // estate's single directed-edge policy point; writing
+      // `e.edge_type !== 'bidirected'` inline here would be a tenth private
+      // copy of a rule that has already drifted once.
+      //
+      // ⚠ SCOPED DELIBERATELY TO THIS LOOP. `edgeSign` itself is NOT changed:
+      // `scanIndirectPaths` uses it, where a bidirected edge can currently only
+      // VETO a claim (fail-safe silence). Making `edgeSign` null on bidirected
+      // would REMOVE those vetoes and make that path less safe — a wider fix
+      // that is strictly worse. This is the one place in the composer where a
+      // bidirected placeholder would make the product ASSERT.
+      if (!isDirectedEdge(e)) continue;
+      // Named `sourceId`, not `from`: a const called `from` initialised from
+      // `e?.from` is TS7022 (implicit any, self-referential initializer) under
+      // the build config, which `tsc -p tsconfig.build.json` catches and the
+      // focused vitest run does not.
+      const sourceId: string | undefined = e?.from;
+      if (typeof sourceId !== 'string' || sourceId === target.id) continue;
+      if (NON_DRIVER_KINDS.has(kindOf.get(sourceId) ?? '')) continue;
+      if (!labelOf.has(sourceId)) continue;
+      const sign = edgeSign(e);
+      if (sign === null) {
+        signBySource.set(sourceId, null);
+        continue;
+      }
+      const seen = signBySource.get(sourceId);
+      if (seen === undefined) signBySource.set(sourceId, sign);
+      else if (seen !== sign) signBySource.set(sourceId, null);
+    }
+
+    // ⛔⛔ F2 — A DIRECT EDGE ESTABLISHES; AN INDIRECT PATH MAY ONLY VETO.
+    //
+    // This is `factorDirectionOnGoal`'s own ruling (see its header), and the
+    // docblock on this line CLAIMED to follow it while the code did not: the
+    // scan above reads `e.to === target.id` and nothing else, so a model that
+    // contradicts itself one level in was reported as settled.
+    //
+    // The recorded counterexample, now closed: `f2→f1 +`, `f2→f9 +`,
+    // `f9→f1 −`, `f3→f1 −`. The direct edge says f2 raises f1; the composed
+    // path says it lowers it. The model does not settle which way f2 moves f1,
+    // so f2 may not be named as one half of an opposition.
+    //
+    // ⚠ A TRUNCATED WALK IS NOT PERMISSION. `scanIndirectPaths` reports when
+    // it stopped short of the depth cap; "nothing contradictory was FOUND"
+    // is not "nothing contradictory EXISTS", and the same distinction is what
+    // `factorDirectionOnGoal` was corrected for.
+    //
+    // ⚠ One known, accepted asymmetry, stated rather than left to be found: a
+    // bidirected edge can still take part in `scanIndirectPaths` and therefore
+    // still VETO here. That direction is silence, never a false claim, and the
+    // alternative — changing `edgeSign` — would remove vetoes elsewhere.
+    for (const [sourceId, settled] of signBySource) {
+      if (settled === null) continue;
+      const scan = scanIndirectPaths(sourceId, target.id, edges);
+      if (scan.truncated) {
+        signBySource.set(sourceId, null);
+        continue;
+      }
+      for (const indirect of scan.signs) {
+        if (indirect !== settled) {
+          signBySource.set(sourceId, null);
+          break;
+        }
+      }
+    }
+
+    let raises: string | null = null;
+    let lowers: string | null = null;
+    for (const n of nodes) {
+      const id = n?.id;
+      if (typeof id !== 'string') continue;
+      const sign = signBySource.get(id);
+      if (sign === undefined || sign === null) continue;
+      const label = labelOf.get(id);
+      if (label === undefined) continue;
+      if (sign > 0 && raises === null) raises = label;
+      else if (sign < 0 && lowers === null) lowers = label;
+    }
+    if (raises !== null && lowers !== null) {
+      return { target: target.label, raises, lowers };
+    }
+  }
+  return null;
+}
+
+/**
+ * Render the convergent-driver coaching line, or `null` when the model does
+ * not settle one.
+ *
+ * ⚠ IT IS DROPPED WHOLE IF IT TRIPS THE COPY GATE, never rewritten — the same
+ * rule the direction-clarification cards follow, and the reason this line may
+ * cross the ready-only gate at all: the copy is a fixed template over the
+ * model's own labels, and the gate is still the last word on it.
+ *
+ * ⭐ THE SENTENCE ENDS ON A QUESTION, AND THAT IS THE POINT. The slot it
+ * occupies otherwise ships a constant that inspects nothing. A question the
+ * person can answer about their own model is the smallest thing that makes
+ * this a reasoning prompt rather than a status report — and answering it
+ * changes the model, which is the bar the outcome was set at.
+ *
+ * ⚠ IT ASSERTS NO AFFORDANCE. It names no button, promises no automatic
+ * re-weighting, and claims no method the product does not implement. What it
+ * states about the model ("in opposite directions") is read off the edges;
+ * what it asks for is the person's own judgement.
+ */
+function buildConvergentDriverLine(
+  nodes: readonly NodeLite[],
+  edges: readonly EdgeLite[],
+  goalId: string | null,
+  opposingPair: readonly [string, string] | null,
+): string | null {
+  const found = findConvergingOpposedDrivers(nodes, edges, goalId);
+  if (found === null) return null;
+
+  // Refusal (4)'s companion: when the trade-off bullet has ALREADY named these
+  // two labels for the goal, naming them again one line below is the same
+  // sentence twice. Compared as a set, since the two bullets order them by
+  // different rules (goal sign vs. target sign).
+  if (opposingPair !== null) {
+    const alreadyNamed = new Set([opposingPair[0], opposingPair[1]]);
+    if (alreadyNamed.has(found.raises) && alreadyNamed.has(found.lowers)) return null;
+  }
+
+  const target = elideLabelAtWordBoundary(found.target, MAX_LABEL_CHARS);
+  const raises = elideLabelAtWordBoundary(found.raises, MAX_LABEL_CHARS);
+  const lowers = elideLabelAtWordBoundary(found.lowers, MAX_LABEL_CHARS);
+  const line =
+    `Worth resolving: ${raises} and ${lowers} both drive ${target}, ` +
+    `in opposite directions. Which of them dominates when they conflict?`;
+
+  return gateCoachingCardBody(line).accept ? line : null;
+}
+
+/**
  * Return a single bullet-ready trade-off fragment (no leading bullet
  * glyph; no trailing full stop — the renderer adds those). Returns null
  * when no factor/risk material is available, so the caller can omit the
@@ -1578,7 +1892,8 @@ interface AssumptionPick {
  *   2. first acceptable analysisReady.bias_findings[*].explanation
  *   3. first acceptable coachingBiasSignals[*].detail
  *   4. uncertainty_driver (with grammar guard)
- *   5. fixed-generic
+ *   5. convergent opposed drivers, derived from the model's own edges
+ *   6. fixed-generic
  *
  * For priorities 2 and 3 the picker iterates the array and returns the
  * first element whose extracted text (or first-sentence slice)
@@ -1679,6 +1994,13 @@ function pickAssumption(input: {
   readonly analysisReady: PostDraftAnalysisReadyLite | null | undefined;
   readonly strengthenItems: ReadonlyArray<unknown> | null | undefined;
   readonly coachingBiasSignals: ReadonlyArray<unknown> | null | undefined;
+  /**
+   * Pre-rendered and pre-gated by {@link buildConvergentDriverLine}, because
+   * the same line is also needed on the non-ready branch that never calls this
+   * function. Passed in rather than recomputed so the two branches can never
+   * disagree about what the model says.
+   */
+  readonly convergentDriverText?: string | null;
 }): AssumptionPick {
   const { nodes, analysisReady, strengthenItems, coachingBiasSignals } = input;
   let anyCandidateRejected = false;
@@ -1738,7 +2060,27 @@ function pickAssumption(input: {
     anyCandidateRejected = true;
   }
 
-  // Priority 5: fixed-generic.
+  /**
+   * Priority 5: the drafted model's own convergent conflict.
+   *
+   * ⭐ IT SITS BELOW ALL FOUR LLM-SOURCED RUNGS ON PURPOSE. Where the coaching
+   * pass produced something specific about THIS brief, that outranks a
+   * structural observation — this rung exists for the turns where it did not,
+   * which the pipeline's own telemetry says is common (the pass is a second
+   * LLM call with a 30s ceiling against a measured 26.0s worst case and no
+   * retry, and its `failed_degraded` marker has no functional reader: nothing
+   * ever refills coaching after a degraded draft).
+   */
+  const convergent = input.convergentDriverText;
+  if (typeof convergent === 'string' && convergent.length > 0) {
+    return {
+      text: convergent,
+      source: 'convergent_drivers',
+      fallbackReason: anyCandidateRejected ? 'gate_rejected' : null,
+    };
+  }
+
+  // Priority 6: fixed-generic.
   return {
     text: FIXED_GENERIC_ASSUMPTION,
     source: 'deterministic_fallback',
