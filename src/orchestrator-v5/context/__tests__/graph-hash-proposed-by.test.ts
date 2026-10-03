@@ -49,7 +49,7 @@ const marked = () => {
 const UNMARKED_HASH_UNDER_V3 = '362137a00c45afb4';
 
 describe('0.64.0 — `proposed_by` enters the analysis revision (projection v4)', () => {
-  it('PRECONDITION: the vendored vocabulary is v5 (v4 + intervention `range`, hashed by CEE once TEMPORAL #2382 lands), whose node fields still end with `proposed_by`', () => {
+  it('PRECONDITION: the vendored vocabulary is v5 (v4 + intervention `range`, hashed by CEE via the published list), whose node fields still end with `proposed_by`', () => {
     expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(5);
     const fields: readonly string[] = CANONICAL_GRAPH_HASH_NESTED_PROJECTION.node.fields;
     expect(fields[fields.length - 1]).toBe('proposed_by');

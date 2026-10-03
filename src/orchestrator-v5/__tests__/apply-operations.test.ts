@@ -234,6 +234,19 @@ beforeEach(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('applyOperations — the accept path writes what was consented to', () => {
+  it.each(['whole', 'nested', 'leaf'])('generic approved operation cannot smuggle a range: %s', async (variant) => {
+    const before = baseGraph();
+    const range = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
+    const cell = { value: 0.4, range };
+    const operation = variant === 'whole'
+      ? { op: 'update_node', path: OPTION_ID, value: { interventions: { [QUALITY_ID]: cell } } }
+      : { op: 'update_node', path: `/nodes/${OPTION_ID}/data/interventions/${QUALITY_ID}${variant === 'leaf' ? '/range' : ''}`, value: variant === 'leaf' ? range : cell };
+    const h = harness({ initial: before });
+    const outcome = await port(h)(input({ modelRevision: modelRevisionOf(before)!, operations: proposalOperations([operation]) }));
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
+    expect(commitDirectAnswer).not.toHaveBeenCalled();
+    expect(await h.store.loadGraph(SCENARIO)).toEqual(before);
+  });
   it('a same-figure data-path rewrite keeps its valid quote through commit and cold read', async () => {
     const before = baseGraph();
     const option = before.nodes.find((node) => node.id === OPTION_ID)!;

@@ -8,6 +8,7 @@ import {
   encodeOptionInterventionsForEdit,
   optionIdsTouchedByOperations,
   optionIdsAddedWithInterventionIntent,
+  clearInheritedInterventionSourceQuotes,
 } from '../encode-option-interventions.js';
 
 type Dict = Record<string, unknown>;
@@ -368,5 +369,85 @@ describe('the range a figure was read against stays on its cell — only when it
     const cell = iv(optionOf(graph as { nodes: Dict[] }, 'opt_f'), 'fac_inhouse_capacity');
     expect(cell.value).toBe(0.2);
     expect('cap' in cell, JSON.stringify(cell)).toBe(false);
+  });
+});
+
+// TEMPORAL (Codex CR 5963331228 P1): a replacement figure never inherits the old cell's stated range unless the
+// quantity is unchanged. Numeric containment cannot see 10 days become 10 weeks, so the range goes with the old figure.
+describe('a stated range stays with ITS quantity across a replacement figure', () => {
+  const RANGE = { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' };
+  // The factor declares no unit of its own, so the encoder accepts the replacement's unit as written.
+  const factor = () => ({ id: 'fac_dt', kind: 'factor', label: 'Migration downtime', observed_state: { value: 0, cap: 40 } });
+  const withReplacement = (replacement: Dict): { nodes: Dict[]; edges: Dict[] } => ({
+    nodes: [goal(), factor(), {
+      id: 'opt_l', kind: 'option', label: 'Lift',
+      interventions: { fac_dt: { value: 0.25, raw_value: 10, unit: 'days', source: 'user_specified', target_match: { node_id: 'fac_dt', match_type: 'exact_id', confidence: 'high' }, range: RANGE } },
+      data: { interventions: { fac_dt: replacement } },
+    }],
+    edges: [edge('opt_l', 'fac_dt')],
+  });
+  const cellAfter = (replacement: Dict): Dict => iv(optionOf(encodeOptionInterventionsForEdit(withReplacement(replacement)).graph as { nodes: Dict[] }, 'opt_l'), 'fac_dt');
+
+  it('RED: the same digits in another unit (10 days → 10 weeks) drop the old range', () => {
+    const cell = cellAfter({ unit: 'weeks', raw_value: 10 });
+    expect(cell.unit).toBe('weeks');
+    expect(Object.hasOwn(cell, 'range')).toBe(false);
+  });
+  it('RED: a new figure (10 → 12 days) drops the old range', () => {
+    const cell = cellAfter({ unit: 'days', raw_value: 12 });
+    expect(cell.raw_value).toBe(12);
+    expect(Object.hasOwn(cell, 'range')).toBe(false);
+  });
+  it('CONTROL: the unchanged quantity (10 days restated) keeps its range', () => {
+    expect(cellAfter({ unit: 'days', raw_value: 10 }).range).toEqual(RANGE);
+  });
+  it('CONTROL: a range supplied WITH the new figure is the one stored', () => {
+    const fresh = { low: 8, high: 30, meaning: 'likely_range', source: 'user_specified' };
+    expect(cellAfter({ unit: 'days', raw_value: 12, range: fresh }).range).toEqual(fresh);
+  });
+
+  const numericMapAfter = (replacement: Dict): Dict => {
+    const before = withReplacement({});
+    const after = structuredClone(before);
+    const option = optionOf(after, 'opt_l');
+    const old = iv(option, 'fac_dt');
+    (option.interventions as Dict).fac_dt = { ...old, ...replacement };
+    const encoded = encodeOptionInterventionsForEdit(after).graph;
+    // Same before/after guard used by both real edit writers; no source quote is present.
+    const guarded = clearInheritedInterventionSourceQuotes(before, encoded);
+    return iv(optionOf(guarded as { nodes: Dict[] }, 'opt_l'), 'fac_dt');
+  };
+
+  it('numeric whole-map opt_l/fac_dt unit edit drops inherited 5–20 days', () => {
+    const cell = numericMapAfter({ unit: 'weeks' });
+    expect(cell).toMatchObject({ value: 0.25, raw_value: 10, unit: 'weeks' });
+    expect(Object.hasOwn(cell, 'range')).toBe(false);
+  });
+  it('numeric whole-map changed figure drops the inherited range', () => {
+    expect(Object.hasOwn(numericMapAfter({ value: 0.3, raw_value: 12 }), 'range')).toBe(false);
+  });
+  it('numeric whole-map unchanged quantity retains its stated range', () => {
+    expect(numericMapAfter({ unit: 'days' }).range).toEqual(RANGE);
+  });
+  it('numeric whole-map fresh replacement range survives a unit change', () => {
+    const fresh = { ...RANGE, low: 2, high: 30 };
+    expect(numericMapAfter({ unit: 'weeks', range: fresh }).range).toEqual(fresh);
+  });
+
+  it('native quantity unchanged by cap/value renormalization keeps its range', () => {
+    expect(numericMapAfter({ value: 0.125, cap: 80 }).range).toEqual(RANGE);
+  });
+  it('removing the only effective unit drops the inherited range', () => {
+    expect(numericMapAfter({ unit: undefined })).not.toHaveProperty('range');
+  });
+  it.each(['days', 'weeks'])('adding a cell unit compares the inherited factor unit: %s', (unit) => {
+    const before = withReplacement({});
+    const opt = optionOf(before, 'opt_l');
+    delete iv(opt, 'fac_dt').unit;
+    (before.nodes.find(n => n.id === 'fac_dt')!.observed_state as Dict).unit = 'days';
+    const after = structuredClone(before);
+    iv(optionOf(after, 'opt_l'), 'fac_dt').unit = unit;
+    const saved = clearInheritedInterventionSourceQuotes(before, after);
+    expect(iv(optionOf(saved, 'opt_l'), 'fac_dt').range).toEqual(unit === 'days' ? RANGE : undefined);
   });
 });

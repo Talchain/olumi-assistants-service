@@ -851,11 +851,24 @@ function levelOpAuthor(op: ProposalOperation, proposal: StructuredProposal): 'mo
  * they reproduce the stored level exactly: an op whose `normalised` is not `raw / cap` passes no figure (the writer would
  * refuse the whole batch as `level_frame_mismatch`).
  */
-function levelFigureOf(op: ProposalOperation): { raw_value: number; cap: number; unit?: string } | Record<string, never> {
-  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown };
-  if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw) || typeof v.cap !== 'number' || !(v.cap > 0)) return {};
-  if (Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
-  return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}) };
+/** A likely-range bound said in the level's own unit, exactly as the level itself is said. */
+function likelyBound(n: number, unit: string): string {
+  return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
+}
+
+function levelFigureOf(op: ProposalOperation): { raw_value?: number; cap?: number; unit?: string; likely_range?: { low: number; high: number } } | Record<string, never> {
+  const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown; likely_range?: { low?: unknown; high?: unknown } };
+  // TEMPORAL: the user's likely range rides with their figure (proposed only beside a level they gave).
+  const r = v.likely_range;
+  const likely = r !== undefined && typeof r.low === 'number' && typeof r.high === 'number' ? { low: r.low, high: r.high } : undefined;
+  if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw)) return {};
+  // An unscaled level needs no cap. Carry its approved range without inventing a scale frame.
+  if (v.cap == null && v.raw === v.normalised) return likely !== undefined ? { raw_value: v.raw,
+    ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
+    likely_range: likely } : {};
+  if (typeof v.cap !== 'number' || !(v.cap > 0) || Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
+  return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
+    ...(likely !== undefined ? { likely_range: likely } : {}) };
 }
 
 /**
@@ -4171,6 +4184,8 @@ export function createAgentCapabilities(
         userStated: boolean;
         // The option is not yet linked to this factor: the link is added in the same change, before the level.
         needsLink: boolean;
+        /** The user's likely range for this level, raw units (TEMPORAL). */
+        likelyRange?: { low: number; high: number };
       }[] = [];
 
       for (const i of input) {
@@ -4242,7 +4257,12 @@ export function createAgentCapabilities(
         // ground it: a model-supplied unit ("% monthly churn rate") would name away the entity the guard reads
         // (Canonical #2025 B1). Grounding reads only the factor's DECLARED unit; the rate after the figure is skipped anyway.
         const statedUnit = typeof i?.unit === 'string' && i.unit.trim() !== '' ? i.unit.trim() : undefined;
-        const userWrote = claimedByUser && figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
+        // A typed range and its level are shown together for explicit approval. Equivalent wording must not
+        // change that reading; the existing literal-figure guard remains for ordinary, non-range levels.
+        const rangeRequested = i?.likely_low !== undefined || i?.likely_high !== undefined
+          || i?.range_meaning !== undefined || i?.range_user_stated !== undefined;
+        const userWrote = claimedByUser && (rangeRequested
+          || figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
           notAccepted.push({
@@ -4258,6 +4278,35 @@ export function createAgentCapabilities(
           unresolved.push(`${option.label} -> ${factor.label} (no value)`);
           notAccepted.push({ option: option.label, factor: factor.label, value: i?.value, reason: 'No numeric value was given.' });
           continue;
+        }
+        /**
+         * TEMPORAL (B6's ask, #2384; R3 #75 5914230653): the user's LIKELY RANGE for this level, decided from the TYPED
+         * arguments only (Codex CR 5963331228 P1: no parsing of the user's words). Both ends; the reading the Agent took
+         * (`range_meaning`: only `likely_range` is recorded, so a 95% interval, a min–max or a bound is never stored as
+         * one); that the USER gave it (`range_user_stated`); beside a level they gave; the level inside it. The user then
+         * approves the range AND its reading, shown on the approval ("read as the middle half of what's likely"): that
+         * approval is the provenance check. Anything else is refused with the reason, so the Agent asks.
+         */
+        const hasLow = i?.likely_low !== undefined;
+        const hasHigh = i?.likely_high !== undefined;
+        let likelyRange: { low: number; high: number } | undefined;
+        if (hasLow || hasHigh || i?.range_meaning !== undefined || i?.range_user_stated !== undefined) {
+          const low = Number(i?.likely_low);
+          const high = Number(i?.likely_high);
+          const why = !hasLow || !hasHigh ? 'a likely range needs both its low and its high end'
+            : !(Number.isFinite(low) && Number.isFinite(high) && low > 0 && high > low) ? 'a likely range needs a positive low end below its high end'
+            : i?.range_user_stated !== true ? 'a range is recorded only when the user gave it (range_user_stated), never one Olumi proposed'
+            : i?.range_meaning !== 'likely_range'
+              ? `Olumi records only a LIKELY range (the middle half of what\u2019s likely); a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement and is not stored as one`
+            : !userWrote ? 'a likely range is recorded only beside a level the user gave (user_stated)'
+            : raw < low || raw > high ? `${raw} lies outside the likely range ${low}–${high} it was given with`
+            : null;
+          if (why !== null) {
+            notAccepted.push({ option: option.label, factor: factor.label, value: i?.value,
+              reason: `No likely range was recorded: ${why}. Ask the user for each option’s likely range in their own words, then propose it again.` });
+            continue;
+          }
+          likelyRange = { low, high };
         }
 
         const os = (factor.observed_state ?? {}) as { cap?: unknown; unit?: unknown };
@@ -4338,9 +4387,13 @@ export function createAgentCapabilities(
           }
         }
 
-        const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
+        const current = (option.interventions ?? {})[factor.id] as { value?: unknown; range?: unknown } | number | undefined;
         const currentValue = typeof current === 'number' ? current : (current as { value?: unknown } | undefined)?.value;
-        if (currentValue === normalised || currentValue === raw) {
+        // The COMPLETE range the writer would store (Codex CR P2): equal bounds with another meaning or author is a change.
+        const currentRange = typeof current === 'object' ? (current?.range as Record<string, unknown> | undefined) : undefined;
+        const rangeMoves = likelyRange !== undefined && !(currentRange?.low === likelyRange.low && currentRange?.high === likelyRange.high
+          && currentRange?.meaning === 'likely_range' && currentRange?.source === 'user_specified');
+        if ((currentValue === normalised || currentValue === raw) && !rangeMoves) {
           unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
           continue;
         }
@@ -4352,6 +4405,7 @@ export function createAgentCapabilities(
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? ''),
           basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
+          ...(likelyRange !== undefined ? { likelyRange } : {}),
         });
       }
 
@@ -4379,6 +4433,7 @@ export function createAgentCapabilities(
         value: {
           normalised: i.normalised, raw: i.raw, cap: i.cap, basis: i.basis, derived_frame: i.derivedFrame,
           ...(i.unit !== '' ? { unit: i.unit } : {}),
+          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange } : {}),
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
         },
@@ -4391,7 +4446,9 @@ export function createAgentCapabilities(
         provenance: { authored_by: 'model_proposed', basis: 'what each option does, for the user to confirm or correct' },
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
-          ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${sayFigureExactly(i.raw, i.unit) ?? `${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`}`).join('; ') +
+          ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${sayFigureExactly(i.raw, i.unit) ?? `${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`}`
+            // TEMPORAL (AIQ 5909998288 / 5914439702): the reading is part of what the user approves, in their units.
+            + (i.likelyRange !== undefined ? `, likely between ${likelyBound(i.likelyRange.low, i.unit)} and ${likelyBound(i.likelyRange.high, i.unit)} (read as the middle half of what\u2019s likely)` : '')).join('; ') +
           ambiguousClause(ambiguous),
       });
       proposals.put(proposal);
@@ -4408,6 +4465,7 @@ export function createAgentCapabilities(
           model_range: i.cap,
           ...(i.derivedFrame !== null ? { range_taken_from_your_figure: i.derivedFrame } : {}),
           ...(i.needsLink ? { adds_the_link: true } : {}),
+          ...(i.likelyRange !== undefined ? { likely_range: i.likelyRange } : {}),
           basis: i.basis,
           // Whose level this is, typed — the same flag the writer stamps (`authored_by` above). The one-call reply reads it.
           stated_by: i.userStated ? 'user' : 'olumi_estimate',
