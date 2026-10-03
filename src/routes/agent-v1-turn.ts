@@ -111,6 +111,8 @@ import {
   isWidenPress, nextStepsWithWiden, settleWidenTurn, widenGate, widenOffered, widenTurnForReadback,
   WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
+import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
+import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -298,6 +300,50 @@ function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
     if (oldest !== undefined) offeredActions.delete(oldest);
   }
   offeredActions.set(key, actions);
+}
+
+/**
+ * ⭐ "WHAT WOULD CHANGE THE RESULT?" HAS ONE OWNER, LIVE AND ON REPLAY (Codex P1 #2542). SCI-CHANGE (#2522,
+ * `method-turn/what-changes-turn.ts`) and SCI-HERO (#2536, `tipping-point-coaching.ts`) answer the same chip; this
+ * selector is the only place that chooses between them. The measured answer is used only while the Run it was measured
+ * for is the Run the Explain control binds NOW (`runExplanationMatches`) AND today's leader licence still permits naming
+ * a leader (`leaderLicenceFromState`, caveated permission included): its sentences name options, so a revoked claim or an
+ * absent / malformed / refused / exploratory admission on the SAME Run withholds them (Codex round 2 P1). Otherwise, and with the kill switch
+ * CEE_WHAT_CHANGES_MEASURED_ENABLED=false, the answer is that Run's own tipping-point coaching. A replay never measures
+ * again (up to the 70 s ISL cap): it reuses the measured answer this process gave THAT turn, re-checked against today's
+ * Run, as the words the user received (`sentText`: the stored reply, so the leader wire gate's caveat stays with it);
+ * after a restart, or once the Run has moved, it is today's coaching, as a coaching replay always was.
+ */
+/**
+ * The ONE recorded operation a measured answer is ever given under: the what-changes chip with no `action_type` (as
+ * `NEXT_STEP_CHIPS` offers it). A replay recognises its turn from that recorded typed identity, durably: the press resent
+ * with its chip, or the UI's chipless retry (`source: 'retry'`) whose stored hash is exactly this operation's (Codex
+ * delta P1: a chipless retry skipped the selector and resent the measured words under a withheld licence, warm or cold).
+ * A press carrying any other `action_type` is never measured, so its recorded answer is coaching, which names no option.
+ */
+const WHAT_CHANGES_CHIP_OPERATION = chipOperationOf({ chip: { id: TIPPING_POINT_PRESS_ID } });
+const MEASURED_WHAT_CHANGES_MAX = 500;
+type MeasuredWhatChanges = { readonly runKey: string; readonly turn: WhatChangesTurn };
+const measuredWhatChanges = new Map<string, MeasuredWhatChanges>();
+function rememberMeasuredWhatChanges(key: string, measured: MeasuredWhatChanges): void {
+  measuredWhatChanges.delete(key);
+  if (measuredWhatChanges.size >= MEASURED_WHAT_CHANGES_MAX) {
+    const oldest = measuredWhatChanges.keys().next().value;
+    if (oldest !== undefined) measuredWhatChanges.delete(oldest);
+  }
+  measuredWhatChanges.set(key, measured);
+}
+function whatWouldChangeAnswer(scenarioId: string, read: Parameters<typeof tippingPointCoachingFor>[1] & { readonly analysisReady?: unknown },
+  measured: MeasuredWhatChanges | null, sentText?: string | null): {
+  readonly text: string; readonly tippingTurn: TippingPointCoaching | null; readonly measured: MeasuredWhatChanges | null;
+} {
+  if (measured !== null && config.features.whatChangesMeasuredEnabled && runExplanationMatches(measured.runKey, scenarioId, read)
+    && leaderLicenceFromState(read.analysisState, read.analysisReady) !== 'withheld') {
+    return { text: sentText ?? measured.turn.reply, tippingTurn: null, measured };
+  }
+  const tippingTurn = tippingPointCoachingFor(scenarioId, read);
+  return { text: tippingTurn.kind === 'found' ? settleTippingPointCoaching(tippingTurn, tippingTurn.reply).reply : tippingTurn.reply,
+    tippingTurn, measured: null };
 }
 
 /**
@@ -1726,10 +1772,14 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let replayText = prior.assistant_message ?? 'That request was already completed.';
       let replayNarration: { status: 'pending' | 'ready' | 'unavailable' | 'stale'; run_key: string } | undefined;
       const boundControl: OfferedAction[] = [];
-      if (approvedProposal === undefined && explanationId === TIPPING_POINT_PRESS_ID) {
-        // This unbound question asks about today's result: retry/cold read reconstructs today's fact, never Run A's words.
-        const tipping = tippingPointCoachingFor(scenarioId, state);
-        replayText = tipping.kind === 'found' ? settleTippingPointCoaching(tipping, tipping.reply).reply : tipping.reply;
+      const whatChangesReplay = approvedProposal === undefined && (explanationId === TIPPING_POINT_PRESS_ID
+        || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, WHAT_CHANGES_CHIP_OPERATION)));
+      if (whatChangesReplay) {
+        // This unbound question asks about today's result: retry/cold read reconstructs today's answer, never Run A's
+        // words. The SAME owner as the live turn (`whatWouldChangeAnswer`): this turn's measured answer while its Run is
+        // still the bound one, else today's coaching. Never measured again here.
+        const remembered = turnId !== undefined ? measuredWhatChanges.get(`${scenarioId}:${turnId}`) ?? null : null;
+        replayText = whatWouldChangeAnswer(scenarioId, state, remembered, prior.assistant_message).text;
         boundControl.push(TALK_IT_THROUGH_CHIP);
       } else if (approvedProposal === undefined && isRunExplanationChip(explanationId)) {
         const runKey = explanationId.slice(RUN_EXPLANATION_PREFIX.length);
@@ -2423,12 +2473,42 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let tippingTurn: TippingPointCoaching | null = null;
     let methodGraph: unknown;
     const pressedChipId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
+    /**
+     * ⭐ "WHAT WOULD CHANGE THIS?" — ONE CHIP, TWO GROUNDED ANSWERS, MEASURED FIRST, ONE OWNER (`whatWouldChangeAnswer`,
+     * shared with the replay). The measured link tipping points answer only when ISL measured them for the Run the
+     * Explain control binds (`runExplanationChip`): no measurement is asked for a Run it cannot bind, a block measured for
+     * any other Run is refused (`whatChangesTurnFor`), and the fresh final read re-checks the bound Run, as it does for
+     * the coaching. #2522's own digest disagreeing with a canonically current Run (`stale`) never says "your model has
+     * changed". Every other outcome (no Run, nothing measurable, stale, a timeout, an error, kill switch
+     * CEE_WHAT_CHANGES_MEASURED_ENABLED=false) is the Run's own tipping-point coaching, exactly as before. Terminal and
+     * with NO model call either way; the measured fetch persists nothing.
+     */
+    let whatChangesTurn: WhatChangesTurn | null = null;
+    let measuredRunKey: string | null = null;
     if (result === undefined && approvedProposal === undefined && pressedChipId === TIPPING_POINT_PRESS_ID) {
-      tippingTurn = tippingPointCoachingFor(scenarioId, await readBackState(readingDispatch, scenarioId));
+      const rb = await readBackState(readingDispatch, scenarioId);
+      const boundRun = runExplanationChip(scenarioId, rb);
+      let measured: MeasuredWhatChanges | null = null;
+      if (boundRun !== null && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)
+        && chipOperationOf(body) === WHAT_CHANGES_CHIP_OPERATION) {
+        const turn = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
+          payload: {
+            kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
+            source: 'chip_click', message,
+          },
+          requestId: `${String(req.id)}:decision-flip`,
+          candidateLinks,
+        }));
+        if (turn?.outcome === 'measured') measured = { runKey: boundRun.id, turn };
+        log.info({ scenario_id: scenarioId, what_changes: turn?.outcome ?? null, answered: measured !== null }, 'agent-lane: what-would-change measured attempt');
+      }
+      const answer = whatWouldChangeAnswer(scenarioId, rb, measured);
+      if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
+      tippingTurn = answer.tippingTurn;
+      whatChangesTurn = answer.measured?.turn ?? null;
+      measuredRunKey = answer.measured?.runKey ?? null;
       fastPath = 'method';
-      const text = tippingTurn.kind === 'found'
-        ? settleTippingPointCoaching(tippingTurn, tippingTurn.reply).reply : tippingTurn.reply;
-      result = { assistant_text: text, items: [], tool_calls: [], tool_results: [], mutated: false,
+      result = { assistant_text: answer.text, items: [], tool_calls: [], tool_results: [], mutated: false,
         hops: 0, stopped_reason: 'answered',
         timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
     }
@@ -2763,11 +2843,16 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // A successful bound check reuses the exact read that supplied the narration. A mismatch/failure
     // reads current wire state, but never restores the old explanation's licence.
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
-      : await readBackState(fastPath === 'explain' || tippingTurn !== null
+      : await readBackState(fastPath === 'explain' || tippingTurn !== null || measuredRunKey !== null
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
-    if (tippingTurn?.kind === 'found' && !runExplanationMatches(tippingTurn.run_key, scenarioId, finalRead)) {
+    // Every bound coaching answer, a "no threshold" one included, is about ITS Run: re-checked on the fresh read (Codex P1 #2542).
+    if ((tippingTurn?.kind === 'found' || tippingTurn?.kind === 'no_signal') && !runExplanationMatches(tippingTurn.run_key, scenarioId, finalRead)) {
+      text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
+    }
+    // The measured answer waited on ISL (up to the 70 s cap): the same re-check, so an edit meanwhile is never answered.
+    if (measuredRunKey !== null && !runExplanationMatches(measuredRunKey, scenarioId, finalRead)) {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
     }
     if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
@@ -2905,6 +2990,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Widen, terminal: the door's ONE card (its approval) and RC's follow-up, or the unavailable reply's own follow-up.
       : fastPath === 'method' && widenTurn !== null
       ? firstOfEachId([...approvals, ...(widenTurn.kind === 'run' ? widenActions : widenTurn.actions)])
+      // What would change, terminal: the turn's own follow-up only.
+      : fastPath === 'method' && whatChangesTurn !== null
+      ? firstOfEachId([...approvals, ...whatChangesTurn.actions])
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
