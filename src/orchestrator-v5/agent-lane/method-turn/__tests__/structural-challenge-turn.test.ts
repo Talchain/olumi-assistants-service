@@ -4,7 +4,13 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { composeStructuralChallengeReply } from '../structural-challenge-turn.js';
+import {
+  STRUCTURAL_CHALLENGE_NO_RUN_REPLY,
+  composeStructuralChallengeReply,
+  parseStructuralChallengePress,
+  structuralChallengePressId,
+  structuralChallengeTurnFor,
+} from '../structural-challenge-turn.js';
 import type { StructuralChallengeResult } from '../../../coaching/structural-challenge-compare.js';
 
 const LABELS = new Map([
@@ -73,5 +79,28 @@ describe('SCI-DEEP reply', () => {
     const near = { ...changed, claims: [{ ...changed.claims[1], baseline: 0.996, alternative: 0.004, verdict: 'delta_only', basis: 'no_licensed_boundary' } as const] } as StructuralChallengeResult;
     const reply = composeStructuralChallengeReply({ result: near, labels: LABELS });
     expect(reply).toContain('over 99% of model runs now, and in under 1% without the link');
+  });
+
+  it('the press id round-trips typed ids; anything else is not this press', () => {
+    const link = { from_id: 'monthly_churn', to_id: 'paying_subscribers' };
+    expect(parseStructuralChallengePress(structuralChallengePressId(link))).toEqual(link);
+    for (const other of ['agent-next-what-would-change', 'agent-test-without-link:', 'agent-test-without-link:a', 'agent-test-without-link:a::', undefined, 7]) {
+      expect(parseStructuralChallengePress(other)).toBeNull();
+    }
+  });
+
+  it('the route adapter: one dispatch per recognised press, the deterministic reply, and only "Talk it through"', async () => {
+    const asked: unknown[] = [];
+    const turn = await structuralChallengeTurnFor(structuralChallengePressId({ from_id: 'monthly_churn', to_id: 'paying_subscribers' }), async (l) => {
+      asked.push(l);
+      return { kind: 'result', result: changed, labels: LABELS };
+    });
+    expect(asked).toEqual([{ from_id: 'monthly_churn', to_id: 'paying_subscribers' }]);
+    expect(turn?.outcome).toBe('completed');
+    expect(turn?.reply.split('\n')[0]).toContain('still leads');
+    expect(turn?.actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
+    expect(await structuralChallengeTurnFor('agent-next-what-would-change', async () => { throw new Error('never'); })).toBeNull();
+    const none = await structuralChallengeTurnFor(structuralChallengePressId({ from_id: 'a', to_id: 'b' }), async () => ({ kind: 'no_run' }));
+    expect(none).toMatchObject({ outcome: 'no_run', reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, result: null });
   });
 });

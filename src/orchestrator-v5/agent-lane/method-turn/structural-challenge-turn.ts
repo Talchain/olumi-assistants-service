@@ -10,11 +10,15 @@
  *   - the reply always says what was tested, that it is one alternative and not "the true model", and that it is not
  *     saved (NOT_RETAINED), and ends with one next step.
  */
+import type { SuggestedAction } from '../../compose/types.js';
 import type {
   StructuralChallengeClaim,
   StructuralChallengeQuantityClaim,
   StructuralChallengeResult,
 } from '../../coaching/structural-challenge-compare.js';
+import type { ChallengeLink } from '../../coaching/structural-challenge-eligibility.js';
+import type { StructuralChallengeDispatchResult } from '../../handlers/structural-challenge-dispatch.js';
+import { TALK_IT_THROUGH_CHIP } from './method-turn.js';
 
 export interface StructuralChallengeReplyInput {
   readonly result: StructuralChallengeResult;
@@ -127,4 +131,54 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
     ? `Next step: this conclusion rests on how ${from} affects ${to}. What evidence do you have for that link? If you decide it doesn't belong, you can remove it on the canvas and rerun — the comparison is then saved.`
     : `Next step: your conclusion doesn't depend on this link, so there's no need to change it.`);
   return lines.join('\n');
+}
+
+// ── The press and the route adapter (the Executor's hot-seam hunk calls only these) ─────────────────────────────────
+
+/**
+ * The press id the existing Challenge surface sends for "Test without this link" on one link. Typed ids, never labels:
+ * `agent-test-without-link:<from_id>::<to_id>` (node ids cannot contain `::`).
+ */
+export const STRUCTURAL_CHALLENGE_PRESS_PREFIX = 'agent-test-without-link:';
+
+export function structuralChallengePressId(link: ChallengeLink): string {
+  return `${STRUCTURAL_CHALLENGE_PRESS_PREFIX}${link.from_id}::${link.to_id}`;
+}
+
+export function parseStructuralChallengePress(chipId: unknown): ChallengeLink | null {
+  if (typeof chipId !== 'string' || !chipId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) return null;
+  const parts = chipId.slice(STRUCTURAL_CHALLENGE_PRESS_PREFIX.length).split('::');
+  if (parts.length !== 2 || parts[0].length === 0 || parts[1].length === 0) return null;
+  return { from_id: parts[0], to_id: parts[1] };
+}
+
+export interface StructuralChallengeTurn {
+  readonly reply: string;
+  readonly outcome: StructuralChallengeResult['status'] | 'no_run';
+  readonly result: StructuralChallengeResult | null;
+  readonly actions: readonly SuggestedAction[];
+}
+
+export const STRUCTURAL_CHALLENGE_NO_RUN_REPLY =
+  'There is no analysis to test yet. Run the analysis first, then try "Test without this link".';
+
+/**
+ * A recognised press → one dispatch → the deterministic reply. Null for any other press (the turn proceeds as usual).
+ * The caller supplies the dispatch bound to the turn's existing permissions; nothing here reads or writes state.
+ */
+export async function structuralChallengeTurnFor(
+  chipId: unknown,
+  ask: (link: ChallengeLink) => Promise<StructuralChallengeDispatchResult>,
+): Promise<StructuralChallengeTurn | null> {
+  const link = parseStructuralChallengePress(chipId);
+  if (link === null) return null;
+  const actions = [TALK_IT_THROUGH_CHIP];
+  const dispatched = await ask(link);
+  if (dispatched.kind === 'no_run') return { reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, outcome: 'no_run', result: null, actions };
+  return {
+    reply: composeStructuralChallengeReply({ result: dispatched.result, labels: dispatched.labels }),
+    outcome: dispatched.result.status,
+    result: dispatched.result,
+    actions,
+  };
 }
