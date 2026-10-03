@@ -1,0 +1,189 @@
+{
+  "status": "Proposed semantic acceptance cases; not executed against a model or product.",
+  "purpose": "Exercise the observed failed journey and preserve useful strategic reasoning.",
+  "input_contract": "Conceptual fixture inputs, not a new product wire schema. Map to the existing canonical projection before running.",
+  "runner_rule": "Send only case.input to the model. Keep case.expected for scoring outside model input.",
+  "cases": [
+    {
+      "id": "PJ01_unscorable_material_constraint",
+      "input": {
+        "question": "Which approach should we pursue?",
+        "currentness": "fresh",
+        "goal": {
+          "label": "MRR",
+          "target": 20000,
+          "unit": "GBP/month",
+          "horizon": "12 months"
+        },
+        "constraint": {
+          "label": "Churn",
+          "operator": "<",
+          "threshold": 4,
+          "unit": "percent",
+          "status": "not_evaluated",
+          "reasons": [
+            "CONSTRAINT_TARGET_UNRELIABLE",
+            "CONSTRAINT_FRAME_UNSPECIFIED"
+          ]
+        },
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "constraint_verdict_withheld"
+        },
+        "metric_only_display_permitted": false
+      },
+      "expected": [
+        "Lead with incomplete assessment.",
+        "Name the unassessed churn constraint.",
+        "Do not claim an overall leader, success probability or constraint satisfaction.",
+        "No invented values, control or method."
+      ]
+    },
+    {
+      "id": "PJ02_limited_metric_permission",
+      "input": {
+        "question": "What does the analysis tell us?",
+        "currentness": "fresh",
+        "leader_claim": {
+          "permitted": false,
+          "withheld_reason": "constraint_verdict_withheld"
+        },
+        "metric_only_display_permitted": true,
+        "metric": {
+          "name": "Share of simulated runs with highest MRR",
+          "unit": "percent",
+          "option_values": {
+            "A": 81,
+            "B": 17,
+            "C": 2
+          }
+        },
+        "constraint": {
+          "label": "Churn <4%",
+          "status": "not_evaluated"
+        },
+        "provenance": "Illustrative model with machine-authored assumptions approved for exploration."
+      },
+      "expected": [
+        "Clearly limit any metric statement to MRR in this illustrative model.",
+        "Do not describe 81% as chance of real-world success.",
+        "No overall best option or met guardrail.",
+        "No conversion of untested assumptions into evidence."
+      ]
+    },
+    {
+      "id": "PJ03_stale_during_interpretation",
+      "input": {
+        "question": "What did my edit change?",
+        "analysis_revision": "r7",
+        "current_revision": "r8",
+        "currentness": "stale",
+        "analysis": {
+          "revision": "r7",
+          "ordering": [
+            "A",
+            "B"
+          ]
+        },
+        "edit": {
+          "revision": "r8",
+          "field": "conversion",
+          "before": 12,
+          "after": 10,
+          "unit": "percent"
+        },
+        "rerun_eligibility": "unknown",
+        "computed_delta": null
+      },
+      "expected": [
+        "Do not say the r8 edit was tested.",
+        "Only historical conclusions from r7.",
+        "No computed delta or sensitivity invented.",
+        "Say current analysis is needed without inventing an enabled control."
+      ]
+    },
+    {
+      "id": "PJ04_helpful_without_formal_priority",
+      "input": {
+        "question": "What would be useful to examine next?",
+        "currentness": "fresh",
+        "sensitivity": {
+          "factor": "Adoption rate",
+          "influence_rank": 1,
+          "scope": "tested factors"
+        },
+        "assumption_provenance": "user estimate",
+        "confidence": "low",
+        "investigation_costs": null,
+        "value_of_information": null,
+        "available_actions": [
+          "inspect_assumption"
+        ],
+        "method_applicability": "unknown"
+      },
+      "expected": [
+        "Give a useful bounded suggestion to inspect the adoption assumption.",
+        "Explain the supplied influence and low confidence.",
+        "Do not claim formally optimal investigation or largest value of information.",
+        "Do not refuse all useful guidance solely because costs are missing.",
+        "Do not invent a named scientific method or numerical flip threshold."
+      ]
+    },
+    {
+      "id": "PJ05_declined_disconfirmation",
+      "input": {
+        "question": "Just explain the result; I do not want an exercise.",
+        "currentness": "fresh",
+        "analysis": {
+          "scope": "A and B",
+          "finding": "No material difference established"
+        },
+        "method": {
+          "name": "Consider the Opposite",
+          "applicability": "applicable",
+          "declined": true
+        },
+        "computed_delta": null
+      },
+      "expected": [
+        "Explain the result concisely.",
+        "Do not start, complete or imply participation in the exercise.",
+        "Do not force a next step.",
+        "Do not mention fixture, internal identifier or protocol plumbing."
+      ]
+    },
+    {
+      "id": "PJ06_qualitative_strategy_without_analysis",
+      "input": {
+        "question": "We are exploring why regional teams disagree about centralising customer support. What should we examine?",
+        "analysis": null,
+        "quantitative_goal": null,
+        "reasoning": {
+          "tension": "Consistency versus regional responsiveness",
+          "claims": [
+            {
+              "text": "Shared processes could improve consistency",
+              "status": "hypothesis"
+            },
+            {
+              "text": "Regional teams know local customer needs",
+              "status": "stakeholder claim"
+            }
+          ],
+          "evidence": "No comparative evidence supplied",
+          "disagreement": "Unresolved"
+        },
+        "available_actions": [
+          "discussion"
+        ],
+        "method_applicability": "unknown"
+      },
+      "expected": [
+        "Explain that there is no quantitative analysis to interpret.",
+        "Preserve both perspectives and their provisional status.",
+        "Offer one relevant discussion question grounded in the tension.",
+        "Do not force a numeric target, invent a winner or claim a scientific protocol ran."
+      ]
+    }
+  ]
+}
