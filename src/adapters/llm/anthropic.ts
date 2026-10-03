@@ -4666,8 +4666,20 @@ export class AnthropicAdapter implements LLMAdapter {
       rationales: result.rationales,
       usage: result.usage,
       ...((result as any).coaching ? { coaching: (result as any).coaching } : {}),
-      ...((result as any).record_disclosures
-        ? { record_disclosures: (result as any).record_disclosures }
+      // REBASE NOTE (coaching lane, 17 Sep 2026). Staging had independently
+      // landed the same carrier with `(result as any).record_disclosures` and a
+      // TRUTHINESS test. Both are superseded here, and neither change is lost:
+      //   · the cast is redundant — `record_disclosures?: unknown` is declared on
+      //     the result type (`adapters/llm/types.ts:103`), so the typed read
+      //     compiles without it;
+      //   · `!== undefined` is strictly more precise than truthiness, which
+      //     silently drops a present-but-falsy value.
+      // Staging's behaviour is preserved for every non-null case; the one
+      // difference is that an explicit `null` is now forwarded rather than
+      // dropped, which is the reviewed PR's intent — the wrapper's job is to
+      // carry what the producer emitted, not to judge it.
+      ...(result.record_disclosures !== undefined
+        ? { record_disclosures: result.record_disclosures }
         : {}),
       ...(result.record_constraint_candidates
         ? { record_constraint_candidates: result.record_constraint_candidates } : {}),
