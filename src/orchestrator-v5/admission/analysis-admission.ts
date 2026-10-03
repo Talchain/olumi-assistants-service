@@ -173,6 +173,7 @@ import {
   type StructureProvenance,
 } from '../../cee/graph-readiness/obligation-provenance.js';
 import { targetTestabilityOf, notTargetTestableSentence, targetVerdictCapsOrdering } from './target-testability.js';
+import { declaredGapsOf } from '../agent-lane/unmodelled-mechanisms.js';
 
 // ============================================================================
 // Vocabulary
@@ -1294,10 +1295,16 @@ export function analysisAdmissionFrom(
     // Counts what the run LEAVES OUT, never what it waives: a held status quo is waived AND compared
     // (`ScaffoldPlan.excluded_option_ids`).
     const left = admission.plan.excluded_option_ids.length;
+    // ⭐ B3: an option left out because it declares what it does not model HAS values — never say it has none.
+    const incomplete = admission.plan.excluded_option_ids.filter((id) => declaredGapsOf(graph, id).length > 0).length;
     reasons.push({
       field: 'structurally_analysable',
       code: 'RUN_WILL_EXCLUDE_OPTIONS',
-      message: `Analysis can run, leaving out ${left === 1 ? 'one option' : `${left} options`} you have not set values for.`,
+      message: incomplete === 0
+        ? `Analysis can run, leaving out ${left === 1 ? 'one option' : `${left} options`} you have not set values for.`
+        : incomplete === left
+          ? `Analysis can run, leaving out ${left === 1 ? 'one option that is' : `${left} options that are`} not fully modelled yet.`
+          : `Analysis can run, leaving out ${left} options that are not set or not fully modelled yet.`,
     });
   } else {
     reasons.push({
