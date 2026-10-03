@@ -130,4 +130,57 @@ describe('WIRE: run_analysis forwards an option\'s stated range to PLoT', () => 
     expect(Object.hasOwn(setting, 'range')).toBe(false);
     expect(diffRunInputs(a.fact.result.input_snapshot, b.fact.result.input_snapshot)).toEqual({ rows: [], complete: true });
   });
+
+  // Codex CR 5963331228 P1: a range on a figure CEE PROJECTED off its raw point (0.8 months → 0.08) cannot ride the wire.
+  // Dropping it alone would let PLoT score that option's limit on the single point; its P for that limit is withheld.
+  async function projectedRun(range?: Rec): Promise<{ options: Rec[]; results: Rec[] }> {
+    const tm = { node_id: 'fac_downtime', match_type: 'exact_id', confidence: 'high' };
+    const liftIv = { value: 0.08, raw_value: 0.8, cap: 10, unit: 'months', source: 'user_specified', target_match: tm, ...(range ? { range } : {}) };
+    const stayIv = { value: 0, raw_value: 0, cap: 10, unit: 'months', source: 'user_specified', target_match: tm };
+    const graph = GraphV3.parse({
+      nodes: [
+        { id: 'goal_cost', kind: 'goal', label: 'Annual cost' },
+        { id: 'opt_lift', kind: 'option', label: 'Lift-and-shift', interventions: { fac_downtime: liftIv } },
+        { id: 'opt_stay', kind: 'option', label: 'Stay on-prem', interventions: { fac_downtime: stayIv } },
+        { id: 'fac_downtime', kind: 'factor', label: 'Migration downtime', observed_state: { value: 0, raw_value: 0, cap: 10, unit: 'months', source: 'user_override' } },
+      ],
+      edges: [{ from: 'fac_downtime', to: 'goal_cost', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' }],
+    });
+    const snapshot = {
+      graph,
+      options: [
+        { id: 'opt_lift', option_id: 'opt_lift', label: 'Lift-and-shift', interventions: { fac_downtime: liftIv } },
+        { id: 'opt_stay', option_id: 'opt_stay', label: 'Stay on-prem', interventions: { fac_downtime: stayIv } },
+      ],
+      goal_node_id: 'goal_cost',
+      goal_constraints: [{ constraint_id: 'c_dt', node_id: 'fac_downtime', operator: '<=', value: 1, unit: 'months', value_frame: 'level' }],
+      rawPersistedGraph: graph,
+    } as unknown as RunAnalysisScenarioSnapshot;
+    const response = JSON.parse(JSON.stringify(happyFixture)) as Rec;
+    response.results = [
+      { option_id: 'opt_lift', option_label: 'Lift-and-shift', win_probability: 0.6, constraint_probabilities: { c_dt: 1 } },
+      { option_id: 'opt_stay', option_label: 'Stay on-prem', win_probability: 0.4, constraint_probabilities: { c_dt: 1 } },
+    ];
+    let captured: Rec | undefined;
+    const run = vi.fn((payload: Rec) => { captured = payload; return Promise.resolve(response as unknown as V2RunResponseEnvelope); });
+    const plotClient = { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;
+    const result = await createRunAnalysisHandler({ plotClient, scenarioReader: vi.fn(() => Promise.resolve(snapshot)) })(makeInvocation());
+    const fact = (result.handler_facts as unknown as Fact[]).find((f) => f.fact_type === 'run_analysis')!;
+    return { options: captured!.options as Rec[], results: (fact.enrichment?.results ?? fact.result?.enrichment?.results) as Rec[] };
+  }
+  const pOf = (results: Rec[], id: string) => (results.find((r) => r.option_id === id)!.constraint_probabilities as Rec);
+
+  it('RED: a range lost to the unit projection withholds THAT option\'s P for the limit on its factor (fail closed)', async () => {
+    const { options, results } = await projectedRun({ low: 0.5, high: 2, meaning: 'likely_range', source: 'user_specified' });
+    expect(options.find((o) => o.id === 'opt_lift')!.interventions).toEqual({ fac_downtime: 0.08 });
+    expect(options.every((o) => !Object.hasOwn(o, 'intervention_ranges'))).toBe(true);
+    expect(Object.hasOwn(pOf(results, 'opt_lift'), 'c_dt'), 'the point-only P must not reach any reader').toBe(false);
+    expect(pOf(results, 'opt_stay')).toEqual({ c_dt: 1 });
+  });
+
+  it('CONTROL: the same projected figure with NO range stated keeps its P (nothing withheld)', async () => {
+    const { results } = await projectedRun();
+    expect(pOf(results, 'opt_lift')).toEqual({ c_dt: 1 });
+  });
 });
+

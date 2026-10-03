@@ -17,6 +17,8 @@ const SCENARIO_ID = '88888888-8888-4888-8888-888888888888';
 const LIFT = 'Lift-and-shift';
 const REPLATFORM = 'Re-platform';
 const TEXT = 'For Lift-and-shift, migration downtime is likely between 5 and 20 days, most likely 10 days.';
+/** The typed reading the Agent sends with a range: a plain LIKELY range, given by the user. */
+const TYPED = { range_meaning: 'likely_range', range_user_stated: true } as const;
 
 function servedGraph() {
   return projectGraphForPersistence({
@@ -126,7 +128,7 @@ describe('the user\'s likely range for an option\'s level survives propose → a
 
   it('RED: the persisted cell holds the user\'s 10 days AND their likely range 5–20, as theirs; ONE commit; the hash moves', async () => {
     const before = currentHash();
-    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20 });
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     // What the user approves names the range AND how it is read (AIQ 5909998288 / 5914439702).
     expect(String(proposed.public_label)).toMatch(/likely between 5 days and 20 days \(read as the middle half of what.s likely\)/);
@@ -144,43 +146,26 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     await proposeAndApprove({ value: 10 });
     expect(liftCell().range).toBeUndefined();
     rows.clear();
-    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20 });
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
   });
 
+  // Codex CR 5963331228 P1: the range is decided from TYPED arguments only (its meaning, that the user gave it, beside a
+  // level they gave, the level inside it), never by parsing the user's words; the user then approves range AND reading.
   it.each([
-    ['bounds the user never wrote (Olumi\'s range is never recorded as theirs)', { value: 10, likely_low: 4, likely_high: 25 }, TEXT],
-    ['a figure outside its own range', { value: 30, likely_low: 5, likely_high: 20 }, 'Lift-and-shift: likely between 5 and 20 days, call it 30.'],
-    ['only one bound', { value: 10, likely_low: 5 }, TEXT],
-    // AIQ CR 5918093025: the range is theirs only as ONE affirmed statement with no comparator.
-    ['two separate figures, one a hard bound (AIQ CR)', { value: 10, likely_low: 5, likely_high: 20 },
-      'Lift-and-shift downtime is at most 20 days; the testing part is 5 days, and 10 days is typical.'],
-    ['a range the user only ASKED about (AIQ CR)', { value: 10, likely_low: 5, likely_high: 20 },
-      'For Lift-and-shift, is migration downtime between 5 and 20 days? I guess 10 days.'],
-    ['two figures joined by a bare "and" (AIQ 5918229950)', { value: 10, likely_low: 5, likely_high: 20 },
-      'For Lift-and-shift, it takes 5 days of setup and 20 days of downtime, 10 days typically.'],
-    // CODEX CEE BUDDY 5919274454: the span must be about THIS factor, in the same statement, not another factor's range.
-    ["downtime's own figures separate, another factor's likely span (buddy)", { value: 10, likely_low: 5, likely_high: 20 },
-      'Migration downtime is 5 days for setup and 20 days for recovery, most likely 10 days. Training time is likely between 5 and 20 days.'],
-    ["downtime's own figures separate, a money span (buddy)", { value: 10, likely_low: 5, likely_high: 20 },
-      'Migration downtime is 5 days for setup and 20 days for recovery, most likely 10 days. Annual cost is likely £5–£20.'],
-    ["downtime's own figures separate, no span at all (buddy control)", { value: 10, likely_low: 5, likely_high: 20 },
-      'Migration downtime is 5 days for setup and 20 days for recovery, most likely 10 days.'],
-    ['one sentence, both factors: the span sits beside training time (AIQ 5919410219)', { value: 10, likely_low: 5, likely_high: 20 },
-      'For Lift-and-shift, migration downtime is 10 days, and training time is likely between 5 and 20 days.'],
-    // CODEX CEE BUDDY 5919620573: the span's OWN option and unit.
-    ['both options in one sentence, the span is Re-platform\'s (buddy)', { value: 10, likely_low: 5, likely_high: 20 },
-      'For Re-platform, migration downtime is likely between 5 and 20 days; for Lift-and-shift, migration downtime is most likely 10 days.'],
-    ['both options in one sentence, reversed (buddy)', { value: 10, likely_low: 5, likely_high: 20 },
-      'For Lift-and-shift, migration downtime is most likely 10 days; for Re-platform, migration downtime is likely between 5 and 20 days.'],
-    ['the span is in WEEKS for a factor in days (buddy)', { value: 10, likely_low: 5, likely_high: 20 },
-      'For Lift-and-shift, migration downtime is likely between 5 and 20 weeks, most likely 10 days.'],
-    ['the span names ANOTHER option', { value: 10, likely_low: 5, likely_high: 20 },
-      'For Re-platform, migration downtime is likely between 5 and 20 days. Lift-and-shift is about 10 days.'],
-    ['a span with a comparator ("no more than 5 to 20 days")', { value: 10, likely_low: 5, likely_high: 20 },
-      'For Lift-and-shift, migration downtime is no more than 5 to 20 days, about 10 days.'],
+    ['no range_user_stated (Olumi\'s range is never recorded as theirs)', { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'likely_range' }, TEXT],
+    ['range_user_stated false', { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'likely_range', range_user_stated: false }, TEXT],
+    ['a 95% confidence interval (range_meaning other; Codex CR)', { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'other', range_user_stated: true },
+      'For Lift-and-shift I am 95% confident migration downtime is between 5 and 20 days, most likely 10 days.'],
+    ['a min–max (range_meaning min_max)', { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'min_max', range_user_stated: true }, TEXT],
+    ['a bound (range_meaning at_most)', { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'at_most', range_user_stated: true }, TEXT],
+    ['no range_meaning', { value: 10, likely_low: 5, likely_high: 20, range_user_stated: true }, TEXT],
+    ['only one bound', { value: 10, likely_low: 5, ...TYPED }, TEXT],
+    ['a low end that is not positive', { value: 10, likely_low: 0, likely_high: 20, ...TYPED }, TEXT],
+    ['a figure outside its own range', { value: 30, likely_low: 5, likely_high: 20, ...TYPED }, 'Lift-and-shift: likely between 5 and 20 days, call it 30.'],
+    ['a level that is not the user\'s (user_stated false)', { value: 10, likely_low: 5, likely_high: 20, ...TYPED, user_stated: false }, TEXT],
   ])('REFUSED, nothing proposed: %s', async (_n, level, text) => {
     const { proposed } = await proposeAndApprove(level, text);
     expect(proposed.ok).toBe(false);
@@ -188,15 +173,33 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(rows.size).toBe(0);
   });
 
-  it.each([
-    ['"5 to 20 days"', 'For Lift-and-shift, migration downtime is likely 5 to 20 days, most likely 10 days.'],
-    ['"5–20 days"', 'For Lift-and-shift, migration downtime is likely 5–20 days, most likely 10 days.'],
-    ['"5 days to 20 days" (AIQ 5919742948)', 'For Lift-and-shift, migration downtime is likely 5 days to 20 days, most likely 10 days.'],
-  ])('CONTROL: one affirmed span %s is the user\'s likely range', async (_n, text) => {
-    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20 }, text);
+  it('RED: a typed likely range is admitted however the user worded it (no wording door: "five to twenty days")', async () => {
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED },
+      'For Lift-and-shift, migration downtime is 10 days most likely; my likely range runs from five to twenty days.');
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
+  });
+
+  // Codex CR 5963331228 P2: equal bounds with another meaning or author are a CHANGE, never "already set".
+  it.each([
+    ['stored as a min–max', { low: 5, high: 20, meaning: 'min_max', source: 'user_specified' }],
+    ['stored as Olumi\'s', { low: 5, high: 20, meaning: 'likely_range', source: 'cee_hypothesis' }],
+  ])('RED: the same 5–20 %s is rewritten as the user\'s likely range', async (_n, stored) => {
+    await proposeAndApprove({ value: 10 });
+    liftCell().range = stored;
+    rows.clear();
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
+  });
+  it('CONTROL: the same complete likely range already stored is a repeat (nothing proposed)', async () => {
+    await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
+    rows.clear();
+    const { proposed } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
+    expect(proposed.ok).toBe(false);
+    expect(rows.size).toBe(0);
   });
 
   it('CONTROL: a level with no range is written exactly as before (no `range` key)', async () => {

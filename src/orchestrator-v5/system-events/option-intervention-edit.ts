@@ -1129,9 +1129,12 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     // must not turn the old AI estimate into a new user-authored measurement.
     // TEMPORAL: a likely range the user just gave for the SAME level is a change (the range is theirs, the level already
     // was), so it is written; an identical range is still a repeat.
-    const storedRange = (existing as { range?: { low?: unknown; high?: unknown } } | undefined)?.range;
+    // The COMPLETE range this write stores (Codex CR 5963331228 P2): equal bounds stored as `min_max`, or with another
+    // author, are a change, never a repeat.
+    const storedRange = (existing as { range?: Record<string, unknown> } | undefined)?.range;
     const likelyMoves = figure?.likely_range !== undefined
-      && (storedRange?.low !== figure.likely_range.low || storedRange?.high !== figure.likely_range.high);
+      && !(storedRange?.low === figure.likely_range.low && storedRange?.high === figure.likely_range.high
+        && storedRange?.meaning === 'likely_range' && storedRange?.source === 'user_specified');
     if (entry.data.value === input.modelValue && !likelyMoves) return { kind: 'unchanged' };
   }
   const built = buildOptionEffectRawOperation({

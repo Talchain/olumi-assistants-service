@@ -95,6 +95,29 @@ describe('S1 writer — the persisted form refuses a range that contradicts its 
     expect(nodeIv.raw_value).toBe(10);
   });
 
+  // Codex CR 5963331228 P1: a cell with no finite numeric LEVEL sets nothing, so a `raw_value` beside it brackets nothing.
+  const R = { low: 5, high: 20, meaning: 'likely_range', ...USER };
+  it.each([
+    ['`value` missing', { raw_value: 10, range: R }],
+    ['`value` a string', { value: 'ten', raw_value: 10, range: R }],
+    ['`value` a numeric string', { value: '0.25', raw_value: 10, range: R }],
+    ['`value` NaN', { value: Number.NaN, raw_value: 10, range: R }],
+    ['`value` null', { value: null, raw_value: 10, range: R }],
+  ])('RED: REFUSED (no_point) when %s, even with a raw_value inside the range', (_n, cell) => {
+    expect(admitInterventionRange(cell)).toEqual({ refused: 'no_point' });
+    expect(wireInterventionRanges({ downtime: cell }, { downtime: 10 })).toBeUndefined();
+  });
+  it('RED: the persisted form drops that range (node and option), keeping the raw_value', () => {
+    const g = downtime(R);
+    for (const iv of [((g.nodes[2] as Rec).interventions as Rec).downtime, ((g.options[0] as Rec).interventions as Rec).downtime] as Rec[]) delete iv.value;
+    const projected = projectGraphForPersistence(g) as Rec;
+    expect(liftNodeRange(projected)).toBeUndefined();
+    expect(liftOptionRange(projected)).toBeUndefined();
+  });
+  it('CONTROL: a finite numeric level on the model scale (0.25) beside raw 10 days admits the range', () => {
+    expect(admitInterventionRange({ value: 0.25, raw_value: 10, range: R })).toEqual({ range: R });
+  });
+
   it('a categorical value has no point for a range to bracket → refused', () => {
     expect(admitInterventionRange({ value: 1, raw_value: 'UK', value_type: 'categorical', range: { low: 5, high: 20, meaning: 'likely_range', ...USER } }))
       .toEqual({ refused: 'no_point' });

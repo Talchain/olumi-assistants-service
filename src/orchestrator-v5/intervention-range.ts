@@ -48,12 +48,15 @@ function finiteNumber(v: unknown): number | undefined {
 /**
  * The option's own figure in the range's units: `raw_value` when present (the user-scale quantity), else `value`
  * (a numeric intervention with no separate raw carries its raw figure in `value`). Categorical/boolean → none.
+ * ⛔ A finite numeric LEVEL (`value`) is required first (Codex CR 5963331228 P1): a cell whose `value` is missing or
+ * invalid sets no level, so a `raw_value` beside it brackets nothing and its range is refused (`no_point`).
  */
 export function interventionPoint(intervention: unknown): number | undefined {
   if (!isRec(intervention)) return undefined;
   if (intervention.value_type === 'categorical' || intervention.value_type === 'boolean') return undefined;
+  if (typeof intervention.value !== 'number' || !Number.isFinite(intervention.value)) return undefined;
   if (intervention.raw_value !== undefined) return finiteNumber(intervention.raw_value);
-  return finiteNumber(intervention.value);
+  return intervention.value;
 }
 
 /** The admitted range, or why it is refused. `undefined` when the intervention states no range. */
@@ -120,14 +123,29 @@ export function wireInterventionRanges(
   sourceInterventions: Readonly<Record<string, unknown>>,
   wireInterventions: Readonly<Record<string, number>>,
 ): Record<string, WireInterventionRange> | undefined {
-  let out: Record<string, WireInterventionRange> | undefined;
+  return wireInterventionRangePlan(sourceInterventions, wireInterventions).ranges;
+}
+
+/**
+ * The same read, plus the factors whose ADMITTED range could not ride the wire (Codex CR 5963331228 P1: "0.8 months"
+ * projected to 0.08 is no longer the raw point the range brackets). Dropping the range alone would let the engine score
+ * that option's limit on the single point (100% / 0%), the very verdict the range exists to replace; the caller
+ * withholds that option's result for every limit on these factors instead (fail closed).
+ */
+export function wireInterventionRangePlan(
+  sourceInterventions: Readonly<Record<string, unknown>>,
+  wireInterventions: Readonly<Record<string, number>>,
+): { ranges: Record<string, WireInterventionRange> | undefined; notForwarded: string[] } {
+  let ranges: Record<string, WireInterventionRange> | undefined;
+  const notForwarded: string[] = [];
   for (const factorId of Object.keys(sourceInterventions).sort()) {
     const verdict = admitInterventionRange(sourceInterventions[factorId]);
     if (verdict === undefined || !('range' in verdict)) continue;
     const wire = wireInterventions[factorId];
-    if (wire === undefined || wire !== interventionPoint(sourceInterventions[factorId])) continue;
+    if (wire === undefined) continue;
+    if (wire !== interventionPoint(sourceInterventions[factorId])) { notForwarded.push(factorId); continue; }
     const { low, high, meaning } = verdict.range;
-    (out ??= {})[factorId] = { low, high, meaning };
+    (ranges ??= {})[factorId] = { low, high, meaning };
   }
-  return out;
+  return { ranges, notForwarded };
 }

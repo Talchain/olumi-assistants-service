@@ -453,8 +453,13 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   // copies of both, so these are re-supplied from the NEW record or not at all.
   if (rec.value_confidence !== undefined) iv.value_confidence = rec.value_confidence;
   if (rec.reasoning !== undefined) iv.reasoning = rec.reasoning;
-  // TEMPORAL: a range supplied with this figure replaces the one carried from the old entry.
+  // TEMPORAL: a range supplied with this figure replaces the one carried from the old entry. With none supplied, the old
+  // range is kept ONLY while the quantity is unchanged (Codex CR 5963331228 P1): a new figure, or the same digits in
+  // another unit (10 days → 10 weeks), is a different quantity, and containment cannot tell, so its range is dropped.
   if (rec.range !== undefined) iv.range = rec.range;
+  else if ('range' in iv && !(isPlainObject(existing) && QUOTED_FIGURE_KEYS.every((key) => isDeepStrictEqual(existing[key], iv[key])))) {
+    delete iv.range;
+  }
   if (isPlainObject(existing) && typeof existing.source_quote === 'string'
     && QUOTED_FIGURE_KEYS.every((key) => isDeepStrictEqual(existing[key], iv[key]))) {
     iv.source_quote = existing.source_quote;
