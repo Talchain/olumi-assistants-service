@@ -56,11 +56,20 @@ export function leaderLicence(o: LeaderLicenceInput): LeaderLicence {
   return 'permitted';
 }
 
-/** A published admission that answers "how strong a claim?" (`structurally_analysable: true`, a recognised mode). */
+/**
+ * A published admission that answers "how strong a claim?": the run-axis flag is `true` and the mode is recognised.
+ *
+ * ⚠ TWO SPELLINGS OF ONE FLAG, BOTH PRODUCER-MINTED. `analysis_ready.analysis_admission.structurally_analysable` (the
+ * canonical payload) and the `/graph` read's top-level projection `analysis_admission.admitted`
+ * (`routes/analysis-admission-projection.ts`: `admitted: a.structurally_analysable`), which the Agent's follow-up state
+ * passes in (`withSavedRunCertainty`). The canonical spelling wins when present; neither present fails closed.
+ */
 function admissionOnClaimStrengthAxis(analysisReady: unknown): boolean {
   const admission = (analysisReady as { analysis_admission?: unknown } | null | undefined)?.analysis_admission;
   if (admission === null || typeof admission !== 'object') return false;
-  if ((admission as { structurally_analysable?: unknown }).structurally_analysable !== true) return false;
+  const a = admission as { structurally_analysable?: unknown; admitted?: unknown };
+  const runnable = a.structurally_analysable !== undefined ? a.structurally_analysable : a.admitted;
+  if (runnable !== true) return false;
   return permittedAnalysisModeFromAnalysisReady(analysisReady) !== null;
 }
 

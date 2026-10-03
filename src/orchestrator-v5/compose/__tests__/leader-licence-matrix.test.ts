@@ -30,6 +30,9 @@ const CELLS = {
   M6_absent: { status: 'ready', may_run: true },
   M6_malformed: { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'leader_please' } },
   M6_no_ready: undefined,
+  /** The `/graph` read's top-level projection spells the run-axis flag `admitted` (`analysis-admission-projection.ts`). */
+  M1_projection: { analysis_admission: { admitted: true, permitted_analysis_mode: 'comparative_leader', semantic_quality_sufficient: true } },
+  M5_projection: { analysis_admission: { admitted: false, permitted_analysis_mode: 'none', semantic_quality_sufficient: false } },
 } as const;
 
 const current = { run_state: { kind: 'complete_current', computed_at: '2026-10-03T00:00:00.000Z' } };
@@ -61,6 +64,8 @@ const EXPECTED_WHEN_A_TRUE: Record<keyof typeof CELLS, LeaderLicence> = {
   M6_absent: 'withheld',
   M6_malformed: 'withheld',
   M6_no_ready: 'withheld',
+  M1_projection: 'permitted',
+  M5_projection: 'withheld',
 };
 
 describe('RED: the matrix through the ONE entry point (A = true: entitled, separated)', () => {
