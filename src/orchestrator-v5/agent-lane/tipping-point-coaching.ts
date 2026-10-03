@@ -9,7 +9,7 @@ type Found = Extract<TippingPoint, { status: 'found' }>;
 export type TippingPointCoaching =
   | { readonly kind: 'found'; readonly run_key: string; readonly fact: Found; readonly reply: string; readonly check_inputs: MethodInputs }
   | { readonly kind: 'unavailable'; readonly reply: string }
-  | { readonly kind: 'no_signal'; readonly status: Exclude<TippingPoint['status'], 'found'>; readonly reply: string };
+  | { readonly kind: 'no_signal'; readonly run_key: string; readonly status: Exclude<TippingPoint['status'], 'found'>; readonly reply: string };
 
 /** The existing Explain control owns currentness and full Run binding; this consumer neither computes nor grants it. */
 export function tippingPointCoachingFor(scenarioId: string, read: RunExplanationRead): TippingPointCoaching {
@@ -18,7 +18,8 @@ export function tippingPointCoachingFor(scenarioId: string, read: RunExplanation
   const result = read.analysisResult as { enrichment?: unknown };
   const fact = tippingPointOf(result.enrichment);
   if (fact.status !== 'found') {
-    return { kind: 'no_signal', status: fact.status, reply: fact.status === 'no_flip_in_range'
+    // A "no threshold" answer is about THIS Run as much as a found one: it keeps the Run key the route re-checks (Codex P1 #2542).
+    return { kind: 'no_signal', run_key: bound.id, status: fact.status, reply: fact.status === 'no_flip_in_range'
       ? 'This analysis has no factor threshold to quote within the ranges it checked.'
       : 'This analysis has no grounded factor threshold available to quote.' };
   }

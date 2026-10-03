@@ -72,6 +72,7 @@
  * initialisation).
  */
 
+import type { RunAnalysisProbe } from './handlers/run-analysis-probe.js';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { KnownObservedStateSourceLiteral } from '@talchain/schemas';
 import type {
@@ -754,6 +755,11 @@ export interface RegistryOverrides {
    * state in a test without a mock.
    */
   readonly counterfactualClient?: CounterfactualClient | null;
+  /**
+   * SCIENCE ROBUSTNESS (EXPERIMENT): hand `run_analysis` a probe that receives the exact payload a Run would send and
+   * returns before PLoT (`handlers/run-analysis-probe.ts`). Set ONLY by `handlers/decision-flip-dispatch.ts`.
+   */
+  readonly runAnalysisProbe?: RunAnalysisProbe;
 }
 
 /**
@@ -794,7 +800,11 @@ export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
       ? overrides.counterfactualClient ?? null
       : createCounterfactualClient();
 
-  const runAnalysis = createRunAnalysisHandler({ plotClient, scenarioReader });
+  const runAnalysis = createRunAnalysisHandler({
+    plotClient,
+    scenarioReader,
+    ...(overrides?.runAnalysisProbe ? { probe: overrides.runAnalysisProbe } : {}),
+  });
   const explainFromStructure = createExplainFromStructureHandler();
   const explainResults = createExplainResultsHandler();
   const whatWouldFlip = createWhatWouldFlipHandler({ counterfactualClient });
