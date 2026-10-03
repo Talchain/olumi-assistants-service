@@ -121,7 +121,7 @@ const assumedEdge = () => ({
  * Price → Customer churn. Both of the user's options work through Price, so their whole difference rests partly on that
  * assumed link. Interventions are in the STORED shape ({ value, raw_value, unit }).
  */
-const seedGraph = (assumed: Rec = assumedEdge()) => {
+const seedGraph = (assumed: Rec = assumedEdge(), withReferral = false) => {
   const e = (from: string, to: string, mean = 1) => ({ from, to, strength: { mean, std: 0.1 }, exists_probability: 1,
     effect_direction: mean < 0 ? 'negative' as const : 'positive' as const });
   return {
@@ -130,11 +130,12 @@ const seedGraph = (assumed: Rec = assumedEdge()) => {
       { id: 'goal_x', kind: 'goal', label: 'Revenue', goal_threshold: 0.8 },
       { id: 'fac_price', kind: 'factor', label: 'Price', category: 'controllable', observed_state: { value: 0.245, raw_value: 49, unit: 'GBP', cap: 200 } },
       { id: 'fac_churn', kind: 'factor', label: 'Customer churn', observed_state: { value: 0.245, raw_value: 49, unit: 'GBP', cap: 200 } },
+      ...(withReferral ? [{ id: 'fac_referral', kind: 'factor', label: 'Referral rate', observed_state: { value: 0.245, raw_value: 49, unit: 'GBP', cap: 200 } }] : []),
       { id: 'opt_a', kind: 'option', label: 'Keep £49', interventions: { fac_price: { value: 0.245, raw_value: 49, unit: 'GBP' } } },
       { id: 'opt_b', kind: 'option', label: 'Raise to £59', interventions: { fac_price: { value: 0.295, raw_value: 59, unit: 'GBP' } } },
     ],
     edges: [e('dec_x', 'opt_a'), e('dec_x', 'opt_b'), e('opt_a', 'fac_price'), e('opt_b', 'fac_price'),
-      e('fac_price', 'goal_x'), e('fac_churn', 'goal_x', -0.6), assumed],
+      e('fac_price', 'goal_x'), e('fac_churn', 'goal_x', -0.6), ...(withReferral ? [e('fac_referral', 'goal_x', 0.4)] : []), assumed],
     goal_node_id: 'goal_x',
   };
 };
@@ -270,6 +271,10 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
     const instructions = JSON.stringify(bodies[0]!['instructions'] ?? '');
     expect(instructions).toContain('‘Price’ → ‘Customer churn’');
     expect(instructions).toContain('METHOD TURN: the user asked Olumi to question one assumption');
+    // ⛔ Nothing is truth yet: the model, its options and the assumption are byte-identical before the approval.
+    expect(await hashes()).toBe(before);
+    expect(optionLabels()).toEqual(['Keep £49', 'Raise to £59']);
+    expect(edgeOf(graphNow(), ASSUMED.from, ASSUMED.to)).toEqual(assumedBefore);
     expect(t1._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_option', true]]);
     const approve = approveChipOf(t1);
     expect(approve?.id, JSON.stringify(t1.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
@@ -278,10 +283,6 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
     expect(t1.assistant_text).toContain('‘Price’ → ‘Customer churn’');
     expect(t1.assistant_text).toContain('Retention offer');
     expect((await heldOnLatestRow()).map((p) => p.chip_id)).toEqual([approve!.id.slice('agent-approve-proposal:'.length)]);
-    // ⛔ Nothing is truth yet: the model, its options and the assumption are byte-identical before the approval.
-    expect(await hashes()).toBe(before);
-    expect(optionLabels()).toEqual(['Keep £49', 'Raise to £59']);
-    expect(edgeOf(graphNow(), ASSUMED.from, ASSUMED.to)).toEqual(assumedBefore);
   }, 120_000);
 
   it('LM-3 GENUINELY DIFFERENT, by identity: an option on the link’s own source is refused inside the door — no hold, no chip, nothing stored', async () => {
@@ -297,10 +298,10 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
     expect(optionLabels()).toEqual(['Keep £49', 'Raise to £59']);
   }, 120_000);
 
-  it('LM-3b ONE alternative per press: two options (each one passing alone) are refused', async () => {
-    graphOf.set(SCENARIO, seedGraph());
+  it('LM-3b ONE alternative per press: two DISTINCT options (each one passing alone, on different factors) are refused', async () => {
+    graphOf.set(SCENARIO, seedGraph(assumedEdge(), true));
     script = [() => fnCall('propose_new_option', { rationale: 'r', options: [retention,
-      { label: 'Loyalty discount', acts_on: [{ factor_label: 'Customer churn', direction: 'negative', level: { value: 30, unit: 'GBP', estimate: true, basis: 'b' } }] }] })];
+      { label: 'Referral programme', acts_on: [{ factor_label: 'Referral rate', direction: 'positive', level: { value: 80, unit: 'GBP', estimate: true, basis: 'b' } }] }] })];
     const t1 = await pressFor(ASSUMED.from, ASSUMED.to);
     expect(t1._agent.tool_calls.map((c) => c.refusal)).toEqual(['widen_gate']);
     expect(await heldOnLatestRow()).toEqual([]);
