@@ -168,10 +168,10 @@ export function computeAnalysisAffectingGraphHashSha256(
     nodes: nodes.map((node) => {
       // Match canonical readiness: one valid mirror owns this option, even in
       // a partial mirror; missing/invalid/duplicate mirrors fall back to the node.
-      const mirrors = mirroredOptions.filter((option) => option.id === node.id.trim());
-      const option = node.kind === 'option'
-        ? mirrors.length === 1 ? mirrors[0]! : projectOptionForCanonicalBuilder(node, factorIds)
-        : null;
+      const mirrors = node.kind === 'option' && typeof node.id === 'string'
+        ? mirroredOptions.filter((option) => option.id === node.id.trim()) : [];
+      const option = node.kind === 'option' && typeof node.id === 'string'
+        ? mirrors.length === 1 ? mirrors[0]! : projectOptionForCanonicalBuilder(node, factorIds) : null;
       return { ...projectNode(node), ...projectAdmissionGaps(option) };
     }).sort((a, b) => a.id.localeCompare(b.id)),
     edges: edges

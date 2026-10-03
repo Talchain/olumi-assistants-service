@@ -11,6 +11,7 @@ import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { computeAnalysisAffectingGraphHash } from '../graph-hash.js';
 import { deriveAnalysisFreshness } from '../freshness.js';
+import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 
 type Row = Record<string, unknown> & { id: string };
 type TestGraph = { nodes: Row[]; edges: unknown[]; options?: Row[]; [key: string]: unknown };
@@ -85,7 +86,7 @@ function runAt(graph: TestGraph): RunAnalysisHandlerFact {
     result: { scenario_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       summary: 'Saved Run freshness control.', leading_option_id: OPTION,
       graph_hash_at_run: hash(graph), computed_at: AT,
-      enrichment: { analysis_status: 'computed' } } };
+      enrichment: stampRunAnalysisProjection({ analysis_status: 'computed' }) } };
 }
 
 const freshness = (saved: RunAnalysisHandlerFact, graph: TestGraph) =>

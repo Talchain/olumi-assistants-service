@@ -3,7 +3,9 @@ import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeGraphIdentityHash, computeAnalysisAffectingHashRecord,
   computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
 import { validateAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
-import { deriveAnalysisFreshness, isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { compareRunGoalUnitSnapshot, isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { matchesHistoricalAnalysisIdentity } from '../context/historical-analysis-identity.js';
+import { computeLegacyAnalysisAffectingGraphHash } from '../context/graph-hash-legacy.js';
 import { selectCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
 import { composeAnalysisStateV1 } from '../compose/analysis-state-v1.js';
 import { leaderLicenceFromState, type LeaderLicence } from '../compose/leader-licence.js';
@@ -42,7 +44,7 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
   const analysis = computeVersionAnalysisAffectingHashRecord(version.graph as typeof parsed.data);
   const runHash = computeAnalysisAffectingHashRecord(version.graph as typeof parsed.data);
   if (full === null || analysis === null || runHash === null
-    || full.value !== version.graph_identity_hash || analysis.value !== version.analysis_affecting_hash
+    || full.value !== version.graph_identity_hash || !matchesHistoricalAnalysisIdentity(version.graph as typeof parsed.data, version.analysis_affecting_hash)
     || full.algorithm !== version.hash_algorithm || full.projection_version !== version.identity_projection_version
     || full.normaliser_version !== version.identity_normaliser_version || full.graph_schema_version !== version.graph_schema_version) {
     return { reason: 'unconfirmed_identity' };
@@ -54,16 +56,19 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
     const result = record((fact as { result?: unknown }).result);
     const checked = validateAnalysisRunFactIdentity(result);
     if (checked.status !== 'confirmed') { refusal = 'unconfirmed_identity'; continue; }
-    if (checked.identity.graph_hash_at_run !== runHash.value) continue;
+    if (checked.identity.graph_hash_at_run !== runHash.value
+      && checked.identity.graph_hash_at_run !== computeLegacyAnalysisAffectingGraphHash(version.graph as typeof parsed.data)) continue;
     const runId = result?.run_id;
     const snapshot = RunInputSnapshotSchema.safeParse(result?.input_snapshot);
     if (checked.identity.scenario_id !== version.scenario_id || typeof runId !== 'string'
       || runId.length === 0 || runId.length > 200 || runId.trim() !== runId || !snapshot.success) {
       refusal = 'unconfirmed_identity'; continue;
     }
-    // Reuse the Run-attested goal-unit/currentness authority, including goal-free work.
-    const freshness = deriveAnalysisFreshness([fact], runHash.value, undefined, { currentGraph: version.graph });
-    if (freshness.freshness !== 'fresh') { refusal = 'incompatible_results'; continue; }
+    // A confirmed immutable snapshot is historical identity, not current
+    // freshness. Reuse only the Run-attested goal-unit check, including
+    // goal-free work; never bypass the legacy guard on a live current graph.
+    const goalBinding = compareRunGoalUnitSnapshot(fact, version.graph);
+    if (goalBinding === 'unit_changed' || goalBinding === 'unverified') { refusal = 'incompatible_results'; continue; }
     candidates.push({ identity: { ...checked.identity, run_id: runId }, fact, snapshot: snapshot.data });
   }
   const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;

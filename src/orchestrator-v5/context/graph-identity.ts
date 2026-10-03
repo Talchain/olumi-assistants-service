@@ -65,7 +65,7 @@ export const IDENTITY_PROJECTION_VERSION = 'identity.v1' as const;
  * current behaviour; they do not alter it.
  */
 export const ANALYSIS_NORMALISER_VERSION = '1' as const;
-export const ANALYSIS_PROJECTION_VERSION = 'analysis_affecting.v1' as const;
+export const ANALYSIS_PROJECTION_VERSION = 'analysis_affecting.admission_gaps.v2' as const;
 
 const HASH_ALGORITHM = 'sha256' as const;
 

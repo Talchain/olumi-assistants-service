@@ -9,6 +9,10 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { CARRIERS, legacyGraph, legacyRun, SCENARIO as LEGACY_SCENARIO } from '../../context/__tests__/legacy-gap-projection.fixture.js';
+import { bindVersionResults } from '../version-result-binding.js';
+import { factSet } from './version-result-fixtures.js';
+import { versionRecord } from './fixtures.js';
 
 import {
   ModelVersionCasConflictError,
@@ -466,6 +470,28 @@ describe('SupabaseModelVersionStore.listVersions', () => {
 });
 
 describe('SupabaseModelVersionStore.getVersion', () => {
+  it.each(CARRIERS)('a NULL-hash legacy %s snapshot still binds its old Run without rewriting history', async carrier => {
+    const graph = legacyGraph(carrier);
+    const { client } = makeClient({ selectResult: { data: {
+      ...versionRecord(graph),
+      analysis_affecting_hash: null,
+    }, error: null } });
+    const version = await new SupabaseModelVersionStore(client).getVersion(LEGACY_SCENARIO, VERSION_ID);
+    expect(version).not.toBeNull();
+    expect(bindVersionResults({ scenarioId: LEGACY_SCENARIO, from: version!, to: version!,
+      factSet: factSet([legacyRun(carrier)]) })).toMatchObject({ kind: 'shared' });
+  });
+  it.each([undefined, null, 42])('legacy nodes with id %j and a valid mirror derive identical identities on list/get reads', async id => {
+    const graph = { nodes: [{ kind: 'option', label: 'Legacy node', ...(id === undefined ? {} : { id }) }], edges: [],
+      options: [{ id: 'valid-option', label: 'Valid mirror', status: 'ready', interventions: { factor: { value: 0.5 } } }] };
+    const row = { ...summaryRow(), graph, analysis_affecting_hash: null };
+    const getClient = makeClient({ selectResult: { data: row, error: null } }).client;
+    const listClient = makeClient({ selectResult: { data: [row], error: null } }).client;
+    const version = await new SupabaseModelVersionStore(getClient).getVersion(SCENARIO, VERSION_ID);
+    const [listed] = await new SupabaseModelVersionStore(listClient).listVersions(SCENARIO);
+    expect(version?.analysis_affecting_hash).toBe('e2a118c22bac9b69fc06ec86a26e21762013755bf51a28b1c21db0375fe530e1');
+    expect(listed?.analysis_affecting_hash).toBe(version?.analysis_affecting_hash);
+  });
   it('filters by BOTH scenario_id and id; returns the full record including graph', async () => {
     const graph = { nodes: [{ id: 'n1' }], edges: [] };
     const { client, selectCalls } = makeClient({

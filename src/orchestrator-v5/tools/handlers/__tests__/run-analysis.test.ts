@@ -18,6 +18,8 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setTestSink } from '../../../../utils/telemetry.js';
+import { RUN_ANALYSIS_PROJECTION_KEY } from '../../../context/analysis-projection-policy.js';
+import { ANALYSIS_PROJECTION_VERSION } from '../../../context/graph-identity.js';
 import { z } from 'zod';
 import * as talchainSchemas from '@talchain/schemas/orchestrator';
 
@@ -229,31 +231,22 @@ describe('run_analysis handler — happy path', () => {
 
     const enrichment = fact.result.enrichment as Record<string, unknown>;
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // STRENGTHENED at @talchain/schemas 0.25.0, and the strengthening is the
-    // point of the release. This test previously read "…VERBATIM PLUS EXACTLY
-    // ONE CEE KEY" and asserted `added` equalled
-    // `['__cee_claim_safety']` — a documented, deliberate BREACH of the
-    // handler-ownership invariant ("enrichment is byte-for-byte PLoT",
-    // scripts/validate-handler-ownership.sh §6), tolerated only because
-    // `RunAnalysisResultSchema` was `.strict()` and the verdict had nowhere
-    // else to live. 0.25.0 gives it `result.constraint_verdict`, so the
-    // invariant is now satisfied EXACTLY and this assertion tightens from
-    // "one known exception" to "none".
-    // ═══════════════════════════════════════════════════════════════════════
-
-    // 1. ZERO added keys. The pass-through is total.
+    // 1. Exactly one internal projection stamp in the existing persisted JSON
+    // record. No provider field changes and no claim-safety key returns.
     const added = Object.keys(enrichment).filter(
       (k) => !Object.prototype.hasOwnProperty.call(responseSnapshot, k),
     );
-    expect(added).toEqual([]);
+    expect(added).toEqual([RUN_ANALYSIS_PROJECTION_KEY]);
+    expect(enrichment[RUN_ANALYSIS_PROJECTION_KEY]).toBe(ANALYSIS_PROJECTION_VERSION);
     // The interim key specifically is GONE — nothing writes it any more.
     expect(CEE_CLAIM_SAFETY_ENRICHMENT_KEY in enrichment).toBe(false);
 
     // 2. Every PLoT field is untouched — no projection, no stripping, and no
     //    field reordering that would change JSON.stringify byte output.
-    expect(enrichment).toEqual(responseSnapshot);
-    expect(JSON.stringify(enrichment)).toBe(JSON.stringify(responseSnapshot));
+    const providerEnvelope = { ...enrichment };
+    delete providerEnvelope[RUN_ANALYSIS_PROJECTION_KEY];
+    expect(providerEnvelope).toEqual(responseSnapshot);
+    expect(JSON.stringify(providerEnvelope)).toBe(JSON.stringify(responseSnapshot));
 
     // 3. The verdict carries a real answer, not a placeholder, and it is on the
     //    CONTRACT field. This fixture ratifies no hard constraint, so the

@@ -45,6 +45,7 @@ import {
 } from './option-identity.js';
 import { isAnalysisRefusalFact } from './analysis-refusal-continuity.js';
 import { normalizeRunGoalUnit } from './run-goal-unit.js';
+import { runProjectionAllowsFreshness } from './analysis-projection-policy.js';
 
 /**
  * Four-valued freshness state. Reachable from new code paths only as
@@ -67,6 +68,8 @@ export type FreshnessReason =
   | 'goal_unit_changed'
   /** A snapshotted Run was read without one verifiable selected goal. */
   | 'goal_snapshot_unverified'
+  /** A legacy Run's projection cannot attest unchanged option admission. */
+  | 'legacy_admission_unverified'
   | 'legacy_fact_missing_hash'
   | 'current_graph_hash_unavailable'
   | 'no_successful_run_analysis_fact'
@@ -103,7 +106,7 @@ export type FreshnessReason =
 /**
  * Optional read-state the caller may thread into {@link deriveAnalysisFreshness}.
  *
- * Legacy facts retain their hash verdict. A Run that supplies a selected-goal
+ * Legacy facts require verifiable projection/admission evidence. A Run that supplies a selected-goal
  * snapshot also requires the current graph; missing proof fails closed. Only
  * callers that distinguish an empty store from a failed read should supply
  * priorFactsReadOk — CEE #977's `PriorFactsReadResult` is that distinction.
@@ -591,7 +594,7 @@ function checkHardInvariants(
       assertExhaustive(derivation.freshness);
   }
 
-  // Invariant 2: identical-hash ⇒ fresh unless chronology or the snapshotted
+  // Invariant 2: identical-hash ⇒ fresh unless projection/admission, chronology or the snapshotted
   // goal unit invalidates that fact. Goal units are outside the hash projection;
   // A -> analyse -> B -> restore A also remains stale until a newer rerun.
   if (
@@ -601,6 +604,7 @@ function checkHardInvariants(
     derivation.reason !== 'model_restored_after_analysis' &&
     derivation.reason !== 'goal_unit_changed' &&
     derivation.reason !== 'goal_snapshot_unverified' &&
+    derivation.reason !== 'legacy_admission_unverified' &&
     derivation.freshness !== 'fresh'
   ) {
     return { coerce_to: 'fresh' };
@@ -629,7 +633,7 @@ function checkHardInvariants(
  *     (legacy fact predating 0.10.0)
  *   - Successful fact selected, currentGraphHash null → unknown
  *     (graph absent on this turn)
- *   - Hashes match → fresh
+ *   - Hashes match → fresh only with supported projection/admission and goal-unit evidence
  *   - Hashes differ → stale
  *
  * Option-identity guard (optional `currentGraphOptionIds`, gated by
@@ -642,8 +646,8 @@ function checkHardInvariants(
  * so behaviour is byte-identical to the two-argument form. `none` and already-
  * `stale` verdicts, and indeterminate option data, are left untouched.
  *
- * INVARIANT (F10 root, ROADMAP 1.133): identical-hash ⇒ fresh, by
- * construction. The guard is deliberately NOT consulted on the hash-proven
+ * INVARIANT (F10 root, ROADMAP 1.133): enrichment option namespaces are never
+ * compared on the matching-hash path. That guard is deliberately NOT consulted on the hash-proven
  * `fresh` path: the analysis-affecting graph hash already includes
  * options[].id, so equal hashes prove the option set is unchanged — whereas
  * the analysed identifiers on the fact (enrichment.option_comparison[]
@@ -652,8 +656,8 @@ function checkHardInvariants(
  * former "defence-in-depth check on the fresh path" compared those two
  * namespaces and stamped a run's OWN response stale with identical hashes on
  * both sides (verified live, 16 Jul). `enforceInvariants` backstops this
- * structurally: a non-fresh verdict with equal non-null hashes is coerced to
- * `fresh`.
+ * structurally, except for independent restore, goal-unit and projection/
+ * admission evidence. A legacy hash ignored gaps and cannot prove admission.
  *
  * Caller is responsible for emitting the `analysis_freshness.derived`
  * telemetry event with the returned derivation. The function does not
@@ -772,6 +776,12 @@ export function deriveAnalysisFreshness(
     };
   }
 
+  if (base.freshness === 'fresh' && !runProjectionAllowsFreshness(
+    selected.fact, selected.graph_hash_at_run!, opts?.currentGraph,
+  )) {
+    base = { ...base, freshness: 'stale', reason: 'legacy_admission_unverified' };
+  }
+
   // SC-24's one Run-input snapshot owns the unit at computation time. The
   // canonical graph hash does not include goal_threshold_unit, so equality
   // alone cannot license relabelling a saved figure after a unit-only edit.
@@ -812,6 +822,7 @@ export function deriveAnalysisFreshness(
 
 /** Human copy for the existing freshness_reason text carrier; no new wire enum. */
 export function goalSnapshotStaleMessage(reason: FreshnessReason): string | undefined {
+  if (reason === 'legacy_admission_unverified') return 'the saved Run’s option admission could not be confirmed';
   if (reason === 'goal_unit_changed') return 'your goal’s unit changed';
   if (reason === 'goal_snapshot_unverified') return 'the saved goal’s unit could not be confirmed';
   return undefined;
@@ -819,7 +830,7 @@ export function goalSnapshotStaleMessage(reason: FreshnessReason): string | unde
 
 /** Read only SC-24's existing input_snapshot.goal carrier. No second snapshot,
  * numeric inference or unit default is created by this currentness gate. */
-function compareRunGoalUnitSnapshot(
+export function compareRunGoalUnitSnapshot(
   fact: HandlerFact,
   currentGraph: unknown,
 ): 'legacy' | 'match' | 'unit_changed' | 'unverified' {
