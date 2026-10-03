@@ -254,3 +254,18 @@ describe('option-intervention candidate — target-only final persisted postimag
       expect(optionInterventionPostimageIsScoped(before, result.graph, target)).toBe(true);
     });
 });
+
+
+describe('approved capless figures preserve their actual frame', () => {
+  it('rejects a raw-only partial frame when the factor has a proven normalization cap', () => {
+    const g = graph();
+    Object.assign(g.nodes.find(n => n.id === 'factor')!.observed_state!, { value: 0.5, raw_value: 20, cap: 40, unit: 'days' });
+    expect(prepare(g, { modelValue: 0.3, figure: { raw_value: 0.3, unit: 'days', likely_range: { low: 0.1, high: 0.5 } } }))
+      .toEqual({ kind: 'refused', reason: 'level_frame_mismatch' });
+  });
+  it.each([
+    { cap: 40 }, { raw_value: 10 }, { raw_value: 10, cap: 0 }, { raw_value: 10, cap: 40 },
+  ])('still refuses an inconsistent/partial normalization figure: %j', (figure) => {
+    expect(prepare(graph(), { modelValue: 0.3, figure })).toEqual({ kind: 'refused', reason: 'level_frame_mismatch' });
+  });
+});

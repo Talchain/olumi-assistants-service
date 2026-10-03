@@ -3244,8 +3244,8 @@ export type CommitOptionLevelsResult =
 export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> {
   const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
     ...(l.raw_value !== undefined || l.cap !== undefined || l.likely_range !== undefined
-      ? { figure: { ...(l.raw_value !== undefined || l.cap !== undefined
-        ? { raw_value: Number(l.raw_value), cap: Number(l.cap) } : {}), ...(l.unit !== undefined ? { unit: l.unit } : {}),
+      ? { figure: { ...(l.raw_value !== undefined ? { raw_value: Number(l.raw_value) } : {}),
+        ...(l.cap !== undefined ? { cap: Number(l.cap) } : {}), ...(l.unit !== undefined ? { unit: l.unit } : {}),
         ...(l.likely_range !== undefined ? { likely_range: l.likely_range } : {}) } } : {}) }));
   // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
   const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
