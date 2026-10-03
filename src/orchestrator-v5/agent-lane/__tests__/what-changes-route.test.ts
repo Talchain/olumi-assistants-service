@@ -16,12 +16,13 @@ const D3 = SERVED.cases.find((c) => c.id === 'A-WHAT-CHANGES-NONE-MEASURABLE-SIL
 const ISL_D3_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"switch_to_gcp","replicates":4,"bound_abs":0.01,"bound_rel":0.15,"grid_step":0.0025,"links":[{"from_id":"monthly_cloud_savings","to_id":"monthly_spend","status":"quoted","reason":null,"current_mean":-0.3555555555555555,"threshold":-0.09324009324009322,"replicate_thresholds":[-0.09324009324009322,-0.09572649572649569,-0.08578088578088575,-0.09324009324009322],"replicate_range":0.009945609945609946,"to_option_id":"stay_on_aws"},{"from_id":"monthly_cloud_overspend_during_migration","to_id":"monthly_spend","status":"no_change","reason":null,"current_mean":0.17777777777777776,"threshold":null,"replicate_thresholds":[null,null,null,null],"replicate_range":null,"to_option_id":null}]};
 const PRESS = NEXT_STEP_CHIPS.find((c) => c.id === 'agent-next-what-would-change')!;
 
-const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' }));
+const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' | 'unavailable' }));
 vi.mock('../../handlers/decision-flip-dispatch.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatchDecisionFlip: vi.fn(async (params: Rec) => {
     dispatch.calls.push(params);
     return dispatch.answer === 'stale' ? { status: 'stale' }
+      : dispatch.answer === 'unavailable' ? { status: 'unavailable', reason: 'client_without_decision_flip' }
       : { status: 'measured', block: ISL_D3_BLOCK, links: params.candidateLinks.slice(0, 2) };
   }),
 }));
@@ -97,19 +98,37 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(body.assistant_text).toMatch(/(^|\n\n)Your model has changed since its last analysis, so I can’t say what would change that result\. Run the analysis again, then ask\.$/);
   });
 
-  it('W3: the kill switch (CEE_WHAT_CHANGES_MEASURED_ENABLED=false) leaves the press to the ordinary Agent turn', async () => {
+  // One chip, two grounded answers (#2536 SCI-HERO coaching shares `agent-next-what-would-change`): anything the
+  // measurement does not answer is the Run's own tipping-point coaching, exactly as served before this branch.
+  const coaching = async () => {
+    dispatch.answer = 'measured';
     const { _resetConfigCache } = await import('../../../config/index.js');
     process.env.CEE_WHAT_CHANGES_MEASURED_ENABLED = 'false';
     _resetConfigCache();
-    try {
-      const body = await post(PRESS.id, PRESS.message);
-      expect(dispatch.calls).toHaveLength(0);
-      expect(modelCalls).toBeGreaterThan(0);
-      expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead/);
-    } finally {
+    try { return (await post(PRESS.id, PRESS.message)).assistant_text; } finally {
       delete process.env.CEE_WHAT_CHANGES_MEASURED_ENABLED;
       _resetConfigCache();
     }
+  };
+
+  it('W3: the kill switch (CEE_WHAT_CHANGES_MEASURED_ENABLED=false) leaves the press to the Run\'s tipping-point coaching', async () => {
+    const text = await coaching();
+    expect(dispatch.calls).toHaveLength(0);
+    expect(modelCalls).toBe(0);
+    // D3's Run quotes no factor threshold (#2536 `no_flip_in_range`); the wire gate's caveat leads, as in W1.
+    const coached = 'This analysis has no factor threshold to quote within the ranges it checked.';
+    expect(text === coached || text.endsWith(`\n\n${coached}`), text).toBe(true);
+    expect(text).not.toMatch(/would come out ahead|would still lead|Your model has changed since/);
+  });
+
+  it('W4: a measurement that is not an answer (unavailable) falls back to the same coaching, never RC\'s honest limit', async () => {
+    dispatch.answer = 'unavailable';
+    const body = await post(PRESS.id, PRESS.message);
+    expect(dispatch.calls).toHaveLength(1);
+    expect(modelCalls).toBe(0);
+    expect(body.assistant_text).toBe(await coaching());
+    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|can't yet measure what would change/);
+    expect(body.suggested_actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
   });
 
   it('CONTROL: another next step never reaches the decision-flip dispatch', async () => {

@@ -2425,11 +2425,38 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let tippingTurn: TippingPointCoaching | null = null;
     let methodGraph: unknown;
     const pressedChipId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
+    /**
+     * ⭐ "WHAT WOULD CHANGE THIS?" — ONE CHIP, TWO GROUNDED ANSWERS, MEASURED FIRST. SCI-CHANGE (#2522,
+     * `method-turn/what-changes-turn.ts`) and SCI-HERO (#2536, `tipping-point-coaching.ts`) answer the same press. The
+     * measured link tipping points of the Run the user saw answer when ISL measured them, or say the model changed since
+     * that Run (`stale`). Any other outcome (no Run, nothing measurable, a timeout, an error, kill switch
+     * CEE_WHAT_CHANGES_MEASURED_ENABLED=false) is the Run's own tipping-point coaching, exactly as before. Terminal and
+     * with NO model call either way; the measured fetch persists nothing.
+     */
+    let whatChangesTurn: WhatChangesTurn | null = null;
     if (result === undefined && approvedProposal === undefined && pressedChipId === TIPPING_POINT_PRESS_ID) {
-      tippingTurn = tippingPointCoachingFor(scenarioId, await readBackState(readingDispatch, scenarioId));
+      const rb = await readBackState(readingDispatch, scenarioId);
+      if (config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)) {
+        const measured = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
+          payload: {
+            kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
+            source: 'chip_click', message,
+          },
+          requestId: `${String(req.id)}:decision-flip`,
+          candidateLinks,
+        }));
+        if (measured?.outcome === 'measured' || measured?.outcome === 'stale') whatChangesTurn = measured;
+        log.info({ scenario_id: scenarioId, what_changes: measured?.outcome ?? null, answered: whatChangesTurn !== null }, 'agent-lane: what-would-change measured attempt');
+      }
       fastPath = 'method';
-      const text = tippingTurn.kind === 'found'
-        ? settleTippingPointCoaching(tippingTurn, tippingTurn.reply).reply : tippingTurn.reply;
+      let text: string;
+      if (whatChangesTurn !== null) {
+        text = whatChangesTurn.reply;
+      } else {
+        tippingTurn = tippingPointCoachingFor(scenarioId, rb);
+        text = tippingTurn.kind === 'found'
+          ? settleTippingPointCoaching(tippingTurn, tippingTurn.reply).reply : tippingTurn.reply;
+      }
       result = { assistant_text: text, items: [], tool_calls: [], tool_results: [], mutated: false,
         hops: 0, stopped_reason: 'answered',
         timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
@@ -2486,39 +2513,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     const widenRun = widenTurn?.kind === 'run' ? widenTurn : undefined;
-    /**
-     * ⭐ "WHAT WOULD CHANGE THIS?" (SCIENCE ROBUSTNESS, EXPERIMENT; #85 lease 5950283606, hunk leased by HARNESS 5950400056;
-     * `method-turn/what-changes-turn.ts`). A recognised press is TERMINAL and answered with NO model call: the measured
-     * tipping points of the Run the user saw, in RC's link copy, or RC's honest limit. The fetch persists nothing.
-     * Kill switch: CEE_WHAT_CHANGES_MEASURED_ENABLED=false (default ON) leaves the press to the ordinary Agent turn.
-     */
-    let whatChangesTurn: WhatChangesTurn | null = null;
-    if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null
-      && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)) {
-      const rb = await readBackState(readingDispatch, scenarioId);
-      whatChangesTurn = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
-        payload: {
-          kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
-          source: 'chip_click', message,
-        },
-        requestId: `${String(req.id)}:decision-flip`,
-        candidateLinks,
-      }));
-      if (whatChangesTurn !== null) {
-        fastPath = 'method';
-        result = {
-          assistant_text: whatChangesTurn.reply,
-          items: [],
-          tool_calls: [],
-          tool_results: [],
-          mutated: false,
-          hops: 0,
-          stopped_reason: 'answered',
-          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
-        };
-        log.info({ scenario_id: scenarioId, what_changes: whatChangesTurn.outcome }, 'agent-lane: what-would-change answered without a model call');
-      }
-    }
     /**
      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
