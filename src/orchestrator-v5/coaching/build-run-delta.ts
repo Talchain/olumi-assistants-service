@@ -64,7 +64,9 @@ import {
 import { RUN_DELTA_FLIP_THRESHOLDS_NOT_COMPUTED } from '../compose/claim-safety-cage.js';
 import { mayPresentComparedRunLeader, mayPresentComparedRunVerdicts } from './compared-run-leader.js';
 
-import { projectRunFact, selectTwoNewestRunAnalysisFacts } from './compare-runs.js';
+import { projectRunFact, selectTwoNewestRunAnalysisFacts, type RunPair } from './compare-runs.js';
+import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { validateAnalysisRunFactIdentity, type AnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
 // ⭐ THE BAND LIVES IN ITS OWN MODULE NOW, AND IT HAS TWO READERS. The
 // constants and `noiseVerdictForProportions` moved out of this file VERBATIM
 // when the deterministic rerun PROSE acquired the same question. Two
@@ -483,6 +485,39 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
   return { kind: 'not_recorded', members: { ...endpoints, input_coverage: 'not_recorded' } };
 }
 
+/** Exact historical execution identity resolved by the selected-version binding. */
+export type SelectedRunIdentity = AnalysisRunFactIdentity & { readonly run_id: string };
+export interface SelectedRunPair {
+  readonly prior: SelectedRunIdentity;
+  readonly current: SelectedRunIdentity;
+}
+
+function selectRecordedPair(facts: readonly HandlerFact[], selected: SelectedRunPair): RunPair | null {
+  if (selected.prior.scenario_id !== selected.current.scenario_id) return null;
+  const find = (identity: SelectedRunIdentity): HandlerFact | null => {
+    if (validateAnalysisRunFactIdentity(identity).status !== 'confirmed'
+      || typeof identity.run_id !== 'string' || identity.run_id.trim() === '' || identity.run_id.trim() !== identity.run_id || identity.run_id.length > 200) return null;
+    const matches = facts.filter((fact) => {
+      if (!isSuccessfulRunAnalysisFact(fact)) return false;
+      const result = asRecord((fact as { result?: unknown }).result);
+      const checked = validateAnalysisRunFactIdentity(result);
+      return result?.run_id === identity.run_id && checked.status === 'confirmed'
+        && checked.identity.scenario_id === identity.scenario_id
+        && checked.identity.graph_hash_at_run === identity.graph_hash_at_run
+        && checked.identity.computed_at === identity.computed_at;
+    });
+    // Ambiguous records cannot be repaired by taking the first or newest fact.
+    return matches.length === 1 ? matches[0]! : null;
+  };
+  const prior = find(selected.prior);
+  const current = find(selected.current);
+  return prior === null || current === null ? null : {
+    prior, current,
+    prior_graph_hash_at_run: selected.prior.graph_hash_at_run,
+    current_graph_hash_at_run: selected.current.graph_hash_at_run,
+  };
+}
+
 /**
  * The wire block, or a discriminated refusal.
  *
@@ -497,8 +532,12 @@ function pairInputs(prior: HandlerFact, current: HandlerFact): PairInputs {
 export function buildRunDelta(input: {
   readonly priorFacts: readonly HandlerFact[];
   readonly mayNameLeadingOption: boolean;
+  /** Compare route only: FROM → TO, retaining the recorded dates. No fallback. */
+  readonly selectedPair?: SelectedRunPair;
 }): BuildRunDeltaResult {
-  const pair = selectTwoNewestRunAnalysisFacts(input.priorFacts);
+  const pair = input.selectedPair === undefined
+    ? selectTwoNewestRunAnalysisFacts(input.priorFacts)
+    : selectRecordedPair(input.priorFacts, input.selectedPair);
   if (pair === null) return { kind: 'none', reason: 'insufficient_runs' };
   // ⛔ A pair with a run nobody asked for has no honest delta: its scores and trust verdict are
   // confined (review of #1857, B5), and withholding only its leader id still lets

@@ -1,0 +1,60 @@
+{
+  "baseline": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+  "present": {
+    "kind": "ok",
+    "delta": {
+      "attribution_case": "C2_unpaired",
+      "pair_provenance": {
+        "seed_equal": false,
+        "hash_equal": false,
+        "builds_equal": "equal",
+        "n_equal": true
+      },
+      "leader": {
+        "changed": true,
+        "prior_leading_option_id": "opt-a",
+        "current_leading_option_id": "opt-b",
+        "noise_verdict": "not_noise_qualified"
+      },
+      "win_probabilities": [
+        {
+          "option_id": "opt-a",
+          "prior": 0.62,
+          "current": 0.45,
+          "noise_verdict": "signal"
+        },
+        {
+          "option_id": "opt-b",
+          "prior": 0.38,
+          "current": 0.55,
+          "noise_verdict": "signal"
+        }
+      ],
+      "flip_thresholds": [],
+      "input_coverage": "not_recorded"
+    }
+  },
+  "withheld": {
+    "kind": "ok",
+    "delta": {
+      "attribution_case": "C2_unpaired",
+      "pair_provenance": {
+        "seed_equal": false,
+        "hash_equal": false,
+        "builds_equal": "equal",
+        "n_equal": true
+      },
+      "leader": {
+        "changed": false,
+        "noise_verdict": "not_noise_qualified"
+      },
+      "win_probabilities": [],
+      "flip_thresholds": [],
+      "input_coverage": "not_recorded"
+    }
+  },
+  "refused": {
+    "kind": "none",
+    "reason": "insufficient_runs"
+  }
+}
