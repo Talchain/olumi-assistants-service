@@ -104,8 +104,9 @@ export declare function extractDiagnostics(body: unknown): {
 
 /**
  * A turn that PRODUCED a graph — delivered one on the wire, or declared the
- * `draft_graph` exit — must carry a non-empty prompt_identity, on any turn and
- * any exit path.
+ * `draft_graph` exit — must carry a non-empty prompt_identity, on any exit path
+ * EXCEPT `agent_lane_v1`, whose provenance is its provider ledger (proven by
+ * `assertOpenAiOnly`).
  * @param bodies the same turns' response bodies, index-aligned with
  *   `diagnostics`. Omit only when no bodies exist (no turns were driven).
  * @returns failure messages; an empty array means healthy.
@@ -209,3 +210,24 @@ export declare function samplingReport(
   summary: { attempted: number; ok: number; failed: number; failureRate: number | null; byCode: Record<string, number> },
   options: { floor: number; requested: number; minSamples: number },
 ): string[];
+
+export declare const AI_MODE_HEADER: "x-olumi-ai-mode";
+export declare const AI_MODE: "openai";
+export declare const AGENT_EXIT_PATH: "agent_lane_v1";
+export declare const ALLOWED_PROVIDER: "openai";
+
+/**
+ * ⛔ OPENAI ONLY. Proves a turn was served by the OpenAI lane and made no
+ * non-OpenAI generative call. Fails closed on an absent, empty or truncated
+ * `_provider_calls`, on any non-`openai` row (refused rows included), on a row
+ * with no model, on an `exit_path` other than `agent_lane_v1`, and on a proxy
+ * `x-olumi-ai-mode` response header other than `openai`.
+ * @returns failure messages; an empty array means proven OpenAI-only.
+ */
+export declare function assertOpenAiOnly(
+  turn: { body?: unknown; aiMode?: string | null },
+  label?: string,
+): string[];
+
+/** REPORTS ONLY. `providers: openai:<model>×N …`, printed on every turn. */
+export declare function providerLine(body: unknown): string;
