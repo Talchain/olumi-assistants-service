@@ -1,3 +1,4 @@
+import { reconciliationPending } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
  *
@@ -318,13 +319,20 @@ export const BUILD_INSTRUCTIONS = [
   // 1. Every rule below that limits how a risk is LINKED or SIZED had been read as a reason to leave the risk out.
   + 'and up to 4 to 6 outcomes and risks between them, only where they materially change the reasoning (the outcome the factors act through, the risk that could reverse the answer). '
   + 'ALWAYS KEEP AT LEAST ONE RISK: the downside that could reverse the answer is part of the decision the user must weigh. The rules below limit how a risk is LINKED or SIZED; none of them is a reason to leave a risk out. '
+  // K3 (R3 #75 5925627855, #85 5931851041; DL 380e54 5932372585: GO, generalised, never money-specific): a downside
+  // the user NAMES is theirs to weigh, so it is never traded away for one Olumi thought of (Paul's "we'll run out of
+  // money soon" was drawn 0/4 with A4b, 1/4 before).
+  + 'EVERY RISK THE USER NAMES IS DRAWN AS A RISK NODE: each downside the user states in their own words (for example that they will run out of money, lose a key customer, or miss a deadline) is its own risk, linked to what it threatens, even when you also draw a risk of your own. '
+  // K3 precedence (Codex CR @5d3841dc, DL 9d9666): seven user-named risks cannot fit "up to 4 to 6 outcomes and risks",
+  // so the envelope and K3 contradicted each other. The user's risks win; Olumi's own additions give way first.
+  + 'A RISK THE USER NAMED OUTRANKS THE ENVELOPE: when the risks the user named do not all fit beside your own, leave out your own risks and outcomes first; never leave out or merge a risk the user named, even when that takes the model past 6 outcomes and risks. '
   + 'A model below this envelope cannot carry the reasoning; a model above it buries it. Do NOT widen beyond it on this turn: no speculative options, secondary factors, or decorative risks and outcomes. '
   + 'Anything you judge material but that does not meet that bar belongs in `unknowns` as a question, NOT as a node \u2014 it can become a proposal later. '
   // ⛔ THE COUNT IS THE GATE'S (AIQ #70 5858990481 item 5: the first draft's budget is the truth-safe lever). The rule
   // named only the decision's links, but admission also links each option to each factor it acts on, and the held
   // status quo to each factor the others act on (`admit-model.ts`): a served-shape draft the rule counted at 23 was
   // 33 at the gate (`construction-first-draft-link-budget.test.ts`).
-  + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option, one from each option to each factor it acts on (for the option that keeps things as they are, each factor the other options act on) and each entry in \`links\`. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas.`,
+  + `Stay within ${COMPACT_LIMITS.maxNodes} nodes and ${COMPACT_LIMITS.maxEdges} links in total, counting one link from the decision to each option, one from each option to each factor it acts on (for the option that keeps things as they are, each factor the other options act on) and each entry in \`links\`. Correct, connected items beat a comprehensive map: an oversized first model is refused before it reaches the canvas. THE ONE EXCEPTION IS THE USER'S OWN MATERIAL: when what the user stated (their options, figures, relationships and the risks they named) cannot fit this budget, keep all of it and leave out your own additions; that model is admitted, not refused.`,
   // ⛔ AN ADDED OPTION THE MODEL CANNOT TELL APART IS A DEAD START (DL #70 5842361028 / 5842400604). Served ef99a97 and
   // cb1778b added "Test £59 with AI release" beside the user's £59 option; the fill made them identical and the run
   // refused NOTHING_TO_COMPARE. Admission withholds such an option and says so (`admit-model.ts`), but withholding
@@ -1982,6 +1990,12 @@ export async function buildModelFromBrief(
     mutated: true,
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     ...(replayed ? { replayed: true } : {}),
+    ...(candidate.goal.scope && admitted.loss.some(l => /\.goal_scope$/.test(l.field_path)) && goalNodes.find(n => n.kind === 'goal') ? {
+      pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
+        goal_id: goalNodes.find(n => n.kind === 'goal')!.id, goal_label: candidate.goal.metric,
+        declared_scope: candidate.goal.scope, expected: 'scope',
+        question: admitted.loss.find(l => /\.goal_scope$/.test(l.field_path))!.reason, operands: [], derivations: [] }),
+    } : {}),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
     // The compact verdict travels with the success, so a caller never has to

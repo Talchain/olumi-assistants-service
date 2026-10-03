@@ -72,6 +72,10 @@ import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
 import { isUnnamedCurrencyUnit, unitAlreadyOnGoal, unitNamingCurrency } from './unnamed-currency.js';
+import { scopeOf, identityConflictsWithScope, scopeSourcesAreUserWords, goalScopeCheck, scopeCanRecord, SCOPE_APPROVE_PREFIX } from './goal-scope.js';
+import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWithdrawalReading } from '../system-events/identity-confirm-edit.js';
+import { goalScopeMeaning } from '../../schemas/goal-scope.js';
+import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 
 /** The proposal op: the estate's existing node-update op, carrying the goal's new `observed_state`. */
 export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
@@ -80,6 +84,8 @@ export const GOAL_CURRENT_LEVEL_OP = 'update_node' as const;
 const OPERATOR_OF: Readonly<Record<string, string>> = { at_least: '>=', above: '>', at_most: '<=', below: '<' };
 
 export interface GoalCurrentLevelArgs {
+  readonly goal_scope?: unknown;
+  readonly reconciliation_key?: string;
   readonly goal_label?: unknown;
   readonly value?: unknown;
   readonly unit?: unknown;
@@ -605,6 +611,7 @@ export async function proposeGoalCurrentLevel(
   const stated = inWords;
   const raw = inWords.raw;
   const statedUnit = inWords.statedUnit;
+  if (isChange && args.goal_scope !== undefined) return refuse('scope_frame_unresolved', 'Clarify the level of the total goal before recording its scope. Nothing was prepared.');
   if (isChange) return changeGoalLevel(deps, ctx, g, goal, node, raw, value, statedUnit, stated.normalised, goalUnit, adoptedUnit, storedUnit);
 
   let normalisedLevel: number;
@@ -653,7 +660,7 @@ export async function proposeGoalCurrentLevel(
 
   const existing = goal.observed_state;
   const existingRaw = num(existing?.raw_value) ? existing!.raw_value as number : undefined;
-  if (existingRaw === raw && existing?.source === USER_EDIT_SOURCE) {
+  if (args.goal_scope === undefined && existingRaw === raw && existing?.source === USER_EDIT_SOURCE) {
     return refuse('already_recorded', `${sayFigureExactly(raw, goalUnit ?? '') ?? `${raw}${goalUnit !== undefined ? ` ${goalUnit}` : ''}`} is already recorded as the user’s current level of "${goal.label}". Nothing to change.`);
   }
   const observed: GoalObservedState = {
@@ -678,7 +685,14 @@ export async function proposeGoalCurrentLevel(
   const figure = stated.normalised !== undefined ? `${asStated}, which is ${withUnit(raw)}` : asStated;
   const replaces = existingRaw !== undefined && existingRaw !== raw ? existingRaw : undefined;
   // Carried INSIDE the goal's one op, so this stays one goal-level proposal with one write.
-  const rederived = rederivedEstimatedPart(g.nodes, goal.id, raw);
+  const scope = args.goal_scope === undefined ? undefined : scopeOf(args.goal_scope);
+  if (args.goal_scope !== undefined && (!scope || !scopeSourcesAreUserWords(scope, ctx.user_text ?? '', scopeOf((goal as Record<string, unknown>).goal_scope)))) {
+    return refuse('scope_not_grounded', 'The scope is not bound to the user’s stated words. Nothing was prepared.');
+  }
+  if (scope && !scopeCanRecord(scope, goalScopeCheck(g.raw, goal.id, scope, { value: raw, unit: goalUnit ?? '', source: scope.source }))) return refuse('goal_scope_unresolved', 'Resolve the goal scope and its factor references before approving this reading. Nothing was prepared.');
+  const withdrawal = scope ? identityWithdrawalFor(goal as Record<string, unknown>, scope) : undefined;
+  if (!scope && identityConflictsWithScope(goal as Record<string, unknown>)) return refuse('goal_scope_unresolved', 'Resolve the goal’s scope before changing its current level. Nothing was prepared.');
+  const rederived = withdrawal ? null : rederivedEstimatedPart(g.nodes, goal.id, raw);
   // A figure recorded BEFORE this card is said, and matched on other nodes, in the unit it was recorded in (the stored one).
   const withStoredUnit = (x: number) => sayFigureExactly(x, storedUnit ?? '') ?? `${x}${storedUnit !== undefined ? ` ${storedUnit}` : ''}`;
   const earlierHeld = replaces === undefined ? null
@@ -691,6 +705,8 @@ export async function proposeGoalCurrentLevel(
       op: GOAL_CURRENT_LEVEL_OP, path: goal.id,
       value: {
         goal_current_level: observed, against: targetOf(node),
+        ...(scope ? { goal_scope: scope, reconciliation_key: args.reconciliation_key } : {}),
+        ...(withdrawal ? { identity_withdrawal: withdrawal } : {}),
         ...(rederived !== null ? { rederived_part: rederived } : {}),
         ...(adoptedUnit !== undefined ? { adopted_unit: adoptedUnit } : {}),
       },
@@ -704,7 +720,9 @@ export async function proposeGoalCurrentLevel(
       (num(target) ? ` (target ${withUnit(target)})` : '') +
       sayAdoptedUnit(goal.label, adoptedUnit) +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
-      (earlierHeld !== null ? earlierHeld.label : ''),
+      (earlierHeld !== null ? earlierHeld.label : '') +
+      (scope ? `. Goal scope: ${scope.modelled}${scope.component?.share !== undefined ? `; ${scope.component.label} contributes ${scope.component.share * 100}%` : ''}${scope.component?.count_basis ? `; count means ${scope.component.count_basis}` : ''}${scope.component ? (scope.component.basis === 'unknown' ? '; the count population and billing basis remain unresolved' : `; revenue share and rate/count are on ${scope.component.basis === 'different' ? 'different' : 'the same'} billing bases`) : ''}.` : '') +
+      (withdrawal ? ` ${withdrawal.words}` : ''),
   });
   deps.proposals.put(proposal);
   return {
@@ -1017,7 +1035,15 @@ export async function applyGoalCurrentLevel(
   // ⛔ THE RE-DERIVED ESTIMATE IS RE-DERIVED AT APPLY TIME, and must come out exactly as the user approved it — or,
   // when none was approved, still none: the approval text said what would change, and nothing else is written.
   const carried = (op.value as { rederived_part?: RederivedPart } | undefined)?.rederived_part ?? null;
-  const part = rederivedEstimatedPart(approved.nodes, goal.id, os.raw_value);
+  const scoped = op.value as { goal_scope?: unknown; identity_withdrawal?: IdentityWithdrawalReading };
+  const scope = scoped.goal_scope === undefined ? undefined : scopeOf(scoped.goal_scope);
+  if (scoped.goal_scope !== undefined && (!scope || ctx.typed_approval_of !== proposal.proposal_id || ctx.typed_approval_words !== SCOPE_APPROVE_PREFIX + proposal.public_label)) {
+    return notApplied('Approve the card showing this exact scope and identity correction. Nothing was written.');
+  }
+  if (scope && !scopeCanRecord(scope, goalScopeCheck(approved.raw, goal.id, scope, { value: os.raw_value, unit: os.unit ?? '', source: scope.source }))) return notApplied('Resolve the scope and its factor references before approving this reading. Nothing was written.');
+  const withdrawal = scope ? identityWithdrawalFor(goal as Record<string, unknown>, scope) : undefined;
+  if (stableStringify(withdrawal) !== stableStringify(scoped.identity_withdrawal)) return notApplied('The identity changed after this reading was offered. Nothing was written.');
+  const part = withdrawal ? null : rederivedEstimatedPart(approved.nodes, goal.id, os.raw_value);
   if (JSON.stringify(part) !== JSON.stringify(carried)) {
     return {
       ok: false, mutated: false, applied: false, proposal_id: proposal.proposal_id, refusal: 'superseded',
@@ -1036,7 +1062,8 @@ export async function applyGoalCurrentLevel(
   const nodes = approved.nodes.map((n) => {
     if (n.id !== op.path) return part !== null && n.id === part.node_id ? { ...n, observed_state: part.observed_state } : n;
     const written: Record<string, unknown> = {
-      ...n, observed_state: { ...kept, ...os },
+      ...(scope && withdrawal ? applyIdentityWithdrawalToGoal(n as Record<string, unknown>, scope, withdrawal)! : n), observed_state: { ...kept, ...os },
+      ...(scope ? { goal_scope: scope } : {}),
       ...(reframedCap !== undefined ? { goal_threshold_cap: reframedCap } : {}),
       // The goal is measured in the adopted unit from this write on — its target too — in the SAME registration as its level.
       ...(adoptedUnit !== undefined ? { goal_threshold_unit: adoptedUnit } : {}),
@@ -1094,7 +1121,9 @@ export async function applyGoalCurrentLevel(
   // An adopted unit is read back byte for byte, on the goal and on its level.
   const unitHeld = adoptedUnit === undefined || (held?.unit === adoptedUnit &&
     (after?.nodes.find((n) => n.id === op.path) as { goal_threshold_unit?: unknown } | undefined)?.goal_threshold_unit === adoptedUnit);
-  const landed = held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
+  const scopeHeld = !scope || (after !== null && stableStringify(goalScopeMeaning((after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.goal_scope)) === stableStringify(goalScopeMeaning(scope))
+    && (!withdrawal || !(after?.nodes.find(n => n.id === op.path) as Record<string, unknown>)?.nonlinear_identity));
+  const landed = scopeHeld && held !== undefined && held.raw_value === os.raw_value && held.baseline === writtenOs.baseline && held.source === os.source && capHeld && unitHeld &&
     (part === null || (partHeld !== undefined && partHeld.raw_value === part.now && partHeld.source === part.observed_state.source));
   if (!landed) {
     return {

@@ -76,6 +76,7 @@ let persisted: unknown = buildPersistedGraph();
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
+    readMostRecentPendingActions: async () => [],
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: async () => [],

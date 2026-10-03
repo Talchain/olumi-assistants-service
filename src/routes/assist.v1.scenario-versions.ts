@@ -125,7 +125,10 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { AnalysisStateV1Schema } from "@talchain/schemas/boundary";
+import { AnalysisStateV1Schema, ModelVersionDiffV2Schema, type ModelVersionResultComparison } from "@talchain/schemas/boundary";
+import { loadScenarioAnalysisFactsForRead } from "../orchestrator-v5/build-turn-context.js";
+import { bindVersionResults } from "../orchestrator-v5/model-management/version-result-binding.js";
+import { buildRunDelta } from "../orchestrator-v5/coaching/build-run-delta.js";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
@@ -207,9 +210,11 @@ const SaveBodySchema = z.object({
 const CompareBodySchema = z.object({
   from_version_id: z.string().uuid(),
   to_version_id: z.string().uuid(),
+  response_schema: z.enum(["model_version_diff.v1", "model_version_diff.v2"]).optional(),
 });
 const COMPARE_BODY_ALLOWED_KEYS = new Set([
   "user_id",
+  "response_schema",
   "from_version_id",
   "to_version_id",
 ]);
@@ -734,6 +739,7 @@ export default async function route(app: FastifyInstance) {
       const parsedBody = CompareBodySchema.safeParse({
         from_version_id: body.from_version_id,
         to_version_id: body.to_version_id,
+        ...(body.response_schema !== undefined ? { response_schema: body.response_schema } : {}),
       });
       if (!parsedBody.success) {
         return invalid(
@@ -745,11 +751,11 @@ export default async function route(app: FastifyInstance) {
       }
 
       const service = getModelManagementService();
-      const result = await service.compareVersions(
-        ctx.scenarioId,
-        parsedBody.data.from_version_id,
-        parsedBody.data.to_version_id,
-      );
+      const wantsResults = parsedBody.data.response_schema === "model_version_diff.v2";
+      const args = [ctx.scenarioId, parsedBody.data.from_version_id, parsedBody.data.to_version_id] as const;
+      const result = wantsResults
+        ? await service.compareVersions(...args, true)
+        : await service.compareVersions(...args);
       if (result.status === "disabled") return disabled(reply, requestId);
       if (result.status === "conflict") return stale(reply, requestId);
       if (result.status === "error") {
@@ -775,7 +781,8 @@ export default async function route(app: FastifyInstance) {
         return unavailable(reply, requestId, "Those versions could not be compared right now.");
       }
 
-      const validated = VersionComparisonResponseSchema.safeParse(result.value);
+      const { records, ...comparisonValue } = result.value;
+      const validated = VersionComparisonResponseSchema.safeParse(comparisonValue);
       if (!validated.success) {
         log.error(
           {
@@ -811,7 +818,47 @@ export default async function route(app: FastifyInstance) {
         );
         return unavailable(reply, requestId, "Those versions could not be compared right now.");
       }
-      return reply.code(200).send(wireOutcome.data);
+      if (!wantsResults) return reply.code(200).send(wireOutcome.data);
+
+      let resultComparison: ModelVersionResultComparison = { status: "unavailable", reason: "unconfirmed_identity" };
+      if (records !== undefined) {
+        const { factSet } = await loadScenarioAnalysisFactsForRead(ctx.scenarioId, requestId);
+        const bound = bindVersionResults({ scenarioId: ctx.scenarioId, ...records, factSet });
+        if (bound.kind === "unavailable") {
+          resultComparison = { status: "unavailable", reason: bound.reason };
+        } else if (bound.kind === "shared") {
+          resultComparison = { status: "available", kind: "shared_run", recorded_run: bound.recordedRun };
+        } else {
+          // This route alone requests an explicit pair; ordinary turns keep chronology.
+          const built = buildRunDelta({ priorFacts: bound.facts, selectedPair: bound.selectedPair,
+            mayNameLeadingOption: bound.mayNameLeadingOption });
+          // Reuse the final licence, projecting only the typed leader-claim fields.
+          // Recorded input identities and values are facts, so must never enter a prose scrubber.
+          if (built.kind === "ok") {
+            const licence = bound.leaderLicences.prior === 'permitted' && bound.leaderLicences.current === 'permitted'
+              ? 'permitted' : 'withheld';
+            const { prior_leading_option_id: _prior, current_leading_option_id: _current,
+              ...withheldLeader } = built.delta.leader;
+            const licensedDelta = licence === "withheld"
+              ? { ...built.delta, leader: withheldLeader, win_probabilities: [] }
+              : built.delta;
+            resultComparison = { status: "available", kind: "paired_runs", prior_run: bound.selectedPair.prior,
+              current_run: bound.selectedPair.current, run_delta: licensedDelta };
+          } else {
+            resultComparison = { status: "unavailable", reason: built.reason === "insufficient_runs" || built.reason === "echoes_incomplete"
+              ? "unconfirmed_identity" : "incompatible_results" };
+          }
+        }
+      }
+      const v2 = ModelVersionDiffV2Schema.safeParse({ ...wireOutcome.data,
+        schema: "model_version_diff.v2", result_comparison: resultComparison });
+      if (!v2.success) {
+        log.error({ event: "v5.scenario_versions.compare_v2_egress_invalid", request_id: requestId,
+          scenario_id: ctx.scenarioId, issues: v2.error.issues.slice(0, 5) },
+        "Scenario versions — result comparison failed the shared contract");
+        return unavailable(reply, requestId, "Those recorded results could not be compared safely.");
+      }
+      return reply.code(200).send(v2.data);
     },
   );
 

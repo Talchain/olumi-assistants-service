@@ -27,7 +27,8 @@ const readRecent = vi.fn();
 const readFactsFor = vi.fn();
 const readAnalysisInvalidatedAt = vi.fn();
 vi.mock('../../orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({ readRecent, readFactsFor, readAnalysisInvalidatedAt }),
+  getSessionStore: () => ({
+    readMostRecentPendingActions: async () => [], readRecent, readFactsFor, readAnalysisInvalidatedAt }),
 }));
 vi.mock('../../utils/telemetry.js', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -51,10 +52,21 @@ import type { GraphStateIngress } from '../../orchestrator-v5/boundary/request-e
 const SCENARIO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const BRIEF = 'Should we raise prices by 10% this quarter or hold them?';
 const CONSTRUCTION_TURN_ID = registrationTurnId(SCENARIO, constructionOperationId(SCENARIO, BRIEF));
+// P0 SHARED DATA (#85 5963281356): a model the product can RUN. The ONE leader licence reads the admission, and a
+// goal-only graph is refused (`structurally_analysable: false`, matrix M5), so no leader could ever be named from it.
+// Admitted here at `quantified_provisional` (matrix M2): a separated leader ships with its caveat.
+const linkOf = (from: string, to: string, mean = 1) => ({ from, to, strength: { mean, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' as const });
 const GRAPH: GraphStateIngress = {
-  nodes: [{ id: 'goal', kind: 'goal', label: 'Synthetic goal', goal_threshold: 0.7 }],
-  edges: [],
-};
+  nodes: [
+    { id: 'decision', kind: 'decision', label: 'Choose' },
+    { id: 'goal', kind: 'goal', label: 'Synthetic goal', goal_threshold: 0.7 },
+    { id: 'factor', kind: 'factor', label: 'Synthetic factor' },
+    { id: 'option-a', kind: 'option', label: 'Option A', interventions: { factor: 1 } },
+    { id: 'option-b', kind: 'option', label: 'Option B', interventions: { factor: 0 } },
+  ],
+  edges: [linkOf('decision', 'option-a'), linkOf('decision', 'option-b'), linkOf('option-a', 'factor'), linkOf('option-b', 'factor', 0.01), linkOf('factor', 'goal')],
+  goal_node_id: 'goal',
+} as unknown as GraphStateIngress;
 const HASH = computeAnalysisAffectingGraphHash(GRAPH)!;
 const COMPUTED_AT = '2026-09-24T10:00:03.871Z';
 

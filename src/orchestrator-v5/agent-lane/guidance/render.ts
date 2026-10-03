@@ -18,6 +18,11 @@ function pick(value: string | Readonly<Record<string, string>>, variant?: string
 
 /** No invented labels or raw-id fallback; unavailable copy fields are null. */
 export function renderCopy(selected: RowIdentity, signals: GuidanceSignals): RenderedCopy {
+  const tipping = signals['run.tipping_point'];
+  if (selected.policy_id === 'RC-WHAT-CHANGES' && signals['run.kind'] === 'complete_current' && tipping?.status === 'found') {
+    return { title: `${tipping.label} could change this.`, why: tipping.say,
+      question: `Would you like to refine ${tipping.label}?` };
+  }
   const row = POLICY.rows.find(r => r.policy_id === selected.policy_id)!;
   const options = signals['model.non_sq_option_ids'] ?? [];
   const labels = signals['model.option_labels'] ?? {};

@@ -293,6 +293,37 @@ export function dropDanglingCalls(items: readonly unknown[]): unknown[] {
 }
 
 /**
+ * Replace only this turn's assistant messages after its last tool pair with the FINAL sent text.
+ * User words, intermediate messages, reasoning and call/output pairs stay intact. An unedited single
+ * message stays byte-identical, including its Responses id and associated reasoning.
+ */
+export function historyWithSentText(items: readonly unknown[], sent: string): unknown[] {
+  type Item = { type?: unknown; role?: unknown; content?: unknown };
+  let start = items.length;
+  while (start > 0) {
+    const i = items[start - 1] as Item | null;
+    if (i?.role === 'user' || i?.type === 'function_call' || i?.type === 'function_call_output') break;
+    start -= 1;
+  }
+  const isAssistant = (raw: unknown): boolean => {
+    const i = raw as Item | null;
+    return i?.role === 'assistant' || (i?.type === 'message' && i.role === undefined);
+  };
+  const tail = items.slice(start);
+  const messages = tail.filter(isAssistant) as Item[];
+  if (messages.length === 1) {
+    const content = messages[0]!.content;
+    const text = typeof content === 'string' ? content : Array.isArray(content)
+      ? content.map((p: { text?: unknown }) => typeof p.text === 'string' ? p.text : '').join('') : undefined;
+    if (text === sent) return [...items];
+  }
+  return [
+    ...items.slice(0, start), ...tail.filter((i) => !isAssistant(i)),
+    { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: sent }] },
+  ];
+}
+
+/**
  * ⛔ THE CONVERSATION OUTLIVES THE PROCESS; THE AGENT'S MEMORY OF IT DID NOT.
  *
  * The history above is in-process. cee-staging runs ONE instance (Render API,

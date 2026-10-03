@@ -1,6 +1,6 @@
-// Generated typed constants from the byte-identical policy beside this file.
-// programme-docs @ 712625a1c484943ad330214504634121a44216e7.
-// The acceptance suite asserts equality with the pinned source.
+// Typed constants from the adjacent policy. Base programme-docs @ 712625a1c484943ad330214504634121a44216e7.
+// SCI-HERO amendment: Paul-approved tipping-point plan, board #85 5963520834.
+// Acceptance pins both source bytes and these constants; older fixtures remain unchanged.
 export const POLICY = {
   "selection": {
     "attach_to": [
@@ -242,26 +242,26 @@ export const POLICY = {
         "all": [
           "turn.request in [narration, turn]",
           "run.kind == complete_current",
-          "run.leader_licensed == true",
-          "run.decision_sensitivity.status == measured"
+          "run.tipping_point.status == found OR run.leader_licensed == true",
+          "run.tipping_point.status == found OR run.decision_sensitivity.status == measured",
+          "run.tipping_point.status != found OR run.run_key is present"
         ]
       },
       "required_typed_signals": [
         "run.kind",
-        "run.leader_licensed",
-        "run.decision_sensitivity",
-        "turn.request"
+        "run.tipping_point OR run.decision_sensitivity",
+        "turn.request",
+        "run.run_key (required for a tipping_point)"
       ],
       "forbidden_without": [
-        "run.leader_licensed",
-        "run.decision_sensitivity.status == measured"
+        "complete_current Run and a grounded tipping_point with existing bound run.run_key OR licensed measured decision_sensitivity"
       ],
       "silent_when": [
         "open.decision_point",
         "turn.request == run_result",
-        "run.decision_sensitivity.status in [none_measurable, not_measured]",
+        "run.tipping_point.status != found AND run.decision_sensitivity.status in [none_measurable, not_measured]",
         "run.kind != complete_current (stale, withheld or no run)",
-        "run.leader_licensed != true",
+        "run.tipping_point.status != found AND run.leader_licensed != true",
         "guidance[RC-WHAT-CHANGES] pressed, dismissed or completed with an unchanged state_key"
       ],
       "priority": "P2",
@@ -335,7 +335,13 @@ export const POLICY = {
         "A-STALE-SILENT",
         "A-WHAT-CHANGES-ASKED-HONEST-LIMIT"
       ],
-      "note": "Expect this row to fire rarely today: factor_evppi is structurally flat in additive lever models (P3C A2), and every served run read on 1 Oct had EVPPI empty or below resolution and every flip_thresholds row no_flip_in_range. Silence is the correct output there. It fires once identity kinds (product, stock-flow) make a factor interact with a lever."
+      "note": "Expect this row to fire rarely today: factor_evppi is structurally flat in additive lever models (P3C A2), and every served run read on 1 Oct had EVPPI empty or below resolution and every flip_thresholds row no_flip_in_range. Silence is the correct output there. It fires once identity kinds (product, stock-flow) make a factor interact with a lever.",
+      "tipping_point_copy": {
+        "title": "{factor_label} could change this.",
+        "why": "tipping_point.say verbatim, including the supplied display threshold and unit",
+        "question": "Would you like to refine {factor_label}?",
+        "primary_action": "Talk it through; factor refinement uses the existing ID-bound path, with no automatic edit/rerun."
+      }
     },
     {
       "policy_id": "RC-STRENGTHEN-ITEM",
@@ -934,11 +940,12 @@ export const POLICY = {
     },
     "RC-WHAT-CHANGES": {
       "inputs": [
+        "Current tipping_point: factor_id, label, current_value, threshold, direction, unit and code-owned say, on the selected canonical Run; no leader or EVPPI prerequisite",
         "decision_sensitivity.most_sensitive: factor label + ref, current value + unit, whose figure (yours | Olumi's estimate), range source",
         "leader label (licensed only)",
         "other compared options: labels"
       ],
-      "body": "One line on what the analysis varied ('Olumi varied {factor} within the range it assumed'). Then up to 3 bullets on what would have to be true about {factor} for a different option to come out ahead, said qualitatively. Then the question asking for the user's estimate.",
+      "body": "With a current tipping_point, begin with tipping_point.say verbatim. Optional short elaboration may add no figures, crossing assertions, probabilities or winner language. Otherwise retain the existing qualitative sensitivity method. One line on what the analysis varied ('Olumi varied {factor} within the range it assumed'). Then up to 3 bullets on what would have to be true about {factor} for a different option to come out ahead, said qualitatively. Then the question asking for the user's estimate.",
       "action": "'Give your estimate' (edit_inline on the factor) when the range is Olumi's; else 'Talk it through'.",
       "post_checks": [
         {
@@ -947,7 +954,7 @@ export const POLICY = {
         },
         {
           "id": "WC-NO-NEW-FIGURES",
-          "rule": "every number_token is the factor's current value or a user figure"
+          "rule": "Legacy: every number_token is the current value or a user figure. With a typed tipping_point, all figures and units come from its exact code-owned say; optional elaboration contains no figures. No rounding, decimal-shift or additional threshold is accepted."
         },
         {
           "id": "WC-NO-NOTHING",
@@ -955,14 +962,18 @@ export const POLICY = {
         },
         {
           "id": "WC-BANNED",
-          "rule": "no /\\b(EVPI|EVPPI|sensitivity score|elasticity)\\b/i and no '%' (on the label-masked reply, shared.label_masking)"
+          "rule": "No EVPI/EVPPI/sensitivity score/elasticity. Existing qualitative method forbids %. Tipping-point units may contain % only in the exact code-owned sentence; elaboration may contain no %, probability, odds or chance claim."
+        },
+        {
+          "id": "WC-TIPPING-FACT",
+          "rule": "When tipping_point is supplied: run.kind == complete_current; factor_label equals its label; reply begins with its exact code-owned say. Elaboration adds no figures, crossing/direction assertion or winner/ranking claim."
         }
       ],
-      "fallback": "Deterministic: the row's reasoning_question with the 'Give your estimate' action.",
+      "fallback": "With a current tipping_point, its code-owned say verbatim. Otherwise: Deterministic: the row's reasoning_question with the 'Give your estimate' action.",
       "science": "Value of information: attention goes to the input that can change the choice (Howard 1966).",
       "format": "Insight line naming what was varied, up to 3 bullets on what would have to be true, then the question.",
       "honest_limit": {
-        "when": "The user explicitly asks (menu, chip or user.explicit_request) AND run.decision_sensitivity.status in [none_measurable, not_measured]. The row is never OFFERED in this state; this is how the method answers when asked.",
+        "when": "No current grounded tipping_point, and: The user explicitly asks (menu, chip or user.explicit_request) AND run.decision_sensitivity.status in [none_measurable, not_measured]. The row is never OFFERED in this state; this is how the method answers when asked.",
         "text": "Olumi can't yet measure what would change this choice in this model. The most useful thing to check meanwhile is {item_label}: it is Olumi's estimate and it sits on the path to your goal.",
         "item": "The RC-STRENGTHEN-ITEM pick (S1, then S3L, then S3V). With no Olumi estimate on a goal path, drop the second sentence.",
         "action": {

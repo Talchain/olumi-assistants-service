@@ -511,7 +511,7 @@ describe('C6-2: a streamed first brief gets the user\'s own goal and options bef
       todaysPath('retry');
     });
 
-    it('CONTRAST: a chip press on an empty model → not routed, today\'s path', async () => {
+    it('CONTRAST: a conversational chip on an empty model → not routed, today\'s path', async () => {
       script = [say('Noted.')];
       // An ORDINARY chip (an Agent turn). Every next step now has its own answer — the pre-mortem and "What would change
       // the result?" (SCIENCE ROBUSTNESS, #85 5950283606) are method turns with no model call, Strengthen opens a card —

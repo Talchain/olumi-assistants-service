@@ -216,6 +216,7 @@ describe('dial A — the recorded-ask window', () => {
       'draft_graph',
       'edit_graph_add_risk',
       'proposed_concept',
+      'reconcile_goal_scope',
       'run_analysis',
       'set_factor_value',
       'what_would_flip',

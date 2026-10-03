@@ -175,6 +175,7 @@ const canon = (v: unknown): string => JSON.stringify(v, (_k, x) =>
 async function runAnalysis(graph: Graph): Promise<{ plotCalls: { options: { option_id?: string; id?: string; interventions?: Record<string, number> }[] }[]; error: unknown }> {
   const plotCalls: { options: { option_id?: string; id?: string; interventions?: Record<string, number> }[] }[] = [];
   const store = {
+    readMostRecentPendingActions: async () => [],
     loadGraph: async () => graph,
     loadGraphAndBriefText: async () => ({ graph, briefText: null }),
   } as unknown as SessionStore;

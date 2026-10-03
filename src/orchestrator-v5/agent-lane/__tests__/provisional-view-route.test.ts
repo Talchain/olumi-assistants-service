@@ -311,13 +311,14 @@ describe('C5: the provisional view reaches the user labelled, after the gate, on
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });
 
-  it('CONTRAST: a readback that PERMITS the leader refuses the tool — no view, the same prose under the existing reply format', async () => {
+  it('CONTRAST: a readback that PERMITS the leader refuses the tool — no view, narrator prose plus the unavailable bounded basis', async () => {
     readbackState = PERMITTED_STATE;
     const r = await runViewThenReply();
     const b = r.json() as Body;
     expect(callModelOutputs).toEqual([]);
     expect(b._agent.tool_calls.find((c) => c.name === 'give_provisional_view')).toMatchObject({ ok: false, refusal: 'not_withheld' });
-    expect(b.assistant_text.replace(/^• /gm, '- ')).toBe(REPLY.text);
+    expect(b.assistant_text.replace(/^• /gm, '- ')).toBe(`${REPLY.text}\n\nThe sources of this comparison’s factor starting values are unavailable.`);
+    expect('_answer_shape' in b, 'the host disclosure stays visible').toBe(false);
     expect(Object.hasOwn(b._agent, 'provisional_view')).toBe(false);
   });
 });

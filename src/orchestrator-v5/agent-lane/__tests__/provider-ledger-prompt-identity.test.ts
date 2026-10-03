@@ -24,6 +24,9 @@ import { researchChipFor } from '../runtime/public-research.js';
 import { OPENAI_ONLY, assertProviderAllowed, recordedProviderCalls, runWithProviderPolicy } from '../../../adapters/llm/provider-policy.js';
 import { asSent } from './helpers/as-sent.js';
 
+/** P0 SHARED DATA (#85 5963281356): the readback's admission, as the producer always mints it (matrix M1); an absent one now fails the ONE leader licence closed. */
+const COMPARATIVE_ADMISSION = { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } as const;
+
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async () => null),
@@ -89,7 +92,7 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
         try { policyMod.assertProviderAllowed('anthropic', 'decision_review', { model: 'claude-sonnet-5', purpose: 'decision_review' }); } catch { /* refused, as the enricher degrades */ }
       }
       return { response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: 'h1',
-        blocks: [{ type: 'analysis_result', data: { marker: 'the-run' } }], analysis_ready: { status: 'ready', options: [], blockers: [] } };
+        blocks: [{ type: 'analysis_result', data: { marker: 'the-run' } }], analysis_ready: { status: 'ready', options: [], blockers: [], analysis_admission: COMPARATIVE_ADMISSION } };
     });
     app.post('/assist/v1/scenarios/:id/graph', async (req) => {
       const sid = (req.params as { id: string }).id;
@@ -98,6 +101,7 @@ describe('the provider ledger names the prompt each Agent call sent', () => {
       return {
         graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Velocity' }, { id: 'f', kind: 'factor', label: 'Capacity' }], edges: [{ from: 'f', to: 'g' }] },
         graph_hash: 'h1',
+        analysis_ready: { status: 'ready', analysis_admission: COMPARATIVE_ADMISSION },
         // A completed withheld Run asks for C5b's typed view; the permitted completed control does not. Same alias, different composed instructions.
         ...([RUN_WITHHELD, RUN_NOTHING_ON_RECORD].includes(sid) ? { analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } },
           analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: sid === RUN_WITHHELD
