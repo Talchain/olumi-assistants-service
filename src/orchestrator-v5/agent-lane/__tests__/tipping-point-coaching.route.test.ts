@@ -35,6 +35,7 @@ describe('SCI-HERO live route consumer', () => {
   let kind: string;
   let at: string;
   let enrichment: unknown;
+  let graph: unknown;
   let changeAfterRead: boolean;
   let reads: number;
   let calls: number;
@@ -50,7 +51,7 @@ describe('SCI-HERO live route consumer', () => {
     app.post('/assist/v1/scenarios/:id/graph', async () => {
       reads += 1;
       if (changeAfterRead && reads > 1) at = '2026-10-03T00:01:00.000Z';
-      return { graph: positive.graph, graph_hash: positive.graph_hash,
+      return { graph, graph_hash: positive.graph_hash,
         analysis_ready: { status: 'ready', may_run: true },
         analysis_state: { run_state: { kind, computed_at: at }, usable_for_chips: true,
           leader_claim: { permitted: false, withheld_reason: 'close_call' } },
@@ -67,7 +68,8 @@ describe('SCI-HERO live route consumer', () => {
   });
   beforeEach(() => {
     sid = randomUUID(); kind = 'complete_current'; at = '2026-10-03T00:00:00.000Z';
-    enrichment = positive.enrichment; reads = 0; calls = 0; changeAfterRead = false;
+    enrichment = positive.enrichment; graph = positive.graph;
+    reads = 0; calls = 0; changeAfterRead = false;
   });
   const press = async (turnId?: string) => {
     const response = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -96,6 +98,13 @@ describe('SCI-HERO live route consumer', () => {
   it('stale analysis refuses the prior threshold', async () => {
     kind = 'complete_stale';
     expect((await press()).assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+    expect(calls).toBe(0);
+  });
+  it('an empty model without a Run refuses a threshold without construction or generation', async () => {
+    kind = 'never_run'; enrichment = undefined; graph = { nodes: [], edges: [] };
+    const body = await press();
+    expect(body.assistant_text).toBe(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+    expect(body._agent.tool_calls).toEqual([]);
     expect(calls).toBe(0);
   });
   it('a competing newer Run on the same graph refuses the earlier threshold as current', async () => {
