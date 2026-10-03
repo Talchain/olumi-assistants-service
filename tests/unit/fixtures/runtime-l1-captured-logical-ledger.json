@@ -1,0 +1,394 @@
+{
+  "schema": "runtime-l1-historical-logical-ledger-v1",
+  "source": "/Users/paulslee/Documents/GitHub/output/ai-experience-runtime-simplification-20261002/source-receipts.json",
+  "source_sha256": "d864eeb26ef480d31dddd65dcfb44ee35f41ad800e94f60ead2058a7295cbf52",
+  "source_kind": "read-only owner-banked captures; not Git-committed raw",
+  "source_receipt_comment": 5947655524,
+  "served_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+  "source_receipts": 18,
+  "records": [
+    {
+      "source_file": "02-explain-074054.json",
+      "source_raw_sha256": "5e8242ea3cd3c78f6a6101f61ebeb12f353d04c21b2e5c6a9540df5f803d1862",
+      "turn_id": "643e497d-ed84-448a-86b8-f7495ba8d162",
+      "recorded_policy_index": 0,
+      "recorded_identity": {
+        "cee_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+        "duration_ms": 9184,
+        "environment": "staging",
+        "environment_source": "render_service_name",
+        "max_output_tokens": 3400,
+        "model": "gpt-6.1-sol",
+        "outcome": "allowed",
+        "prompt_alias": "agent.interpret",
+        "prompt_sha256": "9307ed7f6314e23d73cdf87850b5977cd2d7c06a21fc311ab79dcd1f5128d447",
+        "provider": "openai",
+        "purpose": "conversation",
+        "reasoning_effort": "low",
+        "schema_sha256": "4d0c2bda0ba11c795cd87f78f647b510430db47d04be51fa81904767698d503a",
+        "site": "agent-v1-turn.callModel",
+        "tools_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 9050,
+          "output_tokens": 233,
+          "raw": {
+            "input_tokens": 9050,
+            "input_tokens_details": {
+              "cache_write_tokens": 9047,
+              "cached_tokens": 0
+            },
+            "output_tokens": 233,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 9283
+          }
+        }
+      },
+      "physical_attempt_ids": null,
+      "physical_attempt_count": null
+    },
+    {
+      "source_file": "05-explain-074125.json",
+      "source_raw_sha256": "26a7f122309a504430191db547d190638201031e9b0e1f32a15d0abcfa72ed8f",
+      "turn_id": "1c837759-dab7-4ecc-a871-91da21e4cc73",
+      "recorded_policy_index": 0,
+      "recorded_identity": {
+        "cee_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+        "duration_ms": 9416,
+        "environment": "staging",
+        "environment_source": "render_service_name",
+        "max_output_tokens": 3400,
+        "model": "gpt-6.1-sol",
+        "outcome": "allowed",
+        "prompt_alias": "agent.interpret",
+        "prompt_sha256": "c907e993abf4910885223eee7c03eaddff1d65f5b21d372f373b0f7796fe7226",
+        "provider": "openai",
+        "purpose": "conversation",
+        "reasoning_effort": "low",
+        "schema_sha256": "4d0c2bda0ba11c795cd87f78f647b510430db47d04be51fa81904767698d503a",
+        "site": "agent-v1-turn.callModel",
+        "tools_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 9677,
+          "output_tokens": 236,
+          "raw": {
+            "input_tokens": 9677,
+            "input_tokens_details": {
+              "cache_write_tokens": 9674,
+              "cached_tokens": 0
+            },
+            "output_tokens": 236,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 9913
+          }
+        }
+      },
+      "physical_attempt_ids": null,
+      "physical_attempt_count": null
+    },
+    {
+      "source_file": "08-explain-074152.json",
+      "source_raw_sha256": "9d5bf66daa205674fd0a0d10823b0dd1863e1a47b06794f261b9e1ac7394456c",
+      "turn_id": "268bdbd8-1dfa-4447-8da1-40d880cb6a59",
+      "recorded_policy_index": 0,
+      "recorded_identity": {
+        "cee_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+        "duration_ms": 5633,
+        "environment": "staging",
+        "environment_source": "render_service_name",
+        "max_output_tokens": 3400,
+        "model": "gpt-6.1-sol",
+        "outcome": "allowed",
+        "prompt_alias": "agent.interpret",
+        "prompt_sha256": "581b20fec2b65bee5e68977660c24cbac47929ed1aa2b8d42b012df6539465b1",
+        "provider": "openai",
+        "purpose": "conversation",
+        "reasoning_effort": "low",
+        "schema_sha256": null,
+        "site": "agent-v1-turn.callModel",
+        "tools_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 12274,
+          "output_tokens": 128,
+          "raw": {
+            "input_tokens": 12274,
+            "input_tokens_details": {
+              "cache_write_tokens": 12271,
+              "cached_tokens": 0
+            },
+            "output_tokens": 128,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12402
+          }
+        }
+      },
+      "physical_attempt_ids": null,
+      "physical_attempt_count": null
+    },
+    {
+      "source_file": "09-turn-074203.json",
+      "source_raw_sha256": "b54b8d7049132b9dcd31fec716b9b0192c1ccdb0f4cc48cc59ea41021edecd6e",
+      "turn_id": "a27923ee-c71b-4d2b-9e2a-a28e031d279a",
+      "recorded_policy_index": 0,
+      "recorded_identity": {
+        "cee_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+        "duration_ms": 3884,
+        "environment": "staging",
+        "environment_source": "render_service_name",
+        "max_output_tokens": 3400,
+        "model": "gpt-6.1-sol",
+        "outcome": "allowed",
+        "prompt_alias": "agent.converse",
+        "prompt_sha256": "b1049e78a74540041fb4c003d3ce0f94fa695402234b18d05847cf91da4ffc2b",
+        "provider": "openai",
+        "purpose": "conversation",
+        "reasoning_effort": "high",
+        "schema_sha256": null,
+        "site": "agent-v1-turn.callModel",
+        "tools_sha256": "d1a42143c84c8221643810d757595b9308ecddd145736eedbb1f1013897ddfc4",
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 16579,
+          "output_tokens": 71,
+          "raw": {
+            "input_tokens": 16579,
+            "input_tokens_details": {
+              "cache_write_tokens": 16576,
+              "cached_tokens": 0
+            },
+            "output_tokens": 71,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 16650
+          }
+        }
+      },
+      "physical_attempt_ids": null,
+      "physical_attempt_count": null
+    },
+    {
+      "source_file": "12-explain-074231.json",
+      "source_raw_sha256": "a3fb77dcc66431450b7055fbb85219ee89669655556bfd8ae7e4cffbedab86c3",
+      "turn_id": "18ed10a8-cf8e-4029-952c-9efe12f0b3b5",
+      "recorded_policy_index": 0,
+      "recorded_identity": {
+        "cee_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+        "duration_ms": 5432,
+        "environment": "staging",
+        "environment_source": "render_service_name",
+        "max_output_tokens": 3400,
+        "model": "gpt-6.1-sol",
+        "outcome": "allowed",
+        "prompt_alias": "agent.interpret",
+        "prompt_sha256": "f0053247792423e47ea81ada5388ab28232de046b8256d4309986ede4608bd2b",
+        "provider": "openai",
+        "purpose": "conversation",
+        "reasoning_effort": "low",
+        "schema_sha256": null,
+        "site": "agent-v1-turn.callModel",
+        "tools_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 12773,
+          "output_tokens": 133,
+          "raw": {
+            "input_tokens": 12773,
+            "input_tokens_details": {
+              "cache_write_tokens": 12770,
+              "cached_tokens": 0
+            },
+            "output_tokens": 133,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12906
+          }
+        }
+      },
+      "physical_attempt_ids": null,
+      "physical_attempt_count": null
+    },
+    {
+      "source_file": "13-turn-074250.json",
+      "source_raw_sha256": "5a209a9339e69e4665a2b16d7bbf4fef657731764f00955bb4fe5cc65c6656f1",
+      "turn_id": "17c2aee6-78fe-4266-a64a-b2cf1a1886bd",
+      "recorded_policy_index": 0,
+      "recorded_identity": {
+        "cee_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+        "duration_ms": 9393,
+        "environment": "staging",
+        "environment_source": "render_service_name",
+        "max_output_tokens": 3400,
+        "model": "gpt-6.1-sol",
+        "outcome": "allowed",
+        "prompt_alias": "agent.converse",
+        "prompt_sha256": "2efc1376647cf5724c168c8399d3b6a40e176dff817b059352b758f692acf752",
+        "provider": "openai",
+        "purpose": "conversation",
+        "reasoning_effort": "low",
+        "schema_sha256": null,
+        "site": "agent-v1-turn.callModel",
+        "tools_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 9469,
+          "output_tokens": 231,
+          "raw": {
+            "input_tokens": 9469,
+            "input_tokens_details": {
+              "cache_write_tokens": 9466,
+              "cached_tokens": 0
+            },
+            "output_tokens": 231,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 9700
+          }
+        }
+      },
+      "physical_attempt_ids": null,
+      "physical_attempt_count": null
+    },
+    {
+      "source_file": "14-turn-074308.json",
+      "source_raw_sha256": "02fcc7c4262d0b3b1fb5ba4951e9f85699e3375768c2e118a7302fbd6945b7eb",
+      "turn_id": "0940f349-4811-41ff-aef8-80455eb536c2",
+      "recorded_policy_index": 0,
+      "recorded_identity": {
+        "cee_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+        "duration_ms": 13077,
+        "environment": "staging",
+        "environment_source": "render_service_name",
+        "max_output_tokens": 3400,
+        "model": "gpt-6.1-sol",
+        "outcome": "allowed",
+        "prompt_alias": "agent.converse",
+        "prompt_sha256": "b1049e78a74540041fb4c003d3ce0f94fa695402234b18d05847cf91da4ffc2b",
+        "provider": "openai",
+        "purpose": "conversation",
+        "reasoning_effort": "high",
+        "schema_sha256": null,
+        "site": "agent-v1-turn.callModel",
+        "tools_sha256": "46a1d4835db8fe5c4ef60230716a4217b2d656b47126b7a8921ea602d68531f1",
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 16681,
+          "output_tokens": 456,
+          "raw": {
+            "input_tokens": 16681,
+            "input_tokens_details": {
+              "cache_write_tokens": 16678,
+              "cached_tokens": 0
+            },
+            "output_tokens": 456,
+            "output_tokens_details": {
+              "reasoning_tokens": 392
+            },
+            "total_tokens": 17137
+          }
+        }
+      },
+      "physical_attempt_ids": null,
+      "physical_attempt_count": null
+    },
+    {
+      "source_file": "15-turn-074319.json",
+      "source_raw_sha256": "f63c72e156dae66a60cfa4752b8a4bb948ce21c7085cb942caa22d1b641ca204",
+      "turn_id": "0d9824e7-09fb-4625-99a5-3fe9936c0a98",
+      "recorded_policy_index": 0,
+      "recorded_identity": {
+        "cee_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+        "duration_ms": 5720,
+        "environment": "staging",
+        "environment_source": "render_service_name",
+        "max_output_tokens": 3400,
+        "model": "gpt-6.1-sol",
+        "outcome": "allowed",
+        "prompt_alias": "agent.converse",
+        "prompt_sha256": "b1049e78a74540041fb4c003d3ce0f94fa695402234b18d05847cf91da4ffc2b",
+        "provider": "openai",
+        "purpose": "conversation",
+        "reasoning_effort": "high",
+        "schema_sha256": null,
+        "site": "agent-v1-turn.callModel",
+        "tools_sha256": "d1a42143c84c8221643810d757595b9308ecddd145736eedbb1f1013897ddfc4",
+        "usage": {
+          "cached_input_tokens": 13539,
+          "input_tokens": 17208,
+          "output_tokens": 152,
+          "raw": {
+            "input_tokens": 17208,
+            "input_tokens_details": {
+              "cache_write_tokens": 3666,
+              "cached_tokens": 13539
+            },
+            "output_tokens": 152,
+            "output_tokens_details": {
+              "reasoning_tokens": 83
+            },
+            "total_tokens": 17360
+          }
+        }
+      },
+      "physical_attempt_ids": null,
+      "physical_attempt_count": null
+    },
+    {
+      "source_file": "18-explain-074349.json",
+      "source_raw_sha256": "8d0cc8a7163a23332a24633be18b5d8be67eeeb8fff2c4e8c4e6413a282dd72b",
+      "turn_id": "8c83ed9e-5ab6-4d0c-864f-55fd8eb1e8b4",
+      "recorded_policy_index": 0,
+      "recorded_identity": {
+        "cee_build": "d928fbf1ade6c5119618f87478c2da1fb4aec945",
+        "duration_ms": 6290,
+        "environment": "staging",
+        "environment_source": "render_service_name",
+        "max_output_tokens": 3400,
+        "model": "gpt-6.1-sol",
+        "outcome": "allowed",
+        "prompt_alias": "agent.interpret",
+        "prompt_sha256": "6f4b6bfba2d2b1a3d6b45295b01d2272707fb35d9dec0f70bc155a3692894e84",
+        "provider": "openai",
+        "purpose": "conversation",
+        "reasoning_effort": "low",
+        "schema_sha256": "4d0c2bda0ba11c795cd87f78f647b510430db47d04be51fa81904767698d503a",
+        "site": "agent-v1-turn.callModel",
+        "tools_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "usage": {
+          "cached_input_tokens": 0,
+          "input_tokens": 12181,
+          "output_tokens": 202,
+          "raw": {
+            "input_tokens": 12181,
+            "input_tokens_details": {
+              "cache_write_tokens": 12178,
+              "cached_tokens": 0
+            },
+            "output_tokens": 202,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12383
+          }
+        }
+      },
+      "physical_attempt_ids": null,
+      "physical_attempt_count": null
+    }
+  ],
+  "limits": [
+    "Historical logical policy rows only, not current staging calls per turn.",
+    "Physical attempts were not captured; null is retained.",
+    "New retry/failure transport controls are labelled offline scripted controls, not fabricated captured physical evidence."
+  ]
+}
