@@ -4243,12 +4243,16 @@ export function createAgentCapabilities(
             : i?.range_user_stated !== true ? 'a range is recorded only when the user gave it (range_user_stated), never one Olumi proposed'
             : i?.range_meaning !== 'likely_range'
               ? `Olumi records only a LIKELY range (the middle half of what\u2019s likely); a range read as ${typeof i?.range_meaning === 'string' ? `"${i.range_meaning}"` : 'nothing stated'} is a different statement and is not stored as one`
+            // SCI-TEMPORAL (DL #85 5963038431 / 5963160109): decided by the TYPED args, never by the value or the wording.
+            // A range alone ("likely between 5 and 20 days") carries no most likely figure, so a level beside it is the
+            // user's only when the Agent sends it as their own separate figure (`most_likely_stated`), even at an end.
+            : i?.most_likely_stated !== true ? 'only a range was given, with no most likely figure the user stated separately'
             : !userWrote ? 'a likely range is recorded only beside a level the user gave (user_stated)'
             : raw < low || raw > high ? `${raw} lies outside the likely range ${low}–${high} it was given with`
             : null;
           if (why !== null) {
             notAccepted.push({ option: option.label, factor: factor.label, value: i?.value,
-              reason: `No likely range was recorded: ${why}. Ask the user for each option’s likely range in their own words, then propose it again.` });
+              reason: `No likely range was recorded: ${why}. Ask the user for each option’s likely range and its most likely figure in their own words, then propose it again.` });
             continue;
           }
           likelyRange = { low, high };

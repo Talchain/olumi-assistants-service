@@ -587,6 +587,13 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
             type: 'boolean',
             description: 'Set true ONLY when the USER gave this range (both ends) for this option and factor.',
           },
+          most_likely_stated: {
+            type: 'boolean',
+            description:
+              'With a range: true ONLY when the user ALSO gave value as their own most likely figure, separately from ' +
+              'the range (\u201clikely 5\u201320 days, most likely 5\u201d \u2014 it may equal an end). If they gave only a ' +
+              'range, a value derived from it is not theirs: leave this out and ask for their most likely figure.',
+          },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
       whole_request: WHOLE_REQUEST,

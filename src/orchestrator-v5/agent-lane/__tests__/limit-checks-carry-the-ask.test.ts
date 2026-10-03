@@ -40,7 +40,7 @@ describe('⭐ each limit row carries MG’s ask, verbatim', () => {
    * Olumi's figure is withheld, and the row's ONE question is the first withheld option's arm question — never MG's
    * "can only be checked against Olumi's estimate", which would call a withheld guess a check.
    */
-  const LIMIT_B6_ASK = 'What’s each option’s likely range for ‘Total investment’?';
+  const LIMIT_B6_ASK = 'What’s each option’s likely range for ‘Total investment’, and its most likely figure?';
   const CHURN_B6_ASK = 'What is ‘Monthly churn’ today? How much does ‘Pro plan price’ change ‘Monthly churn’?';
 
   it('B6 (served C10): each row asks its first withheld option\'s arm question, and never MG\'s "checked against" wording', () => {

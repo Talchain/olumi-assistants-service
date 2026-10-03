@@ -42,7 +42,7 @@ describe('⛔ a limit the engine could not place on the model’s scale is said 
       // The other limit is untouched: its own row and its own question (B6's, AIQ 5916187873: two options set it at Olumi's figure).
       const other = rows.find((r) => r.constraint_id === LIMIT)!;
       expect(other.state).toBe('estimate_only');
-      expect(other.ask).toBe('What’s each option’s likely range for ‘Total investment’?');
+      expect(other.ask).toBe('What’s each option’s likely range for ‘Total investment’, and its most likely figure?');
     });
   }
 

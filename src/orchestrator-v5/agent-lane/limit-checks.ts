@@ -87,7 +87,7 @@ function guessWords(
   if (target === null) return null;
   if (f.arm === 'level') return { why: `it starts from Olumi’s estimate of today’s ${q(target)}.`, ask: `What is ${q(target)} today?` };
   if (f.arm === 'point') {
-    return { why: `it uses a single Olumi figure for ${q(target)}.`, ask: `What’s each option’s likely range for ${q(target)}?` };
+    return { why: `it uses a single Olumi figure for ${q(target)}.`, ask: `What’s each option’s likely range for ${q(target)}, and its most likely figure?` };
   }
   return null;
 }

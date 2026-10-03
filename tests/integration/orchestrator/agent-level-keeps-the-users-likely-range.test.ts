@@ -18,7 +18,7 @@ const LIFT = 'Lift-and-shift';
 const REPLATFORM = 'Re-platform';
 const TEXT = 'For Lift-and-shift, migration downtime is likely between 5 and 20 days, most likely 10 days.';
 /** The typed reading the Agent sends with a range: a plain LIKELY range, given by the user. */
-const TYPED = { range_meaning: 'likely_range', range_user_stated: true } as const;
+const TYPED = { range_meaning: 'likely_range', range_user_stated: true, most_likely_stated: true } as const;
 
 function servedGraph() {
   return projectGraphForPersistence({
@@ -200,6 +200,30 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     const { proposed } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
     expect(proposed.ok).toBe(false);
     expect(rows.size).toBe(0);
+  });
+
+  // SCI-TEMPORAL (DL #85 5963038431 / 5963160109): decided by the TYPED args. A range sent WITHOUT `most_likely_stated`
+  // (the plain answer to B6's ask, "likely between 5 and 20 days") has no most likely figure of the user's, so no level
+  // beside it is recorded as theirs — not an end, not a middle; the refusal asks for that figure (never the range again).
+  const SPAN_ONLY = 'For Lift-and-shift, migration downtime is likely between 5 and 20 days.';
+  const RANGE_ONLY = { range_meaning: 'likely_range', range_user_stated: true } as const;
+  it.each([5, 20])('RED: a range sent with no separate typed level never stores its end (%s days) as the user\'s level', async (end) => {
+    const { proposed } = await proposeAndApprove({ value: end, likely_low: 5, likely_high: 20, ...RANGE_ONLY }, SPAN_ONLY);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(false);
+    expect(rows.size).toBe(0);
+    expect(liftCell().range).toBeUndefined();
+  });
+  it('RED: a range-only answer is refused with the question that unblocks it (their most likely figure)', async () => {
+    const { proposed } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...RANGE_ONLY }, SPAN_ONLY);
+    expect(proposed.ok).toBe(false);
+    expect(JSON.stringify(proposed)).toMatch(/most likely figure/);
+  });
+  it('CONTROL (DL): a SEPARATE typed level equal to an end ("5–20 days, most likely 5 days" → value 5, most_likely_stated) is admitted as the user\'s', async () => {
+    const { proposed, out } = await proposeAndApprove({ value: 5, likely_low: 5, likely_high: 20, ...TYPED },
+      'For Lift-and-shift, migration downtime is likely 5–20 days, most likely 5 days.');
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(liftCell()).toMatchObject({ raw_value: 5, source: 'user_specified', range: { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' } });
   });
 
   it('CONTROL: a level with no range is written exactly as before (no `range` key)', async () => {

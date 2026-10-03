@@ -138,7 +138,7 @@ describe('B6: an option that SETS the limited quantity to one point (AIQ 5915438
     const [row] = limitChecksForAgent(g, { per_limit: [{ constraint_id: LIMIT, state: 'scored' }], joint: { state: 'scored' } } as never) ?? [];
     expect(row?.withheld_for).toEqual(['Switch to GCP']);
     expect(row?.say).toContain('For ‘Switch to GCP’ it isn’t shown: it uses a single Olumi figure for ‘Migration downtime’.');
-    expect(row?.ask).toBe('What’s each option’s likely range for ‘Migration downtime’?');
+    expect(row?.ask).toBe('What’s each option’s likely range for ‘Migration downtime’, and its most likely figure?');
   });
 
   it('RED: no owner at all → withheld (fails closed)', () => {
