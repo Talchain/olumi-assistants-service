@@ -1205,7 +1205,6 @@ export function projectEntity(n: GraphRead['nodes'][number]): Record<string, unk
             label: n.label,
             ...(n.description !== undefined ? { full_label: n.description } : {}),
             kind: n.kind,
-            ...(scopeOf(n.goal_scope) ? { goal_scope: n.goal_scope } : {}),
             // A value only when one is actually stored. Absence is reported as
             // unknown rather than as a zero.
             value: num(os.value) ? os.value : null,

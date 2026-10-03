@@ -27,6 +27,7 @@ import { breakEvenFor } from '../break-even.js';
 import { buildAtomicCommittedModelVersion, commitDirectAnswer } from '../../commit.js';
 import { appendCheckedGraphWrite } from '../../persist-graph-write.js';
 import { config } from '../../../config/index.js';
+import { CURRENT_MODEL_STATE_PREFIX } from '../runtime/agent-loop.js';
 
 const SID = '550e8400-e29b-41d4-a716-4466554400d9';
 type Rec = Record<string, unknown>;
@@ -101,6 +102,44 @@ async function approve(h: Awaited<ReturnType<typeof harness>>, r: ToolResult, wo
 }
 
 describe('Semantic spine S1–S7 through real canonical read/register and Run input', () => {
+  it('the held-out warehouse canonical slice retains units, range, comparison basis and three options without inventing scope questions', async () => {
+    const factor = (id: string, label: string, raw_value: number, unit: string) => ({ id, kind: 'factor', label, observed_state: { value: .5, raw_value, cap: raw_value * 2, unit, source: 'brief_extraction' } });
+    const g = GraphV3.parse({ nodes: [
+      factor('staff', 'Picking and packing staffing', 24, 'FTE'),
+      factor('util', 'Normal-month utilisation', .8, '%'),
+      factor('uplift', 'Nov/Dec volume uplift versus last year', .4, '%'),
+      { id: 'temp_rate', kind: 'factor', label: 'Temporary staff hourly rate', prior: { distribution: 'uniform', range_min: 12, range_max: 15 }, display_value: '£12–15 per hour' },
+      factor('capex', 'Conveyor automation capex', 80000, 'GBP'),
+      factor('running', 'Current annual running costs', 800000, 'GBP/year'),
+      { id: 'temps', kind: 'option', label: 'Hire temporary staff' },
+      { id: 'conveyor', kind: 'option', label: 'Conveyor automation' },
+      { id: 'shifts', kind: 'option', label: 'Three shifts instead of two' },
+    ], edges: [] });
+    const h = await harness(g); expect((await h.register(g)).status).toBe(200);
+    h.clearHistory(); h.restart(); const read = await h.read();
+    expect(read.json.graph).toEqual(g); expect(h.row.pending).toHaveLength(0);
+    const nodes = (read.json.graph as Graph).nodes;
+    for (const [id, raw_value, unit] of [['staff',24,'FTE'],['util',.8,'%'],['uplift',.4,'%'],['capex',80000,'GBP'],['running',800000,'GBP/year']]) {
+      expect(nodes.find(n => n.id === id)).toMatchObject({ observed_state: { raw_value, unit, source: 'brief_extraction' } });
+    }
+    expect(nodes.find(n => n.id === 'temp_rate')).toMatchObject({ prior: { range_min: 12, range_max: 15 }, display_value: '£12–15 per hour' });
+    expect(nodes.find(n => n.id === 'temp_rate')).not.toHaveProperty('observed_state');
+    expect(nodes.find(n => n.id === 'uplift')!.label).toBe('Nov/Dec volume uplift versus last year');
+    expect(nodes.filter(n => n.kind === 'option').map(n => n.id)).toEqual(['temps','conveyor','shifts']);
+    expect(nodes.some(n => n.kind === 'goal')).toBe(false);
+  });
+  it('the answer context binds user quantities and conditional derivations to separate carrier ids', async () => {
+    const h = await harness(); await open(h); const total = await share(h); await approve(h, total); h.clearHistory(); h.restart();
+    const projected = await h.call('get_canonical_state', {});
+    const entities = projected.entities as Rec[];
+    expect(entities.find(e => e.id === 'mrr')).toMatchObject({ raw_value: 10000, unit: '£/month' });
+    expect(entities.find(e => e.id === 'pro_paying_subscribers')).toMatchObject({ raw_value: 300 });
+    expect(entities.find(e => e.id === 'pro_plan_price')).toMatchObject({ raw_value: 49 });
+    expect(projected.goal).toMatchObject({ id: 'mrr', scope: { extent: 'total', component: { share: .3, basis: 'unknown', rate_id: 'pro_plan_price', count_id: 'pro_paying_subscribers' } }, conditional_derivations: [{ value: 3000, source: 'deterministic_derivation', conditional: true }, { value: 3000/49, source: 'deterministic_derivation', conditional: true }] });
+    expect(entities.some(e => e.raw_value === 3000 || e.raw_value === 3000/49)).toBe(false);
+    expect(entities.every(e => !Object.hasOwn(e, 'goal_scope'))).toBe(true); // Scope rides once beside the existing goal reading.
+    expect(projected.goal_scope_reconciliation).toHaveLength(1);
+  });
   it('approves the known total and withdraws its wrong product while retaining one unresolved count question after restart', async () => {
     const h = await harness(); await open(h); const offered = await share(h);
     expect(offered.public_label).toContain('count population and billing basis remain unresolved');
@@ -116,7 +155,7 @@ describe('Semantic spine S1–S7 through real canonical read/register and Run in
   it('binds an explicitly named multiword component after expiry while an unqualified number requires a fresh question', async () => {
     const h = await harness(); await open(h);
     const held = h.row.pending[0]!; if (held.action.kind !== 'reconcile_goal_scope') throw new Error('missing scope issue');
-    held.action.scope!.component!.label = 'Pro plan'; held.expires_at_iso = new Date(0).toISOString();
+    held.action.scope!.component!.label = 'Pro plan'; h.row.pending[0] = { ...held, expires_at_iso: new Date(0).toISOString() };
     const bare = await h.call('reconcile_goal_scope', { goal_label: 'MRR', component_share: .3, source_quote: '30% currently' }, '30% currently');
     expect(bare).toMatchObject({ refusal: 'share_not_bound' }); expect(bare).not.toHaveProperty('proposal_id');
     const words = 'The Pro plan contributes 30% of our total MRR.';
@@ -328,8 +367,17 @@ describe('S6–S7: the actual Agent route owns the durable reconciliation and co
     h.clearHistory(); sent.length = 0; await h.startAgentProcess();
     scripted = [[{ type: 'message', content: [{ type: 'output_text', text: 'The model records £10,000 total monthly MRR. Pro contributes 30%; 300 refers to registered accounts, not billable subscriptions. Its price and account count do not define total MRR.' }] }]];
     const explanation = await h.agentTurn('Explain the goal reading from the saved model.');
-    const request = JSON.stringify(sent);
-    expect(request).toContain('all revenue streams'); expect(request).toContain('registered accounts, not billable subscriptions'); expect(request).toContain('10000');
+    const input = sent.at(-1)!.input as Rec[];
+    const text = input.filter(item => item.role === 'developer').flatMap(item => Array.isArray(item.content) ? item.content as Rec[] : [])
+      .find(item => typeof item.text === 'string' && item.text.startsWith(CURRENT_MODEL_STATE_PREFIX))?.text;
+    expect(text).toBeTypeOf('string');
+    const supplied = JSON.parse(String(text).slice(CURRENT_MODEL_STATE_PREFIX.length)) as Rec;
+    expect(supplied.goal).toMatchObject({ id: 'mrr', scope: { extent: 'total', modelled: 'all revenue streams', component: { share: .3, basis: 'different', count_basis: 'registered accounts, not billable subscriptions', rate_id: 'pro_plan_price', count_id: 'pro_paying_subscribers' } } });
+    const suppliedEntities = supplied.entities as Rec[];
+    expect(suppliedEntities.find(e => e.id === 'mrr')).toMatchObject({ raw_value: 10000, value_provenance: { source: 'user_override' } });
+    expect(suppliedEntities.find(e => e.id === 'pro_paying_subscribers')).toMatchObject({ raw_value: 300 });
+    expect(suppliedEntities.find(e => e.id === 'pro_plan_price')).toMatchObject({ raw_value: 49 });
+    expect(suppliedEntities.some(e => e.raw_value === 3000 || e.raw_value === 3000 / 49)).toBe(false);
     expect(explanation.assistant_text).toContain('£10,000 total monthly MRR');
     expect(explanation.assistant_text).not.toContain('£14,700'); expect((explanation._agent as Rec).break_even).toBeUndefined();
     const cold = await h.read(); expect(goal(cold.json.graph as Graph)).toMatchObject({ goal_scope: { extent: 'total', component: { share: .3, basis: 'different' } }, observed_state: { raw_value: 10000 } });
