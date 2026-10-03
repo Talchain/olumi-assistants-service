@@ -14,7 +14,7 @@ type Rec = Record<string, unknown>;
 const SERVED_FX = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')) as { goal_after_build: Rec; goal_after_target: Rec };
 // Explicit-goal controls retain the target-ask contract. The captured D1 goal is inferred;
 // B3-7 deliberately offers its objective too, as the separate raw-capture row records.
-const FX = {
+const FX: typeof SERVED_FX = {
   goal_after_build: { ...SERVED_FX.goal_after_build, provenance: 'from_brief' },
   goal_after_target: { ...SERVED_FX.goal_after_target, provenance: 'from_brief' },
 };
@@ -177,11 +177,11 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
 
   it('the route judges the ask on the composed reply at rest — model words + owed lines + host status (source pin)', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(src).toContain('const composedWithout = withWriteOutcome(withDisclosures(narration.text, resultDisclosures), statusText);');
+    expect(src).toContain('const composedWithout = withWriteOutcome(withDisclosures(narration.text, owed), statusText);');
     expect(src).toContain('restingText: textAtRest(composedWithout),');
     expect(src).toContain('...decisionTurn,');
     expect(src).toContain('questionsToggle: textAtRest(composedWithout) !== composedWithout,');
-    expect(src).toContain('withWriteOutcome(withDisclosures(narration.text, [...resultDisclosures, ...decisionLines]), statusText)');
+    expect(src).toContain('withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)');
   });
 
   it('textAtRest is the panel\'s own split: the same marker and producer-sentence predicate as the pinned DGAI copy', () => {

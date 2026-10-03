@@ -3046,8 +3046,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ? conditionalInputBasis({ graph: readbackGraph,
         admission: (analysisReady as { analysis_admission?: unknown } | undefined)?.analysis_admission,
         analysedOptionIds: analysedOptionIds(analysisResult) }) : null;
-    const resultDisclosures = basis === null ? owed : [...owed, basis];
-    const composedWithout = withWriteOutcome(withDisclosures(narration.text, resultDisclosures), statusText);
+    if (basis !== null && !narration.text.includes(basis)) owed.push(basis);
+    const composedWithout = withWriteOutcome(withDisclosures(narration.text, owed), statusText);
     const decisionTurn = {
       awaitingApproval: offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
         || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined,
@@ -3076,7 +3076,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
       assistant_text: fastPath === 'method' ? narration.text
-        : withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...resultDisclosures, ...decisionLines]), statusText)),
+        : withoutProposalIds(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)),
       stage: 'frame',
       answerKind: 'substantive',
       // One click approves the ONE proposal just offered — the same words as typing "yes".
@@ -3229,7 +3229,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // #2517): a status line, an owed disclosure, a decision line or a rerun composition ships the reply whole, even when
       // the host restored text identical to the narrator's.
       hostLinesInText: narratorWords === null || finalText.trim() !== narratorWords.trim() || hostComposed
-        || (statusText ?? '').trim() !== '' || owed.length > 0 || decisionLines.length > 0,
+        || (statusText ?? '').trim() !== '' || owed.length > 0 || basis !== null || decisionLines.length > 0,
     });
     let pendingPreview: ProposalPreview | undefined;
     /**
