@@ -151,6 +151,21 @@ beforeEach(() => {
 });
 
 describe('#1740 R5 — the graph handed to store.append, after the edit-path persistence merge', () => {
+  it.each(['whole', 'nested', 'leaf'])('generic edit_graph cannot smuggle a user range: %s', async (variant) => {
+    const graph = buildPersistedGraph();
+    const opt = nodeOf(graph, 'opt_buy');
+    opt.interventions = { [TARGET]: { value: 0.2, source: 'cee_hypothesis', target_match: { node_id: TARGET, match_type: 'exact_id', confidence: 'high' } } };
+    persistedRef.current = graph;
+    const range = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
+    const cell = { value: 0.4, range };
+    const op = variant === 'whole' ? { op: 'update_node', path: 'opt_buy', value: { interventions: { [TARGET]: cell } } }
+      : { op: 'update_node', path: `/nodes/opt_buy/data/interventions/${TARGET}${variant === 'leaf' ? '/range' : ''}`, value: variant === 'leaf' ? range : cell };
+    llmChatMock.mockResolvedValue(editResponse([op]));
+    await dispatchEditGraph({ payload: makeMessagePayload({ scenario_id: SCENARIO_ID, turn_id: '17401740-aaaa-4aaa-8aaa-000000000001', stage: 'analyse', message: 'Set this option level to 0.4' }),
+      requestId: 'req-range-smuggle', request: {} as FastifyRequest, graphState: graph as unknown as GraphStateIngress, analysisState: null });
+    expect(appendMock.mock.calls.map(c => (c[0] as { graph?: unknown }).graph).filter(g => g !== undefined)).toHaveLength(0);
+    expect(persistedRef.current).toEqual(graph);
+  });
   it.each([
     ['single value leaf', [{ op: 'update_node', path: `/nodes/${TARGET}/data/value`, value: 0.42 }]],
     [

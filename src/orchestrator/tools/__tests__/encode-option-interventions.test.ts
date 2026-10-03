@@ -433,4 +433,21 @@ describe('a stated range stays with ITS quantity across a replacement figure', (
     const fresh = { ...RANGE, low: 2, high: 30 };
     expect(numericMapAfter({ unit: 'weeks', range: fresh }).range).toEqual(fresh);
   });
+
+  it('native quantity unchanged by cap/value renormalization keeps its range', () => {
+    expect(numericMapAfter({ value: 0.125, cap: 80 }).range).toEqual(RANGE);
+  });
+  it('removing the only effective unit drops the inherited range', () => {
+    expect(numericMapAfter({ unit: undefined })).not.toHaveProperty('range');
+  });
+  it.each(['days', 'weeks'])('adding a cell unit compares the inherited factor unit: %s', (unit) => {
+    const before = withReplacement({});
+    const opt = optionOf(before, 'opt_l');
+    delete iv(opt, 'fac_dt').unit;
+    (before.nodes.find(n => n.id === 'fac_dt')!.observed_state as Dict).unit = 'days';
+    const after = structuredClone(before);
+    iv(optionOf(after, 'opt_l'), 'fac_dt').unit = unit;
+    const saved = clearInheritedInterventionSourceQuotes(before, after);
+    expect(iv(optionOf(saved, 'opt_l'), 'fac_dt').range).toEqual(unit === 'days' ? RANGE : undefined);
+  });
 });

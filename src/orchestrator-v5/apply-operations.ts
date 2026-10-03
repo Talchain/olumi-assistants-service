@@ -107,8 +107,10 @@ import { assertIngressGraphNumericBounds, floorGraphSigmaForCompute } from '../v
 import { applyPatchOperations } from '../orchestrator/patch-applier.js';
 import { validatePatchOperations } from '../orchestrator/patch-validation.js';
 import { buildAppliedChanges, parseEditGraphResponse } from '../orchestrator/tools/edit-graph.js';
+import { hasInterventionRangeWrite } from './graph-management/field-safety.js';
 import {
   clearInheritedInterventionSourceQuotes,
+  hasNewInterventionRanges,
   encodeOptionInterventionsForEdit,
   optionIdsAddedWithInterventionIntent,
   optionIdsTouchedByOperations,
@@ -579,6 +581,9 @@ export function createApplyOperations(
       return refuse('that change is not valid against the model as it stands');
     }
     const operations = validated.operations;
+    if (hasInterventionRangeWrite(operations)) {
+      return refuse('A likely range needs its dedicated range proposal and approval; nothing was saved');
+    }
 
     let applied: GraphV3T;
     try {
@@ -601,6 +606,9 @@ export function createApplyOperations(
     const encoded = encodeOptionInterventionsForEdit(applied, touched, mustConfigure);
     if (encoded.unresolvedOptionIds.length > 0) {
       return refuse('I could not work out what that change means for the options, so I have not saved it');
+    }
+    if (hasNewInterventionRanges(before, encoded.graph)) {
+      return refuse('A new or changed likely range needs its dedicated range proposal and approval; nothing was saved');
     }
 
     const graph = projectGraphForPersistence(

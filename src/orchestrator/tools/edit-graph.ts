@@ -88,7 +88,7 @@ import {
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
 import { userTypedStoredFigure } from "../../orchestrator-v5/agent-lane/figure-scope.js";
-import { stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
+import { hasInterventionRangeWrite, stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -98,7 +98,7 @@ import {
 import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
 import { shouldHandOffProposeToLlmLane, resolveClauseLabel } from "./propose-handoff.js";
 import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
-import { clearInheritedInterventionSourceQuotes, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
+import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
@@ -3031,6 +3031,10 @@ export async function handleEditGraph(
 
     // Sanitise: remove legacy fields
     let operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
+    if (hasInterventionRangeWrite(operations)) {
+      return buildRejectionResult('A likely range needs its dedicated range proposal and approval.',
+        operations, baseGraphHash, turnId, startTime, 'FIELD_NOT_ALLOWED', undefined, attempt, diagnostics());
+    }
 
     // ⭐ STRIP PIPELINE-OWNED KEYS FROM `add_node` VALUES, RATHER THAN LET THE
     // REFEREE REFUSE THE WHOLE BATCH. Witnessed on a real user session: an
@@ -3970,6 +3974,10 @@ export async function handleEditGraph(
           attempt,
           diagnostics(),
         );
+      }
+      if (hasNewInterventionRanges(context.graph, encoded.graph)) {
+        return buildRejectionResult('A new or changed likely range needs its dedicated range proposal and approval.',
+          operations, baseGraphHash, turnId, startTime, 'FIELD_NOT_ALLOWED', undefined, attempt, diagnostics());
       }
       const truthfullyQuoted = clearInheritedInterventionSourceQuotes(context.graph, encoded.graph);
       if (truthfullyQuoted !== appliedGraph) {

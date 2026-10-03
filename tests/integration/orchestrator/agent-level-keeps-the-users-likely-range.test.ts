@@ -112,15 +112,20 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     rows.clear();
   });
 
-  async function proposeAndApprove(level: Record<string, unknown>, text = TEXT) {
+  async function proposeAndApprove(level: Record<string, unknown>, text = TEXT, compound = false) {
     const read = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash() } });
     const caps = createAgentCapabilities(read as never, new ProposalStore(), undefined, 'full', undefined, {
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
     });
     const ctx = { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: text };
-    const proposed = await caps.proposeOptionInterventions(ctx, { interventions: [
-      { option_label: LIFT, factor_label: 'Migration downtime', unit: 'days', basis: 'the user', user_stated: true, ...level },
-    ] } as never);
+    const levels = [{ option_label: LIFT, factor_label: 'Migration downtime', unit: 'days', basis: 'the user', user_stated: true, ...level }];
+    const before = JSON.stringify(persisted);
+    const count = rows.size;
+    const proposed = compound
+      ? await caps.proposeStartingPoint(ctx, { assumptions: [{ factor_label: 'Training time', value: 8, unit: 'days', basis: 'planning assumption' }], option_levels: levels } as never)
+      : await caps.proposeOptionInterventions(ctx, { interventions: levels } as never);
+    expect(JSON.stringify(persisted)).toBe(before);
+    expect(rows.size).toBe(count);
     if (proposed.ok !== true) return { proposed, out: undefined };
     const out = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
     return { proposed, out };
@@ -152,20 +157,41 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
   });
 
-  it('capless opt_lift/fac_downtime preserves the range the user approved through the real writer', async () => {
+  it.each([[false, true], [false, false], [true, true], [true, false]])('capless opt_lift/fac_downtime retains raw/unit/range: compound=%s declaredUnit=%s', async (compound, declaredUnit) => {
     const factor = (persisted as { nodes: { id: string; observed_state?: Record<string, unknown> }[] })
       .nodes.find(n => n.id === 'fac_downtime')!;
     delete factor.observed_state!.cap;
+    if (!declaredUnit) delete factor.observed_state!.unit;
     const { proposed, out } = await proposeAndApprove({ value: 0.5, likely_low: 0.2, likely_high: 0.8, ...TYPED },
-      'For Lift-and-shift, migration downtime is likely between 0.2 and 0.8 days, most likely 0.5 days.');
+      'For Lift-and-shift, migration downtime is likely between 0.2 and 0.8 days, most likely 0.5 days.', compound);
     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(rows.size).toBe(1);
-    expect(liftCell()).toMatchObject({ value: 0.5, source: 'user_specified',
+    expect(liftCell()).toMatchObject({ value: 0.5, raw_value: 0.5, unit: 'days', source: 'user_specified',
       range: { low: 0.2, high: 0.8, meaning: 'likely_range', source: 'user_specified' } });
+    expect(liftCell()).not.toHaveProperty('cap');
+    const cold = GraphV3.parse(JSON.parse(JSON.stringify(persisted)));
+    expect(cold.nodes.find(n => n.id === 'opt_lift')?.interventions?.fac_downtime).toEqual(liftCell());
     const other = (persisted as { nodes: { id: string; interventions?: Record<string, unknown> }[] })
       .nodes.find(n => n.id === 'opt_replatform')!;
     expect(other.interventions?.fac_downtime).toBeUndefined();
+  });
+
+  it.each(['10', 'ten'])('equivalent typed likely range is admitted and explicitly approved with most likely %s days', async (point) => {
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED },
+      `For Lift-and-shift, migration downtime is likely between five and twenty days, most likely ${point} days.`);
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(liftCell()).toMatchObject({ raw_value: 10, unit: 'days', range: { low: 5, high: 20, source: 'user_specified' } });
+  });
+
+  it('the dedicated approval preserves an identical stated range on a changed native quantity', async () => {
+    await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
+    const { proposed, out } = await proposeAndApprove({ value: 12, likely_low: 5, likely_high: 20, ...TYPED },
+      'For Lift-and-shift, migration downtime is likely between 5 and 20 days, most likely 12 days.');
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(liftCell()).toMatchObject({ value: 0.3, raw_value: 12, range: { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' } });
   });
 
   // Codex CR 5963331228 P1: the range is decided from TYPED arguments only (its meaning, that the user gave it, beside a
