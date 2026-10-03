@@ -156,7 +156,7 @@ import { OLUMI_SUGGESTION_NOT_ADOPTABLE, planNewFactors, planNewOption, type New
 import { createProposal, ProposalStore, type ProposalInterpretation, type ProposalOperation, type ReceiptSummary, type StructuredProposal } from '../proposal.js';
 import { modelVersionMutationReceiptFromResponse } from '../../model-management/mutation-receipt.js';
 import type { CommitLimitEditInput, CommitLimitEditResult, CommitOptionLevelsInput, CommitOptionLevelsResult, CommitOptionStatusInput, CommitOptionStatusResult, HoldAddFactorInput, HoldAddFactorResult, HoldAddRiskInput, HoldAddRiskResult } from '../../system-events/dispatch.js';
-import { buildAddRiskTransaction } from '../../routing/add-risk-transaction.js';
+import { buildAddRiskTransaction, type AddRiskProposal } from '../../routing/add-risk-transaction.js';
 import { buildAddFactorTransaction, GM_HELD_USER_TODAY_KEY, isNewFactorTarget, MAX_FACTORS_PER_ADD, readUserTodayMember, USER_TODAY_SOURCE, type UserTodayBasis } from '../../routing/add-factor-transaction.js';
 import { readCurrencyUnitWithQualifiers } from '../../../cee/provenance/stated-amounts.js';
 import { confirmEdgeWrite, describeOutcome } from '../confirm-write.js';
@@ -188,7 +188,7 @@ import { defaultFrameFor, framedObservedState, nonlinearIdentityForAgent, readEv
 import { LIMIT_OPERATOR_WORDS, statedOperatorOf } from '../admit-constraint.js';
 import { readHeldGoalComparator } from '../../goal-target/goal-direction.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
-import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult } from './agent-tools.js';
+import { RISK_LINKS_RULE, type AgentCapabilities, type AgentToolContext, type ToolResult, type RequestFulfilment, type NewRiskSpec } from './agent-tools.js';
 import { buildModelFromBrief, constructionOperationId, findConstructionVersion, type CallStructuredModel, type ConstructionTrace } from './build-model.js';
 import { claimPermissionsFrom, describeFirstAnalysisForAgent, type FirstAnalysisInput, type FirstAnalysisOutcome } from '../first-analysis.js';
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from '../limit-checks.js';
@@ -2071,6 +2071,10 @@ export function createAgentCapabilities(
       ok: true, mutated: true, applied: true, outcome: 'applied', proposal_id: ref,
       receipts: summary !== null ? [summary] : [],
       ...(unreadable ? { receipt_unreadable: true } : {}),
+      ...(addedRiskIds.length > 0 ? { fulfilment: addedRiskIds.map((id) => ({
+        requested_label: String((r.json.draft_graph as { nodes: { id: string; label?: string }[] }).nodes.find((n) => n.id === id)!.label ?? id),
+        outcome: 'committed' as const, entity_id: id,
+      })) } : {}),
       follow_up: sentences.join(' '),
       ...(rangesAdded.length > 0 ? { ranges_added_for_analysis: rangesAdded } : {}),
     };
@@ -6982,126 +6986,157 @@ export function createAgentCapabilities(
      */
     async proposeNewRisk(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      const specs = Array.isArray(args?.risks) && args.risks.length > 0
+        ? args.risks : [{ label: args?.label ?? '', affects: args?.affects ?? [], caused_by: args?.caused_by }];
+      const fulfilment: RequestFulfilment[] = [];
+      const rejectAll = (result: ToolResult): ToolResult => ({ ...result, fulfilment: specs.map((spec) => ({
+        requested_label: String(spec?.label ?? ''), outcome: 'refused', reason: String(result.refusal ?? 'not_prepared'),
+      })) });
       if (opts.holdAddRisk === undefined) {
-        return { ok: false, mutated: false, refusal: 'unavailable', detail: 'A risk cannot be added here. Nothing was changed. Tell the user plainly.' };
+        return rejectAll({ ok: false, mutated: false, refusal: 'unavailable', detail: 'A risk cannot be added here. Nothing was changed. Tell the user plainly.' });
       }
-      const label = typeof args?.label === 'string' ? args.label.trim() : '';
-      if (label === '') {
-        return { ok: false, mutated: false, refusal: 'unreadable_risk', detail: 'A new risk needs a name, in the user’s words. Nothing was prepared.' };
-      }
-      const affects = Array.isArray(args?.affects) ? args.affects : [];
-      const causedBy = Array.isArray(args?.caused_by) ? args.caused_by : [];
-      if (affects.length === 0) {
-        return { ok: false, mutated: false, refusal: 'no_affects',
-          detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` };
-      }
-      const g = await readGraph(ctx.scenario_id);
-      if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      if (g.nodes.some((n) => norm(n.label) === norm(label))) {
-        return { ok: false, mutated: false, refusal: 'risk_exists',
-          detail: `The model already has something called "${label}", so nothing was prepared. Describe it from the model instead of adding it again.` };
-      }
-      const links: { from_id?: string; to_id?: string; effect_direction: 'positive' | 'negative' }[] = [];
-      const ambiguous: AmbiguousTarget[] = [];
-      const direction = (d: unknown): 'positive' | 'negative' | null => (d === 'positive' || d === 'negative' ? d : null);
-      for (const a of affects as { target_label?: unknown; direction?: unknown }[]) {
-        const asked = String(a?.target_label ?? '');
-        const dir = direction(a?.direction);
-        const res = resolveNamed(g, asked, (n) => n.kind === 'goal' || n.kind === 'outcome');
-        if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
-        if (res.kind === 'other' && res.node.kind === 'factor') {
-          // ⛔ Never INTO a factor: said in the words the Agent can repeat, and nothing is prepared.
-          return { ok: false, mutated: false, refusal: 'risk_affects_factor',
-            detail: `Nothing was prepared: a risk affects the goal or an outcome, not a factor directly. "${res.node.label}" is a factor. `
-              + 'Say that plainly, and ask which outcome or goal the risk would hurt (a factor that makes the risk more likely goes in caused_by).' };
+      const graph = await readGraph(ctx.scenario_id);
+      if (graph === null) return rejectAll({ ok: false, mutated: false, refusal: 'not_found' });
+      // Resolve each item through the SAME single-risk checks, before sending any held change.
+      const g: GraphRead = { ...graph, nodes: [...graph.nodes] };
+      type PreparedRisk = { label: string; links: HoldAddRiskInput['links']; built: AddRiskProposal };
+      const prepare = (spec: NewRiskSpec): PreparedRisk | { result: ToolResult } => {
+        const label = typeof spec?.label === 'string' ? spec.label.trim() : '';
+        if (label === '') {
+          return { result: { ok: false, mutated: false, refusal: 'unreadable_risk', detail: 'A new risk needs a name, in the user’s words. Nothing was prepared.' } };
         }
-        if (res.kind !== 'one') {
-          return { ok: false, mutated: false, refusal: 'target_not_goal_or_outcome',
-            detail: res.kind === 'none'
-              ? `The model has nothing called "${asked}", so nothing was prepared. ${RISK_LINKS_RULE}`
-              : `"${asked}" is not the goal or an outcome, so nothing was prepared. ${RISK_LINKS_RULE}` };
+        const affects = Array.isArray(spec?.affects) ? spec.affects : [];
+        const causedBy = Array.isArray(spec?.caused_by) ? spec.caused_by : [];
+        if (affects.length === 0) {
+          return { result: { ok: false, mutated: false, refusal: 'no_affects',
+            detail: `Nothing was prepared. ${RISK_LINKS_RULE} Ask the user what "${label}" would hurt if it happened.` } };
         }
-        if (dir === null) {
-          return { ok: false, mutated: false, refusal: 'direction_not_stated',
-            detail: `Nothing was prepared: say whether "${label}" would raise or lower "${res.node.label}", from the user’s words; if it is unclear, ask.` };
+        if (g.nodes.some((n) => norm(n.label) === norm(label))) {
+          return { result: { ok: false, mutated: false, refusal: 'risk_exists',
+            detail: `The model already has something called "${label}", so nothing was prepared. Describe it from the model instead of adding it again.` } };
         }
-        links.push({ to_id: res.node.id, effect_direction: dir });
-      }
-      for (const c of causedBy as { factor_label?: unknown; direction?: unknown }[]) {
-        const asked = String(c?.factor_label ?? '');
-        const dir = direction(c?.direction);
-        const res = resolveNamed(g, asked, (n) => n.kind === 'factor');
-        if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
-        if (res.kind !== 'one') {
-          return { ok: false, mutated: false, refusal: 'cause_not_a_factor',
-            detail: `"${asked}" is not a factor in the model, so nothing was prepared. What drives a risk must be one of the model’s factors; leave caused_by out if none does.` };
+        const links: { from_id?: string; to_id?: string; effect_direction: 'positive' | 'negative' }[] = [];
+        const ambiguous: AmbiguousTarget[] = [];
+        const direction = (d: unknown): 'positive' | 'negative' | null => (d === 'positive' || d === 'negative' ? d : null);
+        for (const a of affects as { target_label?: unknown; direction?: unknown }[]) {
+          const asked = String(a?.target_label ?? '');
+          const dir = direction(a?.direction);
+          const res = resolveNamed(g, asked, (n) => n.kind === 'goal' || n.kind === 'outcome');
+          if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
+          if (res.kind === 'other' && res.node.kind === 'factor') {
+            // ⛔ Never INTO a factor: said in the words the Agent can repeat, and nothing is prepared.
+            return { result: { ok: false, mutated: false, refusal: 'risk_affects_factor',
+              detail: `Nothing was prepared: a risk affects the goal or an outcome, not a factor directly. "${res.node.label}" is a factor. `
+                + 'Say that plainly, and ask which outcome or goal the risk would hurt (a factor that makes the risk more likely goes in caused_by).' } };
+          }
+          if (res.kind !== 'one') {
+            return { result: { ok: false, mutated: false, refusal: 'target_not_goal_or_outcome',
+              detail: res.kind === 'none'
+                ? `The model has nothing called "${asked}", so nothing was prepared. ${RISK_LINKS_RULE}`
+                : `"${asked}" is not the goal or an outcome, so nothing was prepared. ${RISK_LINKS_RULE}` } };
+          }
+          if (dir === null) {
+            return { result: { ok: false, mutated: false, refusal: 'direction_not_stated',
+              detail: `Nothing was prepared: say whether "${label}" would raise or lower "${res.node.label}", from the user’s words; if it is unclear, ask.` } };
+          }
+          links.push({ to_id: res.node.id, effect_direction: dir });
         }
-        if (dir === null) {
-          return { ok: false, mutated: false, refusal: 'direction_not_stated',
-            detail: `Nothing was prepared: say whether raising "${res.node.label}" makes "${label}" more or less likely, from the user’s words; if it is unclear, ask.` };
+        for (const c of causedBy as { factor_label?: unknown; direction?: unknown }[]) {
+          const asked = String(c?.factor_label ?? '');
+          const dir = direction(c?.direction);
+          const res = resolveNamed(g, asked, (n) => n.kind === 'factor');
+          if (res.kind === 'ambiguous') { ambiguous.push(describeAmbiguity(g, asked, res.candidates)); continue; }
+          if (res.kind !== 'one') {
+            return { result: { ok: false, mutated: false, refusal: 'cause_not_a_factor',
+              detail: `"${asked}" is not a factor in the model, so nothing was prepared. What drives a risk must be one of the model’s factors; leave caused_by out if none does.` } };
+          }
+          if (dir === null) {
+            return { result: { ok: false, mutated: false, refusal: 'direction_not_stated',
+              detail: `Nothing was prepared: say whether raising "${res.node.label}" makes "${label}" more or less likely, from the user’s words; if it is unclear, ask.` } };
+          }
+          links.push({ from_id: res.node.id, effect_direction: dir });
         }
-        links.push({ from_id: res.node.id, effect_direction: dir });
+        if (ambiguous.length > 0) {
+          return { result: { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE } };
+        }
+        // The door's own builder, run here purely: a spec it would refuse is never sent.
+        const built = buildAddRiskTransaction({ risk: { label }, links }, { nodes: g.nodes as never, edges: g.edges as never });
+        if (!built.matched) {
+          const why = built.reason === 'kind_pair_not_allowed'
+            ? ` ${RISK_LINKS_RULE}`
+            : built.reason === 'risk_unreachable'
+              ? riskUnreachableWhy(g, label, links)
+              : '';
+          return { result: { ok: false, mutated: false, refusal: 'not_prepared', reason: built.reason,
+            detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` } };
+        }
+        return { label, links, built: built.proposal };
+      };
+      const prepared: PreparedRisk[] = [];
+      const seen = new Set<string>();
+      let refusal: ToolResult | undefined;
+      for (const spec of specs) {
+        const label = String(spec?.label ?? '').trim();
+        if (seen.has(norm(label))) continue; // One outcome per requested identity, including repeated tool calls.
+        seen.add(norm(label));
+        const checked = prepare(spec);
+        if ('result' in checked) {
+          refusal ??= checked.result;
+          const existing = graph.nodes.filter((n) => norm(n.label) === norm(label));
+          fulfilment.push(checked.result.refusal === 'risk_exists' && existing.length === 1 && existing[0]!.kind === 'risk'
+            ? { requested_label: label, outcome: 'already_present', reason: 'risk_exists', entity_id: existing[0]!.id }
+            : { requested_label: label, outcome: 'refused', reason: String(checked.result.reason ?? checked.result.refusal ?? 'not_prepared') });
+          continue;
+        }
+        if (prepared.length >= 4) {
+          fulfilment.push({ requested_label: label, outcome: 'deferred', reason: 'cap' });
+          continue;
+        }
+        prepared.push(checked);
+        fulfilment.push({ requested_label: label, outcome: 'proposed', entity_id: checked.built.riskId });
+        // Identity allocation sees earlier accepted risks, so colliding id bases cannot alias two requested items.
+        g.nodes.push({ id: checked.built.riskId, kind: 'risk', label } as GraphRead['nodes'][number]);
       }
-      if (ambiguous.length > 0) {
-        return { ok: false, mutated: false, refusal: 'ambiguous_target', ambiguous_targets: ambiguous, detail: AMBIGUOUS_NOTE };
-      }
-      // The door's own builder, run here purely: a spec it would refuse is never sent.
-      const built = buildAddRiskTransaction({ risk: { label }, links }, { nodes: g.nodes as never, edges: g.edges as never });
-      if (!built.matched) {
-        const why = built.reason === 'kind_pair_not_allowed'
-          ? ` ${RISK_LINKS_RULE}`
-          : built.reason === 'risk_unreachable'
-            ? riskUnreachableWhy(g, label, links)
-            : '';
-        return { ok: false, mutated: false, refusal: 'not_prepared', reason: built.reason,
-          detail: `That risk could not be prepared as one change, so nothing was sent or changed.${why} Tell the user plainly.` };
-      }
-      const riskId = built.proposal.riskId;
+      if (prepared.length === 0) return { ...(refusal ?? { ok: false, mutated: false }), fulfilment };
+      const first = prepared[0]!;
+      const riskId = first.built.riskId;
+      const risks = prepared.map((p) => ({ risk: { id: p.built.riskId, label: p.label }, links: p.links }));
       const res = await opts.holdAddRisk({
-        scenario_id: ctx.scenario_id,
-        // A fresh row per offer (see `HoldAddRiskInput.turn_id`): a lapsed hold never blocks offering the same risk again.
-        turn_id: randomUUID(),
-        base_graph_hash: g.graph_hash,
-        risk: { id: riskId, label },
-        links,
+        scenario_id: ctx.scenario_id, turn_id: randomUUID(), base_graph_hash: graph.graph_hash,
+        ...risks[0]!, ...(risks.length > 1 ? { risks } : {}),
       });
-      if (res.status === 'stale') {
-        return { ok: false, mutated: false, refusal: 'model_changed',
-          detail: 'The model changed while this was being prepared, so nothing was held. Read it again and propose afresh.' };
-      }
       const ref = gmHeldProposalRef(ctx.scenario_id, `node:${riskId}`);
       let heldOk = res.status === 'held' && res.proposal_id === ref && res.risk_id === riskId;
       if (heldOk && opts.readPendingActions !== undefined) {
         try {
           const hold = await liveHeldHold(ctx.scenario_id, ref);
           const ops = hold !== undefined ? heldOpsOf(hold) : [];
-          heldOk = ops.some((o) => o.op === 'add_node' && o.path === riskId)
-            && built.proposal.links.every((l) => ops.some((o) => o.op === 'add_edge' && o.path === `${l.from}::${l.to}`));
-        } catch {
-          heldOk = false;
-        }
+          heldOk = prepared.every((p) => ops.some((o) => o.op === 'add_node' && o.path === p.built.riskId
+            && (o.value as { kind?: unknown; label?: unknown } | undefined)?.kind === 'risk'
+            && (o.value as { label?: unknown }).label === p.label)
+            && p.built.links.every((l) => ops.some((o) => o.op === 'add_edge' && o.path === `${l.from}::${l.to}`)));
+        } catch { heldOk = false; }
       }
       if (!heldOk || res.status !== 'held') {
-        return { ok: false, mutated: false, refusal: 'not_prepared', ...(res.status === 'refused' ? { reason: res.reason } : {}),
-          detail: res.status === 'refused' && res.reason === 'kind_pair_not_allowed'
-            ? `Olumi did not prepare that change, so nothing was added. ${RISK_LINKS_RULE} Tell the user plainly.`
-            : 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly; do not retry it in other words.' };
+        const reason = res.status === 'stale' ? 'model_changed' : res.status === 'refused' ? res.reason : 'not_prepared';
+        return { ok: false, mutated: false, refusal: reason, fulfilment: fulfilment.map((e) => e.outcome === 'proposed'
+          ? { requested_label: e.requested_label, outcome: 'refused', reason } : e),
+          detail: 'Olumi could not prepare that as one change, so nothing was added. Tell the user plainly.' };
       }
-      const labelOfId = (id: string): string => String(g.nodes.find((n) => n.id === id)?.label ?? id);
-      const effect = (d: 'positive' | 'negative'): string => (d === 'positive' ? 'raises it' : 'lowers it');
+      const labelOfId = (id: string): string => String(graph.nodes.find((n) => n.id === id)?.label ?? id);
+      const disclosure = (p: typeof first) => ({
+        label: p.label,
+        threatens: p.built.links.filter((l) => l.from === p.built.riskId).map((l) => `${labelOfId(l.to)} (${l.effect_direction === 'positive' ? 'raises it' : 'lowers it'})`),
+        driven_by: p.built.links.filter((l) => l.to === p.built.riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
+        how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
+      });
       return {
-        ok: true, mutated: false,
-        proposal_id: ref,
-        public_label: res.public_label.trim() !== '' ? res.public_label : `Add the risk "${label}"`,
+        ok: true, mutated: false, proposal_id: ref, fulfilment,
+        public_label: res.public_label.trim() !== '' ? res.public_label : `Add the risk "${first.label}"`,
         held_message: res.held_message,
         ...(res.detail !== undefined && res.detail.trim() !== '' ? { held_detail: res.detail } : {}),
-        base_revision: g.graph_hash,
-        risk: {
-          label,
-          threatens: built.proposal.links.filter((l) => l.from === riskId).map((l) => `${labelOfId(l.to)} (${effect(l.effect_direction)})`),
-          driven_by: built.proposal.links.filter((l) => l.to === riskId).map((l) => `${labelOfId(l.from)} (${l.effect_direction === 'positive' ? 'more of it makes the risk more likely' : 'more of it makes the risk less likely'})`),
-          how_strongly: 'not known yet: Olumi uses a placeholder strength for each link, not an estimate',
-        },
+        base_revision: graph.graph_hash,
+        ...(prepared.length === 1 ? { risk: disclosure(first) } : { risks: prepared.map(disclosure) }),
         note: 'Nothing has changed yet. Tell the user it will add the risk, what it threatens and what drives it, and that how strongly '
           + 'is a placeholder for them to correct — never the id — and call authorise_change with this proposal_id once they agree.',
       };

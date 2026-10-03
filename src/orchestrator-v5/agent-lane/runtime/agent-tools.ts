@@ -490,9 +490,28 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           direction: { type: 'string', enum: ['positive', 'negative'], description: 'positive when raising the factor makes the risk more likely.' },
         }, ['factor_label', 'direction']),
       },
+      risks: { type: 'array', maxItems: 4, description: 'Several requested risks in ONE approval. Each is checked separately; present or refused entries are reported.', items: obj({
+      label: { type: 'string', description: 'The risk in the user\u2019s own words (e.g. "Competitive response").' },
+      affects: {
+        type: 'array',
+        description: 'What the risk threatens: the goal or an outcome in the model, and which way. At least one. Never a factor.',
+        items: obj({
+          target_label: { type: 'string', description: 'The goal or an outcome, exactly as the CURRENT MODEL STATE labels it.' },
+          direction: { type: 'string', enum: ['positive', 'negative'], description: 'negative when the risk lowers it (the usual case); from the user\u2019s words, never a guess.' },
+        }, ['target_label', 'direction']),
+      },
+      caused_by: {
+        type: 'array',
+        description: 'Factors in the model that drive the risk, and which way (optional).',
+        items: obj({
+          factor_label: { type: 'string', description: 'A factor exactly as the CURRENT MODEL STATE labels it.' },
+          direction: { type: 'string', enum: ['positive', 'negative'], description: 'positive when raising the factor makes the risk more likely.' },
+        }, ['factor_label', 'direction']),
+      },
+      }, ['label', 'affects']) },
       rationale: { type: 'string', description: 'What the user said, in their words.' },
       whole_request: WHOLE_REQUEST,
-    }, ['label', 'affects', 'rationale']),
+    }, ['rationale']),
   },
   // PJ-E-FIG (DL #72 5866036457): the add-risk door's twin for new factors carrying the user's figures. Text kept minimal:
   // every character here is sent on every turn (C1 latency).
@@ -721,9 +740,21 @@ export function toolsFor(mode: AgentLaneMode): readonly ToolDefinition[] {
 }
 
 /** Every tool result carries whether it changed anything, so nothing is implied. */
+export interface RequestFulfilment {
+  readonly requested_label: string;
+  readonly outcome: 'proposed' | 'committed' | 'already_present' | 'deferred' | 'refused';
+  readonly reason?: string;
+  readonly entity_id?: string;
+}
+export interface NewRiskSpec {
+  readonly label: string;
+  readonly affects: readonly { target_label: string; direction: 'positive' | 'negative' }[];
+  readonly caused_by?: readonly { factor_label: string; direction: 'positive' | 'negative' }[];
+}
 export interface ToolResult {
   readonly ok: boolean;
   readonly mutated: boolean;
+  readonly fulfilment?: readonly RequestFulfilment[];
   readonly [k: string]: unknown;
 }
 
@@ -792,9 +823,10 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). SLICE C2. */
   proposeNewRisk?(ctx: AgentToolContext, args: {
-    label: string; rationale: string;
-    affects: readonly { target_label: string; direction: 'positive' | 'negative' }[];
-    caused_by?: readonly { factor_label: string; direction: 'positive' | 'negative' }[];
+    label?: string; rationale: string;
+    affects?: NewRiskSpec['affects'];
+    caused_by?: NewRiskSpec['caused_by'];
+    risks?: readonly NewRiskSpec[];
   }): Promise<ToolResult>;
   /** Optional: a capability set without it refuses the tool plainly (`dispatchTool`). PJ-E-FIG. */
   proposeNewFactor?(ctx: AgentToolContext, args: {

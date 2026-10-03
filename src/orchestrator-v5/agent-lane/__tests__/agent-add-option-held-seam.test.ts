@@ -218,6 +218,28 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
   };
   const newOption = () => graphNow().nodes.find((x) => x.kind === 'option' && x.label === 'Test £54 at release');
 
+  it('[B4 F5] four requested risks share one hold; one approval commits exactly those labels and ids', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const labels = ['Competitor price cut', 'Key hire leaves', 'Vendor outage', 'Market contraction'];
+    script = [() => fnCall('propose_new_risk', { risks: labels.map((label) => ({ label,
+      affects: [{ target_label: 'Revenue', direction: 'negative' }],
+    })), rationale: 'The user requested each risk', whole_request: true })];
+    const proposal = await turn({ message: 'Add all four risks.' });
+    expect(proposal.suggested_actions.filter((c) => c.id.startsWith('agent-approve-proposal:'))).toHaveLength(1);
+    const held = await heldOnLatestRow();
+    expect(held).toHaveLength(1);
+    const ids = held[0]!.action.inline_patch!.operations!.filter((o) => o.op === 'add_node').map((o) => o.path);
+    expect(ids).toHaveLength(4);
+    const approve = approveChipOf(proposal)!;
+    const callsBefore = openAiCalls;
+    const committed = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(openAiCalls).toBe(callsBefore);
+    expect(graphNow().nodes.filter((n) => n.kind === 'risk').map((n) => [n.id, n.label])).toEqual(ids.map((id, i) => [id, labels[i]]));
+    for (const label of labels) expect(committed.assistant_text).toContain(`Added "${label}" as a risk`);
+    expect(await heldOnLatestRow()).toEqual([]);
+    expect(routerCalls).toEqual([]);
+  }, 120_000);
+
   it('CONTROL (passes at base): the REAL route-v2 in this harness mints ONE gmh_ hold for a typed add-option chip turn, with the decision edge, and no LLM', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const r = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: {
