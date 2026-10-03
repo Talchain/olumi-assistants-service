@@ -33,8 +33,17 @@ export function sharedLicensedPair() {
     const goal = g.nodes.find(n => n.kind === 'goal')!;
     const options = g.nodes.filter(n => n.kind === 'option').map(n => ({ id: n.id, option_id: n.id,
       label: n.label, interventions: n.interventions === undefined ? {} : record(n.interventions) }));
-    const wire = options.map(o => Object.fromEntries(Object.entries(o.interventions).map(([key, value]) =>
-      [key, typeof value === 'number' ? value : record(value).value])));
+    const wire = options.map(o => {
+      const values: Record<string, number> = {};
+      for (const [key, intervention] of Object.entries(o.interventions)) {
+        const value = typeof intervention === 'number' ? intervention : record(intervention).value;
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          throw new Error('Control expected a captured finite intervention value');
+        }
+        values[key] = value;
+      }
+      return values;
+    });
     const snapshot = buildRunInputSnapshot({ submittedOptions: options, rawObjectsPerOption: options.map(o => o.interventions),
       wirePerOption: wire, heldFactorIdsByOptionId: new Map(), optionsNotSent: [], wireGraph: g,
       plotPayload: { graph: g, goal_node_id: goal.id, goal_threshold_unit: goal.goal_threshold_unit, options } });
