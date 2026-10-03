@@ -31,7 +31,7 @@ export function savedRunContextFacts(
     ? limitChecksForAgent(read.raw, read.limit_verdicts) : undefined;
   return {
     selected_run_reference: selected.id,
-    leader_limit_risks_note: 'Each probability is the chance the recorded leading option meets the named limit, not its chance of breaching it. '
+    leader_limit_risks_note: 'Each probability is the chance that its recorded option meets the named limit, not its chance of breaching it. '
       + 'Missing means unrecorded; null means no result body; [] means read with no recorded risk. These facts grant no permission to name a leader.',
     ...(projected.tipping_point !== undefined ? {
       tipping_point: projected.tipping_point, tipping_point_run_key: selected.id,
