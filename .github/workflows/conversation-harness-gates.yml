@@ -80,6 +80,8 @@ concurrency:
 jobs:
   harness-gates:
     name: Conversation Harness Gates (advisory)
+    # Advisory: not run on pull requests (Paul 27 Sep: streamline CI; DL #70). Still runs on every staging push.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

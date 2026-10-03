@@ -428,6 +428,8 @@ jobs:
   # new test failures or a coverage drop — not a stale aspiration.
   full-test-suite:
     name: Full Test Suite (advisory)
+    # Advisory: not run on pull requests (Paul 27 Sep: streamline CI; DL #70). Still runs on every staging push.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -469,6 +471,8 @@ jobs:
   # separately from the in-process required gate.
   integration-tests:
     name: Integration Tests (advisory)
+    # Advisory: not run on pull requests (Paul 27 Sep: streamline CI; DL #70). Still runs on every staging push.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
