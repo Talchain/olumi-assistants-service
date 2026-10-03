@@ -7,7 +7,23 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.74.0.tgz` ← **THE CURRENT PIN** (CODEX BUILDER, opt-in saved-version result comparison)
+### `talchain-schemas-0.75.0.tgz` ← **THE CURRENT PIN** (SCIENCE/DSK fa13b6a1, the decision-flip block)
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
+> **`55a72e62`** (schemas #85 merge; publish run 36995247489), 2026-10-02. Fetched with `npm pack
+> @talchain/schemas@0.75.0` from `npm.pkg.github.com`.
+>
+> ```
+> npm shasum (sha1)  b608fb229e4c9083a219c3e1eddabeec31827a44   ← matches
+> integrity (sha512) sha512-ZeH7GM/D8axbMZRT29VsdQGJEZS+nli9QW/8PBAjw7zR3dV09zfqFvBQwcuv8jC3wGmnTdY0ZzsTW5nTyBeh0g==   ← matches (pnpm-lock, written by pnpm)
+> sha256             015ddc38a5b32c71410bfdb89ec5209d4e7c50666732fbe6bb0ba486f11c441f
+> ```
+>
+> **What 0.74.0 + 0.75.0 add (additive):** 0.74.0 `ModelVersionDiffV2Schema` (opt-in, recorded results for two stored
+> versions); 0.75.0 `DecisionFlipBlockV1Schema` — the recommendation's tipping point per link (ISL #220 → PLoT #431),
+> with the licence structural (R1–R10). CEE is its validating boundary (`plot-client.ts` `parseDecisionFlipResponse`).
+
+### `talchain-schemas-0.74.0.tgz` (superseded by 0.75.0, a superset) (CODEX BUILDER, opt-in saved-version result comparison)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by DL from `olumi-schemas` `main`
 > **`c47767f9690c49d092145cbd90247fd0da22da34`** (schemas #84 merge; publish run 36988699914), 2026-10-02. Registry download:
