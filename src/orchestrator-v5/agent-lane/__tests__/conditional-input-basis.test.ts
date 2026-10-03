@@ -67,4 +67,14 @@ describe('B3-8: named factor baselines, with bounded coverage', () => {
     say(g, a);
     expect(JSON.stringify([g, a])).toBe(before);
   });
+  it('RED: partial computations retain used baselines; failed computations do not join the comparison', () => {
+    const g = graph(observed('cee_inference'), [option('a', true), option('b', true), option('c')]);
+    const rows = [{ option_id: 'a', win_probability: 0.5, status: 'computed' }, { option_id: 'b', win_probability: 0.3, status: 'computed' },
+      { option_id: 'c', win_probability: 0.2, status: 'partial', outcome: { mean: 1 } }];
+    expect(say(g, admission(), [...analysedOptionIds({ enrichment: { option_comparison: rows } })])).toContain('Subscribers');
+    for (const status of ['failed', 'error', 'skipped']) {
+      const ids = analysedOptionIds({ enrichment: { option_comparison: [...rows.slice(0, 2), { ...rows[2], status }] } });
+      expect(say(g, admission(), [...ids])).toBeNull();
+    }
+  });
 });

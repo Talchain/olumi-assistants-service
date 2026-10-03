@@ -18,7 +18,10 @@ export interface ConditionalInputBasis {
 /** The existing current-first option-result reader; an excluded option never joins the set. */
 export function analysedOptionIds(result: unknown): readonly string[] {
   const block = rec(result);
-  const rows = winnerOptionResultSource(rec(block?.enrichment) ?? block ?? {}).filter(isRecommendableOption);
+  // Comparison participation is wider than crown eligibility: ISL partial rows have real samples.
+  // Retain them only with the finite-result proof below; failed/error/skipped rows remain excluded.
+  const rows = winnerOptionResultSource(rec(block?.enrichment) ?? block ?? {})
+    .filter((row) => isRecommendableOption(row) || row.status === 'partial');
   if (rows.some((r) => !isUsableWinProbability(r.win_probability) && !finite(rec(r.outcome)?.mean))) return [];
   const ids = rows.map((r) => r.option_id ?? r.id);
   return ids.every((id): id is string => typeof id === 'string' && id.trim() !== '') && new Set(ids).size === ids.length ? ids : [];
