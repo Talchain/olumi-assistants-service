@@ -72,7 +72,7 @@ import { sayFigure, sayFigureExactly, sayFigureRead } from './say-figure.js';
 import { sayGoalChange } from './limit-frame.js';
 import { resolveGoalThresholdCapWithProvenance } from '../../utils/goal-threshold-cap.js';
 import { isUnnamedCurrencyUnit, unitAlreadyOnGoal, unitNamingCurrency } from './unnamed-currency.js';
-import { scopeOf, identityConflictsWithScope, scopeSourcesAreUserWords, goalScopeCheck, scopeReadyToApprove, SCOPE_APPROVE_PREFIX } from './goal-scope.js';
+import { scopeOf, identityConflictsWithScope, scopeSourcesAreUserWords, goalScopeCheck, scopeCanRecord, SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityWithdrawalFor, applyIdentityWithdrawalToGoal, type IdentityWithdrawalReading } from '../system-events/identity-confirm-edit.js';
 import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
@@ -689,7 +689,7 @@ export async function proposeGoalCurrentLevel(
   if (args.goal_scope !== undefined && (!scope || !scopeSourcesAreUserWords(scope, ctx.user_text ?? '', scopeOf((goal as Record<string, unknown>).goal_scope)))) {
     return refuse('scope_not_grounded', 'The scope is not bound to the user’s stated words. Nothing was prepared.');
   }
-  if (scope && !scopeReadyToApprove(scope, goalScopeCheck(g.raw, goal.id, scope, { value: raw, unit: goalUnit ?? '', source: scope.source }))) return refuse('goal_scope_unresolved', 'Resolve the component share and billing basis before approving this reading. Nothing was prepared.');
+  if (scope && !scopeCanRecord(scope, goalScopeCheck(g.raw, goal.id, scope, { value: raw, unit: goalUnit ?? '', source: scope.source }))) return refuse('goal_scope_unresolved', 'Resolve the goal scope and its factor references before approving this reading. Nothing was prepared.');
   const withdrawal = scope ? identityWithdrawalFor(goal as Record<string, unknown>, scope) : undefined;
   if (!scope && identityConflictsWithScope(goal as Record<string, unknown>)) return refuse('goal_scope_unresolved', 'Resolve the goal’s scope before changing its current level. Nothing was prepared.');
   const rederived = withdrawal ? null : rederivedEstimatedPart(g.nodes, goal.id, raw);
@@ -721,7 +721,7 @@ export async function proposeGoalCurrentLevel(
       sayAdoptedUnit(goal.label, adoptedUnit) +
       (rederived !== null ? `. ${sayRederived(goal.label, rederived)}` : '') +
       (earlierHeld !== null ? earlierHeld.label : '') +
-      (scope ? `. Goal scope: ${scope.modelled}${scope.component?.share !== undefined ? `; ${scope.component.label} contributes ${scope.component.share * 100}%` : ''}${scope.component?.count_basis ? `; count means ${scope.component.count_basis}` : ''}${scope.component ? `; revenue share and rate/count are on ${scope.component.basis === 'different' ? 'different' : 'the same'} billing bases` : ''}.` : '') +
+      (scope ? `. Goal scope: ${scope.modelled}${scope.component?.share !== undefined ? `; ${scope.component.label} contributes ${scope.component.share * 100}%` : ''}${scope.component?.count_basis ? `; count means ${scope.component.count_basis}` : ''}${scope.component ? (scope.component.basis === 'unknown' ? '; the count population and billing basis remain unresolved' : `; revenue share and rate/count are on ${scope.component.basis === 'different' ? 'different' : 'the same'} billing bases`) : ''}.` : '') +
       (withdrawal ? ` ${withdrawal.words}` : ''),
   });
   deps.proposals.put(proposal);
@@ -1040,7 +1040,7 @@ export async function applyGoalCurrentLevel(
   if (scoped.goal_scope !== undefined && (!scope || ctx.typed_approval_of !== proposal.proposal_id || ctx.typed_approval_words !== SCOPE_APPROVE_PREFIX + proposal.public_label)) {
     return notApplied('Approve the card showing this exact scope and identity correction. Nothing was written.');
   }
-  if (scope && !scopeReadyToApprove(scope, goalScopeCheck(approved.raw, goal.id, scope, { value: os.raw_value, unit: os.unit ?? '', source: scope.source }))) return notApplied('Resolve the scope and billing basis before approving this reading. Nothing was written.');
+  if (scope && !scopeCanRecord(scope, goalScopeCheck(approved.raw, goal.id, scope, { value: os.raw_value, unit: os.unit ?? '', source: scope.source }))) return notApplied('Resolve the scope and its factor references before approving this reading. Nothing was written.');
   const withdrawal = scope ? identityWithdrawalFor(goal as Record<string, unknown>, scope) : undefined;
   if (stableStringify(withdrawal) !== stableStringify(scoped.identity_withdrawal)) return notApplied('The identity changed after this reading was offered. Nothing was written.');
   const part = withdrawal ? null : rederivedEstimatedPart(approved.nodes, goal.id, os.raw_value);

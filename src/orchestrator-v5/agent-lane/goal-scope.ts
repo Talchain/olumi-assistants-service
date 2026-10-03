@@ -28,30 +28,32 @@ export function identityConflictsWithScope(goal: Rec, scope = scopeOf(goal.goal_
 
 /** The same check is used before proposing and before saving. It never repairs an operand. */
 export function goalScopeCheck(graph: unknown, goalId: string, scope: GoalScope,
-  current?: GoalScopeReconciliation['current_level']): Pick<GoalScopeReconciliation, 'operands' | 'derivations'> & { contradiction: boolean; comparable: boolean } {
+  current?: GoalScopeReconciliation['current_level']): Pick<GoalScopeReconciliation, 'operands' | 'derivations'> & { contradiction: boolean; comparable: boolean; referencesValid: boolean } {
   const ns = nodesOf(graph), goal = ns.find(n => n.id === goalId);
   const total = current ? { value: current.value, unit: current.unit, source: 'user_stated_claim' } : native(goal);
   const c = scope.component; const rateNode = ns.find(n => n.id === c?.rate_id), countNode = ns.find(n => n.id === c?.count_id);
+  const referencesValid = !c || c.rate_id !== c.count_id && rateNode?.kind === 'factor' && countNode?.kind === 'factor';
   const rate = native(rateNode), count = native(countNode);
   const operands = [total && { id: goalId, ...total }, rate && { id: c!.rate_id, ...rate }, count && { id: c!.count_id, ...count }]
     .filter((v): v is NonNullable<typeof v> => v !== undefined);
   const derivations: GoalScopeReconciliation['derivations'] = [];
-  if (!total || !c || scope.extent === 'total' && c.share === undefined) return { operands, derivations, contradiction: false, comparable: false };
+  if (!referencesValid || !total || !c || scope.extent === 'total' && c.share === undefined) return { operands, derivations, referencesValid, contradiction: false, comparable: false };
   const revenue = scope.extent === 'total' ? total.value * c.share! : total.value;
-  if (!Number.isFinite(revenue)) return { operands, derivations, contradiction: false, comparable: false };
+  if (!Number.isFinite(revenue)) return { operands, derivations, referencesValid, contradiction: false, comparable: false };
   if (scope.extent === 'total') derivations.push({ kind: 'component_revenue', value: revenue, unit: total.unit, source: 'deterministic_derivation', conditional: true });
   // The estate's own currency / period / denominator check, never a pricing-specific parser.
   const compose = rate && count && unitsCompose(total.unit, String(goal?.label ?? ''),
     { unit: rate.unit, label: String(rateNode?.label ?? '') }, { unit: count.unit, label: String(countNode?.label ?? '') });
-  if (!rate || rate.value <= 0 || !count || !(compose?.kind === 'proof' || compose?.kind === 'confirm' && c.basis === 'same')) return { operands, derivations, contradiction: false, comparable: false };
+  if (!rate || rate.value <= 0 || !count || !(compose?.kind === 'proof' || compose?.kind === 'confirm' && c.basis === 'same')) return { operands, derivations, referencesValid, contradiction: false, comparable: false };
   const implied = revenue / rate.value;
   if (Number.isFinite(implied)) derivations.push({ kind: 'implied_count', value: implied, unit: count.unit, source: 'deterministic_derivation', conditional: true });
   const product = rate.value * count.value;
-  return { operands, derivations, comparable: true, contradiction: c.basis !== 'different' && Number.isFinite(product)
+  return { operands, derivations, referencesValid, comparable: true, contradiction: c.basis !== 'different' && Number.isFinite(product)
     && Math.abs(revenue - product) > RECONCILIATION_TOLERANCE * Math.max(Math.abs(revenue), 1) };
 }
 
 export function scopeQuestion(label: string, scope: GoalScope, check: ReturnType<typeof goalScopeCheck>): string {
+  if (!check.referencesValid) return `A factor referenced by ${label}'s saved scope was removed or changed kind. Which existing rate and count should this scope use?`;
   const revenue = check.derivations.find(d => d.kind === 'component_revenue') ?? (scope.extent === 'component' ? check.operands[0] : undefined), count = check.derivations.find(d => d.kind === 'implied_count');
   if (check.contradiction && revenue && count) return `If these figures describe the same monthly billing basis, ${scope.component!.label} would contribute ${revenue.value} ${revenue.unit}, implying about ${Number(count.value.toPrecision(3))} ${count.unit}. The stated count is ${check.operands.find(o => o.id === scope.component!.count_id)!.value}. Does that count refer to a different population, or do the revenue and price use a different billing basis?`;
   if (!scope.component) return `Approve the current level and resolved scope of ${label} on the displayed card.`;
@@ -165,5 +167,11 @@ export function assertNoPendingScopeAmendment(graph: unknown, base: unknown, pri
 
 export function scopeReadyToApprove(scope: GoalScope, check: ReturnType<typeof goalScopeCheck>): boolean {
   const c = scope.component;
-  return !check.contradiction && (!c || (scope.extent === 'component' || c.share !== undefined) && (c.basis === 'different' || c.basis === 'same' && check.comparable));
+  return check.referencesValid && !check.contradiction && (!c || (scope.extent === 'component' || c.share !== undefined) && (c.basis === 'different' || c.basis === 'same' && check.comparable));
+}
+
+/** Recording a known total never answers the independent question of what the component count means. */
+export function scopeCanRecord(scope: GoalScope, check: ReturnType<typeof goalScopeCheck>): boolean {
+  return scopeReadyToApprove(scope, check) || check.referencesValid && scope.extent === 'total'
+    && scope.component?.share !== undefined && scope.component.share < 1;
 }

@@ -89,7 +89,7 @@ async function open(h: Awaited<ReturnType<typeof harness>>) {
 async function share(h: Awaited<ReturnType<typeof harness>>) {
   const words = capture.statements[1]!.quote!;
   const r = await h.call('reconcile_goal_scope', { goal_label: 'MRR', component_share: .3, source_quote: words }, words);
-  expect(r.ok, JSON.stringify(r)).toBe(true); expect(r).not.toHaveProperty('proposal_id'); h.retain(r); return r;
+  expect(r.ok, JSON.stringify(r)).toBe(true); expect(r).toHaveProperty('proposal_id'); h.retain(r); return r;
 }
 async function clarified(h: Awaited<ReturnType<typeof harness>>) {
   const words = '300 are registered Pro accounts, not billable subscriptions. The £49 price is per billable subscription per month; Pro contributes 30% of our total MRR.';
@@ -101,6 +101,59 @@ async function approve(h: Awaited<ReturnType<typeof harness>>, r: ToolResult, wo
 }
 
 describe('Semantic spine S1–S7 through real canonical read/register and Run input', () => {
+  it('approves the known total and withdraws its wrong product while retaining one unresolved count question after restart', async () => {
+    const h = await harness(); await open(h); const offered = await share(h);
+    expect(offered.public_label).toContain('count population and billing basis remain unresolved');
+    expect(offered.public_label).not.toContain('the same billing bases');
+    expect(await approve(h, offered)).toMatchObject({ applied: true });
+    h.clearHistory(); h.restart();
+    const read = await h.read(); const g = read.json.graph as Graph;
+    expect(goal(g)).toMatchObject({ observed_state: { raw_value: 10000, source: 'user_override' }, goal_scope: { extent: 'total', component: { share: .3, basis: 'unknown' } } });
+    expect(goal(g)).not.toHaveProperty('nonlinear_identity'); expect(count(g)).toBe(300);
+    expect(h.row.pending).toHaveLength(1); expect(h.row.pending[0]!.action).toMatchObject({ kind: 'reconcile_goal_scope', goal_id: 'mrr', expected: 'billing_basis', derivations: [{ value: 3000, source: 'deterministic_derivation' }, { value: 3000/49, source: 'deterministic_derivation' }] });
+    expect(read.json.goal_scope_reconciliation).toHaveLength(1);
+  });
+  it('binds an explicitly named multiword component after expiry while an unqualified number requires a fresh question', async () => {
+    const h = await harness(); await open(h);
+    const held = h.row.pending[0]!; if (held.action.kind !== 'reconcile_goal_scope') throw new Error('missing scope issue');
+    held.action.scope!.component!.label = 'Pro plan'; held.expires_at_iso = new Date(0).toISOString();
+    const bare = await h.call('reconcile_goal_scope', { goal_label: 'MRR', component_share: .3, source_quote: '30% currently' }, '30% currently');
+    expect(bare).toMatchObject({ refusal: 'share_not_bound' }); expect(bare).not.toHaveProperty('proposal_id');
+    const words = 'The Pro plan contributes 30% of our total MRR.';
+    const named = await h.call('reconcile_goal_scope', { goal_label: 'MRR', component_share: .3, source_quote: words }, words);
+    expect(named.ok, JSON.stringify(named)).toBe(true); expect(named).toHaveProperty('proposal_id');
+    expect((named.pending_action as PendingAction).action).toMatchObject({ goal_id: 'mrr', scope: { component: { label: 'Pro plan', share: .3 } } });
+  });
+  it.each(['pro_plan_price', 'pro_paying_subscribers'])('deleted operand %s reopens one durable issue by id even on a previously resolved different basis', async deletedId => {
+    const h = await harness(); await open(h); await share(h); const offered = await clarified(h); await approve(h, offered);
+    expect(h.row.pending).toHaveLength(0);
+    const g = clone(h.row.graph); g.nodes = g.nodes.filter(n => n.id !== deletedId);
+    g.edges = g.edges.filter(e => e.from !== deletedId && e.to !== deletedId);
+    expect((await h.register(g)).status).toBe(200);
+    h.clearHistory(); h.restart(); await h.read();
+    expect(h.row.pending).toHaveLength(1);
+    expect(h.row.pending[0]!.action).toMatchObject({ kind: 'reconcile_goal_scope', goal_id: 'mrr', scope: { component: { rate_id: 'pro_plan_price', count_id: 'pro_paying_subscribers' } } });
+    const action = h.row.pending[0]!.action;
+    if (action.kind !== 'reconcile_goal_scope') throw new Error('missing scope issue');
+    expect(action.question).toContain('removed or changed kind');
+    expect(goal(h.row.graph)).toMatchObject({ observed_state: { raw_value: 10000 } });
+    if (deletedId === 'pro_plan_price') expect(count(h.row.graph)).toBe(300);
+    else expect(h.row.graph.nodes.some(n => n.id === deletedId)).toBe(false);
+    expect((await h.read()).json.goal_scope_reconciliation).toHaveLength(1);
+  });
+  it('all-subscriber clarification closes the issue; an incompatible Pro-subscriber clarification retains the conflict', async () => {
+    for (const all of [true, false]) {
+      const h = await harness(); await open(h); const total = await share(h); await approve(h, total);
+      const words = all ? '300 counts all subscribers across every plan, not Pro subscribers.' : '300 are Pro subscribers on the same monthly billing basis.';
+      const r = await h.call('reconcile_goal_scope', { goal_label: 'MRR', component_basis: all ? 'different' : 'same', count_basis: all ? 'all subscribers across every plan' : 'Pro subscribers', source_quote: words }, words);
+      expect(r.ok, JSON.stringify(r)).toBe(true); h.retain(r);
+      expect(await approve(h, r)).toMatchObject({ applied: true });
+      h.clearHistory(); h.restart(); await h.read();
+      expect(goal(h.row.graph)).toMatchObject({ observed_state: { raw_value: 10000 }, goal_scope: { extent: 'total', component: { share: .3, count_basis: all ? 'all subscribers across every plan' : 'Pro subscribers' } } });
+      expect(count(h.row.graph)).toBe(300); expect(h.row.pending).toHaveLength(all ? 0 : 1);
+      if (!all) expect(h.row.pending[0]!.action).toMatchObject({ expected: 'billing_basis', derivations: [{ value: 3000 }, { value: 3000/49 }] });
+    }
+  });
   it('S1: an explicitly scoped component goal can approve consistent figures without changing its count or identity authorship', async () => {
     const h = await harness();
     const words = 'MRR here means Pro-plan revenue only. Current Pro MRR is £14,700 per month. Its £49 price and 300 subscriptions use the same monthly billing basis.';

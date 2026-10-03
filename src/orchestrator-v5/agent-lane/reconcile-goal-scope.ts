@@ -1,6 +1,6 @@
 import { GoalScopeSchema, type GoalScope, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 import { figureTheUserWrote, figureTheUserWroteFor } from './stated-by-user.js';
-import { goalScopeCheck, scopeQuestion, reconciliationPending, scopeOf, scopeShareAnswerCanBind, scopeSourcesAreUserWords, scopeReconciliationKey, scopeReadyToApprove, nodesOf } from './goal-scope.js';
+import { goalScopeCheck, scopeQuestion, reconciliationPending, scopeOf, scopeShareAnswerCanBind, scopeSourcesAreUserWords, scopeReconciliationKey, scopeReadyToApprove, scopeCanRecord, nodesOf } from './goal-scope.js';
 import { proposeGoalCurrentLevel, type GoalLevelRead } from './goal-current-level.js';
 import type { ProposalStore } from './proposal.js';
 import type { PendingAction } from '../session/pending-action.js';
@@ -30,8 +30,7 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   if (!scope) return fail('scope_unresolved', prior?.question ?? 'State whether this goal covers the whole metric or a component. Nothing was recorded.');
   if (args.component_share !== undefined || args.component_basis !== undefined || args.count_basis !== undefined) {
     if (!scope.component || !args.source_quote || !words.includes(args.source_quote)) return fail('source_not_stated', 'Use the user’s exact words for this component. Nothing was recorded.');
-    const explicitlyNamed = args.source_quote.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(scope.component.label.toLowerCase())
-      && figureTheUserWroteFor(args.component_share ?? 0, '%', args.source_quote, { target: [scope.component.label], others: [goal.label], strict: true });
+    const explicitlyNamed = figureTheUserWroteFor(args.component_share ?? 0, '%', args.source_quote, { target: [scope.component.label], others: [goal.label], strict: true, requireNamed: true });
     if (args.component_share !== undefined && (!explicitlyNamed && !scopeShareAnswerCanBind(pendings, goal.id)
       || !figureTheUserWrote(args.component_share, '%', args.source_quote))) {
       if (!prior) return fail('share_not_bound', 'Name the component this share describes.');
@@ -50,8 +49,7 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
   }
   if (scope.component?.share !== undefined && scope.component.share !== (prior?.scope ?? scopeOf((goal as Record<string, unknown>).goal_scope))?.component?.share && args.component_share === undefined) {
     const quote = scope.component.source.quote;
-    const explicitlyNamed = quote.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(scope.component.label.toLowerCase())
-      && figureTheUserWroteFor(scope.component.share, '%', quote, { target: [scope.component.label], others: [goal.label], strict: true });
+    const explicitlyNamed = figureTheUserWroteFor(scope.component.share, '%', quote, { target: [scope.component.label], others: [goal.label], strict: true, requireNamed: true });
     if (!explicitlyNamed && !scopeShareAnswerCanBind(pendings, goal.id)) return fail('share_not_bound', 'Name which component this share describes, or answer its fresh scoped question. Nothing was recorded.');
   }
   if (scope.component && (scope.component.rate_id === scope.component.count_id || ![scope.component.rate_id, scope.component.count_id].every(id => nodesOf(graph.raw).some(n => n.id === id && n.kind === 'factor')))) {
@@ -71,7 +69,7 @@ export async function reconcileGoalScope(deps: { readGraph: (id: string) => Prom
     operands: check.operands, derivations: check.derivations };
   const pending = reconciliationPending(ctx.scenario_id, action);
   // A clarification records claims on the existing pending carrier. The baseline remains the existing approved writer's value.
-  if (expected !== 'approval') return { ok: true, mutated: false, pending_action: pending, reconciliation: action, conditional_derivations: check.derivations, detail: action.question };
+  if (!scopeCanRecord(scope, check)) return { ok: true, mutated: false, pending_action: pending, reconciliation: action, conditional_derivations: check.derivations, detail: action.question };
   if (!current) return { ok: true, mutated: false, pending_action: pending, reconciliation: action,
     detail: 'The scope question is retained. State the goal’s current level to prepare its existing baseline card.' };
   const groundedWords = [words, current.source.quote, scope.source.quote, scope.component?.source.quote ?? '', scope.component?.basis_source?.quote ?? ''].join('\n');
