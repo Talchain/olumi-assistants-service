@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { BUILD_INSTRUCTIONS } from '../runtime/build-model.js';
+import { COMPACT_MARKER, servedControlInstructions } from './compact-benchmark-control.js';
 
 const K3 = 'EVERY RISK THE USER NAMES IS DRAWN AS A RISK NODE: each downside the user states in their own words (for example that they will run out of money, lose a key customer, or miss a deadline) is its own risk, linked to what it threatens, even when you also draw a risk of your own. ';
 
@@ -34,6 +35,26 @@ describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as
     expect(text.split(K3_PRECEDENCE).length - 1).toBe(1);
     expect(text.indexOf(K3_PRECEDENCE)).toBe(text.indexOf(K3) + K3.length);
     expect(text.indexOf(K3_PRECEDENCE) < text.indexOf('Do NOT widen beyond it on this turn')).toBe(true);
+  });
+
+  it('RED: the node/link budget yields to the user\'s own material, stated once, in the same sentence block as the budget', () => {
+    const text = String(BUILD_INSTRUCTIONS);
+    const EXCEPTION = "THE ONE EXCEPTION IS THE USER'S OWN MATERIAL: when what the user stated (their options, figures, relationships and the risks they named) cannot fit this budget, keep all of it and leave out your own additions; that model is admitted, not refused.";
+    expect(text.split(EXCEPTION).length - 1).toBe(1);
+    const budget = text.indexOf('Stay within ');
+    const refused = text.indexOf('an oversized first model is refused before it reaches the canvas. ');
+    expect(budget).toBeGreaterThan(-1);
+    expect(refused).toBeGreaterThan(budget);
+    expect(text.indexOf(EXCEPTION)).toBe(refused + 'an oversized first model is refused before it reaches the canvas. '.length);
+  });
+
+  it('the live benchmark\'s served control drops the whole compact clause: no budget and no budget exception left behind', () => {
+    const control = servedControlInstructions(String(BUILD_INSTRUCTIONS));
+    expect(control).toContain('Then widen');
+    expect(control).not.toContain(COMPACT_MARKER);
+    expect(control).not.toContain('Stay within ');
+    expect(control).not.toContain("THE ONE EXCEPTION IS THE USER'S OWN MATERIAL");
+    expect(control).not.toContain('cannot fit this budget');
   });
 
   it('CONTROL: the envelope still forbids decorative risks (the rule adds the user\'s risk; it never widens the model)', () => {
