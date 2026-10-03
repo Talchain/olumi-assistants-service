@@ -11,7 +11,7 @@
  *
  * The model call is a stubbed `fetch`: no provider is contacted.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
@@ -20,6 +20,8 @@ import {
   synthesiseAnswerShapeFromText,
   type AnswerShape,
 } from '../../routing/answer-shape.js';
+
+import { textAtRest } from '../decision-input-ask.js';
 
 type Reply = { id: string; label: string; leak_phrases: string[]; text: string };
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
@@ -69,6 +71,7 @@ function shapeControlReady() {
   return ready;
 }
 let readbackReady: unknown = shapeControlReady();
+const b3WireCases: { source: string; text: string; line: string; question: string }[] = [];
 const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
 /** The readback's graph: the corpus's served pricing graph, or a variant a row sets (reset before each row). */
 let readbackGraph: unknown = FX.state.draft_graph;
@@ -329,6 +332,22 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(b.assistant_text).toBe(narrated);
     expect('_answer_shape' in b).toBe(false);
     expect(rows.get(turnId)?.assistant_message).toBe(narrated);
+  });
+
+  it.each([[true, true], [false, true], [true, false], [false, false]])('B3-8 RED: question-tail basis is visible once (present=%s punctuated=%s)', async (present, punctuated) => {
+    readbackReady = FX.state.analysis_ready;
+    const question = punctuated ? 'What baseline should we use?' : 'The baseline is unknown';
+    const narrated = `The comparison is conditional. Questions this model does not answer yet: ${question}${present ? `\n\n${BASIS_UNAVAILABLE}` : ''}`;
+    const { b, turnId } = await typedRun(narrated);
+    expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
+    expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
+    expect(b.assistant_text).toContain(question);
+    expect('_answer_shape' in b).toBe(false);
+    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
+    if (process.env.B3_WIRE_EVIDENCE) {
+      b3WireCases.push({ source: 'actual Agent route; stubbed model/Run/readback', text: b.assistant_text, line: BASIS_UNAVAILABLE, question });
+      writeFileSync(`${process.env.B3_WIRE_EVIDENCE}/b3-question-tail-basis-wire.json`, JSON.stringify(b3WireCases, null, 2) + '\n');
+    }
   });
 
   it('9. CONSENT: a SECOND proposal in the turn is refused (one change per approval), so ONE chip is offered → still NOT shaped; text byte-identical', async () => {

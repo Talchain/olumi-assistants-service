@@ -6,8 +6,8 @@ import { explainRun } from './fixtures/run-explanation-follow-up.js';
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { readFileSync } from 'node:fs';
-import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest, withA7AfterGate } from '../decision-input-ask.js';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest, withB3LinesAtRest, withA7AfterGate } from '../decision-input-ask.js';
 import { narrateWriteOutcome, openQuestionsForReply, withWriteOutcome } from '../write-outcome.js';
 
 type Rec = Record<string, unknown>;
@@ -23,6 +23,12 @@ const graphWith = (goal: Rec) => ({ nodes: [goal, { id: 'opt_a', kind: 'option',
 const ASK = 'What figure should "Funding secured" reach or stay under within 2 months? I\'ll propose it as your target.';
 const A7 = 'This model doesn\'t yet say whether any option gets there within 2 months.';
 const base = { restingText: 'The model is a sketch to challenge.', questionsToggle: false, awaitingApproval: false, builtOrRan: true };
+const b3WireCases: { source: string; text: string; line: string; question: string }[] = [];
+const captureB3 = (source: string, text: string, line: string, question: string) => {
+  if (!process.env.B3_WIRE_EVIDENCE) return;
+  b3WireCases.push({ source, text, line, question });
+  writeFileSync(`${process.env.B3_WIRE_EVIDENCE}/b3-question-tail-selected-wire.json`, JSON.stringify(b3WireCases, null, 2) + '\n');
+};
 const OBJECTIVE_ASK = 'I used "Quarterly revenue" as a provisional objective. What should this model help you explore?';
 const inferredGoal = { ...FX.goal_after_build, label: 'Quarterly revenue', provenance: 'ai_inferred' };
 
@@ -55,6 +61,31 @@ describe('B3-7: offer the inferred objective before its target', () => {
     const restored = withA7AfterGate(text, graphWith(inferredGoal), base, 'Saved.');
     expect(restored.indexOf(A7)).toBeLessThan(restored.indexOf(OBJECTIVE_ASK));
     expect(restored.split(OBJECTIVE_ASK)).toHaveLength(2);
+  });
+});
+
+describe('B3 host placement through the existing questions split', () => {
+  it.each(['Future demand is unknown.', 'Future demand is unknown'])('RED: a selected inferred objective stays visible after a parked tail (%s)', (question) => {
+    const prose = `This model is a sketch. Questions this model does not answer yet: ${question}`;
+    const lines = decisionInputLines(graphWith(inferredGoal), { ...base, restingText: textAtRest(prose), questionsToggle: true });
+    const ask = lines.find((l) => l === OBJECTIVE_ASK)!;
+    expect(ask).toBe(OBJECTIVE_ASK);
+    const out = withB3LinesAtRest(`${prose}\n\n${lines.join('\n\n')}`, [ask]);
+    expect(textAtRest(out)).toContain(OBJECTIVE_ASK);
+    expect(out.split(OBJECTIVE_ASK)).toHaveLength(2);
+    expect(out).toContain(question);
+    captureB3('actual host ask selection/composition helper; not a route', out, OBJECTIVE_ASK, question);
+  });
+  it('RED: the host and hidden narrator copy of one selected objective become one visible ask', () => {
+    const prose = `Sketch. Questions this model does not answer yet: Unknown demand\n\n${OBJECTIVE_ASK}\n\n${OBJECTIVE_ASK}`;
+    const out = withB3LinesAtRest(prose, [OBJECTIVE_ASK]);
+    expect(textAtRest(out)).toContain(OBJECTIVE_ASK);
+    expect(out.split(OBJECTIVE_ASK)).toHaveLength(2);
+    expect(out).toContain('Unknown demand');
+  });
+  it('CONTROL: a visible line and a null obligation preserve the entire reply bytes', () => {
+    const prose = `Sketch.\n\n${OBJECTIVE_ASK}\n\nQuestions this model does not answer yet: Future demand is unknown`;
+    expect(withB3LinesAtRest(prose, [OBJECTIVE_ASK, null])).toBe(prose);
   });
 });
 
@@ -177,7 +208,7 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
 
   it('the route judges the ask on the composed reply at rest — model words + owed lines + host status (source pin)', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(src).toContain('const composedWithout = withWriteOutcome(withDisclosures(narration.text, owed), statusText);');
+    expect(src).toContain('const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narration.text, owed), statusText), [basis]);');
     expect(src).toContain('restingText: textAtRest(composedWithout),');
     expect(src).toContain('...decisionTurn,');
     expect(src).toContain('questionsToggle: textAtRest(composedWithout) !== composedWithout,');
@@ -300,6 +331,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   let modelSays = 'This run is a sketch, not a basis for choosing.';
   let blocked = false;
   let licensedBasis = false;
+  let basisSource = 'cee_inference';
   let staleBasis = false;
   // ⭐ K3: a kept risk with a cause drawn in and no onward link (left out of the Run), or the same risk once connected.
   let risk: 'none' | 'inert' | 'connected' = 'none';
@@ -316,7 +348,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: licensedBasis ? { nodes: [goal, { id: 'subscribers', kind: 'factor', label: 'Subscribers', observed_state: { value: 300, source: 'cee_inference' } }, { id: 'a', kind: 'option' }, { id: 'b', kind: 'option' }], edges: [] } : withRisk(graphWith(goal)),
+      graph: licensedBasis ? { nodes: [goal, { id: 'subscribers', kind: 'factor', label: 'Subscribers', observed_state: { value: 300, source: basisSource } }, { id: 'a', kind: 'option' }, { id: 'b', kind: 'option' }], edges: [] } : withRisk(graphWith(goal)),
       graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true,
         ...(licensedBasis ? { analysis_admission: { permitted_analysis_mode: 'comparative_leader', semantic_signals: { material_parameters_awaiting_user_node_ids: ['subscribers'] } } } : {}),
       },
@@ -334,7 +366,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; licensedBasis = false; staleBasis = false; recentFails = false; risk = 'none'; n += 1; });
+  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; licensedBasis = false; basisSource = 'cee_inference'; staleBasis = false; recentFails = false; risk = 'none'; n += 1; });
   const scenarioNow = () => `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
   const runTurn = async (turnId?: string, explain = false) => {
     const scenarioId = scenarioNow();
@@ -358,6 +390,20 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     expect((await runTurn(A)).assistant_text).toContain(OBJECTIVE_ASK);
     blocked = true;
     expect((await runTurn()).assistant_text).not.toContain(OBJECTIVE_ASK);
+  });
+
+  it.each(['cee_inference', 'unknown_legacy'])('B3-8 RED: the licensed %s basis precedes an unpunctuated question tail', async (source) => {
+    licensedBasis = true; basisSource = source; goal = FX.goal_after_target;
+    const question = 'Future demand is unknown';
+    modelSays = `This comparison is conditional. Questions this model does not answer yet: ${question}`;
+    const text = (await runTurn(undefined, true)).assistant_text;
+    const line = source === 'cee_inference'
+      ? 'This comparison uses Olumi’s estimates for "Subscribers". These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.'
+      : '"Subscribers": source unrecorded. These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.';
+    expect(textAtRest(text)).toContain(line);
+    expect(text.split(line)).toHaveLength(2);
+    expect(text).toContain(question);
+    captureB3('actual Agent route; stubbed model/Run/readback', text, line, question);
   });
 
   it('B3-8 RED: licensed current Run carries named input basis in served and durable bytes, including replay', async () => {

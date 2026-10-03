@@ -80,6 +80,20 @@ export function textAtRest(text: string): string {
   return after ? `${lead} ${after}` : lead;
 }
 
+/** Keep selected host obligations visible using the existing consumer split. */
+export function withB3LinesAtRest(text: string, lines: readonly (string | null)[]): string {
+  let out = text;
+  for (const line of lines) {
+    if (line === null || textAtRest(out).includes(line)) continue;
+    // Only the caller's bound basis/selected objective moves. Other prose stays verbatim.
+    const body = out.split(line).join('').trimEnd();
+    const at = textAtRest(out) === out ? -1 : body.indexOf(QUESTIONS_MARKER);
+    out = at < 0 ? `${body}\n\n${line}`
+      : `${body.slice(0, at).trimEnd()}\n\n${line}\n\n${body.slice(at)}`;
+  }
+  return out;
+}
+
 /** DL #75 5923219186 (R3 K4): words on screen per turn — the reply at rest plus the toggle's label. */
 export const AT_REST_WORD_BOUND = 160;
 const words = (s: string): number => s.split(/\s+/).filter(Boolean).length;
