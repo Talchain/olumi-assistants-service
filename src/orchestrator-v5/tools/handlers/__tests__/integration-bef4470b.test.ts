@@ -36,6 +36,9 @@
 
 import { describe, it, expect } from 'vitest';
 
+// Interpolated, never re-typed — see the note in post-analysis-advice-gate.test.ts.
+import { RESULT_STANDING_SUBJECT } from '../../../compose/goal-referenced-result-phrasing.js';
+
 import { createExplainFromStructureHandler } from '../explain-from-structure.js';
 import { createExplainResultsHandler } from '../explain-results.js';
 import type { HandlerInvocation } from '../../registry.js';
@@ -411,7 +414,9 @@ describe('integration: bef4470b answer-carrying explanation contract', () => {
     // (formatSensitivityDirection composes adverb + verb against the
     // bandFromMagnitude thresholds — the canonical helper used by the
     // upstream display-safe projection).
-    expect(outcome.assistant_text).toMatch(/(strengthens|weakens) the lead/);
+    expect(outcome.assistant_text).toMatch(
+      new RegExp(`(strengthens|weakens) ${RESULT_STANDING_SUBJECT}`),
+    );
     expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
     expect(outcome.assistant_text).not.toBe('Here is what the analysis shows.');

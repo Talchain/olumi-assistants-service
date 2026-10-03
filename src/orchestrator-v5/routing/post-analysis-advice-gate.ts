@@ -57,6 +57,12 @@ import { classifyStructuralClaim } from './mutation-language.js';
 // ROADMAP 2.278 — the single owner of "may copy claim this could flip?".
 import type { FlipClaimPosture } from '../context/flip-threshold-rows.js';
 import {
+  composeResultStandingSentence,
+  composeRunnerUpStandingSentence,
+  RESULT_STANDING_QUESTION,
+  RESULT_STANDING_SAME_OPTION,
+} from '../compose/goal-referenced-result-phrasing.js';
+import {
   formatPercentagePoints,
   formatProbability,
 } from '../format/format-analysis-value.js';
@@ -1062,8 +1068,8 @@ export function hasRenderableTopDriverLabel(
  * claims ("the strongest sensitivity is on …", "the factor with the most
  * influence …", "driven by …", "the order could shift with movement on …").
  * A driver whose finite `sensitivity_value` sits below the shared near-zero
- * threshold renders as "has little effect on the lead" — pairing that band
- * with a superlative is the live #341 self-contradiction. Such drivers are
+ * threshold renders as "has little effect on the option that came out highest"
+ * — pairing that band with a superlative is the live #341 self-contradiction. Such drivers are
  * omitted from prose; drivers WITHOUT a value stay nameable (no materiality
  * verdict on missing data). Deliberately NOT used by the per-class
  * availability requirements (`missing_inputs`) or the copy-source
@@ -1932,7 +1938,10 @@ function runnerUpStandingSentence(
   renderedRunnerLabel: string,
   runnerProbability: number | undefined,
 ): string {
-  return `${renderedRunnerLabel} sits in second place${probabilityFragment(runnerProbability)}.`;
+  return composeRunnerUpStandingSentence(
+    renderedRunnerLabel,
+    probabilityFragment(runnerProbability),
+  );
 }
 
 /**
@@ -1988,10 +1997,23 @@ function interpretationCloseness(
  * will flip the result. The two constants are also reused verbatim by
  * `composeWhatWouldFlip` so the phrasing has one home.
  */
-const STRENGTHEN_LINK_NEXT_STEP =
-  'Strengthen the evidence behind that link, then re-run to see whether the lead holds.';
-const RERUN_INFLUENTIAL_NEXT_STEP =
-  'Re-run after adjusting the most influential factor to see whether the lead holds.';
+/**
+ * ⭐ THE LEAGUE-TABLE NOUN IS GONE FROM THESE THREE LINES — PAUL'S 21 Sep
+ * RULING, routed through the one owner.
+ *
+ * They asked whether "the lead holds". `the lead` states no referent (held
+ * against what?) and adjudicates a standing the analysis does not produce. They
+ * now ask whether a re-run reproduces the standing — a question the user can
+ * actually answer by doing the thing the line asks for.
+ *
+ * ⛔ {@link RESULT_STANDING_SAME_OPTION} is TAKEN FROM
+ * `compose/goal-referenced-result-phrasing.ts`, never typed here. The alarm's
+ * `came_out_highest` pattern is derived from the same constant, so these lines
+ * cannot reword themselves out from under the guard that has to redact them
+ * when a later turn withholds the leader claim.
+ */
+const STRENGTHEN_LINK_NEXT_STEP = `Strengthen the evidence behind that link, then re-run to see whether ${RESULT_STANDING_SAME_OPTION}.`;
+const RERUN_INFLUENTIAL_NEXT_STEP = `Re-run after adjusting the most influential factor to see whether ${RESULT_STANDING_SAME_OPTION}.`;
 
 function interpretationNextStep(
   hasNamedFragileEdge: boolean,
@@ -1999,7 +2021,7 @@ function interpretationNextStep(
 ): string {
   if (hasNamedFragileEdge) return STRENGTHEN_LINK_NEXT_STEP;
   return topDriverLabel !== null
-    ? `Re-run after revisiting ${quoteLabel(topDriverLabel)}, the factor with the most influence here, to see whether the lead holds.`
+    ? `Re-run after revisiting ${quoteLabel(topDriverLabel)}, the factor with the most influence here, to see whether ${RESULT_STANDING_SAME_OPTION}.`
     : RERUN_INFLUENTIAL_NEXT_STEP;
 }
 
@@ -2035,7 +2057,7 @@ function composeAdvice(
   // a grammatical sentence, because a node label can be a raw span of the
   // user's brief ("The biggest thing to examine next is we believe is partly
   // driven by product quality and…"). `quoteLabel` exists for exactly this.
-  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
+  const opener = composeResultStandingSentence(quoteLabel(leadingLabel), null, probability);
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
   // ROUND 4: `advice` makes no stability claim, but it DOES compose a margin
@@ -2077,7 +2099,7 @@ function composeImprovement(
   // matching.
   const probability = probabilityFragment(analysis.leading_option?.probability);
   // Quoted, matching every sibling composer — see `composeAdvice`.
-  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
+  const opener = composeResultStandingSentence(quoteLabel(leadingLabel), null, probability);
   // ROUND 4: routed through the shared composer. `improvement` is the one
   // surface with NO closeness sentence of its own — its opener states the
   // leader flatly — so on a near-tie this slot is the ONLY place honesty can
@@ -2131,9 +2153,12 @@ function composeMeaning(
   // A3: the posture was never threaded here, so "The order could shift with
   // movement on X" shipped un-gated beside the gated fragility caveat.
   const noFlip = flipClaimPosture === 'attested_no_flip';
-  // Vocabulary aligns with the workstream brief — "currently favours"
-  // opener and "appears to be driven by" attribution avoid the
-  // winner/leader-adjacent framing the previous wording carried.
+  // ⭐ Vocabulary follows PAUL'S 21 Sep RULING via the one owner,
+  // `compose/goal-referenced-result-phrasing.ts`. The opener used to open with
+  // a RECOMMENDATION VERB, which is exactly what the ruling forbids; it now
+  // states the measurement ("came out highest on your goal") and lets the
+  // reader judge it. The "appears to be driven by" attribution is unchanged
+  // and rides as a trailing clause.
   //
   // Near-tie honesty (shared with explain_results): on a sub-1pp margin OR a
   // raw near_tie override, lead with the closeness line and DO NOT assert the
@@ -2177,11 +2202,21 @@ function composeMeaning(
         : '';
     if (topDriverLabel) {
       sentences.push(
-        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, and the result appears to be driven by ${quoteLabel(topDriverLabel)}.${marginSentence}`,
+        `${composeResultStandingSentence(
+          quoteLabel(leadingLabel),
+          null,
+          probability,
+          `, and the result appears to be driven by ${quoteLabel(topDriverLabel)}`,
+        )}${marginSentence}`,
       );
     } else {
       sentences.push(
-        `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}, given the model you've built so far.${marginSentence}`,
+        `${composeResultStandingSentence(
+          quoteLabel(leadingLabel),
+          null,
+          probability,
+          ", given the model you've built so far",
+        )}${marginSentence}`,
       );
     }
   }
@@ -2370,7 +2405,11 @@ function composeExplainResults(
     sentences.push(closeness);
   } else {
     sentences.push(
-      `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probabilityFragment(analysis.leading_option?.probability)}.`,
+      composeResultStandingSentence(
+        quoteLabel(leadingLabel),
+        null,
+        probabilityFragment(analysis.leading_option?.probability),
+      ),
     );
     // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE. These two arms were
     // copy-identical twins of `composeRobustnessVerdict`'s `explain` clear and
@@ -2627,7 +2666,18 @@ function composeWhatWouldFlip(
     sentences.push(closeness);
   } else {
     sentences.push(
-      `Based on this model, ${quoteLabel(leadingLabel)} currently leads${probabilityFragment(analysis.leading_option?.probability)}.`,
+      // ⭐ THE SIXTH CALL SITE, and the one this file had missed. The other
+      // five already route through the shared composer; this arm still
+      // asserted a league-table standing in the retired verb, on the live
+      // deterministic free-text advice path. `null` for the goal label is the
+      // same choice the five siblings make: the composer says "your goal"
+      // rather than inventing a referent, which is safer than keeping a
+      // standing claim the ruling retires.
+      composeResultStandingSentence(
+        quoteLabel(leadingLabel),
+        null,
+        probabilityFragment(analysis.leading_option?.probability),
+      ),
     );
     // ROADMAP 2.1067 — ONE OWNER FOR THIS SENTENCE, the `flip` voice of
     // `composeRobustnessVerdict`. These two arms were copy-identical twins of
@@ -2690,10 +2740,14 @@ function composeWhatWouldFlip(
   //    "provisional" caveat; an otherwise-stable result gets the stability
   //    reassurance; moderate / unknown bands get nothing.
   if (fragileSignal) {
+    // ⭐ `the lead` retired here too (Paul, 21 Sep). What is provisional is
+    // WHICH OPTION came out highest, not an unnamed standing — and
+    // RESULT_STANDING_SUBJECT would be wrong in this frame: "treat the option
+    // that came out highest as provisional" makes the OPTION provisional.
     sentences.push(
       topEdge
-        ? 'Treat the lead as provisional until that assumption is strengthened.'
-        : 'Treat the lead as provisional until the key assumptions are checked.',
+        ? `Treat ${RESULT_STANDING_QUESTION} as provisional until that assumption is strengthened.`
+        : `Treat ${RESULT_STANDING_QUESTION} as provisional until the key assumptions are checked.`,
     );
   } else {
     const stabilityPhrase = describeRobustnessBand(analysis.robustness_band);
