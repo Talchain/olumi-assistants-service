@@ -1,3 +1,4 @@
+import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 /**
  * Group A — Canonical State foundation: CEE-local `graphIdentityHash`.
  *
@@ -344,7 +345,12 @@ export function normaliseGraphForIdentity(
   delete stripped.ref_high_water;
 
   if (Array.isArray(stripped.nodes)) {
-    stripped.nodes = sortByIdThenSerialised(stripped.nodes);
+    // Scope sources do not change meaning. Bind this projection to NODE FIELDS,
+    // never a nested key (an intervention's factor id may itself be goal_scope).
+    stripped.nodes = sortByIdThenSerialised(stripped.nodes.map(raw => {
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw) || !Object.prototype.hasOwnProperty.call(raw, 'goal_scope')) return raw;
+      return { ...raw, goal_scope: goalScopeMeaning((raw as Record<string, unknown>).goal_scope) };
+    }));
   }
   if (Array.isArray(stripped.edges)) {
     stripped.edges = sortEdges(stripped.edges);

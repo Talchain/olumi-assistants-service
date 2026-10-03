@@ -24,6 +24,7 @@ import { graphBoundToHash } from '../coaching/bound-graph.js';
 import { selectNextMove, type NextMove, type NextMoveCaveat } from '../coaching/next-move.js';
 import { edgeAuthorshipIn } from '../coaching/edge-strength-authorship.js';
 import { WITHHELD_NEAR_TIE } from '../compose/analysis-state-v1.js';
+import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { summaryAsksUserToRepairALimit } from '../coaching/constraint-gap-disclosure.js';
 
 export interface CapturedAnalysis {
@@ -108,6 +109,8 @@ export function scienceBriefOf(
   nextMove: NextMove | null,
   caveats: readonly NextMoveCaveat[],
   analysisState: unknown,
+  /** The run's `analysis_ready`: its admission is half of the leader licence (P0 SHARED DATA, DL 4563ad). */
+  analysisReady?: unknown,
 ): ScienceBrief {
   const claim = record(record(analysisState)?.leader_claim);
   return {
@@ -121,8 +124,9 @@ export function scienceBriefOf(
     },
     caveats: caveats.map((c) => ({ title: c.block.title, body: c.block.body })),
     leader: {
-      // Fail closed: only an explicit `permitted: true` names the leader.
-      may_be_named: claim?.permitted === true,
+      // The ONE licence (`compose/leader-licence.ts`), the answer `claim_permissions` gives the same turn: the bare claim
+      // never reads the admission. Fail closed: only an explicit `permitted: true` can license.
+      may_be_named: leaderLicenceFromState(analysisState, analysisReady) !== 'withheld',
       withheld_reason: typeof claim?.withheld_reason === 'string' ? claim.withheld_reason : null,
     },
   };
@@ -376,7 +380,7 @@ export function runTurnNextMove(
     boundGraph,
     limitVerdicts: final.limitVerdicts,
   });
-  const scienceBrief = scienceBriefOf(selection.move, selection.caveats, final.analysisState);
+  const scienceBrief = scienceBriefOf(selection.move, selection.caveats, final.analysisState, captured.analysis_ready);
   if (selection.move === null) {
     return {
       blocks: upstream,

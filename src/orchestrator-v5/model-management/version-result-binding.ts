@@ -6,7 +6,7 @@ import { validateAnalysisRunFactIdentity } from '../context/analysis-interpretat
 import { deriveAnalysisFreshness, isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { selectCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
 import { composeAnalysisStateV1 } from '../compose/analysis-state-v1.js';
-import { claimPermissionsFrom } from '../agent-lane/first-analysis.js';
+import { leaderLicenceFromState, type LeaderLicence } from '../compose/leader-licence.js';
 import { leaderWithheldOnlyBecauseUnrequested, mayPresentLeaderClaimForFact,
   wasAnalysisRequestedByUser } from '../compose/unrequested-analysis-confinement.js';
 import { pickLatestRawRobustness } from '../coaching/pick-raw-robustness.js';
@@ -28,7 +28,8 @@ export type VersionResultBinding =
   | { readonly kind: 'unavailable'; readonly reason: UnavailableReason }
   | { readonly kind: 'shared'; readonly recordedRun: SelectedRunIdentity }
   | { readonly kind: 'paired'; readonly selectedPair: SelectedRunPair;
-      readonly facts: readonly HandlerFact[]; readonly mayNameLeadingOption: boolean };
+      readonly facts: readonly HandlerFact[]; readonly mayNameLeadingOption: boolean;
+      readonly leaderLicences: { readonly prior: LeaderLicence; readonly current: LeaderLicence } };
 
 const unavailable = (reason: UnavailableReason) => ({ kind: 'unavailable', reason } as const);
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -75,9 +76,9 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
 }
 
 /** Compose the canonical claim and licence for this Run on the version it analysed. */
-function mayNameBoundRunLeader(run: BoundRun, version: ModelVersionRecord): boolean {
+function boundRunLeaderLicence(run: BoundRun, version: ModelVersionRecord): LeaderLicence {
   const fact = run.fact;
-  if (fact.fact_type !== 'run_analysis') return false;
+  if (fact.fact_type !== 'run_analysis') return 'withheld';
   const facts = [fact];
   const graph = version.graph;
   const graphHash = run.identity.graph_hash_at_run;
@@ -100,9 +101,7 @@ function mayNameBoundRunLeader(run: BoundRun, version: ModelVersionRecord): bool
     ...(limit === null ? {} : { everyOptionLimit: limit.kind }),
     rawRobustness: pickLatestRawRobustness(facts),
   });
-  // Saved-result deltas carry plain leader claims, so use the canonical comparative
-  // permission without the requested-Run override that permits a provisional caveat.
-  return claimPermissionsFrom(state, readiness).leader_may_be_named;
+  return leaderLicenceFromState(state, readiness);
 }
 
 /** Pure binding only; the compare route calls the existing delta builder for this pair. */
@@ -128,12 +127,15 @@ export function bindVersionResults(input: {
       && prior.identity.computed_at === current.identity.computed_at
       ? { kind: 'shared', recordedRun: prior.identity } : unavailable('unconfirmed_identity');
   }
+  const leaderLicences = { prior: boundRunLeaderLicence(prior, input.from),
+    current: boundRunLeaderLicence(current, input.to) };
   return {
     kind: 'paired', selectedPair: { prior: prior.identity, current: current.identity },
     facts: [prior.fact, current.fact],
     // The existing builder's shared turn permission also confines figures by arithmetic.
     // Both canonical permissions include the limit, separation and comparative admission gates.
-    mayNameLeadingOption: mayNameBoundRunLeader(prior, input.from)
-      && mayNameBoundRunLeader(current, input.to),
+    // The delta has no caveat carrier: both bound Runs must permit plain naming.
+    mayNameLeadingOption: leaderLicences.prior === 'permitted' && leaderLicences.current === 'permitted',
+    leaderLicences,
   };
 }

@@ -1,3 +1,5 @@
+import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
+import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
 /**
  * ROADMAP 2.312 track 2 (2) — THE SCENARIO-ADDRESSED GRAPH READ.
  *
@@ -613,6 +615,13 @@ export default async function route(app: FastifyInstance) {
         return unavailable();
       }
 
+      if (typeof store.readMostRecentPendingActions !== 'function') return unavailable();
+      let scopeInput: ReturnType<typeof goalScopeClaimInput>;
+      try {
+        scopeInput = goalScopeClaimInput(await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' }), graph);
+      } catch { return unavailable(); }
+      const scopeIssues = scopeInput.issues;
+
       // An EMPTY graph is a valid answer, not an error: every scenario starts
       // there, and 404-ing it would make "no graph yet" indistinguishable from
       // "not yours" — collapsing the very distinction the UI needs.
@@ -641,12 +650,16 @@ export default async function route(app: FastifyInstance) {
         scenarioId,
         graph: graphPresent ? graph : null,
         requestId,
+        goalScopeClaimInput: scopeInput,
         ...(snapshot !== undefined && snapshot !== null ? { analysisInvalidatedAt: snapshot.analysisInvalidatedAt } : {}),
       });
       // The selected block already has one public carrier, `analysis_result`.
       // The current-read sidecar exposes its bounded identity and typed figures
       // without a second copy of raw enrichment/probability fields.
       const { result: _selectedBlock, ...currentReadWire } = analysis.current_read;
+      // Compatibility projection reads the common canonical claim, never the
+      // issue count. The pending actions remain explanatory data only.
+      const scopePermissions = claimPermissionsFrom(analysis.analysis_state, undefined);
 
       // ── 6. THE CONVERSATION, OPT-IN (DL lease #75 5907582591; Canvas 5907308286) ──
       //
@@ -753,6 +766,10 @@ export default async function route(app: FastifyInstance) {
         // told it about (the H4 seam — the two authorities answer different
         // questions).
         analysis_state: analysis.analysis_state,
+        ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
+        ...(scopePermissions.total_goal_claims_allowed === false ? {
+          goal_scope_claim_permissions: { total_goal_claims_allowed: false, exploratory_work_allowed: true },
+        } : {}),
         analysis_result: analysis.analysis_result,
         // CURRENT-READ-v1: one selected Run's canonical freshness and typed
         // figures. The raw graph_hash above remains the edit/CAS token; the

@@ -1,3 +1,4 @@
+import { assertNoPendingScopeAmendment, scopeIssuesAfterWrite } from './agent-lane/goal-scope.js';
 /**
  * V5 commit stage — slice B.
  *
@@ -622,6 +623,12 @@ export function computeSurvivingPriorPendingsDetailed(
       || (priorPa.action.kind === 'proposed_concept' && thisTurnHasFreshProposedConcept)
       || (priorPa.action.kind === 'draft_graph' && thisTurnHasFreshDraftOffer)
     ) { supersededCount += 1; continue; } // 2. superseded (same key, or fresher concept/offer capture)
+    // The issue survives; only its answer-binding window counts down. It is consumed
+    // after canonical resolution, not by wall time, an unrelated revision or an offer's TTL.
+    if (priorPa.action.kind === 'reconcile_goal_scope') {
+      survivors.push({ ...priorPa, expires_at_turn_count: Math.max(0, priorPa.expires_at_turn_count - 1) });
+      continue;
+    }
     // 2b. SYMMETRIC CLAIM WINDOW — clamp before rules 3-5 read the bounds, so a
     // clamped ask expires on the same turn as the competitor it was outliving.
     // Identity when the set is unmixed or the pending is not a recorded ask.
@@ -1255,12 +1262,19 @@ export async function commitDirectAnswer(
   // then derive every hash-dependent decision from the projected bytes.
   // Stable entity refs go on the SAME projected bytes, before any hash is taken from them (`graph/entity-refs.ts`):
   // the base's ref for a node id wins, so an edit path that dropped `ref` cannot renumber an entity.
+  const baseForWrite = await refBaseFor(metadata, store);
+  if (graphWasProvided(metadata.graph)) {
+    const priorForScope = typeof store.readMostRecentPendingActions === 'function'
+      ? await store.readMostRecentPendingActions(metadata.scenario_id, { validation: 'strict' })
+      : metadata.priorPendingActions ?? [];
+    assertNoPendingScopeAmendment(metadata.graph, baseForWrite, priorForScope);
+  }
   const projectedGraphForStore = assignEntityRefs(projectGraphForPersistence(metadata.graph, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
-  }), await refBaseFor(metadata, store)).graph;
+  }), baseForWrite).graph;
   const atomicVersionPlan = buildAtomicCommittedModelVersion(
     projectedGraphForStore,
     metadata,
@@ -1427,10 +1441,10 @@ export async function commitDirectAnswer(
   // rendered-chip invariant is one-directional). A consent hold that STILL
   // cannot fit (all-consent overflow) lapses with the honest F-HELD 2b
   // notice below, never silently.
-  const combinedPendings: readonly PendingAction[] = [
+  const combinedPendings: readonly PendingAction[] = scopeIssuesAfterWrite([
     ...chipDerivedPending,
     ...survivingPrior,
-  ];
+  ], graphForStore, metadata.scenario_id);
   let finalPendings: readonly PendingAction[];
   let capEvictedConsentHolds: readonly PendingAction[] = [];
   if (combinedPendings.length <= PENDING_ACTIONS_PER_TURN_CAP) {
@@ -1440,6 +1454,10 @@ export async function commitDirectAnswer(
       CONFIRMATION_EXPECTING_ACTION_TYPES.has(pa.action.kind) &&
       !isPendingActionExpired(pa, nowMsForPendings);
     const keep = new Set<PendingAction>();
+    for (const pa of combinedPendings) {
+      if (keep.size >= PENDING_ACTIONS_PER_TURN_CAP) break;
+      if (pa.action.kind === 'reconcile_goal_scope') keep.add(pa);
+    }
     for (const pa of combinedPendings) {
       if (keep.size >= PENDING_ACTIONS_PER_TURN_CAP) break;
       if (isLiveConsentHold(pa)) keep.add(pa);

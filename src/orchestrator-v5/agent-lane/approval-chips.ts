@@ -22,6 +22,7 @@ import type { StructuredProposal } from './proposal.js';
 import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
+import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
@@ -32,6 +33,7 @@ const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   // #1788's add-option proposal: the same typed, zero-call approval as every other proposal.
   propose_new_option: { label: 'Add this option', message: 'Yes, add that option.' },
   // The goal's current level, as the user stated it (`goal-current-level.ts`).
+  reconcile_goal_scope: { label: 'Record this goal reading', message: 'Yes, record this reading.' },
   propose_goal_current_level: { label: 'Record this current level', message: 'Yes, record it.' },
   // A link's strength recorded as the user's own (challenge → authorised revision): one button, carried like the rest.
   propose_link_strength: { label: 'Record this link', message: 'Yes, record that.' },
@@ -164,6 +166,9 @@ export function approvalChipsFor(
   // Adoption is a proposal about an EXISTING Olumi option. The card, including every displayed
   // level, is derived from the stored proposal; only its exact pressed words authorise the write.
   const stored = labelSourceFor?.(proposalId)?.proposal;
+  if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
+    return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
+  }
   const adoption = stored?.operations.length === 1 && stored.operations[0]?.op === 'adopt_olumi_option'
     ? stored.operations[0].value as { approval_message?: unknown } | undefined : undefined;
   if (adoption !== undefined && typeof adoption.approval_message === 'string' && adoption.approval_message !== '') {

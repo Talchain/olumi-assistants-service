@@ -1,3 +1,4 @@
+import { sharedLicensedPair } from './shared-licensed-pair.fixture.js';
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { bindVersionResults } from '../version-result-binding.js';
@@ -87,5 +88,30 @@ describe('stored versions bind only to confirmed recorded results', () => {
         expect(delta.delta.win_probabilities).toStrictEqual([]);
       }
     }
+  });
+});
+
+
+describe('both bound saved Run licences reach the final Compare input', () => {
+  it('retains a producer-licensed positive instead of evaluating a bare permission with no admission', () => {
+    const pair = sharedLicensedPair();
+    expect(pair.admissions.map(a => a?.permitted_analysis_mode)).toStrictEqual(['comparative_leader', 'comparative_leader']);
+    const bound = bindVersionResults({ scenarioId: FIX_SCENARIO, from: pair.from, to: pair.to, factSet: pair.facts });
+    expect(bound.kind).toBe('paired');
+    if (bound.kind !== 'paired') return;
+    expect(bound.leaderLicences).toStrictEqual({ prior: 'permitted', current: 'permitted' });
+    expect(bound.mayNameLeadingOption).toBe(true);
+    const delta = buildRunDelta({ priorFacts: bound.facts, selectedPair: bound.selectedPair, mayNameLeadingOption: bound.mayNameLeadingOption });
+    expect(delta.kind).toBe('ok');
+    if (delta.kind === 'ok') expect(delta.delta.win_probabilities.length).toBeGreaterThan(0);
+  });
+  it.each(['prior', 'current'] as const)('withholds if the %s Run restricts the claim', (which) => {
+    const pair = sharedLicensedPair();
+    result(pair[which]).constraint_verdict = { may_name_leading_option: false, constraint_verdict_state: 'evaluated_feasible' };
+    const bound = bindVersionResults({ scenarioId: FIX_SCENARIO, from: pair.from, to: pair.to, factSet: pair.facts });
+    expect(bound.kind).toBe('paired');
+    if (bound.kind !== 'paired') return;
+    expect(bound.leaderLicences[which]).toBe('withheld');
+    expect(bound.mayNameLeadingOption).toBe(false);
   });
 });

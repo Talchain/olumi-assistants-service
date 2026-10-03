@@ -32,6 +32,7 @@ const isScenarioMember = vi.fn();
 const readRecent = vi.fn();
 const ensureScenarioExists = vi.fn();
 const store = {
+  readMostRecentPendingActions: async () => [],
   readExistingScenario,
   isScenarioMember,
   readRecent,

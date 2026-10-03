@@ -77,6 +77,7 @@ function makeShiftingStore(graphs: readonly unknown[]) {
   let calls = 0;
   return {
     store: {
+      readMostRecentPendingActions: async () => [],
       loadGraphAndBriefText: async (): Promise<{ graph: unknown; briefText: string | null }> => {
         const graph = graphs[Math.min(calls, graphs.length - 1)];
         calls += 1;

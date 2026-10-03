@@ -48,6 +48,7 @@
  * (P0-A) — and only a `null` nothing else claimed is dropped as absence.
  * See `drop-null-optional-fields.ts`.
  */
+import { assertNoScopedIdentityConflict } from './agent-lane/goal-scope.js';
 import { dropNullOptionalGraphFields } from './drop-null-optional-fields.js';
 import { repairGraphForPersistence } from './repair-graph-for-persistence.js';
 import { normaliseOptionInterventionContract } from './normalise-option-interventions.js';
@@ -86,6 +87,7 @@ export function projectGraphForPersistence<T>(
   ctx: PersistedGraphProjectionContext = {},
 ): T {
   if (graph === undefined || graph === null) return graph;
+  assertNoScopedIdentityConflict(graph);
   const repaired = repairGraphForPersistence(graph, ctx);
   const normalised = normaliseOptionInterventionContract(repaired, ctx);
   const reconciled = reconcileTopLevelOptionsFromNodes(normalised, ctx);

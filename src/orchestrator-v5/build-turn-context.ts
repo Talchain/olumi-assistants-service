@@ -21,6 +21,7 @@
  * `TurnContext` continues to compile via structural subtyping.
  */
 
+import { goalScopeClaimInput, type GoalScopeClaimInput } from './compose/goal-scope-claim-input.js';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type {
   DecisionContext,
@@ -605,6 +606,7 @@ export interface BuildTurnContextOptions {
 }
 
 export interface RunAnalysisScenarioSnapshot {
+  readonly goalScopeClaimInput: GoalScopeClaimInput;
   readonly graph: GraphV3T;
   readonly options: Array<{
     readonly id: string;
@@ -3107,7 +3109,18 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // (the round-3 TOCTOU). Read-only: the persisted graph is never mutated.
   const options = mergeOptionInterventionObjects(parsedGraph.data.nodes, readiness.options);
 
+  const pendingStore = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
+  if (!pendingStore) {
+    throw new SessionReadError(`loadScenarioSnapshotForRunAnalysis(${scenarioId}): pending store unavailable`, {});
+  }
+  // A failed/corrupt read stops before PLoT; it cannot mint a licensed Run.
+  const scopeInput = goalScopeClaimInput(
+    await pendingStore.readMostRecentPendingActions(scenarioId, { validation: 'strict' }),
+    persistedGraph,
+  );
+
   return {
+    goalScopeClaimInput: scopeInput,
     graph: parsedGraph.data,
     options,
     goal_node_id: readiness.goal_node_id,

@@ -129,7 +129,6 @@ import { AnalysisStateV1Schema, ModelVersionDiffV2Schema, type ModelVersionResul
 import { loadScenarioAnalysisFactsForRead } from "../orchestrator-v5/build-turn-context.js";
 import { bindVersionResults } from "../orchestrator-v5/model-management/version-result-binding.js";
 import { buildRunDelta } from "../orchestrator-v5/coaching/build-run-delta.js";
-import { leaderLicence } from "../orchestrator-v5/compose/leader-licence.js";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
 import { GraphStateIngressSchema } from "../orchestrator-v5/boundary/request-extensions.js";
@@ -836,7 +835,8 @@ export default async function route(app: FastifyInstance) {
           // Reuse the final licence, projecting only the typed leader-claim fields.
           // Recorded input identities and values are facts, so must never enter a prose scrubber.
           if (built.kind === "ok") {
-            const licence = leaderLicence({ mayNameLeadingOption: bound.mayNameLeadingOption });
+            const licence = bound.leaderLicences.prior === 'permitted' && bound.leaderLicences.current === 'permitted'
+              ? 'permitted' : 'withheld';
             const { prior_leading_option_id: _prior, current_leading_option_id: _current,
               ...withheldLeader } = built.delta.leader;
             const licensedDelta = licence === "withheld"

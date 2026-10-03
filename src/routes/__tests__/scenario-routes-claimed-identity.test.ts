@@ -56,6 +56,7 @@ const getScenarioOwner = vi.fn();
 const loadGraph = vi.fn();
 const append = vi.fn();
 const store = {
+  readMostRecentPendingActions: async () => [],
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,

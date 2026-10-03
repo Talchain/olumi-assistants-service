@@ -1,3 +1,4 @@
+import { reconciliationPending } from '../goal-scope.js';
 /**
  * Agent lane — build a canonical model from the user's brief.
  *
@@ -1982,6 +1983,12 @@ export async function buildModelFromBrief(
     mutated: true,
     ...(modelVersion === undefined ? {} : { model_version: modelVersion }),
     ...(replayed ? { replayed: true } : {}),
+    ...(candidate.goal.scope && admitted.loss.some(l => /\.goal_scope$/.test(l.field_path)) && goalNodes.find(n => n.kind === 'goal') ? {
+      pending_action: reconciliationPending(scenarioId, { kind: 'reconcile_goal_scope',
+        goal_id: goalNodes.find(n => n.kind === 'goal')!.id, goal_label: candidate.goal.metric,
+        declared_scope: candidate.goal.scope, expected: 'scope',
+        question: admitted.loss.find(l => /\.goal_scope$/.test(l.field_path))!.reason, operands: [], derivations: [] }),
+    } : {}),
     nodes: admitted.nodes.length,
     edges: admitted.edges.length,
     // The compact verdict travels with the success, so a caller never has to
