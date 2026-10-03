@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "served-price-tipping-point",
+      "kind": "positive",
+      "source": "tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json",
+      "source_sha256": "36f120f70a075503ba017f15c112e62e52dce21bdf583a4d9bd142bdc619a654",
+      "fixture_read_at_cee_sha": "752c487b4392cb1ccd299d0ebae4a039e6696ade",
+      "factor_id": "pro_plan_price",
+      "current_value": 49,
+      "threshold": 55.76
+    },
+    {
+      "id": "served-no-signal",
+      "kind": "no_signal",
+      "source": "src/orchestrator-v5/coaching/__tests__/fixtures/paul-run-17d1cd3a-next-move.json",
+      "source_sha256": "99e16bc8e5a26b71b5611821a9143abe55d9179455e9e460aff6fd9876d7bc22",
+      "fixture_read_at_cee_sha": "752c487b4392cb1ccd299d0ebae4a039e6696ade",
+      "factor_id": "pro_plan_price",
+      "current_value": 49,
+      "threshold": null
+    }
+  ],
+  "fresh_unseen_control": {
+    "state": "not_prepared",
+    "reason": "Existing captures are known regression cases; no independent unseen science case was supplied. Do not relabel one as unseen or manufacture a positive."
+  }
+}
