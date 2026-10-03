@@ -7,6 +7,7 @@ import { FIX_SCENARIO, FIX_OWNER, versionRecord } from '../../orchestrator-v5/mo
 import { readMayNameLeadingOptionVerdictForFact } from '../../orchestrator-v5/context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../../orchestrator-v5/boundary/request-extensions.js';
 import { deriveEveryOptionLimitVerdict, readRatifiedConstraints } from '../../orchestrator/context/constraint-feasibility.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 
 const mocks = vi.hoisted(() => ({
   getVersion: vi.fn(), facts: vi.fn(), identity: vi.fn(),
@@ -64,8 +65,8 @@ const result = (fact: HandlerFact) => (fact as unknown as { result: Record<strin
 function pairWithRatifiedLimits(priorSatisfaction: number, currentSatisfaction: number) {
   const endpoints = [FROM, TO].map((version, i) => {
     // Distinct limits prove each permission reads its own saved graph, not the live/TO graph.
-    const constraint = { constraint_id: `saved-limit-${i}`, node_id: 'n_revenue',
-      operator: '>=', value: 100, label: 'Revenue at least £100/month' };
+    const constraint = { constraint_id: `saved-limit-${i}`, node_id: 'n_price',
+      operator: '<=', value: 100, label: 'Price at most £100' };
     const saved = versionRecord(GraphStateIngressSchema.parse({
       ...GraphStateIngressSchema.parse(version.graph), goal_constraints: [constraint],
     }), { id: version.id });
@@ -88,11 +89,64 @@ function pairWithRatifiedLimits(priorSatisfaction: number, currentSatisfaction: 
   return { prior: prior!, current: current! };
 }
 
+function pairWithAdmission(side: 'prior' | 'current', mode: 'none' | 'exploratory' | 'quantified_provisional') {
+  const endpoints = [FROM, TO].map((version, i) => {
+    const graph = clone(GraphStateIngressSchema.parse(version.graph));
+    if (i === (side === 'prior' ? 0 : 1)) {
+      for (const node of graph.nodes) {
+        if (mode === 'none' && node.kind === 'option') node.interventions = {};
+        if (mode === 'exploratory' && node.id === 'opt-b') {
+          node.interventions = { n_price: { value: 12, source: 'brief_extraction' } };
+        }
+        if (mode === 'quantified_provisional' && node.id === 'n_price') {
+          node.observed_state = { value: 10, source: 'cee_inference' };
+        }
+      }
+    }
+    const saved = versionRecord(graph, { id: version.id });
+    const run = savedRun(saved, i === 0 ? 'bound-prior' : 'bound-current',
+      i === 0 ? '2026-10-02T00:00:00.000Z' : '2026-10-02T01:00:00.000Z', i === 0 ? 0.62 : 0.45);
+    const readiness = buildCanonicalAnalysisReadyFromGraph(graph);
+    expect(readiness?.analysis_admission).toMatchObject(i === (side === 'prior' ? 0 : 1)
+      ? { permitted_analysis_mode: mode, structurally_analysable: mode === 'quantified_provisional' }
+      : { permitted_analysis_mode: 'comparative_leader', structurally_analysable: true });
+    const permission = readMayNameLeadingOptionVerdictForFact(run);
+    expect(permission.may_name_leading_option).toBe(true);
+    expect(permission.separation_withhold).toBeNull();
+    return { saved, run };
+  });
+  const [prior, current] = endpoints;
+  mocks.getVersion.mockImplementation(async (_scenario: string, id: string) =>
+    id === FROM.id ? prior!.saved : id === TO.id ? current!.saved : null);
+  mocks.facts.mockResolvedValue({ factSet: factSet([current!.run, prior!.run]), hotWindow: { status: 'ok', facts: [] } });
+}
+
 describe('version result comparison uses the real route, service, binder and delta producer', () => {
+  it.each([
+    ['N3', 'prior', 'exploratory'], ['N4', 'current', 'exploratory'],
+    ['N3', 'prior', 'none'], ['N4', 'current', 'none'],
+    ['N5', 'prior', 'quantified_provisional'], ['N5', 'current', 'quantified_provisional'],
+  ] as const)('%s: withholds an identity-bound %s Run in %s mode', async (_row, side, mode) => {
+    pairWithAdmission(side, mode);
+    const reply = await compare(); expect(reply.statusCode).toBe(200);
+    const value = ModelVersionDiffV2Schema.parse(reply.json()).result_comparison;
+    expect(value).toMatchObject({ status: 'available', kind: 'paired_runs',
+      prior_run: { run_id: 'bound-prior' }, current_run: { run_id: 'bound-current' } });
+    if (value.status === 'available' && value.kind === 'paired_runs') {
+      expect(value.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
+      expect(value.run_delta.leader).not.toHaveProperty('current_leading_option_id');
+      expect(value.run_delta.win_probabilities).toStrictEqual([]);
+    }
+  });
+
   it.each([
     ['N1', 'prior', 0.2, 0.8], ['N2', 'current', 0.8, 0.2],
   ] as const)('%s: withholds both leaders when the %s Run has every option likely breaking its saved limit', async (_row, side, priorP, currentP) => {
     const pair = pairWithRatifiedLimits(priorP, currentP);
+    for (const endpoint of Object.values(pair)) {
+      expect(buildCanonicalAnalysisReadyFromGraph(endpoint.saved.graph)?.analysis_admission)
+        .toMatchObject({ permitted_analysis_mode: 'comparative_leader', structurally_analysable: true });
+    }
     const { saved, run } = pair[side];
     const permission = readMayNameLeadingOptionVerdictForFact(run);
     expect(permission.may_name_leading_option).toBe(true);
@@ -111,7 +165,11 @@ describe('version result comparison uses the real route, service, binder and del
 
   it('P1: a licensed pair retains the existing leader ids and win probabilities', async () => {
     const baseline = ModelVersionDiffV2Schema.parse((await compare()).json()).result_comparison;
-    pairWithRatifiedLimits(0.8, 0.8);
+    const pair = pairWithRatifiedLimits(0.8, 0.8);
+    for (const endpoint of Object.values(pair)) {
+      expect(buildCanonicalAnalysisReadyFromGraph(endpoint.saved.graph)?.analysis_admission)
+        .toMatchObject({ permitted_analysis_mode: 'comparative_leader', structurally_analysable: true });
+    }
     const reply = await compare(); expect(reply.statusCode).toBe(200);
     const value = ModelVersionDiffV2Schema.parse(reply.json()).result_comparison;
     expect(value).toMatchObject({ status: 'available', kind: 'paired_runs', run_delta: {

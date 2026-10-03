@@ -6,7 +6,7 @@ import { validateAnalysisRunFactIdentity } from '../context/analysis-interpretat
 import { deriveAnalysisFreshness, isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { selectCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
 import { composeAnalysisStateV1 } from '../compose/analysis-state-v1.js';
-import { leaderLicenceFromState } from '../compose/leader-licence.js';
+import { claimPermissionsFrom } from '../agent-lane/first-analysis.js';
 import { leaderWithheldOnlyBecauseUnrequested, mayPresentLeaderClaimForFact,
   wasAnalysisRequestedByUser } from '../compose/unrequested-analysis-confinement.js';
 import { pickLatestRawRobustness } from '../coaching/pick-raw-robustness.js';
@@ -100,7 +100,9 @@ function mayNameBoundRunLeader(run: BoundRun, version: ModelVersionRecord): bool
     ...(limit === null ? {} : { everyOptionLimit: limit.kind }),
     rawRobustness: pickLatestRawRobustness(facts),
   });
-  return leaderLicenceFromState(state, readiness) !== 'withheld';
+  // Saved-result deltas carry plain leader claims, so use the canonical comparative
+  // permission without the requested-Run override that permits a provisional caveat.
+  return claimPermissionsFrom(state, readiness).leader_may_be_named;
 }
 
 /** Pure binding only; the compare route calls the existing delta builder for this pair. */
@@ -130,7 +132,7 @@ export function bindVersionResults(input: {
     kind: 'paired', selectedPair: { prior: prior.identity, current: current.identity },
     facts: [prior.fact, current.fact],
     // The existing builder's shared turn permission also confines figures by arithmetic.
-    // Both canonical licences include the limit rule and fail closed on separation.
+    // Both canonical permissions include the limit, separation and comparative admission gates.
     mayNameLeadingOption: mayNameBoundRunLeader(prior, input.from)
       && mayNameBoundRunLeader(current, input.to),
   };

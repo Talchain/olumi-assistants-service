@@ -47,7 +47,7 @@ const ALLOWED_CROSS_BOUNDARY = new Set(
     // Saved-result permission reuses the canonical per-Run claim/licence composition.
     '../context/canonical-analysis-state.js',
     '../compose/analysis-state-v1.js',
-    '../compose/leader-licence.js',
+    '../agent-lane/first-analysis.js',
     '../compose/unrequested-analysis-confinement.js',
     '../coaching/pick-raw-robustness.js',
     '../agent-lane/admit-model.js',
@@ -307,7 +307,7 @@ describe('model-management isolation guards — meta-checks (the enforcer cannot
     expect(importAllowed(moduleDir, '../context/freshness.js')).toBe(true);
     expect(importAllowed(moduleDir, '../context/canonical-analysis-state.js')).toBe(true);
     expect(importAllowed(moduleDir, '../compose/analysis-state-v1.js')).toBe(true);
-    expect(importAllowed(moduleDir, '../compose/leader-licence.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../agent-lane/first-analysis.js')).toBe(true);
     expect(importAllowed(moduleDir, '../compose/unrequested-analysis-confinement.js')).toBe(true);
     expect(importAllowed(moduleDir, '../coaching/pick-raw-robustness.js')).toBe(true);
     expect(importAllowed(moduleDir, '../agent-lane/admit-model.js')).toBe(true);
