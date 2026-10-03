@@ -21,7 +21,7 @@
  * `TurnContext` continues to compile via structural subtyping.
  */
 
-import { goalScopeClaimInput } from './compose/goal-scope-claim-input.js';
+import { goalScopeClaimInput, type GoalScopeClaimInput } from './compose/goal-scope-claim-input.js';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type {
   DecisionContext,
@@ -606,6 +606,7 @@ export interface BuildTurnContextOptions {
 }
 
 export interface RunAnalysisScenarioSnapshot {
+  readonly goalScopeClaimInput: GoalScopeClaimInput;
   readonly graph: GraphV3T;
   readonly options: Array<{
     readonly id: string;

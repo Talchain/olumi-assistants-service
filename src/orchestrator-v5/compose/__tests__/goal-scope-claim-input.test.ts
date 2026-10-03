@@ -57,12 +57,14 @@ describe('canonical scope input before claim composition', () => {
   });
   it.each(['clear', 'unresolved', 'unavailable'] as const)(
     'retains both the newer degraded Run and %s scope permission in the common consumer', async (scope) => {
+      const priorResult = (PRIOR as unknown as { result: Record<string, unknown> }).result;
       const prior = RunAnalysisHandlerFactSchema.parse({ ...PRIOR, fact_version: 1,
-        result: { ...PRIOR.result, leading_option_id: 'opt-a', summary: 'Synthetic prior success.' } });
+        result: { ...priorResult, leading_option_id: 'opt-a', summary: 'Synthetic prior success.' } });
       const raw = savedRun(FROM, 'newer-partial', '2026-10-02T02:00:00.000Z');
+      const rawResult = (raw as unknown as { result: Record<string, unknown> }).result;
       const newer = RunAnalysisHandlerFactSchema.parse({ ...raw, fact_version: 1,
-        result: { ...raw.result, leading_option_id: 'opt-a', summary: 'Synthetic newer partial.',
-          enrichment: { ...raw.result.enrichment, analysis_status: 'partial' },
+        result: { ...rawResult, leading_option_id: 'opt-a', summary: 'Synthetic newer partial.',
+          enrichment: { ...(rawResult.enrichment as Record<string, unknown>), analysis_status: 'partial' },
           constraint_verdict: { may_name_leading_option: false, constraint_verdict_state: 'not_applicable' } } });
       const facts = [newer, prior];
       const readiness = buildCanonicalAnalysisReadyFromGraph(FROM.graph);

@@ -879,7 +879,7 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 
 /** One internal dispatch, so every path is the product's own. */
 import { reconcileGoalScope } from '../reconcile-goal-scope.js';
-import { goalScopeCheck, scopeOf, refreshScopePending, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
+import { goalScopeCheck, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
 import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
