@@ -18,7 +18,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult } from './agent-tools.js';
+import { composeProposalReply } from '../proposal-reply.js';
+import { toolsFor, dispatchTool, type AgentCapabilities, type AgentToolContext, type AgentLaneMode, type ToolResult, type RequestFulfilment } from './agent-tools.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
 import { isProposingTool, proposalsAwaitingApproval, ONE_CHANGE_PER_APPROVAL, ONE_CHANGE_PER_APPROVAL_DETAIL, WITHDRAW_PROPOSAL, NOT_PROPOSED_THIS_TURN } from '../approval-chips.js';
 import { config } from '../../../config/index.js';
@@ -327,6 +328,35 @@ export async function runAgentTurn(
   const handedOn = (): unknown[] => (stateItem === undefined ? items : items.filter((i) => i !== stateItem));
   const toolCalls: { name: string; ok: boolean; mutated: boolean; proposal_id?: string; outcome?: string; refusal?: string; conflict_fields?: readonly string[]; rejected_levels?: readonly RejectedLevel[]; incomplete_reason?: string }[] = [];
   const toolResults: ToolResult[] = [];
+  const requestedLabels = (args: unknown): string[] => {
+    const a = args !== null && typeof args === 'object' ? args as Record<string, unknown> : {};
+    const specs = Array.isArray(a.risks) ? a.risks : Array.isArray(a.options) ? a.options : [a];
+    const labels = specs.map((x) => (x as { label?: unknown } | null)?.label).filter((l): l is string => typeof l === 'string');
+    return labels.filter((label, index) => labels.findIndex((l) => l.trim().toLowerCase() === label.trim().toLowerCase()) === index);
+  };
+  const parsedArgs = (call: Record<string, unknown>): Record<string, unknown> | undefined => {
+    try {
+      const args: unknown = JSON.parse(String(call.arguments ?? '{}'));
+      return args !== null && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : undefined;
+    } catch { return undefined; }
+  };
+  const ledgerReply = (): string | null => {
+    // OPTIONS fulfilment is the design's follow-up; preserve its existing reply path.
+    if (!toolCalls.some((c, i) => c.name === 'propose_new_risk'
+      || (c.name === 'authorise_change' && toolResults[i]?.fulfilment !== undefined))) return null;
+    const byIdentity = new Map<string, RequestFulfilment>();
+    for (const entry of toolResults.flatMap((r) => r.fulfilment ?? [])) {
+      const key = entry.requested_label.trim().toLowerCase();
+      const prior = byIdentity.get(key);
+      if (prior === undefined || entry.outcome === 'committed') byIdentity.set(key, entry);
+    }
+    const fulfilment = [...byIdentity.values()];
+    // The existing composer still governs a single successful risk.
+    if (fulfilment.length === 0 || (fulfilment.length === 1 && fulfilment[0]!.outcome === 'proposed')) return null;
+    const proposal = toolResults.find((r) => r.ok && typeof r.proposal_id === 'string') ?? {};
+    const risks = toolResults.flatMap((r) => Array.isArray(r.risks) ? r.risks : r.risk !== undefined ? [r.risk] : []);
+    return composeProposalReply('propose_new_risk', { whole_request: true }, { ...proposal, risks, fulfilment }, input.message);
+  };
   let mutated = false;
   const now = input.now ?? (() => Date.now());
   const startedAt = now();
@@ -434,6 +464,13 @@ export async function runAgentTurn(
     const calls = out.filter((i) => i.type === 'function_call');
 
     if (calls.length === 0) {
+      const typedReply = ledgerReply();
+      if (typedReply !== null) {
+        // The narrating call's claim never enters the conversation of record.
+        items.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: typedReply }] });
+        return { assistant_text: typedReply, items: handedOn(), tool_calls: toolCalls, tool_results: toolResults,
+          mutated, hops: hop, stopped_reason: 'answered', timing: ((t) => { emitTiming(t); return t; })(timingAt(hop)) };
+      }
       // ⛔ An unfinished final answer is never returned as the answer, and never enters the history as one: the
       // route answers from the turn's own outcome instead (a run's result, or "ask me again").
       if (answerIsIncomplete(resp)) {
@@ -465,28 +502,60 @@ export async function runAgentTurn(
     // The whole output array first — the reasoning item must accompany the
     // calls — then one output per call, in the order they were made.
     items.push(...out);
+    // Several risk calls in ONE model response describe one consent scope, just like risks[].
+    // Execute the compound once, but preserve an output for every Responses call id.
+    const riskCalls = calls.filter((c) => c.name === 'propose_new_risk' && parsedArgs(c) !== undefined);
+    const groupRisks = riskCalls.length > 1 && proposalsAwaitingApproval(toolCalls).size === 0;
+    let compoundRisk: ToolResult | undefined;
+    const allocated = new Set<string>();
     for (const call of calls) {
       const toolStartedAt = now();
       toolCallCount += 1;
       // Second layer for a withheld tool: a model can name a tool it was not offered.
-      const result: ToolResult = withheld.has(String(call.name))
-        ? {
-            ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
-            detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.',
-          }
-        // ⛔ One approval carries one change: a second proposal while this turn's first awaits the user's yes is
-        // refused before it is stored, so the turn always ends with its one control (`ONE_CHANGE_PER_APPROVAL`).
-        : isProposingTool(String(call.name)) && proposalsAwaitingApproval(toolCalls).size > 0
-          ? { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL }
-          // ⛔ Only a change THIS turn proposed and still offers can be withdrawn: one an earlier turn showed the user
-          // stays theirs to approve or decline (`WITHDRAW_PROPOSAL`).
-          : String(call.name) === WITHDRAW_PROPOSAL && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')
-            ? {
-                ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
-                detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
-                  + 'a change the user has already seen stays theirs to approve or decline.',
-              }
-            : await dispatchTool(String(call.name), String(call.arguments ?? '{}'), input.ctx, caps, mode);
+      const args = parsedArgs(call);
+      const effectiveArgs = groupRisks && call === riskCalls[0] ? { ...args, risks: riskCalls.flatMap((c) => {
+        const a = parsedArgs(c)!;
+        return Array.isArray(a.risks) ? a.risks : [a];
+      }) } : args;
+      const secondProposal = isProposingTool(String(call.name)) && proposalsAwaitingApproval(toolCalls).size > 0;
+      let result: ToolResult;
+      if (groupRisks && call.name === 'propose_new_risk' && args !== undefined && compoundRisk !== undefined) {
+        result = compoundRisk;
+      } else if (withheld.has(String(call.name))) {
+        result = { ok: false, mutated: false, refusal: WITHHELD_ON_CHIP_TURN,
+          detail: 'Not from a suggestion button: approving a change and running the analysis each have their own control. Nothing was changed.' };
+      } else if (secondProposal) {
+        result = { ok: false, mutated: false, refusal: ONE_CHANGE_PER_APPROVAL, detail: ONE_CHANGE_PER_APPROVAL_DETAIL,
+          fulfilment: requestedLabels(effectiveArgs).filter((label) => !toolResults.some((r) => r.fulfilment?.some((e) =>
+            e.requested_label.trim().toLowerCase() === label.trim().toLowerCase()))).map((label): RequestFulfilment => ({
+            requested_label: label, outcome: 'deferred', reason: ONE_CHANGE_PER_APPROVAL,
+          })) };
+      } else if (String(call.name) === WITHDRAW_PROPOSAL && !proposalsAwaitingApproval(toolCalls).has(proposalIdArg(call.arguments) ?? '')) {
+        result = { ok: false, mutated: false, refusal: NOT_PROPOSED_THIS_TURN,
+          detail: 'Only a change you proposed in this turn, and have not had approved, can be withdrawn. Nothing was withdrawn: '
+            + 'a change the user has already seen stays theirs to approve or decline.' };
+      } else {
+        const raw = groupRisks && call === riskCalls[0] ? JSON.stringify(effectiveArgs) : String(call.arguments ?? '{}');
+        result = await dispatchTool(String(call.name), raw, input.ctx, caps, mode);
+      }
+      if (call.name === 'propose_new_risk' && !result.ok && result.fulfilment === undefined) {
+        result = { ...result, fulfilment: requestedLabels(effectiveArgs).map((label) => ({
+          requested_label: label, outcome: 'refused' as const, reason: String(result.refusal ?? 'not_prepared'),
+        })) };
+      }
+      if (groupRisks && call.name === 'propose_new_risk' && args !== undefined) {
+        compoundRisk ??= result;
+        const labels = new Set(requestedLabels(args).map((l) => l.trim().toLowerCase()));
+        const fulfilment = (compoundRisk.fulfilment ?? []).filter((e) => {
+          const key = e.requested_label.trim().toLowerCase();
+          if (!labels.has(key) || allocated.has(key)) return false;
+          allocated.add(key);
+          return true;
+        });
+        const proposed = fulfilment.some((e) => e.outcome === 'proposed');
+        result = { ...compoundRisk, fulfilment, ok: proposed,
+          ...(!proposed ? { proposal_id: undefined, refusal: fulfilment[0]?.reason } : {}) };
+      }
       // ⛔ A TOOL'S OWN PROVIDER CALL IS NOT OVERHEAD.
       //
       // `build_model_from_brief` is dispatched as a tool and makes its own
@@ -541,6 +610,12 @@ export async function runAgentTurn(
         output: JSON.stringify(modelFacingToolResult(String(call.name), result)),
       });
     }
+    if (ledgerReply() !== null) {
+      for (const item of out.filter((o) => o.type === 'message')) {
+        const index = items.indexOf(item);
+        if (index >= 0) items.splice(index, 1);
+      }
+    }
     // ⭐ ONE CALL, NOT TWO: the turn's only call, answered from its own result (`composeReply`) — no narrating call.
     if (input.composeReply !== undefined && calls.length === 1 && toolCalls.length === 1) {
       let args: unknown;
@@ -565,7 +640,7 @@ export async function runAgentTurn(
   // ⛔ A hop limit is reported, never disguised as an answer. Silently returning
   // empty text here would read to the user as the Agent having nothing to say.
   return {
-    assistant_text: '',
+    assistant_text: ledgerReply() ?? '',
     items: handedOn(),
     tool_calls: toolCalls,
     tool_results: toolResults,

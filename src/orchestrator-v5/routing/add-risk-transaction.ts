@@ -91,6 +91,22 @@ const THREATENED_BY_A_RISK: ReadonlySet<string> = new Set(['outcome', 'goal']);
  */
 export function buildAddRiskTransaction(params: unknown, graph: AddOptionGraphView | null): AddRiskBuildResult {
   if (graph === null) return fail('no_graph');
+  // Several individually checked risks share the existing atomic held transaction.
+  if (params !== null && typeof params === 'object' && Object.hasOwn(params, 'risks')) {
+    const batch = z.object({ risks: z.array(AddRiskParamsSchema).min(1).max(4) }).strict().safeParse(params);
+    if (!batch.success) return fail('parameters_invalid');
+    const view = { nodes: [...graph.nodes], edges: [...graph.edges] };
+    const proposals: AddRiskProposal[] = [];
+    for (const spec of batch.data.risks) {
+      const built = buildAddRiskTransaction(spec, view);
+      if (!built.matched) return built;
+      proposals.push(built.proposal);
+      view.nodes.push({ id: built.proposal.riskId, kind: 'risk', label: built.proposal.riskLabel });
+    }
+    const operations = proposals.flatMap((p) => p.operations);
+    if (operations.length > TYPED_TRANSACTION_ENVELOPE_CAP) return fail('too_many_links');
+    return { matched: true, proposal: { ...proposals[0]!, operations, links: proposals.flatMap((p) => p.links) } };
+  }
   const parsed = AddRiskParamsSchema.safeParse(params);
   if (!parsed.success) return fail('parameters_invalid');
   const { risk, links } = parsed.data;

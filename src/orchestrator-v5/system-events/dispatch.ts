@@ -3331,6 +3331,8 @@ export type HoldAddRiskInput = {
   readonly risk: { readonly id?: string; readonly label: string };
   /** Each link names ONE end: `from_id` (a factor driving the risk) or `to_id` (the goal or an outcome it threatens). */
   readonly links: readonly { readonly from_id?: string; readonly to_id?: string; readonly effect_direction: 'positive' | 'negative' }[];
+  /** Several risks in the SAME held change; the first risk above binds its handle. */
+  readonly risks?: readonly { readonly risk: HoldAddRiskInput['risk']; readonly links: HoldAddRiskInput['links'] }[];
 };
 export type HoldAddRiskResult =
   | {
@@ -3381,7 +3383,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
   }
 
   const outcome = dispatchAddRiskTransaction({
-    params: { risk: input.risk, links: input.links },
+    params: input.risks !== undefined ? { risks: input.risks } : { risk: input.risk, links: input.links },
     currentGraph: persistedGraph,
     currentGraphHash: currentHash,
     freshness,
@@ -3401,7 +3403,7 @@ export async function holdAddRiskInProcess(input: HoldAddRiskInput, requestId: s
     ? outcome.response
     : { ...outcome.response, assistant_text: appendLapseNotice(outcome.response.assistant_text, notice) };
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
-    kind: 'agent_add_risk', risk: input.risk, links: input.links, base_graph_hash: input.base_graph_hash })).digest('hex').slice(0, 32)}`;
+    kind: 'agent_add_risk', risk: input.risk, links: input.links, ...(input.risks !== undefined ? { risks: input.risks } : {}), base_graph_hash: input.base_graph_hash })).digest('hex').slice(0, 32)}`;
   try {
     await commitDirectAnswer(response, {
       scenario_id: input.scenario_id,

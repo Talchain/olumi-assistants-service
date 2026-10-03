@@ -38,7 +38,7 @@ const NEW_OPTION_KEYS: ReadonlySet<string> = new Set([
 ]);
 /** Every key `proposeNewRisk` returns on success (agent-capabilities.ts): every disclosure is typed in `risk`. */
 const NEW_RISK_KEYS: ReadonlySet<string> = new Set([
-  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'note',
+  'ok', 'mutated', 'proposal_id', 'public_label', 'held_message', 'held_detail', 'base_revision', 'risk', 'note', 'fulfilment',
 ]);
 /**
  * Every key `proposeOptionInterventions` returns on a clean success. Its disclosures (`not_the_users_figure`,
@@ -366,7 +366,52 @@ export function userFiguresTheCallLeaves(args: unknown, userMessage: string): st
   return left;
 }
 
+/** Typed item outcomes own the reply when a request has several items or a non-success. */
+function fulfilmentReply(r: Rec): string | null {
+  const entries = Array.isArray(r.fulfilment) ? r.fulfilment.map(recordOf) : [];
+  if (entries.length === 0 || entries.some((e) => e === undefined || !nonEmpty(e.requested_label))) return null;
+  if (entries.length === 1 && entries[0]!.outcome === 'proposed') return null; // Keep the existing single-risk template.
+  const reasons: Record<string, string> = {
+    one_change_per_approval: 'another change is already waiting for approval', cap: 'one change can carry up to four risks',
+    risk_exists: 'it is already in the model', risk_affects_factor: 'a risk must affect a goal or an outcome; the target is a factor',
+    target_not_goal_or_outcome: 'the target is not a goal or an outcome in the model', cause_not_a_factor: 'the cause is not a factor in the model',
+    direction_not_stated: 'the direction of the effect is not stated', ambiguous_target: 'the target needs clarification',
+    no_affects: 'what it threatens needs to be named', unreadable_risk: 'the risk needs a name',
+    model_changed: 'the model changed while the change was being prepared', unavailable: 'adding a risk is unavailable here',
+    not_found: 'the model could not be read', risk_unreachable: 'the risk does not lead to the goal',
+  };
+  const disclosures = (Array.isArray(r.risks) ? r.risks : r.risk !== undefined ? [r.risk] : []).map(recordOf);
+  const lines: string[] = [];
+  for (const e of entries) {
+    const item = e!;
+    const reason = nonEmpty(item.reason) ? reasons[item.reason] ?? 'the requested change could not be prepared' : undefined;
+    if (item.outcome === 'proposed') {
+      const risk = disclosures.find((d) => d?.label === item.requested_label);
+      const threatens = phrases(risk?.threatens);
+      const drivenBy = phrases(risk?.driven_by ?? []);
+      lines.push(`${q(String(item.requested_label))}: proposed — prepared for approval.`
+        + (threatens !== null && threatens.length > 0 ? ` It threatens ${threatens.join(' and ')}.` : '')
+        + (drivenBy !== null && drivenBy.length > 0 ? ` It is driven by ${drivenBy.join(' and ')}.` : ''));
+    } else if (item.outcome === 'committed') {
+      lines.push(`${q(String(item.requested_label))}: committed — added to the model.`);
+    } else if (item.outcome === 'already_present') {
+      lines.push(`${q(String(item.requested_label))}: already present in the model.`);
+    } else if (item.outcome === 'deferred' || item.outcome === 'refused') {
+      lines.push(`${q(String(item.requested_label))}: ${item.outcome} — ${reason ?? 'the requested change could not be prepared'}.`);
+    } else return null;
+  }
+  const proposed = entries.some((e) => e!.outcome === 'proposed');
+  // A different proposing tool may already hold the turn's one change. Keep its existing consent subject.
+  const otherSubject = !proposed && !entries.some((e) => e!.outcome === 'committed') && nonEmpty(r.proposal_id) ? heldSubject(r) : undefined;
+  return [...(otherSubject !== undefined ? [`I’ve prepared this change: ${otherSubject}.`] : []), ...lines, ...(proposed ? [
+    'Nothing has changed yet. How strongly each proposed risk acts is not known yet: Olumi uses a placeholder strength for each link, not an estimate, for you to correct.',
+    'Approve this change?',
+  ] : otherSubject !== undefined ? ['Approve this change?'] : [])].join('\n\n');
+}
+
 export function composeProposalReply(tool: string, args: unknown, result: unknown, userMessage: string): string | null {
+  const typed = tool === 'propose_new_risk' ? fulfilmentReply(recordOf(result) ?? {}) : null;
+  if (typed !== null) return recordOf(args)?.whole_request === true ? typed : null;
   // The model's own typed word that this call is the WHOLE request: a message asking for two things never loses one.
   if (recordOf(args)?.whole_request !== true) return null;
   if (typeof userMessage === 'string' && userMessage.includes('?')) return null;
