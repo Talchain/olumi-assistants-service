@@ -5,8 +5,10 @@
  *
  * When `RunAnalysisHandlerDeps.probe` is set, the handler hands the probe the final payload (after the seed decision,
  * i.e. exactly what `plotClient.run` would receive) and returns before PLoT with no facts — so nothing reaches a
- * caller to persist. Only `handlers/decision-flip-dispatch.ts` sets it (via `RegistryOverrides.runAnalysisProbe`); the
- * production registry never does, so a Run is byte-identical.
+ * caller to persist. Only the on-demand probes set it (via `RegistryOverrides.runAnalysisProbe`):
+ * `handlers/decision-flip-dispatch.ts`, and `handlers/structural-challenge-dispatch.ts` (SCI-DEEP: proves the Run's request
+ * still rebuilds exactly before the one-link alternative is run). The production registry never does, so a Run is
+ * byte-identical.
  *
  * Kept in its own module because `run-analysis(.js)` may be imported only by `registry.ts`
  * (scripts/validate-handler-ownership.sh).

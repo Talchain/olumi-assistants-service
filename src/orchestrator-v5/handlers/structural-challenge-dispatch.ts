@@ -21,9 +21,11 @@
  *                 unchanged; anything else is `failed: baseline_payload_mismatch`. The pair's
  *                 residual digest necessarily differs (it digests the removed link's own unrecorded members too), so
  *                 `complete` is not required — and unrecorded GRAPH members are already pinned by the hash check above.
- *                 ⚠ KNOWN LIMIT until the `run_analysis` probe seam lands (CEE #2522, PTL ruling §3): a change in how
- *                 CEE BUILDS the payload since the Run is not excluded. With the probe, the rebuilt baseline payload's
- *                 `sent_digest` equal to the Run's closes it exactly; that check is the intended v1.1 hardening.
+ *   same builder — before the candidate is run, the ONE payload builder rebuilds the Run's request through the
+ *                 `run_analysis` probe seam (#2522; PTL ruling §3), which returns before PLoT, and it must be the request
+ *                 the Run sent (`isTheRunsPayload`, the SAME digest rule as "What would change this?"). So a change in
+ *                 how CEE builds the payload since the Run is `failed: baseline_payload_mismatch`, never a comparison;
+ *                 the candidate is then that same builder's output for the snapshot minus one link.
  *   late reply  — the hash is re-read after the recompute; a model edited meanwhile is `stale`.
  * Each refusal is a typed contract status; none is turned into a figure.
  */
@@ -38,6 +40,7 @@ import { orderSuccessfulRunAnalysisFactsNewestFirst } from '../context/freshness
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../run-analysis-snapshot-binding.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
+import type { RunAnalysisProbeInput } from '../tools/handlers/run-analysis-probe.js';
 import {
   createRegistry,
   getDefaultPlotClient,
@@ -54,6 +57,7 @@ import {
   type StructuralChallengeResult,
 } from '../coaching/structural-challenge-compare.js';
 import { graphWithoutLink, structuralChallengeEligibility, type ChallengeLink } from '../coaching/structural-challenge-eligibility.js';
+import { isTheRunsPayload } from './decision-flip-dispatch.js';
 import type { PLoTClient } from '../../orchestrator/plot-client.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { log } from '../../utils/telemetry.js';
@@ -200,6 +204,33 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   const eligibility = structuralChallengeEligibility(snapshot.graph, link);
   if (!eligibility.eligible) return refuse('unsupported', eligibility.reason, labels);
 
+  const plotClient = params.plotClient ?? getDefaultPlotClient();
+  const invoke = (handlerFn: NonNullable<ReturnType<typeof resolveHandler>>) => runWithBoundAnalysisSnapshot(
+    { scenarioId: context.session_id, analysisGraphHash: NO_CLAIM, priorRunSeed: priorRunForSeed(history) },
+    () => handlerFn({ context, payload, requestId, signal: params.signal ?? new AbortController().signal, orientationText: '' }),
+  );
+
+  // The same builder: rebuild the Run's own request from the unedited snapshot; the probe returns before PLoT.
+  let sent: RunAnalysisProbeInput | null = null;
+  const probeFn = resolveHandler(createRegistry({
+    scenarioReader: async () => snapshot,
+    plotClient,
+    counterfactualClient: null,
+    runAnalysisProbe: async (input) => {
+      sent = input;
+    },
+  }), 'run_analysis');
+  if (!probeFn) return refuse('failed', 'probe_unavailable', labels);
+  try {
+    await invoke(probeFn);
+  } catch (err) {
+    if (!(err instanceof HandlerInvocationFailedError)) throw err;
+    return refuse('failed', 'probe_unavailable', labels);
+  }
+  const rebuilt = sent as RunAnalysisProbeInput | null;
+  if (rebuilt === null) return refuse('failed', 'probe_unavailable', labels);
+  if (!isTheRunsPayload(rebuilt.plotPayload, selected)) return refuse('failed', 'baseline_payload_mismatch', labels);
+
   // The alternative: the SAME snapshot minus one link. `briefText` is dropped — it only feeds PLoT's decision-review
   // chain, which the comparison never reads.
   const edited: RunAnalysisScenarioSnapshot = {
@@ -208,20 +239,12 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
     ...(snapshot.rawPersistedGraph !== undefined ? { rawPersistedGraph: graphWithoutLink(snapshot.rawPersistedGraph, link) } : {}),
     briefText: undefined,
   };
-  const registry = createRegistry({
-    scenarioReader: async () => edited,
-    plotClient: params.plotClient ?? getDefaultPlotClient(),
-    counterfactualClient: null,
-  });
-  const handlerFn = resolveHandler(registry, 'run_analysis');
+  const handlerFn = resolveHandler(createRegistry({ scenarioReader: async () => edited, plotClient, counterfactualClient: null }), 'run_analysis');
   if (!handlerFn) return refuse('failed', 'candidate_run_failed', labels);
 
   let candidate: HandlerFact | undefined;
   try {
-    const outcome = await runWithBoundAnalysisSnapshot(
-      { scenarioId: context.session_id, analysisGraphHash: NO_CLAIM, priorRunSeed: priorRunForSeed(history) },
-      () => handlerFn({ context, payload, requestId, signal: params.signal ?? new AbortController().signal, orientationText: '' }),
-    );
+    const outcome = await invoke(handlerFn);
     candidate = outcome.handler_facts.find((f) => f.fact_type === 'run_analysis');
   } catch (err) {
     if (!(err instanceof HandlerInvocationFailedError)) throw err;

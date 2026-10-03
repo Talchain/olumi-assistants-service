@@ -258,6 +258,17 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     expect(isExactlyThisRemoval(h.runA as never, h.runA as never, CHURN_LINK)).toBe(false);
   });
 
+  it('S10: the same builder — a Run whose request no longer rebuilds exactly is never compared, and PLoT is never asked', async () => {
+    const h = await harness();
+    const drifted = structuredClone(h.runA);
+    const digest = drifted.result.input_snapshot.sent_digest as string;
+    // What a change in how CEE builds the payload since the Run looks like: the rebuilt request's digest is not the Run's.
+    drifted.result.input_snapshot.sent_digest = `${digest[0] === 'a' ? 'b' : 'a'}${digest.slice(1)}`;
+    const result = resultOf(await h.ask(CHURN_LINK, { priorFacts: [drifted] }));
+    expect(result).toMatchObject({ status: 'failed', reason: 'baseline_payload_mismatch', claims: [], pair_provenance: null });
+    expect(h.plot.runBodies).toHaveLength(1); // Run A only: the rebuild went through the probe, not PLoT
+  });
+
   it('S8: a model edited DURING the recompute is stale — a late reply never overwrites it', async () => {
     const h = await harness();
     const edited = structuredClone(h.graph);

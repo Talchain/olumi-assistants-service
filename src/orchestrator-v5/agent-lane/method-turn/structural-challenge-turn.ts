@@ -86,6 +86,11 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
         return `The test of ${link} took too long to finish, so there is no result. Nothing in your model changed; you can try again.`;
       case 'withheld':
         return 'This analysis isn\'t currently permitted to explore alternatives, so I haven\'t run the test. Nothing in your model changed.';
+      case 'failed':
+        if (result.reason === 'baseline_payload_mismatch' || result.reason === 'probe_unavailable') {
+          return 'I couldn\'t line this test up exactly with the analysis you ran, so there\'s no fair comparison to show. Run the analysis again, then try this test. Nothing in your model changed.';
+        }
+        return `I couldn't complete the test of ${link}, so there is no result. Nothing in your model changed.`;
       default:
         return `I couldn't complete the test of ${link}, so there is no result. Nothing in your model changed.`;
     }

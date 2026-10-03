@@ -73,6 +73,11 @@ describe('SCI-DEEP reply', () => {
       .toBe('I can\'t test the link from Pro plan price to Monthly churn. Removing that link would leave its target with nothing driving it, which changes how its starting level is read — the comparison would measure that change of meaning, not the link. Nothing in your model changed.');
     const stale: StructuralChallengeResult = { ...root, status: 'stale', reason: 'run_not_current' };
     expect(composeStructuralChallengeReply({ result: stale, labels: LABELS })).toContain('Run the analysis again');
+    const mismatch: StructuralChallengeResult = { ...root, status: 'failed', reason: 'baseline_payload_mismatch' };
+    expect(composeStructuralChallengeReply({ result: mismatch, labels: LABELS }))
+      .toBe('I couldn\'t line this test up exactly with the analysis you ran, so there\'s no fair comparison to show. Run the analysis again, then try this test. Nothing in your model changed.');
+    const failed: StructuralChallengeResult = { ...root, status: 'failed', reason: 'candidate_run_failed' };
+    expect(composeStructuralChallengeReply({ result: failed, labels: LABELS })).toContain('I couldn\'t complete the test of the link from Pro plan price to Monthly churn');
   });
 
   it('a chance is never rounded to certain', () => {
