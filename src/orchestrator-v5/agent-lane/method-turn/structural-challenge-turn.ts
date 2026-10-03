@@ -161,7 +161,26 @@ export interface StructuralChallengeTurn {
   readonly reply: string;
   readonly outcome: StructuralChallengeResult['status'] | 'no_run';
   readonly result: StructuralChallengeResult | null;
+  readonly labels: ReadonlyMap<string, string>;
   readonly actions: readonly SuggestedAction[];
+}
+
+/**
+ * The reply under the turn's FINAL leader licence. The dispatch ran under the press-time read's licence; the route
+ * composes this turn's retained goal-scope issues into the final read (#2545) and passes that read's permission here.
+ * A licence that now withholds the leader is applied exactly as the comparator applies it
+ * (`mayPresentComparedRunLeader` with false: both ids withheld), and the reply is re-rendered. A licence never names a
+ * leader the dispatch withheld — this only ever narrows.
+ */
+export function structuralChallengeTurnUnderLicence(turn: StructuralChallengeTurn, leaderMayBeNamed: boolean): StructuralChallengeTurn {
+  if (leaderMayBeNamed || turn.result === null || turn.result.status !== 'completed') return turn;
+  const result: StructuralChallengeResult = {
+    ...turn.result,
+    claims: turn.result.claims.map((c) => (c.kind === 'leader'
+      ? { kind: 'leader', baseline_option_id: null, alternative_option_id: null, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side', invariant_by_construction: false }
+      : c)),
+  };
+  return { ...turn, result, reply: composeStructuralChallengeReply({ result, labels: turn.labels }) };
 }
 
 export const STRUCTURAL_CHALLENGE_NO_RUN_REPLY =
@@ -179,11 +198,12 @@ export async function structuralChallengeTurnFor(
   if (link === null) return null;
   const actions = [TALK_IT_THROUGH_CHIP];
   const dispatched = await ask(link);
-  if (dispatched.kind === 'no_run') return { reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, outcome: 'no_run', result: null, actions };
+  if (dispatched.kind === 'no_run') return { reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, outcome: 'no_run', result: null, labels: new Map(), actions };
   return {
     reply: composeStructuralChallengeReply({ result: dispatched.result, labels: dispatched.labels }),
     outcome: dispatched.result.status,
     result: dispatched.result,
+    labels: dispatched.labels,
     actions,
   };
 }

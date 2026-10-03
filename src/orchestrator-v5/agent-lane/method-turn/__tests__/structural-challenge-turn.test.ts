@@ -10,6 +10,7 @@ import {
   parseStructuralChallengePress,
   structuralChallengePressId,
   structuralChallengeTurnFor,
+  structuralChallengeTurnUnderLicence,
 } from '../structural-challenge-turn.js';
 import type { StructuralChallengeResult } from '../../../coaching/structural-challenge-compare.js';
 
@@ -107,5 +108,19 @@ describe('SCI-DEEP reply', () => {
     expect(await structuralChallengeTurnFor('agent-next-what-would-change', async () => { throw new Error('never'); })).toBeNull();
     const none = await structuralChallengeTurnFor(structuralChallengePressId({ from_id: 'a', to_id: 'b' }), async () => ({ kind: 'no_run' }));
     expect(none).toMatchObject({ outcome: 'no_run', reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, result: null });
+  });
+
+  it('the final licence only narrows: a leader withheld at the final read is withheld in the result and the reply', async () => {
+    const turn = await structuralChallengeTurnFor(structuralChallengePressId({ from_id: 'monthly_churn', to_id: 'paying_subscribers' }), async () => ({ kind: 'result', result: changed, labels: LABELS }));
+    if (turn === null) throw new Error('expected a turn');
+    expect(structuralChallengeTurnUnderLicence(turn, true)).toBe(turn);
+    const narrowed = structuralChallengeTurnUnderLicence(turn, false);
+    expect(narrowed.result?.claims.find((c) => c.kind === 'leader'))
+      .toEqual({ kind: 'leader', baseline_option_id: null, alternative_option_id: null, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side', invariant_by_construction: false });
+    expect(narrowed.result?.claims.slice(1)).toEqual(changed.claims.slice(1));
+    expect(narrowed.reply.split('\n')[0]).toBe('Without the link from Monthly churn to Paying subscribers, part of the result changes.');
+    expect(narrowed.reply).not.toContain('still leads');
+    expect(narrowed.reply).not.toContain('Raise Pro price to £59 leads');
+    expect(narrowed.actions).toEqual(turn.actions);
   });
 });
