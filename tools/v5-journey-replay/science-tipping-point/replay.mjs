@@ -55,7 +55,18 @@ const offered = (wire, id) => wire?.suggested_actions?.some((c) => c.id === id) 
 
 function pointerValue(object, pointer) {
   assert.match(pointer, /^\/(?:[^/]+\/)*(?:node_id|factor_id|target_id|node_ids\/0)$/, 'target pointer must address an ID field');
+  return atPointer(object, pointer);
+}
+
+function atPointer(object, pointer) {
+  assert.ok(typeof pointer === 'string' && pointer.startsWith('/'), 'JSON pointer missing');
   return pointer.slice(1).split('/').reduce((v, key) => v?.[key.replace(/~1/g, '/').replace(/~0/g, '~')], object);
+}
+
+function browserAction(step, control) {
+  assert.equal(step.browser_action?.control, control, 'explicit browser control missing');
+  assert.ok(typeof step.browser_action?.artifact === 'string' && step.browser_action.artifact.length > 0,
+    'browser control witness reference missing');
 }
 
 function sameRun(a, b) {
@@ -96,6 +107,10 @@ export function replay(caseInput, capture) {
   assert.deepEqual(capture.steps.map((s) => s.stage), order, 'missing, duplicate or out-of-order stage');
   for (const step of capture.steps) {
     assert.equal(step.scenario_id, capture.scenario_id, 'cross-scenario capture');
+    if (step.stage === 'refine' && capture.edit_door === 'model-factor-editor') {
+      assert.equal(step.status, null, 'local Review change must not invent an HTTP response');
+      continue;
+    }
     assert.equal(step.status, 200, `${step.stage}: non-success response`);
   }
   const stages = Object.fromEntries(capture.steps.map((s) => [s.stage, s]));
@@ -133,24 +148,42 @@ export function replay(caseInput, capture) {
     assert.ok(/model|comparison|could/i.test(text), 'model-relative qualification missing');
     assert.ok(!/most worth investigating|highest value of information|missing evidence/i.test(text), 'price lever misrepresented as VOI');
     const refine = stages.refine;
-    assert.equal(pointerValue(refine.request, refine.target_pointer), spec.factor_id, 'action selected the wrong factor');
+    assert.ok(['agent-proposal', 'model-factor-editor'].includes(capture.edit_door), 'existing edit door missing');
+    if (capture.edit_door === 'model-factor-editor') {
+      browserAction(refine, 'Review change');
+      browserAction(stages.approve, 'Confirm');
+      const event = atPointer(stages.approve.request, stages.approve.event_pointer);
+      assert.equal(event?.type, 'factor_value_edit', 'existing factor edit carrier missing');
+      assert.equal(event.payload?.target_id, spec.factor_id, 'action selected the wrong factor');
+      assert.equal(event.payload?.field, 'value');
+      assert.equal(event.payload?.raw_value, spec.edit_value, 'approved crossing edit differs from request');
+      assert.equal(event.payload?.unit, row.unit);
+    } else {
+      assert.equal(pointerValue(refine.request, refine.target_pointer), spec.factor_id, 'action selected the wrong factor');
+      const approval = chipId(stages.approve.request);
+      assert.match(approval ?? '', /^(?:agent-approve-proposal:(?:prop_[a-f0-9]{6,64}|gmh_[a-f0-9]{12})|gmh_[a-f0-9]{12})$/, 'explicit bound approval missing');
+      assert.ok(offered(body(refine), approval), 'approval was never offered by the preceding proposal');
+    }
     assert.deepEqual(read(stages.before_approval_read).graph, before.graph, 'refinement wrote before approval');
-    const approval = chipId(stages.approve.request);
-    assert.match(approval ?? '', /^agent-approve-proposal:(?:prop_[a-f0-9]{6,64}|gmh_[a-f0-9]{12})$/, 'explicit bound approval missing');
-    assert.ok(offered(body(refine), approval), 'approval was never offered by the preceding proposal');
     const stale = read(stages.stale_read);
     const edited = factor(stale, spec.factor_id);
-    assert.equal(edited.raw_value, spec.threshold, 'approved figure did not land');
+    assert.ok(spec.edit_value > spec.threshold, 'positive edit must cross the supplied threshold');
+    assert.equal(edited.raw_value, spec.edit_value, 'approved crossing figure did not land');
     assert.equal(edited.unit, row.unit, 'approved unit changed');
     assert.ok(/^user_/.test(edited.source ?? ''), 'user approval provenance missing');
     assert.notEqual(stale.graph_hash, before.graph_hash, 'canonical revision did not move');
     assert.equal(stale.current_read.run_state.kind, 'complete_stale', 'old Run not marked stale');
     assert.equal(stale.current_read.result, null, 'stale read promotes an old result as current');
-    assert.equal(stages.rerun.request?.chip?.action_type, 'run_analysis', 'explicit rerun action missing');
-    assert.ok(offered(body(stages.approve), chipId(stages.rerun.request)), 'rerun did not use the offered control');
+    if (capture.edit_door === 'model-factor-editor') {
+      browserAction(stages.rerun, 'Run analysis');
+      assert.ok(stages.rerun.request && Object.keys(stages.rerun.request).length > 0, 'actual rerun request missing');
+    } else {
+      assert.equal(stages.rerun.request?.chip?.action_type, 'run_analysis', 'explicit rerun action missing');
+      assert.ok(offered(body(stages.approve), chipId(stages.rerun.request)), 'rerun did not use the offered control');
+    }
     const after = read(stages.after_run_read);
     assert.notEqual(after.current_read.run_state.computed_at, before.current_read.run_state.computed_at, 'old Run reused as rerun');
-    assert.equal(factor(after, spec.factor_id).raw_value, spec.threshold);
+    assert.equal(factor(after, spec.factor_id).raw_value, spec.edit_value);
     assert.deepEqual(after.graph.nodes, stale.graph.nodes, 'rerun changed the approved model values, units or provenance');
     const cold = read(stages.cold_read);
     assert.deepEqual(cold.graph, after.graph, 'cold reload lost the approved model');

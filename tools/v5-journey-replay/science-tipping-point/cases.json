@@ -9,7 +9,8 @@
       "fixture_read_at_cee_sha": "752c487b4392cb1ccd299d0ebae4a039e6696ade",
       "factor_id": "pro_plan_price",
       "current_value": 49,
-      "threshold": 55.76
+      "threshold": 55.76,
+      "edit_value": 56
     },
     {
       "id": "served-no-signal",

@@ -26,7 +26,7 @@ function recording(input) {
   } else {
     const changed = clone(graph);
     Object.assign(changed.nodes.find((n) => n.id === input.spec.factor_id).observed_state,
-      { raw_value: 55.76, value: 55.76 / 200, unit: 'GBP/month', source: 'user_confirmed' });
+      { raw_value: 56, value: 56 / 200, unit: 'GBP/month', source: 'user_confirmed' });
     const stale = current(changed, 'changed-analysis-hash', '2026-10-03T00:00:00Z');
     stale.current_read.run_state.kind = 'complete_stale';
     stale.current_read.computed_against_hash = 'original-analysis-hash';
@@ -46,11 +46,30 @@ function recording(input) {
     );
   }
   return { case_id: input.spec.id, scenario_id: 'instrument-selftest-only', evidence_kind: 'instrument-selftest',
+    edit_door: 'agent-proposal',
     configuration: { builds: Object.fromEntries(['ui', 'cee', 'plot', 'isl'].map((n) => [n, '1'.repeat(40)])),
       model: 'instrument-only', effort: 'instrument-only', prompt_hash: 'instrument-only', schema_version: 'instrument-only', flags: {} }, steps };
 }
 
 const stage = (capture, name) => capture.steps.find((s) => s.stage === name);
+function modelEditorRecording() {
+  const capture = recording(positive);
+  capture.edit_door = 'model-factor-editor';
+  const refine = stage(capture, 'refine');
+  refine.status = null;
+  delete refine.request;
+  delete refine.response;
+  delete refine.target_pointer;
+  refine.browser_action = { control: 'Review change', artifact: 'instrument-only-review.png' };
+  const approve = stage(capture, 'approve');
+  approve.browser_action = { control: 'Confirm', artifact: 'instrument-only-confirm.png' };
+  approve.event_pointer = '/system_event';
+  approve.request = { system_event: { type: 'factor_value_edit', payload: {
+    target_id: 'pro_plan_price', field: 'value', value: 0.28, raw_value: 56, unit: 'GBP/month',
+  } } };
+  stage(capture, 'rerun').browser_action = { control: 'Run analysis', artifact: 'instrument-only-run.png' };
+  return capture;
+}
 test('original immutable served fixtures admit exact 49 → 55.76 and attested no-signal', () => {
   assert.equal(positive.row.flip_value, 55.76);
   assert.equal(control.row.flip_value, null);
@@ -61,6 +80,21 @@ test('positive chain checks only an INSTRUMENT-SELFTEST rung', () => {
 test('honest no-signal chain allows ordinary discussion without a measured offer', () => {
   assert.equal(replay(control, recording(control)).rung, 'INSTRUMENT-SELFTEST');
 });
+test('existing Model editor: local review, explicit Confirm, real factor_value_edit, across-threshold56', () => {
+  assert.equal(replay(positive, modelEditorRecording()).rung, 'INSTRUMENT-SELFTEST');
+});
+for (const [name, mutate] of [
+  ['wrong Model-editor target', (c) => { stage(c, 'approve').request.system_event.payload.target_id = 'monthly_churn'; }],
+  ['edit exactly to the boundary', (c) => { stage(c, 'approve').request.system_event.payload.raw_value = 55.76; }],
+  ['missing explicit Confirm witness', (c) => { delete stage(c, 'approve').browser_action; }],
+  ['local review disguised as a server proposal', (c) => { stage(c, 'refine').status = 200; }],
+  ['missing explicit rerun witness', (c) => { delete stage(c, 'rerun').browser_action; }],
+]) {
+  test(`rejects ${name}`, () => {
+    const capture = modelEditorRecording(); mutate(capture);
+    assert.throws(() => replay(positive, capture));
+  });
+}
 
 const negatives = [
   ['rounded threshold', positive, (c) => { stage(c, 'explain').response.assistant_text = 'Pro plan price could reach 56 GBP/month in this model.'; }],
