@@ -2832,6 +2832,8 @@ export async function dispatchOptionLevelsBatch(
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
     readonly fenceRefusalReachesCaller?: boolean;
+    /** ⭐ B3: what each approved option does not model yet, written on its node in the SAME commit as its levels. */
+    readonly optionGaps?: readonly { readonly optionId: string; readonly mechanisms: readonly string[] }[];
   },
   requestId: string,
 ): Promise<DispatchSystemEventResult> {
@@ -2897,7 +2899,7 @@ export async function dispatchOptionLevelsBatch(
   // level whose approved links are declared — goes through the batch entry.
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
-    && batch.identityConfirm === undefined
+    && batch.identityConfirm === undefined && (batch.optionGaps ?? []).length === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
@@ -2908,7 +2910,8 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.frames !== undefined && batch.frames.length > 0 ? { frames: batch.frames } : {}),
       ...(linkStrengths.length > 0 ? { linkStrengths, lastRunIdentityUse } : {}),
       ...(batch.linkEffect !== undefined ? { linkEffect: batch.linkEffect, lastRunIdentityUse } : {}),
-      ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}) }, getSessionStore());
+      ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}),
+      ...(batch.optionGaps !== undefined && batch.optionGaps.length > 0 ? { optionGaps: batch.optionGaps } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
     // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
@@ -3135,6 +3138,11 @@ export type CommitOptionLevelsInput = {
   readonly turn_id: string;
   /** The links the approved proposal declared. They must EQUAL the ones its levels need (`links_mismatch` otherwise). */
   readonly links: readonly { readonly option_id: string; readonly factor_id: string }[];
+  /**
+   * ⭐ B3 (model fidelity): what each approved option does not model yet, as the approved proposal declared it
+   * (`unmodelled_mechanisms`). Written on the option node in the SAME commit as its levels; `[]` clears it.
+   */
+  readonly option_gaps?: readonly { readonly option_id: string; readonly mechanisms: readonly string[] }[];
   readonly levels: readonly {
     readonly option_id: string;
     readonly factor_id: string;
@@ -3254,6 +3262,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { link_strengths: input.link_strengths } : {}),
       ...(input.link_effect !== undefined ? { link_effect: input.link_effect } : {}),
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
+      ...(input.option_gaps !== undefined && input.option_gaps.length > 0 ? { option_gaps: input.option_gaps } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
@@ -3275,6 +3284,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
       reading_token: input.identity_confirm.reading_token } } : {}),
+    ...(input.option_gaps !== undefined && input.option_gaps.length > 0
+      ? { optionGaps: input.option_gaps.map(g => ({ optionId: g.option_id, mechanisms: [...g.mechanisms] })) } : {}),
   }, requestId));
   if (r.graphConflict !== undefined) return { status: 'stale' };
   if (r.commitSkippedReason === 'refused_no_write') {

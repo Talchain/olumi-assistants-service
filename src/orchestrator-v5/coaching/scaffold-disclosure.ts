@@ -61,6 +61,15 @@ export interface OmittedOptionRecord {
   readonly option_id: string;
   /** Raw option label (unsanitised); null when the node carried none. */
   readonly label: string | null;
+  /**
+   * ⭐ B3: WHY the run gate left it out, when the gate knows (`ExcludedOptionRecord`, `analysable-option-gate.ts`).
+   * Absent on every pre-B3 record, which keeps today's copy byte for byte. `incomplete` ships the "does not model … yet"
+   * sentence naming `missing`; `duplicate` ships the existing indistinguishable-from sentence naming
+   * `duplicate_of_label`.
+   */
+  readonly reason?: 'no_interventions' | 'incomplete' | 'duplicate';
+  readonly missing?: readonly string[];
+  readonly duplicate_of_label?: string | null;
 }
 
 /**
@@ -538,10 +547,75 @@ export function buildAnalysisSubmissionDisclosure(
   excluded: readonly OmittedOptionRecord[],
   keptLabelFor?: DedupKeptLabelResolver,
 ): string {
+  // ⭐ B3: an INCOMPLETE option gets its own sentence (it HAS values — "no values set" would be false), appended after
+  // the other omissions. A DUPLICATE the gate left out is named with its twin by the SAME dedup sentence the engine's own
+  // dedup ships, its kept label read off the gate's record. With neither, this is byte-identical to before.
+  const incomplete = excluded.filter((r) => r.reason === 'incomplete');
+  const rest = excluded.filter((r) => r.reason !== 'incomplete');
+  const gateKept = new Map<string, string>();
+  for (const r of rest) {
+    if (r.reason === 'duplicate' && typeof r.duplicate_of_label === 'string') gateKept.set(r.option_id, r.duplicate_of_label);
+  }
+  const resolver: DedupKeptLabelResolver | undefined = gateKept.size === 0
+    ? keptLabelFor
+    : (id) => gateKept.get(id) ?? keptLabelFor?.(id) ?? null;
   return (
     buildBaselineHoldSuffix(heldPartition.analysed) +
-    buildScaffoldOmittedSuffix([...heldPartition.omitted, ...excluded], keptLabelFor)
+    buildScaffoldOmittedSuffix([...heldPartition.omitted, ...rest], resolver) +
+    buildIncompleteOmittedSuffix(incomplete)
   );
+}
+
+// ── INCOMPLETE form (B3 model fidelity, 3 Oct 2026) ─────────────────────
+// An option that says SOME of what it does and declares the rest is not modelled ("Raise Pro to £59 with introductory
+// offer of 1 month free" with only the ongoing price) is left out by the run gate. It HAS values, so the "no values set"
+// sentence would be false; the honest one names what it does not model, from the declaration itself.
+
+/** The longest "the …" phrase naming what is missing that the sentence will carry; longer falls back to no nouns. */
+const SCAFFOLD_MISSING_MAX_CHARS = 120;
+
+function missingPhrase(missing: readonly string[]): string {
+  return missing.join(' and the ');
+}
+
+function incompleteLabelledSuffix(label: string, missing: string | null): string {
+  return (
+    ` '${label}' was left out of this comparison because it ` +
+    `${missing !== null ? `does not model the ${missing} yet` : 'is not fully modelled yet'}. ` +
+    `To include it, say '${buildConfigureOptionChipMessage(label)}'`
+  );
+}
+
+function incompleteGenericSingleSuffix(missing: string | null): string {
+  return (
+    ` One of your options was left out of this comparison because it ` +
+    `${missing !== null ? `does not model the ${missing} yet` : 'is not fully modelled yet'}. ` +
+    `To include it, say '${CONFIGURE_OPTION_GENERIC_CHIP.message}'`
+  );
+}
+
+function incompletePluralSuffix(count: number): string {
+  return (
+    ` ${count} of your options were left out of this comparison because they are not fully modelled yet. ` +
+    `To include them, say '${CONFIGURE_OPTION_GENERIC_CHIP.message}'`
+  );
+}
+
+/**
+ * The incomplete-omission sentence for the gate's `incomplete` records ('' for none). The missing nouns and the label
+ * are each probed against the COMPOSED sentence (the egress grammar + the shared content defences), exactly as every
+ * other slot here is; a slot that would not survive degrades to its generic form, never to a dropped disclosure.
+ */
+export function buildIncompleteOmittedSuffix(incomplete: readonly OmittedOptionRecord[]): string {
+  if (incomplete.length === 0) return '';
+  if (incomplete.length > 1) return incompletePluralSuffix(Math.min(incomplete.length, 99));
+  const record = incomplete[0]!;
+  const nouns = (record.missing ?? []).filter((m) => typeof m === 'string' && m.trim() !== '');
+  const phrase = nouns.length > 0 ? missingPhrase(nouns) : null;
+  const safePhrase = phrase !== null && phrase.length <= SCAFFOLD_MISSING_MAX_CHARS
+    && composedSuffixSurvivesEgress(incompleteGenericSingleSuffix(phrase)) ? phrase : null;
+  const label = safeLabelForSuffix(record.label, (l) => incompleteLabelledSuffix(l, safePhrase));
+  return label !== null ? incompleteLabelledSuffix(label, safePhrase) : incompleteGenericSingleSuffix(safePhrase);
 }
 
 /**
@@ -694,8 +768,21 @@ export const SCAFFOLD_DEDUP_OMITTED_RE_SRC =
  * omission reason the moment it is added here, so a copy branch cannot ship
  * while the egress silently swallows the summary carrying it.
  */
+// ⭐ B3: the INCOMPLETE omission sentence (`buildIncompleteOmittedSuffix`). Module-private on purpose: it is a
+// sub-grammar composed into the union below, never a family of its own (the registry lists each exported family).
+const SCAFFOLD_INCOMPLETE_OMITTED_RE_SRC =
+  '(?:' +
+  ` (?:'[^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS}}' was|One of your options was) left out of this comparison because it ` +
+  `(?:does not model the [^'\\n]{1,${SCAFFOLD_MISSING_MAX_CHARS}} yet|is not fully modelled yet)\\. ` +
+  `To include it, say 'Help me configure [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS + 1}}\\.'` +
+  '|' +
+  ' \\d{1,2} of your options were left out of this comparison because they are not fully modelled yet\\. ' +
+  `To include them, say 'Help me configure [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS + 1}}\\.'` +
+  ')';
+
 export const SCAFFOLD_OMITTED_ANY_RE_SRC =
-  `(?:${SCAFFOLD_OMITTED_RE_SRC}|${SCAFFOLD_DEDUP_OMITTED_RE_SRC})`;
+  `(?:(?:${SCAFFOLD_OMITTED_RE_SRC}|${SCAFFOLD_DEDUP_OMITTED_RE_SRC})(?:${SCAFFOLD_INCOMPLETE_OMITTED_RE_SRC})?` +
+  `|${SCAFFOLD_INCOMPLETE_OMITTED_RE_SRC})`;
 
 /**
  * The union every consumer compiles — the registry egress allowlist tail,
@@ -751,4 +838,10 @@ export const SCAFFOLD_DISCLOSURE_MAX_CHARS =
     ).length,
     dedupOmittedGenericSingleSuffix('y'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,
     dedupOmittedPluralSuffix(99).length,
+  ) +
+  // ⭐ B3: the incomplete sentence can follow either omission sentence above, so it is its OWN term of the sum.
+  Math.max(
+    incompleteLabelledSuffix('x'.repeat(SCAFFOLD_LABEL_MAX_CHARS), 'm'.repeat(SCAFFOLD_MISSING_MAX_CHARS)).length,
+    incompleteGenericSingleSuffix('m'.repeat(SCAFFOLD_MISSING_MAX_CHARS)).length,
+    incompletePluralSuffix(99).length,
   );

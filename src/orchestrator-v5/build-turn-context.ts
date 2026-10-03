@@ -633,6 +633,14 @@ export interface RunAnalysisScenarioSnapshot {
      * treated as `false` by any consumer that can instead say less.
      */
     readonly is_baseline?: boolean;
+    /**
+     * ⭐ B3 (model fidelity + admission): the readiness verdict on THIS option and what it names as missing, carried
+     * from the one readiness authority (`buildCanonicalAnalysisReadyFromGraph`) exactly as `is_baseline` is, so the run
+     * gate excludes an option that declares what it does not model instead of ranking it. Carried, never re-derived.
+     */
+    readonly status?: string;
+    readonly unresolved_targets?: readonly string[];
+    readonly user_questions?: readonly string[];
   }>;
   readonly goal_node_id: string;
   /**
@@ -3163,6 +3171,9 @@ function mergeOptionInterventionObjects(
     label: string;
     interventions: Record<string, unknown>;
     is_baseline?: boolean;
+    status?: string;
+    unresolved_targets?: readonly string[];
+    user_questions?: readonly string[];
   }>,
 ): Array<{
   id: string;
@@ -3170,6 +3181,9 @@ function mergeOptionInterventionObjects(
   label: string;
   interventions: Record<string, unknown>;
   is_baseline?: boolean;
+  status?: string;
+  unresolved_targets?: readonly string[];
+  user_questions?: readonly string[];
 }> {
   const optionNodesById = new Map<string, Record<string, unknown>>();
   for (const node of nodes) {
@@ -3196,6 +3210,10 @@ function mergeOptionInterventionObjects(
       // Omitted when absent so `undefined` ("detection did not run") stays
       // distinguishable from `false` ("detected as not the baseline").
       ...(option.is_baseline !== undefined ? { is_baseline: option.is_baseline } : {}),
+      // ⭐ B3: the readiness verdict travels the same way — carried, so the run gate reads the authority's answer.
+      ...(option.status !== undefined ? { status: option.status } : {}),
+      ...(option.unresolved_targets !== undefined ? { unresolved_targets: [...option.unresolved_targets] } : {}),
+      ...(option.user_questions !== undefined ? { user_questions: [...option.user_questions] } : {}),
     };
   });
 }

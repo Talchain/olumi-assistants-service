@@ -19,6 +19,7 @@
  */
 import { assessRouteAdmission } from '../../cee/graph-readiness/canonical-readiness.js';
 import { targetTestabilityOf, notTargetTestableSentence } from '../admission/target-testability.js';
+import { declaredGapsOf } from './unmodelled-mechanisms.js';
 
 export interface ReadinessItem {
   readonly message: string;
@@ -51,6 +52,11 @@ export interface ReadinessView {
   readonly target_not_testable?: string;
   /** Why a run is refused when no demand explains it: the refusal's own words. Present only then. */
   readonly reason?: string;
+  /**
+   * ⭐ B3: the options in `will_run_without` that are left out because they DECLARE what they do not model yet, with what
+   * that is (`unmodelled-mechanisms.ts`). Present only when there is one, so every other view is unchanged.
+   */
+  readonly not_modelled?: readonly { readonly option: string; readonly missing: readonly string[] }[];
 }
 
 const UNCHECKED: ReadinessView = { checked: false, needs_from_user: [], olumi_can_offer: [], will_run_without: [], levels_not_set: [] };
@@ -108,7 +114,12 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
   for (const n of ((rawGraph as { nodes?: unknown }).nodes as { id?: unknown; label?: unknown }[] | undefined) ?? []) {
     if (typeof n?.id === 'string') labelOf.set(n.id, typeof n.label === 'string' && n.label !== '' ? n.label : n.id);
   }
-  const excluded = (verdict.scaffold_plan.excluded_option_ids ?? []).map((id) => labelOf.get(id) ?? id);
+  const excludedIds = verdict.scaffold_plan.excluded_option_ids ?? [];
+  const excluded = excludedIds.map((id) => labelOf.get(id) ?? id);
+  const notModelled = excludedIds.flatMap((id) => {
+    const missing = declaredGapsOf(rawGraph, id);
+    return missing.length > 0 ? [{ option: labelOf.get(id) ?? id, missing }] : [];
+  });
   const target = notTargetTestableSentence(rawGraph, targetTestabilityOf(rawGraph));
   return {
     checked: true,
@@ -119,6 +130,7 @@ export function readinessViewOf(rawGraph: unknown): ReadinessView {
     levels_not_set: levelsNotSet,
     ...(reason !== undefined ? { reason } : {}),
     ...(target !== null ? { target_not_testable: target } : {}),
+    ...(notModelled.length > 0 ? { not_modelled: notModelled } : {}),
   };
 }
 
@@ -159,9 +171,19 @@ export function withoutCantRunOpening(reason: string): string {
 export function readinessSentence(view: ReadinessView): string {
   if (!view.checked) return 'I could not check whether the analysis can run yet.';
   if (view.may_run === true) {
-    const one = view.will_run_without.length === 1;
-    const leaveOut = view.will_run_without.length === 0 ? ''
-      : `leave out ${one ? `"${view.will_run_without[0]}"` : listOf(view.will_run_without)} until ${one ? 'its levels are' : 'their levels are'} set.`;
+    // ⭐ B3: an option left out because it does not model something yet is said so, naming it — "until its levels are
+    // set" would be false (its levels ARE set). With no such option this is the sentence it always was.
+    const incomplete = view.not_modelled ?? [];
+    const unset = view.will_run_without.filter((o) => !incomplete.some((m) => m.option === o));
+    const one = unset.length === 1;
+    const unsetPart = unset.length === 0 ? ''
+      : `leave out ${one ? `"${unset[0]}"` : listOf(unset)} until ${one ? 'its levels are' : 'their levels are'} set`;
+    const incompletePart = incomplete.length === 0 ? ''
+      : incomplete.length === 1
+        ? `leave out "${incomplete[0]!.option}" until it models the ${incomplete[0]!.missing.join(' and the ')}`
+        : `leave out ${listOf(incomplete.map((m) => m.option))} until each models what it does not yet`;
+    const leaveOut = unsetPart === '' && incompletePart === '' ? ''
+      : `${[unsetPart, incompletePart].filter((p) => p !== '').join(', and ')}.`;
     // ⛔ A run that proceeds over a target it can't test never reads "can run" and then shows nothing (AIQ 5914209776):
     // the lead is DR row 4's own sentence.
     if (view.target_not_testable !== undefined) return leaveOut === '' ? view.target_not_testable : `${view.target_not_testable} The run will ${leaveOut}`;

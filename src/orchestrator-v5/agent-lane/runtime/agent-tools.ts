@@ -134,6 +134,21 @@ const WHOLE_REQUEST = {
   description: 'true ONLY when this one call does everything the user asked for in their latest message: no other change to make, no question to answer, nothing else to explain. If there is anything more, or you are unsure, false.',
 } as const;
 
+/**
+ * ⭐ B3 MODEL FIDELITY (`../unmodelled-mechanisms.ts`): what an option does that its levels do NOT carry — typed, so it
+ * is recorded on the option and the option is kept out of the comparison (shown, with that reason) until it is modelled.
+ * Before, the Agent could only SAY "the free month is not represented yet", and the option was ranked as complete.
+ */
+const UNMODELLED_MECHANISMS = {
+  type: 'array',
+  items: { type: 'string' },
+  description: 'What this option does that these levels do NOT capture, as short nouns in the user\u2019s terms (e.g. '
+    + '"free first month", "billable seats"). Give it whenever you would otherwise tell the user that part of this option '
+    + 'is not represented or not modelled: the option is then recorded as incomplete and kept out of the comparison, with '
+    + 'that reason shown, until it is modelled. [] ONLY to record that something listed before is now modelled. Leave it '
+    + 'out when the levels carry everything the option does.',
+} as const;
+
 /** The factors ONE option would change — shared by the single and the several-option forms of propose_new_option. */
 const ACTS_ON = {
   type: 'array',
@@ -297,12 +312,14 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     parameters: obj({
       label: { type: 'string', description: 'ONE option in the user\u2019s own words. For several, use `options` instead.' },
       acts_on: ACTS_ON,
+      unmodelled_mechanisms: UNMODELLED_MECHANISMS,
       options: {
         type: 'array',
         description: 'Several options the user asked for (2 to 4), each with its own label and factors. One change, one approval.',
         items: obj({
           label: { type: 'string', description: 'The option in the user\u2019s own words.' },
           acts_on: ACTS_ON,
+          unmodelled_mechanisms: UNMODELLED_MECHANISMS,
         }, ['label', 'acts_on']),
       },
       new_factors: {
@@ -570,6 +587,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
               'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
+          unmodelled_mechanisms: UNMODELLED_MECHANISMS,
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
       whole_request: WHOLE_REQUEST,
@@ -614,6 +632,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
               'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
+          unmodelled_mechanisms: UNMODELLED_MECHANISMS,
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
     }, ['assumptions', 'option_levels']),
@@ -835,8 +854,10 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   proposeNewOption(ctx: AgentToolContext, args: {
     label?: string; acts_on?: NewOptionActsOn[]; rationale: string;
+    /** ⭐ B3: what the ONE option does that its levels do not carry yet (`../unmodelled-mechanisms.ts`). */
+    unmodelled_mechanisms?: readonly string[];
     /** Several options as ONE change (F4): each `{label, acts_on}`, up to 4. */
-    options?: { label: string; acts_on: NewOptionActsOn[] }[];
+    options?: { label: string; acts_on: NewOptionActsOn[]; unmodelled_mechanisms?: readonly string[] }[];
     /** Factors the model lacks, added in the SAME change (`planNewFactors`): each named in an option's acts_on. */
     new_factors?: readonly {
       label: string; affects: readonly { label: string; direction?: 'positive' | 'negative' }[];
@@ -845,10 +866,16 @@ export interface AgentCapabilities {
     }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
-    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean }[];
+    interventions: readonly {
+      option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean;
+      /** ⭐ B3: what this option does that its levels do NOT carry yet (`unmodelled-mechanisms.ts`); `[]` = nothing. */
+      unmodelled_mechanisms?: readonly string[];
+    }[];
   }, internal?: ProposeLevelsInternal): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
-    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
+    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean;
+      /** ⭐ B3: forwarded with the level to `proposeOptionInterventions` (`../unmodelled-mechanisms.ts`). */
+      unmodelled_mechanisms?: readonly string[] }[];
   }): Promise<ToolResult>;
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
   reconcileGoalScope?(ctx: AgentToolContext, args: ReconcileGoalScopeArgs): Promise<ToolResult>;

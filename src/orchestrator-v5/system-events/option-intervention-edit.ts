@@ -73,6 +73,7 @@ import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-option
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../agent-lane/stated-link-band-context.js';
 import { factorUnitOf } from '../agent-lane/unit-conflict.js';
+import { withOptionGaps } from '../agent-lane/unmodelled-mechanisms.js';
 import type { IdentityRunUse } from '../compose/definitional-links.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import { structuralEdgeValue } from '../routing/add-option-transaction.js';
@@ -704,6 +705,13 @@ export type OptionInterventionBatchExecutionInput =
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
     readonly lastRunIdentityUse?: IdentityRunUse | null;
+    /**
+     * ⭐ B3 (model fidelity): what each approved option does that the model does NOT carry yet, as the approved proposal
+     * DECLARED it (`unmodelled_mechanisms`). Written onto the option NODE (`unresolved_targets` + `user_questions`) in the
+     * SAME commit as its levels — one approval, one append. `[]` CLEARS a declaration (the mechanism is now modelled).
+     * Only with levels, and only on an option this batch sets a level on; anything else writes nothing.
+     */
+    readonly optionGaps?: readonly { readonly optionId: string; readonly mechanisms: readonly string[] }[];
   };
 
 /**
@@ -739,7 +747,18 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   const { targets: _callerTargets, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
-    linkEffect: _callerEffect, identityConfirm: _callerIdentity, lastRunIdentityUse: _callerRunUse, ...common } = input;
+    linkEffect: _callerEffect, identityConfirm: _callerIdentity, lastRunIdentityUse: _callerRunUse, optionGaps: _callerGaps,
+    ...common } = input;
+  // ⭐ B3: a gap rides ONLY with the levels it was declared beside, on an option this batch sets a level on.
+  const optionGaps = input.optionGaps ?? [];
+  if (optionGaps.length > 0) {
+    const levelled = new Set(targets.map(t => t.optionId));
+    if (input.linkStrengths !== undefined || input.linkEffect !== undefined || input.identityConfirm !== undefined
+      || optionGaps.some(g => !levelled.has(g.optionId))
+      || new Set(optionGaps.map(g => g.optionId)).size !== optionGaps.length) {
+      return { kind: 'refused', reason: 'option_gaps_not_with_their_levels' };
+    }
+  }
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -872,13 +891,22 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     ? ({ kind: 'unchanged' } as const)
     : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;
-  if (candidate.kind === 'unchanged' && !valuesChanged) return candidate;
+  // ⭐ B3: the declared gaps, applied to the graph the levels produced (or, when every level is already held, to the
+  // base) — a declaration that changes nothing on any node is no change at all.
+  const gapBase = (candidate.kind === 'candidate' ? candidate.graph : levelBase) as EditableGraph;
+  const gapGraph = applyOptionGaps(gapBase, optionGaps);
+  const gapsChanged = gapGraph !== gapBase;
+  if (candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged) return candidate;
+  if (gapsChanged && (!isEditableGraph(gapGraph) || !isEditableGraph(before))) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
   // Every level already held (a compound whose values alone change): the values commit on their own, still ONE append.
-  const plan = candidate.kind === 'candidate'
+  const planBeforeGaps = candidate.kind === 'candidate'
     ? { graph: candidate.graph, operations: candidate.operations, analysisGraphHash: candidate.analysisGraphHash,
       targetsWritten: candidate.targetsWritten, handlerFacts: [...valueFacts, candidate.handlerFact] as unknown[] }
     : { graph: levelBase as EditableGraph, operations: [] as PatchOperation[], analysisGraphHash: levelBaseHash,
       targetsWritten: [] as OptionLevelTarget[], handlerFacts: [...valueFacts] as unknown[] };
+  const gapHash = gapsChanged ? computeAnalysisAffectingGraphHash(gapGraph) : planBeforeGaps.analysisGraphHash;
+  if (!gapHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+  const plan = gapsChanged ? { ...planBeforeGaps, graph: gapGraph, analysisGraphHash: gapHash } : planBeforeGaps;
   if (expectedLinks !== undefined) {
     const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
@@ -892,7 +920,10 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // P1-a: one line naming Olumi's own links this commit re-sized, labels read from the committed graph.
   const resizedLine = groupResizedLinks(linksResized, [...values.map(v => v.factorId), ...frames.map(f => f.factorId)], labelOf)
     .map(resizedLinksSentence);
-  const acknowledgment = [...valueConfirmations, ...resizedLine, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
+  const gapLines = gapsChanged ? optionGaps.map(g => g.mechanisms.length > 0
+    ? `"${labelOf(g.optionId)}" is recorded as not yet modelling the ${g.mechanisms.join(' and the ')}, so it stays out of the comparison until it does.`
+    : `"${labelOf(g.optionId)}" no longer lists anything it does not model, so it can be compared again.`) : [];
+  const acknowledgment = [...valueConfirmations, ...resizedLine, ...gapLines, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
     factorLabel: labelOf(t.factorId), committedValue: t.modelValue,
     ...((f) => (f !== undefined ? { committedFigure: f } : {}))(committedFigureOf(plan.graph, t.optionId, t.factorId, t.modelValue)) })
     + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))]
@@ -964,6 +995,29 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   } catch {
     return { kind: 'unverified', reason: 'canonical_readback_failed', commitAttempted: true };
   }
+}
+
+/**
+ * ⭐ B3: each declared option gap written onto its option NODE (`withOptionGaps`: set both carriers, or clear both).
+ * Returns the INPUT BY REFERENCE when no node changes, so "nothing declared" and "declared what is already stored" are
+ * both no change. Never touches a node that is not an option, and never adds one.
+ */
+function applyOptionGaps(
+  graph: EditableGraph,
+  gaps: readonly { readonly optionId: string; readonly mechanisms: readonly string[] }[],
+): EditableGraph {
+  if (gaps.length === 0) return graph;
+  const byId = new Map(gaps.map(g => [g.optionId, g.mechanisms] as const));
+  let changed = false;
+  const nodes = graph.nodes.map((node) => {
+    const mechanisms = node.kind === 'option' ? byId.get(String(node.id)) : undefined;
+    if (mechanisms === undefined) return node;
+    const next = withOptionGaps(node, mechanisms);
+    if (isDeepStrictEqual(next, node)) return node;
+    changed = true;
+    return next;
+  });
+  return changed ? { ...graph, nodes } : graph;
 }
 
 /**

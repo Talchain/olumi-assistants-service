@@ -70,7 +70,8 @@ function invocation(): HandlerInvocation {
   return { payload: { scenario_id: 'c96fc4bb-ccd1-4615-a6d9-52c652e3e0e4' }, requestId: 'req-c96', signal: new AbortController().signal, context: {}, orientationText: '' } as unknown as HandlerInvocation;
 }
 function snapshotOf(graph: Rec): RunAnalysisScenarioSnapshot {
-  const options = graph.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec) => ({ id: n.id, option_id: n.id, label: n.label, interventions: { pro_plan_price: 59 } }));
+  // Distinct levels: two options sending the SAME vector are one arm, and the run gate leaves the twin out (B3-2).
+  const options = graph.nodes.filter((n: Rec) => n.kind === 'option').map((n: Rec, i: number) => ({ id: n.id, option_id: n.id, label: n.label, interventions: { pro_plan_price: 59 + i } }));
   return { graph: JSON.parse(JSON.stringify(graph)), options, goal_node_id: FX.goal_node_id, rawPersistedGraph: JSON.parse(JSON.stringify(graph)) } as RunAnalysisScenarioSnapshot;
 }
 async function sentGraph(snapshot: RunAnalysisScenarioSnapshot): Promise<{ graph: Rec; outcome: unknown }> {
