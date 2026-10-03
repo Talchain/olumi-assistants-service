@@ -65,24 +65,43 @@ if [ -n "$migration_hits" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. P1-2 regression: vendored schemas pin must match the committed tarball.
-# If package.json pin and vendor/*.tgz filename disagree, `pnpm install`
-# fails / `npm ci` fails, and at least one of these drifted without the other
-# being updated.
+# 3. P1-2 regression: the vendored schemas pin must resolve to a committed tarball.
+# If package.json pins a version whose vendor/*.tgz is missing, `pnpm install`
+# / `npm ci` fail: the pin and the vendoring drifted apart.
+#
+# OTHER versions may sit beside the pinned one on purpose (the previous
+# archive is kept for rollback: staging tracks 0.73.0 and 0.74.0). The old
+# rule compared EVERY vendored filename to the one pin, so a kept rollback
+# archive failed the pre-push hook on every push (Executor, programme-docs
+# #87 5972191802). What must hold is: the PINNED archive is present, and its
+# bytes match its committed .sha256 when one is committed.
 # ---------------------------------------------------------------------------
-pin_version="$(grep -oE '"@talchain/schemas": "file:\./vendor/talchain-schemas-[0-9.]+\.tgz"' "${REPO_ROOT}/package.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
-vendored_files="$(ls "${REPO_ROOT}/vendor/" | grep -oE 'talchain-schemas-[0-9.]+\.tgz$' | sort -u | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+# EXACTLY three numeric components, anchored on both sides: "0.74.0.1" or "0.74.0." must not be read as
+# "0.74.0" and be satisfied by the neighbouring archive (Codex CR on #2540 @2e317faf).
+pin_version="$(sed -nE 's/.*"@talchain\/schemas": "file:\.\/vendor\/talchain-schemas-([0-9]+\.[0-9]+\.[0-9]+)\.tgz".*/\1/p' "${REPO_ROOT}/package.json" | head -1 || true)"
+vendored_files="$(ls "${REPO_ROOT}/vendor/" | grep -oE 'talchain-schemas-[0-9.]+\.tgz$' | sort -u | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | tr '\n' ' ' | sed 's/ $//' || true)"
 if [ -z "$pin_version" ]; then
   echo "TRIPWIRE: package.json @talchain/schemas pin does not match file:./vendor/... shape."
   EXIT=1
-elif [ "$vendored_files" != "$pin_version" ]; then
-  echo "TRIPWIRE: @talchain/schemas pin ($pin_version) and vendored tarball ($vendored_files) disagree."
-  echo "  reason: P1-2 regression: vendoring out-of-sync with pin."
-  EXIT=1
+else
+  pinned_tgz="${REPO_ROOT}/vendor/talchain-schemas-${pin_version}.tgz"
+  if [ ! -f "$pinned_tgz" ]; then
+    echo "TRIPWIRE: @talchain/schemas pin ($pin_version) has no vendored tarball (vendored: ${vendored_files:-none})."
+    echo "  reason: P1-2 regression: vendoring out-of-sync with pin."
+    EXIT=1
+  elif [ -f "${pinned_tgz}.sha256" ]; then
+    want_sha="$(tr -d '[:space:]' < "${pinned_tgz}.sha256" | cut -c1-64)"
+    have_sha="$(shasum -a 256 "$pinned_tgz" | cut -d' ' -f1)"
+    if [ "$want_sha" != "$have_sha" ]; then
+      echo "TRIPWIRE: vendored talchain-schemas-${pin_version}.tgz does not match its committed .sha256."
+      echo "  reason: the pinned archive's bytes changed without its checksum (or the reverse)."
+      EXIT=1
+    fi
+  fi
 fi
 
 if [ "$EXIT" -eq 0 ]; then
-  echo "Docs consistency check OK: no stale grant-model wording; no p_user_id in migrations; pin and vendored tarball agree."
+  echo "Docs consistency check OK: no stale grant-model wording; no p_user_id in migrations; the pinned schemas tarball is vendored and matches its checksum."
 fi
 
 exit "$EXIT"
