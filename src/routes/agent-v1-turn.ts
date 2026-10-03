@@ -25,6 +25,7 @@
 
 import { runFencedInProcessWrite } from '../orchestrator/turn-fence-prehandler.js';
 import { isRunExplanationChip, runExplanationChip, runExplanationMatches, recentRunExplanationConversation, RUN_EXPLANATION_PREFIX, RUN_EXPLANATION_MESSAGE, RUN_RESULT_READY_TEXT, RUN_EXPLANATION_UNAVAILABLE_TEXT, RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT } from '../orchestrator-v5/agent-lane/run-explanation.js';
+import { tippingPointCoachingFor, settleTippingPointCoaching, TIPPING_POINT_PRESS_ID, type TippingPointCoaching } from '../orchestrator-v5/agent-lane/tipping-point-coaching.js';
 import { composeRerunExplanation, rerunExplanationPlan, rerunViewFailures } from '../orchestrator-v5/agent-lane/rerun-explanation.js';
 import { analysisResultForAgent } from '../orchestrator-v5/agent-lane/decision-sensitivity.js';
 
@@ -1718,7 +1719,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       let replayText = prior.assistant_message ?? 'That request was already completed.';
       let replayNarration: { status: 'pending' | 'ready' | 'unavailable' | 'stale'; run_key: string } | undefined;
       const boundControl: OfferedAction[] = [];
-      if (approvedProposal === undefined && isRunExplanationChip(explanationId)) {
+      if (approvedProposal === undefined && explanationId === TIPPING_POINT_PRESS_ID) {
+        // This unbound question asks about today's result: retry/cold read reconstructs today's fact, never Run A's words.
+        const tipping = tippingPointCoachingFor(scenarioId, state);
+        replayText = tipping.kind === 'found' ? settleTippingPointCoaching(tipping, tipping.reply).reply : tipping.reply;
+        boundControl.push(TALK_IT_THROUGH_CHIP);
+      } else if (approvedProposal === undefined && isRunExplanationChip(explanationId)) {
         const runKey = explanationId.slice(RUN_EXPLANATION_PREFIX.length);
         if (!runExplanationMatches(explanationId, scenarioId, state)) {
           replayText = RUN_EXPLANATION_UNAVAILABLE_TEXT;
@@ -2389,8 +2395,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * BEFORE it is sent.
      */
     let methodTurn: MethodTurn | null = null;
+    let tippingTurn: TippingPointCoaching | null = null;
     let methodGraph: unknown;
     const pressedChipId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
+    if (result === undefined && approvedProposal === undefined && pressedChipId === TIPPING_POINT_PRESS_ID) {
+      tippingTurn = tippingPointCoachingFor(scenarioId, await readBackState(readingDispatch, scenarioId));
+      fastPath = 'method';
+      const text = tippingTurn.kind === 'found'
+        ? settleTippingPointCoaching(tippingTurn, tippingTurn.reply).reply : tippingTurn.reply;
+      result = { assistant_text: text, items: [], tool_calls: [], tool_results: [], mutated: false,
+        hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+    }
     if (result === undefined && approvedProposal === undefined && isMethodPress(pressedChipId)) {
       const rb = await readBackState(readingDispatch, scenarioId);
       methodGraph = rb.graph;
@@ -2722,9 +2738,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // A successful bound check reuses the exact read that supplied the narration. A mismatch/failure
     // reads current wire state, but never restores the old explanation's licence.
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
-      : await readBackState(fastPath === 'explain'
+      : await readBackState(fastPath === 'explain' || tippingTurn !== null
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
+    if (tippingTurn?.kind === 'found' && !runExplanationMatches(tippingTurn.run_key, scenarioId, finalRead)) {
+      text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
+    }
     if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) === null) {
       text = RUN_RESULT_UNVERIFIED_TEXT;
@@ -2852,7 +2871,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⛔ One button per id: a card issued THIS turn and the same card carried from the last (its id is its content) were
     // both offered, so the Run button's reply showed "Yes, calculate it that way" and "Change something first" TWICE
     // (R3 5910885689, served e9fba88; the UI does not de-duplicate).
-    const offeredSpecific: OfferedAction[] = fastPath === 'method' && methodTurn !== null
+    const offeredSpecific: OfferedAction[] = fastPath === 'method' && tippingTurn !== null
+      ? [TALK_IT_THROUGH_CHIP]
+      : fastPath === 'method' && methodTurn !== null
       // T3, terminal: the method's ONE card (its approval) and the method's own follow-ups (RC method_turn_rule), nothing else.
       ? firstOfEachId([...approvals, ...(methodTurn.kind === 'run' ? [TALK_IT_THROUGH_CHIP] : methodTurn.actions)])
       // Widen, terminal: the door's ONE card (its approval) and RC's follow-up, or the unavailable reply's own follow-up.
