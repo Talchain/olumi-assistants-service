@@ -16,10 +16,12 @@
  * 3. the admission does not license a leader, or the run looked and declined (a `withheld`-kind reason) → `withheld`;
  * 4. ruling (ii): a separation that could not be evaluated (`separation_unavailable`) → `withheld` (fail-closed);
  * 5. otherwise `permitted`.
+ * 0. (before all of these, P0 SHARED DATA) an admission that is absent, malformed, or on the run-refusal axis
+ *    (`structurally_analysable: false`) → `withheld`. Only M1 (comparative_leader) and M2 (quantified_provisional,
+ *    caveated) can license; the matrix is in programme-docs `output/p0-shared-data/AUDIT.md` §1b.
  *
  * PURE. Never throws.
  */
-import { analysisReadyPermitsLeaderNaming, permittedAnalysisModeFromAnalysisReady } from '../admission/analysis-admission.js';
 import { leaderClaimReasonKind, WITHHELD_SEPARATION_UNAVAILABLE } from './analysis-state-v1.js';
 
 export type LeaderLicence = 'permitted' | 'permitted_with_caveat' | 'withheld';
@@ -37,13 +39,36 @@ export interface LeaderLicenceInput {
 
 export function leaderLicence(o: LeaderLicenceInput): LeaderLicence {
   if (o.mayNameLeadingOption !== true) return 'withheld';
-  if (o.separationEstablished === true && permittedAnalysisModeFromAnalysisReady(o.analysisReady) === 'quantified_provisional') {
-    return 'permitted_with_caveat';
-  }
-  if (!analysisReadyPermitsLeaderNaming(o.analysisReady)) return 'withheld';
+  // Read both producer spellings here. The legacy V5 predicate intentionally
+  // stands down on projected admissions and cannot enforce this licence.
+  const mode = claimStrengthMode(o.analysisReady);
+  if (mode === null) return 'withheld';
+  // A provisional caveat cannot override a canonical restriction, including
+  // an unresolved goal scope on a separated Run.
   if (leaderClaimReasonKind(o.leaderClaimWithheldReason) === 'withheld') return 'withheld';
   if (o.leaderClaimWithheldReason === WITHHELD_SEPARATION_UNAVAILABLE) return 'withheld';
+  if (mode === 'quantified_provisional') {
+    return o.separationEstablished === true ? 'permitted_with_caveat' : 'withheld';
+  }
   return 'permitted';
+}
+
+/**
+ * A published admission that answers "how strong a claim?": the run-axis flag is `true` and the mode is recognised.
+ *
+ * ⚠ TWO SPELLINGS OF ONE FLAG, BOTH PRODUCER-MINTED. `analysis_ready.analysis_admission.structurally_analysable` (the
+ * canonical payload) and the `/graph` read's top-level projection `analysis_admission.admitted`
+ * (`routes/analysis-admission-projection.ts`: `admitted: a.structurally_analysable`), which the Agent's follow-up state
+ * passes in (`withSavedRunCertainty`). The canonical spelling wins when present; neither present fails closed.
+ */
+function claimStrengthMode(analysisReady: unknown): 'comparative_leader' | 'quantified_provisional' | null {
+  const admission = (analysisReady as { analysis_admission?: unknown } | null | undefined)?.analysis_admission;
+  if (admission === null || typeof admission !== 'object' || Array.isArray(admission)) return null;
+  const a = admission as { structurally_analysable?: unknown; admitted?: unknown; permitted_analysis_mode?: unknown };
+  const runnable = 'structurally_analysable' in a ? a.structurally_analysable : a.admitted;
+  if (runnable !== true) return null;
+  return a.permitted_analysis_mode === 'comparative_leader' || a.permitted_analysis_mode === 'quantified_provisional'
+    ? a.permitted_analysis_mode : null;
 }
 
 /** The licence from a turn's `analysis_state` + `analysis_ready`, read the way the Agent lane's wire gate reads them. */

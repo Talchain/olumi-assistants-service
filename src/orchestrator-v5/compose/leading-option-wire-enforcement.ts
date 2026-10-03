@@ -652,6 +652,10 @@ function projectBlocksForWithheldClaim(
   const projected = blocks.map((block) => {
     if (block === null || typeof block !== 'object' || Array.isArray(block)) return block;
     const source = block as Record<string, unknown>;
+    // A draft model carries the team's reasoning, including disputed leader
+    // claims. It is not a current analytical recommendation. Preserve its
+    // body, graph and provenance verbatim when this Run withholds a leader.
+    if (source.type === 'draft_graph') return block;
     let next: Record<string, unknown> | null = null;
     const write = (key: string, value: unknown): void => {
       next ??= { ...source };

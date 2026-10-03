@@ -26,6 +26,9 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
+import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
+import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
 
 /**
@@ -82,6 +85,65 @@ export function decisionSensitivityOf(enrichment: unknown): DecisionSensitivity 
   return { status: 'not_measured' };
 }
 
+/**
+ * The first usable crossing in producer order, read by the existing parser and display predicate.
+ * Values are already in display units: preserve their supplied precision, never calculate or round a replacement.
+ * This factor fact names no option and has no EVPPI dependency. Its enclosing selected analysis result carries the
+ * existing computed_against_hash / Run identity; callers consume canonical currentness, never infer it from this fact.
+ * No rows are not_evaluated, all attested no-flip rows are no_flip_in_range, and unusable/unsafe rows are unresolved.
+ * These are local projection outcomes, not a new shared status-transport contract.
+ */
+export type TippingPoint =
+  | {
+    readonly status: 'found';
+    readonly factor_id: string;
+    readonly label: string;
+    readonly direction: 'increase' | 'decrease';
+    readonly unit: string | null;
+    readonly current_value: number;
+    readonly threshold: number;
+    readonly current_display: string;
+    readonly threshold_display: string;
+    readonly say: string;
+  }
+  | { readonly status: 'no_flip_in_range' }
+  | { readonly status: 'unresolved' }
+  | { readonly status: 'not_evaluated' };
+
+const inUnit = (value: number, unit: string | null): string => {
+  const n = String(value);
+  if (unit === null || unit.trim() === '') return n;
+  const suffix = unit.trim();
+  // Compact the one-character percent suffix only; the shared display predicate already licensed the values.
+  return classifyUnitScaleClass(suffix) === 'percent' && suffix.length === 1 ? `${n}${suffix}` : `${n} ${suffix}`;
+};
+
+export function tippingPointOf(enrichment: unknown): TippingPoint {
+  const e = recordOf(enrichment);
+  if (e === undefined) return { status: 'not_evaluated' };
+  const rows = readTopLevelFlipRows(e);
+  if (rows.length === 0) return { status: 'not_evaluated' };
+  const first = rows.find((r) => r.kind === 'flip_pair' && r.current_value !== null && r.flip_value !== null
+    && flipRowScaleIsDisplaySafe({ value_scale: r.value_scale }, r.current_value, r.flip_value));
+  if (first === undefined) {
+    return rows.every((r) => r.kind === 'attested_no_flip') ? { status: 'no_flip_in_range' } : { status: 'unresolved' };
+  }
+  const current = inUnit(first.current_value!, first.unit);
+  const threshold = inUnit(first.flip_value!, first.unit);
+  return {
+    status: 'found',
+    factor_id: first.factor_id,
+    label: first.factor_label,
+    direction: first.direction!,
+    unit: first.unit,
+    current_value: first.current_value!,
+    threshold: first.flip_value!,
+    current_display: current,
+    threshold_display: threshold,
+    say: `${first.factor_label} is a factor that could change this: the comparison could change if it ${first.direction === 'increase' ? 'rises above' : 'falls below'} ${threshold}.`,
+  };
+}
+
 /** The run's `analysis_result` block as the Agent reads it: (i)–(iii) above. Never mutates its input. */
 export function analysisResultForAgent(result: unknown): unknown {
   const block = recordOf(result);
@@ -135,6 +197,7 @@ export function analysisResultForAgent(result: unknown): unknown {
     if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
   out.decision_sensitivity = decisionSensitivityOf(enrichment);
+  out.tipping_point = tippingPointOf(enrichment);
   return out;
 }
 

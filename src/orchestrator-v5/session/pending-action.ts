@@ -54,6 +54,7 @@
 // and cycle-free.
 import { isClarifyDimension } from '../clarify-v2/rubric.js';
 
+import { GoalScopeReconciliationSchema, type GoalScopeReconciliation } from '../../schemas/goal-scope.js';
 export type PendingActionId = string;
 
 /**
@@ -259,6 +260,7 @@ export interface ElicitEditTargetFields {
 }
 
 export type PendingActionAction =
+  | GoalScopeReconciliation
   | {
       readonly kind: 'set_factor_value';
       readonly factor_id: string;
@@ -601,6 +603,7 @@ export type PendingActionKind = PendingActionAction['kind'];
  * For chip-derivation use `CHIP_DERIVABLE_ACTION_TYPES` instead.
  */
 export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
+  'reconcile_goal_scope',
   'set_factor_value',
   'run_analysis',
   'what_would_flip',
@@ -900,6 +903,7 @@ export const PENDING_ACTION_ASK_WALL_TTL_MS = 30 * 60 * 1000;
  * Every non-member keeps the default bounds unchanged.
  */
 export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = {
+  reconcile_goal_scope: false, // issue lifetime and answer-binding lifetime are deliberately separate
   // Recorded questions. Answerable only by a bare number or a menu index, and
   // every bind path re-checks the live graph before it binds.
   elicit_target_baseline: true, // "Roughly what percentage is X at right now?"
@@ -1216,6 +1220,7 @@ export const CONFIRMATION_EXPECTING_ACTION_TYPES: ReadonlySet<PendingActionKind>
  *     (wall-clock only, documented there).
  */
 export function isPendingActionExpired(pa: PendingAction, nowMs: number): boolean {
+  if (pa.action.kind === 'reconcile_goal_scope') return false;
   const expiresMs = Date.parse(pa.expires_at_iso);
   if (!Number.isFinite(expiresMs)) return true;
   if (nowMs > expiresMs) return true;
@@ -1250,6 +1255,7 @@ export type ElicitTargetBaselinePending = PendingAction & {
  * the elliptical carry must refuse.
  */
 export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean> = {
+  reconcile_goal_scope: false, // only the scoped answer gate may bind this question
   // The asks whose natural answer IS a bare number, or a bare menu index.
   // "What does this option cost?" -> "95000" / "£95,000". TRUE so a lone
   // numeric reply is CLAIMED rather than falling through to the edit lane.
@@ -1513,6 +1519,7 @@ export function parsePendingAction(input: unknown): PendingAction | null {
   const a = action as Record<string, unknown>;
   if (typeof a.kind !== 'string') return null;
   if (!RESUMABLE_ACTION_TYPES.has(a.kind as PendingActionKind)) return null;
+  if (a.kind === 'reconcile_goal_scope' && !GoalScopeReconciliationSchema.safeParse(a).success) return null;
   if (a.kind === 'set_factor_value') {
     if (typeof a.factor_id !== 'string') return null;
     if (typeof a.value !== 'number') return null;

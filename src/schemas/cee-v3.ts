@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import { GoalScopeSchema } from './goal-scope.js';
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
@@ -202,6 +203,8 @@ export const NodeV3 = z.object({
   ref: z.string().regex(/^(OC|G|O|F|R|D|A)[1-9][0-9]{0,8}$/).optional().catch(undefined),
   /** Quantitative data for factor nodes */
   observed_state: ObservedStateV3.optional(),
+  /** Approved scope of this goal; unresolved readings stay on the pending-action carrier. */
+  goal_scope: GoalScopeSchema.optional(),
   /** Factor category (V12.4+): controllable, observable, external - only for factor nodes */
   category: FactorCategoryV3.optional(),
   /**

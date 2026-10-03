@@ -76,7 +76,7 @@ describe('the Agent is told how to use `provisional` (the flag is worded, not me
       blocks: [{ type: 'analysis_result', data: { marker: 'the-run' } }],
       analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: true, separation: 'separated' } },
       analysis_ready: { status: 'ready', options: [], blockers: [], analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional' } } }));
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Growth' }], edges: [] }, graph_hash: 'h1', analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } }, analysis_ready: { status: 'ready', analysis_admission: { permitted_analysis_mode: 'quantified_provisional' } },
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph: { nodes: [{ id: 'g', kind: 'goal', label: 'Growth' }], edges: [] }, graph_hash: 'h1', analysis_result: { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } }, analysis_ready: { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional' } },
       analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, leader_claim: { permitted: true, separation: 'separated' } } }));
     await app.register(agentV1TurnRoute);
     await app.ready();

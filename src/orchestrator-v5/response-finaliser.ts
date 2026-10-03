@@ -185,6 +185,7 @@ export function isFinalisedV5Response(value: unknown): value is FinalisedV5Respo
 // ─── Context ──────────────────────────────────────────────────────────────
 
 export interface FinaliserContext {
+  readonly goalScopeClaimInput?: import('./compose/goal-scope-claim-input.js').GoalScopeClaimInput;
   /** Already carried by sendFinalised200; independent of selected fact scope. */
   readonly scenarioId?: string;
   /**
@@ -646,6 +647,7 @@ function attachAnalysisState(
     && (selectedRun !== null
       || (ctx.analysisStateCanonical === undefined && canonical.selected_fact_index !== null));
   const analysisState = composeAnalysisStateV1({
+    goalScopeClaimInput: ctx.goalScopeClaimInput,
     canonical,
     // Read for `refusal_declared` only (see `composeRunState`). Substituting is
     // safe because a refusal turn can never reach supersession: its verdict is
@@ -906,7 +908,8 @@ function attachRunDelta(
   const built = buildRunDelta({
     priorFacts: ctx.priorFacts,
     // Fail-closed on absence, per this member's own documented semantics.
-    mayNameLeadingOption: ctx.mayNameLeadingOption === true,
+    mayNameLeadingOption: ctx.mayNameLeadingOption === true
+      && (ctx.goalScopeClaimInput === undefined || ctx.goalScopeClaimInput.status === 'clear'),
   });
   // The producer's own union, passed through. This caller mints no taxonomy for
   // the five: re-spelling them here would be a second list free to drift from

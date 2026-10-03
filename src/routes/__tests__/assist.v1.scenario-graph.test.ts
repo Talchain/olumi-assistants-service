@@ -100,6 +100,7 @@ const getScenarioOwner = vi.fn();
 const readExistingScenario = vi.fn();
 
 const store = {
+  readMostRecentPendingActions: async () => [],
   readExistingScenario: undefined as typeof readExistingScenario | undefined,
   scenarioExists,
   loadGraphAndBriefText,

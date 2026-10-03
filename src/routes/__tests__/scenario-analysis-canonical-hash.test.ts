@@ -76,6 +76,7 @@ const readFactsWithTurnFor = vi.fn();
 const readScenarioRunAnalysisFactsFor = vi.fn();
 const readAnalysisInvalidatedAt = vi.fn();
 const routeStore = {
+  readMostRecentPendingActions: async () => [],
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,
@@ -147,6 +148,7 @@ function makeTopLevelRawOnly(raw = 120000): Dict {
 /** A store double for the run-time seam ONLY — never the route's store. */
 function snapshotStore(graph: unknown): SessionStore {
   return {
+    readMostRecentPendingActions: async () => [],
     loadGraph: async () => graph,
     loadGraphAndBriefText: async () => ({ graph, briefText: null }),
   } as unknown as SessionStore;

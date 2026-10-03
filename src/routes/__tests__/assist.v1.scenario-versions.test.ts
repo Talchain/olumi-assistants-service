@@ -1669,3 +1669,24 @@ describe("POST /versions/restore — a version the receipt cannot carry is refus
     expect(res.json().receipt?.version_id).toBe(RESTORED_VERSION);
   });
 });
+
+
+describe("Semantic spine: approved scope survives the existing restore", () => {
+  it("restores scope, baseline and withdrawn identity in the same saved graph", async () => {
+    const goal = { id: "mrr", kind: "goal", label: "MRR",
+      observed_state: { raw_value: 10000, baseline: .4, value: .4, cap: 25000, unit: "£/month", source: "user_override" },
+      goal_scope: { modelled: "all revenue streams", alternative: "Pro revenue only", extent: "total", stated_in_brief: true,
+        source: { quote: "£10k total MRR" }, component: { label: "Pro", share: .3, rate_id: "price", count_id: "accounts", basis: "different",
+          count_basis: "registered accounts, not billable subscriptions", source: { quote: "Pro is 30% of total MRR" }, basis_source: { quote: "300 are registered accounts" } } } };
+    const saved = { nodes: [goal, { id: "price", kind: "factor", label: "Pro price" }, { id: "accounts", kind: "factor", label: "Pro accounts",
+      observed_state: { raw_value: 300, value: .6, cap: 500, unit: "accounts", source: "user_override" } }], edges: [] };
+    getVersion.mockResolvedValue({ status: "ok", value: { ...summary(), graph: saved } });
+    restoreVersionAtomic.mockImplementation(async (args: {graph: unknown}) => { const ok = atomicRestoreOk(); return { ...ok, value: { ...ok.value, graph: args.graph } }; });
+    const app = await buildApp(); const res = await post(app, "/versions/restore", { version_id: VERSION_A });
+    expect(res.statusCode, res.body).toBe(200);
+    const restored = res.json().receipt.graph.nodes.find((n: {id: string}) => n.id === "mrr");
+    expect(restored).toMatchObject(goal); expect(restored).not.toHaveProperty("nonlinear_identity");
+    expect(restoreVersionAtomic.mock.calls[0][0].graph.nodes.find((n: {id: string}) => n.id === "mrr").goal_scope).toEqual(goal.goal_scope);
+    await app.close();
+  });
+});

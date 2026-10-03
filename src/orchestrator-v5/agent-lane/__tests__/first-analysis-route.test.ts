@@ -55,6 +55,8 @@ let knobs: {
   analysisReady?: Record<string, unknown>;
   /** F3: extra fields on the readback's analysis_result (the run's brief). */
   analysisResultExtra?: Record<string, unknown>;
+  /** P0 SHARED DATA: the run's review card kind (default `evidence_priority`, neutral; `narrative` presumes a leader). */
+  cardKind?: string;
 } = { graph: READY_GRAPH, coachingHash: 'readback', runStateKind: 'complete_current', leaderClaim: { permitted: false, withheld_reason: 'auto_initiated' } };
 
 const { runStub } = vi.hoisted(() => ({ runStub: { impl: null as null | ((a: unknown) => Promise<unknown>) } }));
@@ -192,7 +194,7 @@ function installRunStub() {
           { type: 'analysis_result', summary: 'the run’s own copy' },
           {
             type: 'review_card', block_id: '11111111-2222-4333-8444-555555555555', signal_id: 'evidence_priority:x', created_at: '2026-09-24T18:00:00.000Z',
-            source_handler: 'run_analysis', graph_hash_at_generation: coachingHash, card_kind: 'evidence_priority',
+            source_handler: 'run_analysis', graph_hash_at_generation: coachingHash, card_kind: knobs.cardKind ?? 'evidence_priority',
             title: 'Where evidence would help most', body: 'Delivery reliability carries the most uncertainty.', target_refs: [], priority_rank: 10,
           },
         ],
@@ -538,6 +540,24 @@ describe('the Agent route runs the first analysis itself, once', () => {
     const b = await buildTurn(app);
     expect(st(SID).inProcessRuns, 'control: the run happened').toHaveLength(1);
     expect((b.blocks ?? []).some((x) => x.type === 'review_card')).toBe(false);
+  });
+
+  /**
+   * P0 SHARED DATA (#85 5963053136): the route hands `bindRunBlocksToReadback` the readback's `analysis_ready`, so a
+   * leader-presuming card follows the ONE leader licence. A separated Run (`permitted: true`) of a model the admission
+   * holds at `exploratory` withholds the leader everywhere else on the turn; its `narrative` card must not ship.
+   */
+  it.each([
+    ['exploratory', false],
+    ['comparative_leader', true],
+  ] as const)('RED: a leader-presuming card under a %s admission (separated Run) → shown: %s', async (mode, shown) => {
+    knobs.leaderClaim = { permitted: true, separation: 'separated' };
+    knobs.analysisReady = { status: 'ready', may_run: true, analysis_admission: { structurally_analysable: true, permitted_analysis_mode: mode } };
+    knobs.cardKind = 'narrative';
+    const b = await buildTurn(app);
+    expect(st(SID).inProcessRuns, 'control: the run happened').toHaveLength(1);
+    expect((b.blocks ?? []).some((x) => x.type === 'analysis_result'), 'control: an analysis-bearing turn').toBe(true);
+    expect((b.blocks ?? []).some((x) => x.type === 'review_card')).toBe(shown);
   });
 });
 

@@ -49,8 +49,14 @@ export interface FlipLinkRef {
 export const DECISION_FLIP_MAX_LINKS = 2;
 export const DECISION_FLIP_REPLICATES = 4;
 
+/** The Run a measurement was taken for: the latest Run's own recorded identity (its fact's `graph_hash_at_run`, `computed_at`). */
+export interface MeasuredRunRef {
+  readonly graph_hash_at_run: string | null;
+  readonly computed_at: string | null;
+}
+
 export type DecisionFlipDispatchResult =
-  | { readonly status: 'measured'; readonly block: DecisionFlipBlockV1; readonly links: readonly FlipLinkRef[] }
+  | { readonly status: 'measured'; readonly block: DecisionFlipBlockV1; readonly links: readonly FlipLinkRef[]; readonly run: MeasuredRunRef }
   | { readonly status: 'no_run' | 'stale' | 'no_links' }
   | { readonly status: 'unavailable'; readonly reason: string };
 
@@ -176,5 +182,11 @@ export async function dispatchDecisionFlip(params: DispatchDecisionFlipParams): 
   if (answered.length !== links.length || answered.some((k, i) => k !== key(links[i]))) {
     return { status: 'unavailable', reason: 'block_links_mismatch' };
   }
-  return { status: 'measured', block: result.block, links };
+  // The Run this measurement is about travels with it, so the caller can refuse it for any other Run (Codex P1 #2542).
+  const ran = (latest as { result?: { graph_hash_at_run?: unknown; computed_at?: unknown } }).result;
+  const run: MeasuredRunRef = {
+    graph_hash_at_run: typeof ran?.graph_hash_at_run === 'string' ? ran.graph_hash_at_run : null,
+    computed_at: typeof ran?.computed_at === 'string' ? ran.computed_at : null,
+  };
+  return { status: 'measured', block: result.block, links, run };
 }

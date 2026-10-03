@@ -120,6 +120,10 @@ describe('dispatchDecisionFlip — the Run the user saw, one builder, nothing pe
     expect(h.plot.runBodies[0].seed, 'Run A had no prior: PLoT derived its seed').toBeUndefined();
     const out = await h.ask([h.runA]);
     expect(out.status, JSON.stringify(out).slice(0, 200)).toBe('measured');
+    // The measurement names the Run it is about, by that Run's own recorded identity (Codex P1 #2542).
+    expect(out.status === 'measured' && out.run).toEqual({ graph_hash_at_run: h.runA.result.graph_hash_at_run, computed_at: h.runA.result.computed_at });
+    expect(h.runA.result.graph_hash_at_run).toMatch(/^[0-9a-f]{16}$/);
+    expect(typeof h.runA.result.computed_at).toBe('string');
     expect(h.plot.runBodies, 'the dispatch never asks PLoT for a Run').toHaveLength(1);
     const { decision_flip, seed, request_id: _r, ...rest } = h.plot.flipBodies[0];
     const { request_id: _ra, brief: _b, ...runA } = h.plot.runBodies[0];

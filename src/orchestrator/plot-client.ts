@@ -546,13 +546,12 @@ class PLoTClientImpl implements PLoTClient {
         body: JSON.stringify(payload),
         signal: fetchSignal,
       });
-      clear();
       if (!response.ok) return { ok: false, reason: 'http_error', status: response.status };
+      // The cap covers the BODY too: headers then a stalled body end as a typed timeout, never past it (Codex P2 #2542).
       const result = parseDecisionFlipResponse(await response.json());
       log.info({ request_id: requestId, elapsed_ms: Date.now() - startTime, ok: result.ok }, 'PLoT decision-flip response');
       return result;
     } catch (error) {
-      clear();
       try {
         classifyAbort(error, Date.now() - startTime); // rethrows a TURN abort unchanged; a timeout as PLoTTimeoutError
       } catch (aborted) {
@@ -560,6 +559,8 @@ class PLoTClientImpl implements PLoTClient {
         throw aborted;
       }
       return { ok: false, reason: 'network' };
+    } finally {
+      clear();
     }
   }
 

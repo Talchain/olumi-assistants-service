@@ -645,6 +645,7 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // its `level` is a staleness key copied from that, and the rest is the brief's clause and Olumi's words.
       "goal_level_reading",
       "goal_period",
+      "goal_scope",
       "goal_sense_reading",
       "goal_stated_as",
       "goal_threshold",
