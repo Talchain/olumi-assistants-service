@@ -26,6 +26,7 @@
  * The user-facing blocks are untouched; this is the Agent's view only.
  */
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
+import { readTopLevelFlipRows, type TopLevelFlipRow } from '../context/flip-threshold-rows.js';
 import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
 
 /**
@@ -82,6 +83,99 @@ export function decisionSensitivityOf(enrichment: unknown): DecisionSensitivity 
   return { status: 'not_measured' };
 }
 
+/**
+ * ⭐ THE TIPPING POINT AS A TYPED FACT (SCI-HERO, DL 4563ad #85 5962995335 item 2). ISL computes each factor's crossing
+ * value in closed form (`_compute_factor_flip_values`); PLoT denormalises it into the user's unit and ships the rows
+ * top-level (`enrichment.flip_thresholds`). Until this, the Agent read those rows raw, with no unit rule and no say-rule.
+ *
+ * Read ONLY through the owned parser (`readTopLevelFlipRows`: classification, alternative-winner identity, echoed-label
+ * rule) — never a second reading of `flip_reason`. The states:
+ *   · `found`            — the producer's FIRST numeric crossing row (producer order; no ranking of our own), its value
+ *                          ATTESTED in display units (`value_scale === 'display'`), stated at 2 significant figures
+ *                          ("about"), never more precisely, and distinct from today's value at that precision;
+ *   · `below_resolution` — a crossing exists but cannot be stated in the user's unit at that precision: say THAT the
+ *                          figure could change which option leads, never at what value;
+ *   · `no_flip_in_range` — every row is a producer-attested no-flip. No sentence: the claim class "nothing would change"
+ *                          is RC's to word (RC 5950124321), and link strengths were never varied;
+ *   · `unresolved`       — rows that neither cross nor attest (a search cap, an unknown reason): no claim;
+ *   · `not_evaluated`    — no rows (PLoT ships `[]` when withheld or unavailable): no claim.
+ *
+ * ⛔ The option that would then lead rides ONLY under the keys `new_leading_option_id` / `new_leading_option_label`,
+ * which `licensed-run-view.ts` nulls whenever the run's ONE leader licence (`claim_permissions.leader_may_be_named`,
+ * from `leaderLicenceFromState`) is not granted. No second permission rule: the key family IS the gate, and `say` never
+ * names an option.
+ */
+export type TippingPoint =
+  | {
+    readonly status: 'found';
+    readonly factor_id: string;
+    readonly label: string;
+    readonly direction: 'increase' | 'decrease';
+    readonly unit: string | null;
+    readonly current_about: string;
+    readonly threshold_about: string;
+    readonly new_leading_option_id: string | null;
+    readonly new_leading_option_label: string | null;
+    /** Further crossing rows on this run, after the one stated (count only). */
+    readonly other_tipping_points: number;
+    readonly say: string;
+  }
+  | { readonly status: 'below_resolution'; readonly factor_id: string; readonly label: string; readonly say: string }
+  | { readonly status: 'no_flip_in_range' }
+  | { readonly status: 'unresolved' }
+  | { readonly status: 'not_evaluated' };
+
+/** The method's stated precision for a crossing the user reads: 2 significant figures. Never more. */
+const ABOUT = new Intl.NumberFormat('en-GB', { maximumSignificantDigits: 2 });
+const inUnit = (value: number, unit: string | null): string => {
+  const n = ABOUT.format(value);
+  if (unit === null || unit.trim() === '') return n;
+  return unit.trim() === '%' ? `${n}%` : `${n} ${unit.trim()}`;
+};
+
+const statedInUserUnits = (row: TopLevelFlipRow): boolean =>
+  row.value_scale !== null && row.value_scale.trim().toLowerCase() === 'display';
+
+export function tippingPointOf(enrichment: unknown): TippingPoint {
+  const e = recordOf(enrichment);
+  if (e === undefined) return { status: 'not_evaluated' };
+  const rows = readTopLevelFlipRows(e);
+  if (rows.length === 0) return { status: 'not_evaluated' };
+  const crossings = rows.filter((r) => r.kind === 'flip_pair');
+  if (crossings.length === 0) {
+    return rows.every((r) => r.kind === 'attested_no_flip') ? { status: 'no_flip_in_range' } : { status: 'unresolved' };
+  }
+  const first = crossings[0]!;
+  const stated = (row: TopLevelFlipRow): { current: string; threshold: string } | undefined => {
+    if (!statedInUserUnits(row) || row.current_value === null || row.flip_value === null) return undefined;
+    const current = inUnit(row.current_value, row.unit);
+    const threshold = inUnit(row.flip_value, row.unit);
+    return current === threshold ? undefined : { current, threshold };
+  };
+  const s = stated(first);
+  if (s === undefined) {
+    return {
+      status: 'below_resolution',
+      factor_id: first.factor_id,
+      label: first.factor_label,
+      say: `${first.factor_label} could change which option leads, but this run cannot say at what value in your units.`,
+    };
+  }
+  return {
+    status: 'found',
+    factor_id: first.factor_id,
+    label: first.factor_label,
+    direction: first.direction!,
+    unit: first.unit,
+    current_about: s.current,
+    threshold_about: s.threshold,
+    new_leading_option_id: first.alternative_winner_id,
+    new_leading_option_label: first.alternative_winner_label,
+    other_tipping_points: crossings.length - 1,
+    say: `The comparison could change if ${first.factor_label} crosses about ${s.threshold} (it is ${s.current} in this model).`,
+  };
+}
+
 /** The run's `analysis_result` block as the Agent reads it: (i)–(iii) above. Never mutates its input. */
 export function analysisResultForAgent(result: unknown): unknown {
   const block = recordOf(result);
@@ -135,6 +229,7 @@ export function analysisResultForAgent(result: unknown): unknown {
     if (limitsRenamed) out.limits_note = ALL_LIMITS_HOLD_NOTE;
   }
   out.decision_sensitivity = decisionSensitivityOf(enrichment);
+  out.tipping_point = tippingPointOf(enrichment);
   return out;
 }
 
