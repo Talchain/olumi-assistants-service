@@ -18,6 +18,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import {
+  GM_REJECTED_COPY_BY_BLOCKER_CODE,
   evaluateEditGraphMutations,
   gmHeldProposalRef,
   GM_HELD_PENDING_TURN_TTL,
@@ -288,10 +289,45 @@ describe('live verdict routing', () => {
     );
     expect(d.governing).toBe('rejected');
     expect(d.blockApply).toBe(true);
-    expect(d.assistantText).toBe(GM_REJECTED_ASSISTANT_TEXT);
+    // ⭐ THIS ASSERTION USED TO READ `toBe(GM_REJECTED_ASSISTANT_TEXT)`, AND ITS
+    // FAILURE IS THE FIX. The generic sentence answered every rejection
+    // identically — including, on a witnessed staging session, an ADVICE
+    // request and an EDIT request byte-for-byte alike. The reason was already
+    // here: note the very next line asserts `blocker_code` on the SAME object.
+    // The cause was computed, attached, logged, and withheld only from the
+    // person reading the reply.
+    expect(d.assistantText).toBe(GM_REJECTED_COPY_BY_BLOCKER_CODE.ENTITY_ID_COLLISION);
+    expect(d.assistantText).not.toBe(GM_REJECTED_ASSISTANT_TEXT);
     expect(d.publicReason).toMatchObject({ verdict: 'rejected', blocker_code: 'ENTITY_ID_COLLISION' });
     // NEVER RefereeVerdict.candidate internals on the public reason.
     expect(Object.keys(d.publicReason!)).not.toContain('candidate');
+  });
+
+  it('⭐ an existing ID with a DISTINCT label must not be explained as a duplicate name', () => {
+    // The review case. `f-spend` exists; the label offered is different from
+    // the one already on it. The collision is on the ID
+    // (referee.ts:151 graphHasNodeId), which is derived from the operation
+    // path SEPARATELY from value.label.
+    //
+    // ⛔ The first version of this copy said "Something with that name is
+    // already in the model" and offered to "add it under a different name".
+    // Against THIS operation both halves are false: the name may be entirely
+    // new, and renaming would leave the id — and so the collision — untouched.
+    const d = evaluateEditGraphMutations(
+      baseInput({
+        operations: [
+          { op: 'add_node', path: 'f-spend', value: { id: 'f-spend', kind: 'factor', label: 'Team morale' } },
+        ],
+      }),
+    );
+    expect(d.governing).toBe('rejected');
+    expect(d.publicReason).toMatchObject({ blocker_code: 'ENTITY_ID_COLLISION' });
+    const text = d.assistantText ?? '';
+    expect(text, 'must not assert a duplicate displayed name').not.toMatch(/that name|same name|already called/i);
+    expect(text, 'must not prescribe a rename that cannot work').not.toMatch(/different name|rename/i);
+    expect(text, 'but must still say nothing changed').toContain('unchanged');
+    // Still no chips: the atomicity guard's posture is unchanged by this fix.
+    expect(d.suggestedActions).toEqual([]);
   });
 
   it('unknown op (R1 reject) blocks in live — a malformed projection can never silently apply', () => {
