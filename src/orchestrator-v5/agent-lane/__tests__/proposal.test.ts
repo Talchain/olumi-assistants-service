@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { narrateWriteOutcome, withWriteOutcome } from '../write-outcome.js';
 import {
   ProposalStore, createProposal, computeProposalId, MAX_PROPOSALS,
   type ProposalContent,
@@ -111,6 +112,191 @@ describe('authorisation applies the STORED proposal', () => {
     const s = new ProposalStore();
     for (let i = 0; i < MAX_PROPOSALS + 10; i++) s.put(createProposal(content({ public_label: 'p' + i })));
     expect(s.size()).toBeLessThanOrEqual(MAX_PROPOSALS);
+  });
+
+  /**
+   * ⛔ AN APPLIED PROPOSAL MUST NOT BECOME `unknown_proposal` BY EVICTION.
+   *
+   * `put` evicted the oldest id from `items` and never touched `applied`, while
+   * `authorise` reads `items` FIRST and returns `unknown_proposal` before it ever
+   * consults `applied`. So an approval that HAD been applied came back as
+   * "no longer available".
+   *
+   * That is not a cosmetic wrong code. The refusal the user is shown for
+   * `unknown_proposal` reads "that proposal is no longer available, so nothing was
+   * changed — ask me to suggest it again and approve the new one"
+   * (`write-outcome.ts` REFUSAL_WORDS). So the user is told nothing was saved when
+   * it WAS, and invited to propose and approve the same change a second time. This
+   * file's own docblock calls that family the single worst thing this loop can do.
+   *
+   * Eviction preferentially destroys exactly the wrong entries: `order` is FIFO and
+   * an applied proposal is by definition one that has already been through a full
+   * cycle, so it is among the oldest. The store is also a PROCESS-WIDE singleton
+   * shared by every user and scenario (`agent-v1-turn.ts`), so the cap is reached
+   * by total traffic, not by one conversation.
+   */
+  /**
+   * ⚠ SUPERSEDED PREMISE, kept as the honest statement of the NEW contract (b2b691ff): an applied proposal is
+   * now the PREFERRED eviction victim — its cycle is complete, and keeping the proposal a user is looking at
+   * matters more (a two-half starting point otherwise evicts its own first half). What must hold instead is
+   * that the forgotten approval is TOLD honestly, never "nothing was changed" (the describe block below).
+   */
+  it('under eviction pressure an applied proposal is forgotten FIRST, and the user is told it may already be saved', () => {
+    const s = new ProposalStore();
+    const approved = s.put(createProposal(content({ public_label: 'the one the user approved' })));
+    s.markApplied(approved.proposal_id, [{ version: 7, scenario_id: SCENARIO, label: 'v7' } as never]);
+    for (let i = 0; i < MAX_PROPOSALS + 5; i++) s.put(createProposal(content({ public_label: 'filler ' + i })));
+    const d = s.authorise(req(approved.proposal_id));
+    expect(d.status).toBe('unknown_proposal');
+    const n = narrateWriteOutcome('Done.', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal: d.status }]);
+    const text = withWriteOutcome(n.text, n.status);
+    expect(text).not.toMatch(/nothing was changed/i);
+    expect(text).toMatch(/may already be in the model/i);
+  });
+
+  /**
+   * The discriminating half. If the fix above were "stop evicting", this fails —
+   * an UNAPPLIED proposal must still be discarded and the bound must still hold.
+   */
+  it('still evicts an UNAPPLIED proposal, and the bound still holds', () => {
+    const s = new ProposalStore();
+    const neverApproved = s.put(createProposal(content({ public_label: 'offered and ignored' })));
+    for (let i = 0; i < MAX_PROPOSALS + 5; i++) s.put(createProposal(content({ public_label: 'filler ' + i })));
+    expect(s.authorise(req(neverApproved.proposal_id)).status, 'the fix must not work by never evicting').toBe('unknown_proposal');
+    expect(s.size(), 'memory must stay bounded').toBeLessThanOrEqual(MAX_PROPOSALS);
+  });
+});
+
+/**
+ * ⛔ THE CORNER THE EVICTION ORDER CANNOT REACH (Codex 5807661105): when EVERY entry is applied, the
+ * oldest applied proposal is still evicted, and a process restart forgets every proposal at once. So
+ * `unknown_proposal` can name a change that WAS saved. What the user reads for it must therefore never
+ * say nothing was changed, nor invite a blind second approval.
+ */
+/**
+ * ⛔ PARTIAL PROGRESS IS COMMITTED STATE, NOT AN UNTOUCHED PROPOSAL (Codex #1803 5810472138, the
+ * interaction with #1788). An option whose node landed but whose links did not is recorded in `partial`,
+ * and its reply promised "approving the same change again will try only the missing link". Eviction that
+ * treated it as unapplied threw that continuation away and left the partial record orphaned.
+ * Priority: untouched first, then applied (its words are honest when forgotten), a partial one last.
+ */
+describe('eviction keeps saved progress, and leaves no orphaned record', () => {
+  const PARTIAL_REV = 'b'.repeat(64);
+  const progress = { revision: PARTIAL_REV, landed: ['opt_new'], receipts: [] };
+
+  it('RED: 199 applied + one partial, then one more put → the partial survives and its continuation still executes', () => {
+    const s = new ProposalStore();
+    for (let i = 0; i < MAX_PROPOSALS - 1; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+    }
+    const partial = s.put(createProposal(content({ public_label: 'the option the user approved' })));
+    s.markPartial(partial.proposal_id, progress);
+    s.put(createProposal(content({ public_label: 'someone else\u2019s proposal' })));
+    const d = s.authorise(req(partial.proposal_id, { current_graph_identity_hash: PARTIAL_REV }));
+    expect(d.status, 'the promised same-proposal continuation').toBe('execute');
+    if (d.status === 'execute') expect(d.continuation?.landed).toEqual(['opt_new']);
+    expect(s.size()).toBeLessThanOrEqual(MAX_PROPOSALS);
+  });
+
+  it('CONTRAST: an APPLIED proposal is the one evicted — the untouched and the partial both survive', () => {
+    const s = new ProposalStore();
+    const untouched = s.put(createProposal(content({ public_label: 'offered and ignored' })));
+    const appliedIds: string[] = [];
+    for (let i = 0; i < MAX_PROPOSALS - 2; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+      appliedIds.push(p.proposal_id);
+    }
+    const partial = s.put(createProposal(content({ public_label: 'partly saved' })));
+    s.markPartial(partial.proposal_id, progress);
+    s.put(createProposal(content({ public_label: 'one more' })));
+    expect(s.authorise(req(appliedIds[0]!)).status, 'the oldest APPLIED one went').toBe('unknown_proposal');
+    expect(s.authorise(req(untouched.proposal_id)).status, 'the one the user is looking at survived').toBe('execute');
+    expect(s.authorise(req(partial.proposal_id, { current_graph_identity_hash: PARTIAL_REV })).status).toBe('execute');
+    expect(s.size()).toBeLessThanOrEqual(MAX_PROPOSALS);
+  });
+
+  /**
+   * ⛔ RED-first for the regression the adversarial review found at 41e4c563 (24 Sep): with an
+   * untouched proposal tried FIRST as the victim, the untouched count at the cap drains to 0-1 and
+   * stays there, so a just-offered proposal is evicted by the very next put from any user.
+   * REVERT the eviction order in `evictOne` and both of these go RED.
+   */
+  it('RED: 199 applied at capacity, then a just-offered proposal survives an unrelated put', () => {
+    const s = new ProposalStore();
+    for (let i = 0; i < MAX_PROPOSALS - 1; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+    }
+    const offered = s.put(createProposal(content({ public_label: 'the proposal the user is being shown' })));
+    s.put(createProposal(content({ public_label: 'an unrelated turn, another user' })));
+    expect(s.authorise(req(offered.proposal_id)).status, 'the user can still approve what they were just offered').toBe('execute');
+    expect(s.outstanding(SCENARIO, USER).map((o) => o.proposal_id), 'it is still listed as awaiting approval').toContain(offered.proposal_id);
+  });
+
+  it('RED: a two-half starting point survives its own second put — no false "the model changed"', () => {
+    const s = new ProposalStore();
+    for (let i = 0; i < MAX_PROPOSALS; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+    }
+    const halfA = s.put(createProposal(content({ public_label: 'the assumptions half' })));
+    const halfB = s.put(createProposal(content({ public_label: 'the option levels half' })));
+    const halves = [halfA, halfB].filter((h) => s.get(h.proposal_id) !== undefined);
+    expect(halves.length, 'both halves must be re-readable, or proposeStartingPoint refuses and blames the model').toBe(2);
+  });
+
+  it('all-partial at capacity: exactly one (the oldest) goes, and its progress record goes with it', () => {
+    const s = new ProposalStore();
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_PROPOSALS; i++) {
+      const p = s.put(createProposal(content({ public_label: 'partial ' + i })));
+      s.markPartial(p.proposal_id, progress);
+      ids.push(p.proposal_id);
+    }
+    s.put(createProposal(content({ public_label: 'one more' })));
+    expect(s.authorise(req(ids[0]!)).status, 'the oldest went').toBe('unknown_proposal');
+    expect(s.authorise(req(ids[1]!, { current_graph_identity_hash: PARTIAL_REV })).status).toBe('execute');
+    expect(s.recordCounts(), 'no orphaned progress: every record names a held proposal').toEqual({ items: MAX_PROPOSALS, applied: 0, partial: MAX_PROPOSALS - 1 });
+  });
+});
+
+describe('an unknown proposal is never told as "nothing was changed"', () => {
+  const said = (refusal: string) => {
+    // `toolCalls` is typed `readonly { name: string }[]` and `narrateWriteOutcome` reads
+    // ONLY `.name` from it — the outcome comes from `toolResults`. Repeating ok/mutated/
+    // refusal here tripped the full-tsc excess-property check (TS2353) and implied the
+    // function reads fields it does not.
+    const n = narrateWriteOutcome('Done.', [{ name: 'authorise_change' }], [{ ok: false, mutated: false, refusal }]);
+    return withWriteOutcome(n.text, n.status);
+  };
+
+  it('RED: 200 applied proposals plus one more → the evicted applied id reads as possibly saved, never as unchanged', () => {
+    const s = new ProposalStore();
+    const first = s.put(createProposal(content({ public_label: 'applied 0' })));
+    s.markApplied(first.proposal_id, [{ version: 1, scenario_id: SCENARIO, label: 'v1' } as never]);
+    for (let i = 1; i < MAX_PROPOSALS; i++) {
+      const p = s.put(createProposal(content({ public_label: 'applied ' + i })));
+      s.markApplied(p.proposal_id);
+    }
+    s.put(createProposal(content({ public_label: 'one more' })));
+    const d = s.authorise(req(first.proposal_id));
+    expect(d.status, 'the control: this IS the all-applied corner, where the applied record goes too').toBe('unknown_proposal');
+
+    const text = said(d.status);
+    expect(text).not.toMatch(/nothing was changed/i);
+    expect(text, 'it may already be saved: say so').toMatch(/may already be in the model/i);
+    expect(text, 'no blind second approval').toMatch(/check the model before/i);
+  });
+
+  it('CONTRAST: a retained applied proposal still returns already_applied with its original receipt', () => {
+    const s = new ProposalStore();
+    const p = s.put(createProposal(content({ public_label: 'kept' })));
+    s.markApplied(p.proposal_id, [{ version: 4, scenario_id: SCENARIO, label: 'v4' } as never]);
+    const d = s.authorise(req(p.proposal_id));
+    expect(d.status).toBe('already_applied');
+    if (d.status === 'already_applied') expect(d.receipts.map((r) => (r as { version?: number }).version)).toEqual([4]);
   });
 });
 
