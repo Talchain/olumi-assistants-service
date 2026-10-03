@@ -41,6 +41,7 @@ const readAnalysisInvalidatedAt = vi.fn();
 vi.mock('../../session/index.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../session/index.js')>()),
   getSessionStore: () => ({
+    readMostRecentPendingActions: async () => [],
     readRecent,
     readFactsFor,
     readFactsWithTurnFor,
@@ -177,7 +178,8 @@ function sizedForC46<G>(g: G): G {
  * `identity_evaluations` (ISL #187 / PLoT #379), which the handler stores whole with the envelope as the fact's `enrichment`.
  */
 async function runOn(registered: Graph, identityEvaluations?: unknown): Promise<RunAnalysisHandlerFact> {
-  const store = { loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }) } as unknown as SessionStore;
+  const store = {
+    readMostRecentPendingActions: async () => [], loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }) } as unknown as SessionStore;
   const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, REQUEST_ID, store);
   const env = structuredClone(happyFixture) as unknown as Record<string, unknown>;
   env.results = [

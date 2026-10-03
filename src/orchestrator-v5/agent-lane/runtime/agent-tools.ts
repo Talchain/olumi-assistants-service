@@ -11,6 +11,7 @@
  * turn's own verified identity before any tool runs. That is why this is a
  * server-side loop and not an MCP surface OpenAI calls from outside.
  */
+import type { ReconcileGoalScopeArgs } from '../reconcile-goal-scope.js';
 import { sendableQuery } from './public-research.js';
 
 /**
@@ -203,7 +204,9 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     name: 'withdraw_proposal',
     description:
       'Withdraw a change you proposed earlier in THIS turn that you now think is wrong, before you reply. It is never applied '
-      + 'and no approve button is shown. Never ask the user not to approve a change you leave offered.',
+      + 'and no approve button is shown. Never ask the user not to approve a change you leave offered. '
+      + 'An unresolved goal reading (goal-scope: ID) may also be withdrawn, but only when the user writes exactly '
+      + '"Withdraw this unresolved goal reading: <goal_id>". Otherwise retain its question.',
     parameters: obj({ proposal_id: { type: 'string' } }, ['proposal_id']),
   },
   {
@@ -636,6 +639,20 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
     }, ['assumptions', 'option_levels']),
   },
   {
+    type: 'function', name: 'reconcile_goal_scope',
+    description: 'Retain the user’s goal scope or component share, and reconcile it with the existing rate and count. Use when they correct a whole/component reading or answer its share question (including “30% currently”). This retains one durable question; it never writes a derived number. Supply the exact user quote and existing operand ids. If a current_level is supplied, the ordinary baseline writer prepares ONE approval for the scope, baseline and withdrawal of any incompatible product identity. Never use propose_goal_current_level alone to force a total onto a component product.',
+    parameters: obj({
+      goal_label: { type: 'string' },
+      scope: obj({ modelled: { type: 'string' }, alternative: { type: 'string' }, extent: { type: 'string', enum: ['total', 'component'] },
+        stated_in_brief: { type: 'boolean', enum: [true] }, source: obj({ quote: { type: 'string' } }, ['quote']),
+        component: obj({ label: { type: 'string' }, rate_id: { type: 'string' }, count_id: { type: 'string' }, share: { type: 'number' },
+          basis: { type: 'string', enum: ['unknown', 'same', 'different'] }, count_basis: { type: 'string' }, basis_source: obj({ quote: { type: 'string' } }, ['quote']), source: obj({ quote: { type: 'string' } }, ['quote']) }, ['label', 'rate_id', 'count_id', 'basis', 'source']) }, ['modelled', 'alternative', 'extent', 'stated_in_brief', 'source']),
+      current_level: obj({ value: { type: 'number' }, unit: { type: 'string', description: 'Their native currency and the goal’s stated period, e.g. GBP/month for MRR; never a normalized value.' }, quote: { type: 'string' } }, ['value', 'unit', 'quote']),
+      component_share: { type: 'number', description: 'The user’s share as 0–1; bind a short answer only to the retained share question.' },
+      component_basis: { type: 'string', enum: ['same', 'different'] }, count_basis: { type: 'string' }, source_quote: { type: 'string' },
+    }, ['goal_label']),
+  },
+  {
     type: 'function',
     name: 'propose_goal_current_level',
     description:
@@ -731,7 +748,7 @@ export type ToolName = (typeof AGENT_TOOLS)[number]['name'];
  * registration route, and without it a preview has nothing to talk about. It is
  * additionally refused over a scenario that already has entities.
  */
-export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
+export const MUTATION_TOOLS: readonly string[] = ['propose_new_option', 'propose_option_status', 'propose_new_risk', 'propose_new_factor', 'propose_link_strength', 'propose_link_effect', 'propose_link_strengths', 'propose_goal_target', 'propose_limit_change', 'propose_model_change', 'propose_assumptions', 'propose_option_interventions', 'propose_starting_point', 'reconcile_goal_scope', 'propose_goal_current_level', 'propose_identity', 'authorise_change', 'withdraw_proposal'];
 
 export type AgentLaneMode = 'full' | 'preview';
 
@@ -854,6 +871,7 @@ export interface AgentCapabilities {
     option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
   }): Promise<ToolResult>;
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
+  reconcileGoalScope?(ctx: AgentToolContext, args: ReconcileGoalScopeArgs): Promise<ToolResult>;
   proposeGoalCurrentLevel(ctx: AgentToolContext, args: {
     goal_label: string; value: number; unit: string; goal_is?: 'at_least' | 'above' | 'at_most' | 'below'; user_stated: boolean;
   }): Promise<ToolResult>;
@@ -946,6 +964,8 @@ export async function dispatchTool(
       return caps.proposeOptionInterventions(ctx, args as never);
     case 'propose_starting_point':
       return caps.proposeStartingPoint(ctx, args as never);
+    case 'reconcile_goal_scope':
+      return caps.reconcileGoalScope ? caps.reconcileGoalScope(ctx, args as never) : { ok: false, mutated: false, refusal: 'scope_writer_unavailable' };
     case 'propose_goal_current_level':
       return caps.proposeGoalCurrentLevel(ctx, args as never);
     case 'propose_identity':

@@ -3,6 +3,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { repairedOptionNameRead } from './fixtures/repaired-option-name.js';
 
+/** P0 SHARED DATA (#85 5963281356): the readback's admission, as the producer always mints it (matrix M1); an absent one now fails the ONE leader licence closed. */
+const COMPARATIVE_ADMISSION = { structurally_analysable: true, permitted_analysis_mode: 'comparative_leader' } as const;
+
 const SCENARIO = '7d18dd9a-5929-4b6e-8ca4-462a11489257';
 const HASH = 'aaaacccc00001111';
 const HUMAN_LABEL = 'Raise Pro plan price from £49 to £59';
@@ -22,7 +25,7 @@ const latestRunContext = (): Record<string, unknown> | undefined => {
 };
 let modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
 let readBody: Record<string, unknown> = { graph, graph_hash: HASH, analysis_result: result,
-  analysis_state: state, analysis_ready: { status: 'ready', options: [], blockers: [] } };
+  analysis_state: state, analysis_ready: { status: 'ready', options: [], blockers: [], analysis_admission: COMPARATIVE_ADMISSION } };
 const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null }>();
 const store = { ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_sid: string, turnId: string) => rows.get(turnId) ?? null),
@@ -79,7 +82,7 @@ describe('Agent Run result names a changed option level without renaming the gra
     const repaired = repairedOptionNameRead();
     const before = modelRequests.length;
     readBody = { graph: repaired.graph, graph_hash: repaired.graphHash, analysis_result: repaired.result,
-      analysis_state: repaired.state, analysis_ready: { status: 'ready', options: [], blockers: [] } };
+      analysis_state: repaired.state, analysis_ready: { status: 'ready', options: [], blockers: [], analysis_admission: COMPARATIVE_ADMISSION } };
     modelText = 'Spend £110,000 (set to £120,000): current model result.';
     try {
       expect(repaired.graphHash).not.toBe(repaired.runHash);
@@ -96,7 +99,7 @@ describe('Agent Run result names a changed option level without renaming the gra
       expect((readBody.analysis_result as typeof repaired.result).enrichment.option_comparison[0]!.option_label).toBe('Spend £110,000');
     } finally {
       readBody = { graph, graph_hash: HASH, analysis_result: result, analysis_state: state,
-        analysis_ready: { status: 'ready', options: [], blockers: [] } };
+        analysis_ready: { status: 'ready', options: [], blockers: [], analysis_admission: COMPARATIVE_ADMISSION } };
       modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
     }
   });
@@ -106,7 +109,7 @@ describe('Agent Run result names a changed option level without renaming the gra
     const before = modelRequests.length;
     readBody = { graph: repaired.graph, graph_hash: repaired.graphHash, analysis_result: repaired.result,
       analysis_state: { run_state: { kind, graph_hash_at_run: repaired.runHash } },
-      analysis_ready: { status: 'ready', options: [], blockers: [] } };
+      analysis_ready: { status: 'ready', options: [], blockers: [], analysis_admission: COMPARATIVE_ADMISSION } };
     modelText = 'The last Run cannot describe this model.';
     try {
       const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
@@ -118,7 +121,7 @@ describe('Agent Run result names a changed option level without renaming the gra
       expect(r.json().suggested_actions.some((c: { id: string }) => c.id.startsWith('agent-explain-run:'))).toBe(false);
     } finally {
       readBody = { graph, graph_hash: HASH, analysis_result: result, analysis_state: state,
-        analysis_ready: { status: 'ready', options: [], blockers: [] } };
+        analysis_ready: { status: 'ready', options: [], blockers: [], analysis_admission: COMPARATIVE_ADMISSION } };
       modelText = `${HUMAN_LABEL} (set to £60/month): 99% in this model.`;
     }
   });

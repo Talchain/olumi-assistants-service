@@ -1,7 +1,8 @@
 import { expect, test, vi } from 'vitest';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 const readFactsFor = vi.fn();
-vi.mock('../../session/index.js', () => ({getSessionStore:()=>({readRecent:async()=>[{id:'row'}],readFactsFor,readAnalysisInvalidatedAt:async()=>null})}));
+vi.mock('../../session/index.js', () => ({getSessionStore:()=>({
+  readMostRecentPendingActions: async () => [],readRecent:async()=>[{id:'row'}],readFactsFor,readAnalysisInvalidatedAt:async()=>null})}));
 import { buildAnalysisResultBlock, composeDirectAnswerResponse } from '../../compose.js';
 import { finaliseV5Response } from '../../response-finaliser.js';
 import { enforceLeadingOptionClaimsAtWire } from '../../compose/leading-option-wire-enforcement.js';

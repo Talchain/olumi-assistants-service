@@ -400,7 +400,10 @@ export class ModelManagementService {
     scenarioId: string,
     fromVersionId: string,
     toVersionId: string,
-  ): Promise<ModelManagementResult<VersionComparison>> {
+    includeRecords = false,
+  ): Promise<ModelManagementResult<VersionComparison & {
+    readonly records?: { readonly from: ModelVersionRecord; readonly to: ModelVersionRecord };
+  }>> {
     if (!this.isEnabled()) return { status: 'disabled' };
     try {
       const [from, to] = await Promise.all([
@@ -418,7 +421,9 @@ export class ModelManagementService {
           },
         };
       }
-      return { status: 'ok', value: compareVersionRecords(from, to) };
+      const comparison = compareVersionRecords(from, to);
+      // Reuse these two reads for opt-in result binding; never send records on the wire.
+      return { status: 'ok', value: includeRecords ? { ...comparison, records: { from, to } } : comparison };
     } catch (err) {
       return mapThrownError(err);
     }

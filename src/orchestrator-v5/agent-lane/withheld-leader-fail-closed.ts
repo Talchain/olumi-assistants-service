@@ -1579,7 +1579,11 @@ export function dropRankingSentences(text: string, labels: RankingLabelContext =
 }
 
 /**
- * Is the leader WITHHELD on this turn — exactly where the shared gate withholds, never wider?
+ * Is the leader WITHHELD on this turn?
+ *
+ * ⚠ P0 SHARED DATA (#85 5963281356): through the ONE licence this is now WIDER than the shared V5 gate on exactly the
+ * cells where the admission is absent or on the run-refusal axis (the V5 predicate stands down there; the licence fails
+ * closed). Everywhere else the arms below still match.
  *
  * ⛔ It mirrors the shared gate's own three arms (`enforceLeadingOptionClaimsAtWire`), from the same
  * inputs, through the same exported predicates, so the two gates cannot disagree about WHETHER; this

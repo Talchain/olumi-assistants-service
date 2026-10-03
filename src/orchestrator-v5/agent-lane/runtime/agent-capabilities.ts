@@ -17,6 +17,7 @@
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
+import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { acceptedOlumiEstimateSentence } from '../rerun-explanation.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -176,6 +177,7 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
+import { savedRunContextFacts } from '../saved-run-context-facts.js';
 import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
@@ -886,6 +888,9 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 }
 
 /** One internal dispatch, so every path is the product's own. */
+import { reconcileGoalScope } from '../reconcile-goal-scope.js';
+import { goalScopeCheck, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
+import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
 interface GraphRead {
@@ -922,6 +927,7 @@ interface GraphRead {
     analysis_participation?: unknown;
     /** MG F1 T6: the user's own word for an option (`option_status_edit`); absent = feasible. */
     option_status?: unknown;
+    goal_scope?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -951,6 +957,8 @@ interface GraphRead {
    * `permitted_analysis_mode` is the mode half of the selected Run's leader permission (`claimPermissionsFrom`).
    */
   readonly analysis_admission?: unknown;
+  /** Refreshed issues from the same canonical read; explanatory data, never a second permission gate. */
+  readonly goal_scope_reconciliation?: readonly GoalScopeReconciliation[];
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
   /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
@@ -965,10 +973,15 @@ interface GraphRead {
   readonly identity_run_use?: IdentityRunUse | null;
   /** The selected run's per-limit rows (`analysis_limit_verdicts`), read off the SAME graph read (`limit-checks.ts`). */
   readonly limit_verdicts?: StoredLimitVerdicts;
+  /** Selected canonical sidecars; narrowed by the existing verdict reader in savedRunContextFacts. */
+  readonly constraint_verdict_state?: unknown;
+  readonly leader_limit_risks?: readonly unknown[] | null;
   /** The read's `analysis_result` block — the selected Run, present only when the route delivers it (`goal-certainty-for-agent.ts`). */
   readonly analysis_result?: unknown;
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
+  /** The selected Run's recorded participation via the canonical reader; absent = not recorded. */
+  readonly option_participation?: StoredOptionParticipation;
 }
 
 // An edited graph can still carry an earlier Run. Its old result must not be
@@ -1259,6 +1272,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
+      ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
         target: {
           value: trio.goal_threshold_raw,
@@ -1464,8 +1478,11 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   // model chance, as the Run chip's own result does. The retained history no longer holds that result (#2322), so
   // without it the Agent said "not confirmed" beside a Goal panel showing 25%. A withheld leader keeps AI Quality's
   // standing drop of per-option chances; an exact 0 or 1 travels only through its earned `goal_certainty` decision.
-  const chancePermitted = current && goalChance === undefined
-    && claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
+  // The selected Run uses the same existing requested-Run licence, including separable provisional caveats.
+  const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true });
+  const selectedPermissions = current && g.analysis_result !== undefined && permissions.leader_may_be_named !== true
+    ? withNonlinearIdentity(permissions, g.raw, g.identity_evaluated) : permissions;
+  const chancePermitted = current && goalChance === undefined && permissions.leader_may_be_named === true;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const optionNames = optionNameAliasesForCurrentRun(g);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
@@ -1488,10 +1505,27 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
       ...(decision !== undefined ? { goal_certainty: decision } : {}),
     }];
   }) : [];
+  // Participation belongs to the same selected, delivered current Run. Only labels come from this read's graph;
+  // today's option authorship, adoption and status never reinterpret the Run's recorded reason.
+  const labels = new Map(g.nodes.filter((n) => n.kind === 'option').map((n) => [n.id, n.label]));
+  const labelledOption = (id: string): { option_id: string; label?: string } => ({
+    option_id: id, ...(labels.has(id) ? { label: labels.get(id)! } : {}),
+  });
+  const participation = current && g.analysis_result !== undefined && g.option_participation !== undefined
+    ? g.option_participation
+      .map((entry) => ({ ...entry, ...labelledOption(entry.option_id),
+        ...(entry.unanalysable_user_option_ids === undefined ? {} : {
+          unanalysable_user_options: entry.unanalysable_user_option_ids.map(labelledOption),
+        }),
+      }))
+    : undefined;
   return { ...context, analysis: { ...analysis,
+    claim_permissions: selectedPermissions,
+    ...savedRunContextFacts(scenarioId, g, selectedPermissions),
     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
     ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
+    ...(participation !== undefined ? { option_participation: participation } : {}),
   } };
 }
 
@@ -1866,12 +1900,18 @@ export function createAgentCapabilities(
         return readiness === undefined ? {} : { analysis_ready: readiness };
       })(),
       ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
+      ...(Array.isArray(r.json.goal_scope_reconciliation) ? { goal_scope_reconciliation: r.json.goal_scope_reconciliation as GoalScopeReconciliation[] } : {}),
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
+      ...(r.json.analysis_constraint_verdict_state !== undefined
+        ? { constraint_verdict_state: r.json.analysis_constraint_verdict_state } : {}),
+      ...(() => { const risks = r.json.analysis_leader_limit_risks;
+        return risks === null || Array.isArray(risks) ? { leader_limit_risks: risks } : {}; })(),
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
+      ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),
     };
   };
 
@@ -2570,6 +2610,7 @@ export function createAgentCapabilities(
     if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
       return notApplied('model_changed_since_approval', 'The model changed after this was offered, so nothing was recorded. Read it again; offer the reading afresh only if it still applies.');
     }
+    if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return notApplied('goal_scope_unresolved', 'Resolve the retained scope question before confirming this identity. Nothing was written.');
     if (opts.commitOptionLevels === undefined) {
       return notApplied('identity_writer_unavailable', 'This reading could not be recorded here, so nothing was recorded.');
     }
@@ -2830,10 +2871,14 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const scopeIssues = g.goal_scope_reconciliation ?? [];
+      const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission });
       const optionNames = optionNameAliasesForCurrentRun(g);
       return {
         ok: true,
         mutated: false,
+        ...(permissions.total_goal_claims_allowed === false ? { claim_permissions: permissions } : {}),
+        ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
         graph_revision: g.graph_hash,
         empty: g.nodes.length === 0,
         entities: g.nodes.map((n) => {
@@ -3109,6 +3154,7 @@ export function createAgentCapabilities(
       if (g === null) {
         return { ok: false, mutated: false, refusal: 'unreadable_model', detail: 'The model could not be read, so no reading was offered. Nothing was changed.' };
       }
+      if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
       const card = proposeProductIdentity(g.raw);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
@@ -4441,7 +4487,14 @@ export function createAgentCapabilities(
       if (readOnly) return refuseReadOnly();
       const id = typeof args?.proposal_id === 'string' ? args.proposal_id : '';
       const notFound = { ok: false, mutated: false, refusal: 'not_proposed_this_turn', detail: 'No change with that id is awaiting approval. Nothing was withdrawn.' };
-      if (/^gmh_[0-9a-f]{12}$/.test(id)) {
+      if (id.startsWith('goal-scope:')) {
+        const issue = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).find(p => p.action.kind === 'reconcile_goal_scope' && p.chip_id === id);
+        if (issue?.action.kind !== 'reconcile_goal_scope') return notFound;
+        const words = scopeWithdrawalWords(issue.action.goal_id);
+        if ((ctx.user_turn_text ?? ctx.user_text ?? '').trim() !== words) return { ok: false, mutated: false, refusal: 'withdrawal_not_approved', approval_words: words,
+          detail: 'This unresolved reading belongs to the user. It is retained until they explicitly withdraw it with the displayed words.' };
+        withdrawnHolds.add(id);
+      } else if (/^gmh_[0-9a-f]{12}$/.test(id)) {
         withdrawnHolds.add(id);
       } else {
         const p = proposals.get(id);
@@ -4504,6 +4557,13 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
       }
 
+      const scopeRevision = pendingAdoption?.operations.find(op => op.op === 'update_node')?.value as { reconciliation_key?: string } | undefined;
+      if (scopeRevision?.reconciliation_key) {
+        const issues = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+        if (!issues.some(p => p.action.kind === 'reconcile_goal_scope' && scopeReconciliationKey(p.action) === scopeRevision.reconciliation_key)) {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', detail: 'The retained scope reading changed or was withdrawn after this card was offered. Nothing was written; ask for a fresh card.' };
+        }
+      }
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
 
@@ -7479,8 +7539,14 @@ export function createAgentCapabilities(
       };
     },
 
+    async reconcileGoalScope(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      return reconcileGoalScope({ readGraph, proposals, readPending: () => opts.readPendingActions ? opts.readPendingActions(ctx.scenario_id) : Promise.resolve([]) }, ctx, args);
+    },
     async proposeGoalCurrentLevel(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      const issues = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+      if (issues.some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Use reconcile_goal_scope to resolve the retained question before preparing the goal baseline. Nothing was prepared.' };
       return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
     },
 

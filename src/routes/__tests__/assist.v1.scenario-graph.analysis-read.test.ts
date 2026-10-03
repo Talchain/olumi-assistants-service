@@ -77,6 +77,7 @@ const getScenarioOwner = vi.fn();
 const readRecent = vi.fn();
 const readFactsFor = vi.fn();
 const store = {
+  readMostRecentPendingActions: async () => [],
   scenarioExists,
   loadGraphAndBriefText,
   ensureScenarioExists,
@@ -126,6 +127,20 @@ const PRE_EDIT_GRAPH_HASH = computeAnalysisAffectingGraphHash({
     ? { ...node, observed_state: { value: 0.3, cap: 1 } }
     : node),
 })!;
+/**
+ * P0 SHARED DATA (#85 5963281356): the SAME model, made one the product can RUN (decision → options → factor → goal, a
+ * target). The ONE leader licence reads the admission; `GRAPH` above has no links, so the admission refuses it
+ * (`structurally_analysable: false`, matrix M5) and no leader may be named from it. This one is admitted
+ * (`quantified_provisional`, matrix M2: a separated leader ships with its caveat).
+ */
+const linkOf = (from: string, to: string, mean = 1) => ({ from, to, strength: { mean, std: 0.1 }, exists_probability: 1, effect_direction: "positive" as const });
+const ADMITTED_GRAPH = {
+  ...GRAPH,
+  goal_node_id: "goal_growth",
+  nodes: GRAPH.nodes.map((node) => node.id === "goal_growth" ? { ...node, goal_threshold: 0.8 } : node),
+  edges: [linkOf("decision", "opt_hire"), linkOf("decision", "opt_hold"), linkOf("opt_hire", "fac_market"), linkOf("opt_hold", "fac_market", 0.01), linkOf("fac_market", "goal_growth")],
+};
+const ADMITTED_GRAPH_HASH = computeAnalysisAffectingGraphHash(ADMITTED_GRAPH as never)!;
 const FIGURE_GRAPH = {
   ...GRAPH,
   goal_node_id: "goal_growth",
@@ -510,8 +525,9 @@ describe("2.1271 — verdict and block cannot disagree about the leader (pin 4)"
     expect(claim.withheld_reason).toBe("constraint_verdict_withheld");
   });
 
-  it("OPPOSITE-DIRECTION TWIN — an ENTITLED fact names the leader on BOTH surfaces", async () => {
-    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: GRAPH_HASH, mayName: true })]);
+  it("OPPOSITE-DIRECTION TWIN — an ENTITLED fact on an ADMITTED model names the leader on BOTH surfaces", async () => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: ADMITTED_GRAPH, briefText: BRIEF });
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: ADMITTED_GRAPH_HASH, mayName: true })]);
     const app = await buildApp();
     const body = (await read(app)).json() as Record<string, unknown>;
 
@@ -520,6 +536,16 @@ describe("2.1271 — verdict and block cannot disagree about the leader (pin 4)"
     expect(block.leading_option_id).toBe("opt_hire");
     expect(claim.permitted).toBe(true);
     expect(claim.separation).toBe("separated");
+  });
+
+  it("P0 SHARED DATA (matrix M5): an ENTITLED fact on a model the admission refuses names NO leader on the block", async () => {
+    // The ONE licence fails closed off the claim-strength axis. `leader_claim.permitted` is the composed INPUT (it never
+    // reads the admission), so it stays true here: consumers read the licence, never the bare claim (AUDIT §1).
+    readFactsFor.mockResolvedValue([runAnalysisFact({ graphHash: GRAPH_HASH, mayName: true })]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect((body.analysis_result as Record<string, unknown>).leading_option_id).toBeNull();
+    expect((body.analysis_state as { leader_claim: Record<string, unknown> }).leader_claim.permitted).toBe(true);
   });
 });
 

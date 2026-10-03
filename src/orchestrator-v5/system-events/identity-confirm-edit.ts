@@ -35,6 +35,30 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { normaliseAbsenceOnly } from '../persisted-graph-projection.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import { identityConflictsWithScope } from '../agent-lane/goal-scope.js';
+import type { GoalScope } from '../../schemas/goal-scope.js';
+
+export interface IdentityWithdrawalReading {
+  outcome_id: string;
+  factor_ids: string[];
+  stated_in_brief: boolean;
+  words: string;
+  reading_token: string;
+}
+export function identityWithdrawalFor(goal: Record<string, unknown>, scope: GoalScope): IdentityWithdrawalReading | undefined {
+  if (!identityConflictsWithScope(goal, scope)) return undefined;
+  const held = goal.nonlinear_identity as { factor_ids: string[]; stated_in_brief: boolean };
+  const reading = { outcome_id: String(goal.id), factor_ids: [...held.factor_ids], stated_in_brief: held.stated_in_brief,
+    words: `Withdraw ${held.stated_in_brief ? 'your confirmed' : "Olumi's inferred"} product reading of ${String(goal.label)}; retain both operand values.` };
+  return { ...reading, reading_token: createHash('sha256').update(stableStringify(reading)).digest('hex') };
+}
+/** Used inside the existing approved atomic writer. No graph append and no numerical repair here. */
+export function applyIdentityWithdrawalToGoal(goal: Record<string, unknown>, scope: GoalScope, approved: IdentityWithdrawalReading): Record<string, unknown> | null {
+  const now = identityWithdrawalFor(goal, scope);
+  if (!now || now.reading_token !== approved.reading_token || !isDeepStrictEqual(now, approved)) return null;
+  const { nonlinear_identity: _identity, ...without } = goal;
+  return without;
+}
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -64,6 +88,7 @@ export type IdentityConfirmRefusal =
   | 'superseded'
   | 'outcome_not_found'
   | 'carrier_conflict'
+  | 'goal_scope_conflict'
   | 'already_carried'
   | Exclude<StoredProductDeclarationRefusal, 'invalid_graph'>;
 
@@ -124,6 +149,9 @@ export function applyIdentityConfirmEdit(params: ApplyIdentityConfirmEditParams)
   const outcome = graph.nodes.find((n): n is Rec => isRec(n) && n.id === outcome_id);
   if (outcome === undefined) return refuse('outcome_not_found');
   const distinct = [...new Set(factor_ids)];
+  if (identityConflictsWithScope({ ...outcome, nonlinear_identity: { operation: 'product', factor_ids: distinct } })) {
+    return refuse('goal_scope_conflict', 'This product covers a component of the total goal. Correct its scope before confirming an identity.');
+  }
 
   // ── NEVER OVER ANOTHER CARRIER. Olumi's own reading of the SAME product is what the card confirms (it becomes the
   // user's); anything else on the node — a sum, another product, a malformed value — is refused, never replaced.

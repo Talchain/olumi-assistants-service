@@ -40,6 +40,7 @@
  * keeps the handler pure and the test surface small.
  */
 
+import type { GoalScopeClaimInput } from '../../compose/goal-scope-claim-input.js';
 import { optionsRestingOnAcceptedOlumiSizes } from '../../../cee/magnitude/link-sizing.js';
 import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js';
 import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
@@ -304,6 +305,8 @@ function withholdStatedOperator<C>(goalConstraints: C): C {
  * The reader produces them; PLoT consumes them; the handler is the conduit.
  */
 export interface RunAnalysisScenarioSnapshot {
+  /** Production reader attests current scope; a failed pending read throws before PLoT. */
+  readonly goalScopeClaimInput?: GoalScopeClaimInput;
   /** The current graph (PLoT consumes as-is). */
   readonly graph: unknown;
   /** PLoT-shape options: each with {id, option_id, label, interventions{}}. */
@@ -2822,6 +2825,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // take the permission away, and leaves `constraint_verdict_state` untouched (its REASON is chosen
         // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
         constraint_verdict: keptOlumiProvisional
+          || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')
           ? { ...leaderPermission, may_name_leading_option: false }
           : leaderPermission,
       },

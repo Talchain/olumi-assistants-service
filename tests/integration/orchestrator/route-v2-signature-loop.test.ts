@@ -322,14 +322,15 @@ describe('POST /orchestrate/v2/turn — V5 Signature Loop guards', () => {
   });
 
   // ── amendment #4: pending-read failure is observable + degrades safely ───
-  it('amendment #4: a pending-read FAILURE degrades to suppression with a distinct trace', async () => {
+  it('amendment #4: a pending-read FAILURE suppresses application and refuses to erase an unresolved issue', async () => {
     pendingReadShouldThrow = true;
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: payload({ message: 'make that update' }),
     });
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(500);
+    expect(appendMock).not.toHaveBeenCalled();
     expect(dispatchEditGraphMock).not.toHaveBeenCalled();
     expect(findEvent('v5.edit_graph.proposal_confirm_resolved')!.outcome).toBe('suppressed_read_failed');
   });

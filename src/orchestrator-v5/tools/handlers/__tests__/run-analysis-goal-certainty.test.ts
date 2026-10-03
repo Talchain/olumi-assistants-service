@@ -69,6 +69,7 @@ const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
 async function storedRun(body: Json, graph: Json = input.graph): Promise<Json> {
   const store = {
+    readMostRecentPendingActions: async () => [],
     loadGraphAndBriefText: vi.fn(async () => ({ graph: clone(graph), briefText: input.brief_text })),
     loadGraph: vi.fn(async () => clone(graph)),
   };
