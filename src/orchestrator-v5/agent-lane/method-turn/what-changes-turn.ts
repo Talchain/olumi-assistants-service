@@ -77,6 +77,12 @@ export interface LinkLabels {
 }
 
 const optionQuote = (label: string): string => `‘${cut(label)}’`;
+/**
+ * An id names an entry only when the map OWNS it as a string. Ids are data (ISL's block, the graph), so `constructor`,
+ * `toString` or `__proto__` must never read an inherited member and render it as an option or a factor (Codex P2 #2542).
+ */
+const ownLabel = (map: Readonly<Record<string, string>>, id: unknown): string | undefined =>
+  typeof id === 'string' && Object.prototype.hasOwnProperty.call(map, id) && typeof map[id] === 'string' ? map[id] : undefined;
 const fill = (template: string, slots: Readonly<Record<string, string>>): string =>
   template.replace(/\{(\w+)\}/g, (_m, k: string) => slots[k] ?? `{${k}}`);
 
@@ -86,10 +92,10 @@ const fill = (template: string, slots: Readonly<Record<string, string>>): string
  */
 export function renderLinkTippingPoints(links: readonly FlipLink[], labels: LinkLabels): string[] {
   const out: string[] = [];
-  const leader = labels.option[labels.leaderId];
+  const leader = ownLabel(labels.option, labels.leaderId);
   for (const link of links) {
-    const from = labels.node[link.from_id];
-    const to = labels.node[link.to_id];
+    const from = ownLabel(labels.node, link.from_id);
+    const to = ownLabel(labels.node, link.to_id);
     if (from === undefined || to === undefined) continue;
     const nodeSlots = { from: midSentence(cut(from)), to: midSentence(cut(to)) };
     if (link.status === 'no_change') {
@@ -97,7 +103,7 @@ export function renderLinkTippingPoints(links: readonly FlipLink[], labels: Link
       continue;
     }
     if (link.status !== 'quoted' || link.threshold === null || link.to_option_id === null) continue;
-    const other = labels.option[link.to_option_id];
+    const other = ownLabel(labels.option, link.to_option_id);
     const fraction = fractionOf(link.threshold, link.current_mean);
     if (other === undefined || fraction === null) continue;
     out.push(fraction === 'below_a_tenth'
@@ -109,7 +115,7 @@ export function renderLinkTippingPoints(links: readonly FlipLink[], labels: Link
 
 const nodeLabelsOf = (graph: unknown): Record<string, string> => {
   const nodes = (graph as { nodes?: unknown } | null)?.nodes;
-  const out: Record<string, string> = {};
+  const out = Object.create(null) as Record<string, string>; // a node id `__proto__` is a key, never the prototype
   for (const n of Array.isArray(nodes) ? nodes : []) {
     const node = n as { id?: unknown; label?: unknown };
     if (typeof node.id === 'string' && typeof node.label === 'string' && node.label.trim().length > 0) out[node.id] = node.label;
@@ -124,11 +130,12 @@ export function honestLimitReply(s: TurnSignals, graph: unknown): string {
   const selection = selectGuidance(selectorSignalsOf(s, null), {});
   const ref = itemRefOf(selection.item, graph);
   const labels = nodeLabelsOf(graph);
+  const [from, to, factor] = ref === undefined ? [] : ref.kind === 'link'
+    ? [ownLabel(labels, ref.from_id), ownLabel(labels, ref.to_id), undefined] : [undefined, undefined, ownLabel(labels, ref.factor_id)];
   const itemLabel = ref === undefined ? undefined
     : ref.kind === 'link'
-      ? labels[ref.from_id] !== undefined && labels[ref.to_id] !== undefined
-        ? `how much ${midSentence(cut(labels[ref.from_id]!))} affects ${midSentence(cut(labels[ref.to_id]!))}` : undefined
-      : labels[ref.factor_id] !== undefined ? `the figure for ${midSentence(cut(labels[ref.factor_id]!))}` : undefined;
+      ? from !== undefined && to !== undefined ? `how much ${midSentence(cut(from))} affects ${midSentence(cut(to))}` : undefined
+      : factor !== undefined ? `the figure for ${midSentence(cut(factor))}` : undefined;
   return itemLabel === undefined ? first! : fill(contract.text, { item_label: itemLabel });
 }
 
@@ -146,6 +153,13 @@ export interface WhatChangesTurn {
 }
 
 export type AskDecisionFlip = (candidateLinks: readonly FlipLinkRef[]) => Promise<DecisionFlipDispatchResult>;
+
+/** The Run the readback shows, by the identity the Explain control binds (`runExplanationChip`): its hash and time. */
+function shownRunOf(rb: MethodReadback): { readonly graph_hash_at_run: string; readonly computed_at: string } | null {
+  const hash = (rb.analysisResult as { computed_against_hash?: unknown } | null | undefined)?.computed_against_hash;
+  const at = (rb.analysisState as { run_state?: { computed_at?: unknown } } | null | undefined)?.run_state?.computed_at;
+  return typeof hash === 'string' && hash !== '' && typeof at === 'string' && at !== '' ? { graph_hash_at_run: hash, computed_at: at } : null;
+}
 
 /**
  * The turn for a "What would change the result?" press, or null when the request carries no such press (a recognised
@@ -186,6 +200,10 @@ export async function whatChangesTurnFor(chipId: unknown, rb: MethodReadback, as
   }
   if (result.status === 'stale') return { reply: WHAT_CHANGES_REPLY.stale, outcome: 'stale', actions };
   if (result.status !== 'measured') return honest();
+  // The block must be about the Run the user is looking at: a newer Run with the same model and leader is still another
+  // Run (Codex P1 #2542), so the measured Run's identity must equal the shown one, not just its leader.
+  const shown = shownRunOf(rb);
+  if (shown === null || result.run.graph_hash_at_run !== shown.graph_hash_at_run || result.run.computed_at !== shown.computed_at) return honest();
   if (result.block.leader_option_id !== leaderId) return honest(); // never tipping points about another leader
   const sentences = renderLinkTippingPoints(result.block.links, {
     node: nodeLabelsOf(rb.graph), option: s['model.option_labels'], leaderId,

@@ -88,6 +88,20 @@ describe("plotClient.decisionFlip — one attempt, typed outcomes", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("headers then a STALLED body are still capped: a typed timeout (Codex P2 #2542)", async () => {
+    vi.useFakeTimers();
+    fetchSpy.mockImplementation(async (_u: string, init: { signal: AbortSignal }) => ({
+      ok: true, status: 200,
+      json: () => new Promise((_res, rej) => {
+        init.signal.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" })));
+      }),
+    }));
+    const pending = createPLoTClient()!.decisionFlip!(PAYLOAD, "req-4b");
+    await vi.advanceTimersByTimeAsync(PLOT_DECISION_FLIP_TIMEOUT_MS + 1);
+    expect(await pending).toEqual({ ok: false, reason: "timeout" });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("a TURN abort is not swallowed: the caller went away", async () => {
     const turn = new AbortController();
     fetchSpy.mockImplementation((_u: string, init: { signal: AbortSignal }) => new Promise((_res, rej) => {

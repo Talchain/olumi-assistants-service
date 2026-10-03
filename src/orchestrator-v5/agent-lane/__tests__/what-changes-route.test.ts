@@ -5,6 +5,7 @@
  * dispatch answers with ISL's REAL D3 block (ISL #220 @51bab705) for the links the turn asks about.
  * Harness modelled on `strengthen-press.test.ts`.
  */
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,8 +16,13 @@ const SERVED = JSON.parse(readFileSync(new URL('../turn-context/__tests__/fixtur
 const D3 = SERVED.cases.find((c) => c.id === 'A-WHAT-CHANGES-NONE-MEASURABLE-SILENT')!;
 const ISL_D3_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"switch_to_gcp","replicates":4,"bound_abs":0.01,"bound_rel":0.15,"grid_step":0.0025,"links":[{"from_id":"monthly_cloud_savings","to_id":"monthly_spend","status":"quoted","reason":null,"current_mean":-0.3555555555555555,"threshold":-0.09324009324009322,"replicate_thresholds":[-0.09324009324009322,-0.09572649572649569,-0.08578088578088575,-0.09324009324009322],"replicate_range":0.009945609945609946,"to_option_id":"stay_on_aws"},{"from_id":"monthly_cloud_overspend_during_migration","to_id":"monthly_spend","status":"no_change","reason":null,"current_mean":0.17777777777777776,"threshold":null,"replicate_thresholds":[null,null,null,null],"replicate_range":null,"to_option_id":null}]};
 const PRESS = NEXT_STEP_CHIPS.find((c) => c.id === 'agent-next-what-would-change')!;
+// The Run the served D3 read shows, by the identity the measurement carries (its fact's graph_hash_at_run + computed_at).
+const D3_RUN = { graph_hash_at_run: D3.body.analysis_result.computed_against_hash, computed_at: D3.body.analysis_state.run_state.computed_at };
+// Run B: the SAME model and leader, a newer Run (Codex P1 #2542: "unchanged leader/model variants").
+const RUN_B_AT = '2026-10-01T12:30:00.000Z';
+const runB = () => ({ ...D3.body.analysis_state, run_state: { ...D3.body.analysis_state.run_state, computed_at: RUN_B_AT } });
 
-const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' | 'unavailable', during: null as null | (() => void) }));
+const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' | 'unavailable', during: null as null | (() => void), run: null as null | Rec }));
 vi.mock('../../handlers/decision-flip-dispatch.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatchDecisionFlip: vi.fn(async (params: Rec) => {
@@ -24,7 +30,7 @@ vi.mock('../../handlers/decision-flip-dispatch.js', async (importOriginal) => ({
     dispatch.during?.();
     return dispatch.answer === 'stale' ? { status: 'stale' }
       : dispatch.answer === 'unavailable' ? { status: 'unavailable', reason: 'client_without_decision_flip' }
-      : { status: 'measured', block: ISL_D3_BLOCK, links: params.candidateLinks.slice(0, 2) };
+      : { status: 'measured', block: ISL_D3_BLOCK, links: params.candidateLinks.slice(0, 2), run: dispatch.run ?? D3_RUN };
   }),
 }));
 
@@ -48,7 +54,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
 }));
 
 // What the product's graph read serves; rows change it to model an edit or a Run the Explain control cannot bind.
-const served: { state: Rec; result: Rec } = { state: D3.body.analysis_state, result: D3.body.analysis_result };
+const served: { state: Rec; result: Rec; reads: number; afterRead: null | ((n: number) => void) } = { state: D3.body.analysis_state, result: D3.body.analysis_result, reads: 0, afterRead: null };
 const RUN_NOT_CURRENT = 'I can’t explain that result as current. Check the current results before asking again.';
 
 describe('the real route: "What would change the result?" → measured tipping points, 0 model calls', () => {
@@ -64,23 +70,26 @@ describe('the real route: "What would change the result?" → measured tipping p
     vi.resetModules();
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: D3.body.draft_graph, graph_hash: 'h-d3', analysis_state: served.state,
-      analysis_result: served.result, analysis_option_participation: D3.body.option_participation,
-    }));
+    app.post('/assist/v1/scenarios/:id/graph', async () => {
+      const read = { graph: D3.body.draft_graph, graph_hash: 'h-d3', analysis_state: served.state,
+        analysis_result: served.result, analysis_option_participation: D3.body.option_participation };
+      served.reads += 1;
+      served.afterRead?.(served.reads);
+      return read;
+    });
     app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'ok', blocks: [] }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
-    modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; dispatch.during = null;
-    served.state = D3.body.analysis_state; served.result = D3.body.analysis_result;
+    modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; dispatch.during = null; dispatch.run = null;
+    served.state = D3.body.analysis_state; served.result = D3.body.analysis_result; served.reads = 0; served.afterRead = null;
     n += 1; SCENARIO = `${SCENARIO_BASE}${String(n).padStart(2, '0')}`;
   });
 
-  const post = async (chipId: string, message: string) => {
-    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, source: 'chip', chip: { id: chipId } } });
+  const post = async (chipId: string, message: string, turnId?: string) => {
+    const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, source: 'chip', chip: { id: chipId }, ...(turnId !== undefined ? { turn_id: turnId } : {}) } });
     expect(r.statusCode, r.body).toBe(200);
     return r.json() as { assistant_text: string; suggested_actions: { id: string }[] };
   };
@@ -102,15 +111,18 @@ describe('the real route: "What would change the result?" → measured tipping p
 
   // One chip, two grounded answers (#2536 SCI-HERO coaching shares `agent-next-what-would-change`): anything the
   // measurement does not answer is the Run's own tipping-point coaching, exactly as served before this branch.
-  const coaching = async () => {
-    dispatch.answer = 'measured';
+  const killSwitchOff = async <T>(fn: () => Promise<T>): Promise<T> => {
     const { _resetConfigCache } = await import('../../../config/index.js');
     process.env.CEE_WHAT_CHANGES_MEASURED_ENABLED = 'false';
     _resetConfigCache();
-    try { return (await post(PRESS.id, PRESS.message)).assistant_text; } finally {
+    try { return await fn(); } finally {
       delete process.env.CEE_WHAT_CHANGES_MEASURED_ENABLED;
       _resetConfigCache();
     }
+  };
+  const coaching = async () => {
+    dispatch.answer = 'measured';
+    return killSwitchOff(async () => (await post(PRESS.id, PRESS.message)).assistant_text);
   };
 
   it('W3: the kill switch (CEE_WHAT_CHANGES_MEASURED_ENABLED=false) leaves the press to the Run\'s tipping-point coaching', async () => {
@@ -158,6 +170,60 @@ describe('the real route: "What would change the result?" → measured tipping p
     expect(dispatch.calls).toHaveLength(0);
     expect(modelCalls).toBe(0);
     expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
+  });
+
+  it('W7: Run B (same model, same leader) landing while ISL measures Run A is never answered with Run A\'s tipping points', async () => {
+    dispatch.during = () => { served.state = runB(); };
+    const body = await post(PRESS.id, PRESS.message);
+    expect(dispatch.calls).toHaveLength(1);
+    expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
+    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+  });
+
+  it('W7b: a block measured for another Run than the one shown is refused: the shown Run\'s coaching answers', async () => {
+    dispatch.run = { ...D3_RUN, computed_at: RUN_B_AT };
+    const body = await post(PRESS.id, PRESS.message);
+    expect(dispatch.calls).toHaveLength(1);
+    expect(body.assistant_text).toBe(await coaching());
+  });
+
+  it('W8: a "no threshold" coaching answer (no_signal) is about ITS Run too: Run B landing before the final read is never answered', async () => {
+    const text = await killSwitchOff(async () => {
+      served.afterRead = (n) => { if (n === 1) served.state = runB(); }; // the turn's first read binds Run A; every later read shows Run B
+      return (await post(PRESS.id, PRESS.message)).assistant_text;
+    });
+    expect(served.reads).toBeGreaterThan(1);
+    expect(text.endsWith(RUN_NOT_CURRENT), text).toBe(true);
+    expect(text).not.toMatch(/no factor threshold/);
+  });
+
+  describe('ONE owner on replay (Codex P1 #2542: the replay always chose SCI-HERO)', () => {
+    const MEASURED = "‘Switch to GCP’ would still lead even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.";
+    it('R1: a retry of a measured turn, its Run still current, is the SAME measured answer and never measures again', async () => {
+      const turn = randomUUID();
+      const first = await post(PRESS.id, PRESS.message, turn);
+      expect(first.assistant_text.endsWith(MEASURED), first.assistant_text).toBe(true);
+      const again = await post(PRESS.id, PRESS.message, turn);
+      expect(again.assistant_text).toBe(first.assistant_text);
+      expect(dispatch.calls).toHaveLength(1);
+      expect(modelCalls).toBe(0);
+    });
+    it('R2: once Run B is current, the retry is today\'s coaching, never Run A\'s measured words', async () => {
+      const turn = randomUUID();
+      await post(PRESS.id, PRESS.message, turn);
+      served.state = runB();
+      const again = await post(PRESS.id, PRESS.message, turn);
+      expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+      expect(again.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\.$/);
+      expect(dispatch.calls).toHaveLength(1);
+    });
+    it('R3: with the kill switch off, the retry is the coaching too', async () => {
+      const turn = randomUUID();
+      await post(PRESS.id, PRESS.message, turn);
+      const again = await killSwitchOff(() => post(PRESS.id, PRESS.message, turn));
+      expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+      expect(dispatch.calls).toHaveLength(1);
+    });
   });
 
   it('CONTROL: another next step never reaches the decision-flip dispatch', async () => {

@@ -28,7 +28,10 @@ const rbOf = (c: { body: Rec }, over: Partial<MethodReadback> = {}): MethodReadb
   graph: c.body.draft_graph, analysisState: c.body.analysis_state, analysisResult: c.body.analysis_result,
   optionParticipation: c.body.option_participation, analysisReady: buildCanonicalAnalysisReadyFromGraph(c.body.draft_graph), ...over,
 });
-const measured = (block: unknown, links: FlipLinkRef[]): DecisionFlipDispatchResult => ({ status: 'measured', block: block as never, links });
+// A measurement names the Run it was taken for; by default the served D3 Run (its own computed_against_hash + computed_at).
+const D3_RUN = { graph_hash_at_run: D3.body.analysis_result.computed_against_hash as string, computed_at: D3.body.analysis_state.run_state.computed_at as string };
+const measured = (block: unknown, links: FlipLinkRef[], run: { graph_hash_at_run: string | null; computed_at: string | null } = D3_RUN): DecisionFlipDispatchResult =>
+  ({ status: 'measured', block: block as never, links, run });
 
 describe('RC\'s contract, bound', () => {
   it('the copy and the ladder are RC @a4992165 verbatim', () => {
@@ -95,6 +98,21 @@ describe('the served D3 case + ISL\'s real D3 block', () => {
     expect((await whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbOf(D3), async (l) => measured(other, l.slice(0, 2))))?.outcome).toBe('honest_limit');
   });
 
+  it('a block measured for ANOTHER Run is never shown, even with the same model and leader (Codex P1 #2542)', async () => {
+    expect(D3_RUN.graph_hash_at_run).toMatch(/^[0-9a-f]{16}$/);
+    for (const run of [
+      { ...D3_RUN, computed_at: '2026-10-01T12:30:00.000Z' }, // Run B on the same model: same hash, a newer Run
+      { ...D3_RUN, graph_hash_at_run: '0123456789abcdef' }, // a Run on another model
+      { graph_hash_at_run: null, computed_at: null }, // a Run with no recorded identity
+    ]) {
+      const turn = await whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbOf(D3), async (l) => measured(ISL_D3_BLOCK, l.slice(0, 2), run));
+      expect(turn?.outcome, JSON.stringify(run)).toBe('honest_limit');
+    }
+    // The readback with no Run identity cannot be matched either.
+    const { computed_against_hash: _h, ...unbound } = D3.body.analysis_result;
+    expect((await whatChangesTurnFor(WHAT_CHANGES_PRESS_ID, rbOf(D3, { analysisResult: unbound }), async (l) => measured(ISL_D3_BLOCK, l.slice(0, 2))))?.outcome).toBe('honest_limit');
+  });
+
   it('gates: no press → null; an unread model → its reply; no licensed leader or not current → honest limit, PLoT never asked', async () => {
     const ask = vi.fn(async () => ({ status: 'no_run' }) as DecisionFlipDispatchResult);
     expect(await whatChangesTurnFor('agent-next-pre-mortem', rbOf(D3), ask)).toBeNull();
@@ -119,6 +137,18 @@ describe('renderLinkTippingPoints', () => {
     expect(renderLinkTippingPoints([link({ threshold: 0.02 })], labels)).toEqual(
       ["‘Bug fixes’ would come out ahead only if sprint capacity's effect on AI module availability all but disappeared."]);
   });
+  it('ids are data: `constructor`, `toString`, `__proto__` never read an inherited member as an option or a factor (Codex P2 #2542)', () => {
+    for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(renderLinkTippingPoints([link({ to_option_id: id })], labels), id).toEqual([]);
+      expect(renderLinkTippingPoints([link({ from_id: id })], labels), id).toEqual([]);
+      expect(renderLinkTippingPoints([link({ status: 'no_change', threshold: null, to_option_id: null })], { ...labels, leaderId: id }), id).toEqual([]);
+    }
+    // A graph whose node id IS `__proto__` keeps it as a label, never as the map's prototype.
+    const proto = { nodes: [{ id: '__proto__', label: 'Proto factor' }, { id: 'b', label: 'Outcome' }] };
+    const turn = renderLinkTippingPoints([link({ from_id: '__proto__' })], { ...labels, node: Object.fromEntries(proto.nodes.map((n) => [n.id, n.label])) });
+    expect(turn).toEqual(["‘Bug fixes’ would come out ahead if proto factor's effect on outcome fell below about a quarter of what it is now."]);
+  });
+
   it('ISL\'s real D1 block: two quoted links, the spread absence silent', () => {
     const d1 = { node: { sprint_capacity_for_ai_reporting: 'Sprint capacity for AI reporting', ai_reporting_module_availability: 'AI reporting module availability',
       enterprise_prospect_signing_likelihood: 'Enterprise prospect signing likelihood', quarterly_revenue: 'Quarterly revenue' },
