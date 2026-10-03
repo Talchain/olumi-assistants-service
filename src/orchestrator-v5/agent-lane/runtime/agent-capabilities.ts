@@ -856,13 +856,15 @@ function likelyBound(n: number, unit: string): string {
   return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
 }
 
-function levelFigureOf(op: ProposalOperation): { raw_value: number; cap: number; unit?: string; likely_range?: { low: number; high: number } } | Record<string, never> {
+function levelFigureOf(op: ProposalOperation): { raw_value?: number; cap?: number; unit?: string; likely_range?: { low: number; high: number } } | Record<string, never> {
   const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown; likely_range?: { low?: unknown; high?: unknown } };
-  if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw) || typeof v.cap !== 'number' || !(v.cap > 0)) return {};
-  if (Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
   // TEMPORAL: the user's likely range rides with their figure (proposed only beside a level they gave).
   const r = v.likely_range;
   const likely = r !== undefined && typeof r.low === 'number' && typeof r.high === 'number' ? { low: r.low, high: r.high } : undefined;
+  if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw)) return {};
+  // An unscaled level needs no cap. Carry its approved range without inventing a scale frame.
+  if (v.cap == null && v.raw === v.normalised) return likely !== undefined ? { likely_range: likely } : {};
+  if (typeof v.cap !== 'number' || !(v.cap > 0) || Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
   return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
     ...(likely !== undefined ? { likely_range: likely } : {}) };
 }

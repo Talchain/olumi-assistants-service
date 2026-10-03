@@ -469,9 +469,9 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
 
 /**
  * A whole-map `update_node` can replace an already numeric intervention without
- * entering `buildInterventionV3`. Clear only a quote copied from the persisted
- * OLD cell when the figure changed; a newly supplied quote remains the user's
- * evidence, and a same-value repeat leaves the original quote alone.
+ * entering `buildInterventionV3`. Clear a quote or range copied from the persisted
+ * OLD cell when the quantity changed; a fresh replacement remains, and an unchanged
+ * quantity keeps its original metadata.
  */
 export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after: T): T {
   if (!isPlainObject(before) || !Array.isArray(before.nodes)
@@ -491,8 +491,7 @@ export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after
     let updatedInterventions: Dict | undefined;
     for (const [factorId, cell] of Object.entries(node.interventions)) {
       const oldCell = prior.interventions[factorId];
-      if (!isPlainObject(cell) || !isPlainObject(oldCell)
-        || typeof cell.source_quote !== 'string' || cell.source_quote !== oldCell.source_quote) continue;
+      if (!isPlainObject(cell) || !isPlainObject(oldCell)) continue;
       const figureChanged = cell.value !== oldCell.value
         || (cell.raw_value !== undefined && oldCell.raw_value !== undefined && !isDeepStrictEqual(cell.raw_value, oldCell.raw_value))
         || (cell.unit !== undefined && oldCell.unit !== undefined && cell.unit !== oldCell.unit)
@@ -500,9 +499,14 @@ export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after
         || (cell.value_type !== undefined && oldCell.value_type !== undefined && cell.value_type !== oldCell.value_type)
         || (cell.encoding_map !== undefined && oldCell.encoding_map !== undefined && !isDeepStrictEqual(cell.encoding_map, oldCell.encoding_map));
       if (!figureChanged) continue;
-      const { source_quote: _staleQuote, ...withoutStaleQuote } = cell;
+      const staleQuote = typeof cell.source_quote === 'string' && cell.source_quote === oldCell.source_quote;
+      const staleRange = cell.range !== undefined && oldCell.range !== undefined && isDeepStrictEqual(cell.range, oldCell.range);
+      if (!staleQuote && !staleRange) continue;
+      const withoutStaleMetadata = { ...cell };
+      if (staleQuote) delete withoutStaleMetadata.source_quote;
+      if (staleRange) delete withoutStaleMetadata.range;
       updatedInterventions ??= { ...node.interventions };
-      updatedInterventions[factorId] = withoutStaleQuote;
+      updatedInterventions[factorId] = withoutStaleMetadata;
     }
     if (updatedInterventions !== undefined) {
       updatedNodes ??= [...afterNodes];

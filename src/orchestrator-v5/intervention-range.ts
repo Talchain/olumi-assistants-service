@@ -13,7 +13,8 @@
  *      inherit the value's user authorship.
  *   3. FORWARD ONLY WHAT THE ENGINE CAN READ: `{low, high, meaning}`, and only when the wire number for that factor IS
  *      the raw point the range brackets. A value CEE rescaled onto the model scale gets no range (the units would
- *      disagree), so that limit falls back to today's behaviour rather than being scored on a mismatched range.
+ *      disagree). The wire plan reports that conversion loss so affected outcomes are withheld, never silently
+ *      scored as though the user's range had been sampled.
  */
 import { InterventionRangeMeaningV3, InterventionRangeV3, type InterventionRangeV3T } from '../schemas/cee-v3.js';
 

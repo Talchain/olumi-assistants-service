@@ -8,6 +8,7 @@ import {
   encodeOptionInterventionsForEdit,
   optionIdsTouchedByOperations,
   optionIdsAddedWithInterventionIntent,
+  clearInheritedInterventionSourceQuotes,
 } from '../encode-option-interventions.js';
 
 type Dict = Record<string, unknown>;
@@ -403,5 +404,33 @@ describe('a stated range stays with ITS quantity across a replacement figure', (
   it('CONTROL: a range supplied WITH the new figure is the one stored', () => {
     const fresh = { low: 8, high: 30, meaning: 'likely_range', source: 'user_specified' };
     expect(cellAfter({ unit: 'days', raw_value: 12, range: fresh }).range).toEqual(fresh);
+  });
+
+  const numericMapAfter = (replacement: Dict): Dict => {
+    const before = withReplacement({});
+    const after = structuredClone(before);
+    const option = optionOf(after, 'opt_l');
+    const old = iv(option, 'fac_dt');
+    (option.interventions as Dict).fac_dt = { ...old, ...replacement };
+    const encoded = encodeOptionInterventionsForEdit(after).graph;
+    // Same before/after guard used by both real edit writers; no source quote is present.
+    const guarded = clearInheritedInterventionSourceQuotes(before, encoded);
+    return iv(optionOf(guarded as { nodes: Dict[] }, 'opt_l'), 'fac_dt');
+  };
+
+  it('numeric whole-map opt_l/fac_dt unit edit drops inherited 5–20 days', () => {
+    const cell = numericMapAfter({ unit: 'weeks' });
+    expect(cell).toMatchObject({ value: 0.25, raw_value: 10, unit: 'weeks' });
+    expect(Object.hasOwn(cell, 'range')).toBe(false);
+  });
+  it('numeric whole-map changed figure drops the inherited range', () => {
+    expect(Object.hasOwn(numericMapAfter({ value: 0.3, raw_value: 12 }), 'range')).toBe(false);
+  });
+  it('numeric whole-map unchanged quantity retains its stated range', () => {
+    expect(numericMapAfter({ unit: 'days' }).range).toEqual(RANGE);
+  });
+  it('numeric whole-map fresh replacement range survives a unit change', () => {
+    const fresh = { ...RANGE, low: 2, high: 30 };
+    expect(numericMapAfter({ unit: 'weeks', range: fresh }).range).toEqual(fresh);
   });
 });

@@ -152,6 +152,22 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
   });
 
+  it('capless opt_lift/fac_downtime preserves the range the user approved through the real writer', async () => {
+    const factor = (persisted as { nodes: { id: string; observed_state?: Record<string, unknown> }[] })
+      .nodes.find(n => n.id === 'fac_downtime')!;
+    delete factor.observed_state!.cap;
+    const { proposed, out } = await proposeAndApprove({ value: 0.5, likely_low: 0.2, likely_high: 0.8, ...TYPED },
+      'For Lift-and-shift, migration downtime is likely between 0.2 and 0.8 days, most likely 0.5 days.');
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(rows.size).toBe(1);
+    expect(liftCell()).toMatchObject({ value: 0.5, source: 'user_specified',
+      range: { low: 0.2, high: 0.8, meaning: 'likely_range', source: 'user_specified' } });
+    const other = (persisted as { nodes: { id: string; interventions?: Record<string, unknown> }[] })
+      .nodes.find(n => n.id === 'opt_replatform')!;
+    expect(other.interventions?.fac_downtime).toBeUndefined();
+  });
+
   // Codex CR 5963331228 P1: the range is decided from TYPED arguments only (its meaning, that the user gave it, beside a
   // level they gave, the level inside it), never by parsing the user's words; the user then approves range AND reading.
   it.each([

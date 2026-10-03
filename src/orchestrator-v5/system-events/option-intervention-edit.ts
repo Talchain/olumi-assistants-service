@@ -107,7 +107,7 @@ export interface OptionInterventionEditInput {
    * was normalised on. Without it a level on a factor with no range of its own (a NEW, value-less factor) is stored as a
    * bare model number and the figure is unrecoverable. It must normalise to `modelValue` exactly, or nothing is written.
    */
-  readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number;
+  readonly figure?: { readonly raw_value?: number; readonly unit?: string; readonly cap?: number;
     /** TEMPORAL: the user's likely range for this level, raw units (`intervention-range.ts` gates it at persist). */
     readonly likely_range?: { readonly low: number; readonly high: number } };
 }
@@ -1017,9 +1017,12 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     return refuse('invalid_identity');
   }
   const figure = input.figure;
-  if (figure !== undefined && (!Number.isFinite(figure.raw_value) || !Number.isFinite(figure.cap) || !(figure.cap > 0)
-    || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === ''))
-    || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9)) {
+  if (figure !== undefined && (
+    ((figure.raw_value !== undefined || figure.cap !== undefined)
+      && (typeof figure.raw_value !== 'number' || !Number.isFinite(figure.raw_value)
+        || typeof figure.cap !== 'number' || !Number.isFinite(figure.cap) || !(figure.cap > 0)
+        || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9))
+    || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === '')))) {
     return refuse('level_frame_mismatch');
   }
 
@@ -1144,14 +1147,17 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   // ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (DL #75 5902916137 (3); P0 partner 5902892060; served W4 run2 on `f074916`):
   // the card sends the level on the model scale and shows it on the factor's own range ("£57" = 0.285 of 200). Written
   // bare, the £57 left the model and the reply said "an effect value of 0.285". That same reading is kept on the cell.
-  const levelFigure = figure ?? figureOnFactorRange(graph, factor, existing, input.modelValue);
+  const levelFigure = figure !== undefined && typeof figure.raw_value === 'number' && typeof figure.cap === 'number'
+    ? { raw_value: figure.raw_value, cap: figure.cap, ...(figure.unit !== undefined ? { unit: figure.unit } : {}) }
+    : figureOnFactorRange(graph, factor, existing, input.modelValue);
   // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell
   // (`cap` only when it reproduces the level, which the check above has already required).
   // TEMPORAL: the user's likely range, only from THIS approval's figure (never read back from another cell), recorded as
   // theirs with the one meaning its wording licenses (R3 #75 5914230653).
   const likely = figure?.likely_range;
-  const operation = levelFigure === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
-    raw_value: levelFigure.raw_value, cap: levelFigure.cap, ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}),
+  const operation = levelFigure === undefined && likely === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
+    ...(levelFigure !== undefined ? { raw_value: levelFigure.raw_value, cap: levelFigure.cap,
+      ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } : {}),
     ...(likely !== undefined ? { range: { low: likely.low, high: likely.high, meaning: 'likely_range', source: 'user_specified' } } : {}) } };
   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
