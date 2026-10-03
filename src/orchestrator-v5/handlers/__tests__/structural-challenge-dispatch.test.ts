@@ -93,7 +93,7 @@ function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean } = {})
     validatePatch: vi.fn().mockResolvedValue({}),
     run: vi.fn(async (body: Rec) => {
       runBodies.push(structuredClone(body));
-      if (opts.timeoutOnCandidate && runBodies.length > 1) throw new PLoTTimeoutError('candidate timed out');
+      if (opts.timeoutOnCandidate && runBodies.length > 1) throw new PLoTTimeoutError('candidate timed out', 'run', 75_000, 75_000);
       const derived = String(parseInt(createHash('sha256').update(JSON.stringify(body.graph)).digest('hex').slice(0, 7), 16));
       const seedUsed = body.seed !== undefined ? String(body.seed) : derived;
       if (opts.real) {
