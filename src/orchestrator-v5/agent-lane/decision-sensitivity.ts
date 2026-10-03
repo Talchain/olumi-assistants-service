@@ -28,6 +28,7 @@
 import { selectFactorEvppiPriority } from '../coaching/select-factor-evppi.js';
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { flipRowScaleIsDisplaySafe } from '../context/analysis-signals.js';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { GOAL_FIGURES_WITHHELD_CODES, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
 
 /**
@@ -112,7 +113,9 @@ export type TippingPoint =
 const inUnit = (value: number, unit: string | null): string => {
   const n = String(value);
   if (unit === null || unit.trim() === '') return n;
-  return unit.trim() === '%' ? `${n}%` : `${n} ${unit.trim()}`;
+  const suffix = unit.trim();
+  // Compact the one-character percent suffix only; the shared display predicate already licensed the values.
+  return classifyUnitScaleClass(suffix) === 'percent' && suffix.length === 1 ? `${n}${suffix}` : `${n} ${suffix}`;
 };
 
 export function tippingPointOf(enrichment: unknown): TippingPoint {
