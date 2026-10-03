@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { BUILD_INSTRUCTIONS } from '../runtime/build-model.js';
+import { COMPACT_MARKER, servedControlInstructions } from './compact-benchmark-control.js';
 
 const K3 = 'EVERY RISK THE USER NAMES IS DRAWN AS A RISK NODE: each downside the user states in their own words (for example that they will run out of money, lose a key customer, or miss a deadline) is its own risk, linked to what it threatens, even when you also draw a risk of your own. ';
 
@@ -45,6 +46,15 @@ describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as
     expect(budget).toBeGreaterThan(-1);
     expect(refused).toBeGreaterThan(budget);
     expect(text.indexOf(EXCEPTION)).toBe(refused + 'an oversized first model is refused before it reaches the canvas. '.length);
+  });
+
+  it('the live benchmark\'s served control drops the whole compact clause: no budget and no budget exception left behind', () => {
+    const control = servedControlInstructions(String(BUILD_INSTRUCTIONS));
+    expect(control).toContain('Then widen');
+    expect(control).not.toContain(COMPACT_MARKER);
+    expect(control).not.toContain('Stay within ');
+    expect(control).not.toContain("THE ONE EXCEPTION IS THE USER'S OWN MATERIAL");
+    expect(control).not.toContain('cannot fit this budget');
   });
 
   it('CONTROL: the envelope still forbids decorative risks (the rule adds the user\'s risk; it never widens the model)', () => {
