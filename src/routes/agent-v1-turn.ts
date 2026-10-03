@@ -306,7 +306,9 @@ function rememberOffered(key: string, actions: readonly OfferedAction[]): void {
  * ⭐ "WHAT WOULD CHANGE THE RESULT?" HAS ONE OWNER, LIVE AND ON REPLAY (Codex P1 #2542). SCI-CHANGE (#2522,
  * `method-turn/what-changes-turn.ts`) and SCI-HERO (#2536, `tipping-point-coaching.ts`) answer the same chip; this
  * selector is the only place that chooses between them. The measured answer is used only while the Run it was measured
- * for is the Run the Explain control binds NOW (`runExplanationMatches`); otherwise, and with the kill switch
+ * for is the Run the Explain control binds NOW (`runExplanationMatches`) AND today's leader licence still permits naming
+ * a leader (`leaderLicenceFromState`, caveated permission included): its sentences name options, so a revoked claim or an
+ * absent / malformed / refused / exploratory admission on the SAME Run withholds them (Codex round 2 P1). Otherwise, and with the kill switch
  * CEE_WHAT_CHANGES_MEASURED_ENABLED=false, the answer is that Run's own tipping-point coaching. A replay never measures
  * again (up to the 70 s ISL cap): it reuses the measured answer this process gave THAT turn, re-checked against today's
  * Run, as the words the user received (`sentText`: the stored reply, so the leader wire gate's caveat stays with it);
@@ -323,11 +325,12 @@ function rememberMeasuredWhatChanges(key: string, measured: MeasuredWhatChanges)
   }
   measuredWhatChanges.set(key, measured);
 }
-function whatWouldChangeAnswer(scenarioId: string, read: Parameters<typeof tippingPointCoachingFor>[1], measured: MeasuredWhatChanges | null,
-  sentText?: string | null): {
+function whatWouldChangeAnswer(scenarioId: string, read: Parameters<typeof tippingPointCoachingFor>[1] & { readonly analysisReady?: unknown },
+  measured: MeasuredWhatChanges | null, sentText?: string | null): {
   readonly text: string; readonly tippingTurn: TippingPointCoaching | null; readonly measured: MeasuredWhatChanges | null;
 } {
-  if (measured !== null && config.features.whatChangesMeasuredEnabled && runExplanationMatches(measured.runKey, scenarioId, read)) {
+  if (measured !== null && config.features.whatChangesMeasuredEnabled && runExplanationMatches(measured.runKey, scenarioId, read)
+    && leaderLicenceFromState(read.analysisState, read.analysisReady) !== 'withheld') {
     return { text: sentText ?? measured.turn.reply, tippingTurn: null, measured };
   }
   const tippingTurn = tippingPointCoachingFor(scenarioId, read);

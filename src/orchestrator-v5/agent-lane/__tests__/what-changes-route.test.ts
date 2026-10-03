@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 
 type Rec = Record<string, any>;
 const SERVED = JSON.parse(readFileSync(new URL('../turn-context/__tests__/fixtures/rc-served-signal-cases.json', import.meta.url), 'utf8')) as { cases: { id: string; body: Rec }[] };
@@ -22,7 +23,7 @@ const D3_RUN = { graph_hash_at_run: D3.body.analysis_result.computed_against_has
 const RUN_B_AT = '2026-10-01T12:30:00.000Z';
 const runB = () => ({ ...D3.body.analysis_state, run_state: { ...D3.body.analysis_state.run_state, computed_at: RUN_B_AT } });
 
-const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' | 'unavailable', during: null as null | (() => void), run: null as null | Rec }));
+const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' | 'unavailable', during: null as null | (() => void), run: null as null | Rec, block: null as null | Rec }));
 vi.mock('../../handlers/decision-flip-dispatch.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   dispatchDecisionFlip: vi.fn(async (params: Rec) => {
@@ -30,7 +31,7 @@ vi.mock('../../handlers/decision-flip-dispatch.js', async (importOriginal) => ({
     dispatch.during?.();
     return dispatch.answer === 'stale' ? { status: 'stale' }
       : dispatch.answer === 'unavailable' ? { status: 'unavailable', reason: 'client_without_decision_flip' }
-      : { status: 'measured', block: ISL_D3_BLOCK, links: params.candidateLinks.slice(0, 2), run: dispatch.run ?? D3_RUN };
+      : { status: 'measured', block: dispatch.block ?? ISL_D3_BLOCK, links: params.candidateLinks.slice(0, 2), run: dispatch.run ?? D3_RUN };
   }),
 }));
 
@@ -54,7 +55,7 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
 }));
 
 // What the product's graph read serves; rows change it to model an edit or a Run the Explain control cannot bind.
-const served: { state: Rec; result: Rec; reads: number; afterRead: null | ((n: number) => void) } = { state: D3.body.analysis_state, result: D3.body.analysis_result, reads: 0, afterRead: null };
+const served: { state: Rec; result: Rec; ready: Rec | undefined; reads: number; afterRead: null | ((n: number) => void) } = { state: D3.body.analysis_state, result: D3.body.analysis_result, ready: undefined, reads: 0, afterRead: null };
 const RUN_NOT_CURRENT = 'I can’t explain that result as current. Check the current results before asking again.';
 
 describe('the real route: "What would change the result?" → measured tipping points, 0 model calls', () => {
@@ -72,7 +73,9 @@ describe('the real route: "What would change the result?" → measured tipping p
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => {
       const read = { graph: D3.body.draft_graph, graph_hash: 'h-d3', analysis_state: served.state,
-        analysis_result: served.result, analysis_option_participation: D3.body.option_participation };
+        analysis_result: served.result, analysis_option_participation: D3.body.option_participation,
+        // Absent: the readback derives the producer's own admission from the graph (D3: M2, caveated permission).
+        ...(served.ready !== undefined ? { analysis_ready: served.ready } : {}) };
       served.reads += 1;
       served.afterRead?.(served.reads);
       return read;
@@ -83,8 +86,8 @@ describe('the real route: "What would change the result?" → measured tipping p
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
   beforeEach(() => {
-    modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; dispatch.during = null; dispatch.run = null;
-    served.state = D3.body.analysis_state; served.result = D3.body.analysis_result; served.reads = 0; served.afterRead = null;
+    modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; dispatch.during = null; dispatch.run = null; dispatch.block = null;
+    served.state = D3.body.analysis_state; served.result = D3.body.analysis_result; served.ready = undefined; served.reads = 0; served.afterRead = null;
     n += 1; SCENARIO = `${SCENARIO_BASE}${String(n).padStart(2, '0')}`;
   });
 
@@ -224,6 +227,45 @@ describe('the real route: "What would change the result?" → measured tipping p
       expect(again.assistant_text).not.toMatch(/would come out ahead|would still lead/);
       expect(dispatch.calls).toHaveLength(1);
     });
+  });
+
+  describe('a measured answer is reused on replay only under TODAY\'s leader licence (Codex round 2 P1)', () => {
+    // Each of RC's three measured sentence kinds, from ISL's real D3 links.
+    const [savings, overspend] = ISL_D3_BLOCK.links;
+    const STATUSES: Record<string, { block: Rec; said: RegExp }> = {
+      quoted: { block: { ...ISL_D3_BLOCK, links: [savings] }, said: /would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter/ },
+      below_a_tenth: { block: { ...ISL_D3_BLOCK, links: [{ ...savings, threshold: -0.02, replicate_thresholds: [-0.02, -0.02, -0.02, -0.02], replicate_range: 0 }] },
+        said: /would come out ahead only if monthly cloud savings's effect on monthly spend all but disappeared/ },
+      no_change: { block: { ...ISL_D3_BLOCK, links: [overspend] }, said: /would still lead even if monthly cloud overspend during migration's average effect/ },
+    };
+    const canonical = buildCanonicalAnalysisReadyFromGraph(D3.body.draft_graph) as Rec;
+    // The SAME Run (scenario, computed_against_hash, computed_at untouched): only the permission or the admission moves.
+    const WITHHELD: Record<string, () => void> = {
+      'leader claim revoked': () => { served.state = { ...D3.body.analysis_state, leader_claim: { ...D3.body.analysis_state.leader_claim, permitted: false } }; },
+      'admission absent': () => { served.ready = { ...canonical, analysis_admission: undefined }; },
+      'admission malformed': () => { served.ready = { ...canonical, analysis_admission: 'admitted' }; },
+      'admission refused': () => { served.ready = { ...canonical, analysis_admission: { ...canonical.analysis_admission, structurally_analysable: false } }; },
+      'admission exploratory': () => { served.ready = { ...canonical, analysis_admission: { ...canonical.analysis_admission, permitted_analysis_mode: 'exploratory' } }; },
+    };
+    it('the served D3 admission is M2 (caveated permission): the measured replay R1 stands under it', () => {
+      expect(canonical.analysis_admission).toMatchObject({ structurally_analysable: true, permitted_analysis_mode: 'quantified_provisional' });
+    });
+    for (const [status, { block, said }] of Object.entries(STATUSES)) {
+      for (const [how, withhold] of Object.entries(WITHHELD)) {
+        it(`R4 ${status} · ${how}: the retry is today's coaching, never the measured words`, async () => {
+          dispatch.block = block;
+          const turn = randomUUID();
+          const first = await post(PRESS.id, PRESS.message, turn);
+          expect(first.assistant_text, first.assistant_text).toMatch(said);
+          withhold();
+          const again = await post(PRESS.id, PRESS.message, turn);
+          expect(again.assistant_text, again.assistant_text).not.toMatch(/would come out ahead|would still lead|all but disappeared/);
+          expect(again.assistant_text).toMatch(/no factor threshold to quote within the ranges it checked\./);
+          expect(dispatch.calls).toHaveLength(1);
+          expect(modelCalls).toBe(0);
+        });
+      }
+    }
   });
 
   it('CONTROL: another next step never reaches the decision-flip dispatch', async () => {
