@@ -28,6 +28,7 @@ import { POLICY } from '../guidance/policy.js';
 import { doorLevelOf, estimateLevelPersists } from '../runtime/agent-capabilities.js';
 import { assembleGuidanceSignals, type GuidanceSignals as TurnSignals } from '../turn-context/guidance-signals.js';
 import { selectorSignalsOf, TALK_IT_THROUGH_CHIP, type MethodReadback } from './method-turn.js';
+import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
 
 const METHOD = 'RC-WIDEN' as const;
 const CONTRACT = POLICY.method_turns[METHOD];
@@ -51,7 +52,7 @@ export const WIDEN_FALLBACK_TEMPLATE =
 export const WIDEN_GATE_REFUSAL = 'widen_gate';
 
 export function isWidenPress(chipId: unknown): boolean {
-  return chipId === WIDEN_PRESS_ID;
+  return chipId === WIDEN_PRESS_ID || questionedLinkOf(chipId) !== null;
 }
 
 /** The Widen next-step chip, labelled by RC's primary action for options ("Suggest options"). */
@@ -157,9 +158,11 @@ export interface RunWidenTurn {
   readonly sq: string | null;
   /** The RAW graph, exactly as the door reads it (`factorUnitOf` joins `goal_constraints` by node id). */
   readonly raw: unknown;
+  /** LIVING MODEL: the ONE open assumption this press questions, re-read from the stored graph. Absent on a Widen. */
+  readonly question?: QuestionedLink;
 }
 
-export type WidenUnavailableReason = 'model_unread' | 'no_goal';
+export type WidenUnavailableReason = 'model_unread' | 'no_goal' | 'not_an_assumption';
 
 /** ONE deterministic "can't widen because …" reply, with 'Talk it through'. No model call. */
 export interface WidenUnavailableTurn {
@@ -174,6 +177,7 @@ export type WidenTurn = RunWidenTurn | WidenUnavailableTurn;
 const UNAVAILABLE_REPLY: Readonly<Record<WidenUnavailableReason, string>> = {
   model_unread: 'I can’t suggest options right now because I couldn’t read your model. Try again in a moment.',
   no_goal: 'I can’t suggest options yet because your model has no goal for them to reach. Add the goal first.',
+  not_an_assumption: 'That link isn’t an open assumption in your model (it isn’t one of Olumi’s unconfirmed estimates on the way to your goal), so there’s nothing for me to question there.',
 };
 
 function unavailable(reason: WidenUnavailableReason): WidenUnavailableTurn {
@@ -181,7 +185,7 @@ function unavailable(reason: WidenUnavailableReason): WidenUnavailableTurn {
 }
 
 /** The Widen turn for these signals: unavailable without a goal or factors, else ONE gated model call. Total. */
-export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn {
+export function widenTurnFromSignals(s: TurnSignals, graph: unknown, question?: QuestionedLink): WidenTurn {
   if (s['model.goal_present'] !== true) return unavailable('no_goal');
   const g = graphOf(graph);
   const goalLabel = s['model.goal_label'] ?? labelOf(g.nodes.find((n) => n.kind === 'goal')) ?? 'your goal';
@@ -204,7 +208,7 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
     const changes = g.edges.filter((e) => e.from === id && factorLabel.has(e.to)).map((e) => quote(factorLabel.get(e.to)!));
     return `- ${quote(labelFor(id))}${compared.has(id) ? '' : ' (left out of the comparison)'}${changes.length > 0 ? `: changes ${changes.join(', ')}` : ''}`;
   };
-  const directive = [
+  const directive = question !== undefined ? questionDirective(question, goalLabel, optionIds.map(describe), factors.map((n) => quote(labelOf(n)!))) : [
     'METHOD TURN: the user asked Olumi to suggest options they have not considered. Call propose_new_option exactly once, '
       + `with 1 to ${WIDEN_MAX_OPTIONS} options (one option: \`label\` + \`acts_on\`; two or three: \`options\`). The user approves `
       + 'the change before anything is added.',
@@ -225,13 +229,17 @@ export function widenTurnFromSignals(s: TurnSignals, graph: unknown): WidenTurn 
   ].join('\n');
   const doorFactors = g.nodes.filter((n) => n.kind === 'factor').map((n) => ({
     id: String(n.id), label: typeof n.label === 'string' ? n.label : '', description: typeof n.description === 'string' ? n.description : '' }));
-  return { kind: 'run', target: 'options', variant, goal_label: goalLabel, directive, current, factors: doorFactors, graph: g, sq, raw: graph };
+  return { kind: 'run', target: 'options', variant: question !== undefined ? null : variant, goal_label: goalLabel, directive, current,
+    factors: doorFactors, graph: g, sq, raw: graph, ...(question !== undefined ? { question } : {}) };
 }
 
 /** The Widen turn for a press, from the route's own readback (the same licence and identity projection as the pre-mortem). */
 export function widenTurnForReadback(chipId: unknown, rb: MethodReadback): WidenTurn | null {
   if (!isWidenPress(chipId)) return null;
   if (rb.graph === undefined || rb.graph === null) return unavailable('model_unread');
+  const pressed = questionedLinkOf(chipId);
+  const question = pressed === null ? undefined : openAssumptionOf(rb.graph, pressed.from, pressed.to);
+  if (pressed !== null && question === undefined) return unavailable('not_an_assumption');
   const signals = assembleGuidanceSignals({
     request: 'method',
     explicitRequest: METHOD,
@@ -244,7 +252,7 @@ export function widenTurnForReadback(chipId: unknown, rb: MethodReadback): Widen
       ? { identityEvaluations: [...rb.identityEvaluated].map((node_id) => ({ node_id, evaluated: true })) } : {}),
     leaderLicensed: leaderLicenceFromState(rb.analysisState, rb.analysisReady) !== 'withheld',
   });
-  return widenTurnFromSignals(signals, rb.graph);
+  return widenTurnFromSignals(signals, rb.graph, question);
 }
 
 export type WidenGateResult = { readonly ok: true } | { readonly ok: false; readonly failed: readonly string[] };
@@ -320,6 +328,16 @@ export function widenGate(turn: RunWidenTurn, args: unknown): WidenGateResult {
     if (levers.size > 0 && seen.some((existing) => sameLevers(levers, existing))) failed.add('WD-S-DISTINCT');
     seen.push(levers);
   }
+  if (turn.question !== undefined) {
+    if (raw.length !== 1) failed.add('CH-COUNT');
+    for (const item of raw) {
+      const actsOn = Array.isArray(rec(item)?.acts_on) ? (rec(item)!.acts_on as unknown[]).map(rec) : [];
+      for (const e of actsOn) {
+        const id = doorFactorOf(turn, e?.factor_label);
+        if (id !== undefined && !actsWithout(turn.graph, id, turn.question)) failed.add('CH-OTHER-MECHANISM');
+      }
+    }
+  }
   return failed.size === 0 ? { ok: true } : { ok: false, failed: [...failed] };
 }
 
@@ -387,8 +405,12 @@ export function settleWidenTurn(
   if (cards.length === 1) {
     const reply = run.assistant_text.trim() !== '' ? run.assistant_text
       : widenDoorReply(run.tool_results?.[cards[0]!]) ?? WIDEN_CARD_LINE;
+    if (turn.question !== undefined) {
+      return { reply: `${questionHeadline(turn.question, turn.goal_label)}\n${reply}`, carded: true, actions: [QUESTION_KEEP_CHIP] };
+    }
     return { reply, carded: true, actions: [SOMETHING_ELSE_CHIP] };
   }
+  if (turn.question !== undefined) return { reply: questionFallbackReply(turn.question, turn.goal_label), carded: false, actions: [TALK_IT_THROUGH_CHIP] };
   return { reply: widenFallbackReply(turn), carded: false, actions: [TALK_IT_THROUGH_CHIP] };
 }
 
@@ -424,4 +446,131 @@ export function widenOffered(rb: MethodReadback): boolean {
 /** The product's next steps with Widen in the replaced chip's place when it is offered; otherwise unchanged. */
 export function nextStepsWithWiden<T extends SuggestedAction>(steps: readonly T[], offered: boolean): (T | typeof WIDEN_CHIP)[] {
   return offered ? steps.map((s) => (s.id === WIDEN_REPLACES_CHIP_ID ? WIDEN_CHIP : s)) : [...steps];
+}
+
+/**
+ * ⭐ LIVING MODEL — QUESTION ONE ASSUMPTION (PTL #85 5963052437 item 7; lease 5963140107; DL GO 5963160109).
+ *
+ *   press `agent-question-assumption:<from>><to>` → the link is RE-READ from the stored graph (never trusted from the
+ *   chip) and must be an OPEN assumption: Olumi's unconfirmed size (`linkSizing`: `olumi_estimate` or `placeholder`, the
+ *   ONE reader) on a link that reaches the goal → the Widen turn's ONE forced `propose_new_option` call, told the link →
+ *   the gate (Widen's checks, plus CH-COUNT: exactly ONE option, and CH-OTHER-MECHANISM) INSIDE the door → ONE held card,
+ *   or the question's fallback and nothing stored.
+ *
+ * ⛔ A PROPOSAL, NEVER TRUTH: nothing is written until the user presses the existing approve chip; the levels stay
+ * Olumi's estimates (`user_text: ''`, the Widen wrapper in the route); and the questioned link itself is NEVER rewritten
+ * here — it stays explicit and unresolved until the user sizes it through its own door.
+ * ⛔ "GENUINELY DIFFERENT" IS GRAPH STRUCTURE, NEVER WORDING (DL 5963160109): every factor the option changes must reach
+ * the goal with the questioned link REMOVED, and none may be the link's own source.
+ */
+export const QUESTION_PRESS_PREFIX = 'agent-question-assumption:';
+/** The press label (DL 5963160109: "Challenge this" stays SCI-DEEP's). */
+export const QUESTION_PRESS_LABEL = 'Question this assumption';
+/** The card's decline: an ordinary Agent turn; the held change is simply never approved, so nothing is written. */
+export const QUESTION_KEEP_CHIP = {
+  id: 'agent-question-keep',
+  label: 'Keep my options',
+  message: 'Keep my options as they are.',
+} as const satisfies SuggestedAction;
+
+/** The link a question names, by its stored endpoints, and whose open size it is (re-read from the graph). */
+export interface QuestionedLink {
+  readonly from: string;
+  readonly to: string;
+  readonly from_label: string;
+  readonly to_label: string;
+  readonly goal_id: string;
+  readonly sizing: 'olumi_estimate' | 'placeholder';
+}
+
+/** The ONE press for a stored link. Node ids never contain `>` (`NODE_ID_PATTERN` `[a-z0-9_:-]`), so the id is unambiguous. */
+export function challengePressFor(from: string, to: string): SuggestedAction {
+  return { id: `${QUESTION_PRESS_PREFIX}${from}>${to}`, label: QUESTION_PRESS_LABEL, message: `${QUESTION_PRESS_LABEL}.` };
+}
+
+const NODE_ID = /^[a-z0-9_:-]+$/;
+/** The endpoints a press names, or null when it is not a question press. Shape only; the graph decides the rest. */
+export function questionedLinkOf(chipId: unknown): { readonly from: string; readonly to: string } | null {
+  if (typeof chipId !== 'string' || !chipId.startsWith(QUESTION_PRESS_PREFIX)) return null;
+  const parts = chipId.slice(QUESTION_PRESS_PREFIX.length).split('>');
+  return parts.length === 2 && NODE_ID.test(parts[0]!) && NODE_ID.test(parts[1]!) ? { from: parts[0]!, to: parts[1]! } : null;
+}
+
+/** The goal the graph names: `goal_node_id` when it is a goal node, else the ONE goal node; undefined otherwise. */
+function goalIdOf(raw: unknown, g: Graph): string | undefined {
+  const named = rec(raw)?.goal_node_id;
+  const goals = g.nodes.filter((n) => n.kind === 'goal').map((n) => String(n.id));
+  if (typeof named === 'string' && goals.includes(named)) return named;
+  return goals.length === 1 ? goals[0] : undefined;
+}
+
+/** Directed reachability over the stored links, optionally with ONE link removed. */
+function reaches(g: Graph, start: string, target: string, without?: { readonly from: string; readonly to: string }): boolean {
+  const seen = new Set<string>([start]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const at = queue.shift()!;
+    if (at === target) return true;
+    for (const e of g.edges) {
+      if (e.from !== at || (without !== undefined && e.from === without.from && e.to === without.to)) continue;
+      const next = String(e.to);
+      if (!seen.has(next)) { seen.add(next); queue.push(next); }
+    }
+  }
+  return false;
+}
+
+/**
+ * The OPEN assumption at this stored link, or undefined: exactly one link with these endpoints, its size Olumi's and
+ * unconfirmed (`linkSizing`), both ends labelled, and its target on the way to the goal. Read off the stored graph only.
+ */
+export function openAssumptionOf(graph: unknown, from: string, to: string): QuestionedLink | undefined {
+  const g = graphOf(graph);
+  const links = g.edges.filter((e) => e.from === from && e.to === to);
+  if (links.length !== 1) return undefined;
+  const sizing = linkSizing(links[0]);
+  if (sizing !== 'olumi_estimate' && sizing !== 'placeholder') return undefined;
+  const goalId = goalIdOf(graph, g);
+  const fromLabel = labelOf(g.nodes.find((n) => n.id === from));
+  const toLabel = labelOf(g.nodes.find((n) => n.id === to));
+  if (goalId === undefined || fromLabel === null || toLabel === null || !reaches(g, to, goalId)) return undefined;
+  return { from, to, from_label: fromLabel, to_label: toLabel, goal_id: goalId, sizing };
+}
+
+/** CH-OTHER-MECHANISM for ONE factor an option changes: not the link's source, and still reaches the goal without it. */
+export function actsWithout(g: Graph, factorId: string, q: QuestionedLink): boolean {
+  return factorId !== q.from && reaches(g, factorId, q.goal_id, q);
+}
+
+const linkWords = (q: QuestionedLink): string => `${quote(q.from_label)} → ${quote(q.to_label)}`;
+const whoseSize = (q: QuestionedLink): string =>
+  q.sizing === 'placeholder' ? 'nobody has sized it yet' : 'its size is Olumi’s estimate, and nobody has confirmed it';
+
+function questionDirective(q: QuestionedLink, goalLabel: string, existing: readonly string[], factorLabels: readonly string[]): string {
+  return [
+    `METHOD TURN: the user asked Olumi to question one assumption in their model: the link ${linkWords(q)}; ${whoseSize(q)}. `
+      + 'Call propose_new_option exactly once, with exactly ONE option (`label` + `acts_on`). The user approves the change '
+      + 'before anything is added.',
+    `The goal is ${quote(goalLabel)}.`,
+    ...(existing.length > 0 ? ['The options already in the model, and the factors each one changes (never propose any of these again):', ...existing] : []),
+    `The model's factors (use these exact labels in acts_on, and no others): ${factorLabels.join(', ')}.`,
+    `The option must reach the goal through a DIFFERENT mechanism, one that does not depend on that link: it must not change `
+      + `${quote(q.from_label)}, and every factor it changes must affect ${quote(goalLabel)} without going through ${linkWords(q)}. `
+      + 'An option that only works through that link is refused. Add no new factors. Name the option in 6 words or fewer, in plain words.',
+    'EVERY factor the option changes needs a level: your own estimate (estimate: true, with a basis the user can check), in '
+      + 'the factor’s own units and within its range. An option whose levels you cannot estimate is not suggested. Never '
+      + 'present a level as the user’s figure, and put no figure in the option’s name.',
+    'Put why it might do better, whichever way that link turns out, in `rationale`, in one or two plain sentences.',
+    ...POLICY.method_turns.shared.never.map((rule) => `Never: ${rule}.`),
+  ].join('\n');
+}
+
+/** The card's first line: WHICH assumption this option answers (typed labels only), so the stored answer row says it. */
+export function questionHeadline(q: QuestionedLink, goalLabel: string): string {
+  return `Your options rest partly on the link ${linkWords(q)}: ${whoseSize(q)}. Here is a way to reach ${quote(goalLabel)} that does not rely on it. The link itself stays as it is.`;
+}
+
+export function questionFallbackReply(q: QuestionedLink, goalLabel: string): string {
+  return `I couldn’t find a way to reach ${quote(goalLabel)} that does not rely on the link ${linkWords(q)}, so nothing was changed. `
+    + 'That link is still an open assumption: you can give your own view of it, or name another lever.';
 }
