@@ -94,10 +94,14 @@ export interface StructuralChallengeResult {
   readonly recompute_key: string;
 }
 
-/** Listed on every completed result (contract S2), plus the other diagnostics this method does not compare. */
+/**
+ * Listed on every completed result (contract S2), plus the other diagnostics this method does not compare. Flip
+ * thresholds are left off: the contract makes them optional, and naming a ratified Tier-3 key here would make this
+ * producer a claim-safety site (tier3-leak-guard) for a field it never reads.
+ */
 export const NOT_COMPARED = [
   'structural_influence', 'e_values', 'driver_rank', 'robustness_label', 'fragile_edges',
-  'factor_sensitivity', 'path_decomposition', 'flip_thresholds', 'evpi',
+  'factor_sensitivity', 'path_decomposition', 'evpi',
 ] as const;
 
 // ── Readers over the stored envelope ───────────────────────────────────────────────────────────────────────────────
