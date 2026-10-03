@@ -271,6 +271,13 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   out when nothing you emitted measures that quantity: an omission is read as
   "not stated" and costs nothing, and a wrong index binds the user's limit to the
   wrong number.
+  A limit NEVER applies to the \`goal\`. A goal says where the user wants to get
+  to; a limit bounds a quantity that is being MEASURED, so point at the stated
+  \`figure\` — or the factor claim — that measures it. This holds even when the
+  limit bounds the very quantity the goal targets: "lift on-time delivery to 95%,
+  our contractual floor is 88%" points at the stated figure giving on-time
+  delivery's CURRENT level, never at the goal. A limit pointed at a goal is
+  discarded and the user's limit is lost.
   A limit must be one the user adopts, not merely a number or someone else's
   proposal they report. Keep acceptance, rejection and uncertainty in the
   \`source_quote\`; if the bounded quantity or direction is unresolved, retain
