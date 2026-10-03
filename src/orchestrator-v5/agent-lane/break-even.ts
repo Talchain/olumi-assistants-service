@@ -1,3 +1,4 @@
+import { identityConflictsWithScope, nodesOf } from './goal-scope.js';
 /**
  * ⭐ AX1 — WHEN THE ANALYSIS CANNOT RANK A PRICE × VOLUME GOAL, THE ARITHMETIC STILL ANSWERS (DL #70 5850280205:
  * "Paul's brief on the served build never gets an answer … When C46 withholds, the Agent still answers with exact
@@ -96,6 +97,7 @@ function exactRaw(stored: { value?: unknown; raw_value?: unknown } | null | unde
  * arithmetic stands in for it. Omitted ⇒ today's reading, byte for byte.
  */
 export function breakEvenFor(graph: unknown, evaluated?: ReadonlySet<string>): BreakEven | null {
+  if (nodesOf(graph).some(n => n.kind === 'goal' && identityConflictsWithScope(n))) return null;
   const finding = nonlinearIdentityForAgent(graph, true, evaluated);
   if (finding === null || finding.outcome_id !== finding.goal_id || finding.factor_ids.length !== 2) return null;
   // MG B2 (#2051 5850436075): "stays at least that" and "needs N" are a floor's words; a goal to REDUCE reads them

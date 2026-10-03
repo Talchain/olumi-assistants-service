@@ -204,6 +204,7 @@ const CEE_ANALYSIS_OWNED_ROOTS: readonly string[] = [
   'goal_direction',
   'goal_sense_reading',
   'goal_level_reading',
+  'goal_scope',
   'goal_horizon_months',
   // The deadline in the brief's own words (PJ-E-A2 part 2): the same G1 class, written only by construction.
   'goal_deadline_as_stated',

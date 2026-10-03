@@ -1,3 +1,4 @@
+import { scopeClaimGate } from '../orchestrator-v5/agent-lane/goal-scope.js';
 /**
  * ROADMAP 2.1271 — READ A SCENARIO'S COMMITTED ANALYSIS, OUTSIDE A TURN.
  *
@@ -237,6 +238,8 @@ const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
 });
 
 export interface ReadScenarioAnalysisParams {
+  /** An open scope issue restricts claims without rewriting the saved Run or its freshness. */
+  readonly scopeUnresolved?: boolean;
   readonly scenarioId: string;
   /** The graph this read just returned, or `null` when the scenario has none. */
   readonly graph: unknown;
@@ -396,7 +399,7 @@ export async function readScenarioAnalysis(
       );
     }
 
-    const analysisState =
+    const analysisState = scopeClaimGate(
       composeAnalysisStateV1({
         // ⭐ THE FACT-BASED CANONICAL STATE (Canonical ruling, 28 Sep): the SAME function a turn uses, over the SAME
         // fact set and read status `derivation` was built from, so degraded detection (a newer refused/failed Run →
@@ -475,7 +478,7 @@ export async function readScenarioAnalysis(
           analysisResult !== null
             ? readRawRobustnessFromResponseBody({ blocks: [analysisResult] })
             : null,
-      }) ?? null;
+      }) ?? null, params.scopeUnresolved ? [true] : []);
 
     const builtResult = analysisResult !== null && analysisState !== null
       ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState, derivation.reason)[0] ?? null

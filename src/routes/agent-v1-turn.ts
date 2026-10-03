@@ -1,3 +1,5 @@
+import { refreshScopePending, scopeClaimGate } from '../orchestrator-v5/agent-lane/goal-scope.js';
+import { parsePendingAction } from '../orchestrator-v5/session/pending-action.js';
 /**
  * POST /agent/v1/turn — the OpenAI Agent mounted in the real PoC.
  *
@@ -866,7 +868,7 @@ export function timedDispatch(inner: InternalDispatch, ledger: DispatchTiming[],
   };
 }
 
-export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation }> {
+export async function readBackState(dispatch: InternalDispatch, scenarioId: string): Promise<{ graphHash?: string; analysisReady?: unknown; draftGraph?: unknown; analysisState?: unknown; analysisResult?: unknown; graph?: unknown; constraintVerdictState?: string | null; leaderLimitRisks?: readonly unknown[] | null; notModelled?: NotModelledManifest; limitVerdicts?: StoredLimitVerdicts; identityEvaluated?: ReadonlySet<string>; goalCertainty?: StoredGoalCertainty; optionParticipation?: StoredOptionParticipation; scopeOpen?: boolean }> {
   let graphHash: string | undefined;
   let analysisReady: unknown;
   /**
@@ -907,6 +909,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
    * (`analysis_identity_evaluated_node_ids`), same fact and gates as `analysisResult`. `undefined` = not attested.
    */
   let identityEvaluated: ReadonlySet<string> | undefined;
+  let scopeOpen = false;
   /**
    * ⛔ THE CANVAS RENDERS FROM `draft_graph`, NOT FROM `graph_hash`.
    *
@@ -931,6 +934,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
     const after = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph`, {});
     if (after.status === 200) {
       graph = after.json.graph;
+      scopeOpen = Array.isArray(after.json.goal_scope_reconciliation) && after.json.goal_scope_reconciliation.length > 0;
       graphHash = typeof after.json.graph_hash === 'string' ? after.json.graph_hash : undefined;
       analysisReady = after.json.analysis_ready;
       if (typeof after.json.analysis_state === 'object' && after.json.analysis_state !== null) analysisState = after.json.analysis_state;
@@ -1080,7 +1084,7 @@ export async function readBackState(dispatch: InternalDispatch, scenarioId: stri
   // the helper's header for why `graph_hash_at_run` is never set here.
   analysisReady = withCurrentGraphHash(analysisReady, graphHash);
 
-  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation };
+  return { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation, scopeOpen };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1742,7 +1746,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           const lines = await decisionLinesAskedOnce(state.graph, { ...atRest, restingText: textAtRest(withoutAsks), questionsToggle: textAtRest(withoutAsks) !== withoutAsks }, store, scenarioId, turnId);
           let rebuilt = withDisclosures(RUN_RESULT_READY_TEXT, [...owedNow, ...lines]);
           const breakEvenNow = (state.analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
-            ? breakEvenFor(state.graph, state.identityEvaluated) : null;
+            ? (state.scopeOpen ? null : breakEvenFor(state.graph, state.identityEvaluated)) : null;
           if (breakEvenNow !== null) rebuilt = withBreakEvenAnswer(rebuilt, breakEvenNow, { afterIdentityAsk: false });
           replayText = withA7AfterGate(rebuilt, state.graph, atRest, null);
           replayNarration = { status: 'pending', run_key: replayChip.id.slice(RUN_EXPLANATION_PREFIX.length) };
@@ -2008,7 +2012,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         },
         // The held add-option (C52) is confirmed against the store's LATEST answer row — the row route-v2 reads.
         ...(typeof store.readMostRecentPendingActions === 'function'
-          ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid) }
+          ? { readPendingActions: (sid: string) => store.readMostRecentPendingActions!(sid, { validation: 'strict' }) }
           : {}),
         // ⭐ Whole-request atomicity (ChatGPT #70 5847200462): N option levels and their links as ONE commit, in-process.
         commitOptionLevels: async (input) => {
@@ -2724,6 +2728,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
       : await readBackState(fastPath === 'explain'
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
+    const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
+    finalRead.analysisState = scopeClaimGate(finalRead.analysisState, freshScopeIssues.filter(p => refreshScopePending(p, finalRead.graph) !== undefined));
     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
     if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) === null) {
@@ -2913,9 +2919,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * holds at most PENDING_ACTIONS_PER_TURN_CAP (a DB CHECK). A failed read carries none, loudly.
      */
     let liveHolds: readonly PendingAction[] = [];
+    let liveScopeIssues: readonly PendingAction[] = [];
     if (typeof store.readMostRecentPendingActions === 'function') {
       try {
-        const held = (await store.readMostRecentPendingActions(scenarioId)).filter((pa) => pa.action.kind === 'apply_proposed_change'
+        const priorPendings = await store.readMostRecentPendingActions(scenarioId, { validation: 'strict' });
+        const held = priorPendings.filter((pa) => pa.action.kind === 'apply_proposed_change'
           && (pa.action as { inline_patch?: { handler_id?: unknown } }).inline_patch?.handler_id === GM_HELD_HANDLER_ID);
         /*
          * ⛔ CARRIED BY THE PRODUCT'S OWN SURVIVAL RULE, never copied verbatim (Canonical, #70 5841421182,
@@ -2928,13 +2936,18 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
          * leaving it off retires the hold, and the next turn finds nothing to confirm.
          */
         const withdrawn = withdrawnThisTurn(result.tool_calls);
+        liveScopeIssues = computeSurvivingPriorPendingsDetailed(priorPendings.filter(p => p.action.kind === 'reconcile_goal_scope'), freshScopeIssues, [], graphHash, Date.now()).survivors;
         liveHolds = computeSurvivingPriorPendingsDetailed(held, [], [], graphHash, Date.now()).survivors
           .filter((pa) => typeof pa.chip_id !== 'string' || !withdrawn.has(pa.chip_id));
       } catch (err) {
-        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: live held proposals could not be read — this answer row carries none');
+        log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: refusing to erase unresolved scope or approval on a failed pending read');
+        throw err;
       }
     }
+    const scopeWithdrawals = new Set(result.tool_results.filter(r => r.withdrawn === true).map(r => r.proposal_id));
+    const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
     const pendingCandidates = [
+      ...retainedScopeIssues,
       ...liveHolds,
       ...(approvalCarrier !== undefined ? [approvalCarrier] : []),
       ...(offerRun ? derivePendingActionsFromFinalizedChips([RUN_OFFER_CHIP], { scenario_id: scenarioId, emitted_at_iso: emittedAtIso, ...(graphHash !== undefined ? { graph_hash: graphHash } : {}) }) : []),
@@ -2977,7 +2990,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // ⭐ F3 (DL #70 5851710093): on the build turn, the user's goal is named even when it could not be scored — unless the
     // arithmetic below already states the target. Pure reads of this turn's readback; the same inputs AX1 uses.
     const targetStatedByArithmetic = (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
-      && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
+      && retainedScopeIssues.length === 0 && breakEvenFor(readbackGraph, identityEvaluated)?.target !== undefined;
     const goalLine = fa?.ran === true && fastPath !== 'run' && !targetStatedByArithmetic ? goalNotCheckedLine(readbackGraph, analysisResult) : null;
     const narrated = fastPath === 'run' || fastPath === 'explain' || fastPath === 'research' || fastPath === 'strengthen' || fastPath === 'method'
       ? { text, status: null as string | null, stripped: [] as string[] }
@@ -3130,7 +3143,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const ranAnalysisThisTurn = fastPath === 'run' || fa !== undefined || result.tool_calls.some((c) => c.name === 'run_analysis');
     const breakEven = ranAnalysisThisTurn
       && (analysisState as { leader_claim?: { permitted?: unknown } } | undefined)?.leader_claim?.permitted !== true
-      ? breakEvenFor(readbackGraph, identityEvaluated) : null;
+      && retainedScopeIssues.length === 0 ? breakEvenFor(readbackGraph, identityEvaluated) : null;
     if (breakEven !== null && typeof wireBody.assistant_text === 'string') {
       // After "The figures don't add up … Which is right?", the arithmetic is one side of the conflict: it opens on its
       // condition, "If MRR is …", with no lead-in that reads as an answer (AIQ #72 5868909577).
@@ -3236,6 +3249,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const preview = previewBesideItsChip(pendingPreview, approvalChipIdFor, wireBody.suggested_actions);
       if (preview !== undefined) wireBody = { ...wireBody, proposal_preview: preview };
     }
+    // Bind the question that is actually delivered after every prose gate.
+    const freshScopeAsk = freshScopeIssues.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.expected !== 'approval' && retainedScopeIssues.some(held => held.chip_id === p.chip_id));
+    if (freshScopeAsk?.action.kind === 'reconcile_goal_scope') {
+      wireBody = { ...wireBody, assistant_text: `${textAtRest(String(wireBody.assistant_text ?? ''))} ${freshScopeAsk.action.question}`.trim() };
+    }
     // History and the durable answer row below remember the same FINAL SENT text, after every gate.
     // Ordinary turns keep their reasoning and tool pairs; only their trailing assistant messages are replaced.
     // Every retained Run output becomes a neutral marker; superseded pairs leave with their reasoning as before.
@@ -3269,6 +3287,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           store,
           writesGraph: false,
           source: 'agent_turn',
+          baseGraphForInvariants: readbackGraph,
+          withdrawnGoalScopeChipIds: [...scopeWithdrawals].filter((id): id is string => typeof id === 'string'),
           write: {
           scenario_id: scenarioId,
           // The ANSWER row, under the client's own turn_id (the claim `<turn_id>:claim` was taken before

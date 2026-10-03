@@ -86,7 +86,7 @@ describe('RELOAD — the graph read carries the readiness authority, not just by
     // `analysis_ready` (0 occurrences) and reading its absence as the absence of
     // readiness — while these two sat on the same response, with a complete UI
     // consumer. A field name is not its meaning.
-    expect(GRAPH_READ).toContain('analysis_state: analysis.analysis_state');
+    expect(GRAPH_READ).toContain('analysis_state: scopeClaimGate(analysis.analysis_state, scopeIssues)');
     expect(GRAPH_READ).toContain('analysis_result: analysis.analysis_result');
   });
 

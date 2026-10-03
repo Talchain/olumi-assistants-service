@@ -1,3 +1,4 @@
+import { goalScopeAnalysisMeaning } from '../../schemas/goal-scope.js';
 /**
  * V5 Phase 1.5 — deterministic graph hash.
  *
@@ -302,6 +303,8 @@ interface NodeProjection {
 function projectNode(raw: unknown): NodeProjection {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const out: NodeProjection = { id: typeof r.id === 'string' ? r.id : '' };
+  const scope = goalScopeAnalysisMeaning(r.goal_scope);
+  if (scope !== undefined) out.goal_scope = scope;
 
   // The published node vocabulary (schemas 0.62.0): the 0.61.0 frame / direction / quantity fields, `scale_frame`
   // (read with `unit` / `raw_value` by `percentLimitFrameProvable`), the C46 `nonlinear_identity` carrier and

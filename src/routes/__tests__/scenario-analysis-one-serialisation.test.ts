@@ -230,3 +230,21 @@ describe('one Run, one serialisation — the reload\'s run_delta names no leader
     expect(RunDeltaSchema.safeParse(delta).success).toBe(true);
   });
 });
+
+
+describe('Semantic spine: unresolved scope uses the existing claim licence', () => {
+  it('withholds the formerly licensed conclusion while keeping the Run current and exploratory result available', async () => {
+    const fact = runFact({ separated: true });
+    const ordinary = await reload(fact, 'scope-premise');
+    expect(ordinary.analysis_state.leader_claim.permitted).toBe(true);
+    const gated = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'scope-open', scopeUnresolved: true });
+    expect(gated.analysis_state?.run_state).toEqual(ordinary.analysis_state.run_state);
+    expect(gated.analysis_state?.leader_claim).toMatchObject({ permitted: false, withheld_reason: 'goal_scope_unresolved' });
+    expect(gated.analysis_result).not.toBeNull();
+    if (gated.analysis_result?.type !== 'analysis_result') throw new Error('Expected the retained exploratory analysis result');
+    expect(gated.analysis_result.leading_option_id).toBeNull();
+    expect((gated.analysis_result.enrichment?.decision_brief as Rec)).not.toHaveProperty('headline');
+    expect(gated.current_read.current_analysis_hash).toBe(ordinary.current_read.current_analysis_hash);
+    expect(fact.result.leading_option_id).toBe('option-b');
+  });
+});
