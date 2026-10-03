@@ -11,7 +11,7 @@
  *
  * The model call is a stubbed `fetch`: no provider is contacted.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
@@ -20,6 +20,8 @@ import {
   synthesiseAnswerShapeFromText,
   type AnswerShape,
 } from '../../routing/answer-shape.js';
+
+import { textAtRest } from '../decision-input-ask.js';
 
 type Reply = { id: string; label: string; leak_phrases: string[]; text: string };
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
@@ -61,6 +63,16 @@ const LONG_NO_BULLETS = ['paired-57f903c/M.rep1', 'paired-57f903c/M.rep3', 'pair
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 let readbackState: unknown = PERMITTED_STATE;
 let readbackCarriesResult = true;
+// Isolate the unchanged shaping controls with a known-empty bounded census.
+// The original capture's goal/risk IDs are retained in the unavailable contrasts below.
+function shapeControlReady() {
+  const ready = structuredClone(FX.state.analysis_ready) as { analysis_admission: { semantic_signals: Record<string, unknown> } };
+  ready.analysis_admission.semantic_signals.material_parameters_awaiting_user_node_ids = [];
+  return ready;
+}
+let readbackReady: unknown = shapeControlReady();
+const b3WireCases: { source: string; text: string; line: string; question: string }[] = [];
+const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting values are unavailable.';
 /** The readback's graph: the corpus's served pricing graph, or a variant a row sets (reset before each row). */
 let readbackGraph: unknown = FX.state.draft_graph;
 /** The durable turn rows, keyed by turn id — the store fake from `agent-turn-withheld-leader-fail-closed.test.ts`. */
@@ -116,18 +128,18 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     // The Run itself: the product's own turn route, as the `run_analysis` capability dispatches it.
     app.post('/orchestrate/v2/turn', async () => ({
       response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [], graph_hash: GRAPH_HASH, blocks: [RESULT_BLOCK],
-      analysis_ready: FX.state.analysis_ready, analysis_state: readbackState,
+      analysis_ready: readbackReady, analysis_state: readbackState,
     }));
     // The final readback — the ONLY source of the response's `analysis_result` block.
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState, analysis_ready: FX.state.analysis_ready,
+      graph: readbackGraph, graph_hash: GRAPH_HASH, analysis_state: readbackState, analysis_ready: readbackReady,
       ...(readbackCarriesResult ? { analysis_result: RESULT_BLOCK } : {}),
     }));
     await app.register(agentV1TurnRoute);
     await app.ready();
   }, 60_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; });
+  beforeEach(() => { rows.clear(); callModelOutputs = []; readbackState = PERMITTED_STATE; readbackCarriesResult = true; readbackGraph = FX.state.draft_graph; readbackReady = shapeControlReady(); });
 
   let turnSeq = 0;
   const nextTurnId = () => { turnSeq += 1; return `5d4c3b2a-1f0e-4d9c-8b7a-${String(turnSeq).padStart(12, '0')}`; };
@@ -303,6 +315,39 @@ describe('an analysis reply on the Agent route arrives headline first (`_answer_
     expect(await offersApprove(b as Offered), 'the control: nothing to approve').toBe(false);
     expect(b._answer_shape, 'shaped').toBeDefined();
     expect(deriveAnswerTextFromShape(b._answer_shape!)).toBe(b.assistant_text);
+  });
+
+  it('B3-8: the original capture names non-factor IDs, so its unavailable basis remains on the face', async () => {
+    readbackReady = FX.state.analysis_ready;
+    const { b, turnId } = await typedRun(CLEAN_BULLETS.text);
+    expect(b.assistant_text).toBe(`${CLEAN_BULLETS.text}\n\n${BASIS_UNAVAILABLE}`);
+    expect('_answer_shape' in b).toBe(false);
+    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
+  });
+
+  it('RED B3-8: a basis already in the narrator’s words is still a host obligation and cannot fold away', async () => {
+    readbackReady = FX.state.analysis_ready;
+    const narrated = `${CLEAN_BULLETS.text}\n\n${BASIS_UNAVAILABLE}`;
+    const { b, turnId } = await typedRun(narrated);
+    expect(b.assistant_text).toBe(narrated);
+    expect('_answer_shape' in b).toBe(false);
+    expect(rows.get(turnId)?.assistant_message).toBe(narrated);
+  });
+
+  it.each([[true, true], [false, true], [true, false], [false, false]])('B3-8 RED: question-tail basis is visible once (present=%s punctuated=%s)', async (present, punctuated) => {
+    readbackReady = FX.state.analysis_ready;
+    const question = punctuated ? 'What baseline should we use?' : 'The baseline is unknown';
+    const narrated = `The comparison is conditional. Questions this model does not answer yet: ${question}${present ? `\n\n${BASIS_UNAVAILABLE}` : ''}`;
+    const { b, turnId } = await typedRun(narrated);
+    expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
+    expect(b.assistant_text.split(BASIS_UNAVAILABLE)).toHaveLength(2);
+    expect(b.assistant_text).toContain(question);
+    expect('_answer_shape' in b).toBe(false);
+    expect(rows.get(turnId)?.assistant_message).toBe(b.assistant_text);
+    if (process.env.B3_WIRE_EVIDENCE) {
+      b3WireCases.push({ source: 'actual Agent route; stubbed model/Run/readback', text: b.assistant_text, line: BASIS_UNAVAILABLE, question });
+      writeFileSync(`${process.env.B3_WIRE_EVIDENCE}/b3-question-tail-basis-wire.json`, JSON.stringify(b3WireCases, null, 2) + '\n');
+    }
   });
 
   it('9. CONSENT: a SECOND proposal in the turn is refused (one change per approval), so ONE chip is offered → still NOT shaped; text byte-identical', async () => {

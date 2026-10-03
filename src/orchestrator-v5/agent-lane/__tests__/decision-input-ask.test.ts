@@ -6,17 +6,88 @@ import { explainRun } from './fixtures/run-explanation-follow-up.js';
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { readFileSync } from 'node:fs';
-import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest, withA7AfterGate } from '../decision-input-ask.js';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { decisionInputAsk, decisionInputLines, goalHasStatedTarget, textAtRest, withB3LinesAtRest, withA7AfterGate } from '../decision-input-ask.js';
 import { narrateWriteOutcome, openQuestionsForReply, withWriteOutcome } from '../write-outcome.js';
 
 type Rec = Record<string, unknown>;
-const FX = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')) as { goal_after_build: Rec; goal_after_target: Rec };
+const SERVED_FX = JSON.parse(readFileSync(new URL('./fixtures/served-goal-target-train-0258Z.json', import.meta.url), 'utf8')) as { goal_after_build: Rec; goal_after_target: Rec };
+// Explicit-goal controls retain the target-ask contract. The captured D1 goal is inferred;
+// B3-7 deliberately offers its objective too, as the separate raw-capture row records.
+const FX: typeof SERVED_FX = {
+  goal_after_build: { ...SERVED_FX.goal_after_build, provenance: 'from_brief' },
+  goal_after_target: { ...SERVED_FX.goal_after_target, provenance: 'from_brief' },
+};
 const graphWith = (goal: Rec) => ({ nodes: [goal, { id: 'opt_a', kind: 'option', label: 'Angel pilot' }], edges: [] });
 // "Funding secured" reads no direction (`deriveGoalIntent` undetermined, no minimise), so the neutral words (AIQ 5924149215).
 const ASK = 'What figure should "Funding secured" reach or stay under within 2 months? I\'ll propose it as your target.';
 const A7 = 'This model doesn\'t yet say whether any option gets there within 2 months.';
 const base = { restingText: 'The model is a sketch to challenge.', questionsToggle: false, awaitingApproval: false, builtOrRan: true };
+const b3WireCases: { source: string; text: string; line: string; question: string }[] = [];
+const captureB3 = (source: string, text: string, line: string, question: string) => {
+  if (!process.env.B3_WIRE_EVIDENCE) return;
+  b3WireCases.push({ source, text, line, question });
+  writeFileSync(`${process.env.B3_WIRE_EVIDENCE}/b3-question-tail-selected-wire.json`, JSON.stringify(b3WireCases, null, 2) + '\n');
+};
+const OBJECTIVE_ASK = 'I used "Quarterly revenue" as a provisional objective. What should this model help you explore?';
+const inferredGoal = { ...FX.goal_after_build, label: 'Quarterly revenue', provenance: 'ai_inferred' };
+
+describe('B3-7: offer the inferred objective before its target', () => {
+  it('the untouched D1 capture is inferred too: a numerical target does not establish objective authorship', () => {
+    for (const goal of [SERVED_FX.goal_after_build, SERVED_FX.goal_after_target]) {
+      expect(decisionInputAsk(graphWith(goal), base)).toBe('I used "Funding secured" as a provisional objective. What should this model help you explore?');
+    }
+  });
+  it('RED: the objective offer is the one visible ask, including with a user-stated numerical target', () => {
+    for (const goal of [inferredGoal, { ...inferredGoal, goal_threshold_raw: 100, threshold_source: 'user', goal_stated_as: '100' }]) {
+      expect(decisionInputAsk(graphWith(goal), base)).toBe(OBJECTIVE_ASK);
+      expect(decisionInputLines(graphWith(goal), base).join(' ')).not.toContain('as your target.');
+    }
+  });
+  it('RED: durable rendered-text history suppresses the objective offer without falling through to a target ask', () => {
+    expect(decisionInputAsk(graphWith(inferredGoal), { ...base, recentReplies: [`Saved. ${OBJECTIVE_ASK}`] })).toBeNull();
+  });
+  it.each([{ awaitingApproval: true }, { restingText: 'Which matters most?' }, { builtOrRan: false }])('CONTROL: an existing step suppresses the offer (%j)', (over) => {
+    expect(decisionInputAsk(graphWith(inferredGoal), { ...base, ...over })).toBeNull();
+  });
+  it('CONTROL: from-brief and user-authored goals keep their existing target question', () => {
+    for (const provenance of ['from_brief', 'user_set']) {
+      expect(decisionInputAsk(graphWith({ ...inferredGoal, provenance }), base)).toContain('as your target.');
+    }
+    expect(decisionInputAsk({ nodes: [inferredGoal, { ...inferredGoal, id: 'other_goal' }] }, base)).toBeNull();
+  });
+  it('RED: after the withholding guard, A7 sits before the objective offer', () => {
+    const text = `A sketch.\n\n${OBJECTIVE_ASK}\n\nSaved.`;
+    const restored = withA7AfterGate(text, graphWith(inferredGoal), base, 'Saved.');
+    expect(restored.indexOf(A7)).toBeLessThan(restored.indexOf(OBJECTIVE_ASK));
+    expect(restored.split(OBJECTIVE_ASK)).toHaveLength(2);
+  });
+});
+
+describe('B3 host placement through the existing questions split', () => {
+  it.each(['Future demand is unknown.', 'Future demand is unknown'])('RED: a selected inferred objective stays visible after a parked tail (%s)', (question) => {
+    const prose = `This model is a sketch. Questions this model does not answer yet: ${question}`;
+    const lines = decisionInputLines(graphWith(inferredGoal), { ...base, restingText: textAtRest(prose), questionsToggle: true });
+    const ask = lines.find((l) => l === OBJECTIVE_ASK)!;
+    expect(ask).toBe(OBJECTIVE_ASK);
+    const out = withB3LinesAtRest(`${prose}\n\n${lines.join('\n\n')}`, [ask]);
+    expect(textAtRest(out)).toContain(OBJECTIVE_ASK);
+    expect(out.split(OBJECTIVE_ASK)).toHaveLength(2);
+    expect(out).toContain(question);
+    captureB3('actual host ask selection/composition helper; not a route', out, OBJECTIVE_ASK, question);
+  });
+  it('RED: the host and hidden narrator copy of one selected objective become one visible ask', () => {
+    const prose = `Sketch. Questions this model does not answer yet: Unknown demand\n\n${OBJECTIVE_ASK}\n\n${OBJECTIVE_ASK}`;
+    const out = withB3LinesAtRest(prose, [OBJECTIVE_ASK]);
+    expect(textAtRest(out)).toContain(OBJECTIVE_ASK);
+    expect(out.split(OBJECTIVE_ASK)).toHaveLength(2);
+    expect(out).toContain('Unknown demand');
+  });
+  it('CONTROL: a visible line and a null obligation preserve the entire reply bytes', () => {
+    const prose = `Sketch.\n\n${OBJECTIVE_ASK}\n\nQuestions this model does not answer yet: Future demand is unknown`;
+    expect(withB3LinesAtRest(prose, [OBJECTIVE_ASK, null])).toBe(prose);
+  });
+});
 
 describe('the lines, on the served goal', () => {
   it('RED: after the build (no stated target, a 2-month horizon, no duration limit) → the A7 line, then the one ask', () => {
@@ -137,11 +208,11 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
 
   it('the route judges the ask on the composed reply at rest — model words + owed lines + host status (source pin)', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(src).toContain('const composedWithout = withWriteOutcome(withDisclosures(narration.text, owed), statusText);');
+    expect(src).toContain('const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);');
     expect(src).toContain('restingText: textAtRest(composedWithout),');
     expect(src).toContain('...decisionTurn,');
     expect(src).toContain('questionsToggle: textAtRest(composedWithout) !== composedWithout,');
-    expect(src).toContain('withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)');
+    expect(src).toContain('withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText)');
   });
 
   it('textAtRest is the panel\'s own split: the same marker and producer-sentence predicate as the pinned DGAI copy', () => {
@@ -259,10 +330,16 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   let goal: Rec = FX.goal_after_build;
   let modelSays = 'This run is a sketch, not a basis for choosing.';
   let blocked = false;
+  let licensedBasis = false;
+  let basisRunnable: boolean | undefined = true;
+  let basisSource = 'cee_inference';
+  let basisLabel = 'Subscribers';
+  let staleBasis = false;
   // ⭐ K3: a kept risk with a cause drawn in and no onward link (left out of the Run), or the same risk once connected.
   let risk: 'none' | 'inert' | 'connected' = 'none';
+  let riskLabel = 'Founder burnout';
   const withRisk = (g: { nodes: Rec[]; edges: Rec[] }) => risk === 'none' ? g : {
-    nodes: [...g.nodes, { id: 'f_hours', kind: 'factor', label: 'Hours on outreach' }, { id: 'r_burn', kind: 'risk', label: 'Founder burnout' }],
+    nodes: [...g.nodes, { id: 'f_hours', kind: 'factor', label: 'Hours on outreach' }, { id: 'r_burn', kind: 'risk', label: riskLabel }],
     edges: [...g.edges, { from: 'f_hours', to: 'r_burn' }, ...(risk === 'connected' ? [{ from: 'r_burn', to: String(goal.id) }] : [])],
   };
   let n = 0;
@@ -274,9 +351,16 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
     app = Fastify({ logger: false });
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
-      graph: withRisk(graphWith(goal)), graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true },
-      analysis_state: { run_state: { kind: 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, usable_for_chips: true },
-      analysis_result: blocked ? undefined : { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' } },
+      graph: withRisk(licensedBasis ? { nodes: [goal, { id: 'subscribers', kind: 'factor', label: basisLabel, observed_state: { value: 300, source: basisSource } }, { id: 'a', kind: 'option' }, { id: 'b', kind: 'option' }], edges: [] } : graphWith(goal)),
+      graph_hash: 'h0', analysis_ready: { status: 'ready', may_run: true,
+        ...(licensedBasis ? { analysis_admission: { ...(basisRunnable === undefined ? {} : { structurally_analysable: basisRunnable }), permitted_analysis_mode: 'comparative_leader', semantic_signals: { material_parameters_awaiting_user_node_ids: ['subscribers'] } } } : {}),
+      },
+      analysis_state: { run_state: { kind: staleBasis ? 'complete_stale' : 'complete_current', computed_at: '2026-10-01T12:00:00.000Z' }, usable_for_chips: true,
+        ...(licensedBasis ? { leader_claim: { permitted: true, separation: 'separated' } } : {}),
+      },
+      analysis_result: blocked ? undefined : { type: 'analysis_result', computed_against_hash: '0123456789abcdef', data: { marker: 'synthetic' },
+        ...(licensedBasis ? { enrichment: { option_comparison: [{ option_id: 'a', win_probability: 0.7 }, { option_id: 'b', win_probability: 0.3 }] } } : {}),
+      },
     }));
     app.post('/orchestrate/v2/turn', async () => (blocked
       ? { assistant_text: 'Set a level for Hours first.', blocks: [], analysis_ready: { status: 'blocked', may_run: false } }
@@ -285,7 +369,7 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
     await app.ready();
   }, 120_000);
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
-  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; recentFails = false; risk = 'none'; n += 1; });
+  beforeEach(() => { goal = FX.goal_after_build; modelSays = 'This run is a sketch, not a basis for choosing.'; blocked = false; licensedBasis = false; basisRunnable = true; basisSource = 'cee_inference'; basisLabel = 'Subscribers'; staleBasis = false; recentFails = false; risk = 'none'; riskLabel = 'Founder burnout'; n += 1; });
   const scenarioNow = () => `7a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c${String(n).padStart(2, '0')}`;
   const runTurn = async (turnId?: string, explain = false) => {
     const scenarioId = scenarioNow();
@@ -295,6 +379,75 @@ describe('on the wire: the Run turn says them at rest, once each', () => {
   } });
     return (explain ? await explainRun(app, scenarioId, first) : first).json() as { assistant_text: string };
   };
+
+  it('B3-7 RED: first successful Run offers the objective at rest; rerun and cold replay recognise that same ask', async () => {
+    goal = { ...inferredGoal, goal_threshold_raw: 100, threshold_source: 'user' };
+    const A = 'e311e890-734f-41b0-8b1f-718054e58109';
+    const B = 'cd15ad39-7363-41b0-bc15-e068518c74fb';
+    const first = (await runTurn(A)).assistant_text;
+    expect(textAtRest(first)).toContain(OBJECTIVE_ASK);
+    expect(first.split(OBJECTIVE_ASK)).toHaveLength(2);
+    expect(first.match(/\?/g)).toHaveLength(1);
+    expect((await runTurn(B)).assistant_text).not.toContain(OBJECTIVE_ASK);
+    expect((await runTurn(B)).assistant_text).not.toContain('as your target.');
+    expect((await runTurn(A)).assistant_text).toContain(OBJECTIVE_ASK);
+    blocked = true;
+    expect((await runTurn()).assistant_text).not.toContain(OBJECTIVE_ASK);
+  });
+
+  it.each(['cee_inference', 'unknown_legacy'])('B3-8 RED: the licensed %s basis precedes an unpunctuated question tail', async (source) => {
+    licensedBasis = true; basisSource = source; goal = FX.goal_after_target;
+    const question = 'Future demand is unknown';
+    modelSays = `This comparison is conditional. Questions this model does not answer yet: ${question}`;
+    const text = (await runTurn(undefined, true)).assistant_text;
+    const line = source === 'cee_inference'
+      ? 'This comparison uses Olumi’s estimates for "Subscribers". These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.'
+      : '"Subscribers": source unrecorded. These are factor starting values on the comparison’s paths. Other model assumptions may also affect the result.';
+    expect(textAtRest(text)).toContain(line);
+    expect(text.split(line)).toHaveLength(2);
+    expect(text).toContain(question);
+    captureB3('actual Agent route; stubbed model/Run/readback', text, line, question);
+  });
+
+  it.each([undefined, false])('CONTROL: a missing/refused run axis (%s) cannot gain a named basis from a true claim flag', async (runnable) => {
+    licensedBasis = true; basisRunnable = runnable; goal = FX.goal_after_target;
+    const text = (await runTurn(undefined, true)).assistant_text;
+    expect(text).not.toContain('Olumi’s estimates');
+    expect(text).not.toContain('This comparison uses');
+  });
+
+  it.each([false, true])('RED: an ID-bearing objective stays scrubbed on replay and is not re-asked (other ID: %s)', async (otherId) => {
+    goal = { ...inferredGoal, label: 'Quarterly revenue prop_deadbeef' };
+    if (otherId) { risk = 'inert'; riskLabel = 'Founder burnout prop_abcdef'; }
+    const id = 'abbeb81d-131e-4b60-a8eb-337bac8397dc';
+    const text = (await runTurn(id)).assistant_text;
+    expect(text).not.toMatch(/prop_[0-9a-f]{6,}/);
+    if (otherId) expect(text).toContain('Founder burnout');
+    expect(text.match(/provisional objective/g)).toHaveLength(1);
+    expect((await runTurn(id)).assistant_text).toBe(text);
+    expect((await runTurn()).assistant_text).not.toContain('provisional objective');
+  });
+  it.each([false, true])('RED: an ID-bearing licensed basis stays scrubbed on replay (other ID: %s)', async (otherId) => {
+    licensedBasis = true; basisLabel = 'Subscribers prop_deadbeef'; goal = FX.goal_after_target;
+    if (otherId) { risk = 'inert'; riskLabel = 'Founder burnout prop_abcdef'; }
+    const id = '43808654-6509-4e76-8949-0f2945fe8f8b';
+    const text = (await runTurn(id)).assistant_text;
+    expect(text).not.toMatch(/prop_[0-9a-f]{6,}/);
+    if (otherId) expect(text).toContain('Founder burnout');
+    expect(text.match(/This comparison uses Olumi’s estimates/g)).toHaveLength(1);
+    expect((await runTurn(id)).assistant_text).toBe(text);
+  });
+
+  it('B3-8 RED: licensed current Run carries named input basis in served and durable bytes, including replay', async () => {
+    licensedBasis = true;
+    const id = 'f27edca3-1d4e-4ced-aa5f-e795a5ae4a6b';
+    const first = (await runTurn(id)).assistant_text;
+    expect(textAtRest(first)).toContain('Olumi’s estimates for "Subscribers"');
+    expect([...rows.values()].find((r) => r.turn_id === id)?.assistant_message).toBe(first);
+    expect((await runTurn(id)).assistant_text).toContain('Olumi’s estimates for "Subscribers"');
+    staleBasis = true;
+    expect((await runTurn()).assistant_text).not.toContain('Olumi’s estimates');
+  });
 
   it('RED: the Run turn on the no-target goal says the A7 line then the ask, once each, before any questions marker', async () => {
     const turnId = '5c0d7e1f-2a3b-4c5d-8e6f-7a8b9c0d1e2f';

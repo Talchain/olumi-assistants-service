@@ -70,6 +70,9 @@ describe('goalChanceLineOwed', () => {
   it('WIRING: the route appends it with the owed disclosures, checked against the Agent\'s own text', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
     expect(src).toContain('...[goalChanceLineOwed(result.tool_results, text)].filter((x): x is string => x !== null),\n      ];');
-    expect(src).toContain('withDisclosures(narration.text, owed)');
+    // Exact host-copy display normalisation preserves the narrator and the same owed lines.
+    expect(src).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
+    expect(src).toContain('withDisclosures(narrationText, owed)');
+    expect(src).toContain('withDisclosures(narrationText, [...owed, ...decisionLines])');
   });
 });
