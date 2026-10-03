@@ -1,0 +1,293 @@
+{
+ "_source": "P-CORE-1 run4 PC03 P0 r1 (real served Agent route in-process, gpt-5.6-terra, CEE 1f9d7698) on the served C10 capture fx-c10-current; programme-docs prompt-strike/p-core-1-run-20260930 openai/ai-experience/2026-09-30/prompt-strike-p-core-1/run4/receipts.jsonl. Graph trimmed to ids and stored figures; text verbatim.",
+ "message": "Which assumption should we test first?",
+ "reply": "Test the **price increase → price-driven churn** assumption first.\n\n- It is an Olumi default assumption, not user evidence.\n- It directly tests whether moving Pro from **£49 to £59/month** risks breaching the **under-4% monthly churn** constraint.\n- A small price experiment or customer research can validate it before committing to the release.",
+ "graph": {
+  "nodes": [
+   {
+    "id": "should_we_develop_new_features_and_increase_our_pro_plan_price_from_49_to_59_per_month_in_the_next_r",
+    "kind": "decision",
+    "label": "Should we develop new features…"
+   },
+   {
+    "id": "mrr",
+    "kind": "goal",
+    "label": "MRR",
+    "observed_state": {
+     "cap": 125000,
+     "unit": "GBP per month",
+     "value": 0.576,
+     "source": "user_override",
+     "baseline": 0.576,
+     "raw_value": 72000
+    },
+    "goal_threshold_raw": 100000,
+    "goal_threshold_unit": "GBP per month"
+   },
+   {
+    "id": "features_and_pro_price",
+    "kind": "option",
+    "label": "Features and Pro price",
+    "interventions": {
+     "pro_plan_price": {
+      "unit": "GBP per month",
+      "value": 0.295,
+      "source": "brief_extraction",
+      "raw_value": 59,
+      "target_match": {
+       "node_id": "pro_plan_price",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "total_investment": {
+      "unit": "GBP over 6 months",
+      "value": 0.4,
+      "source": "cee_hypothesis",
+      "raw_value": 20000,
+      "target_match": {
+       "node_id": "total_investment",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "feature_release_completion": {
+      "value": 1,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "feature_release_completion",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "incremental_advertising_spend": {
+      "unit": "GBP over 6 months",
+      "value": 0,
+      "source": "cee_hypothesis",
+      "raw_value": 0,
+      "target_match": {
+       "node_id": "incremental_advertising_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "feature_development_investment": {
+      "unit": "GBP over 6 months",
+      "value": 0.4,
+      "source": "cee_hypothesis",
+      "raw_value": 20000,
+      "target_match": {
+       "node_id": "feature_development_investment",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "additional_advertising",
+    "kind": "option",
+    "label": "Additional advertising",
+    "interventions": {
+     "pro_plan_price": {
+      "unit": "GBP per month",
+      "value": 0.245,
+      "source": "cee_hypothesis",
+      "raw_value": 49,
+      "target_match": {
+       "node_id": "pro_plan_price",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "total_investment": {
+      "unit": "GBP over 6 months",
+      "value": 0.4,
+      "source": "cee_hypothesis",
+      "raw_value": 20000,
+      "target_match": {
+       "node_id": "total_investment",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "feature_release_completion": {
+      "value": 0,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "feature_release_completion",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "incremental_advertising_spend": {
+      "unit": "GBP over 6 months",
+      "value": 0.4,
+      "source": "cee_hypothesis",
+      "raw_value": 20000,
+      "target_match": {
+       "node_id": "incremental_advertising_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "feature_development_investment": {
+      "unit": "GBP over 6 months",
+      "value": 0,
+      "source": "cee_hypothesis",
+      "raw_value": 0,
+      "target_match": {
+       "node_id": "feature_development_investment",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   },
+   {
+    "id": "carry_on_as_now",
+    "kind": "option",
+    "label": "Carry on as now"
+   },
+   {
+    "id": "total_investment",
+    "kind": "factor",
+    "label": "Total investment",
+    "observed_state": {
+     "unit": "GBP over 6 months",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "feature_development_investment",
+    "kind": "factor",
+    "label": "Feature development investment",
+    "observed_state": {
+     "cap": 50000,
+     "unit": "GBP over 6 months",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "incremental_advertising_spend",
+    "kind": "factor",
+    "label": "Incremental advertising spend",
+    "observed_state": {
+     "cap": 50000,
+     "unit": "GBP over 6 months",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "feature_release_completion",
+    "kind": "factor",
+    "label": "Feature release completion"
+   },
+   {
+    "id": "pro_plan_price",
+    "kind": "factor",
+    "label": "Pro plan price",
+    "observed_state": {
+     "cap": 200,
+     "unit": "GBP per month",
+     "value": 0.245,
+     "source": "brief_extraction",
+     "raw_value": 49,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "monthly_churn",
+    "kind": "factor",
+    "label": "Monthly churn",
+    "observed_state": {
+     "unit": "percent per month",
+     "value": 0.03,
+     "source": "cee_inference",
+     "raw_value": 3,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "price_driven_churn",
+    "kind": "risk",
+    "label": "Price-driven churn"
+   },
+   {
+    "id": "feature_adoption",
+    "kind": "outcome",
+    "label": "Feature adoption"
+   },
+   {
+    "id": "qualified_leads",
+    "kind": "outcome",
+    "label": "Qualified leads"
+   },
+   {
+    "id": "6d4ef031",
+    "kind": "option",
+    "label": "Split £30,000 between feature development and advertising",
+    "interventions": {
+     "total_investment": {
+      "unit": "GBP over 6 months",
+      "value": 0.6,
+      "source": "user_specified",
+      "raw_value": 30000,
+      "target_match": {
+       "node_id": "total_investment",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "incremental_advertising_spend": {
+      "unit": "GBP over 6 months",
+      "value": 0.3,
+      "source": "user_specified",
+      "raw_value": 15000,
+      "target_match": {
+       "node_id": "incremental_advertising_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "feature_development_investment": {
+      "unit": "GBP over 6 months",
+      "value": 0.3,
+      "source": "user_specified",
+      "raw_value": 15000,
+      "target_match": {
+       "node_id": "feature_development_investment",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   }
+  ],
+  "goal_constraints": [
+   {
+    "constraint_id": "agent-lane:total_investment:<=",
+    "node_id": "total_investment",
+    "value": 30000,
+    "operator": "<=",
+    "unit": "GBP over 6 months"
+   },
+   {
+    "constraint_id": "agent-lane:monthly_churn:<=",
+    "node_id": "monthly_churn",
+    "value": 4,
+    "operator": "<=",
+    "unit": "%"
+   }
+  ]
+ }
+}
