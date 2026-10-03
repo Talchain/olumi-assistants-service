@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { RunAnalysisHandlerFactSchema, RunInputSnapshotSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import { ModelVersionDiffV1Schema, ModelVersionDiffV2Schema } from '@talchain/schemas/boundary';
 import { FROM, TO, PRIOR, CURRENT, factSet, savedRun } from '../../orchestrator-v5/model-management/__tests__/version-result-fixtures.js';
 import { FIX_SCENARIO, FIX_OWNER, versionRecord } from '../../orchestrator-v5/model-management/__tests__/fixtures.js';
@@ -19,9 +19,11 @@ vi.mock('../../orchestrator-v5/coaching/build-run-delta.js', async (original) =>
   return { ...actual, buildRunDelta: (input: Parameters<typeof actual.buildRunDelta>[0]) => {
     const built = actual.buildRunDelta(input);
     if (built.kind !== 'ok' || mocks.residualLeader === undefined) return built;
-    // A residual from the real producer must be removed by the shared final egress.
+    // Residual leader ids and shares from the real producer must be removed at final egress.
     return { ...built, delta: { ...built.delta,
-      leader: { ...built.delta.leader, [mocks.residualLeader]: 'opt-a' } } };
+      leader: { ...built.delta.leader, [mocks.residualLeader]: 'opt-a' },
+      win_probabilities: [{ option_id: 'opt-a', prior: 0.62, current: 0.45, noise_verdict: 'not_noise_qualified' as const }],
+    } };
   } };
 });
 vi.mock('../../orchestrator/user-identity.js', async (original) => ({
@@ -237,6 +239,61 @@ describe('version result comparison uses the real route, service, binder and del
     const value = ModelVersionDiffV2Schema.parse(reply.json()).result_comparison;
     expect(value).toMatchObject({ status: 'available', kind: 'paired_runs' });
     if (value.status === 'available' && value.kind === 'paired_runs') {
+      expect(value.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
+      expect(value.run_delta.leader).not.toHaveProperty('current_leading_option_id');
+      expect(value.run_delta.win_probabilities).toStrictEqual([]);
+    }
+  });
+
+  it('preserves recorded input changes containing a lead option id on a withheld pair', async () => {
+    const endpoints = [FROM, TO].map((version, i) => {
+      const graph = clone(GraphStateIngressSchema.parse(version.graph));
+      const price = i === 0 ? 12 : 13;
+      for (const node of graph.nodes) {
+        if (node.id === 'opt-a') {
+          node.id = 'generate-leads';
+          node.interventions = { n_price: { value: price, source: 'brief_extraction' } };
+        }
+      }
+      for (const edge of graph.edges) {
+        if (edge.from === 'opt-a') edge.from = 'generate-leads';
+        if (edge.to === 'opt-a') edge.to = 'generate-leads';
+      }
+      const saved = versionRecord(graph, { id: version.id });
+      const base = savedRun(saved, i === 0 ? 'bound-prior' : 'bound-current',
+        i === 0 ? '2026-10-02T00:00:00.000Z' : '2026-10-02T01:00:00.000Z', i === 0 ? 0.62 : 0.45);
+      const recorded = result(base);
+      const enrichment = recorded.enrichment as Record<string, unknown>;
+      enrichment.results = (enrichment.results as Record<string, unknown>[]).map(option =>
+        ({ ...option, option_id: option.option_id === 'opt-a' ? 'generate-leads' : option.option_id }));
+      const run = RunAnalysisHandlerFactSchema.parse({ ...base, fact_version: 1, result: {
+        ...recorded, leading_option_id: i === 0 ? 'generate-leads' : 'opt-b', summary: '',
+        constraint_verdict: { may_name_leading_option: i === 0, constraint_verdict_state: 'evaluated_feasible' },
+        input_snapshot: RunInputSnapshotSchema.parse({ ...(recorded.input_snapshot as Record<string, unknown>),
+          options: [{ option_id: 'generate-leads', label: 'Offshore partner', settings: [
+            { factor_id: 'n_price', label: 'Price', raw: price, unit: 'GBP', encoded: price },
+          ] }],
+        }),
+      } });
+      return { saved, run };
+    });
+    mocks.getVersion.mockImplementation(async (_scenario: string, id: string) =>
+      id === FROM.id ? endpoints[0]!.saved : id === TO.id ? endpoints[1]!.saved : null);
+    mocks.facts.mockResolvedValue({ factSet: factSet(endpoints.map(endpoint => endpoint.run)),
+      hotWindow: { status: 'ok', facts: [] } });
+
+    const v1 = await compare({ response_schema: undefined }); expect(v1.statusCode).toBe(200);
+    ModelVersionDiffV1Schema.parse(v1.json());
+    const reply = await compare(); expect(reply.statusCode).toBe(200);
+    const value = ModelVersionDiffV2Schema.parse(reply.json()).result_comparison;
+    expect(value).toMatchObject({ status: 'available', kind: 'paired_runs',
+      prior_run: { run_id: 'bound-prior' }, current_run: { run_id: 'bound-current' } });
+    if (value.status === 'available' && value.kind === 'paired_runs') {
+      expect(value.run_delta.input_changes).toStrictEqual([{
+        entity_kind: 'option_setting', entity_id: 'n_price', option_id: 'generate-leads', field: 'value',
+        label_before: 'Price', label_after: 'Price',
+        before: { raw: 12, unit: 'GBP' }, after: { raw: 13, unit: 'GBP' }, change: 'changed',
+      }]);
       expect(value.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
       expect(value.run_delta.leader).not.toHaveProperty('current_leading_option_id');
       expect(value.run_delta.win_probabilities).toStrictEqual([]);

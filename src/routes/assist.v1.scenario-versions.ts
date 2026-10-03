@@ -129,7 +129,6 @@ import { AnalysisStateV1Schema, ModelVersionDiffV2Schema, type ModelVersionResul
 import { loadScenarioAnalysisFactsForRead } from "../orchestrator-v5/build-turn-context.js";
 import { bindVersionResults } from "../orchestrator-v5/model-management/version-result-binding.js";
 import { buildRunDelta } from "../orchestrator-v5/coaching/build-run-delta.js";
-import { enforceLeaderLicenceAtFinalEgress } from "../orchestrator-v5/agent-lane/leader-final-egress.js";
 import { leaderLicence } from "../orchestrator-v5/compose/leader-licence.js";
 
 import { parseRequestExtensions } from "../orchestrator-v5/boundary/request-extensions.js";
@@ -834,17 +833,17 @@ export default async function route(app: FastifyInstance) {
           // This route alone requests an explicit pair; ordinary turns keep chronology.
           const built = buildRunDelta({ priorFacts: bound.facts, selectedPair: bound.selectedPair,
             mayNameLeadingOption: bound.mayNameLeadingOption });
-          // Reuse the same final licence check as turn/read egress (DL5955284206).
-          // Only the recorded delta is projected; the human-authored model diff is untouched.
+          // Reuse the final licence, projecting only the typed leader-claim fields.
+          // Recorded input identities and values are facts, so must never enter a prose scrubber.
           if (built.kind === "ok") {
-            const licensed = enforceLeaderLicenceAtFinalEgress(
-              { run_delta: built.delta },
-              { requestId, exitPath: "scenario_versions_compare", graph: records.to.graph,
-                mayNameLeadingOption: bound.mayNameLeadingOption,
-                licence: leaderLicence({ mayNameLeadingOption: bound.mayNameLeadingOption }) },
-            ).response;
+            const licence = leaderLicence({ mayNameLeadingOption: bound.mayNameLeadingOption });
+            const { prior_leading_option_id: _prior, current_leading_option_id: _current,
+              ...withheldLeader } = built.delta.leader;
+            const licensedDelta = licence === "withheld"
+              ? { ...built.delta, leader: withheldLeader, win_probabilities: [] }
+              : built.delta;
             resultComparison = { status: "available", kind: "paired_runs", prior_run: bound.selectedPair.prior,
-              current_run: bound.selectedPair.current, run_delta: licensed.run_delta };
+              current_run: bound.selectedPair.current, run_delta: licensedDelta };
           } else {
             resultComparison = { status: "unavailable", reason: built.reason === "insufficient_runs" || built.reason === "echoes_incomplete"
               ? "unconfirmed_identity" : "incompatible_results" };

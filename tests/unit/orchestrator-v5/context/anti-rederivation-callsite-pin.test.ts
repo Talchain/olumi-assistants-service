@@ -381,6 +381,11 @@ const EXPECTED: Record<string, Record<string, number>> = {
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)
     'src/orchestrator-v5/context/context-pack-assembler.ts': 2, // approved seam
+    // VERSION RESULT-DIFF — DL-approved historical comparison seam: import + one call.
+    // No turn frame exists for these saved versions. The binder judges each bound
+    // Run on its own saved graph and matching Run identity through the canonical
+    // selector and claim composition; it defines no alternative permission rule.
+    'src/orchestrator-v5/model-management/version-result-binding.ts': 2,
     // C2 Phase-3 lifecycle: freshness deliberately selects the older successful
     // Run for historical cards, while this one card-builder seam needs the
     // canonical contradiction from the same prior-fact set to suppress those
