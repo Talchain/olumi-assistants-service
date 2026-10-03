@@ -16,18 +16,15 @@ const TEMPLATE_SHA = '170ac5e7a629f8408fd92857b34d196aede92b99e2ebbce281c23a900c
 // no longer says a user-named band is always "recorded as theirs" — a band the link already sits in records review and stays
 // Olumi's estimate (R11): 26f7e9c0… → 913872bf…, +210 bytes. The template sha above is unchanged.
 // AI HARNESS (2 Oct, RC 5950124321): none_measurable makes no claim; the sentence it was told to say is gone: 913872bf… → cd04fd8c….
-// SCI-HERO (3 Oct, DL 4563ad #85 5962995335 items 2-3): a measured decision_sensitivity is said as a ranking only, and a
-// tipping point is named only from the run's typed `tipping_point`: cd04fd8c… → f2a6a47a….
-const HOST_SHA = 'f2a6a47a4888873257701cf5825ca38e21c6dbff7abb76e3e791ed68b0f82d57';
+const HOST_SHA = 'cd04fd8c700ea94434e31465d01e785312d61d8394441826974f9836f335f68b';
 // + REPLY_LENGTH_INSTRUCTION appended after the host contract (1 Oct, AIQ bound v2 5922412812): 26,834 → 27,324 bytes.
 // + K2: the budgets are limits, one question, the goal's target left to the host's D1 (1 Oct, DL 5925649954 item 5): 27,324 → 27,547 bytes.
 // + AI HARNESS: the links sentence's `sizing` definition replaces the `defaulted` one (1 Oct, DL 5936996041): 27,547 → 27,833 bytes.
 // Derived from the request the real route SENT (harness raw body), never computed by hand.
 // + the link-set sentence above (MG, 2 Oct): 27,833 → 28,043 bytes.
 // + none_measurable makes no claim (AI HARNESS, RC 5950124321): 28,043 → 28,026 bytes.
-// + SCI-HERO tipping-point say-rule + ranking-only EVPPI (3 Oct): 28,026 → 28,676 bytes.
-const RENDERED_SHA = '938b511d708554458f9b1445545df45bcf8aab43bd7266748738705d7d931afe';
-const RENDERED_BYTES = 28_676;
+const RENDERED_SHA = 'b2653d0e2f2eda3c2387366ec33e3c6412508dc1bec9c7fbe35af6877037c739';
+const RENDERED_BYTES = 28_026;
 const SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a0f';
 const FIRST_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a11';
 const FAILED_SCENARIO = '3c2b1a0f-9e8d-4c7b-8a6f-5e4d3c2b1a12';

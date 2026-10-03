@@ -148,8 +148,7 @@ export function licensedRunBlockForModel(block: unknown): unknown {
       }
       continue;
     }
-    // Nested members too (SCI-HERO: `tipping_point.new_leading_option_*` sits one level down): "wherever it sits".
-    out[k] = withoutLeaderDesignations(v);
+    out[k] = v;
   }
   return out;
 }
