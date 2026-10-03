@@ -208,11 +208,11 @@ describe('≤1 ask on the FINAL composed reply at rest — the host\'s own asks 
 
   it('the route judges the ask on the composed reply at rest — model words + owed lines + host status (source pin)', () => {
     const src = readFileSync(new URL('../../../routes/agent-v1-turn.ts', import.meta.url), 'utf8');
-    expect(src).toContain('const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narration.text, owed), statusText), [basis, freshScopeQuestion]);');
+    expect(src).toContain('const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);');
     expect(src).toContain('restingText: textAtRest(composedWithout),');
     expect(src).toContain('...decisionTurn,');
     expect(src).toContain('questionsToggle: textAtRest(composedWithout) !== composedWithout,');
-    expect(src).toContain('withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText)');
+    expect(src).toContain('withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText)');
   });
 
   it('textAtRest is the panel\'s own split: the same marker and producer-sentence predicate as the pinned DGAI copy', () => {

@@ -3043,15 +3043,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // The retained fresh scope question is this turn's existing step, even if the
     // narrator parked it behind the questions toggle. Count it before another ask.
     const freshScopeAsk = freshScopeIssues.find(p => p.action.kind === 'reconcile_goal_scope' && p.action.expected !== 'approval' && retainedScopeIssues.some(held => held.chip_id === p.chip_id));
-    const freshScopeQuestion = freshScopeAsk?.action.kind === 'reconcile_goal_scope' ? freshScopeAsk.action.question : null;
+    const rawScopeQuestion = freshScopeAsk?.action.kind === 'reconcile_goal_scope' ? freshScopeAsk.action.question : null;
+    const freshScopeQuestion = rawScopeQuestion === null ? null : withoutProposalIds(rawScopeQuestion);
+    // Keep the pending authority verbatim. Normalise exact narrator copies before
+    // the whole-reply scrub, so other IDs cannot give this display question a
+    // different replacement name and defeat final deduplication.
+    const narrationText = rawScopeQuestion === null || freshScopeQuestion === null ? narration.text : narration.text.split(rawScopeQuestion).join(freshScopeQuestion);
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       && claimPermissionsFrom(analysisState, analysisReady, { requested: fastPath === 'run' }).leader_may_be_named
       ? conditionalInputBasis({ graph: readbackGraph,
         admission: (analysisReady as { analysis_admission?: unknown } | undefined)?.analysis_admission,
         analysedOptionIds: analysedOptionIds(analysisResult) }) : null;
-    if (basis !== null && !narration.text.includes(basis)) owed.push(basis);
-    const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narration.text, owed), statusText), [basis, freshScopeQuestion]);
+    if (basis !== null && !narrationText.includes(basis)) owed.push(basis);
+    const composedWithout = withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, owed), statusText), [basis, freshScopeQuestion]);
     const decisionTurn = {
       awaitingApproval: offeredNow.some((a) => typedApprovalOf({ chip: { id: a.id } }) !== undefined)
         || executableWaitingProposal(scenarioId, userId, graphHash) !== undefined,
@@ -3080,7 +3085,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Olumi's own status, plus what any proposal this turn LEFT OUT — both deterministic (#1800).
       // T3, terminal: exactly the checked text — no disclosure, status, ask or write line rides on a method turn.
       assistant_text: fastPath === 'method' ? narration.text
-        : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narration.text, [...owed, ...decisionLines]), statusText),
+        : withoutProposalIds(withB3LinesAtRest(withWriteOutcome(withDisclosures(narrationText, [...owed, ...decisionLines]), statusText),
           [basis, ...decisionLines.filter((line) => line.endsWith('What should this model help you explore?'))])),
       stage: 'frame',
       answerKind: 'substantive',
