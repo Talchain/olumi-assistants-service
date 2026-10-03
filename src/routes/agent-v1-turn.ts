@@ -61,7 +61,9 @@ import { composeDirectAnswerResponse } from '../orchestrator-v5/compose.js';
 import { finaliseV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { answerIsIncomplete, runAgentTurn, WITHHELD_ON_CHIP_TURN, type AgentTurnResult, type CallModel } from '../orchestrator-v5/agent-lane/runtime/agent-loop.js';
 import type { AgentLaneMode, AgentToolContext } from '../orchestrator-v5/agent-lane/runtime/agent-tools.js';
-import { createAgentCapabilities, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { createAgentCapabilities, withNonlinearIdentity, type InternalDispatch } from '../orchestrator-v5/agent-lane/runtime/agent-capabilities.js';
+import { goalCertaintyForAgent } from '../orchestrator-v5/agent-lane/goal-certainty-for-agent.js';
+import { savedRunContextFacts } from '../orchestrator-v5/agent-lane/saved-run-context-facts.js';
 import { runExplanationCurrentness } from '../orchestrator-v5/agent-lane/run-currentness.js';
 import { turnReadCache } from '../orchestrator-v5/agent-lane/turn-read-cache.js';
 import { notModelledOfRead, notModelledTurnCarrier } from '../orchestrator-v5/agent-lane/not-modelled-carrier.js';
@@ -2216,8 +2218,20 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         option_display_names: [...optionNameAliases(st.graph).values()].map((a) => a.display),
       };
       // The interpreter reads the LICENSED run (`licensed-run-view.ts`, PR-L1), exactly as the Agent loop's model does.
-      const selectedRun = { result: analysisResultForAgent(st.analysisResult),
-        claim_permissions: claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true }) };
+      const permissionsNow = claimPermissionsFrom(st.analysisState, st.analysisReady, { requested: true });
+      const selectedPermissions = st.analysisResult !== undefined && permissionsNow.leader_may_be_named !== true && st.graph !== undefined
+        ? withNonlinearIdentity(permissionsNow, st.graph, st.identityEvaluated) : permissionsNow;
+      const factsNow = savedRunContextFacts(scenarioId, {
+        graph_hash: st.graphHash, analysis_state: st.analysisState, analysis_result: st.analysisResult, raw: st.graph,
+        limit_verdicts: st.limitVerdicts, constraint_verdict_state: st.constraintVerdictState, leader_limit_risks: st.leaderLimitRisks,
+      }, selectedPermissions);
+      const goalChanceNow = goalChanceWithheldForAgent(st.analysisResult);
+      const goalCertaintyNow = goalCertaintyForAgent(st.analysisResult, { scenario_id: scenarioId, analysis_state: st.analysisState },
+        { raw: st.graph, analysis_state: st.analysisState, analysis_result: st.analysisResult,
+          ...(st.goalCertainty !== undefined ? { goal_certainty: st.goalCertainty } : {}) });
+      const selectedRun = { result: analysisResultForAgent(st.analysisResult), claim_permissions: selectedPermissions, ...factsNow,
+        ...(goalChanceNow !== undefined ? { goal_chance: goalChanceNow } : {}),
+        ...(goalCertaintyNow !== undefined ? { goal_certainty: goalCertaintyNow } : {}) };
       const runForInterpreter = runToolOutputLicensesLeader(selectedRun)
         ? { ...selectedRun, canonical_state: canonicalAfterRun }
         : { ...modelFacingToolResult('run_analysis', selectedRun), canonical_state: withoutLeaderDesignations(canonicalAfterRun) };

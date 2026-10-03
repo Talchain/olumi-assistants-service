@@ -177,6 +177,7 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
+import { savedRunContextFacts } from '../saved-run-context-facts.js';
 import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
@@ -963,6 +964,9 @@ interface GraphRead {
   readonly identity_run_use?: IdentityRunUse | null;
   /** The selected run's per-limit rows (`analysis_limit_verdicts`), read off the SAME graph read (`limit-checks.ts`). */
   readonly limit_verdicts?: StoredLimitVerdicts;
+  /** Selected canonical sidecars; narrowed by the existing verdict reader in savedRunContextFacts. */
+  readonly constraint_verdict_state?: unknown;
+  readonly leader_limit_risks?: readonly unknown[] | null;
   /** The read's `analysis_result` block — the selected Run, present only when the route delivers it (`goal-certainty-for-agent.ts`). */
   readonly analysis_result?: unknown;
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
@@ -1465,8 +1469,11 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   // model chance, as the Run chip's own result does. The retained history no longer holds that result (#2322), so
   // without it the Agent said "not confirmed" beside a Goal panel showing 25%. A withheld leader keeps AI Quality's
   // standing drop of per-option chances; an exact 0 or 1 travels only through its earned `goal_certainty` decision.
-  const chancePermitted = current && goalChance === undefined
-    && claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
+  // The selected Run uses the same existing requested-Run licence, including separable provisional caveats.
+  const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true });
+  const selectedPermissions = current && g.analysis_result !== undefined && permissions.leader_may_be_named !== true
+    ? withNonlinearIdentity(permissions, g.raw, g.identity_evaluated) : permissions;
+  const chancePermitted = current && goalChance === undefined && permissions.leader_may_be_named === true;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const optionNames = optionNameAliasesForCurrentRun(g);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
@@ -1504,6 +1511,8 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
       }))
     : undefined;
   return { ...context, analysis: { ...analysis,
+    claim_permissions: selectedPermissions,
+    ...savedRunContextFacts(scenarioId, g, selectedPermissions),
     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
     ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
@@ -1887,6 +1896,10 @@ export function createAgentCapabilities(
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
+      ...(r.json.analysis_constraint_verdict_state !== undefined
+        ? { constraint_verdict_state: r.json.analysis_constraint_verdict_state } : {}),
+      ...(() => { const risks = r.json.analysis_leader_limit_risks;
+        return risks === null || Array.isArray(risks) ? { leader_limit_risks: risks } : {}; })(),
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
       ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),
