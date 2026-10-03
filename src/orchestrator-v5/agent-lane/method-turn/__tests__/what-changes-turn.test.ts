@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { DecisionFlipDispatchResult, FlipLinkRef } from '../../../handlers/decision-flip-dispatch.js';
 import type { MethodReadback } from '../method-turn.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../../orchestrator/tools/analysis-ready-helper.js';
 import {
   FRACTION_LADDER, LINK_COPY, WHAT_CHANGES_PRESS_ID, WHAT_CHANGES_REPLY, fractionOf, renderLinkTippingPoints, whatChangesTurnFor,
 } from '../what-changes-turn.js';
@@ -20,9 +21,12 @@ const ISL_D3_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"sw
 const ISL_D1_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"ai_reporting_module_sprint","replicates":4,"bound_abs":0.01,"bound_rel":0.15,"grid_step":0.0025,"links":[{"from_id":"sprint_capacity_for_ai_reporting","to_id":"ai_reporting_module_availability","status":"quoted","reason":null,"current_mean":0.25,"threshold":0.0625,"replicate_thresholds":[0.06125,0.06375,0.06125,0.06625],"replicate_range":0.0050000000000000044,"to_option_id":"integration_bug_fix_sprint"},{"from_id":"ai_reporting_module_availability","to_id":"enterprise_prospect_signing_likelihood","status":"absent","reason":"replicates_spread","current_mean":0.6,"threshold":null,"replicate_thresholds":[0.14125000000000001,0.15125,0.15624999999999997,0.15874999999999997],"replicate_range":0.01749999999999996,"to_option_id":null},{"from_id":"enterprise_prospect_signing_likelihood","to_id":"quarterly_revenue","status":"quoted","reason":null,"current_mean":0.5,"threshold":0.08875000000000002,"replicate_thresholds":[0.08625000000000002,0.09125000000000003,0.08875000000000002,0.08875000000000002],"replicate_range":0.0050000000000000044,"to_option_id":"integration_bug_fix_sprint"}]};
 
 const D3 = served('A-WHAT-CHANGES-NONE-MEASURABLE-SILENT');
+// The capture carries no `analysis_ready`; the licence fails CLOSED without an admission (#2533, P0 SHARED DATA matrix
+// M6). The route's readback derives it from the graph (`readBackState` → `buildCanonicalAnalysisReadyFromGraph`), so
+// these rows state that same producer-minted admission: D3's is M2 (quantified_provisional → permitted_with_caveat).
 const rbOf = (c: { body: Rec }, over: Partial<MethodReadback> = {}): MethodReadback => ({
   graph: c.body.draft_graph, analysisState: c.body.analysis_state, analysisResult: c.body.analysis_result,
-  optionParticipation: c.body.option_participation, ...over, // no analysis_ready captured: the licence is the served leader_claim
+  optionParticipation: c.body.option_participation, analysisReady: buildCanonicalAnalysisReadyFromGraph(c.body.draft_graph), ...over,
 });
 const measured = (block: unknown, links: FlipLinkRef[]): DecisionFlipDispatchResult => ({ status: 'measured', block: block as never, links });
 
