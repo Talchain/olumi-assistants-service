@@ -34,7 +34,11 @@ describe('RC\'s contract, bound', () => {
   it('the copy and the ladder are RC @a4992165 verbatim', () => {
     expect(LINK_COPY.quoted).toBe(RC.quoted);
     expect(RC.fraction_rule).toContain(`"${LINK_COPY.below_a_tenth}"`);
-    expect(LINK_COPY.no_change).toBe(RC.no_change);
+    // PTL #85/5972624659: RC's "had no effect" overclaims (#220 zeroes the link's mean, not its uncertainty). The ruled
+    // wording keeps RC's slots and claim shape; only the over-claim moves.
+    expect(RC.no_change).toBe('{leader} would still lead even if {from} had no effect on {to}.');
+    expect(LINK_COPY.no_change).toBe("{leader} would still lead even if {from}'s average effect on {to} fell to zero.");
+    expect(LINK_COPY.no_change).not.toMatch(/had no effect/);
     const named = [...(RC.fraction_rule as string).matchAll(/([a-z]+(?: [a-z]+)?) (0\.\d+|1\/3|2\/3)/g)]
       .map(([, name, v]) => [v === '1/3' ? 1 / 3 : v === '2/3' ? 2 / 3 : Number(v), name.replace(/^(?:round DOWN, so the claim is always a sufficient condition and never false\): )/, '')] as const);
     expect(named.length).toBe(11);
@@ -64,7 +68,7 @@ describe('the served D3 case + ISL\'s real D3 block', () => {
     expect(turn?.outcome).toBe('measured');
     expect(turn?.reply).toBe(
       "‘Stay on AWS’ would come out ahead if monthly cloud savings's effect on monthly spend fell below about a quarter of what it is now. "
-      + '‘Switch to GCP’ would still lead even if monthly cloud overspend during migration had no effect on monthly spend.',
+      + "‘Switch to GCP’ would still lead even if monthly cloud overspend during migration's average effect on monthly spend fell to zero.",
     );
     expect(turn?.reply).not.toMatch(/\d|%|no single (assumption|factor)|nothing would change/i);
   });

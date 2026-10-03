@@ -33,11 +33,16 @@ export function isWhatChangesPress(chipId: unknown): boolean {
   return chipId === WHAT_CHANGES_PRESS_ID;
 }
 
-/** RC @a4992165 `method_turns.RC-WHAT-CHANGES.link_tipping_points_copy`, verbatim (bound by a fixture row). */
+/**
+ * RC @a4992165 `method_turns.RC-WHAT-CHANGES.link_tipping_points_copy`, verbatim (bound by a fixture row), EXCEPT
+ * `no_change`: PTL #85/5972624659 ruled that the "no effect" claim says more than ISL #220 computes. #220 moves the link's
+ * MEAN to zero on the same draws and keeps its uncertainty (`exists · std · z`), so the claim is about its AVERAGE effect.
+ * The RC contract update is owed by its owner (#87/5972845636 ii).
+ */
 export const LINK_COPY = {
   quoted: "{other} would come out ahead if {from}'s effect on {to} fell below about {fraction} of what it is now.",
   below_a_tenth: "{other} would come out ahead only if {from}'s effect on {to} all but disappeared.",
-  no_change: '{leader} would still lead even if {from} had no effect on {to}.',
+  no_change: "{leader} would still lead even if {from}'s average effect on {to} fell to zero.",
 } as const;
 
 /** The ladder, largest first. {fraction} = the LARGEST value <= ratio (rounded DOWN: always a sufficient condition). */
