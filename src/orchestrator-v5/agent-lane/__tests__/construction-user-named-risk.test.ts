@@ -36,6 +36,17 @@ describe('K3 (DL 5932372585, generalised): every risk the user names is drawn as
     expect(text.indexOf(K3_PRECEDENCE) < text.indexOf('Do NOT widen beyond it on this turn')).toBe(true);
   });
 
+  it('RED: the node/link budget yields to the user\'s own material, stated once, in the same sentence block as the budget', () => {
+    const text = String(BUILD_INSTRUCTIONS);
+    const EXCEPTION = "THE ONE EXCEPTION IS THE USER'S OWN MATERIAL: when what the user stated (their options, figures, relationships and the risks they named) cannot fit this budget, keep all of it and leave out your own additions; that model is admitted, not refused.";
+    expect(text.split(EXCEPTION).length - 1).toBe(1);
+    const budget = text.indexOf('Stay within ');
+    const refused = text.indexOf('an oversized first model is refused before it reaches the canvas. ');
+    expect(budget).toBeGreaterThan(-1);
+    expect(refused).toBeGreaterThan(budget);
+    expect(text.indexOf(EXCEPTION)).toBe(refused + 'an oversized first model is refused before it reaches the canvas. '.length);
+  });
+
   it('CONTROL: the envelope still forbids decorative risks (the rule adds the user\'s risk; it never widens the model)', () => {
     expect(String(BUILD_INSTRUCTIONS)).toContain('no speculative options, secondary factors, or decorative risks and outcomes');
   });
