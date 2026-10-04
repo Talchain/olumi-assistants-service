@@ -462,6 +462,8 @@ export interface DraftStatedItem {
   /** REQUIRED, verbatim. Verified by substring location against the brief. */
   source_quote: string;
   value?: number;
+  /** Explicit current level when the same quoted span also names a baseline. */
+  baseline?: number;
   unit?: string;
   role?: DraftRecordRole;
   /**
@@ -544,6 +546,13 @@ export interface DraftInferenceClaim {
   to_stated?: number;
   to_claim?: number;
   effect?: DraftRecordEffect;
+  /** A user-quoted natural effect. All four fields are required when present. */
+  effect_detail?: {
+    amount: number;
+    amount_unit: string;
+    per_source_change: number;
+    per_source_change_unit: string;
+  };
   strength?: number;
   category?: DraftRecordCategory;
   value?: number;
@@ -645,6 +654,7 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
             kind: { type: "string", enum: [...DRAFT_RECORD_STATED_KINDS] },
             source_quote: { type: "string" },
             value: { type: "number" },
+            baseline: { type: "number" },
             unit: { type: "string" },
             role: { type: "string", enum: [...DRAFT_RECORD_ROLES] },
             // What convention `value` is written in. See the interface note:
@@ -724,6 +734,17 @@ export function buildDraftClaimItemSchema(): Record<string, unknown> {
       [DRAFT_RECORD_REF_FIELDS.toStated]: { type: "integer" },
       [DRAFT_RECORD_REF_FIELDS.toClaim]: { type: "integer" },
       effect: { type: "string", enum: [...DRAFT_RECORD_EFFECTS] },
+      effect_detail: {
+        type: "object",
+        properties: {
+          amount: { type: "number" },
+          amount_unit: { type: "string" },
+          per_source_change: { type: "number" },
+          per_source_change_unit: { type: "string" },
+        },
+        required: ["amount", "amount_unit", "per_source_change", "per_source_change_unit"],
+        additionalProperties: false,
+      },
       strength: { type: "number" },
       category: { type: "string", enum: [...DRAFT_RECORD_CATEGORIES] },
       value: { type: "number" },

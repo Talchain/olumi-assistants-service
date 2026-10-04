@@ -248,7 +248,7 @@ describe("F2a — `is_baseline` is expressible and carried", () => {
     expect(b.unionParams).toBeLessThanOrEqual(ANTHROPIC_UNION_PARAM_LIMIT);
     expect(b.forbiddenKeywords).toEqual([]);
     expect(b.objectsMissingAdditionalPropertiesFalse).toEqual([]);
-    expect(b.objectSchemas).toBe(3);
+    expect(b.objectSchemas).toBe(4);
   });
 
   it("the instruction teaches the mandate block 2 was silent on", () => {
@@ -546,6 +546,8 @@ describe("assertSeamCarriesEveryGrammarField — derived, and it did not exist b
         return [0];
       case "string":
         return `derived-${key}`;
+      case "object":
+        return populateFromSchema((schema.properties ?? {}) as Record<string, unknown>);
       default:
         throw new Error(`unhandled declared type for ${key}: ${JSON.stringify(schema)}`);
     }

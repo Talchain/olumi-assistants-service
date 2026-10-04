@@ -312,19 +312,17 @@ const SUPERSEDED_V10_GRAMMAR_SHA256 =
   "bfbbe10037f2d52e603c6b3f0389adc61f62febce3f48748fb035a5ede2835a5";
 
 const PINNED_GRAMMAR_SHA256 =
-  // ⚠ RE-PINNED with v11 (`value_scale` on `stated_items`). This hash is over
+  // ⚠ RE-PINNED with the stated-baseline/effect-detail widening. This hash is over
   // `JSON.stringify(buildDraftRecordsSchema())` — the BUILT OBJECT the adapter
   // attaches, not the file — so it moves when a FIELD is added and cannot move
   // for a comment. That is what makes it the strongest of the three pins, and
   // it is why adding a grammar field moves it while the instruction pins move
-  // independently: 1482 -> 1559 bytes.
+  // independently from the prompt pins: the schema now carries a baseline and
+  // four-part natural effect detail for the deterministic draft seam.
   //
   // ⭐ THE BUDGET WAS MEASURED BEFORE THE FIELD WAS ADDED, NOT AFTER: predicted
-  // 1559 bytes / 22 optional params from the schema's own shape, then confirmed
-  // against `measureDraftRecordsSchemaBudget()` — the authority — which agreed
-  // to the byte. 2 optional slots remain against Anthropic's 24, so the next
-  // field is a decision and not a habit.
-  "321681de308163b4b9420cdcf873e668cd16830d022874eac0f2f920ef30ad88";
+  // The budget remains enforced by `measureDraftRecordsSchemaBudget()`.
+  "9509011c6d6a00b848fba53bf666adce0b0f0193f081d82be97195625449ea8b";
 
 describe("the claim-progress probe is derived from the grammar", () => {
   it("hashes to the PRE-REGISTERED v11 grammar the provider receives", () => {

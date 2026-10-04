@@ -105,6 +105,9 @@ import { generateConstraintId } from "../../compound-goal/extractor.js";
 import { classifyUnitScaleClass } from "./unit-scale-class.js";
 import { soleStatedQuantityInSpan } from "../../factor-extraction/goal-label-target.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
+import { extractStatedLikelyRange, extractStatedPerUnitEffects, type StatedPerUnitEffect } from "../../context-integrity/not-modelled-manifest.js";
+import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
+import { sizeLink, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
 import type { GoalConstraintT } from "../../../schemas/assist.js";
 import {
   deriveGoalObjectiveLabel,
@@ -260,6 +263,8 @@ export interface RecordProvenance {
   readonly source?: string;
   /** REQUIRED by `StructuredProvenance` (max 100). NEVER user text — see above. */
   readonly quote?: string;
+  readonly magnitude?: MagnitudeAuthor;
+  readonly natural_effect?: NaturalEffect;
   /** Present iff `stated`. The verbatim quote, canonicalised. */
   readonly source_quote?: string;
   /** Present iff `ai_inferred`. Minted ids of the stated items it builds on. */
@@ -936,6 +941,8 @@ export interface ProjectedNode {
    * the schema).
    */
   goal_threshold_frame?: typeof CEE_GOAL_THRESHOLD_FRAME;
+  goal_baseline?: number | null;
+  goal_baseline_raw?: number | null;
   /**
    * `factor` nodes only. The frame pass 3d divided this factor's magnitudes
    * by — see the pass 3d write site and `schemas/graph.ts:scale_frame`.
@@ -1581,6 +1588,92 @@ function applyStatedGoalTarget(
     // construction of the `raw / cap` arithmetic one line above.
     node.goal_threshold_frame = CEE_GOAL_THRESHOLD_FRAME;
   }
+}
+
+function applyStatedGoalBaseline(node: ProjectedNode, baseline: number, unit: string | undefined): void {
+  if (!Number.isFinite(baseline)) return;
+  const cap = node.goal_threshold_cap;
+  node.goal_baseline_raw = baseline;
+  node.goal_baseline = typeof cap === "number" && Number.isFinite(cap) && cap !== 0 ? baseline / cap : null;
+  node.observed_state = {
+    ...(node.observed_state ?? {}),
+    value: baseline,
+    baseline,
+    ...(unit !== undefined ? { unit } : {}),
+  };
+}
+
+function briefRange(quote: string): { min: number; max: number; text: string } | undefined {
+  const range = extractStatedLikelyRange(quote);
+  return range === undefined ? undefined : { min: range.low, max: range.high, text: range.text };
+}
+
+function singularToken(token: string): string {
+  const t = token.toLowerCase();
+  return t.endsWith("ies") ? `${t.slice(0, -3)}y` : t.endsWith("s") && t.length > 3 ? t.slice(0, -1) : t;
+}
+
+function substantiveTokens(text: string): string[] {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}%]+/gu, " ").split(/\s+/u)
+    .filter((t) => t.length > 2 && !["the", "a", "an", "to", "of", "in", "for", "new", "tier", "monthly"].includes(t))
+    .map(singularToken);
+}
+
+function resolvePhraseNode(phrase: string, nodes: readonly ProjectedNode[]): ProjectedNode | undefined {
+  const phraseTokens = new Set(substantiveTokens(phrase));
+  if (phraseTokens.size === 0) return undefined;
+  const scored = nodes
+    .filter((node) => node.kind !== "option" && node.kind !== "decision")
+    .map((node) => {
+      const labelTokens = new Set(substantiveTokens(node.label));
+      const score = [...phraseTokens].filter((token) => labelTokens.has(token)).length;
+      return { node, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || substantiveTokens(a.node.label).length - substantiveTokens(b.node.label).length);
+  if (scored.length === 0) return undefined;
+  if (scored[0]!.score > 0 && (scored[0]!.score !== scored[1]?.score
+    || substantiveTokens(scored[0]!.node.label).length !== substantiveTokens(scored[1]!.node.label).length)) return scored[0]!.node;
+  return undefined;
+}
+
+function rangeForEffect(amount: number, quote: string): StatedRangeEnd | undefined {
+  const range = extractStatedLikelyRange(quote);
+  if (range === undefined) return undefined;
+  const absolute = Math.abs(amount);
+  if (absolute !== range.low && absolute !== range.high) return undefined;
+  return { low: range.low, high: range.high, text: range.text, end: absolute === range.low ? "low" : "high" };
+}
+
+function effectForEdge(args: {
+  readonly edge: ProjectedEdge;
+  readonly claim: DraftInferenceClaim | undefined;
+  readonly nodes: readonly ProjectedNode[];
+  readonly relations: readonly StatedPerUnitEffect[];
+}): { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; stated_range?: StatedRangeEnd } | undefined {
+  const { edge, claim, nodes, relations } = args;
+  const source = nodes.find((node) => node.id === edge.from);
+  const target = nodes.find((node) => node.id === edge.to);
+  if (source === undefined || target === undefined) return undefined;
+  const endpointMatches = relations.filter((relation) => resolvePhraseNode(relation.source_phrase, nodes)?.id === source.id
+    && (resolvePhraseNode(relation.target_phrase, nodes)?.id === target.id
+      || (target.kind === "goal" && target.goal_threshold_unit === relation.amount_unit)));
+  const detail = claim?.effect_detail;
+  const matching = detail === undefined ? endpointMatches : endpointMatches.filter((relation) =>
+    relation.amount === detail.amount && relation.per_source_change === detail.per_source_change);
+  if (matching.length !== 1) return undefined;
+  const relation = matching[0]!;
+  const effect = detail === undefined ? relation : {
+    amount: detail.amount,
+    amount_unit: detail.amount_unit,
+    per_source_change: detail.per_source_change,
+    per_source_change_unit: detail.per_source_change_unit,
+  };
+  if (![effect.amount, effect.per_source_change].every((value) => Number.isFinite(value)) || effect.amount === 0 || effect.per_source_change === 0) return undefined;
+  if (detail !== undefined && (detail.amount !== relation.amount || detail.per_source_change !== relation.per_source_change)) return undefined;
+  const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? "negative" : "positive";
+  if (claim?.effect !== undefined && claim.effect !== direction) return undefined;
+  return { ...effect, quote: relation.quote, ...(rangeForEffect(effect.amount, relation.quote) !== undefined ? { stated_range: rangeForEffect(effect.amount, relation.quote) } : {}) };
 }
 
 /**
@@ -2895,7 +2988,13 @@ function projectOnce(
       // ⚠ FactorObservedState REFUSES any `metadata` key (graph.ts:225-233) —
       // a factor carrying constraint metadata matches NEITHER union branch and
       // 400s. Unit lives on `data`, never here.
-      node.observed_state = { value: item.value, raw_value: item.value };
+      const statedRange = briefRange(quote);
+      node.observed_state = {
+        value: item.value,
+        raw_value: item.value,
+        ...(item.baseline !== undefined ? { baseline: item.baseline } : item.role === "baseline" ? { baseline: item.value } : {}),
+        ...(statedRange !== undefined ? { range: { min: statedRange.min, max: statedRange.max }, rangeMin: statedRange.min, rangeMax: statedRange.max } : {}),
+      };
       // ⭐⭐ THE USER'S OWN DECLARATION OF WHAT THEIR NUMBER MEANS.
       //
       // The exact mirror of the claims-side write below (`:3402` at the time of
@@ -2947,6 +3046,7 @@ function projectOnce(
       // (`graph.ts:325-330`). So the cap is never derived separately from the
       // value it divides.
       applyStatedGoalTarget(node, item.value, item.unit);
+      if (item.baseline !== undefined) applyStatedGoalBaseline(node, item.baseline, item.unit);
       // ⚠⚠ `goal_baseline` IS DELIBERATELY NEVER MINTED HERE, and the omission is
       // the honest branch, not a gap. The contract is explicit: it is
       // "EXTRACTION ONLY. Present only when the user STATED a current level in
@@ -4346,6 +4446,62 @@ function projectOnce(
           opt.data.interventions[factor.id] = v / frame;
         }
       }
+    }
+  }
+
+  // ── Pass 3e: BRIEF-STATED NATURAL EFFECTS. This is deliberately after the
+  // single frame pass above: `sizeLink` must read the same persisted frames the
+  // later writer reads, never a second draft-only conversion.
+  if (typeof brief === "string" && brief.trim() !== "") {
+    const relations = extractStatedPerUnitEffects(brief);
+    // The goal threshold is the existing frame authority for the same metric.
+    // Carry it to an outcome that names that metric so a stated natural effect
+    // is convertible at the seam; no new scale is derived here.
+    for (const goal of nodes.filter((node) => node.kind === "goal")) {
+      if (goal.goal_threshold_cap === undefined || goal.goal_threshold_unit === undefined) continue;
+      for (const node of nodes) {
+        if (node.kind === "goal" || node.scale_frame !== undefined) continue;
+        const unit = (node.data as { unit?: unknown } | undefined)?.unit;
+        if (unit === goal.goal_threshold_unit) node.scale_frame = goal.goal_threshold_cap;
+      }
+    }
+    const view = magnitudeNodes(nodes as unknown as Record<string, unknown>[], percentLevelIds({ goal_constraints: goalConstraints }));
+    for (const edge of edges) {
+      if (edge.origin !== "ai") continue;
+      const origin = claimOriginByEdgeId.get(edge.id);
+      const claim = origin === undefined ? undefined : claims[origin.index];
+      const effect = effectForEdge({ edge, claim, nodes, relations });
+      if (effect === undefined) continue;
+      const source = view.get(edge.from);
+      const target = view.get(edge.to);
+      if (source === undefined || target === undefined) continue;
+      const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? "negative" : "positive";
+      const sizing = sizeLink({
+        direction,
+        effect_amount: effect.amount,
+        effect_per_source_change: effect.per_source_change,
+        user_stated: true,
+        ...(effect.stated_range !== undefined ? { stated_range: effect.stated_range } : {}),
+      }, source, target);
+      if (sizing.outcome !== "user_stated" || sizing.natural_effect === undefined) continue;
+      const baseProvenance: RecordProvenance = edge.provenance ?? {
+        provenance_class: "ai_inferred",
+        ...EDGE_ATTRIBUTION.ai_inferred,
+        basis: [],
+        unbased: true,
+      };
+      const prov: RecordProvenance = {
+        ...baseProvenance,
+        source: "brief_extraction",
+        quote: effect.quote.slice(0, 100),
+        magnitude: "user_stated",
+        natural_effect: sizing.natural_effect,
+      };
+      edge.provenance = prov;
+      edge.provenance_source = "inferred";
+      edge.strength_mean = sizing.mean;
+      edge.effect_direction = direction;
+      provenance[edge.id] = prov;
     }
   }
 

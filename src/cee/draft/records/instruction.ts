@@ -293,6 +293,9 @@ natural unit — a judgement of quality, readiness or capability — has NO
 \`unit\`: leave it out and say what the number means in \`value_scale\`. Keep the original amount
 and any uncertainty in the quote. Use a contiguous verbatim span long enough to
 retain the referent and qualifications, never a reconstructed quotation.
+When the same quoted span explicitly gives a current level as well as a target,
+write the current level in \`baseline\` and the target in \`value\`; never
+calculate a baseline or pair two unrelated figures by arithmetic.
 Set \`value_scale\` on a \`figure\` whenever you set a number on it, to say
 WHAT THE NUMBER MEANS —
 \`unit_interval\` for a share or a bounded percentage written as a decimal (3%
@@ -478,6 +481,17 @@ and \`basis\` still records whatever the user said that you built them on.
 - Set \`effect\` to \`positive\` or \`negative\` on every \`causal_link\`. On the link
   from an \`outcome\` to the goal that is normally \`positive\`; from a \`risk\` to
   the goal it is normally \`negative\`. Never store a good thing as a \`risk\`.
+
+When the brief explicitly states a natural effect such as "each 1% price rise
+adds £1,200 a month to MRR" or "each subscriber costs £6 a month", carry it on
+that same \`causal_link\` in \`effect_detail\`: use the signed target change in
+\`amount\`, the target's stated unit in \`amount_unit\`, the signed source
+change in \`per_source_change\`, and the source's stated unit in
+\`per_source_change_unit\`. Set all four fields only when the quoted figures
+and both endpoints are clear; otherwise omit the object. This is a transcription
+of the brief, not an estimate: do not derive £12,000 from £120,000 and 10%, and
+do not convert units or invent a missing per-change figure. Keep the supporting
+sentence in \`basis\` and \`stated_items\`.
 
 Do not emit a factor you cannot connect. But never drop something the user
 stated: keep it in \`stated_items\`, and connect it if it bears on the goal.

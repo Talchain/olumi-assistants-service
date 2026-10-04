@@ -82,7 +82,10 @@ export function magnitudeNodes(nodes: readonly Rec[], percentLevel: ReadonlySet<
     observed_state: isRec(n.observed_state) ? (n.observed_state as MagnitudeNode['observed_state']) : undefined,
     goal_threshold_cap: n.goal_threshold_cap,
     goal_threshold_unit: n.goal_threshold_unit,
-    unit: null,
+    // Draft records carry claim units on `data.unit`; the old view only read
+    // observed_state and consequently made outcome/goal-path sizing refuse even
+    // when the model had stated the natural unit.
+    unit: isRec(n.data) && typeof n.data.unit === 'string' ? n.data.unit : null,
     option_levels: optionLevels.get(n.id as string) ?? [],
     ...(percentLevel.has(n.id as string) ? { percent_level: true } : {}),
   }]));
