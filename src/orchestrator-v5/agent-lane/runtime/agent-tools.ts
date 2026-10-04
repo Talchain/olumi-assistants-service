@@ -233,6 +233,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       'to analyse. Report honestly what it says was left out.',
     parameters: obj({
       brief: { type: 'string', description: 'The user\u2019s decision in their own words, verbatim.' },
+      whole_request: WHOLE_REQUEST,
     }, ['brief']),
   },
   {

@@ -43,6 +43,7 @@ import { OPENAI_ONLY, assertProviderAllowed, providerCallsMade, providerLedgerTr
 import { RESEARCH_CHIP_PREFIX, approvedQueryOf, readResearchResponse, researchChipFor, researchReplyText, researchRequestBody, type ResearchOutcome } from '../orchestrator-v5/agent-lane/runtime/public-research.js';
 import { agentRequestIdentity, conversationPromptAlias } from '../orchestrator-v5/agent-lane/runtime/prompt-identity.js';
 import { composeProposalReply } from '../orchestrator-v5/agent-lane/proposal-reply.js';
+import { firstAnalysisResultReply } from '../orchestrator-v5/agent-lane/first-analysis-result-reply.js';
 import { TURN_RESPONSE_HEADROOM_MS } from '../config/timeouts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
@@ -2199,6 +2200,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let fastPath: 'approve' | 'run' | 'explain' | 'research' | 'strengthen' | 'method' | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
+    let firstAnalysisResultFirst = false;
     let narrationStatus: 'pending' | 'unavailable' | 'ready' | 'stale' | undefined;
     /** C5b: the view the Run button's one interpreting call gave as a typed field — never composed for it. */
     let fastPathView: ProvisionalView | null = null;
@@ -2720,7 +2722,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ...(canonicalContext !== undefined ? { canonicalContext } : {}),
           ...(hostFirstCall !== undefined ? { hostFirstCall } : {}),
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
-          composeReply: (tool, args, toolResult) => composeProposalReply(tool, args, toolResult, message),
+          composeReply: (tool, args, toolResult) => {
+            const firstResult = tool === 'build_model_from_brief'
+              ? firstAnalysisResultReply(args, toolResult, firstAnalysis?.outcome.ran === true, message) : null;
+            if (firstResult !== null) { firstAnalysisResultFirst = true; return firstResult; }
+            return composeProposalReply(tool, args, toolResult, message);
+          },
           // The "Suggest starting assumptions" press: its first call IS the proposal (`SUGGEST_STARTING_ASSUMPTIONS_CHIP`).
           ...((body['chip'] as { id?: unknown } | null | undefined)?.id === SUGGEST_STARTING_ASSUMPTIONS_CHIP.id
             ? { firstCallTool: STARTING_ASSUMPTIONS_TOOL } : {}),
@@ -2947,7 +2954,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     if (measuredRunKey !== null && !runExplanationMatches(measuredRunKey, scenarioId, composedRead)) {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
     }
-    if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
+    const resultFirstRunCompleted = firstAnalysisResultFirst || (fastPath === 'run' && result.tool_results.some((r) => r.ran === true));
+    if (resultFirstRunCompleted
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) === null) {
       text = RUN_RESULT_UNVERIFIED_TEXT;
     }
@@ -3091,7 +3099,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       ...(offerRun ? [RUN_OFFER_CHIP] : []),
       // A Run the engine answered without a result offers ITS outcome's chips, never "what it still needs" (not a model gap).
       ...runOutcomeChips,
-      ...(fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
+      ...(resultFirstRunCompleted
         ? (() => { const chip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }); return chip === null ? [] : [chip]; })() : []),
       // The explanation failed on a Run that is still current: the SAME bound control is offered again (the fallback;
       // CODEX_CLI_OVERFLOW P2 on #2470). A stale Run offers none.
@@ -3273,8 +3281,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * below edits the text a replay returns, not only the text this request returns.
      */
     const explanationChip = runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult });
-    if (fastPath === 'run') narrationStatus = explanationChip !== null
-      && result.tool_results.some((r) => r.ran === true) ? 'pending' : 'unavailable';
+    if (fastPath === 'run' || firstAnalysisResultFirst) narrationStatus = explanationChip !== null
+      && resultFirstRunCompleted ? 'pending' : 'unavailable';
     const narrationKey = fastPath === 'explain' && typeof explanationId === 'string'
       ? explanationId.slice(RUN_EXPLANATION_PREFIX.length) : explanationChip?.id.slice(RUN_EXPLANATION_PREFIX.length);
     let wireBody = {
@@ -3633,6 +3641,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           ? {
             first_analysis: {
               ran: firstAnalysis.outcome.ran,
+              narrator_skipped: firstAnalysisResultFirst,
               ...(firstAnalysis.outcome.ran ? { run_turn_id: firstAnalysis.outcome.runTurnId } : { reason: firstAnalysis.outcome.reason }),
               ...(!firstAnalysis.outcome.ran && firstAnalysis.outcome.reason === 'failed' ? { dispatch_outcome: firstAnalysis.outcome.dispatchOutcome } : {}),
               construction_turn_id: firstAnalysis.constructionTurnId,
