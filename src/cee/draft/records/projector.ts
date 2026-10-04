@@ -2603,8 +2603,13 @@ function projectOnce(
   statedItems.forEach((originalItem, index) => {
     // Only the NODE's measurement uses the referenced unit. Keep the input
     // evidence unchanged: an independent horizon_ref still owns its month unit.
-    const item = originalItem.quantity === undefined ? originalItem
-      : { ...originalItem, unit: statedItems[originalItem.quantity]?.unit };
+    // ⛔ A unit the item's OWN quote evidences is the user's words and stands
+    // (with its authority): a goal "1,100 appointments a month" on a quantity
+    // declared "appointments" keeps its brief-bound target. Only a restated
+    // unit its quote does not evidence takes the referenced quantity's unit.
+    const referencedUnit = originalItem.quantity === undefined ? undefined : statedItems[originalItem.quantity]?.unit;
+    const item = referencedUnit === undefined || statedValueIsBound(originalItem, brief) ? originalItem
+      : { ...originalItem, unit: referencedUnit };
     const quote = canonicalText(item.source_quote ?? "");
     const kind = STATED_KIND_TO_NODE_KIND[item.kind];
     // An unknown kind cannot occur through the grammar (enum-constrained), but

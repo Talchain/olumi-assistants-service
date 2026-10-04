@@ -40,6 +40,25 @@ describe('A16 structural compile rows', () => {
     const r = sealedRecords(); r.stated_items[6]!.unit = 'USD/month';
     expect(project(r).graph.nodes.find(node => node.kind === 'goal')?.goal_threshold_unit).toBe('£/month');
   });
+  it('A3 never strips a stated goal its own quote evidences: its unit and brief authority stand (R1, held-out replay regression)', () => {
+    const span = (quote: string, text: string) => ({ start: quote.indexOf(text), end: quote.indexOf(text) + text.length });
+    const base = 'We complete 900 deliveries today.';
+    const goal = 'Reach 1,000 deliveries a month.';
+    const brief = `${base} ${goal}`;
+    const r = {
+      stated_items: [
+        { kind: 'figure', source_quote: base, value: 900, unit: 'deliveries', role: 'baseline',
+          value_span: span(base, '900'), unit_span: span(base, 'deliveries') },
+        { kind: 'goal', source_quote: goal, value: 1000, unit: 'deliveries a month', role: 'target', quantity: 0,
+          value_span: span(goal, '1,000'), unit_span: span(goal, 'deliveries a month') },
+      ],
+      claims: [],
+    };
+    const result = projectDraftRecords(r as never, brief);
+    if (!result.ok) throw new Error(result.detail);
+    const node = result.projection.graph.nodes.find(n => n.kind === 'goal');
+    expect(node).toMatchObject({ threshold_source: 'brief_extraction', goal_threshold_raw: 1000, goal_threshold_unit: 'deliveries a month' });
+  });
   it('A4 unifies a goal quantity with its explicit baseline reference', () => {
     const r = sealedRecords(); r.stated_items[6]!.quantity = 6;
     const goal = project(r).graph.nodes.find(node => node.kind === 'goal');
