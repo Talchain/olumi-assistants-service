@@ -169,7 +169,7 @@ describe('legacy digest never bridges admission states', () => {
 
   it('a contradictory non-empty snapshot refuses a stamped same-version Run', () => {
     const run = clone(PRIOR);
-    const snapshot = run.result.input_snapshot!;
+    const snapshot = result(run).input_snapshot as { options: { option_id: string }[]; options_not_sent: { option_id: string; reason: string }[] };
     const excluded = snapshot.options.pop()!;
     snapshot.options_not_sent.push({ option_id: excluded.option_id, reason: 'not_analysable' });
     result(run).enrichment = stampRunAnalysisProjection(result(run).enrichment as Record<string, unknown>);
@@ -178,7 +178,7 @@ describe('legacy digest never bridges admission states', () => {
   });
 
   it('empty legacy option snapshots provide no admission attestation', () => {
-    const run = clone(PRIOR); run.result.input_snapshot!.options = [];
+    const run = clone(PRIOR); (result(run).input_snapshot as { options: { option_id: string }[]; options_not_sent: { option_id: string; reason: string }[] }).options = [];
     expect(binding(factSet([run]), FROM, FROM).kind).toBe('unavailable');
   });
 });
