@@ -1,5 +1,6 @@
 /** Selected canonical Run facts for follow-up/Explain context. No freshness or permission authority. */
-import type { RunDelta } from '@talchain/schemas/boundary';
+import type { ContextPackRunDelta } from '../context/context-pack-schema.js';
+import { projectModelFacingRunDelta } from '../context/model-facing-run-delta.js';
 import { asVerdictState, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
 import { analysisResultForAgent } from './decision-sensitivity.js';
 import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from './limit-checks.js';
@@ -14,7 +15,8 @@ export interface SavedRunContextFactsRead {
   readonly limit_verdicts?: StoredLimitVerdicts;
   readonly constraint_verdict_state?: unknown;
   readonly leader_limit_risks?: readonly unknown[] | null;
-  readonly run_delta?: RunDelta;
+  /** Already bound and licensed at the canonical-read carrier; never the UI wire object. */
+  readonly run_delta?: ContextPackRunDelta;
 }
 
 /** The existing Explain reference binds the full selected fact tuple; it is not a Run execution id. */
@@ -33,7 +35,8 @@ export function savedRunContextFacts(
     ? limitChecksForAgent(read.raw, read.limit_verdicts) : undefined;
   return {
     selected_run_reference: selected.id,
-    ...(read.run_delta !== undefined ? { run_delta: read.run_delta } : {}),
+    ...(read.run_delta !== undefined && runToolOutputLicensesLeader({ claim_permissions: permissions })
+      ? { run_delta: projectModelFacingRunDelta(read.run_delta) } : {}),
     leader_limit_risks_note: 'Each probability is the chance that its recorded option meets the named limit, not its chance of breaching it. '
       + 'Missing means unrecorded; null means no result body; [] means read with no recorded risk. These facts grant no permission to name a leader.',
     ...(projected.tipping_point !== undefined ? {

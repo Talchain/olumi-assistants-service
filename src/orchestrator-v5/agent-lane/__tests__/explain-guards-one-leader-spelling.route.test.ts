@@ -17,14 +17,24 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
-import { CURRENT_MODEL_STATE_PREFIX } from '../runtime/agent-loop.js';
+import { CURRENT_MODEL_STATE_PREFIX, runAgentTurn } from '../runtime/agent-loop.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
 import { ProposalStore } from '../proposal.js';
 import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysis-state-v1.js';
 import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import { explanationContext } from './fixtures/run-explanation-follow-up.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
-import { selectedRunContextDelta } from './fixtures/selected-run-context-delta.js';
+import { projectModelFacingRunDelta } from '../../context/model-facing-run-delta.js';
+import { selectedRunContextDelta, selectedRunContextPair } from './fixtures/selected-run-context-delta.js';
+import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-read.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
+import { deriveDecisionContextGraphHash } from '../../build-turn-context.js';
+import { FROM, TO, savedRun } from '../../model-management/__tests__/version-result-fixtures.js';
+import { versionRecord } from '../../model-management/__tests__/fixtures.js';
+import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
+import { issueContextPacket } from '../runtime/request-assembly.js';
+import { modelFacingToolResult } from '../licensed-run-view.js';
+import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 type Json = Record<string, any>;
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url), 'utf8')) as Json;
@@ -41,6 +51,19 @@ const VERDICTS = { per_limit: [{ constraint_id: CHURN, state: 'estimate_only', r
 const WITHHELD_CLAIM = { permitted: false, withheld_reason: 'constraint_verdict_withheld' };
 
 let read: Json = {};
+let selectedFacts: ReturnType<typeof selectedRunContextPair> = [];
+let selectedVersions = [FROM, TO];
+vi.mock('../../model-management/index.js', async original => ({
+  ...await original<Record<string, unknown>>(),
+  getModelManagementService: () => ({
+    listVersions: async () => ({ status: 'ok', value: selectedVersions }),
+    getVersion: async (_scenario: string, id: string) => ({ status: 'ok', value: selectedVersions.find(v => v.id === id) }),
+  }),
+}));
+vi.mock('../../build-turn-context.js', async original => ({
+  ...await original<Record<string, unknown>>(),
+  loadScenarioAnalysisFactsForRead: async () => ({ factSet: { status: 'complete', source: 'scenario', facts: selectedFacts, total_count: selectedFacts.length }, hotWindow: { status: 'ok', facts: selectedFacts } }),
+}));
 const fresh = (): Json => JSON.parse(JSON.stringify(SERVED)) as Json;
 /** The Run turn's own `analysis_ready`: the same admission the read carries (the turn and the read agree). */
 const readyOf = (r: Json): Json => ({ status: 'ready', analysis_admission: r.analysis_admission });
@@ -104,7 +127,7 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { read = fresh(); rows.length = 0; modelBodies = []; });
+  beforeEach(() => { read = fresh(); selectedFacts = selectedRunContextPair(read.graph_hash, read.analysis_state.run_state.computed_at); rows.length = 0; modelBodies = []; });
 
   type First = { suggested_actions: { id: string }[]; _agent: { session_id: string } };
   const run = async (): Promise<First> => {
@@ -129,23 +152,174 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
   const followUpState = async (): Promise<Json> => {
     const first = await run();
     const next = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { turn_id: randomUUID(), scenario_id: SCENARIO,
-      agent_session_id: first._agent.session_id, message: 'What should I look at next?' } });
+      agent_session_id: first._agent.session_id, message: 'Please describe the assumptions recorded in the model.' } });
     expect(next.statusCode, next.body).toBe(200);
     const states = modelBodies.map(modelStateOf).filter((s): s is Json => s !== undefined);
     expect(states.length, 'control: the follow-up model call carries CURRENT MODEL STATE').toBeGreaterThan(0);
     return states[0]!;
   };
 
+  /** Real canonical reader, exact persisted executions and graph versions; no pre-neutralised result. */
+  const canonicalPair = async (change?: (facts: Json[], graphs: Json[]) => void, scope: 'clear' | 'unresolved' | 'unavailable' = 'clear') => {
+    const graphs = [FROM.graph, TO.graph].map(g => JSON.parse(JSON.stringify(g)) as Json);
+    const fixtures = [FROM, TO].map((v, i) => savedRun(v, `execution-${i}`, `2026-10-02T0${i}:00:00.000Z`, i === 0 ? 0.62 : 0.45) as unknown as Json);
+    fixtures.forEach((f, i) => { f.fact_version = 1; f.result.scenario_id = SCENARIO;
+      f.result.leading_option_id = i === 0 ? 'opt-a' : 'opt-b'; f.result.summary = 'Recorded model-relative comparison.'; });
+    change?.(fixtures, graphs);
+    selectedVersions = graphs.map((g, i) => versionRecord(GraphStateIngressSchema.parse(g), { id: i === 0 ? FROM.id : TO.id, scenario_id: SCENARIO }));
+    fixtures.forEach((f, i) => { f.result.graph_hash_at_run = deriveDecisionContextGraphHash(graphs[i]); });
+    selectedFacts = fixtures.reverse().map(f => RunAnalysisHandlerFactSchema.parse(f));
+    const graph = graphs[1]!;
+    const admission = buildCanonicalAnalysisReadyFromGraph(graph)?.analysis_admission;
+    const answer = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'selected-delta-test',
+      analysisInvalidatedAt: null, goalScopeClaimInput: { status: scope, issues: [] } });
+    read = { graph, graph_hash: deriveDecisionContextGraphHash(graph), analysis_admission: admission,
+      analysis_state: answer.analysis_state, analysis_result: answer.analysis_result, current_read: answer.current_read };
+    return answer;
+  };
+  const coldState = async (): Promise<Json> => modelFacingToolResult('get_canonical_state', await createAgentCapabilities(
+    async () => ({ status: 200, json: graphBody() }), new ProposalStore(),
+  ).getCanonicalState({ scenario_id: SCENARIO } as never)) as Json;
+
+  const ordinaryLoopState = async (): Promise<Json> => {
+    const caps = createAgentCapabilities(async () => ({ status: 200, json: graphBody() }), new ProposalStore());
+    const state = await caps.getCanonicalState({ scenario_id: SCENARIO } as never);
+    const expectation = { scenario_id: SCENARIO, authenticated_user_id: 'test-reader', graph_revision: read.graph_hash,
+      current_turn: 1, binding_secret: 'selected-run-test-secret' };
+    const packet = issueContextPacket({ ...expectation, captured_at_turn: 1, state }, expectation.binding_secret);
+    let modelState: Json | undefined;
+    await runAgentTurn({ ctx: { scenario_id: SCENARIO } as never, history: [], message: 'Describe the assumptions.',
+      instructions: 'Use the supplied model.', maxOutputTokens: 100, canonicalContext: { packet, expectation } }, caps,
+    async request => {
+      modelState = modelStateOf(request as unknown as Json);
+      return { output: [{ type: 'message', content: [{ type: 'output_text', text: 'Recorded assumptions.' }] }] };
+    });
+    expect(modelState).toBeDefined();
+    return modelState!;
+  };
+
+  it.each(['missing separation', 'near tie', 'withheld admission', 'likely_breaks', 'withheld leaf', 'unresolved scope', 'unavailable scope'])('canonical withheld %s omits the entire delta from ordinary and recovery inputs', async kind => {
+    const answer = await canonicalPair((facts, graphs) => {
+      const current = facts[1]!.result;
+      if (kind === 'missing separation') delete current.enrichment.robustness;
+      if (kind === 'near tie') current.enrichment.robustness.near_tie.is_tie = true;
+      if (kind === 'withheld leaf') current.constraint_verdict.may_name_leading_option = false;
+      if (kind === 'withheld admission') graphs[1]!.nodes.find((n: Json) => n.id === 'opt-b').interventions = { n_price: { value: 12, source: 'brief_extraction' } };
+      if (kind === 'likely_breaks') {
+        graphs[1]!.goal_constraints = [{ constraint_id: 'limit-current', node_id: 'n_price', operator: '<=', value: 100, label: 'Price limit' }];
+        current.enrichment.option_comparison = ['opt-a', 'opt-b'].map(option_id => ({ option_id, option_label: option_id === 'opt-a' ? 'Offshore partner' : 'Hire locally', constraints_decision_grade: true, constraint_probabilities: { 'limit-current': 0.2 } }));
+        current.enrichment.constraint_results = [{ ...graphs[1]!.goal_constraints[0], scale_provenance: { decision_grade: true, range_unified: true, source: 'explicit_cap' } }];
+      }
+    }, kind === 'unresolved scope' ? 'unresolved' : kind === 'unavailable scope' ? 'unavailable' : 'clear');
+    expect(answer.analysis_result, 'actual canonical result still delivered').not.toBeNull();
+    expect(answer.current_read.run_delta, 'control: the UI comparison still exists').toBeDefined();
+    if (kind === 'missing separation') {
+      expect(answer.current_read.run_delta!.win_probabilities.length, 'the real egress retains inferable shares').toBeGreaterThan(0);
+      expect(answer.current_read.run_delta!.leader.changed).toBe(true);
+      expect(answer.current_read.run_delta!.leader).not.toHaveProperty('current_leading_option_id');
+    }
+    const wire = JSON.stringify(answer);
+    expect((await (kind === 'likely_breaks' ? ordinaryLoopState() : followUpState())).analysis).not.toHaveProperty('run_delta');
+    expect((await coldState()).analysis).not.toHaveProperty('run_delta');
+    expect(JSON.stringify(answer)).toBe(wire);
+  });
+
+  it.each(['missing separation', 'near tie', 'withheld admission', 'likely_breaks', 'withheld leaf'])('the prior Run’s %s restriction cannot borrow the current licence', async kind => {
+    await canonicalPair((facts, graphs) => {
+      const prior = facts[0]!.result;
+      if (kind === 'missing separation') delete prior.enrichment.robustness;
+      if (kind === 'near tie') prior.enrichment.robustness.near_tie.is_tie = true;
+      if (kind === 'withheld leaf') prior.constraint_verdict.may_name_leading_option = false;
+      if (kind === 'withheld admission') graphs[0]!.nodes.find((n: Json) => n.id === 'opt-b').interventions = { n_price: { value: 12, source: 'brief_extraction' } };
+      if (kind === 'likely_breaks') {
+        graphs[0]!.goal_constraints = [{ constraint_id: 'limit-prior', node_id: 'n_price', operator: '<=', value: 100, label: 'Price limit' }];
+        prior.enrichment.option_comparison = ['opt-a', 'opt-b'].map(option_id => ({ option_id, option_label: option_id === 'opt-a' ? 'Offshore partner' : 'Hire locally', constraints_decision_grade: true, constraint_probabilities: { 'limit-prior': 0.2 } }));
+        prior.enrichment.constraint_results = [{ ...graphs[0]!.goal_constraints[0], scale_provenance: { decision_grade: true, range_unified: true, source: 'explicit_cap' } }];
+      }
+    });
+    expect(read.analysis_state.leader_claim.permitted).toBe(true);
+    expect(read.current_read.run_delta).toBeDefined();
+    expect((await followUpState()).analysis).not.toHaveProperty('run_delta');
+    expect((await coldState()).analysis).not.toHaveProperty('run_delta');
+  });
+
+  it('reader → ordinary/recovery inputs share the typed projection and preserve UI wire bytes', async () => {
+    const answer = await canonicalPair();
+    const delta = answer.current_read.run_delta!;
+    expect(delta).toBeDefined();
+    const wire = JSON.stringify(answer);
+    for (const context of [await followUpState(), await coldState()]) {
+      expect(context.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
+      for (const key of ['flip_thresholds', 'endpoints', 'input_coverage', 'input_changes', 'win_probabilities_unavailable']) {
+        expect(context.analysis.run_delta).not.toHaveProperty(key);
+      }
+    }
+    expect(JSON.stringify(answer)).toBe(wire);
+  });
+
+  it('a prior Run keeps its own provisional admission instead of today’s authorship', async () => {
+    await canonicalPair((_facts, graphs) => {
+      graphs[0] = JSON.parse(JSON.stringify(graphs[1])) as Json;
+      graphs[0]!.nodes.find((n: Json) => n.id === 'n_price').observed_state.source = 'cee_inference';
+    });
+    expect(buildCanonicalAnalysisReadyFromGraph(selectedVersions[0]!.graph)?.analysis_admission?.permitted_analysis_mode).toBe('quantified_provisional');
+    expect(read.analysis_state.leader_claim.permitted).toBe(true);
+    expect((await followUpState()).analysis).not.toHaveProperty('run_delta');
+    expect((await coldState()).analysis).not.toHaveProperty('run_delta');
+  });
+
+  it('unavailable prior version evidence omits the comparison without changing the wire', async () => {
+    await canonicalPair();
+    const wire = JSON.stringify(read.current_read);
+    selectedVersions = [];
+    expect((await followUpState()).analysis).not.toHaveProperty('run_delta');
+    expect((await coldState()).analysis).not.toHaveProperty('run_delta');
+    expect(JSON.stringify(read.current_read)).toBe(wire);
+  });
+
+  it.each(['newer same graph', 'foreign scenario', 'foreign version', 'stale comparison'])('reader → ordinary/recovery refuses substitution: %s', async kind => {
+    await canonicalPair();
+    const oldDelta = read.current_read.run_delta;
+    const oldReference = (await coldState()).analysis.selected_run_reference;
+    if (kind === 'newer same graph' || kind === 'stale comparison') {
+      const next = JSON.parse(JSON.stringify(selectedFacts[0])) as Json;
+      next.result.run_id = 'execution-2'; next.result.computed_at = '2026-10-02T02:00:00.000Z';
+      next.result.leading_option_id = 'opt-a';
+      next.result.enrichment.meta.seed_used = 'execution-2';
+      next.result.enrichment.results[0].win_probability = 0.7;
+      next.result.enrichment.results[1].win_probability = 0.3;
+      selectedFacts.unshift(next as ReturnType<typeof selectedRunContextPair>[number]);
+      const answer = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: read.graph, requestId: 'newer-run', analysisInvalidatedAt: null, goalScopeClaimInput: { status: 'clear', issues: [] } });
+      read.analysis_state = answer.analysis_state; read.analysis_result = answer.analysis_result; read.current_read = answer.current_read;
+      expect(read.current_read.run_delta.endpoints.current.run_id).toBe('execution-2');
+      expect(read.current_read.run_delta).not.toEqual(oldDelta);
+      if (kind === 'stale comparison') read.current_read = { ...read.current_read, run_delta: oldDelta };
+    } else if (kind === 'foreign scenario') {
+      (selectedFacts[0] as unknown as Json).result.scenario_id = 'foreign-scenario';
+    } else {
+      selectedVersions = selectedVersions.map(v => ({ ...v, scenario_id: 'foreign-scenario' }));
+    }
+    for (const context of [await followUpState(), await coldState()]) {
+      if (kind === 'newer same graph') {
+        expect(context.analysis.selected_run_reference).not.toBe(oldReference);
+        expect(context.analysis.run_delta).toEqual(projectModelFacingRunDelta(read.current_read.run_delta));
+      } else expect(context.analysis).not.toHaveProperty('run_delta');
+    }
+  });
+
   it('ordinary model input and transcript-free get_canonical_state retain the reader delta and prior qualitative bytes', async () => {
+    const answer = await canonicalPair();
+    const delta = answer.current_read.run_delta!;
+    read.current_read = { ...read.current_read };
+    delete read.current_read.run_delta;
     const dispatch: InternalDispatch = async () => ({ status: 200, json: graphBody() });
     const coldCaps = createAgentCapabilities(dispatch, new ProposalStore());
     const baseline = await coldCaps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
-    const delta = selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at, true);
-    read.current_read = { run_delta: delta };
+    read.current_read = { ...read.current_read, run_delta: delta };
     const state = await followUpState();
     const cold = await coldCaps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
-    expect(state.analysis.run_delta).toEqual(delta);
-    expect(cold.analysis.run_delta).toEqual(delta);
+    expect(state.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
+    expect(cold.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
     const { run_delta: _delta, ...analysis } = cold.analysis;
     expect({ ...cold, analysis }).toEqual(baseline);
     expect(JSON.stringify({ ...cold, analysis })).toBe(JSON.stringify(baseline));
@@ -156,24 +330,13 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
   });
 
   it('Explain and ordinary model input consume the same selected reader delta', async () => {
-    const delta = selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at);
-    read.current_read = { run_delta: delta };
+    const answer = await canonicalPair();
+    const delta = answer.current_read.run_delta!;
     const explained = await explainPayload();
     modelBodies = [];
     const ordinary = await followUpState();
     expect(explained.canonical_state.run_delta).toEqual(delta);
-    expect(ordinary.analysis.run_delta).toEqual(explained.canonical_state.run_delta);
-  });
-
-  it('withheld context carries only the reader’s neutral delta and gains no leader permission', async () => {
-    read.analysis_state.leader_claim = WITHHELD_CLAIM;
-    const delta = selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at, false);
-    read.current_read = { run_delta: delta };
-    const state = await followUpState();
-    expect(state.analysis.run_delta).toEqual(delta);
-    expect(state.analysis.claim_permissions.leader_may_be_named).toBe(false);
-    expect(state.analysis.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
-    expect(state.analysis.run_delta.leader).not.toHaveProperty('current_leading_option_id');
+    expect(ordinary.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
   });
 
   it('an absent first-Run comparison does not become a fabricated no-change delta', async () => {
@@ -189,7 +352,7 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     const baseline = await caps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
     read.current_read = { run_delta: selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at) };
     const cold = await caps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
-    expect(cold.analysis.run_delta).toEqual(read.current_read.run_delta);
+    expect(cold.analysis).not.toHaveProperty('run_delta');
     expect(cold).not.toHaveProperty('goal');
     expect(cold).not.toHaveProperty('goals');
     const { run_delta: _delta, ...analysis } = cold.analysis;

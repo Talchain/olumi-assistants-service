@@ -7,7 +7,9 @@ import { modelFacingToolResult } from '../licensed-run-view.js';
 import { runExplanationChip } from '../run-explanation.js';
 import { claimPermissionsFrom } from '../first-analysis.js';
 import { readLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
-import { selectedRunContextDelta } from './fixtures/selected-run-context-delta.js';
+import { projectModelFacingRunDelta } from '../../context/model-facing-run-delta.js';
+import { selectedRunContextDelta, selectedRunContextPair } from './fixtures/selected-run-context-delta.js';
+import { buildRunDelta } from '../../coaching/build-run-delta.js';
 
 type Rec = Record<string, any>;
 const corpus = (path: string): Rec => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as Rec;
@@ -25,11 +27,36 @@ const withheld = { leader_may_be_named: false };
 const project = (read = current): Rec => savedRunContextFacts(SID, read, withheld);
 
 describe('same selected current Run supplies context facts without another authority', () => {
-  it('carries the same already-licensed delta by reference, preserving every prior fact', () => {
+  it('withheld ordinary and recovery context omits a residual comparison, rather than neutralising its IDs', () => {
+    const delta = selectedRunContextDelta(POSITIVE.graph_hash, AT);
+    expect(delta.leader.changed).toBe(true);
+    expect(delta.win_probabilities.length).toBeGreaterThan(0);
+    expect(project({ ...current, run_delta: delta })).not.toHaveProperty('run_delta');
+    const cold = modelFacingToolResult('get_canonical_state', { analysis: { claim_permissions: withheld, run_delta: delta } });
+    expect(cold.analysis).not.toHaveProperty('run_delta');
+  });
+
+  it.each(['flip_thresholds', 'endpoints', 'input_coverage', 'input_changes', 'win_probabilities_unavailable'])(
+    'wire-only %s stays out of both ordinary and recovery model inputs', key => {
+    const pair = selectedRunContextPair(POSITIVE.graph_hash, AT);
+    (pair[1] as unknown as Rec).result.constraint_verdict.may_name_leading_option = false;
+    const built = buildRunDelta({ priorFacts: pair, mayNameLeadingOption: true });
+    if (built.kind !== 'ok') throw new Error(`fixture comparison refused: ${built.reason}`);
+    const delta = built.delta;
+    const permission = { leader_may_be_named: true };
+    const before = JSON.stringify(delta);
+    const ordinary = savedRunContextFacts(SID, { ...current, run_delta: delta }, permission);
+    const cold = modelFacingToolResult('get_canonical_state', { analysis: { claim_permissions: permission, run_delta: delta } });
+    expect(delta).toHaveProperty(key);
+    expect(ordinary.run_delta).not.toHaveProperty(key);
+    expect(cold.analysis.run_delta).not.toHaveProperty(key);
+    expect(JSON.stringify(delta)).toBe(before);
+  });
+  it('projects the licensed delta, preserving every prior fact', () => {
     const delta = selectedRunContextDelta(POSITIVE.graph_hash, AT);
     const baseline = project();
-    const facts = project({ ...current, run_delta: delta } as SavedRunContextFactsRead);
-    expect(facts.run_delta).toBe(delta);
+    const facts = savedRunContextFacts(SID, { ...current, run_delta: delta }, { leader_may_be_named: true });
+    expect(facts.run_delta).toEqual(projectModelFacingRunDelta(delta));
     const { run_delta: _delta, ...unchanged } = facts;
     expect(unchanged).toEqual(baseline);
     expect(project()).not.toHaveProperty('run_delta');
@@ -53,10 +80,10 @@ describe('same selected current Run supplies context facts without another autho
   it('a newer Run on the same graph uses only its own selected delta and reference', () => {
     const nextAt = '2026-10-03T00:05:00.000Z';
     const delta = selectedRunContextDelta(POSITIVE.graph_hash, nextAt);
-    const facts = project({ ...current, run_delta: delta,
+    const facts = savedRunContextFacts(SID, { ...current, run_delta: delta,
       analysis_state: { run_state: { kind: 'complete_current', computed_at: nextAt } },
-    } as SavedRunContextFactsRead);
-    expect(facts.run_delta).toBe(delta);
+    }, { leader_may_be_named: true });
+    expect(facts.run_delta).toEqual(projectModelFacingRunDelta(delta));
     expect(facts.selected_run_reference).not.toBe(project().selected_run_reference);
   });
 
