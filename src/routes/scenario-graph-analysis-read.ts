@@ -139,7 +139,7 @@ import { isScenarioAnalysisReasoningAuthority, readScenarioAnalysisClaimSafetyFa
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
-import { claimPermissionsFrom } from '../orchestrator-v5/agent-lane/first-analysis.js';
+import { claimPermissionsFrom, type ClaimPermissions } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { log } from '../utils/telemetry.js';
@@ -249,7 +249,10 @@ export interface ReadScenarioAnalysisParams {
   /** Atomic restore may supply the DB-returned marker and avoid a second read. */
   readonly analysisInvalidatedAt?: string | null;
   /** Internal receipt from this same reconciled read; never added to the graph route's wire body. */
-  readonly onCurrentnessRead?: (read: ScenarioAnalysisClaimSafetyRead) => void;
+  readonly onCurrentnessRead?: (read: ScenarioAnalysisClaimSafetyRead & {
+    /** The FULL permission from this same read; absent when the admission read was unavailable. */
+    readonly permissions?: ClaimPermissions;
+  }) => void;
 }
 
 /**
@@ -347,7 +350,7 @@ export async function readScenarioAnalysis(
     // consulted only when no fact is selected, so this changes nothing else.
     // Same rule as the turn path: only `complete` licenses "never analysed".
     const durableAuthority = isScenarioAnalysisReasoningAuthority(factSet);
-    params.onCurrentnessRead?.(readScenarioAnalysisClaimSafetyFact(factSet, params.scenarioId));
+    const currentnessRead = readScenarioAnalysisClaimSafetyFact(factSet, params.scenarioId);
     const facts = durableAuthority ? factSet.facts : hotWindow.facts;
     const factsReadOk = factSet.status === 'complete';
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
@@ -530,6 +533,9 @@ export async function readScenarioAnalysis(
     const boundResult = builtResult === null ? null
       : ((licensed.blocks as unknown[] | undefined)?.find((b) => (b as { type?: unknown } | null)?.type === 'analysis_result') as typeof builtResult | undefined) ?? null;
     const runDelta = licensed.run_delta as typeof builtRunDelta;
+    const permissions = claimPermissionsFrom(analysisState, analysisReady, { requested: true });
+    params.onCurrentnessRead?.({ ...currentnessRead,
+      ...(analysisReady === undefined || scopeInput.status === 'unavailable' ? {} : { permissions }) });
     return {
       current_read: analysisState === null
         ? projectCurrentRead({ analysisState: null })
@@ -545,7 +551,7 @@ export async function readScenarioAnalysis(
                 params.graph,
                 (params.graph as { goal_node_id?: unknown }).goal_node_id,
               ),
-              claimPermissions: claimPermissionsFrom(analysisState, analysisReady, { requested: true }),
+              claimPermissions: permissions,
               currentResult: boundResult,
               selectedFact: fact?.result ?? null,
             }),

@@ -43,10 +43,10 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import { RunInputSnapshotSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
-import { readScenarioAnalysis } from '../../routes/scenario-graph-analysis-read.js';
+import { readScenarioAnalysis, type ScenarioAnalysisRead } from '../../routes/scenario-graph-analysis-read.js';
 import { priorRunForSeed, seedHistoryFacts } from '../coaching/seed-reuse.js';
 import { orderSuccessfulRunAnalysisFactsNewestFirst } from '../context/freshness.js';
-import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
+import { compareAnalysisRunFactIdentity, validateAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
 import type { ScenarioAnalysisClaimSafetyRead } from '../context/reconcile-scenario-analysis-facts.js';
 import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../run-analysis-snapshot-binding.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../tools/handler-errors.js';
@@ -68,6 +68,11 @@ import {
 import { graphWithoutLink, structuralChallengeEligibility, type ChallengeLink } from '../coaching/structural-challenge-eligibility.js';
 import { isTheRunsPayload } from './decision-flip-dispatch.js';
 import { PLoTTimeoutError, type PLoTClient } from '../../orchestrator/plot-client.js';
+import { PERMITTED_ANALYSIS_MODES, modePermitsAtLeast } from '../admission/analysis-admission.js';
+import type { ClaimPermissions } from '../agent-lane/first-analysis.js';
+import { boundRunLeaderLicence } from '../model-management/version-result-binding.js';
+import type { SelectedRunIdentity } from '../coaching/build-run-delta.js';
+import type { LeaderLicence } from '../compose/leader-licence.js';
 import { log } from '../../utils/telemetry.js';
 
 type Rec = Record<string, unknown>;
@@ -90,30 +95,82 @@ export interface DispatchStructuralChallengeParams {
 
 export type StructuralChallengeDispatchResult =
   | { readonly kind: 'no_run' }
-  | { readonly kind: 'result'; readonly result: StructuralChallengeResultV1; readonly labels: ReadonlyMap<string, string>; readonly certainty?: StructuralChallengeCertainty };
+  | { readonly kind: 'result'; readonly result: StructuralChallengeResultV1; readonly labels: ReadonlyMap<string, string>; readonly certainty?: StructuralChallengeCertainty; readonly finalRead?: StructuralChallengeFinalRead; readonly candidateLeaderLicence?: LeaderLicence; readonly baselineRunIdentity?: SelectedRunIdentity };
 
 function currentFacts(context: Awaited<ReturnType<typeof buildTurnContext>>): readonly HandlerFact[] {
   const history = seedHistoryFacts({ scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set }) ?? [];
   return context.newest_analysis_fact ? [...history, context.newest_analysis_fact] : history;
 }
 
-/** Consume the sanctioned non-turn reader; the receipt and verdict belong to the SAME canonical read. */
+/** The receipt and permissions MUST belong to the same canonical read. No freshness is re-derived here. */
+export interface StructuralChallengeFinalRead {
+  readonly read: ScenarioAnalysisRead;
+  readonly currentness: (ScenarioAnalysisClaimSafetyRead & { readonly permissions?: ClaimPermissions }) | undefined;
+}
+
+export type StructuralChallengePresentationPermission =
+  | { readonly ok: true; readonly permissions: ClaimPermissions }
+  | { readonly ok: false; readonly status: 'failed' | 'stale' | 'withheld';
+      readonly reason: 'probe_unavailable' | 'model_changed_during_challenge' | 'exploratory_work_not_permitted' };
+
+/** Consume the canonical verdict and FULL licence, bound to this challenge's baseline execution. */
+export function structuralChallengePresentationPermission(
+  baseline: StructuralChallengeBaselineV1, finalRead: StructuralChallengeFinalRead | undefined, baselineRunIdentity: SelectedRunIdentity | undefined,
+): StructuralChallengePresentationPermission {
+  const unavailable = { ok: false, status: 'failed', reason: 'probe_unavailable' } as const;
+  const current = finalRead?.currentness;
+  const read = finalRead?.read;
+  if (!current?.readOk || current.fact === null || current.fact.fact_type !== 'run_analysis'
+    || !read?.analysis_state || current.permissions === undefined || baselineRunIdentity === undefined) return unavailable;
+  if (baselineRunIdentity.run_id !== baseline.run_id || baselineRunIdentity.scenario_id !== baseline.scenario_id
+    || baselineRunIdentity.graph_hash_at_run !== baseline.graph_hash_at_run) return unavailable;
+  const run = runResult(current.fact);
+  const identity = compareAnalysisRunFactIdentity(baselineRunIdentity, run);
+  if (identity.status === 'unconfirmed' || typeof run.run_id !== 'string') return unavailable;
+  if (identity.status !== 'match') return { ok: false, status: 'stale', reason: 'model_changed_during_challenge' };
+  if (run.run_id !== baseline.run_id || run.scenario_id !== baseline.scenario_id || run.graph_hash_at_run !== baseline.graph_hash_at_run) {
+    return { ok: false, status: 'stale', reason: 'model_changed_during_challenge' };
+  }
+  const snapshot = RunInputSnapshotSchema.safeParse(run.input_snapshot);
+  const enrichment = isRec(run.enrichment) ? run.enrichment : {};
+  const meta = isRec(enrichment.meta) ? enrichment.meta : {};
+  if (!snapshot.success || snapshot.data.sent_digest !== baseline.sent_digest
+    || meta.seed_used !== baseline.seed_used || meta.n_samples !== baseline.n_samples) return unavailable;
+  const state = read.analysis_state;
+  if (state.run_state.kind === 'unknown_degraded' || state.run_state.kind === 'never_run') return unavailable;
+  if (state.run_state.kind !== 'complete_current' || state.requires_rerun) {
+    return { ok: false, status: 'stale', reason: 'model_changed_during_challenge' };
+  }
+  if (read.analysis_result === null) return unavailable;
+  const permissions = current.permissions;
+  const mode = PERMITTED_ANALYSIS_MODES.find((m) => m === permissions.permitted_analysis_mode);
+  if (mode === undefined) return unavailable;
+  if (permissions.total_goal_claims_allowed === false || !modePermitsAtLeast(mode, 'quantified_provisional')) {
+    return { ok: false, status: 'withheld', reason: 'exploratory_work_not_permitted' };
+  }
+  return { ok: true, permissions };
+}
+
+/** Consume the sanctioned non-turn reader; identity receipt and verdict come from ONE canonical read. */
 async function canonicalPinnedFreshness(
   pinned: HandlerFact, snapshot: RunAnalysisScenarioSnapshot, scenarioId: string, requestId: string,
-): Promise<'fresh' | 'stale' | 'unknown'> {
-  let receipt: ScenarioAnalysisClaimSafetyRead | undefined;
+): Promise<{ readonly freshness: 'fresh' | 'stale' | 'unknown'; readonly finalRead: StructuralChallengeFinalRead }> {
+  let receipt: StructuralChallengeFinalRead['currentness'];
   const read = await readScenarioAnalysis({
     scenarioId, graph: snapshot.rawPersistedGraph, requestId,
+    ...(snapshot.goalScopeClaimInput === undefined ? {} : { goalScopeClaimInput: snapshot.goalScopeClaimInput }),
     onCurrentnessRead: (current) => { receipt = current; },
   });
-  const current = receipt as ScenarioAnalysisClaimSafetyRead | undefined;
-  if (!current?.readOk || current.fact === null || read.analysis_state === null) return 'unknown';
+  const current = receipt as StructuralChallengeFinalRead['currentness'];
+  const finalRead = { read, currentness: current };
+  const answer = (freshness: 'fresh' | 'stale' | 'unknown') => ({ freshness, finalRead });
+  if (!current?.readOk || current.fact === null || read.analysis_state === null) return answer('unknown');
   const identity = compareAnalysisRunFactIdentity(runResult(pinned), runResult(current.fact));
-  if (identity.status === 'unconfirmed') return 'unknown';
-  if (identity.status !== 'match' || runResult(pinned).run_id !== runResult(current.fact).run_id) return 'stale';
+  if (identity.status === 'unconfirmed') return answer('unknown');
+  if (identity.status !== 'match' || runResult(pinned).run_id !== runResult(current.fact).run_id) return answer('stale');
   const state = read.analysis_state;
-  if (state.run_state.kind === 'unknown_degraded' || state.run_state.kind === 'never_run') return 'unknown';
-  return state.run_state.kind === 'complete_current' && !state.requires_rerun ? 'fresh' : 'stale';
+  if (state.run_state.kind === 'unknown_degraded' || state.run_state.kind === 'never_run') return answer('unknown');
+  return answer(state.run_state.kind === 'complete_current' && !state.requires_rerun ? 'fresh' : 'stale');
 }
 
 /**
@@ -212,6 +269,8 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
     n_samples: nSamples,
     sent_digest: input.data.sent_digest,
   };
+  const checkedIdentity = validateAnalysisRunFactIdentity(run);
+  const baselineRunIdentity = checkedIdentity.status === 'confirmed' ? { ...checkedIdentity.identity, run_id: run.run_id } : undefined;
   // A selected Run without the published baseline evidence cannot support any challenge result.
   if (!StructuralChallengeBaselineV1Schema.safeParse(baseline).success) return { kind: 'no_run' };
   const alternative: StructuralChallengeAlternativeV1 = {
@@ -249,8 +308,10 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   const labels = nodeLabels(snapshot.graph);
   try {
     const canonical = await canonicalPinnedFreshness(selected, snapshot, context.session_id, requestId);
-    if (canonical === 'unknown') return refuse('failed', 'probe_unavailable', labels);
-    if (canonical === 'stale') return refuse('stale', 'run_not_current', labels);
+    if (canonical.freshness === 'unknown') return refuse('failed', 'probe_unavailable', labels);
+    if (canonical.freshness === 'stale') return refuse('stale', 'run_not_current', labels);
+    const permission = structuralChallengePresentationPermission(baseline, canonical.finalRead, baselineRunIdentity);
+    if (!permission.ok) return refuse(permission.status, permission.reason, labels);
   } catch (err) { return unavailable(err, 'read', labels); }
 
   // Canonical wiring/definition refusals retain priority. Root and reachability are decided on verified wire below.
@@ -320,18 +381,25 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
 
   // A late reply never overwrites a model the user has since changed.
   let after: RunAnalysisScenarioSnapshot;
-  let finalFreshness: 'fresh' | 'stale' | 'unknown';
+  let finalFreshness: Awaited<ReturnType<typeof canonicalPinnedFreshness>>;
   try {
     after = await readSnapshot(payload.scenario_id, params.signal);
     finalFreshness = await canonicalPinnedFreshness(selected, after, context.session_id, requestId);
   } catch (err) { return unavailable(err, 'late', labels); }
-  if (finalFreshness === 'unknown') return refuse('failed', 'probe_unavailable', labels);
-  if (finalFreshness !== 'fresh') return refuse('stale', 'model_changed_during_challenge', labels);
+  if (finalFreshness.freshness === 'unknown') return refuse('failed', 'probe_unavailable', labels);
+  if (finalFreshness.freshness !== 'fresh') return refuse('stale', 'model_changed_during_challenge', labels);
 
+  const finalPermission = structuralChallengePresentationPermission(baseline, finalFreshness.finalRead, baselineRunIdentity);
+  if (!finalPermission.ok) return refuse(finalPermission.status, finalPermission.reason, labels);
+  const candidateRun = runResult(candidate);
+  const candidateLeaderLicence = boundRunLeaderLicence({ fact: candidate, identity: {
+    scenario_id: context.session_id, run_id: candidateRun.run_id as string,
+    graph_hash_at_run: candidateRun.graph_hash_at_run as string, computed_at: candidateRun.computed_at as string,
+  } }, { scenario_id: context.session_id, graph: edited.graph });
   const compared = compareStructuralChallenge({
     baselineFact: selected,
     candidateFact: candidate,
-    turnMayNameLeader: params.turnMayNameLeader,
+    turnMayNameLeader: params.turnMayNameLeader && finalPermission.permissions.leader_may_be_named && candidateLeaderLicence !== 'withheld',
     reachable: eligibility.reachable,
     goalNodeId: snapshot.goal_node_id,
     goalLevelTarget: goalLevelTarget(snapshot.graph, snapshot.goal_node_id),
@@ -353,5 +421,5 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   });
   if (!parsed.success) return refuse('failed', 'candidate_unparseable', labels);
   log.info({ event: 'structural_challenge.result', request_id: requestId, status: 'completed', claims: parsed.data.claims.length }, 'structural challenge');
-  return { kind: 'result', labels, result: parsed.data, certainty: compared.certainty };
+  return { kind: 'result', labels, result: parsed.data, certainty: compared.certainty, finalRead: finalFreshness.finalRead, candidateLeaderLicence, baselineRunIdentity };
 }

@@ -47,6 +47,8 @@ import { SessionReadError } from '../../session/store.js';
 import { AnalysisSnapshotDivergedError } from '../../run-analysis-snapshot-binding.js';
 import { createRegistry, resolveHandler } from '../../tools/registry.js';
 import { dispatchStructuralChallenge, isExactlyThisRemoval, structuralChallengeRecomputeKey } from '../structural-challenge-dispatch.js';
+import { structuralChallengePressId, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence } from '../../agent-lane/method-turn/structural-challenge-turn.js';
+import type { StructuralChallengeFinalRead } from '../structural-challenge-dispatch.js';
 import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-read.js';
 
 type Rec = Record<string, any>;
@@ -142,9 +144,18 @@ function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean; candid
   return { client, runBodies, runOpts };
 }
 
-async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?: boolean; candidateIslBuild?: string; candidateMutation?: (response: Rec) => void } = {}) {
+async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?: boolean; candidateIslBuild?: string; candidateMutation?: (response: Rec) => void; keepExploratory?: boolean } = {}) {
   currentnessStore.current = undefined;
   const graph = structuredClone(opts.graph ?? served.graph);
+  // Execution-boundary tests need an actually licensed quantitative model. These historical captures predate
+  // the current target-path admission: explicitly model the user confirming the identity and stating these sizes
+  // BEFORE Run A, on this test copy only. The unchanged capture is tested separately as an exploratory refusal.
+  if (!opts.keepExploratory) {
+    const goal = graph.nodes.find((node: Rec) => node.id === 'mrr');
+    goal.nonlinear_identity ??= structuredClone(confirmed.graph.nodes.find((node: Rec) => node.id === 'mrr').nonlinear_identity);
+    for (const node of graph.nodes as Rec[]) if (node.nonlinear_identity) node.nonlinear_identity.stated_in_brief = true;
+    for (const edge of graph.edges as Rec[]) edge.provenance = { ...edge.provenance, source: 'user_specified', magnitude: 'user_stated' };
+  }
   const reader = () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: structuredClone(graph) }));
   const plot = plotDouble({ timeoutOnCandidate: opts.timeoutOnCandidate, real: opts.real, candidateIslBuild: opts.candidateIslBuild, candidateMutation: opts.candidateMutation });
   const handler = resolveHandler(createRegistry({ plotClient: plot.client, scenarioReader: reader, counterfactualClient: null }), 'run_analysis')!;
@@ -187,7 +198,8 @@ const resultOf = (r: Awaited<ReturnType<typeof dispatchStructuralChallenge>>) =>
 describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothing persisted', () => {
   it('S1: recomputes Run A\'s request with exactly that link removed and compares claim by claim (real A envelope)', async () => {
     const h = await harness({ graph: confirmed.graph, real: true });
-    const result = resultOf(await h.ask());
+    const output = await h.ask();
+    const result = resultOf(output);
     expect(result.status).toBe('completed');
     expect(h.plot.runBodies).toHaveLength(2); // Run A + the one candidate
     const [sentA, sentB] = h.plot.runBodies;
@@ -204,9 +216,11 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     expect(result).toMatchObject({ attribution_case: 'C2_unpaired', retention: 'not_retained', pair_provenance: { hash_equal: false } });
     expect(result.baseline).toMatchObject({ scenario_id: SCENARIO, graph_hash_at_run: h.runA.result.graph_hash_at_run, run_id: h.runA.result.run_id });
     expect(result.alternative).toMatchObject({ op: 'remove_link', ...CHURN_LINK, origin: 'user_selected' });
-    // The leader claim follows THE authority: named only when the Run's own verdict permits it.
+    // The leader claim follows BOTH full licences, including the canonical admission and candidate's bound licence.
     const leader = result.claims.find((c) => c.kind === 'leader');
-    if (h.runA.result.constraint_verdict?.may_name_leading_option === true && h.runA.result.leading_option_id !== null) {
+    if (output.kind === 'result' && output.finalRead?.currentness?.permissions?.leader_may_be_named === true
+      && output.candidateLeaderLicence !== 'withheld'
+      && h.runA.result.constraint_verdict?.may_name_leading_option === true && h.runA.result.leading_option_id !== null) {
       expect(leader).toMatchObject({ baseline_option_id: h.runA.result.leading_option_id, verdict: 'holds', basis: 'leader_same' });
     } else {
       expect(leader).toMatchObject({ baseline_option_id: null, verdict: 'not_comparable', basis: 'withheld_on_one_side' });
@@ -214,23 +228,20 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     // No changed claim is licensed here; unavailable constraint measurements stay unavailable.
     expect(result.claims.filter((c) => c.verdict === 'changes')).toEqual([]);
     const constraints = result.claims.filter((x) => x.kind === 'constraint_probability');
-    // The real handler's typed limit licence withholds these raw bank frequencies. Assert their absence explicitly.
-    expect(constraints).toEqual([]);
-    expect(result.claims.map((c) => c.kind === 'leader' ? 'leader' : [c.kind, c.option_id, c.constraint_id])).toEqual(['leader', ['goal_probability', 'raise_pro_price_to_59', null], ['goal_probability', 'status_quo', null], ['outcome_level', 'raise_pro_price_to_59', null], ['outcome_level', 'status_quo', null]]);
+    // The real handler withholds the raw frequencies; submitted limit identities remain as typed nulls.
+    expect(constraints).toHaveLength(h.runA.result.input_snapshot.options.length * h.runA.result.input_snapshot.constraints.length);
+    for (const constraint of constraints) expect(constraint).toMatchObject({ baseline: null, alternative: null, verdict: 'not_comparable', basis: 'missing_on_one_side' });
+    expect(result.claims.filter((c) => c.kind !== 'constraint_probability').map((c) => c.kind === 'leader' ? 'leader' : [c.kind, c.option_id, c.constraint_id])).toEqual(['leader', ['goal_probability', 'raise_pro_price_to_59', null], ['goal_probability', 'status_quo', null], ['outcome_level', 'raise_pro_price_to_59', null], ['outcome_level', 'status_quo', null]]);
     expect(result.not_compared).toEqual(expect.arrayContaining(['structural_influence', 'e_values', 'driver_rank', 'robustness_label', 'fragile_edges']));
   });
 
-  it('S1b: on the served MRR graph (goal product not read) nothing withheld is named or quoted', async () => {
-    const h = await harness();
+  it('S1b / P1-1: the unchanged served exploratory MRR graph licenses no quantitative comparison', async () => {
+    const h = await harness({ keepExploratory: true });
     const result = resultOf(await h.ask());
-    expect(result.status).toBe('completed');
+    expect(result).toMatchObject({ status: 'withheld', reason: 'exploratory_work_not_permitted',
+      baseline: { run_id: h.runA.result.run_id }, claims: [], pair_provenance: null });
     expect(h.runA.result.leading_option_id).toBeNull();
-    expect(result.claims.find((c) => c.kind === 'leader'))
-      .toMatchObject({ baseline_option_id: null, alternative_option_id: null, verdict: 'not_comparable', basis: 'withheld_on_one_side' });
-    expect(result.claims.map((c) => c.kind === 'leader' ? 'leader' : [c.kind, c.option_id, c.constraint_id])).toEqual(['leader', ['goal_probability', 'keep_current_price', null], ['goal_probability', 'raise_price_to_59', null], ['outcome_level', 'keep_current_price', null], ['outcome_level', 'raise_price_to_59', null]]);
-    for (const c of result.claims.filter((x) => x.kind === 'goal_probability')) {
-      expect(c.verdict).toBe('not_comparable');
-    }
+    expect(h.plot.runBodies).toHaveLength(1);
   });
 
   it('S2: a model edited since the Run is stale, and PLoT is never asked', async () => {
@@ -317,8 +328,8 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
   );
 
   it.each([
-    ['served MRR', served.graph, false], ['bank-2 A and live link-removal numbers', confirmed.graph, true],
-  ])('every dispatched output on the existing %s fixture parses with the published result schema', async (_label, graph, real) => {
+    ['MRR with user-confirmed identity and sizes', served.graph, false], ['bank-2 A with user-stated sizes and live link-removal numbers', confirmed.graph, true],
+  ])('every dispatched output on the licensed %s fixture parses with the published result schema', async (_label, graph, real) => {
     const h = await harness({ graph: graph as Rec, real: real as boolean });
     const result = resultOf(await h.ask());
     expect(result.status).toBe('completed');
@@ -529,7 +540,7 @@ describe('8/11: identity-bound canonical reload currentness, before and after re
           if (negative === 'durable_degraded') {
             // Reload can retain figures from a healthy hot window; that cannot certify the newest pinned execution.
             expect(canonical.analysis_state?.run_state.kind).toBe('complete_current');
-            expect(receipt).toEqual({ readOk: false, fact: null });
+            expect(receipt).toMatchObject({ readOk: false, fact: null });
           }
         }
         return loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: graph }));
@@ -563,5 +574,90 @@ describe('8/11: identity-bound canonical reload currentness, before and after re
     currentnessStore.current = canonicalStore([h.runA, ...older]);
     expect(resultOf(await h.ask()).status).toBe('completed');
     expect(currentnessStore.current.readAnalysisInvalidatedAt).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe('review P1-1: actual canonical authority at final presentation', () => {
+  afterEach(() => { currentnessStore.current = undefined; });
+  it.each(['newer_run', 'same_time_new_id', 'same_id_new_time', 'stale', 'scope_withdrawn', 'scope_unavailable', 'durable_unavailable'] as const)(
+    'a final %s cannot license the earlier challenge, even after a successful late dispatch read', async (negative) => {
+      const h = await harness({ graph: confirmed.graph, real: true });
+      const output = await h.ask();
+      expect(resultOf(output).status).toBe('completed');
+      if (output.kind !== 'result') throw new Error('expected result');
+      expect(output.finalRead?.currentness).toMatchObject({ readOk: true, fact: { result: { run_id: h.runA.result.run_id } }, permissions: expect.any(Object) });
+      const turn = await structuralChallengeTurnFor(structuralChallengePressId(CHURN_LINK), async () => output);
+      if (turn === null) throw new Error('expected turn');
+      expect(turn.outcome).toBe('completed');
+      const graph = structuredClone(h.graph);
+      if (negative === 'newer_run' || negative === 'same_time_new_id' || negative === 'same_id_new_time') {
+        const newer = structuredClone(h.runA);
+        if (negative !== 'same_id_new_time') newer.result.run_id = 'newer-run';
+        if (negative !== 'same_time_new_id') newer.result.computed_at = new Date(Date.parse(h.runA.result.computed_at) + 1).toISOString();
+        currentnessStore.current = canonicalStore([newer]);
+      }
+      if (negative === 'stale') graph.edges[7].strength = { mean: 0.9, std: 0.1 };
+      if (negative === 'durable_unavailable') currentnessStore.current = canonicalStore([h.runA], null,
+        { throwOnScenarioAnalysisFactRead: new SessionReadError('canonical permission unavailable') });
+      let currentness: StructuralChallengeFinalRead['currentness'];
+      const read = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'final-presentation',
+        ...(negative.startsWith('scope') ? { goalScopeClaimInput: { status: negative === 'scope_withdrawn' ? 'unresolved' as const : 'unavailable' as const, issues: [] } } : {}),
+        onCurrentnessRead: (receipt) => { currentness = receipt; },
+      });
+      const final = structuralChallengeTurnUnderLicence(turn, { read, currentness });
+      expect(final.result).toMatchObject({ baseline: { run_id: h.runA.result.run_id }, claims: [], pair_provenance: null,
+        status: negative === 'scope_withdrawn' ? 'withheld' : negative.includes('unavailable') ? 'failed' : 'stale' });
+      expect(StructuralChallengeResultV1Schema.parse(final.result)).toEqual(final.result);
+      expect(final.reply).not.toContain('What holds:');
+      expect(final.reply).not.toContain('What changes:');
+    },
+  );
+  it.each(['unresolved', 'unavailable'] as const)('the late canonical scope %s is consumed by dispatch before any comparison is returned', async (status) => {
+    const h = await harness({ graph: confirmed.graph, real: true });
+    let reads = 0;
+    const reader = async () => {
+      const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, 'scope-late', createNoopSessionStore({ loadGraphResult: structuredClone(h.graph) }));
+      reads += 1;
+      return { ...snapshot, ...(reads === 2 ? { goalScopeClaimInput: { status, issues: [] } } : {}) };
+    };
+    const result = resultOf(await h.ask(CHURN_LINK, { reader }));
+    expect(result).toMatchObject({ baseline: { run_id: h.runA.result.run_id }, claims: [], pair_provenance: null,
+      status: status === 'unavailable' ? 'failed' : 'withheld',
+      reason: status === 'unavailable' ? 'probe_unavailable' : 'exploratory_work_not_permitted' });
+    expect(h.plot.runBodies).toHaveLength(2);
+  });
+});
+
+
+describe('review P1-2/P1-3: result identities and measurement licences survive the real handler boundary', () => {
+  afterEach(() => { currentnessStore.current = undefined; });
+  it.each(['ghost_option', 'unsubmitted_constraint'] as const)('candidate %s returns no comparison and keeps the baseline Run identity', async (negative) => {
+    const h = await harness({ graph: confirmed.graph, real: true, candidateMutation: (r) => {
+      if (negative === 'ghost_option') r.option_comparison.push({ ...structuredClone(r.option_comparison[0]), option_id: 'ghost_option' });
+      else r.option_comparison[0].constraint_probabilities.unsubmitted_constraint = 1;
+    } });
+    expect(resultOf(await h.ask())).toMatchObject({ status: 'failed', reason: 'candidate_unparseable',
+      baseline: { run_id: h.runA.result.run_id }, claims: [], pair_provenance: null });
+  });
+  it.each(['skipped', 'zero_draws', 'uncertified_scale'] as const)('candidate %s cannot yield a verdict from an unlicensed measurement', async (negative) => {
+    const optionId = 'raise_pro_price_to_59';
+    const h = await harness({ graph: confirmed.graph, real: true, candidateMutation: (r) => {
+      const row = r.option_comparison.find((o: Rec) => o.option_id === optionId);
+      if (negative === 'skipped') row.status = 'skipped';
+      if (negative === 'zero_draws') row.outcome.n_valid_samples = 0;
+      if (negative === 'uncertified_scale') for (const limit of r.constraint_results) delete limit.scale_provenance;
+    } });
+    const output = await h.ask();
+    const result = resultOf(output);
+    expect(result.baseline.run_id).toBe(h.runA.result.run_id);
+    expect(result.status).toBe('completed');
+    const affected = result.claims.filter((c) => c.kind !== 'leader' && c.option_id === optionId
+      && (negative !== 'uncertified_scale' || c.kind === 'constraint_probability'));
+    expect(affected.length).toBeGreaterThan(0);
+    for (const c of affected) expect(c).toMatchObject({ alternative: null, verdict: 'not_comparable', noise_verdict: 'not_noise_qualified' });
+    const turn = await structuralChallengeTurnFor(structuralChallengePressId(CHURN_LINK), async () => output);
+    expect(turn?.reply).toContain('unavailable');
+    expect(turn?.reply).not.toMatch(/rests on|depends on/i);
   });
 });

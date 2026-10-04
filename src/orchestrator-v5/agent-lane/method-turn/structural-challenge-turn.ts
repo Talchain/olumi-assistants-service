@@ -17,9 +17,12 @@ import type {
   StructuralChallengeResultV1,
 } from '@talchain/schemas';
 import type { ChallengeLink } from '../../coaching/structural-challenge-eligibility.js';
-import type { StructuralChallengeDispatchResult } from '../../handlers/structural-challenge-dispatch.js';
+import { structuralChallengePresentationPermission, type StructuralChallengeFinalRead, type StructuralChallengeDispatchResult } from '../../handlers/structural-challenge-dispatch.js';
 import type { StructuralChallengeCertainty } from '../../coaching/structural-challenge-compare.js';
 import { StructuralChallengeAlternativeV1Schema } from '@talchain/schemas';
+import type { SelectedRunIdentity } from '../../coaching/build-run-delta.js';
+import type { LeaderLicence } from '../../compose/leader-licence.js';
+import type { ClaimPermissions } from '../first-analysis.js';
 import { NodeV3 } from '../../../schemas/cee-v3.js';
 import { TALK_IT_THROUGH_CHIP } from './method-turn.js';
 
@@ -28,6 +31,8 @@ export interface StructuralChallengeReplyInput {
   /** Node id → the user's label (factors, goal and options are all nodes of the canonical graph). */
   readonly labels: ReadonlyMap<string, string>;
   readonly certainty?: StructuralChallengeCertainty;
+  readonly leaderLicence?: LeaderLicence;
+  readonly claimPermissions?: ClaimPermissions;
 }
 
 function chance(p: number): string {
@@ -64,13 +69,13 @@ const BASIS_WORDS: Partial<Record<StructuralChallengeClaimV1['basis'], string>> 
   identity_status_changed: 'The runs did not evaluate the same definitions.',
   ranking_status_changed: 'The runs did not record the same comparison status.',
   withheld_on_one_side: 'At least one run withheld this claim.',
-  missing_on_one_side: 'At least one run did not record this claim.',
+  missing_on_one_side: 'At least one model version has no usable measurement for this claim.',
 };
 
-function goalSide(value: number | null, optionId: string, decisions: StructuralChallengeCertainty['baseline']): string {
+function goalSide(value: number | null, optionId: string, decisions: StructuralChallengeCertainty['baseline'], withheld = false): string {
   const matches = decisions?.filter((d) => d.option_id === optionId);
   // The existing certainty reader also speaks its stored sentence beside a withheld figure, without restoring it.
-  if (value === null) return matches?.length === 1 && matches[0].earned === false && matches[0].say
+  if (value === null) return withheld && matches?.length === 1 && matches[0].earned === false && matches[0].say
     ? matches[0].say : 'The target frequency was unavailable.';
   if (value !== 0 && value !== 1) return `Reaches the target in ${chance(value)} of model runs.`;
   const decision = matches?.length === 1 && matches[0].probability_of_goal === value ? matches[0] : undefined;
@@ -80,7 +85,7 @@ function goalSide(value: number | null, optionId: string, decisions: StructuralC
     ? decision.say : 'This is what this model gives, not a certainty; whether that certainty is earned could not be checked.';
 }
 
-function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string, certainty?: StructuralChallengeCertainty): string {
+function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string, certainty?: StructuralChallengeCertainty, caveat = ''): string {
   const reason = BASIS_WORDS[c.basis] ?? '';
   if (c.kind === 'leader') {
     if (c.baseline_option_id === null || c.alternative_option_id === null) return `Which option leads cannot be compared. ${reason}`;
@@ -88,13 +93,13 @@ function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string,
     if (c.verdict !== 'holds' && c.verdict !== 'changes') return c.basis === 'within_noise'
       ? 'Which option leads is too close to call in at least one version.' : `Which option leads cannot be compared reliably. ${reason}`;
     return c.baseline_option_id === c.alternative_option_id
-      ? `${label(c.baseline_option_id)} leads in both versions.`
-      : `${label(c.alternative_option_id)} would lead instead of ${label(c.baseline_option_id)}.`;
+      ? `${label(c.baseline_option_id)} leads in both versions${caveat}.`
+      : `${label(c.alternative_option_id)} leads in the version without the link; ${label(c.baseline_option_id)} leads in the baseline${caveat}.`;
   }
   const q = c as StructuralChallengeQuantityClaimV1;
   const who = label(q.option_id);
   if (q.kind === 'goal_probability') {
-    return `${who} — baseline: ${goalSide(q.baseline, q.option_id, certainty?.baseline)} Without the link: ${goalSide(q.alternative, q.option_id, certainty?.alternative)}${reason ? ` ${reason}` : ''}`;
+    return `${who} — baseline: ${goalSide(q.baseline, q.option_id, certainty?.baseline, q.basis === 'withheld_on_one_side')} Without the link: ${goalSide(q.alternative, q.option_id, certainty?.alternative, q.basis === 'withheld_on_one_side')}${reason ? ` ${reason}` : ''}`;
   }
   const value = (v: number | null, probability: boolean) => v === null ? 'unavailable' : probability
     ? v === 1 ? 'all sampled model runs' : v === 0 ? 'none of the sampled model runs' : `${chance(v)} of model runs` : amount(v);
@@ -102,7 +107,8 @@ function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string,
     const side = q.target === null ? '' : ` (your target is ${amount(q.target)})`;
     return `${who}'s expected result is ${value(q.baseline, false)} now and ${value(q.alternative, false)} without the link${side}.${reason ? ` ${reason}` : ''}`;
   }
-  return `${who} — limit ${label(q.constraint_id ?? '')}: within the limit in ${value(q.baseline, true)} now, and in ${value(q.alternative, true)} without the link.${reason ? ` ${reason}` : ''}`;
+  const limitSide = (v: number | null) => v === null ? 'The frequency within this limit was unavailable.' : `Within the limit in ${value(v, true)}.`;
+  return `${who} — limit ${label(q.constraint_id ?? '')}: baseline: ${limitSide(q.baseline)} Without the link: ${limitSide(q.alternative)}${reason ? ` ${reason}` : ''}`;
 }
 
 export function composeStructuralChallengeReply(input: StructuralChallengeReplyInput): string {
@@ -119,7 +125,7 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
       case 'timed_out':
         return `The test of ${link} took too long to finish, so there is no result. Nothing in your model changed; you can try again.`;
       case 'withheld':
-        return 'This analysis isn\'t currently permitted to explore alternatives, so I haven\'t run the test. Nothing in your model changed.';
+        return 'The current analysis permission does not allow this comparison to be shown, so there is no conclusion to report. Nothing in your model changed.';
       case 'failed':
         if (result.reason === 'candidate_unparseable') {
           return `The test's recorded evidence couldn't be read, so there is no fair comparison for ${link}. Nothing in your model changed; run the analysis again before retrying.`;
@@ -133,6 +139,7 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
     }
   }
 
+  const caveat = input.leaderLicence === 'permitted_with_caveat' ? ', as a provisional finding on Olumi’s starting estimates' : '';
   const changes = result.claims.filter((c) => c.verdict === 'changes');
   const held = result.claims.filter((c) => c.verdict === 'holds' && !c.invariant_by_construction);
   const unaffected = result.claims.filter((c) => c.invariant_by_construction);
@@ -142,9 +149,9 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
 
   let headline: string;
   if (leader?.verdict === 'changes' && leader.kind === 'leader' && leader.alternative_option_id !== null && named !== null) {
-    headline = `Without ${link}, ${label(leader.alternative_option_id)} would lead instead of ${label(named)}.`;
+    headline = `In the version without ${link}, ${label(leader.alternative_option_id)} leads; ${label(named)} leads in the baseline${caveat}.`;
   } else if (changes.length > 0 && named !== null && leader?.verdict === 'holds') {
-    headline = `Without ${link}, ${label(named)} still leads — but part of the result changes.`;
+    headline = `Without ${link}, ${label(named)} still leads${caveat} — but part of the result changes.`;
   } else if (changes.length > 0) {
     headline = `Without ${link}, part of the result changes.`;
   } else if (open.length === 0 && held.length > 0) {
@@ -154,8 +161,11 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
   }
 
   const lines: string[] = [headline, ''];
-  lines.push('What I tested: the same model and inputs, recomputed with only this link removed. It compares these two model versions; it doesn\'t say which version of the model is right.');
-  const bullet = (cs: readonly StructuralChallengeClaimV1[]) => cs.map((c) => `- ${claimLine(c, label, input.certainty)}`);
+  if (input.claimPermissions?.permitted_analysis_mode === 'quantified_provisional' || input.leaderLicence === 'permitted_with_caveat') {
+    lines.push('The figures are provisional estimates from these two model versions.');
+  }
+  lines.push('What I tested: the same model and inputs, recomputed with only this link removed. The two Runs are separately sampled (unpaired). It compares these two model versions; it doesn\'t say which version of the model is right.');
+  const bullet = (cs: readonly StructuralChallengeClaimV1[]) => cs.map((c) => `- ${claimLine(c, label, input.certainty, caveat)}`);
   if (changes.length > 0) lines.push('', 'What changes:', ...bullet(changes));
   if (held.length > 0) lines.push('', 'What holds:', ...bullet(held));
   const uncertain = bullet(open);
@@ -171,7 +181,7 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
   const from = label(result.alternative.from_id);
   const to = label(result.alternative.to_id);
   lines.push('', changes.length > 0
-    ? `Next step: this conclusion rests on how ${from} affects ${to}. What evidence do you have for that link? If you decide it doesn't belong, you can remove it on the canvas and rerun — the comparison is then saved.`
+    ? `Next step: the two model versions differed in ${changes.map((c) => c.kind === 'leader' ? 'which option leads' : c.kind === 'goal_probability' ? `${label(c.option_id)}’s target certainty` : c.kind === 'outcome_level' ? `${label(c.option_id)}’s position relative to the target` : `${label(c.option_id)}’s frequency within ${label(c.constraint_id ?? '')}`).join('; ')}. What evidence do you have for the link from ${from} to ${to}? Review that evidence before deciding whether to keep the link.`
     : open.length === 0 && held.length > 0
       ? `Next step: the tested conclusions held in these two model versions. Review the evidence for how ${from} affects ${to} before deciding whether to keep the link.`
       : `Next step: resolve the missing or unqualified evidence before drawing a conclusion about how ${from} affects ${to}.`);
@@ -207,24 +217,34 @@ export interface StructuralChallengeTurn {
   readonly labels: ReadonlyMap<string, string>;
   readonly actions: readonly SuggestedAction[];
   readonly certainty?: StructuralChallengeCertainty;
+  readonly candidateLeaderLicence?: LeaderLicence;
+  readonly baselineRunIdentity?: SelectedRunIdentity;
 }
 
-/**
- * The reply under the turn's FINAL leader licence. The dispatch ran under the press-time read's licence; the route
- * composes this turn's retained goal-scope issues into the final read (#2545) and passes that read's permission here.
- * A licence that now withholds the leader is applied exactly as the comparator applies it
- * (`mayPresentComparedRunLeader` with false: both ids withheld), and the reply is re-rendered. A licence never names a
- * leader the dispatch withheld — this only ever narrows.
- */
-export function structuralChallengeTurnUnderLicence(turn: StructuralChallengeTurn, leaderMayBeNamed: boolean): StructuralChallengeTurn {
-  if (leaderMayBeNamed || turn.result === null || turn.result.status !== 'completed') return turn;
+/** Final presentation requires a SAME-read receipt naming this baseline Run and the full canonical licence. */
+export function structuralChallengeTurnUnderLicence(
+  turn: StructuralChallengeTurn, finalRead: StructuralChallengeFinalRead | undefined,
+): StructuralChallengeTurn {
+  if (turn.result === null || turn.result.status !== 'completed') return turn;
+  const permission = structuralChallengePresentationPermission(turn.result.baseline, finalRead, turn.baselineRunIdentity);
+  if (!permission.ok) {
+    const result: StructuralChallengeResultV1 = { ...turn.result, status: permission.status, reason: permission.reason,
+      claims: [], pair_provenance: null, not_compared: [] };
+    return { ...turn, result, outcome: result.status, certainty: undefined,
+      reply: composeStructuralChallengeReply({ result, labels: turn.labels }) };
+  }
+  const licence: LeaderLicence = !permission.permissions.leader_may_be_named || turn.candidateLeaderLicence === 'withheld'
+    || turn.candidateLeaderLicence === undefined ? 'withheld'
+    : permission.permissions.provisional === true || turn.candidateLeaderLicence === 'permitted_with_caveat'
+      ? 'permitted_with_caveat' : 'permitted';
   const result: StructuralChallengeResultV1 = {
     ...turn.result,
-    claims: turn.result.claims.map((c) => (c.kind === 'leader'
+    claims: turn.result.claims.map((c) => (c.kind === 'leader' && licence === 'withheld'
       ? { kind: 'leader', baseline_option_id: null, alternative_option_id: null, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side', invariant_by_construction: false }
       : c)),
   };
-  return { ...turn, result, reply: composeStructuralChallengeReply({ result, labels: turn.labels, certainty: turn.certainty }) };
+  return { ...turn, result, reply: composeStructuralChallengeReply({ result, labels: turn.labels,
+    certainty: turn.certainty, leaderLicence: licence, claimPermissions: permission.permissions }) };
 }
 
 export const STRUCTURAL_CHALLENGE_NO_RUN_REPLY =
@@ -246,12 +266,15 @@ export async function structuralChallengeTurnFor(
     : null;
   const dispatched = await ask(link);
   if (dispatched.kind === 'no_run') return { reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, outcome: 'no_run', result: null, labels: new Map(), actions };
-  return {
+  const turn: StructuralChallengeTurn = {
     reply: composeStructuralChallengeReply({ result: dispatched.result, labels: dispatched.labels, certainty: dispatched.certainty }),
     outcome: dispatched.result.status,
     result: dispatched.result,
     labels: dispatched.labels,
     certainty: dispatched.certainty,
+    candidateLeaderLicence: dispatched.candidateLeaderLicence,
+    baselineRunIdentity: dispatched.baselineRunIdentity,
     actions,
   };
+  return structuralChallengeTurnUnderLicence(turn, dispatched.finalRead);
 }
