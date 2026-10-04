@@ -147,19 +147,21 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(count(b.assistant_text, SENTENCE)).toBe(0);
     expect(count(b.assistant_text, NO_FLIP_SENTENCE)).toBe(0);
   });
-  it('W4: exact Explain retry and chipless retry return the same caveat once', async () => {
+  it('W4: an exact Explain retry returns the same caveat once; a chipless retry meets the existing identity gate', async () => {
     const payload = await run();
     const once = await press(payload);
     assertCaveat(once);
     expect(rows.get(payload.turn_id)?.assistant_message).toBe(once.assistant_text);
     const exact = await press(payload, true);
+    expect(exact._agent.replayed).toBe(true);
+    expect(exact.assistant_text).toBe(once.assistant_text);
+    assertCaveat(exact);
+    // The Explain id rides INSIDE the request digest (`ownOperation`), so a chipless retry is another request: the
+    // existing TURN_ID_REUSED gate (unchanged here) answers it, never a second Explain or a second caveat.
     const { chip: _chip, ...chipless } = payload;
-    const retry = await press({ ...chipless, source: 'retry' }, true);
-    for (const b of [exact, retry]) {
-      expect(b._agent.replayed).toBe(true);
-      expect(b.assistant_text).toBe(once.assistant_text);
-      assertCaveat(b);
-    }
+    const retry = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { ...chipless, source: 'retry' } });
+    expect(retry.statusCode).toBe(409);
+    expect(retry.json().error).toBe('TURN_ID_REUSED');
     expect(providerCalls).toBe(1);
   });
   it('W5: the narrator already ends with the exact sentence — no duplicate', async () => {
