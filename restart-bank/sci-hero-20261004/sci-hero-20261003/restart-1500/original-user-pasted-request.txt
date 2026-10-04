@@ -1,0 +1,557 @@
+# SCI-HERO — Tipping Points + VOI/EVPPI
+
+## Mission
+
+Turn Olumi’s existing **factor tipping points** and **Value of Information / EVPPI ranking** into two first-class, investor-visible reasoning capabilities:
+
+1. **“What could change this?”**  
+   Show the most important assumption/factor threshold that could materially change the current conclusion.
+
+2. **“What is most worth resolving next?”**  
+   Identify the uncertainty/evidence gap most worth investigating next.
+
+The objective is not another analytics widget.
+
+The objective is for a user to feel:
+
+> Olumi has identified exactly what my decision hinges on, and told me what evidence is most valuable to resolve next.
+
+This is a **PoC acceleration build**. Reuse aggressively. Do not redesign the inference architecture.
+
+---
+
+# 1. Starting point
+
+Before editing anything, verify all current heads and file paths.
+
+Known recent anchors — **verify, do not assume**:
+
+- ISL served science build: `842254da5aab6ff9aa8caf9c2ace1a59cc42e600`
+- PLoT recent served build: `4526e432...`
+- CEE staging recently: `9a9bf022...`
+- DGAI staging recently: `a521c6b7...`
+
+## Existing science
+
+### Factor tipping points
+
+Existing field/concept:
+
+`flip_thresholds`
+
+ISL already computes algebraic factor crossings.
+
+Science inventory reports:
+
+- analytic factor-flip test matches the hand-computed crossing to `1e-6`;
+- existing product rendering paths include:
+  - “Could change if…”
+  - tornado markers;
+  - Canvas turning-point treatment.
+
+Do **not** rebuild the calculation.
+
+### VOI / EVPPI
+
+Existing science includes:
+
+- EVPPI / Value-of-Information ranking;
+- EVPI support;
+- analytic test for the known `√(2/π)` EVPPI case;
+- point-mass EVPI = 0;
+- hand-computed stage EVPI controls.
+
+Current product intent is **ranking**, not claiming a monetary value:
+
+> “Most worth resolving next”
+
+Do **not** turn EVPPI into a currency/value claim unless the existing scientific contract explicitly supports it.
+
+### Validation already completed
+
+The current ISL validation rerun reports:
+
+- 127 analytic rows passed;
+- factor-flip crossing passes;
+- EVPPI analytic row passes;
+- P(goal) calibration remains consistent;
+- win-flip estimator remains consistent.
+
+Do **not** repeat that validation programme.
+
+---
+
+# 2. First action: map the live path
+
+Before changing code, spend only enough time to establish the exact current path:
+
+**ISL producer → PLoT transport → CEE canonical/current Run projection → Agent/coaching context → UI consumer**
+
+Search by actual fields such as:
+
+- `flip_thresholds`
+- EVPPI / VOI fields
+- EVPI fields
+- `flip_thresholds_status`
+- existing “Could change if”
+- existing “Most worth resolving next”
+
+Post a compact lease to programme-docs #85 containing:
+
+- exact heads;
+- exact files to be touched;
+- what already works end-to-end;
+- the **first missing boundary**;
+- whether ISL or PLoT actually need modification.
+
+Default assumption should be:
+
+**ISL maths stays untouched.  
+PLoT stays untouched unless transport is demonstrably missing.  
+Most work should be CEE/coaching/UI integration.**
+
+Do not create a new data carrier if an existing typed carrier works.
+
+---
+
+# 3. Required user experience
+
+## A. “What could change this?”
+
+When a current Run supports a meaningful tipping point, Olumi should be able to say something equivalent to:
+
+> **What could change this**  
+> The conclusion changes if monthly conversion falls below about 4.2%. That makes conversion the assumption to watch most closely.
+
+Exact wording can follow existing product language.
+
+Requirements:
+
+- identify the correct factor;
+- preserve its user-facing label;
+- preserve correct units;
+- use the computed threshold directly;
+- explain direction correctly;
+- bind the statement to the current Run/model;
+- never invent a threshold;
+- never calculate a replacement threshold in the LLM;
+- offer an obvious next action where useful.
+
+Possible next action:
+
+> Update this assumption
+
+or:
+
+> Test how sensitive this is
+
+Reuse existing action/chip conventions.
+
+### If no valid threshold exists
+
+Do not manufacture one.
+
+Distinguish appropriately between:
+
+- no crossing inside the supported range;
+- insufficient range/evidence;
+- unavailable/not computed;
+- stale result;
+- unsupported interpretation.
+
+Silence is preferable to a misleading tipping point.
+
+---
+
+## B. “What is most worth resolving next?”
+
+Where VOI/EVPPI ranking is supported, Olumi should surface the **highest-value uncertainty to investigate next**.
+
+Example:
+
+> **Most worth resolving next**  
+> Customer churn is the uncertainty most worth reducing because resolving it has the greatest potential to change the decision.
+
+Requirements:
+
+- use the existing deterministic ranking;
+- do not let the LLM reorder the ranking;
+- ground the explanation in the actual factor/evidence gap;
+- do not expose an unsupported monetary interpretation;
+- do not imply causal certainty the model does not have;
+- give the user a useful next action.
+
+Possible action:
+
+> Add evidence
+
+> Refine the range
+
+> Update this assumption
+
+Prefer one clear next move over several generic actions.
+
+---
+
+# 4. Make these coaching capabilities, not isolated widgets
+
+Existing rendering is useful but insufficient.
+
+SCI-HERO succeeds when tipping points and VOI can influence **what Olumi chooses to say and ask next**.
+
+At minimum, the current reasoning/coaching selection path should be able to recognise:
+
+### High-value tipping point
+
+If:
+
+- the current conclusion is materially sensitive to a factor;
+- a valid threshold exists;
+- the finding is current and properly licensed;
+
+then it should be eligible as a high-priority reasoning intervention.
+
+### High-value evidence gap
+
+If:
+
+- VOI/EVPPI identifies one uncertainty as meaningfully most valuable to resolve;
+- there is a useful user action available;
+
+then Olumi should be able to prioritise resolving that uncertainty.
+
+Do **not** hard-code these as always-first rules.
+
+They should compete with existing reasoning weaknesses using the existing selector/priority architecture.
+
+No new coaching framework.
+
+---
+
+# 5. Currentness and authority are non-negotiable
+
+Every SCI-HERO statement must bind to the correct current model and Run.
+
+After any analysis-affecting edit:
+
+- old tipping points must not silently remain attached;
+- old VOI rankings must not silently remain attached;
+- a rerun must produce the new scientific state.
+
+Reuse existing:
+
+- Run identity;
+- currentness/freshness gates;
+- result authority;
+- canonical state;
+- analysis invalidation.
+
+Do not introduce SCI-HERO-specific freshness logic if a shared authority exists.
+
+---
+
+# 6. Claim-strength rules
+
+The LLM explains science; it does not create it.
+
+## Allowed
+
+- “This conclusion changes if X crosses Y.”
+- “X is currently the most valuable uncertainty to resolve.”
+- “The current result is especially sensitive to X.”
+- “Refining this estimate could materially change the comparison.”
+
+## Not allowed without explicit existing support
+
+- invented probabilities;
+- invented ranges;
+- invented thresholds;
+- monetary EVPPI claims;
+- causal claims stronger than the underlying model licences;
+- “this will change the decision” when the science only says it could;
+- “this factor does not matter” merely because no threshold was found.
+
+Unknown ≠ zero.  
+Unavailable ≠ unimportant.  
+No crossing in range ≠ impossible.
+
+---
+
+# 7. Important scientific limitations
+
+Respect existing scientific boundaries.
+
+### K=100 resolution
+
+Existing validation shows very small flip probabilities can appear as zero at the served K=100.
+
+Do not convert a zero estimate into a claim that the link/factor is perfectly robust.
+
+This limitation mainly affects fragile-link probability, but inspect any shared wording SCI-HERO inherits.
+
+### Auto-noise
+
+The latest validation rerun did **not** validate deployed auto-noise behaviour.
+
+Do not expand SCI-HERO into probability recalibration or auto-noise work.
+
+If the relevant deployment setting materially affects SCI-HERO, report it to the DL rather than silently changing science configuration.
+
+### Robustness labels
+
+Do not strengthen existing “Robust / Sensitive” wording as part of this workstream.
+
+That is separate science calibration work.
+
+---
+
+# 8. Scope boundaries
+
+## In scope
+
+- trace the existing tipping-point and VOI fields end-to-end;
+- repair missing typed transport if necessary;
+- make them available to authoritative model/coaching context;
+- improve/select existing user-facing rendering;
+- connect them to useful next actions;
+- ensure currentness/reload behaviour;
+- add focused acceptance coverage;
+- make the capability clearly visible in the PoC.
+
+## Out of scope
+
+Do not implement:
+
+- link-level “What would change this?” — this is **SCI-CHANGE**;
+- new causal inference;
+- counterfactual numerical output;
+- sequential decision optimisation;
+- new sensitivity maths;
+- new VOI maths;
+- a new science store;
+- a new generic semantic state;
+- a new dashboard;
+- a new coaching architecture;
+- a broad UI redesign;
+- a new graph schema unless a genuinely missing typed contract makes it unavoidable.
+
+---
+
+# 9. Acceptance rows
+
+Start with RED where today's product fails.
+
+Use existing fixtures wherever possible.
+
+## H1 — Tipping-point transport
+
+Given a Run containing a valid `flip_threshold`,
+the authoritative CEE/current-read/model-facing path exposes the same:
+
+- factor identity;
+- threshold;
+- direction;
+- unit;
+- Run binding.
+
+No recomputation.
+
+## H2 — Tipping-point coaching
+
+Given a consequential valid threshold,
+Olumi can make a grounded:
+
+> “What could change this?”
+
+intervention referring to that exact threshold.
+
+## H3 — Tipping-point action
+
+The intervention offers a useful existing action to refine/update/test the relevant factor rather than a generic graph-maintenance action.
+
+## H4 — No valid crossing
+
+When no valid threshold exists,
+Olumi does not invent or imply one.
+
+## H5 — VOI transport
+
+Given multiple evidence gaps with deterministic EVPPI ranking,
+the authoritative coaching context preserves the ranking.
+
+## H6 — VOI coaching
+
+Olumi identifies the highest-ranked supported uncertainty as:
+
+> “Most worth resolving next”
+
+without inventing a monetary value.
+
+## H7 — VOI unavailable
+
+When VOI/EVPPI is unavailable or unsupported,
+Olumi does not infer a ranking from prose or position.
+
+## H8 — Edit → stale → rerun
+
+After an analysis-affecting factor edit:
+
+1. the old science becomes stale/unavailable;
+2. rerun occurs;
+3. SCI-HERO uses only the new Run;
+4. threshold/ranking changes appropriately where expected.
+
+## H9 — Reload
+
+After cold reload, the same current Run produces the same SCI-HERO interpretation without depending on transcript memory.
+
+## H10 — Non-science control
+
+A decision with no valid SCI-HERO signal behaves exactly as today.
+
+Do not make every decision produce a tipping point or VOI intervention.
+
+---
+
+# 10. Investor/demo acceptance
+
+Demonstrate at least two joined examples.
+
+## Journey A — threshold
+
+1. Run a decision.
+2. Olumi identifies a consequential tipping point.
+3. User sees/asks what could change the result.
+4. Olumi gives the specific threshold.
+5. User changes/refines that assumption.
+6. Analysis becomes stale.
+7. User reruns.
+8. Result/scientific interpretation visibly changes.
+9. Cold reload preserves the new truth.
+
+## Journey B — evidence value
+
+1. Run a decision with multiple uncertain inputs.
+2. Olumi identifies the uncertainty most worth resolving.
+3. It explains why in plain English.
+4. User refines/adds evidence.
+5. Rerun.
+6. VOI priority or decision state changes appropriately.
+
+Investor reaction sought:
+
+> “It isn't just giving me an answer — it knows what the answer depends on and what I should investigate next.”
+
+---
+
+# 11. Testing strategy
+
+Optimise for speed.
+
+Run:
+
+- focused science-carrier tests;
+- CEE context/currentness tests;
+- coaching-selection tests;
+- relevant UI tests;
+- typecheck/lint/guards;
+- exact-head required CI before merge.
+
+Reuse existing 127-row ISL validation evidence.
+
+Do **not** rerun broad scientific benchmarking unless implementation changes the maths.
+
+Use mutants for the important seams:
+
+- wrong threshold;
+- wrong factor;
+- wrong VOI ordering;
+- stale Run accepted;
+- unsupported value emitted.
+
+Each should turn a named test red.
+
+---
+
+# 12. Delivery approach
+
+Work on isolated branches/worktrees.
+
+Do not push product `main`.
+
+If multiple repos genuinely require changes, keep each PR independently reviewable and state their required merge order.
+
+Preferred implementation order:
+
+1. verify current path;
+2. fix earliest missing typed boundary;
+3. expose to coaching/context;
+4. expose/strengthen existing UI treatment;
+5. focused tests;
+6. exact-head review;
+7. hand to DL for integration;
+8. served witness.
+
+SCI-HERO must not jump shared CEE merge sequencing without DL approval.
+
+---
+
+# 13. Definition of done
+
+SCI-HERO is complete only when:
+
+- no new science engine was created;
+- existing factor tipping points reach the user reliably;
+- existing VOI ranking reaches the user reliably;
+- both can drive useful coaching/next action;
+- values are deterministic and science-owned;
+- currentness is correct after edit/rerun/reload;
+- unsupported cases fail honestly;
+- focused acceptance passes;
+- exact heads are reviewed/merged;
+- exact served build has a joined witness.
+
+Track explicitly:
+
+**SOURCE → TESTED → REVIEWED → MERGED → SERVED → JOURNEY-WITNESSED**
+
+Do not claim completion at an earlier rung.
+
+---
+
+# 14. First receipt required
+
+Before substantial implementation, post to programme-docs #85:
+
+**SCI-HERO START**
+
+- exact repo heads;
+- discovered producer → transport → CEE → UI path;
+- what already works;
+- first missing boundary;
+- exact file lease;
+- proposed PR split/merge order;
+- any collision with currently active CEE work.
+
+Keep this concise.
+
+Then build immediately.
+
+---
+
+# 15. Handover required
+
+When implementation is review-ready, provide:
+
+- repo + branch + exact SHA for every changed repo;
+- PR links;
+- concise diff summary;
+- acceptance rows and results;
+- mutants run;
+- exact known limitations;
+- screenshots/captured output where useful;
+- required merge order;
+- exact served-witness script;
+- anything deliberately deferred.
+
+Do not leave the next owner to reconstruct the system from chat history.

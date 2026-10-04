@@ -1,0 +1,37 @@
+{
+  "rung": "PREPAID-CONTEXT-BOOTSTRAP-BOUNDARY",
+  "provider_backed_calls": 0,
+  "call_cap": 11,
+  "runtime": "Codex IABbrowser3/tab1",
+  "url": "https://staging--olumi.netlify.app/#/login",
+  "observed": [
+    "Guest landing explicitly says shareable links unavailable without an account.",
+    "Normal sign-in presents empty email/password fields and an invite-only notice; no existing authenticated session.",
+    "Guest Save showed a local Saved just now receipt with no persisted/shareable scenario URL.",
+    "Start-new modal says clearing graph/results/AI conversation cannot be undone; cancelled.",
+    "Original graph exported through product UI and copied to original-guest-model-backup.json; export-event timeout was resolved by the real downloaded file."
+  ],
+  "scenario_urls": {
+    "positive": null,
+    "no_signal": null
+  },
+  "model": null,
+  "prompt_identity": null,
+  "science_run_id": null,
+  "schema_version": "0.74.0",
+  "flag_observations": {
+    "guest_mode": true,
+    "credentials_entered": false,
+    "permission_or_feature_flags_changed": false
+  },
+  "served_tuple": {
+    "UI": "622ac23570690d0056a45bbc152c49e44d2b262d",
+    "CEE": "895dd7778cc10c38b33fa2ce93091fb88fd50df8",
+    "PLoT": "4526e4322764ba9b33690cdcd87320bc9e77261f",
+    "ISL": "842254da5aab6ff9aa8caf9c2ace1a59cc42e600"
+  },
+  "screenshot": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/witness-auth-boundary.jpg",
+  "screenshot_sha256": "34f4db9aa55b4e8f575e24ff790e92c976b3f0e8be8381294163e1b09bde2850",
+  "status": "B1 handoff confirms fresh empty-origin guest can persist server-canonical scenario and reload GET graph200. Current runtime still lacks a safely isolated empty origin or authenticated path; this is context bootstrap/isolation, not a universal authentication requirement. Keep0/11 until validated isolated model loading.",
+  "correction": "Guest server persistence demonstrated for warehouseb24fbabc via empty immutableUI origin plus one real draft submission/autoRun. That exact origin is now warehouse state; stagingalias is originalARR. Do not clear either or consume warehouse as SCI evidence."
+}

@@ -1,0 +1,3 @@
+Byte-identical coaching increment SHA256 6f19c9dd389c6326b6ade50f7049ba86cc8396a290c603c02acb7a534434ab54
+1:  44d90ad29 = 1:  44d90ad29 feat: ground tipping-point coaching in the selected current Run
+2:  a7fd1164d = 2:  a7fd1164d test: distinguish conversational chips from grounded science refusal

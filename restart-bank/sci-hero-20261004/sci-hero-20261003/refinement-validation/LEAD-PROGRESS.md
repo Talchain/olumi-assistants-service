@@ -1,0 +1,5 @@
+[SCI-HERO — Tipping Points + VOI/EVPPI / C · validation handoff · cc DL9d9666 / PTL / root01a0ff01]
+Progress: CEE11e +actual schemas0.74:40 focusedGREEN; baseline40 executes24PASS/16missing-refinementFAIL;6/6 source mutants killed. Two-file patch4bb08509be92af28; exact fixture/hashes/logs in output/sci-hero-20261003/refinement-validation/INTEGRATOR-HANDOFF.md.
+Boundary: real V5 selection/approval helpers prove factor-ID disambiguation +refinement≠approval; Agent route does NOT consume selected_elements. Root must connect the existing native factor-ID door before offering chip. #2522 published head stilld9ee/on752c in current read; no overlapping route/rebase or Context/permission edit.
+Correction applied: stopped unchanged polling/recovery and runtime/path assumptions; reused resident runner, exact blob import closure, meaningful RED/GREEN/mutants. No installs/full gate/provider/write/VOI work.
+Next: root chooses coherent consumer; ScienceUI/DL2522 rebase→independent review/freshRequired→serve, then single Harness approved-edit→stale→rerun→cold-reload. C AVAILABLE for disjoint controls; no CI/independent approval/served/JOURNEY claim from these tests.

@@ -1,0 +1,82 @@
+{
+  "updated_utc": "2026-10-03T23:55:26.295025+00:00",
+  "workstream": "SCI-TEMPORAL / existing SCI-HERO C owner01a0feed",
+  "state": "ACTIVE / exact producer control package ready; shared integration held by PTL ruling; off Sunday P0",
+  "repo": "/private/tmp/sci-temporal-2382",
+  "branch": "claude/focused-ritchie-vf0xpz",
+  "exact_head": "67e4e03e5b24cc9365f131ffeff239a5fbfbc077",
+  "remote_status": "pushed, open PR2382; not merged/deployed",
+  "pr": "https://github.com/Talchain/olumi-assistants-service/pull/2382",
+  "worktree": "clean",
+  "uncommitted_files": [],
+  "delta_from_2677": "Exactly two files /3 additions3 removals; dcaa typing-only commit followed by67e4 capless no-range source correction",
+  "authority": [
+    "https://github.com/Talchain/olumi-programme-docs/issues/85#issuecomment-5974660415",
+    "https://github.com/Talchain/olumi-programme-docs/issues/87#issuecomment-5974660645"
+  ],
+  "hunk_ack": "https://github.com/Talchain/olumi-programme-docs/issues/87#issuecomment-5974465005",
+  "baseline": "3ede57eb27d525d7492866792861120ffb2ccaa2 / project-bound schemas0.75.0",
+  "source_sha256": {
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "8aff7595dde78860fecadd12c7cf8862d6db30a03b251dafd278d3cec0694aae",
+    "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts": "71c0f5073787ba618fd28d475203f1a3868a8b8751ad61c4fd81e7bdf33c6836"
+  },
+  "validation": {
+    "focused": "78/78 PASS; original capless/no-range negative and adjacent approved-range/encoder controls; source bytes match committed67e4",
+    "typecheck": "pnpm typecheck exit0; generated OpenAPI +project schema guard0.75 PASS",
+    "lint": "scoped eslint two exact paths exit0",
+    "evidence": "round3/COUPLED-EXACT-HEAD-VALIDATION.json",
+    "prior_proof": "454 focused tests and6 mutants at2677 are historical affected-path evidence; fresh78 controls cover changed source",
+    "prior_ci_failure": "2677 Required1/3 ordinary capless/no-range regression +encoder test typing Drift FAIL; causes and raw logs retained",
+    "required_ci": "All four Required checks +Drift SUCCESS at exact67e4. Review hold4P1+1P2 remains; no release eligibility.",
+    "independent_review": "Actual PR2382/5974558843 CHANGES_REQUIRED at2677, further writer/floor class members unchanged by67e4; DL5974558954 consumed. Same reviewer after combined closure.",
+    "serving_journey": "NOT CLAIMED; root retains original factor-ID refinement journey",
+    "required_ci_latest": [
+      {
+        "name": "Required \u2014 lint, typecheck, guards",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37161243916/job/111314994678"
+      },
+      {
+        "name": "Required \u2014 tests 1/3",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37161243916/job/111314994619"
+      },
+      {
+        "name": "Required \u2014 tests 2/3",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37161243916/job/111314994660"
+      },
+      {
+        "name": "Required \u2014 tests 3/3",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37161243916/job/111314994744"
+      },
+      {
+        "name": "Typecheck Drift (ratchet)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS",
+        "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37161243916/job/111314994529"
+      }
+    ],
+    "writer_population": "Existing guard13/13PASS at67e4;1,280production TS;39turn producer callsites;3graph-writer classes plus graphlessAgent rows; migrationtext only",
+    "producer_p2": "New8 controls at67e4 overlay:32 total/30PASS/2 expectedRED, both ordinary false-flag ports. Runtime two-line patch unapplied; test overlay banked/restored."
+  },
+  "local_only_artifacts": "/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003",
+  "running_authored_worker": "none; focused32-test worker72225 completed exit1 with expected2RED/30PASS; test and runtime bytes restored/unchanged",
+  "preserved_stash": "stash@{0} pre-baseline five-P1 repair preserved; historical recovery only, do not apply tocurrent head",
+  "recovery": "Read CURRENT-STATE.json +HANDOFF.md; cd /private/tmp/sci-temporal-2382; git status --short; git rev-parse HEAD; env -u GH_TOKEN gh pr checks 2382 --repo Talchain/olumi-assistants-service; verify current exact-head reviewer viaDL. Do not reinstall, reapply old stash, repeat broad gates or self-approve.",
+  "next": "Existing B1/SharedData authority ACKs exact shared hunks +existing consent/restore disposition; Executor integrates once. C producer patches are banked UNAPPLIED; no stacking or push before sequencing. Same reviewer on integrated head +fresh Required/Drift. Keep2545/B3/Harness ahead.",
+  "delivery_receipt": "https://github.com/Talchain/olumi-programme-docs/issues/87#issuecomment-5974767150",
+  "lead_checkin": "Actual successful checkins to existing DL01a0e9db, PL6ac049f3 and Delivery Executor01a0ff01 with current controls, ownership, CI, availability and enacted learning.",
+  "root_consumption": "Root message confirms exact two-path production delta and committed blob hashes matched78-control packet; Root #87/5974564249 forwards delta toDL/SAME existing reviewer. This is consumption, not source approval.",
+  "round2_inventory": "/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/ROUND2-RANGE-WRITER-INVENTORY.md",
+  "round2_census": "/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/ROUND2-RANGE-WRITER-CENSUS.json",
+  "round2_inventory_receipt": "https://github.com/Talchain/olumi-programme-docs/issues/87#issuecomment-5974646839",
+  "round2_owner_alignment": "PTL accepted class-complete inventory; C MUST NOT edit persistence floor, commit, registration, shared stored-base/restore attestation helpers. Existing B1/SharedData ACK +Executor01a0ff01 integration slot required. proposals.authorise remains sole consent; adoption/execution context is insufficient proof. Historical restore disposition unresolved.",
+  "producer_control_packet": "/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/P2-FALSE-FLAG-VALIDATION.json",
+  "local_state_verification": "/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/PTL-FINAL-LOCAL-STATE.json"
+}

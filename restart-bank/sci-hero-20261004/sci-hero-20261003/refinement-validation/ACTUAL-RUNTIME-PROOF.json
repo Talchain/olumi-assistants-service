@@ -1,0 +1,47 @@
+{
+  "checked_at": "2026-10-03T20:18:35.300254+00:00",
+  "node": {
+    "path": "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "version": "v24.19.0",
+    "sha256": "c3ec5c451750ec57acabfbc05c26de2fcad6dda84ab1b117a5c1eefaae28cbef"
+  },
+  "vitest": {
+    "path": "/Users/paulslee/.codex/worktrees/core-capacity-intervention-20260919/node_modules/vitest/vitest.mjs",
+    "version_output": "vitest/4.1.10 darwin-arm64 node-v24.19.0"
+  },
+  "typescript": "5.9.3",
+  "schemas": {
+    "version": "0.74.0",
+    "package_json_sha256": "f67b5f147d65132b3f707d345676c1f0a24e75cd7d32adf930971a13fa0dd631"
+  },
+  "external_packages": {
+    "@anthropic-ai/sdk": {
+      "version": "0.68.0",
+      "package_json_sha256": "85c940125628c776c08203d46eb6bd859d11a3a9ddd9eb4126c588a64b760af0"
+    },
+    "compromise": {
+      "version": "14.15.0",
+      "package_json_sha256": "f57daf281b05fc35609db2cdd74b7080975f886e2b84c7e47385e72ac0b13c27"
+    },
+    "compromise-numbers": {
+      "version": "1.4.0",
+      "package_json_sha256": "053899939c16f0fc80fd111c55f3665426016c9614fb4c6b178214878b431de3"
+    },
+    "hot-shots": {
+      "version": "11.2.0",
+      "package_json_sha256": "6838b24b76290eb7cee973f419db78f9afb226bd6aa732c961942fb87e36c32d"
+    },
+    "openai": {
+      "version": "6.7.0",
+      "package_json_sha256": "05864ddcd712ddf5ce92f8c5e195dcb5f129803a0e259ecd24e966f8623aaf19"
+    },
+    "pino": {
+      "version": "9.14.0",
+      "package_json_sha256": "4fff803f053173e2e2f8312dc77fb607989a8c0b536ec4ca234e7c5deffe5cbc"
+    },
+    "zod": {
+      "version": "3.25.76",
+      "package_json_sha256": "70eedbe34fd52385a4ae2f3e5759b19682189f0118ea73a6e7c32c677f61668e"
+    }
+  }
+}

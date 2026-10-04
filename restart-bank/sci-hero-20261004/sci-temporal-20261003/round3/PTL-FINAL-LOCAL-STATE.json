@@ -1,0 +1,14 @@
+{
+  "checked_utc": "2026-10-03T23:55:26.295025+00:00",
+  "exact_head": "67e4e03e5b24cc9365f131ffeff239a5fbfbc077",
+  "remote_tracking_head": "67e4e03e5b24cc9365f131ffeff239a5fbfbc077",
+  "worktree": "clean",
+  "uncommitted_work": [],
+  "running_authored_test_workers": [],
+  "worker72225": "completed / exit1 with32 total30PASS2 expectedRED",
+  "durable_receipt": "https://github.com/Talchain/olumi-programme-docs/issues/87#issuecomment-5974767150",
+  "source_bytes": {
+    "runtime": "8aff7595dde78860fecadd12c7cf8862d6db30a03b251dafd278d3cec0694aae"
+  },
+  "patches": "banked, apply-checked and UNAPPLIED; no source commit/push; future hunk sequencing required"
+}

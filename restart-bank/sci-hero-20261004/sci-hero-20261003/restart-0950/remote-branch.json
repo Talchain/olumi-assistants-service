@@ -1,0 +1,10 @@
+{
+  "ref": "refs/heads/sci-hero/deterministic-tipping-point-coaching",
+  "node_id": "REF_kwDOQQhC39oAOHJlZnMvaGVhZHMvc2NpLWhlcm8vZGV0ZXJtaW5pc3RpYy10aXBwaW5nLXBvaW50LWNvYWNoaW5n",
+  "url": "https://api.github.com/repos/Talchain/olumi-assistants-service/git/refs/heads/sci-hero/deterministic-tipping-point-coaching",
+  "object": {
+    "sha": "097f432b64d98fc447f32344ff2efa97a4d05856",
+    "type": "commit",
+    "url": "https://api.github.com/repos/Talchain/olumi-assistants-service/git/commits/097f432b64d98fc447f32344ff2efa97a4d05856"
+  }
+}

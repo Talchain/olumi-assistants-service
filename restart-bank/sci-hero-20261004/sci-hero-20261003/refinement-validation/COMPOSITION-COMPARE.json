@@ -1,0 +1,46 @@
+{
+  "receipt": "https://github.com/Talchain/olumi-assistants-service/pull/2542#issuecomment-5973046997",
+  "base_head": "4afa1512069beef640dbfe2babbe979103bc7697",
+  "patch_sha256": "4847dce4dc068e6b31098943c65d0ae3d549d471c62a02a98bdd80d077c8af6b",
+  "actual_apply_check": {
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "sources": [
+    {
+      "path": "src/routes/agent-v1-turn.ts",
+      "blob_sha": "a7da7a7f44a90f5a609fbc83dd46c9105a512fb2",
+      "sha256": "62cd6c73ca7c2f6dbb9d1bede8c291dca59ed6f1af62fe2aa7bfbb31108b3246"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/what-changes-route.test.ts",
+      "blob_sha": "8a5fcfcf2aad88274c2a23d0af61da4f301896ef",
+      "sha256": "4a06353197632f4f6cd28339ebda11f49e307c9419c77686656a92a7d718537d"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/method-turn/what-changes-turn.ts",
+      "blob_sha": "efc20fbe2682314ca8eea0802d118efcb653b146",
+      "sha256": "a68ee9b2f5a7c1e0fa688d44a5238bd6bbafd88ae5f22dc1f5ec207fd4353df9"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "blob_sha": "75c40f735dcfd5c16b451c0b1966ff75d0364014",
+      "sha256": "13adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca"
+    }
+  ],
+  "owner_report_only": {
+    "focused_pass": 95,
+    "mutants": 4,
+    "typecheck_lint": "reportedPASS"
+  },
+  "c_tests_not_repeated": true,
+  "actual_source_checks": {
+    "bound_Explain_before_measurement": true,
+    "measured_only_answers": true,
+    "fresh_final_read_after_wait": true,
+    "same_Run_final_match": true,
+    "factor_refinement_consumer_added": false
+  },
+  "leaf_byte_identical_to_11e": true,
+  "inference": "Revised WHAT composes measured-link success and factor-coaching fallback; no selected-factor refinement consumer is supplied by this route diff."
+}

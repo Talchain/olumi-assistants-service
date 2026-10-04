@@ -1,0 +1,3 @@
+Independent Vitest resolution attempt timed out after10seconds before loading any test.
+subprocess.TimeoutExpired; own Node child terminated automatically, parent exited1.
+Focused tests NOT_STARTED; no PASS/FAIL count. No compatible runtime verified.

@@ -1,0 +1,25 @@
+{
+  "head": "9c8c18f30cf0f562df61f13bcca81fecd543115c",
+  "staging_parent": "3ede57eb27d525d7492866792861120ffb2ccaa2",
+  "files": {
+    "src/orchestrator-v5/__tests__/apply-operations.test.ts": "5d131daddab56867549195e05d4d4c9cfc12e244decaf7f054b7b37ecf4c85ce",
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "70cc2f0e9913a1f0612f89d878db70fb707c872a0ddcb939258db13e589693c3",
+    "src/orchestrator-v5/apply-operations.ts": "4c6d2b7f1e32ef15060fbc8fde4e827e5f7d9138769984e08c0de6ef870dc1a8",
+    "src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts": "22d865b1b7fb509d84c64f835770deaa4fec3a9c4bd26236619adc8ef3653778",
+    "src/orchestrator-v5/graph-management/field-safety.ts": "07b5fb1b3f049c64be417cac9391b9b91dfe91a03255651b3054341ab6571704",
+    "src/orchestrator-v5/normalise-option-interventions.ts": "3918350e7aa3f2874940fd0a69a7bb4498fab0eec640c99cdbd0f40824531223",
+    "src/orchestrator-v5/system-events/__tests__/option-intervention-edit.test.ts": "715fbc02dad820cdbd074fa9d8120f4cb5266b7807803a6b1122f9f3b4958c08",
+    "src/orchestrator-v5/system-events/dispatch.ts": "62c12caf4f01ad9b7cf1856ddc05ab3ad2418e801735ae106649baf4cc4d9db0",
+    "src/orchestrator-v5/system-events/option-intervention-edit.ts": "cb1d4b382ac9629b1c911423bf914e551bc05ceacb4e14a2a15d91837ec0ab3d",
+    "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts": "b10d6b47185cf180406c16ccd2ece65627a107c424e898ba46c4c1bb9f16c180",
+    "src/orchestrator/tools/edit-graph.ts": "15e10859a7632db042c7995d416cc0d89e836a08cf6e5d60e9ef72e9105b204e",
+    "src/orchestrator/tools/encode-option-interventions.ts": "a6b12b78621c2e2f4dfb230b935737503eed238f576c3cea3c8480096936bcad",
+    "tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts": "18a7c8e3ecef8ec9901562d1bb42b983d95e45bc81bf4646425e53c551ba1552",
+    "tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts": "f18ede34a2c89b0a04f782957f2a6c52aa1ffd4d3d1e566b7c03b9aa7f6e8788",
+    "tests/unit/orchestrator-v5/normalise-option-interventions.test.ts": "34f01d04b673e01849df2ebd23c8b9e5d3b4b1f1b032bed812770c0b0a6bdbd3"
+  },
+  "schemas_actual": "0.75.0",
+  "node": "v24.19.0",
+  "vitest_actual": "4.1.10",
+  "at": "2026-10-03T22:45:41.308712+00:00"
+}

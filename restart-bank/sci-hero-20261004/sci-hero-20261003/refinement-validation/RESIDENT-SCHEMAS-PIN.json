@@ -1,0 +1,11 @@
+{
+  "head": "11e8fe24ff289fbbb68e074bba22c89055e9661a",
+  "source": "/private/tmp/dl-seam-cee/vendor/talchain-schemas-0.74.0.tgz",
+  "bytes": 775202,
+  "git_blob_sha": "cf037c583a9fad35162d454322daf3c7d9bbe31d",
+  "expected_git_blob_sha": "cf037c583a9fad35162d454322daf3c7d9bbe31d",
+  "sha256": "3850f3aaa1f7e064d8c5649068eae773a0c97c3633d1b27e7fc8452766a2df07",
+  "version": "0.74.0",
+  "current_pin_verified": true,
+  "operation": "reuse committed resident vendored artifact, no package install"
+}

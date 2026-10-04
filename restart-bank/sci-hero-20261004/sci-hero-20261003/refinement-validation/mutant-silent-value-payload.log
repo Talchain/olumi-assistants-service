@@ -1,0 +1,2 @@
+{"level":"info","time":1791058074656,"pid":62089,"hostname":"Mac.net","event":"boundary.validation","boundary":"B1","direction":"ingress","validator":"V5RequestExtensions","contract_version":"1.5.0","pass":true,"request_id":"sci-refinement-contract","graph_present":true,"analysis_present":false,"user_id_present":false,"selected_elements_present":true}
+JSON report written to /Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/mutant-silent-value-payload.json

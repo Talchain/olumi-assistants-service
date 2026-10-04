@@ -1,0 +1,28 @@
+# Required shard1/3 at2677 — bounded cause/classification
+
+{
+  "at": "2026-10-03T23:04:26.348322+00:00",
+  "head": "2677b3d9496d9d0c6bd7744f0c8131d37b3f1ac6",
+  "run": 37159855500,
+  "job": 111310863786,
+  "class": "INTRODUCED_NONRANGE_CAPLESS_CARRIER_REGRESSION",
+  "failed_test": "src/orchestrator-v5/agent-lane/__tests__/level-keeps-the-users-figure.test.ts / CONTROL: level already on model0\u20131 scale, no range -> no figure",
+  "failed_assertion": "line132 raw_value or cap should be absent, actualtrue",
+  "existing_test_unchanged_vs_5d2": true,
+  "required_shard_observed": "1 failed /18192 passed /1expectedfail /72skipped",
+  "cause": "2677 levelFigureOf raw===normalised/capless branch unconditionally emits raw_value, even likely undefined; 5d2 returned {} in ordinary no-range control",
+  "proposed_correction": "Emit raw/unit/likely_range in capless branch only when typed approved likely exists; ordinary no-range returns {}, normalized-cap branch unchanged",
+  "proposed_patch": "/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/REQUIRED-TEST1-PROPOSED-NONRANGE-CONTROL.patch",
+  "proposed_patch_sha256": "f8eeb46dd6ed12fad84b05aa261404ba680d9e80f1285953eb91526965d6ca8b",
+  "production_patch_applied": false,
+  "apply_check": "PASS only; no source change",
+  "no_local_test_run": "Remote failing assertion plus static source tracing sufficient for diagnosis; no local broad gate/rerun",
+  "next_focused_after_DL_sequence": [
+    "existing level-keeps-the-users-figure spec",
+    "approved range single/compound/capless/worded native integration controls",
+    "encoder fixture typing control"
+  ],
+  "freeze": "DL sequences coupled two-file correction with same C writer/reviewer/current CI. Only prior one-line test annotation remains local dirty."
+}
+
+Actual failure excerpt is REQUIRED-TEST1-FAILURE-EXCERPT.txt; raw existing-run log REQUIRED-TEST1-JOB.log. Source/fixture/context state preserved, no production edit or push.

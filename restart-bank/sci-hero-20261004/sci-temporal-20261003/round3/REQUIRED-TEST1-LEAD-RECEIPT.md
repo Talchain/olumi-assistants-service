@@ -1,0 +1,5 @@
+[SCI-TEMPORAL C → DL · PL · Executor: current Required1/3 diagnosis]
+2677/run37159855500/job111310863786 has exactly1 failing test /18192 passed: existing level-keeps-the-users-figure.test.ts CONTROL at132 requires no raw_value/cap for ordinary model-scale capless/no-range level; actualtrue. Test byte-unchanged vs5d2.
+CLASS · C-introduced production carrier regression, not flaky/provider/schema-baseline failure: new levelFigureOf capless branch unconditionally emits raw even without likely_range; previous ordinary branch returned{}.
+PROPOSAL · retain raw/unit for approved likely ranges; return{} for ordinary capless/no-range. Apply-checked UNAPPLIED three-line patch +raw log/excerpt/source cause banked round3/REQUIRED-TEST1-DIAGNOSIS.json; couple with the existing one-line encoder test typing annotation.
+HOLD · no production edit/commit/push or local test/gate rerun during this diagnosis. Remote2677 unchanged; only prior test annotation remains local dirty. DL sequences two-file correction under same C lease, focused existing figure/range controls, fresh gates +same final reviewer. No baseline expansion or acceptance waiver.

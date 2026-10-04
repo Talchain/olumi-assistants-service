@@ -1,0 +1,163 @@
+{
+  "$ref": "#/definitions/EnrichmentFactorSensitivityEntrySchema",
+  "definitions": {
+    "EnrichmentFactorSensitivityEntrySchema": {
+      "type": "object",
+      "properties": {
+        "factor_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "factor_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "influence_score": {
+          "type": "number"
+        },
+        "influence_rank": {
+          "type": "number"
+        },
+        "sensitivity_score": {
+          "type": "number"
+        },
+        "elasticity": {
+          "type": "number"
+        },
+        "direction": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "importance_rank": {
+          "type": "number"
+        },
+        "interpretation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value_of_information": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "evpi_percentage_points": {
+          "type": "number"
+        },
+        "evpi_method": {
+          "type": "string"
+        },
+        "evpi_status": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "zero_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "confidence_source": {
+          "type": "string"
+        },
+        "confidence_provenance": {
+          "type": "object",
+          "properties": {
+            "computation_source": {
+              "type": "string"
+            },
+            "formula_version": {
+              "type": "string"
+            },
+            "is_provisional": {
+              "type": "boolean"
+            },
+            "calibration_status": {
+              "type": "string"
+            },
+            "input_quality": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "computation_source",
+            "formula_version",
+            "is_provisional",
+            "calibration_status",
+            "input_quality"
+          ],
+          "additionalProperties": true
+        },
+        "flip_risk_category": {
+          "type": "string"
+        },
+        "elasticity_std": {
+          "type": "number"
+        },
+        "attribution_stability": {
+          "type": "string"
+        },
+        "rank_flip_rate": {
+          "type": "number"
+        },
+        "stability_method": {
+          "type": "string"
+        },
+        "value_source": {
+          "type": "string"
+        },
+        "value_extraction_type": {
+          "type": "string"
+        },
+        "value_defaulted": {
+          "type": "boolean"
+        },
+        "confidence_components": {
+          "type": "object",
+          "properties": {
+            "structural_certainty": {
+              "type": "number"
+            },
+            "sampling_stability": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "structural_certainty",
+            "sampling_stability"
+          ],
+          "additionalProperties": true
+        },
+        "range_derivation_source": {
+          "type": "string"
+        },
+        "_normalised": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "factor_id"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

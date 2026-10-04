@@ -1,0 +1,73 @@
+{
+  "workstream": "SCI-HERO \u2014 Tipping Points + VOI/EVPPI / C",
+  "base_head": "11e8fe24ff289fbbb68e074bba22c89055e9661a",
+  "recorded_at": "2026-10-03T20:09:57.960433+00:00",
+  "authority": [
+    "85/5972806891",
+    "87/5972807104"
+  ],
+  "files": [
+    {
+      "path": "src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "sha256": "3743bf5b812e46e9355b7ff05e4b3960a2d459411fed971aefb02af62140dfa8",
+      "bytes": 4809
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/tipping-point-interaction.contract.test.ts",
+      "sha256": "da2bfa47b097f236d40204cccafb668628925351e4c7fed95fc9280080be3d38",
+      "bytes": 10139
+    }
+  ],
+  "patch_sha256": "4bb08509be92af28007f7840e651fe63aed97b2f73960a41a430a84ea1629adc",
+  "runtime": "Node24.19.0 / resident Vitest4.1.10",
+  "schemas_pin": "0.74.0",
+  "pin_git_blob": "cf037c583a9fad35162d454322daf3c7d9bbe31d",
+  "import_closure_manifest": "IMPORT-CLOSURE-MANIFEST.json",
+  "baseline": {
+    "tests": 40,
+    "passed": 24,
+    "failed": 16,
+    "collection_failure": false
+  },
+  "candidate": {
+    "tests": 40,
+    "passed": 40,
+    "failed": 0
+  },
+  "mutants_killed": 6,
+  "mutant_count": 6,
+  "limits": [
+    "No full typecheck/lint/Required CI or independent review",
+    "Native V5 helper tests, not Agent route consumer",
+    "No hot-route/context/shared-permission edit",
+    "No provider/write/served/browser/JOURNEY witness"
+  ],
+  "fixtures": [
+    {
+      "path": "tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json",
+      "sha256": "36f120f70a075503ba017f15c112e62e52dce21bdf583a4d9bd142bdc619a654"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/__tests__/fixtures/paul-run-17d1cd3a-next-move.json",
+      "sha256": "99e16bc8e5a26b71b5611821a9143abe55d9179455e9e460aff6fd9876d7bc22"
+    }
+  ],
+  "lead_receipt": "https://github.com/Talchain/olumi-programme-docs/issues/87#issuecomment-5973062192",
+  "native_fixture_sha256": "71029fadae055baa24b1e6c76088c83fb28e469d080cc3cfc87fe9501eb98604",
+  "route_consumer": "OPEN: root must identify/connect existing factor-ID door; no orphan chip",
+  "recovery": "Read INTEGRATOR-HANDOFF.md +COMPOSITION-COMPARE.json; root traces Agent factor-ID\u2192proposal\u2192typed approval door before any integration. No test repetition without source changes.",
+  "composition_compare": "COMPOSITION-COMPARE.json",
+  "runtime_proof": "ACTUAL-RUNTIME-PROOF.json",
+  "evidence_hashes": {
+    "C-VALIDATED-PACKET.patch": "4bb08509be92af28007f7840e651fe63aed97b2f73960a41a430a84ea1629adc",
+    "baseline-red-final.json": "0fbcdda4ed11445b7dde12877a445428d3d110c7df3070738f2dcde10b235a85",
+    "candidate-green.json": "5498784a31f8e262adee7229ce7260fe04c44bf70f22355a91f196be0dda5ece",
+    "MUTANTS.json": "7f8e96c752b971dc1986469cdd8c1586a1c5eceefea7c9ec323e67881d1454a7",
+    "INTEGRATOR-CONTRACT-FIXTURE.json": "71029fadae055baa24b1e6c76088c83fb28e469d080cc3cfc87fe9501eb98604",
+    "ACTUAL-RUNTIME-PROOF.json": "6596e14998995bcb177f312292ac985fdb8935be79594976bf33649760f2f28d",
+    "IMPORT-CLOSURE-MANIFEST.json": "6df43c68b57443f6288d8a6609190eaf4007b9d4559baa6880b4885aba774c3a",
+    "COMPOSITION-COMPARE.json": "7f977fccd9ad7ed95e68930c590ddf41b10f9df5d3475ce2d3dec876c4e1d371",
+    "COMPOSITION-5973046997.patch": "4847dce4dc068e6b31098943c65d0ae3d549d471c62a02a98bdd80d077c8af6b",
+    "INTEGRATOR-HANDOFF.md": "01fe0195f9191dee51c5927e435e207ce570fc4bf5acf46df35898f5bf98d4b4"
+  }
+}

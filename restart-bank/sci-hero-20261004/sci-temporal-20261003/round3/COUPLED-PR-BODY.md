@@ -1,0 +1,11 @@
+User-stated option ranges could disappear after explicit approval or canonical reload, while generic graph edits could create user-authored ranges without dedicated approval. This preserves approved ranges and native figures through the existing proposal, atomic writer and persistence paths, and refuses range writes through generic editing.
+
+The repair covers all five findings from review5973998055: typed admission accepts equivalent digit/word readings; capless single/compound approved ranges retain raw value and unit without inventing a cap; ranges bind to the approved target postimage; inherited range/quote checks use native quantity and effective-unit resolution; legacy nested/slash carriers reach the existing persistence validator. Ordinary capless levels without a range retain their previous no-figure behavior. Permission and selected-current Run authorities are unchanged.
+
+Integration baseline: served staging `3ede57eb27d525d7492866792861120ffb2ccaa2`, project-bound schemas0.75. Manifest/lock/vendor changes are inherited from that normal staging merge.
+
+Current head `67e4e03e5b24cc9365f131ffeff239a5fbfbc077` adds exactly two corrective hunks to2677: the range-only carrier guard and an explicit dynamic-record return type in the encoder fixture. **78 focused checks PASS**, including the original no-range negative control and adjacent approved-range single/compound/unit cases. `pnpm typecheck`, its project0.75 schema guard and scoped lint PASS; source hashes match this committed head. Earlier454 affected-path tests and six discriminating mutants at2677 remain historical repair evidence, rather than current-head CI credit. Raw logs, reports and source manifests are banked under output/sci-temporal-20261003/round3.
+
+Fresh exact-head Required/Drift and DL's same independent final review remain release conditions. The prior2677 Required1/3 regression and fixture typing Drift failure are recorded; no previous-head approval or green transfers.
+
+No provider/browser/science rerun or served journey is claimed. Enter range → explicit approval → storage → unit edit → canonical reload remains a served acceptance boundary. SCI-HERO's separate factor-ID refinement journey remains with its existing integration owner.

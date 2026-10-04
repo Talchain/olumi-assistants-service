@@ -1,0 +1,6 @@
+remote: 
+remote: GitHub found 140 vulnerabilities on Talchain/olumi-assistants-service's default branch (3 critical, 71 high, 55 moderate, 11 low). To find out more, visit:        
+remote:      https://github.com/Talchain/olumi-assistants-service/security/dependabot        
+remote: 
+To https://github.com/Talchain/olumi-assistants-service.git
+   5d2c05dda..2677b3d94  HEAD -> claude/focused-ritchie-vf0xpz

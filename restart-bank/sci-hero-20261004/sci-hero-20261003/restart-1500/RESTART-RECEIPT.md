@@ -1,0 +1,5 @@
+[SCI-HERO/C · Paul direct restart STOP · PARKED · actual15:05Z bank]
+Remote SCI branch097f432b64d98fc447f32344ff2efa97a4d05856 freshly verified;2531/2536 merged. Former/private/tmp/scihero-cee-1790984347 ABSENT; no owned checkout/HEAD or running SCI job (actual ps+cwd checks); heartbeat PAUSED.
+Two source candidates LOCAL-ONLY/unreviewed/NOT_STARTED, exact hashes unchanged: tipping-point-coaching.ts + tipping-point-interaction.contract.test.ts, banked as full files+patch; prior import-closure STOP and root seam ownership preserved. New Science Engine allocation/2522 metadata only; no new science writes before this stop.
+Bank /Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/workstream-evidence.tar.gz:111 files read-back SHA256 verified, includes prior374-member archive also verified. Current RESTART-HANDOFF.md has exact recovery and holds; no push/merge/gate bypass/paid action.
+RESTART_SAFE:YES for this workstream only; programme-wide safety not inferred. Wait Paul resume; first command cat /Users/paulslee/Documents/GitHub/output/sci-hero-20261003/RESTART-HANDOFF.md. Delivery remains PARTIAL/no JOURNEY.

@@ -1,0 +1,93 @@
+{
+  "$ref": "#/definitions/EnrichmentConditionalWinnerSchema",
+  "definitions": {
+    "EnrichmentConditionalWinnerSchema": {
+      "type": "object",
+      "properties": {
+        "factor_id": {
+          "type": "string"
+        },
+        "factor_label": {
+          "type": "string"
+        },
+        "split_value": {
+          "type": "number"
+        },
+        "split_unit": {
+          "type": "string"
+        },
+        "low_bucket": {
+          "type": "object",
+          "properties": {
+            "winner_id": {
+              "type": "string"
+            },
+            "winner_label": {
+              "type": "string"
+            },
+            "runner_up_id": {
+              "type": "string"
+            },
+            "runner_up_label": {
+              "type": "string"
+            },
+            "win_probability": {
+              "type": "number"
+            },
+            "mean_outcome": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "win_probability"
+          ],
+          "additionalProperties": true
+        },
+        "high_bucket": {
+          "type": "object",
+          "properties": {
+            "winner_id": {
+              "type": "string"
+            },
+            "winner_label": {
+              "type": "string"
+            },
+            "runner_up_id": {
+              "type": "string"
+            },
+            "runner_up_label": {
+              "type": "string"
+            },
+            "win_probability": {
+              "type": "number"
+            },
+            "mean_outcome": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "win_probability"
+          ],
+          "additionalProperties": true
+        },
+        "winner_flips": {
+          "type": "boolean"
+        },
+        "_normalised": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "factor_id",
+        "factor_label",
+        "split_value",
+        "low_bucket",
+        "high_bucket",
+        "winner_flips"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

@@ -1,0 +1,228 @@
+diff --git a/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts b/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
+index 3df7fab63..6deb9196f 100644
+--- a/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
++++ b/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
+@@ -856,13 +856,15 @@ function likelyBound(n: number, unit: string): string {
+   return sayFigureExactly(n, unit) ?? `${n}${unit !== '' ? ' ' + unit : ''}`;
+ }
+ 
+-function levelFigureOf(op: ProposalOperation): { raw_value: number; cap: number; unit?: string; likely_range?: { low: number; high: number } } | Record<string, never> {
++function levelFigureOf(op: ProposalOperation): { raw_value?: number; cap?: number; unit?: string; likely_range?: { low: number; high: number } } | Record<string, never> {
+   const v = (op.value ?? {}) as { normalised?: unknown; raw?: unknown; cap?: unknown; unit?: unknown; likely_range?: { low?: unknown; high?: unknown } };
+-  if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw) || typeof v.cap !== 'number' || !(v.cap > 0)) return {};
+-  if (Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
+   // TEMPORAL: the user's likely range rides with their figure (proposed only beside a level they gave).
+   const r = v.likely_range;
+   const likely = r !== undefined && typeof r.low === 'number' && typeof r.high === 'number' ? { low: r.low, high: r.high } : undefined;
++  if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw)) return {};
++  // An unscaled level needs no cap. Carry its approved range without inventing a scale frame.
++  if (v.cap == null && v.raw === v.normalised) return likely !== undefined ? { likely_range: likely } : {};
++  if (typeof v.cap !== 'number' || !(v.cap > 0) || Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
+   return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
+     ...(likely !== undefined ? { likely_range: likely } : {}) };
+ }
+diff --git a/src/orchestrator-v5/intervention-range.ts b/src/orchestrator-v5/intervention-range.ts
+index 29ca2a9b6..155581e7c 100644
+--- a/src/orchestrator-v5/intervention-range.ts
++++ b/src/orchestrator-v5/intervention-range.ts
+@@ -13,7 +13,8 @@
+  *      inherit the value's user authorship.
+  *   3. FORWARD ONLY WHAT THE ENGINE CAN READ: `{low, high, meaning}`, and only when the wire number for that factor IS
+  *      the raw point the range brackets. A value CEE rescaled onto the model scale gets no range (the units would
+- *      disagree), so that limit falls back to today's behaviour rather than being scored on a mismatched range.
++ *      disagree). The wire plan reports that conversion loss so affected outcomes are withheld, never silently
++ *      scored as though the user's range had been sampled.
+  */
+ import { InterventionRangeMeaningV3, InterventionRangeV3, type InterventionRangeV3T } from '../schemas/cee-v3.js';
+ 
+diff --git a/src/orchestrator-v5/system-events/dispatch.ts b/src/orchestrator-v5/system-events/dispatch.ts
+index 793a36d6a..b0c2c41a3 100644
+--- a/src/orchestrator-v5/system-events/dispatch.ts
++++ b/src/orchestrator-v5/system-events/dispatch.ts
+@@ -2816,7 +2816,7 @@ export async function dispatchOptionLevelsBatch(
+   payload: Pick<SystemEventTurnPayload, 'scenario_id' | 'turn_id' | 'stage'> & { readonly requestHash: string },
+   batch: {
+     readonly targets: readonly { readonly optionId: string; readonly factorId: string; readonly modelValue: number;
+-      readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number;
++      readonly figure?: { readonly raw_value?: number; readonly unit?: string; readonly cap?: number;
+         readonly likely_range?: { readonly low: number; readonly high: number } } }[];
+     readonly base_graph_hash: string;
+     /** The links the approved proposal declared (`from::to`); a different set writes nothing. */
+@@ -3243,8 +3243,9 @@ export type CommitOptionLevelsResult =
+  */
+ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> {
+   const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
+-    ...(l.raw_value !== undefined || l.cap !== undefined
+-      ? { figure: { raw_value: Number(l.raw_value), cap: Number(l.cap), ...(l.unit !== undefined ? { unit: l.unit } : {}),
++    ...(l.raw_value !== undefined || l.cap !== undefined || l.likely_range !== undefined
++      ? { figure: { ...(l.raw_value !== undefined || l.cap !== undefined
++        ? { raw_value: Number(l.raw_value), cap: Number(l.cap) } : {}), ...(l.unit !== undefined ? { unit: l.unit } : {}),
+         ...(l.likely_range !== undefined ? { likely_range: l.likely_range } : {}) } } : {}) }));
+   // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
+   const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
+diff --git a/src/orchestrator-v5/system-events/option-intervention-edit.ts b/src/orchestrator-v5/system-events/option-intervention-edit.ts
+index 5cd8c346c..beae12240 100644
+--- a/src/orchestrator-v5/system-events/option-intervention-edit.ts
++++ b/src/orchestrator-v5/system-events/option-intervention-edit.ts
+@@ -107,7 +107,7 @@ export interface OptionInterventionEditInput {
+    * was normalised on. Without it a level on a factor with no range of its own (a NEW, value-less factor) is stored as a
+    * bare model number and the figure is unrecoverable. It must normalise to `modelValue` exactly, or nothing is written.
+    */
+-  readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number;
++  readonly figure?: { readonly raw_value?: number; readonly unit?: string; readonly cap?: number;
+     /** TEMPORAL: the user's likely range for this level, raw units (`intervention-range.ts` gates it at persist). */
+     readonly likely_range?: { readonly low: number; readonly high: number } };
+ }
+@@ -1017,9 +1017,12 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
+     return refuse('invalid_identity');
+   }
+   const figure = input.figure;
+-  if (figure !== undefined && (!Number.isFinite(figure.raw_value) || !Number.isFinite(figure.cap) || !(figure.cap > 0)
+-    || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === ''))
+-    || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9)) {
++  if (figure !== undefined && (
++    ((figure.raw_value !== undefined || figure.cap !== undefined)
++      && (typeof figure.raw_value !== 'number' || !Number.isFinite(figure.raw_value)
++        || typeof figure.cap !== 'number' || !Number.isFinite(figure.cap) || !(figure.cap > 0)
++        || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9))
++    || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === '')))) {
+     return refuse('level_frame_mismatch');
+   }
+ 
+@@ -1144,14 +1147,17 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
+   // ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (DL #75 5902916137 (3); P0 partner 5902892060; served W4 run2 on `f074916`):
+   // the card sends the level on the model scale and shows it on the factor's own range ("£57" = 0.285 of 200). Written
+   // bare, the £57 left the model and the reply said "an effect value of 0.285". That same reading is kept on the cell.
+-  const levelFigure = figure ?? figureOnFactorRange(graph, factor, existing, input.modelValue);
++  const levelFigure = figure !== undefined && typeof figure.raw_value === 'number' && typeof figure.cap === 'number'
++    ? { raw_value: figure.raw_value, cap: figure.cap, ...(figure.unit !== undefined ? { unit: figure.unit } : {}) }
++    : figureOnFactorRange(graph, factor, existing, input.modelValue);
+   // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell
+   // (`cap` only when it reproduces the level, which the check above has already required).
+   // TEMPORAL: the user's likely range, only from THIS approval's figure (never read back from another cell), recorded as
+   // theirs with the one meaning its wording licenses (R3 #75 5914230653).
+   const likely = figure?.likely_range;
+-  const operation = levelFigure === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
+-    raw_value: levelFigure.raw_value, cap: levelFigure.cap, ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}),
++  const operation = levelFigure === undefined && likely === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
++    ...(levelFigure !== undefined ? { raw_value: levelFigure.raw_value, cap: levelFigure.cap,
++      ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } : {}),
+     ...(likely !== undefined ? { range: { low: likely.low, high: likely.high, meaning: 'likely_range', source: 'user_specified' } } : {}) } };
+   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
+   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
+diff --git a/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts b/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
+index 5d69e423c..b2b87be49 100644
+--- a/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
++++ b/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
+@@ -8,6 +8,7 @@ import {
+   encodeOptionInterventionsForEdit,
+   optionIdsTouchedByOperations,
+   optionIdsAddedWithInterventionIntent,
++  clearInheritedInterventionSourceQuotes,
+ } from '../encode-option-interventions.js';
+ 
+ type Dict = Record<string, unknown>;
+@@ -404,4 +405,32 @@ describe('a stated range stays with ITS quantity across a replacement figure', (
+     const fresh = { low: 8, high: 30, meaning: 'likely_range', source: 'user_specified' };
+     expect(cellAfter({ unit: 'days', raw_value: 12, range: fresh }).range).toEqual(fresh);
+   });
++
++  const numericMapAfter = (replacement: Dict): Dict => {
++    const before = withReplacement({});
++    const after = structuredClone(before);
++    const option = optionOf(after, 'opt_l');
++    const old = iv(option, 'fac_dt');
++    (option.interventions as Dict).fac_dt = { ...old, ...replacement };
++    const encoded = encodeOptionInterventionsForEdit(after).graph;
++    // Same before/after guard used by both real edit writers; no source quote is present.
++    const guarded = clearInheritedInterventionSourceQuotes(before, encoded);
++    return iv(optionOf(guarded as { nodes: Dict[] }, 'opt_l'), 'fac_dt');
++  };
++
++  it('numeric whole-map opt_l/fac_dt unit edit drops inherited 5–20 days', () => {
++    const cell = numericMapAfter({ unit: 'weeks' });
++    expect(cell).toMatchObject({ value: 0.25, raw_value: 10, unit: 'weeks' });
++    expect(Object.hasOwn(cell, 'range')).toBe(false);
++  });
++  it('numeric whole-map changed figure drops the inherited range', () => {
++    expect(Object.hasOwn(numericMapAfter({ value: 0.3, raw_value: 12 }), 'range')).toBe(false);
++  });
++  it('numeric whole-map unchanged quantity retains its stated range', () => {
++    expect(numericMapAfter({ unit: 'days' }).range).toEqual(RANGE);
++  });
++  it('numeric whole-map fresh replacement range survives a unit change', () => {
++    const fresh = { ...RANGE, low: 2, high: 30 };
++    expect(numericMapAfter({ unit: 'weeks', range: fresh }).range).toEqual(fresh);
++  });
+ });
+diff --git a/src/orchestrator/tools/encode-option-interventions.ts b/src/orchestrator/tools/encode-option-interventions.ts
+index 87c30c6c6..0cdb4f6a4 100644
+--- a/src/orchestrator/tools/encode-option-interventions.ts
++++ b/src/orchestrator/tools/encode-option-interventions.ts
+@@ -469,9 +469,9 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
+ 
+ /**
+  * A whole-map `update_node` can replace an already numeric intervention without
+- * entering `buildInterventionV3`. Clear only a quote copied from the persisted
+- * OLD cell when the figure changed; a newly supplied quote remains the user's
+- * evidence, and a same-value repeat leaves the original quote alone.
++ * entering `buildInterventionV3`. Clear a quote or range copied from the persisted
++ * OLD cell when the quantity changed; a fresh replacement remains, and an unchanged
++ * quantity keeps its original metadata.
+  */
+ export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after: T): T {
+   if (!isPlainObject(before) || !Array.isArray(before.nodes)
+@@ -491,8 +491,7 @@ export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after
+     let updatedInterventions: Dict | undefined;
+     for (const [factorId, cell] of Object.entries(node.interventions)) {
+       const oldCell = prior.interventions[factorId];
+-      if (!isPlainObject(cell) || !isPlainObject(oldCell)
+-        || typeof cell.source_quote !== 'string' || cell.source_quote !== oldCell.source_quote) continue;
++      if (!isPlainObject(cell) || !isPlainObject(oldCell)) continue;
+       const figureChanged = cell.value !== oldCell.value
+         || (cell.raw_value !== undefined && oldCell.raw_value !== undefined && !isDeepStrictEqual(cell.raw_value, oldCell.raw_value))
+         || (cell.unit !== undefined && oldCell.unit !== undefined && cell.unit !== oldCell.unit)
+@@ -500,9 +499,14 @@ export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after
+         || (cell.value_type !== undefined && oldCell.value_type !== undefined && cell.value_type !== oldCell.value_type)
+         || (cell.encoding_map !== undefined && oldCell.encoding_map !== undefined && !isDeepStrictEqual(cell.encoding_map, oldCell.encoding_map));
+       if (!figureChanged) continue;
+-      const { source_quote: _staleQuote, ...withoutStaleQuote } = cell;
++      const staleQuote = typeof cell.source_quote === 'string' && cell.source_quote === oldCell.source_quote;
++      const staleRange = cell.range !== undefined && oldCell.range !== undefined && isDeepStrictEqual(cell.range, oldCell.range);
++      if (!staleQuote && !staleRange) continue;
++      const withoutStaleMetadata = { ...cell };
++      if (staleQuote) delete withoutStaleMetadata.source_quote;
++      if (staleRange) delete withoutStaleMetadata.range;
+       updatedInterventions ??= { ...node.interventions };
+-      updatedInterventions[factorId] = withoutStaleQuote;
++      updatedInterventions[factorId] = withoutStaleMetadata;
+     }
+     if (updatedInterventions !== undefined) {
+       updatedNodes ??= [...afterNodes];
+diff --git a/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts b/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
+index f74e3cfbd..8e640e59b 100644
+--- a/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
++++ b/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
+@@ -152,6 +152,22 @@ describe('the user\'s likely range for an option\'s level survives propose → a
+     expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
+   });
+ 
++  it('capless opt_lift/fac_downtime preserves the range the user approved through the real writer', async () => {
++    const factor = (persisted as { nodes: { id: string; observed_state?: Record<string, unknown> }[] })
++      .nodes.find(n => n.id === 'fac_downtime')!;
++    delete factor.observed_state!.cap;
++    const { proposed, out } = await proposeAndApprove({ value: 0.5, likely_low: 0.2, likely_high: 0.8, ...TYPED },
++      'For Lift-and-shift, migration downtime is likely between 0.2 and 0.8 days, most likely 0.5 days.');
++    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
++    expect(out?.ok, JSON.stringify(out)).toBe(true);
++    expect(rows.size).toBe(1);
++    expect(liftCell()).toMatchObject({ value: 0.5, source: 'user_specified',
++      range: { low: 0.2, high: 0.8, meaning: 'likely_range', source: 'user_specified' } });
++    const other = (persisted as { nodes: { id: string; interventions?: Record<string, unknown> }[] })
++      .nodes.find(n => n.id === 'opt_replatform')!;
++    expect(other.interventions?.fac_downtime).toBeUndefined();
++  });
++
+   // Codex CR 5963331228 P1: the range is decided from TYPED arguments only (its meaning, that the user gave it, beside a
+   // level they gave, the level inside it), never by parsing the user's words; the user then approves range AND reading.
+   it.each([

@@ -1,0 +1,27 @@
+2026-10-03T22:58:41.9928412Z  FAIL  src/orchestrator-v5/agent-lane/__tests__/level-keeps-the-users-figure.test.ts > the writer is handed the user's figure with each level, in the ONE commit > CONTROL: a level already on the model's 0–1 scale, with no range, hands the writer no figure (nothing for the door to refuse)
+2026-10-03T22:58:41.9930085Z AssertionError: expected true to be false // Object.is equality
+2026-10-03T22:58:41.9930388Z 
+2026-10-03T22:58:41.9930503Z - Expected
+2026-10-03T22:58:41.9930685Z + Received
+2026-10-03T22:58:41.9930758Z 
+2026-10-03T22:58:41.9930826Z - false
+2026-10-03T22:58:41.9930953Z + true
+2026-10-03T22:58:41.9931022Z 
+2026-10-03T22:58:41.9933178Z  ❯ src/orchestrator-v5/agent-lane/__tests__/level-keeps-the-users-figure.test.ts:132:44
+2026-10-03T22:58:41.9971502Z     130|     const l = level('opt_add_on') as Record<string, unknown>;
+2026-10-03T22:58:41.9972881Z     131|     expect(l.value).toBe(0.4);
+2026-10-03T22:58:41.9973663Z     132|     expect('raw_value' in l || 'cap' in l).toBe(false);
+2026-10-03T22:58:41.9974313Z        |                                            ^
+2026-10-03T22:58:41.9974669Z     133|   });
+2026-10-03T22:58:41.9974934Z     134| });
+2026-10-03T22:58:41.9975083Z 
+2026-10-03T22:58:41.9975297Z ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+2026-10-03T22:58:41.9975469Z 
+2026-10-03T22:58:41.9975502Z 
+2026-10-03T22:58:42.0015820Z  Test Files  1 failed | 1054 passed | 8 skipped (1063)
+2026-10-03T22:58:42.0113687Z       Tests  1 failed | 18192 passed | 1 expected fail | 72 skipped (18266)
+2026-10-03T22:58:42.0114312Z    Start at  22:52:27
+2026-10-03T22:58:42.0122578Z    Duration  374.33s (transform 37.50s, setup 30.91s, import 695.70s, tests 260.68s, environment 79ms)
+2026-10-03T22:58:42.0123575Z 
+2026-10-03T22:58:42.1044214Z JSON report written to /home/runner/work/olumi-assistants-service/olumi-assistants-service/.vitest-reports/shard-1.json
+2026-10-03T22:58:42.2621988Z  ELIFECYCLE  Command failed with exit code 1.

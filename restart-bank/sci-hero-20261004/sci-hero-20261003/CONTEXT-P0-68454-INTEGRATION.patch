@@ -1,0 +1,26 @@
+--- a/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
++++ b/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
+@@ -177,6 +177,7 @@
+ import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
+ import { countedNoun } from '../counted-nouns.js';
+ import { analysisResultForAgent } from '../decision-sensitivity.js';
++import { runExplanationChip } from '../run-explanation.js';
+ import { optionNameAliases } from '../option-name-truth.js';
+ import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+ import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
+@@ -1498,7 +1499,15 @@
+         }),
+       }))
+     : undefined;
++  // Same leaf as immediate Run; the existing canonical/Explain guard binds the selected current result.
++  const boundRun = runExplanationChip(scenarioId, {
++    graphHash: g.graph_hash, analysisState: g.analysis_state, analysisResult: g.analysis_result,
++  });
++  const projectedRun = boundRun === null ? undefined : rec(analysisResultForAgent(g.analysis_result));
+   return { ...context, analysis: { ...analysis,
++    ...(projectedRun?.tipping_point !== undefined ? {
++      tipping_point: projectedRun.tipping_point, tipping_point_run_key: boundRun!.id,
++    } : {}),
+     claim_permissions: claimPermissions,
+     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
+     ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),

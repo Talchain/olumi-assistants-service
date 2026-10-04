@@ -1,0 +1,19 @@
+{
+  "$ref": "#/definitions/EnrichmentDecisionReviewSchema",
+  "definitions": {
+    "EnrichmentDecisionReviewSchema": {
+      "type": "object",
+      "properties": {
+        "produced_at": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "produced_at"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

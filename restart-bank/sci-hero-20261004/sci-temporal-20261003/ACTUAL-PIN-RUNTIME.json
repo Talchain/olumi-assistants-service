@@ -1,0 +1,9 @@
+{
+  "at": "2026-10-03T21:28:45.662854+00:00",
+  "pin": "file:./vendor/talchain-schemas-0.74.0.tgz",
+  "resolved": "/private/tmp/sci-temporal-2382/node_modules/.pnpm/@talchain+schemas@file+vendor+talchain-schemas-0.74.0.tgz/node_modules/@talchain/schemas/package.json",
+  "version": "0.74.0",
+  "vendor_sha256": "3850f3aaa1f7e064d8c5649068eae773a0c97c3633d1b27e7fc8452766a2df07",
+  "manifest_lock_diff": "",
+  "source_status": " M src/orchestrator/tools/__tests__/encode-option-interventions.test.ts\n M tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts\n"
+}

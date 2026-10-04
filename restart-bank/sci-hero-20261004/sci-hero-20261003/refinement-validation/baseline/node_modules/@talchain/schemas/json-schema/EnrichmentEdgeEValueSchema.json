@@ -1,0 +1,97 @@
+{
+  "$ref": "#/definitions/EnrichmentEdgeEValueSchema",
+  "definitions": {
+    "EnrichmentEdgeEValueSchema": {
+      "type": "object",
+      "properties": {
+        "edge_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from_id": {
+          "type": "string"
+        },
+        "to_id": {
+          "type": "string"
+        },
+        "from_label": {
+          "type": "string"
+        },
+        "to_label": {
+          "type": "string"
+        },
+        "e_value": {
+          "type": "number"
+        },
+        "flip_direction": {
+          "type": "string"
+        },
+        "current_mean": {
+          "type": "number"
+        },
+        "flip_mean": {
+          "type": "number"
+        },
+        "stability": {
+          "type": "object",
+          "properties": {
+            "n_seeds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "n_seeds_flipped": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "band_min": {
+              "type": "number"
+            },
+            "band_median": {
+              "type": "number"
+            },
+            "band_max": {
+              "type": "number"
+            },
+            "band_width": {
+              "type": "number",
+              "minimum": 0
+            },
+            "seed_flip_means": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "n_seeds",
+            "n_seeds_flipped"
+          ],
+          "additionalProperties": true
+        },
+        "_normalised": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "edge_id",
+        "from_id",
+        "to_id",
+        "e_value",
+        "flip_direction",
+        "current_mean",
+        "flip_mean"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

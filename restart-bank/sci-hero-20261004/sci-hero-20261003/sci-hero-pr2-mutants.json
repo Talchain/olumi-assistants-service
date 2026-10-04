@@ -1,0 +1,32 @@
+[
+  {
+    "mutant": "unchecked_elaboration",
+    "killed": true,
+    "exit_code": 1,
+    "log": "/private/tmp/sci-hero-pr2-mutant-unchecked_elaboration.log"
+  },
+  {
+    "mutant": "stale_consumer",
+    "killed": true,
+    "exit_code": 1,
+    "log": "/private/tmp/sci-hero-pr2-mutant-stale_consumer.log"
+  },
+  {
+    "mutant": "cached_final_read",
+    "killed": true,
+    "exit_code": 1,
+    "log": "/private/tmp/sci-hero-pr2-mutant-cached_final_read.log"
+  },
+  {
+    "mutant": "reuse_competing_run",
+    "killed": true,
+    "exit_code": 1,
+    "log": "/private/tmp/sci-hero-pr2-mutant-reuse_competing_run.log"
+  },
+  {
+    "mutant": "replay_stored_threshold",
+    "killed": true,
+    "exit_code": 1,
+    "log": "/private/tmp/sci-hero-pr2-mutant-replay_stored_threshold.log"
+  }
+]

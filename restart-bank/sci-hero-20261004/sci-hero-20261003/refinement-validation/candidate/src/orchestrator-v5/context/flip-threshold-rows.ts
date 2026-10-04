@@ -1,0 +1,451 @@
+/**
+ * ROADMAP 2.228 F1 — the SINGLE owner of the parse for PLoT's TOP-LEVEL
+ * `enrichment.flip_thresholds[]` rows.
+ *
+ * WHY THIS MODULE EXISTS
+ * ----------------------
+ * Two CEE surfaces need the same rows, and before this module only one of
+ * them read the shape PLoT actually emits:
+ *
+ *   • the COACH context pack — `./analysis-signals.ts`
+ *     (`deriveTippingPointsFromTopLevel`) — reads the top-level array. LIVE.
+ *   • the DECISION REVIEW prompt input —
+ *     `../coaching/decision-review-enricher.ts` (`readFlipThresholdData`) —
+ *     derived its rows from `results[].factor_sensitivity[].flip_threshold`,
+ *     a shape with zero occurrences in the producer. `analysis-signals.ts`'s
+ *     own header already recorded the consequence: *"the per-option
+ *     derivation inside `compactAnalysis` is structurally empty on staging,
+ *     where `results[]` never carries `factor_sensitivity`"*. So
+ *     `enrichment.decision_review.flip_thresholds` was present-and-empty on
+ *     every live turn and no flip card could fire.
+ *
+ * Rather than hand-roll a second top-level reader inside the enricher (the
+ * hand-maintained-mirror defect this estate keeps paying for), the parse,
+ * the `value_scale` resolution and the row CLASSIFICATION live here once and
+ * both surfaces consume them.
+ *
+ * WHAT THIS MODULE DOES NOT DECIDE
+ * --------------------------------
+ * Classification only. Whether an `attested_no_flip` row is forwarded to a
+ * prompt, dropped, or narrated is a CONSUMER policy — the two consumers have
+ * different prompts and different cages, and pretending otherwise would put a
+ * prompt decision inside a parser. See each consumer for its filter.
+ */
+
+/**
+ * A top-level `enrichment.flip_thresholds[]` row, narrowed and classified.
+ *
+ * `kind` is the load-bearing field:
+ *   `flip_pair`        — finite `current_value` AND finite flip value. A real
+ *                        tipping point; `direction` is populated.
+ *   `attested_no_flip` — flip value null AND the producer explicitly said why
+ *                        ({@link isAttestedNoFlipReason} owns the token list).
+ *                        This is producer-owned truth ("this factor cannot
+ *                        flip the result"), NOT "unknown". `direction` is
+ *                        null: there is no flip value to move toward, so any
+ *                        direction would be invented.
+ *   `unusable`         — everything else (flip null with no reason, malformed
+ *                        numerics). Asserts nothing, so it is projected as
+ *                        nothing.
+ */
+export interface TopLevelFlipRow {
+  readonly factor_id: string;
+  readonly factor_label: string;
+  readonly current_value: number | null;
+  readonly flip_value: number | null;
+  readonly direction: 'increase' | 'decrease' | null;
+  readonly unit: string | null;
+  /** Resolved verbatim from the row (top level, else `margin_sensitivity`). */
+  readonly value_scale: string | null;
+  readonly flip_reason: string | null;
+  readonly kind: 'flip_pair' | 'attested_no_flip' | 'unusable';
+  /**
+   * ROADMAP 2.267 — WHICH option PLoT attests would lead once the factor
+   * crosses `flip_value`. The IDENTITY, trimmed, or null when the row names
+   * none (every `attested_no_flip` row ships it as null).
+   *
+   * This field existed on the wire for the whole of this module's life and was
+   * not read: the decision_review prompt projection is a field-by-field
+   * rebuild, and D-2 (`witness-2265-targeted-flip.md` §4) is what that costs —
+   * the model was asked which option takes over and given no field that says
+   * so, so on run A it filled the gap from the `fragile_edges` winner channel
+   * and named an option the row contradicts.
+   */
+  readonly alternative_winner_id: string | null;
+  /**
+   * The SAFE DISPLAY NAME for {@link alternative_winner_id} — null when there is
+   * nothing we may print, which is NOT the same as "no winner".
+   *
+   * Two ways it is null even though an identity exists:
+   *   - no label on the row at all;
+   *   - the label ECHOES the id. PLoT's `resolveLabel` returns
+   *     `option?.label ?? optionId`, so `label === id` is the producer saying
+   *     *"I could not resolve this"*, and printing it would leak an internal
+   *     token into user prose.
+   * And an identity-free row is never nameable: a label alone does not
+   * establish which option the producer meant.
+   *
+   * ⚠ This is the rule `../compose/flip-proposal.ts:resolveAlternativeWinner`
+   * already encodes for the CHIP path's sibling shape (`FlipEntry`). That is a
+   * second statement of one rule and it is deliberate for exactly the reason
+   * this file's header gives for `readValueScale`'s third copy: flip-proposal
+   * reads rows it selects itself, and consolidating it is a separate change
+   * with its own blast radius. If you are touching either, take both.
+   */
+  readonly alternative_winner_label: string | null;
+}
+
+/**
+ * The `flip_reason` tokens by which the PRODUCER attests that no flip exists —
+ * as distinct from saying nothing, or from failing to find one.
+ *
+ *   `no_effect_within_bounds`  — the probe swept the factor's range and the
+ *                                winner never changed.
+ *   `structurally_invariant`   — ISL's closed-form evaluation proved the
+ *                                factor cannot move the winner at all
+ *                                (PLoT #300 / ISL #117, F3 mapping).
+ *
+ * Both are producer-owned CERTAINTY. Neither is "unknown", and the difference
+ * between them is a matter of how the producer established it, never of how
+ * confident it is.
+ *
+ * ⚠ (a) THIS IS A HAND-MAINTAINED MIRROR, BY NECESSITY. ISL declares
+ * `flip_reason` as an OPEN string with no enum (`z.string()`; see also
+ * `src/orchestrator/deterministic/types.ts:319`, `flip_reason?: string`), so
+ * there is no contract to derive this list from. A token added upstream
+ * without adding it here degrades silently — which is exactly what
+ * `structurally_invariant` was about to do at three separate sites.
+ *
+ * ⚠ (b) THE STRUCTURAL FIX IS QUEUED: a producer-emitted `no_flip_in_range`
+ * BOOLEAN in schemas 0.31.0. When it lands, this predicate keys on the boolean
+ * and the token list becomes a legacy fallback for pre-0.31.0 envelopes. Do
+ * not grow the list further in the meantime without asking whether 0.31.0 is
+ * closer than the next token.
+ *
+ * ⚠ (c) ANY SITE THAT STRING-MATCHES `flip_reason` OUTSIDE THIS PREDICATE IS A
+ * DEFECT. Before this predicate existed there were three independent copies of
+ * the same match (this module, `./analysis-signals.ts`,
+ * `../compose/flip-proposal.ts`) and they would have diverged the day the new
+ * token shipped: the coach path would have DROPPED the row as ambiguous, and
+ * `summariseFlipEntries` would have demoted `no_practical_flip` →
+ * `insufficient_data`, turning an attested certainty into user-facing
+ * uncertainty. Three mirrors, one owned list.
+ */
+const ATTESTED_NO_FLIP_REASONS: ReadonlySet<string> = new Set([
+  'no_effect_within_bounds',
+  'structurally_invariant',
+]);
+
+/**
+ * Did the producer ATTEST that this row has no flip, rather than merely fail
+ * to report one? See {@link ATTESTED_NO_FLIP_REASONS} for the list and the
+ * three warnings that go with it.
+ */
+export function isAttestedNoFlipReason(reason: unknown): boolean {
+  return typeof reason === 'string' && ATTESTED_NO_FLIP_REASONS.has(reason);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * TRUE ids only (`factor_id`/`node_id`/`id`); a label is never promoted to an
+ * id — labels collide, and the decision_review prompt keys its output
+ * `flip_thresholds[].factor_id` off this value. Mirrors `readFactorId` in
+ * `./analysis-signals.ts`.
+ */
+function readFactorId(entry: Record<string, unknown>): string | null {
+  for (const candidate of [entry.factor_id, entry.node_id, entry.id]) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate;
+  }
+  return null;
+}
+
+function readLabel(entry: Record<string, unknown>): string | null {
+  for (const candidate of [entry.factor_label, entry.label]) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Resolve the row's attested alternative winner: the identity, plus a display
+ * name only when one is safe to print. See {@link
+ * TopLevelFlipRow.alternative_winner_label} for the two null cases and why the
+ * id — never the label — is the identity.
+ */
+function readAlternativeWinner(entry: Record<string, unknown>): {
+  id: string | null;
+  label: string | null;
+} {
+  const id = typeof entry.alternative_winner_id === 'string' ? entry.alternative_winner_id.trim() : '';
+  if (id.length === 0) return { id: null, label: null };
+  const rawLabel =
+    typeof entry.alternative_winner_label === 'string'
+      ? entry.alternative_winner_label.trim()
+      : '';
+  return { id, label: rawLabel.length > 0 && rawLabel !== id ? rawLabel : null };
+}
+
+/**
+ * Resolve PLoT's `value_scale` from a top-level flip row. The contract
+ * (`Docs/v5/cee-plot-flip-value-scale-contract.md`) permits the signal at the
+ * row top level, and the PLoT build that introduced it nests it under
+ * `margin_sensitivity`. Top level wins. Null when neither is a string.
+ *
+ * THIS IS THE ONE OWNER of that resolution for the top-level shape:
+ * `./analysis-signals.ts` imports it rather than keeping its own copy. (A
+ * third, structurally identical reader still lives on the CHIP path —
+ * `../compose/flip-proposal.ts:readValueScale` — deliberately untouched here:
+ * that module reads rows it selects itself and consolidating it is a separate
+ * change with its own blast radius.)
+ */
+export function readRowValueScale(row: Record<string, unknown>): string | null {
+  if (typeof row.value_scale === 'string') return row.value_scale;
+  const ms = asRecord(row.margin_sensitivity);
+  if (ms !== null && typeof ms.value_scale === 'string') return ms.value_scale;
+  return null;
+}
+
+/**
+ * The normalised-scale band. A raw flip/current value with `|v| <= 1` could be
+ * an uninverted model-scale number, so an absent `value_scale` is not by
+ * itself enough to license quoting it as a user-unit value.
+ *
+ * Owned here so the two predicates that use it —
+ * `../context/analysis-signals.ts:flipRowScaleIsDisplaySafe` (the display
+ * LICENCE) and {@link flipRowScaleUnsafeForPromptUnits} (the prompt INPUT
+ * gate) — cannot drift to different bands. `analysis-signals.ts` re-exports it
+ * so its existing consumers keep their import stable.
+ */
+export const MODEL_SCALE_SUSPECT_ABS = 1;
+
+/**
+ * Is this row unsafe to hand to the decision_review prompt as a USER-UNIT
+ * value? Fail-closed in both branches.
+ *
+ * 1. A non-empty `value_scale` token that is not `display` — `'model'`
+ *    (normalised `[0, 1]`) or anything unrecognised — is a POSITIVE
+ *    attestation that the numbers are not user-scale. Refused.
+ *
+ * 2. An ABSENT `value_scale` is refused ONLY when the row also CARRIES A UNIT
+ *    and either value sits inside the normalised band.
+ *
+ * ⚠ Branch 2 exists because absence is the ORDINARY emission, not an edge
+ * case. At PLoT tip `29703ee` the denormaliser stamps `'display'` only for
+ * `source === 'explicit_cap'` (`flip-threshold-denormaliser.ts:177/:241`);
+ * every other range source ships the row with NO scale at all. So "absent
+ * means pre-contract data, treat it as unclaimed" — the reasoning the first
+ * cut of this function used — would admit the ordinary case. Concretely: the
+ * committed staging capture's first row is `current_value: 0.3, unit:
+ * 'engineers'`, and the moment the F3 mapping gives it a flip value the
+ * prompt would quote it verbatim as `"0.3 engineers"`.
+ *
+ * The UNIT condition is what makes branch 2 free rather than a trade-off. The
+ * prompt's second display case is explicitly gated on the absence of a unit —
+ * *"The value carries no unit and lies between 0 and 1. It is
+ * probability-like…"* (`Prompts/canonical/decision_review.txt:416`,
+ * `src/prompts/defaults.ts:1421`) — so refusing only UNIT-BEARING in-band rows
+ * cannot delete the probability-like case it was written to protect. A
+ * unitless `0.35 → 0.62` pair is still admitted.
+ *
+ * EITHER value in band is enough to refuse, mirroring
+ * `flipRowScaleIsDisplaySafe`'s "safe only when BOTH are out of band". A pair
+ * is quoted as two numbers, so one uninverted value is one wrong number on the
+ * screen — requiring both to be in band would leave exactly the hazard above
+ * open whenever the flip value happened to land above 1.
+ *
+ * Still deliberately NARROWER than `flipRowScaleIsDisplaySafe`, which refuses
+ * an absent in-band scale even with no unit. That predicate governs whether
+ * CEE may REUSE a producer-authored display STRING; this one governs whether a
+ * row may reach the prompt at all. Two questions, two named predicates.
+ */
+export function flipRowScaleUnsafeForPromptUnits(row: TopLevelFlipRow): boolean {
+  const scale = row.value_scale === null ? '' : row.value_scale.trim().toLowerCase();
+  if (scale.length > 0) return scale !== 'display';
+
+  // Absent scale. Unitless rows are the prompt's percentage case — admitted.
+  if (row.unit === null) return false;
+  // Not a pair: classification already refuses it; nothing to judge here.
+  if (row.current_value === null || row.flip_value === null) return false;
+
+  const bothOutOfBand =
+    Math.abs(row.current_value) > MODEL_SCALE_SUSPECT_ABS &&
+    Math.abs(row.flip_value) > MODEL_SCALE_SUSPECT_ABS;
+  return !bothOutOfBand;
+}
+
+/**
+ * Read + narrow + classify every top-level `enrichment.flip_thresholds[]`
+ * row. Pure; never throws; never mutates its input.
+ *
+ * Deduplicated by `factor_id`, FIRST occurrence wins (upstream orders by
+ * importance) — matching the historical `collectFactorFlipEntries`
+ * behaviour this replaces on the decision_review path.
+ *
+ * `direction` is DERIVED from the value delta (`flip_value >= current_value`
+ * → `'increase'`), never copied from the row's own `direction` string. Two
+ * reasons: the derived value cannot disagree with the numbers the prompt is
+ * about to quote, and the same key means "elasticity sign" on the sibling
+ * `factor_sensitivity[]` rows — a semantic collision that has already cost
+ * this estate a wrong answer once.
+ *
+ * Optional lookups fill gaps the row leaves:
+ *   `graphNodeLabels`: factor_id → display label, when the row carries none.
+ *   `graphNodeUnits`:  factor_id → unit, when the row carries none.
+ */
+export function readTopLevelFlipRows(
+  enrichment: Record<string, unknown>,
+  graphNodeLabels?: Map<string, string>,
+  graphNodeUnits?: Map<string, string>,
+): TopLevelFlipRow[] {
+  const raw = enrichment.flip_thresholds;
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set<string>();
+  const out: TopLevelFlipRow[] = [];
+
+  for (const item of raw) {
+    const entry = asRecord(item);
+    if (entry === null) continue;
+
+    const factorId = readFactorId(entry);
+    if (factorId === null || seen.has(factorId)) continue;
+    seen.add(factorId);
+
+    const currentValue = readFiniteNumber(entry.current_value);
+    // `flip_value` is the contract key; `flip_threshold` is accepted as the
+    // same-meaning alias, exactly as `deriveTippingPointsFromTopLevel` does.
+    const flipValue = readFiniteNumber(entry.flip_value) ?? readFiniteNumber(entry.flip_threshold);
+
+    const flipReason = typeof entry.flip_reason === 'string' ? entry.flip_reason : null;
+    // `flip_value === current_value` is degenerate (no actionable movement)
+    // but still a pair; `'increase'` keeps the projected value consistent
+    // rather than inventing a third state, matching the historical reader.
+    const direction: TopLevelFlipRow['direction'] =
+      currentValue !== null && flipValue !== null
+        ? flipValue >= currentValue
+          ? 'increase'
+          : 'decrease'
+        : null;
+    const kind: TopLevelFlipRow['kind'] =
+      direction !== null
+        ? 'flip_pair'
+        : flipValue === null && isAttestedNoFlipReason(flipReason)
+          ? 'attested_no_flip'
+          : 'unusable';
+
+    const unit =
+      typeof entry.unit === 'string' && entry.unit.length > 0
+        ? entry.unit
+        : graphNodeUnits?.get(factorId) ?? null;
+
+    const winner = readAlternativeWinner(entry);
+
+    out.push({
+      factor_id: factorId,
+      factor_label: readLabel(entry) ?? graphNodeLabels?.get(factorId) ?? factorId,
+      current_value: currentValue,
+      flip_value: flipValue,
+      direction,
+      unit,
+      value_scale: readRowValueScale(entry),
+      flip_reason: flipReason,
+      kind,
+      alternative_winner_id: winner.id,
+      alternative_winner_label: winner.label,
+    });
+  }
+
+  return out;
+}
+
+// ============================================================================
+// ROADMAP 2.278 — the flip-claim posture gate
+// ============================================================================
+
+/**
+ * The run's OWN answer to: *may user-facing copy claim this result could flip?*
+ *
+ *   `attested_no_flip` — every usable flip row on this run is an
+ *                        {@link TopLevelFlipRow.kind} `attested_no_flip`. The
+ *                        producer has POSITIVELY ATTESTED that nothing flips in
+ *                        range. Copy must not claim flippability.
+ *   `permitted`        — anything else: a real flip exists, no flip evidence was
+ *                        produced at all, or the evidence is not conclusive.
+ *                        Callers keep their pre-existing behaviour.
+ *
+ * ⚠ WHY THIS EXISTS — the defect it closes (witnessed on staging, 2026-08-01,
+ * `PHASE0-EVIDENCE-2026-07-28/witness-2267-onscreen-flip.md` + `witness-2267-raw/`).
+ * On four consecutive analysis turns, **19 of 19** `flip_thresholds` rows came
+ * back `flip_reason: "structurally_invariant"` / `no_flip_in_range: true` — ISL's
+ * closed-form proof that no factor can move the winner at all — while CEE's
+ * user-facing copy simultaneously told the user "small changes could flip it"
+ * and offered a card titled "pressure-test the key driver". The copy was keyed
+ * off ROBUSTNESS MARGINALS (`robustness.is_robust`, `factor_sensitivity[].flip_risk_category`),
+ * which are non-zero on nearly every run, and never consulted the FLIP EVIDENCE
+ * sitting one key away on the same enrichment object.
+ *
+ * ⚠ THE FIX IS NOT NEW — IT IS AN UNFINISHED ONE. `../tools/handlers/explanation-fallback.ts`
+ * already closed exactly this contradiction for the two deterministic fallback
+ * composers (see its `flippabilityClaimAllowed` ladder, and the header note
+ * naming staging build `cef69b0`: *"the band said fragile and the composer
+ * claimed small adjustments could shift which option leads, while the flip
+ * analysis had found NO single-factor tipping point within bounds"*). That
+ * repair was applied at ONE site and the sibling surfaces were never swept.
+ * This function exists so the rule has a single owner and the next surface
+ * imports it rather than restating it — the hand-maintained-mirror class.
+ *
+ * ⚠ DIRECTION OF CONSERVATISM, stated so it is not "tightened" by accident:
+ * every uncertain state returns `permitted`. This function only ever fires on a
+ * POSITIVE producer attestation, so it can suppress a true claim only if the
+ * producer lied, and it silently permits a false claim whenever evidence is
+ * missing. That asymmetry is deliberate — it makes adoption backward-compatible
+ * at every call site (absent flip evidence ⇒ byte-identical prior behaviour) and
+ * keeps the blast radius of a wrong answer to "we said nothing extra".
+ *
+ * ⚠ A SECOND CLASSIFIER OVER THE SAME ROWS ALREADY EXISTS —
+ * `summariseFlipEntries` in `../compose/flip-proposal.ts` (`overall_status`
+ * `'no_practical_flip'`). It is NOT re-implemented here and it is NOT imported
+ * here: importing it would drag `compose/proposed-change.ts` → `tools/registry.ts`
+ * into what is otherwise a zero-import leaf module. Both are built on the ONE
+ * owned predicate {@link isAttestedNoFlipReason}, and the drift between them is
+ * pinned by a control that drives both over the same fixtures and fails loud on
+ * disagreement (`__tests__/flip-claim-posture.test.ts`, "agrees with
+ * summariseFlipEntries"). Two readers, one predicate, one pin — never two lists.
+ */
+export type FlipClaimPosture = 'attested_no_flip' | 'permitted';
+
+/**
+ * Derive the {@link FlipClaimPosture} for one analysis run, from the raw
+ * enrichment object (the byte-for-byte PLoT response stored on the
+ * `run_analysis` fact as `fact.result.enrichment`).
+ *
+ * Pure; never throws; never mutates. `permitted` for a malformed, absent or
+ * empty `flip_thresholds` — see the conservatism note on {@link FlipClaimPosture}.
+ */
+export function readFlipClaimPosture(enrichment: unknown): FlipClaimPosture {
+  const record = asRecord(enrichment);
+  if (record === null) return 'permitted';
+
+  const rows = readTopLevelFlipRows(record);
+  if (rows.length === 0) return 'permitted';
+
+  let attested = 0;
+  for (const row of rows) {
+    // A single real tipping point is enough to permit the claim outright.
+    if (row.kind === 'flip_pair') return 'permitted';
+    if (row.kind === 'attested_no_flip') attested += 1;
+  }
+
+  // EVERY row must carry the attestation. A mix of attested and `unusable`
+  // rows means the producer did not establish the absence across the board,
+  // so the strong claim "nothing flips" is not ours to make either.
+  return attested === rows.length ? 'attested_no_flip' : 'permitted';
+}

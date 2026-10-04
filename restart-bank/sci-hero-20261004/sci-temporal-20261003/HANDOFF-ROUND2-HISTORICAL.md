@@ -1,0 +1,13 @@
+# SCI-TEMPORAL C — exact-head delivery handoff
+
+Current source is pushed at `5d2c05dda1d9970b6618693b57ec875d544cc312` on `claude/focused-ritchie-vf0xpz`, PR https://github.com/Talchain/olumi-assistants-service/pull/2382. Checkout `/private/tmp/sci-temporal-2382` is exclusive to C and clean. The old environment-blocked CURRENT-STATE is superseded.
+
+The approved capless range reaches the existing native write; changed numeric whole-map quantities lose only inherited metadata. Same quantities and distinct replacement ranges survive. Existing typed admission, persistence gate, permission/freshness/science owners remain authoritative. Authored delta is seven files; the staging merge itself is not C product scope. Leases: #87/5973621012 and #87/5973679456; direct DL authority #87/5973230145 supersedes the brief's historic hot-file handback rule.
+
+Validation: FOCUSED-GREEN.json/log (61 PASS), NATIVE-FRAME-CONTROLS.json/log (4 PASS, remaining rows filtered), MUTANT-MANIFEST.json plus two mutant JSON/log pairs (one failure per injected defect, sources restored), SOURCE-TYPECHECK.log, SCOPED-LINT.log, SCHEMAS-GUARD-CURRENT.log, ACTUAL-PIN-RUNTIME.json, GREEN-SOURCE-HASHES.json. Committed bytes match these hashes. Original SEMANTIC-RED includes an initial capless fixture text mismatch: do not credit that admission failure. CAPLESS-SEMANTIC-RED is the corrected range-loss reproduction. Historical SCHEMAS-GUARD.log failed before dependency reconciliation; CURRENT is the actual passing guard. One authorised offline frozen install with scripts disabled completed; manifest/lock unchanged.
+
+Recovery: first inspect CURRENT-STATE.json and actual `git status --short` / `git rev-parse HEAD` in the exclusive checkout. Remote head was independently read through PR metadata after push. No running focused worker remains. Source patch ROUND2-TWO-P1-FIX.patch is banked (SHA256 b29ab8b45fd1c09cf2bca88da3d86b85ae7db6654509a9a4fdde2c4ece78221e); PUSH.log and PUBLISHED-PR-METADATA.json hold publication proof.
+
+NEXT: DL independently reviews exact head and current Required CI, then owns guarded merge/deployment. Do not self-approve, merge or claim JOURNEY from this packet. Most-likely follow-up stays behind2382; root/ScienceUI owns2542 coaching/replay and B3 stays with its owner. Range entered→approved storage→unit edit→canonical reload is still a served acceptance boundary, not earned here.
+
+Learning applied: test the admitted semantic loss rather than incidental fixture admission; rebind schemas after the baseline merge; restore mutants by bytes; stop broad/duplicate tests after focused checks and use one exact-head handback for review/release. No additional provider/browser/science validation.

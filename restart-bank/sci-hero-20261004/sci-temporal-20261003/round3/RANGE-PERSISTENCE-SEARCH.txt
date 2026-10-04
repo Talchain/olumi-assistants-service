@@ -1,0 +1,1169 @@
+src/orchestrator/canonicalise-value-ops.ts:1514:// (persisted-shape) graph. For update ops that means every field the applier
+src/orchestrator/canonicalise-value-ops.ts:1840: * persisted-shape graph the commit will store and the UI/analysis will read.
+src/orchestrator-v5/session/store.ts:154:   * When present, the graph JSONB is persisted to scenarios.graph atomically
+src/orchestrator-v5/session/store.ts:235:   * `computeGraphIdentityHash`) of the SERVER-SIDE persisted graph read at
+src/orchestrator-v5/session/store.ts:259:  /** Present only for an accepted persisted semantic graph mutation. */
+src/orchestrator-v5/session/store.ts:603:   * Load the persisted graph from scenarios.graph for a given scenario.
+src/orchestrator-v5/session/store.ts:616:   * Load both the persisted graph and the user-supplied brief_text from
+src/orchestrator-v5/session/derive-brief-seed.ts:21: *     executor passes `context.persistedGraph != null`, its server-side
+src/orchestrator-v5/session/derive-brief-seed.ts:84:   * graph. The turn-executor passes `context.persistedGraph != null` — the
+src/orchestrator-v5/session/agent-subturn-context.ts:14: * NULL (`persist-graph-write.ts`, the one floor every turn row passes). Nothing else about the row changes: its turn id,
+src/orchestrator/route-v2.ts:463: * `route-v2-no-persisted-graph-fallthrough.test.ts` is the current consumer.
+src/orchestrator/route-v2.ts:722:    // The redraft offer pins the persisted graph's analysis-affecting hash
+src/orchestrator/route-v2.ts:2510: * ⚠ ROADMAP 2.388 — `'no_persisted_graph'` IS NOW REACHABLE ONLY OFF THE FRAME
+src/orchestrator/route-v2.ts:2530:  | 'no_persisted_graph'
+src/orchestrator/route-v2.ts:2531:  | 'persisted_graph_invalid'
+src/orchestrator/route-v2.ts:3880:      // honest fresh-canvas answer (persistedGraph=null path) rather than a
+src/orchestrator/route-v2.ts:3882:      let persistedGraph: unknown | null = null;
+src/orchestrator/route-v2.ts:3887:        persistedGraph = state.graph;
+src/orchestrator/route-v2.ts:3895:          'S2-L1 readiness arm — persisted-graph read failed; degrading to fresh-canvas answer',
+src/orchestrator/route-v2.ts:3914:      const readiness = composeReadinessIntakeResponse(persistedGraph, ingress.stage);
+src/orchestrator/route-v2.ts:3917:      if (readiness.assessment && readinessPendingReadOk && persistedGraph !== null) {
+src/orchestrator/route-v2.ts:3920:            persistedGraph as GraphStateIngress,
+src/orchestrator/route-v2.ts:3974:        && persistedGraph !== null
+src/orchestrator/route-v2.ts:3978:            persistedGraph as GraphStateIngress,
+src/orchestrator/route-v2.ts:3984:              graph: persistedGraph,
+src/orchestrator/route-v2.ts:4204:        // precondition matches the persisted graph at confirm time. A read
+src/orchestrator/route-v2.ts:4215:          addOptionFrameGraph = turnContext.persistedGraph;
+src/orchestrator/route-v2.ts:4500:    // (persisted graph + recent turns via readRecent) — CEE memory does NOT
+src/orchestrator/route-v2.ts:4556:    let persistedGraphMemo:
+src/orchestrator/route-v2.ts:4561:      if (persistedGraphMemo === null) {
+src/orchestrator/route-v2.ts:4563:          persistedGraphMemo = {
+src/orchestrator/route-v2.ts:4568:          persistedGraphMemo = { ok: false, error: err };
+src/orchestrator/route-v2.ts:4571:      if (!persistedGraphMemo.ok) throw persistedGraphMemo.error;
+src/orchestrator/route-v2.ts:4572:      return persistedGraphMemo.value;
+src/orchestrator/route-v2.ts:4755:    // "Redraft the model" chip plus a persisted `draft_graph` pending with
+src/orchestrator/route-v2.ts:4760:    // never a silent ignore). On a failed persisted-state read graph
+src/orchestrator/route-v2.ts:4796:          if (persisted.graph != null) {
+src/orchestrator/route-v2.ts:4798:            explicitGenerateGraphPresent = { graphForHash: persisted.graph };
+src/orchestrator/route-v2.ts:4880:          : persisted.graph ?? null;
+src/orchestrator/route-v2.ts:5221:    // from the persisted graph), so this append introduces no new
+src/orchestrator/route-v2.ts:5373:        const persisted = await loadPersistedGraphOnce();
+src/orchestrator/route-v2.ts:6400:    // request bodies in the 2.308 diagnosis). The persisted graph that carries
+src/orchestrator/route-v2.ts:6413:        const persisted = await loadPersistedGraphOnce();
+src/orchestrator/route-v2.ts:6914:        persistedForClarify = await loadPersistedGraphOnce();
+src/orchestrator/route-v2.ts:6993:            return computeAnalysisAffectingGraphHash(persistedForClarify as GraphStateIngress);
+src/orchestrator/route-v2.ts:7103:          // one. Readiness is derived from the UNCHANGED persisted graph, so
+src/orchestrator/route-v2.ts:7133:    // the missing option×factor pairs are facts of the persisted graph, read
+src/orchestrator/route-v2.ts:7151:    // failure; a persisted graph that fails the SAME ingress parse the edit
+src/orchestrator/route-v2.ts:7258:          persistedForRepair = await loadPersistedGraphOnce();
+src/orchestrator/route-v2.ts:7264:      const repairGraph = repairGraphParse.success ? persistedForRepair as GraphStateIngress : null;
+src/orchestrator/route-v2.ts:7439:              return computeAnalysisAffectingGraphHash(persistedForRepair as GraphStateIngress);
+src/orchestrator/route-v2.ts:7471:            // readiness is derived from the UNCHANGED persisted graph, so the
+src/orchestrator/route-v2.ts:7489:          // persisted graph the edit dispatch will reload, by the SAME resolver
+src/orchestrator/route-v2.ts:7570:          // `session_store_failed` from `no_persisted_graph` for
+src/orchestrator/route-v2.ts:7578:          persisted = await loadPersistedGraphOnce();
+src/orchestrator/route-v2.ts:7581:          // "no_persisted_graph" so dashboards can separate
+src/orchestrator/route-v2.ts:7623:          // above) and `persisted_graph_invalid` (below) KEEP the recovery
+src/orchestrator/route-v2.ts:7641:          // turn with no persisted graph at all is a different (and much
+src/orchestrator/route-v2.ts:7648:            return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
+src/orchestrator/route-v2.ts:7679:            return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
+src/orchestrator/route-v2.ts:7902:          textFrameGraph = turnContext.persistedGraph;
+src/orchestrator/route-v2.ts:8761:    // or the persisted-graph fallback the executor loaded when the request
+src/routes/assist.v1.scenario-versions.ts:140:import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+src/routes/assist.v1.scenario-versions.ts:142:import { assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
+src/routes/assist.v1.scenario-versions.ts:146:} from "../orchestrator-v5/persisted-graph-invariants.js";
+src/routes/assist.v1.scenario-versions.ts:243: * (`persisted-graph-invariants.ts:195-260`). That predicate answers *"does the
+src/routes/assist.v1.scenario-versions.ts:1135:      // `persisted-graph-invariants.ts:195-204`, which quotes
+src/routes/assist.v1.scenario-versions.ts:1157:        // (`persist-graph-write.ts:272-274`). But neither existing event can
+src/orchestrator-v5/session/supabase-store.ts:2284:    // Track S 0.13c-4: persist-site intercept repair on the SECOND scenarios.graph
+src/schemas/graph.ts:472: * persisted one; `POST /assist/v1/graph-readiness` then refused THE SAME BYTES
+src/schemas/graph.ts:557:   *      re-posting a CEE-drafted or CEE-persisted graph actually sends.
+src/orchestrator-v5/graph-management/field-safety.ts:550://          no call site, no persisted graph, and no later context pack.
+src/orchestrator-v5/system-events/identity-confirm-edit.ts:35:import { normaliseAbsenceOnly } from '../persisted-graph-projection.js';
+src/orchestrator-v5/system-events/identity-confirm-edit.ts:77:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/identity-confirm-edit.ts:141:  if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
+src/orchestrator-v5/system-events/identity-confirm-edit.ts:145:  const hashBefore = computeAnalysisAffectingGraphHash(params.persistedGraph as never);
+src/orchestrator-v5/system-events/identity-confirm-edit.ts:148:  const graph = structuredClone(params.persistedGraph) as Rec & { nodes: unknown[]; edges: unknown[] };
+src/orchestrator-v5/system-events/identity-confirm-edit.ts:169:  const admitted = admitStoredProductDeclaration(params.persistedGraph, { outcome_id, factor_ids: distinct });
+src/orchestrator-v5/system-events/identity-confirm-edit.ts:176:    const today = part === undefined ? null : todaysLevelFor(params.persistedGraph, id);
+src/orchestrator-v5/system-events/limit-edit.ts:63:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/limit-edit.ts:78:  const { payload, request, requestId, persistedGraph, priorFacts } = params;
+src/orchestrator-v5/system-events/limit-edit.ts:82:  if (persistedGraph === null || persistedGraph === undefined) return refused('no_persisted_graph');
+src/orchestrator-v5/system-events/limit-edit.ts:83:  const graphParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/limit-edit.ts:85:    log.error({ ...logBase, event: 'v5.system_event.limit_edit.persisted_graph_invalid' }, 'limit_edit — non-null persisted graph is malformed; failing closed');
+src/orchestrator-v5/system-events/limit-edit.ts:91:  const currentBaseHash = computeAnalysisAffectingGraphHash(persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+src/orchestrator-v5/system-events/limit-edit.ts:94:      'limit_edit — base hash diverged from the persisted graph; refusing');
+src/orchestrator-v5/system-events/limit-edit.ts:110:  const rows = rowsOf(persistedGraph).filter((c) => c.node_id === request.node_id && c.operator === request.operator);
+src/orchestrator-v5/system-events/limit-edit.ts:135:    persistedGraph,
+src/orchestrator-v5/system-events/limit-edit.ts:165:    && rowsOf(result.mutatedGraph).length === rowsOf(persistedGraph).length;
+src/orchestrator-v5/system-events/editable-graph.ts:10:import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/graph-management/candidate-graph.ts:9: * persistence merge seam (`mergeMutatedGraphForPersistence`) is NEVER imported
+src/orchestrator-v5/graph-management/candidate-graph.ts:124:  persistedGraph: unknown,
+src/orchestrator-v5/graph-management/candidate-graph.ts:128:    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+src/orchestrator-v5/graph-management/candidate-graph.ts:151:  persistedGraph: unknown,
+src/orchestrator-v5/graph-management/candidate-graph.ts:155:    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+src/orchestrator-v5/graph-management/candidate-graph.ts:176:  persistedGraph: unknown,
+src/orchestrator-v5/graph-management/candidate-graph.ts:180:    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+src/orchestrator-v5/graph-management/candidate-graph.ts:191:  persistedGraph: unknown,
+src/orchestrator-v5/graph-management/candidate-graph.ts:195:    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+src/orchestrator-v5/graph-management/candidate-graph.ts:325:  persistedGraph: unknown,
+src/orchestrator-v5/graph-management/candidate-graph.ts:329:    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+src/orchestrator-v5/graph-management/candidate-graph.ts:354:  persistedGraph: unknown,
+src/orchestrator-v5/graph-management/candidate-graph.ts:358:    const { mutatedGraph } = applyAndValidateMutation(persistedGraph, (clone: GraphV3T) => {
+src/orchestrator-v5/system-events/option-status-edit.ts:36:import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/system-events/option-status-edit.ts:87:  /** Raw graph from the STRICT server-side persisted-graph read. Never client-supplied. */
+src/orchestrator-v5/system-events/option-status-edit.ts:88:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/option-status-edit.ts:93:    super('option_status_edit: the persisted graph is present but malformed');
+src/orchestrator-v5/system-events/option-status-edit.ts:156:  const { payload, event, requestId, persistedGraph } = params;
+src/orchestrator-v5/system-events/option-status-edit.ts:160:  if (persistedGraph === null || persistedGraph === undefined) {
+src/orchestrator-v5/system-events/option-status-edit.ts:161:    log.info({ ...logBase, event: 'v5.system_event.option_status_edit.no_persisted_graph' }, 'option_status_edit — no persisted model; refusing');
+src/orchestrator-v5/system-events/option-status-edit.ts:162:    return refuse(payload, 'no_persisted_graph', `There's no saved model I can safely change yet, so I haven't changed anything.`);
+src/orchestrator-v5/system-events/option-status-edit.ts:164:  const graphParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/option-status-edit.ts:166:    log.error({ ...logBase, event: 'v5.system_event.option_status_edit.persisted_graph_invalid',
+src/orchestrator-v5/system-events/option-status-edit.ts:167:      first_issue_path: graphParse.error.issues[0]?.path.join('.') ?? '' }, 'option_status_edit — persisted graph malformed; failing closed');
+src/orchestrator-v5/system-events/option-status-edit.ts:173:  const currentBaseHash = computeAnalysisAffectingGraphHash(persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+src/orchestrator-v5/system-events/option-status-edit.ts:226:  if (!isDeepStrictEqual(projectGraphForPersistence(persistedGraph, projectionCtx), normaliseAbsenceOnly(persistedGraph))) {
+src/orchestrator-v5/system-events/option-status-edit.ts:231:  const projectedGraph = structuredClone(persistedGraph) as { nodes: unknown[] } & Record<string, unknown>;
+src/orchestrator-v5/system-events/option-status-edit.ts:256:  if (!isDeepStrictEqual(restored, persistedGraph)) {
+src/orchestrator-v5/system-events/option-status-edit.ts:293:    baseGraph: persistedGraph,
+src/routes/scenario-graph-analysis-read.ts:268:    // `rawPersistedGraph: canonicaliseForAnalysis(persistedGraph)`, and
+src/routes/scenario-graph-analysis-read.ts:297:    // and the writers derive their expected base from the RAW persisted graph
+src/orchestrator-v5/system-events/structural-add.ts:156:import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/system-events/structural-add.ts:186: * A non-null persisted graph that fails GraphV3 is CORRUPTION, not absence.
+src/orchestrator-v5/system-events/structural-add.ts:191:    super('structural_add persisted graph failed GraphV3 validation');
+src/orchestrator-v5/system-events/structural-add.ts:223:  /** Raw graph from the STRICT server-side persisted-graph read. Never client-supplied. */
+src/orchestrator-v5/system-events/structural-add.ts:224:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/structural-add.ts:337: * silently persisting a graph whose two option views disagree.
+src/orchestrator-v5/system-events/structural-add.ts:408:  const { payload, event, requestId, persistedGraph } = params;
+src/orchestrator-v5/system-events/structural-add.ts:411:  if (persistedGraph === null || persistedGraph === undefined) {
+src/orchestrator-v5/system-events/structural-add.ts:414:        event: 'v5.system_event.structural_add.no_persisted_graph',
+src/orchestrator-v5/system-events/structural-add.ts:418:      'structural_add — no persisted model; refusing without a graph write',
+src/orchestrator-v5/system-events/structural-add.ts:422:      'no_persisted_graph',
+src/orchestrator-v5/system-events/structural-add.ts:426:  const graphParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/structural-add.ts:430:        event: 'v5.system_event.structural_add.persisted_graph_invalid',
+src/orchestrator-v5/system-events/structural-add.ts:435:      'structural_add — non-null persisted graph is malformed; failing closed',
+src/orchestrator-v5/system-events/structural-add.ts:443:    persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/structural-add.ts:454:      'structural_add — client base hash diverged from the persisted graph; refusing the add',
+src/orchestrator-v5/system-events/structural-add.ts:499:      'structural_add — the requested kind is outside the persisted graph vocabulary; refusing before the write',
+src/orchestrator-v5/system-events/structural-add.ts:560:  const ingressParse = GraphStateIngressSchema.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/structural-add.ts:583:  // into `persistedGraph`, which `dispatch.ts` hashes as the atomic-CAS expected
+src/orchestrator-v5/system-events/structural-add.ts:591:      persistedBase: persistedGraph,
+src/orchestrator-v5/system-events/structural-add.ts:812:    baseGraph: persistedGraph,
+src/orchestrator-v5/session/pending-action.ts:448:       * graph. `preconditions.graph_hash` carries the persisted graph's
+src/orchestrator-v5/system-events/link-effect-edit.ts:54:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/link-effect-edit.ts:141:  if (!isRec(params.persistedGraph) || !Array.isArray(params.persistedGraph.nodes) || !Array.isArray(params.persistedGraph.edges)) {
+src/orchestrator-v5/system-events/link-effect-edit.ts:144:  const graph = structuredClone(params.persistedGraph) as Rec & { nodes: unknown[]; edges: unknown[] };
+src/orchestrator-v5/system-events/link-effect-edit.ts:152:  if (computeAnalysisAffectingGraphHash(params.persistedGraph as never) !== expected.graph_hash
+src/orchestrator-v5/system-events/link-effect-edit.ts:153:    || linkEffectEdgeToken(params.persistedGraph, from, to) !== expected.edge_token) {
+src/orchestrator-v5/system-events/olumi-option-adoption.ts:23:import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/system-events/olumi-option-adoption.ts:163:      || committed.persistedAnalysisGraphHash !== applied.graph_hash) {
+src/orchestrator/context/intake-option-reconciliation.ts:292: * root-level `options` (the persisted graph). Taking both means this never
+src/orchestrator-v5/tools/handlers/adjust-edge-strength.ts:157:      const rawGraph = invocation.graphForTurn ?? invocation.context.persistedGraph ?? null;
+src/routes/assist.v1.scenario-graph.ts:243: * Keys that would mean canvas LAYOUT had been persisted into `scenarios.graph`.
+src/routes/assist.v1.scenario-graph.ts:702:        // `computeAnalysisAffectingGraphHash(persistedGraph)` equals it. Until
+src/routes/assist.v1.scenario-graph.ts:727:        // derive from the persisted graph. The two agree on a graph already in
+src/orchestrator-v5/system-events/factor-value-edit.ts:126:      /** The PRE-mutation persisted graph, for the commit's CAS expected base. */
+src/orchestrator-v5/system-events/factor-value-edit.ts:159:  /** The scenario's persisted graph, already loaded by the caller. */
+src/orchestrator-v5/system-events/factor-value-edit.ts:160:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/factor-value-edit.ts:206:  persistedGraph: unknown,
+src/orchestrator-v5/system-events/factor-value-edit.ts:226:  // is contractually "the persisted graph's analysis-affecting hash", and the
+src/orchestrator-v5/system-events/factor-value-edit.ts:237:      persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/factor-value-edit.ts:292:  const { payload, event, requestId, persistedGraph, priorFacts } = params;
+src/orchestrator-v5/system-events/factor-value-edit.ts:307:  const graphParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/factor-value-edit.ts:308:  if (!persistedGraph || !graphParse.success || graphParse.data.nodes.length === 0) {
+src/orchestrator-v5/system-events/factor-value-edit.ts:311:        event: 'v5.system_event.factor_value_edit.no_persisted_graph',
+src/orchestrator-v5/system-events/factor-value-edit.ts:320:      'no_persisted_graph',
+src/orchestrator-v5/system-events/factor-value-edit.ts:647:    return refuseFromValidationError(payload, validation.error, lookup, persistedGraph);
+src/orchestrator-v5/system-events/factor-value-edit.ts:662:  // `context.persistedGraph` (fallback graph). `HandlerInvocation.payload` is
+src/orchestrator-v5/system-events/factor-value-edit.ts:675:      persistedGraph,
+src/orchestrator-v5/system-events/factor-value-edit.ts:678:      // `persistedGraph` (fallback graph) — and both are populated honestly above.
+src/orchestrator-v5/system-events/factor-value-edit.ts:686:      // forbidden-exempt: bounded shim — the handler reads only prior_facts + persistedGraph, both populated honestly; widening HandlerInvocation.payload to the payload union is the structural fix and rides its own train
+src/orchestrator-v5/system-events/factor-value-edit.ts:776:    persistedBase: persistedGraph,
+src/orchestrator-v5/system-events/factor-value-edit.ts:871:    baseGraph: persistedGraph,
+src/orchestrator-v5/system-events/dispatch.ts:22: *     add_constraint), then atomically persist graph + fact with a
+src/orchestrator-v5/system-events/dispatch.ts:128:  persistedAnalysisGraphHash: string | null,
+src/orchestrator-v5/system-events/dispatch.ts:134:    persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:145:    return deriveAnalysisFreshness([], persistedAnalysisGraphHash, undefined, { priorFactsReadOk: false, currentGraph });
+src/orchestrator-v5/system-events/dispatch.ts:361: * So this reads the CURRENT persisted graph and answers in analysis space.
+src/orchestrator-v5/system-events/dispatch.ts:499: * `graphPersisted` is still `true` ("a graph was PROVIDED") and `persistedGraph`
+src/orchestrator-v5/system-events/dispatch.ts:500: * / `persistedAnalysisGraphHash` are the authoritative REREAD — a display
+src/orchestrator-v5/system-events/dispatch.ts:526: * `no_persisted_graph`), which wrote no graph. Retried under that turn id once
+src/orchestrator-v5/system-events/dispatch.ts:551:  readonly persistedGraphBytes: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:552:  readonly persistedAnalysisGraphHash: string | null;
+src/orchestrator-v5/system-events/dispatch.ts:574:    persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:575:    persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:578:  const snapshotParse = GraphV3.safeParse(persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:580:    snapshotParse.success && persistedAnalysisGraphHash !== null
+src/orchestrator-v5/system-events/dispatch.ts:581:      ? { graph: snapshotParse.data, hash: persistedAnalysisGraphHash }
+src/orchestrator-v5/system-events/dispatch.ts:641:  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(analysisInputs, snapshot.hash, persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:1427:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:1437:    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+src/orchestrator-v5/system-events/dispatch.ts:1471:      persistedGraph,
+src/orchestrator-v5/system-events/dispatch.ts:1498:  const persistedParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/dispatch.ts:1502:        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/dispatch.ts:1594:  let persistedAnalysisGraphHash: string | null = null;
+src/orchestrator-v5/system-events/dispatch.ts:1595:  let persistedGraphBytes: unknown = null;
+src/orchestrator-v5/system-events/dispatch.ts:1646:    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+src/orchestrator-v5/system-events/dispatch.ts:1647:    persistedGraphBytes = commitResult.persistedGraph;
+src/orchestrator-v5/system-events/dispatch.ts:1709:      persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:1710:      persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:1739:  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:1742:    committed: persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:1750:      after: persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:1764:    persistedAnalysisGraphHash === null ||
+src/orchestrator-v5/system-events/dispatch.ts:1775:        graph_persisted: graphPersisted,
+src/orchestrator-v5/system-events/dispatch.ts:1776:        has_analysis_hash: persistedAnalysisGraphHash !== null,
+src/orchestrator-v5/system-events/dispatch.ts:1792:    ...(persistedAnalysisGraphHash !== null
+src/orchestrator-v5/system-events/dispatch.ts:1793:      ? { graph_hash: persistedAnalysisGraphHash }
+src/orchestrator-v5/system-events/dispatch.ts:1800:  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:1840: *   1. load the persisted graph STRICTLY — the trusted base is the SERVER's own
+src/orchestrator-v5/system-events/dispatch.ts:1895:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:1905:    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+src/orchestrator-v5/system-events/dispatch.ts:1932:    result = applyStructuralDelete({ payload, event, requestId, persistedGraph });
+src/orchestrator-v5/system-events/dispatch.ts:1934:    // A malformed-but-present persisted graph lands here (corruption, not
+src/orchestrator-v5/system-events/dispatch.ts:1956:  const persistedParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/dispatch.ts:1960:        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/dispatch.ts:2051:  let persistedAnalysisGraphHash: string | null = null;
+src/orchestrator-v5/system-events/dispatch.ts:2052:  let persistedGraphBytes: unknown = null;
+src/orchestrator-v5/system-events/dispatch.ts:2118:    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+src/orchestrator-v5/system-events/dispatch.ts:2119:    persistedGraphBytes = commitResult.persistedGraph;
+src/orchestrator-v5/system-events/dispatch.ts:2181:      persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:2182:      persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:2212:  // `commitResult.persistedGraph` is `graphForStore`, and `commit.ts:372-373`
+src/orchestrator-v5/system-events/dispatch.ts:2227:  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:2241:    persistedAnalysisGraphHash === null ||
+src/orchestrator-v5/system-events/dispatch.ts:2251:        graph_persisted: graphPersisted,
+src/orchestrator-v5/system-events/dispatch.ts:2252:        has_analysis_hash: persistedAnalysisGraphHash !== null,
+src/orchestrator-v5/system-events/dispatch.ts:2269:    graph_hash: persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:2276:  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:2321: *   1. load the persisted graph STRICTLY (throws on a degraded read — never
+src/orchestrator-v5/system-events/dispatch.ts:2336:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:2338:    persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+src/orchestrator-v5/system-events/dispatch.ts:2350:      'V5 factor_value_edit — persisted-graph read failed; refusing the write (fail closed)',
+src/orchestrator-v5/system-events/dispatch.ts:2388:    persistedGraph,
+src/orchestrator-v5/system-events/dispatch.ts:2452:  let persistedAnalysisGraphHash: string | null = null;
+src/orchestrator-v5/system-events/dispatch.ts:2453:  let persistedGraphBytes: unknown = null;
+src/orchestrator-v5/system-events/dispatch.ts:2504:    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+src/orchestrator-v5/system-events/dispatch.ts:2505:    persistedGraphBytes = commitResult.persistedGraph;
+src/orchestrator-v5/system-events/dispatch.ts:2590:  // `persistedAnalysisGraphHash` is documented as "the only hash a caller may
+src/orchestrator-v5/system-events/dispatch.ts:2601:  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:2606:    ...(persistedAnalysisGraphHash !== null
+src/orchestrator-v5/system-events/dispatch.ts:2607:      ? { graph_hash: persistedAnalysisGraphHash }
+src/orchestrator-v5/system-events/dispatch.ts:2654:    persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:2655:    persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:3059:    // CURRENT persisted graph in analysis space — the same space the client
+src/orchestrator-v5/system-events/dispatch.ts:3357:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:3360:    [persistedGraph, priorPendings] = await Promise.all([
+src/orchestrator-v5/system-events/dispatch.ts:3369:  if (persistedGraph === null || persistedGraph === undefined) return { status: 'refused', reason: 'no_persisted_graph' };
+src/orchestrator-v5/system-events/dispatch.ts:3372:    currentHash = computeAnalysisAffectingGraphHash(persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+src/orchestrator-v5/system-events/dispatch.ts:3383:    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash, persistedGraph);
+src/orchestrator-v5/system-events/dispatch.ts:3390:    currentGraph: persistedGraph,
+src/orchestrator-v5/system-events/dispatch.ts:3482:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:3485:    [persistedGraph, priorPendings] = await Promise.all([
+src/orchestrator-v5/system-events/dispatch.ts:3494:  if (persistedGraph === null || persistedGraph === undefined) return { status: 'refused', reason: 'no_persisted_graph' };
+src/orchestrator-v5/system-events/dispatch.ts:3497:    currentHash = computeAnalysisAffectingGraphHash(persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0]);
+src/orchestrator-v5/system-events/dispatch.ts:3506:    freshness = preWriteRefereeFreshness(await loadPriorFactsWithReadState(input.scenario_id, requestId), currentHash, persistedGraph);
+src/orchestrator-v5/system-events/dispatch.ts:3516:    currentGraph: persistedGraph,
+src/orchestrator-v5/system-events/dispatch.ts:3616:      apply: (persistedGraph, priorFacts) => applyLimitEdit({
+src/orchestrator-v5/system-events/dispatch.ts:3621:        persistedGraph,
+src/orchestrator-v5/system-events/dispatch.ts:3659:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:3677:    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+src/orchestrator-v5/system-events/dispatch.ts:3704:    result = applyStructuralRename({ payload, event, requestId, persistedGraph });
+src/orchestrator-v5/system-events/dispatch.ts:3706:    // A malformed-but-present persisted graph lands here (corruption, not
+src/orchestrator-v5/system-events/dispatch.ts:3728:  const persistedParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/dispatch.ts:3732:        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/dispatch.ts:3804:  let persistedAnalysisGraphHash: string | null = null;
+src/orchestrator-v5/system-events/dispatch.ts:3805:  let persistedGraphBytes: unknown = null;
+src/orchestrator-v5/system-events/dispatch.ts:3848:    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+src/orchestrator-v5/system-events/dispatch.ts:3849:    persistedGraphBytes = commitResult.persistedGraph;
+src/orchestrator-v5/system-events/dispatch.ts:3905:  // `persistedGraph` is a reread another writer (or this request's own earlier
+src/orchestrator-v5/system-events/dispatch.ts:3917:      persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:3918:      persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:3939:  // sibling: `commitResult.persistedGraph` is `graphForStore` — "this commit's
+src/orchestrator-v5/system-events/dispatch.ts:3945:  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:3949:      persistedGraphBytes as Record<string, unknown>,
+src/orchestrator-v5/system-events/dispatch.ts:3956:    persistedAnalysisGraphHash === null ||
+src/orchestrator-v5/system-events/dispatch.ts:3966:        graph_persisted: graphPersisted,
+src/orchestrator-v5/system-events/dispatch.ts:3967:        has_analysis_hash: persistedAnalysisGraphHash !== null,
+src/orchestrator-v5/system-events/dispatch.ts:3979:    graph_hash: persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:3995:  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:4039:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:4045:    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+src/orchestrator-v5/system-events/dispatch.ts:4072:    result = applyOptionStatusEdit({ payload, event, requestId, persistedGraph });
+src/orchestrator-v5/system-events/dispatch.ts:4093:  const persistedParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/dispatch.ts:4097:        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/dispatch.ts:4163:  let persistedAnalysisGraphHash: string | null = null;
+src/orchestrator-v5/system-events/dispatch.ts:4164:  let persistedGraphBytes: unknown = null;
+src/orchestrator-v5/system-events/dispatch.ts:4197:    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+src/orchestrator-v5/system-events/dispatch.ts:4198:    persistedGraphBytes = commitResult.persistedGraph;
+src/orchestrator-v5/system-events/dispatch.ts:4255:      persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:4256:      persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:4264:      && optionStatusHolds(persistedGraphBytes, result.optionId, result.status);
+src/orchestrator-v5/system-events/dispatch.ts:4272:  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:4274:    committedParse.success && optionStatusHolds(persistedGraphBytes, result.optionId, result.status);
+src/orchestrator-v5/system-events/dispatch.ts:4278:    persistedAnalysisGraphHash === null ||
+src/orchestrator-v5/system-events/dispatch.ts:4288:        graph_persisted: graphPersisted,
+src/orchestrator-v5/system-events/dispatch.ts:4289:        has_analysis_hash: persistedAnalysisGraphHash !== null,
+src/orchestrator-v5/system-events/dispatch.ts:4301:    graph_hash: persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:4314:  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:4407:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:4413:    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+src/orchestrator-v5/system-events/dispatch.ts:4440:    result = applyStructuralAdd({ payload, event, requestId, persistedGraph });
+src/orchestrator-v5/system-events/dispatch.ts:4461:  const persistedParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/dispatch.ts:4465:        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/dispatch.ts:4531:  let persistedAnalysisGraphHash: string | null = null;
+src/orchestrator-v5/system-events/dispatch.ts:4532:  let persistedGraphBytes: unknown = null;
+src/orchestrator-v5/system-events/dispatch.ts:4573:    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+src/orchestrator-v5/system-events/dispatch.ts:4574:    persistedGraphBytes = commitResult.persistedGraph;
+src/orchestrator-v5/system-events/dispatch.ts:4627:  // and `persistedGraph` is a reread another writer (or this request's own
+src/orchestrator-v5/system-events/dispatch.ts:4640:      persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:4641:      persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:4661:  // `commitResult.persistedGraph` is `graphForStore` — "this commit's own input
+src/orchestrator-v5/system-events/dispatch.ts:4667:  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:4675:      persistedGraphBytes as Record<string, unknown>,
+src/orchestrator-v5/system-events/dispatch.ts:4681:    persistedAnalysisGraphHash === null ||
+src/orchestrator-v5/system-events/dispatch.ts:4691:        graph_persisted: graphPersisted,
+src/orchestrator-v5/system-events/dispatch.ts:4692:        has_analysis_hash: persistedAnalysisGraphHash !== null,
+src/orchestrator-v5/system-events/dispatch.ts:4704:    graph_hash: persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:4711:  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:4771:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:4777:    [persistedGraph, priorPendingActions, factsRead] = await Promise.all([
+src/orchestrator-v5/system-events/dispatch.ts:4804:    result = applyStructuralAddEdge({ payload, event, requestId, persistedGraph });
+src/orchestrator-v5/system-events/dispatch.ts:4807:    // persisted graph that fails GraphV3 is CORRUPTION, not absence, and must
+src/orchestrator-v5/system-events/dispatch.ts:4814:        corrupt_persisted_graph: err instanceof InvalidPersistedAddEdgeGraphError,
+src/orchestrator-v5/system-events/dispatch.ts:4829:  const persistedParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/dispatch.ts:4833:        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/dispatch.ts:4899:  let persistedAnalysisGraphHash: string | null = null;
+src/orchestrator-v5/system-events/dispatch.ts:4900:  let persistedGraphBytes: unknown = null;
+src/orchestrator-v5/system-events/dispatch.ts:4935:    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+src/orchestrator-v5/system-events/dispatch.ts:4936:    persistedGraphBytes = commitResult.persistedGraph;
+src/orchestrator-v5/system-events/dispatch.ts:4999:      persistedGraphBytes,
+src/orchestrator-v5/system-events/dispatch.ts:5000:      persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:5014:  // `commitResult.persistedGraph` is this commit's own input after projection,
+src/orchestrator-v5/system-events/dispatch.ts:5019:  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:5028:    persistedAnalysisGraphHash === null ||
+src/orchestrator-v5/system-events/dispatch.ts:5038:        graph_persisted: graphPersisted,
+src/orchestrator-v5/system-events/dispatch.ts:5039:        has_analysis_hash: persistedAnalysisGraphHash !== null,
+src/orchestrator-v5/system-events/dispatch.ts:5051:    graph_hash: persistedAnalysisGraphHash,
+src/orchestrator-v5/system-events/dispatch.ts:5055:  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:5131:      apply: (persistedGraph, priorFacts) => applyGoalTargetEdit({ payload, event, requestId, persistedGraph, priorFacts }),
+src/orchestrator-v5/system-events/dispatch.ts:5153:    readonly apply: (persistedGraph: unknown, priorFacts: readonly HandlerFact[]) => Promise<GoalTargetEditResult>;
+src/orchestrator-v5/system-events/dispatch.ts:5167:  let persistedGraph: unknown;
+src/orchestrator-v5/system-events/dispatch.ts:5169:    persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+src/orchestrator-v5/system-events/dispatch.ts:5179:      `V5 ${event.kind} — persisted-graph read failed; refusing the write (fail closed)`,
+src/orchestrator-v5/system-events/dispatch.ts:5193:    result = await spec.apply(persistedGraph, priorFactsRead.facts);
+src/orchestrator-v5/system-events/dispatch.ts:5195:    // A malformed-but-present persisted graph (corruption, not absence) or an
+src/orchestrator-v5/system-events/dispatch.ts:5244:  let persistedAnalysisGraphHash: string | null = null;
+src/orchestrator-v5/system-events/dispatch.ts:5245:  let persistedGraphBytes: unknown = null;
+src/orchestrator-v5/system-events/dispatch.ts:5277:    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+src/orchestrator-v5/system-events/dispatch.ts:5278:    persistedGraphBytes = commitResult.persistedGraph;
+src/orchestrator-v5/system-events/dispatch.ts:5330:  // LANDED (`commitResult.persistedGraph`), never our pre-projection copy.
+src/orchestrator-v5/system-events/dispatch.ts:5331:  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+src/orchestrator-v5/system-events/dispatch.ts:5335:    ...(persistedAnalysisGraphHash !== null ? { graph_hash: persistedAnalysisGraphHash } : {}),
+src/orchestrator-v5/system-events/dispatch.ts:5340:  const freshness: FreshnessDerivation = deriveWriteReplyFreshness(factsRead, persistedAnalysisGraphHash, persistedGraphBytes);
+src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts:15: * persist a graph that violates the canonical schema. Schema-violation
+src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts:140: * server-authoritative persisted graph shape before persistence.
+src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts:179: *   - `persistedBase === null` — a GENUINELY-empty `scenarios.graph`
+src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts:183: *     nodes+edges arrays) — malformed-but-READABLE persisted graph.
+src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts:206:   * Raw persisted `scenarios.graph` (pre-mutation), or null for a
+src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts:263:      'V5 D1 — persisted scenarios.graph was non-null but structurally unusable; healing forward via the mutated ingress-shaped graph (no rich top-level fields recoverable from a malformed graph)',
+src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts:268:      'V5 D1 — mutated graph merged onto persisted graph shape for persistence',
+src/orchestrator-v5/agent-lane/structural-facts.ts:11: * Every field here is computed from the persisted graph by traversal. Nothing
+src/orchestrator-v5/system-events/structural-delete.ts:14: * against the server's own persisted graph and routes it through the canonical
+src/orchestrator-v5/system-events/structural-delete.ts:32: * id below is resolved against `persistedGraph`.
+src/orchestrator-v5/system-events/structural-delete.ts:69:import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/system-events/structural-delete.ts:98: * A non-null persisted graph that fails GraphV3 is CORRUPTION, not absence.
+src/orchestrator-v5/system-events/structural-delete.ts:104:    super('structural_delete persisted graph failed GraphV3 validation');
+src/orchestrator-v5/system-events/structural-delete.ts:113:      /** The projected graph to persist (full ingress shape, not the GraphV3 subset). */
+src/orchestrator-v5/system-events/structural-delete.ts:138:  /** Raw graph from the STRICT server-side persisted-graph read. Never client-supplied. */
+src/orchestrator-v5/system-events/structural-delete.ts:139:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/structural-delete.ts:424:  const { payload, event, requestId, persistedGraph } = params;
+src/orchestrator-v5/system-events/structural-delete.ts:427:  if (persistedGraph === null || persistedGraph === undefined) {
+src/orchestrator-v5/system-events/structural-delete.ts:430:        event: 'v5.system_event.structural_delete.no_persisted_graph',
+src/orchestrator-v5/system-events/structural-delete.ts:434:      'structural_delete — no persisted model; refusing without a graph write',
+src/orchestrator-v5/system-events/structural-delete.ts:438:      'no_persisted_graph',
+src/orchestrator-v5/system-events/structural-delete.ts:442:  const graphParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/structural-delete.ts:446:        event: 'v5.system_event.structural_delete.persisted_graph_invalid',
+src/orchestrator-v5/system-events/structural-delete.ts:451:      'structural_delete — non-null persisted graph is malformed; failing closed',
+src/orchestrator-v5/system-events/structural-delete.ts:463:    persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/structural-delete.ts:475:      'structural_delete — client base hash diverged from the persisted graph; refusing the removal',
+src/orchestrator-v5/system-events/structural-delete.ts:492:  // user asked for. Duplicates in the persisted graph are refused rather than
+src/orchestrator-v5/system-events/structural-delete.ts:628:  // structurally unusable — unreachable here, because a malformed persisted graph
+src/orchestrator-v5/system-events/structural-delete.ts:634:  const ingressParse = GraphStateIngressSchema.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/structural-delete.ts:660:  // without this clone it writes THROUGH the spread and rewrites `persistedGraph`
+src/orchestrator-v5/system-events/structural-delete.ts:664:  // atomic-CAS expected base from `result.baseGraph` (i.e. `persistedGraph`)
+src/orchestrator-v5/system-events/structural-delete.ts:671:  // The two other post-adapter readers of `persistedGraph` in `dispatch.ts` —
+src/orchestrator-v5/system-events/structural-delete.ts:690:      persistedBase: persistedGraph,
+src/orchestrator-v5/system-events/structural-delete.ts:932:    baseGraph: persistedGraph,
+src/orchestrator-v5/system-events/structural-add-edge.ts:126:import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/system-events/structural-add-edge.ts:143:/** A non-null persisted graph that fails GraphV3 is CORRUPTION, not absence. */
+src/orchestrator-v5/system-events/structural-add-edge.ts:146:    super('structural_add_edge persisted graph failed GraphV3 validation');
+src/orchestrator-v5/system-events/structural-add-edge.ts:176:  /** Raw graph from the STRICT server-side persisted-graph read. Never client-supplied. */
+src/orchestrator-v5/system-events/structural-add-edge.ts:177:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/structural-add-edge.ts:236:  const { payload, event, requestId, persistedGraph } = params;
+src/orchestrator-v5/system-events/structural-add-edge.ts:239:  if (persistedGraph === null || persistedGraph === undefined) {
+src/orchestrator-v5/system-events/structural-add-edge.ts:242:        event: 'v5.system_event.structural_add_edge.no_persisted_graph',
+src/orchestrator-v5/system-events/structural-add-edge.ts:246:      'structural_add_edge — no persisted model; refusing without a graph write',
+src/orchestrator-v5/system-events/structural-add-edge.ts:250:      'no_persisted_graph',
+src/orchestrator-v5/system-events/structural-add-edge.ts:254:  const graphParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/structural-add-edge.ts:258:        event: 'v5.system_event.structural_add_edge.persisted_graph_invalid',
+src/orchestrator-v5/system-events/structural-add-edge.ts:263:      'structural_add_edge — non-null persisted graph is malformed; failing closed',
+src/orchestrator-v5/system-events/structural-add-edge.ts:306:    persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/structural-add-edge.ts:346:      'structural_add_edge — an endpoint does not resolve in the persisted graph; refusing',
+src/orchestrator-v5/system-events/structural-add-edge.ts:434:  const ingressParse = GraphStateIngressSchema.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/structural-add-edge.ts:453:  // rather than copied would write through into `persistedGraph`, which
+src/orchestrator-v5/system-events/structural-add-edge.ts:458:      persistedBase: persistedGraph,
+src/orchestrator-v5/system-events/structural-add-edge.ts:604:    baseGraph: persistedGraph,
+src/orchestrator-v5/system-events/goal-target-edit.ts:110: * A non-null persisted graph that fails GraphV3 is CORRUPTION, not absence.
+src/orchestrator-v5/system-events/goal-target-edit.ts:115:    super('goal_target_edit persisted graph failed GraphV3 validation');
+src/orchestrator-v5/system-events/goal-target-edit.ts:124:  /** The scenario's persisted graph, read strictly by the caller. */
+src/orchestrator-v5/system-events/goal-target-edit.ts:125:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/goal-target-edit.ts:137:  const { payload, event, requestId, persistedGraph, priorFacts } = params;
+src/orchestrator-v5/system-events/goal-target-edit.ts:145:  if (persistedGraph === null || persistedGraph === undefined) {
+src/orchestrator-v5/system-events/goal-target-edit.ts:147:      { ...logBase, event: 'v5.system_event.goal_target_edit.no_persisted_graph' },
+src/orchestrator-v5/system-events/goal-target-edit.ts:150:    return refused('no_persisted_graph');
+src/orchestrator-v5/system-events/goal-target-edit.ts:152:  const graphParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/goal-target-edit.ts:157:        event: 'v5.system_event.goal_target_edit.persisted_graph_invalid',
+src/orchestrator-v5/system-events/goal-target-edit.ts:160:      'goal_target_edit — non-null persisted graph is malformed; failing closed',
+src/orchestrator-v5/system-events/goal-target-edit.ts:171:    persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/goal-target-edit.ts:181:      'goal_target_edit — client base hash diverged from the persisted graph; refusing',
+src/orchestrator-v5/system-events/goal-target-edit.ts:231:    persistedGraph,
+src/orchestrator-v5/system-events/goal-target-edit.ts:259:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/goal-target-edit.ts:260:  /** `persistedGraph`, already GraphV3-parsed by the caller. */
+src/orchestrator-v5/system-events/goal-target-edit.ts:278:    payload, requestId, persistedGraph, graph, priorFacts, targetId, constraintType, rawValue, unit, label,
+src/orchestrator-v5/system-events/goal-target-edit.ts:302:  // conventional path derives it from the persisted graph (`turn-executor.ts`,
+src/orchestrator-v5/system-events/goal-target-edit.ts:312:  const ingress = GraphStateIngressSchema.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/goal-target-edit.ts:313:  const graphForTurn: unknown = ingress.success ? ingress.data : persistedGraph;
+src/orchestrator-v5/system-events/goal-target-edit.ts:343:      persistedGraph,
+src/orchestrator-v5/system-events/goal-target-edit.ts:349:      // context fields — `persistedGraph` (fallback graph) and
+src/orchestrator-v5/system-events/goal-target-edit.ts:356:      // forbidden-exempt: bounded shim — add_constraint reads only persistedGraph + most_recent_pending_actions off the context, both populated honestly; mirrors factor-value-edit.ts
+src/orchestrator-v5/system-events/goal-target-edit.ts:427:    persistedBase: persistedGraph,
+src/orchestrator-v5/system-events/goal-target-edit.ts:453:    baseGraph: persistedGraph,
+src/orchestrator/context/constraint-feasibility.ts:474:/** A hard constraint the user ratified and CEE persisted on the graph. */
+src/orchestrator/context/constraint-feasibility.ts:813: * carrying a root-level `goal_constraints` (the persisted graph, where D1's
+src/routes/agent-v1-turn.ts:49:import { appendCheckedGraphWrite } from '../orchestrator-v5/persist-graph-write.js';
+src/routes/agent-v1-turn.ts:528: * Read the persisted state back for the response: `graph_hash`, readiness and
+src/routes/agent-v1-turn.ts:536: * against the persisted graph, never guessed from the words.
+src/routes/agent-v1-turn.ts:981:  /** The persisted graph as read — the leader wire gate reads its option ROSTER, never a verdict. */
+src/routes/agent-v1-turn.ts:2069:          // The persisted graph as read back — the same single cast COMPLETE's readback makes (`after.json.graph`).
+src/routes/agent-v1-turn.ts:2834:     * Read back from the persisted graph, not from what a tool returned: the
+src/utils/telemetry.ts:720:  // Fires once per floored field when the persisted graph carries a
+src/utils/telemetry.ts:1694:  // canvas selection, after the ids are resolved against the persisted graph.
+src/utils/telemetry.ts:1816:  //    absent on request, persisted graph reload from `scenarios.graph`
+src/utils/telemetry.ts:1819:  //    absent and the persisted graph either UNREADABLE or invalid. The route
+src/utils/telemetry.ts:1822:  //    Carries `reason: 'persisted_graph_invalid' | 'session_store_failed'`
+src/utils/telemetry.ts:1824:  //    ⚠ ROADMAP 2.388 — `reason: 'no_persisted_graph'` NO LONGER APPEARS ON
+src/utils/telemetry.ts:1837:  // persisted graph — i.e. an edit verb with nothing to edit, overwhelmingly a
+src/utils/telemetry.ts:1851:    "v5.edit_graph.no_persisted_graph_fallthrough",
+src/utils/telemetry.ts:2036:  // V5 Phase 1 brief persistence — fires from draft-graph-dispatch when the
+src/utils/telemetry.ts:2411:  // named a target entity that does not exist in the persisted graph; the
+src/utils/telemetry.ts:2420:  // ROADMAP 2.308 / S1 — the configure-option gate ATTEMPTED a persisted-graph
+src/utils/telemetry.ts:2459:  // which reconstructs memory from server-side state (persisted graph + recent
+src/orchestrator-v5/system-events/option-intervention-edit.ts:70:import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/system-events/option-intervention-edit.ts:93:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/option-intervention-edit.ts:277:    const prepared = prepareOptionInterventionEdit({ persistedGraph: input.persistedGraph,
+src/orchestrator-v5/system-events/option-intervention-edit.ts:288:  const before = input.persistedGraph;
+src/orchestrator-v5/system-events/option-intervention-edit.ts:476:      event: event as never, requestId: ctx.requestId, persistedGraph: working, priorFacts: [],
+src/orchestrator-v5/system-events/option-intervention-edit.ts:641:      event: event as never, requestId: ctx.requestId, persistedGraph: working, lastRunIdentityUse: ctx.lastRunIdentityUse,
+src/orchestrator-v5/system-events/option-intervention-edit.ts:666:export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactionInput, 'persistedGraph' | 'source'> & {
+src/orchestrator-v5/system-events/option-intervention-edit.ts:825:    const written = applyLinkEffectEdit({ persistedGraph: before, from: linkEffect.from, to: linkEffect.to, effect: linkEffect.effect,
+src/orchestrator-v5/system-events/option-intervention-edit.ts:857:    const written = applyIdentityConfirmEdit({ persistedGraph: before, outcome_id: identityConfirm.outcome_id,
+src/orchestrator-v5/system-events/option-intervention-edit.ts:884:    : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
+src/orchestrator-v5/system-events/option-intervention-edit.ts:932:    // CommitResult.persistedGraph is projected INPUT, not DB readback. A
+src/orchestrator-v5/system-events/option-intervention-edit.ts:1042:  const parsed = GraphStateIngressSchema.safeParse(input.persistedGraph);
+src/orchestrator-v5/intervention-range.ts:11: *      (`low ≤ point ≤ high`), is REFUSED — removed from the persisted graph — never stored beside a value it contradicts.
+src/orchestrator-v5/intervention-range.ts:98: * The writer rule, at the one persisted form (`projectGraphForPersistence`). Every refused range — on a node's
+src/config/index.ts:1211:    // NULL persisted-graph recovery kill-switch (CEE_RUN_ANALYSIS_NULL_GRAPH_RECOVERABLE).
+src/config/index.ts:1212:    // Default ON. When ON, run_analysis on a scenario whose persisted graph is NULL
+src/orchestrator-v5/normalise-option-interventions.ts:13: * `GraphV3.safeParse(persistedGraph)` STRIPS `node.data` on read
+src/orchestrator-v5/normalise-option-interventions.ts:48: * just options) → the persisted graph is unreadable and rerun fails
+src/orchestrator-v5/normalise-option-interventions.ts:126: * persisted graph unreadable and rerun fail `options_not_configured`/500. An
+src/orchestrator-v5/normalise-option-interventions.ts:335: *     option must never persist with `interventions:null`, which `GraphV3`
+src/orchestrator-v5/normalise-option-interventions.ts:371:    }, '[commit] node interventions invariant sweep threw; persisting the graph unchanged');
+src/orchestrator-v5/normalise-option-interventions.ts:391:    }, '[commit] option-contract promotion detect threw; persisting the swept graph');
+src/orchestrator-v5/normalise-option-interventions.ts:403:    }, '[commit] option-contract promotion could not clone the graph; persisting the swept graph');
+src/orchestrator-v5/normalise-option-interventions.ts:432:    }, '[commit] option-contract promotion threw after cloning; persisting the swept graph');
+src/orchestrator-v5/system-events/structural-rename.ts:23: * server-side persisted read … NEVER from request-supplied `graph_state`". The
+src/orchestrator-v5/system-events/structural-rename.ts:165:import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/system-events/structural-rename.ts:194: * A non-null persisted graph that fails GraphV3 is CORRUPTION, not absence.
+src/orchestrator-v5/system-events/structural-rename.ts:200:    super('structural_rename persisted graph failed GraphV3 validation');
+src/orchestrator-v5/system-events/structural-rename.ts:209:      /** The projected graph to persist (full ingress shape, not the GraphV3 subset). */
+src/orchestrator-v5/system-events/structural-rename.ts:235:  /** Raw graph from the STRICT server-side persisted-graph read. Never client-supplied. */
+src/orchestrator-v5/system-events/structural-rename.ts:236:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/structural-rename.ts:423: * `persistedGraph` is `dispatch.ts`'s CAS expected base and a write-through
+src/orchestrator-v5/system-events/structural-rename.ts:457:  const { payload, event, requestId, persistedGraph } = params;
+src/orchestrator-v5/system-events/structural-rename.ts:460:  if (persistedGraph === null || persistedGraph === undefined) {
+src/orchestrator-v5/system-events/structural-rename.ts:463:        event: 'v5.system_event.structural_rename.no_persisted_graph',
+src/orchestrator-v5/system-events/structural-rename.ts:467:      'structural_rename — no persisted model; refusing without a graph write',
+src/orchestrator-v5/system-events/structural-rename.ts:471:      'no_persisted_graph',
+src/orchestrator-v5/system-events/structural-rename.ts:475:  const graphParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/structural-rename.ts:479:        event: 'v5.system_event.structural_rename.persisted_graph_invalid',
+src/orchestrator-v5/system-events/structural-rename.ts:484:      'structural_rename — non-null persisted graph is malformed; failing closed',
+src/orchestrator-v5/system-events/structural-rename.ts:492:    persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+src/orchestrator-v5/system-events/structural-rename.ts:504:      'structural_rename — client base hash diverged from the persisted graph; refusing the rename',
+src/orchestrator-v5/system-events/structural-rename.ts:657:  const ingressParse = GraphStateIngressSchema.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/structural-rename.ts:678:  // this clone it would rewrite `persistedGraph` — the read `dispatch.ts` then
+src/orchestrator-v5/system-events/structural-rename.ts:684:      persistedBase: persistedGraph,
+src/orchestrator-v5/system-events/structural-rename.ts:782:  const neutrality = renameMovedAnalysisHash(persistedGraph, projectedGraph, {
+src/orchestrator-v5/system-events/structural-rename.ts:896:    baseGraph: persistedGraph,
+src/orchestrator-v5/system-events/edge-strength-edit.ts:29:import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/system-events/edge-strength-edit.ts:73: * A non-null persisted graph that fails GraphV3 is corruption, not absence.
+src/orchestrator-v5/system-events/edge-strength-edit.ts:79:    super('edge_strength_edit persisted graph failed GraphV3 validation');
+src/orchestrator-v5/system-events/edge-strength-edit.ts:109:  /** Raw graph from the strict server-side persisted-graph read. */
+src/orchestrator-v5/system-events/edge-strength-edit.ts:110:  readonly persistedGraph: unknown;
+src/orchestrator-v5/system-events/edge-strength-edit.ts:355:  const { payload, event, requestId, persistedGraph } = params;
+src/orchestrator-v5/system-events/edge-strength-edit.ts:357:  if (persistedGraph === null) {
+src/orchestrator-v5/system-events/edge-strength-edit.ts:360:        event: 'v5.system_event.edge_strength_edit.no_persisted_graph',
+src/orchestrator-v5/system-events/edge-strength-edit.ts:364:      'edge_strength_edit — no persisted model; refusing without a graph write',
+src/orchestrator-v5/system-events/edge-strength-edit.ts:368:      'no_persisted_graph',
+src/orchestrator-v5/system-events/edge-strength-edit.ts:372:  const graphParse = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/system-events/edge-strength-edit.ts:376:        event: 'v5.system_event.edge_strength_edit.persisted_graph_invalid',
+src/orchestrator-v5/system-events/edge-strength-edit.ts:381:      'edge_strength_edit — non-null persisted graph is malformed; failing closed',
+src/orchestrator-v5/system-events/edge-strength-edit.ts:423:  // the RAW persisted graph, which keeps an identity `NodeV3` drops (`definitional-links.ts`).
+src/orchestrator-v5/system-events/edge-strength-edit.ts:425:  const definition = definitionalLinkInUse(persistedGraph, event.from, event.to, params.lastRunIdentityUse ?? null);
+src/orchestrator-v5/system-events/edge-strength-edit.ts:436:    return refuse(payload, 'definitional_link', definitionalLinkRefusalText(persistedGraph, definition));
+src/orchestrator-v5/system-events/edge-strength-edit.ts:584:      persistedGraph,
+src/orchestrator-v5/system-events/edge-strength-edit.ts:585:      // forbidden-exempt: bounded shim — adjust_edge_strength reads only persistedGraph from this context; widening HandlerInvocation.payload to the payload union is a separate cross-handler train
+src/orchestrator-v5/system-events/edge-strength-edit.ts:614:    graphForTurn: persistedGraph,
+src/orchestrator-v5/system-events/edge-strength-edit.ts:649:    persistedBase: persistedGraph,
+src/orchestrator-v5/system-events/edge-strength-edit.ts:653:  // Use the existing canonical persist projection before deriving the graph
+src/orchestrator-v5/system-events/edge-strength-edit.ts:680:      before: persistedGraph,
+src/orchestrator-v5/system-events/edge-strength-edit.ts:728:    baseGraph: persistedGraph,
+src/orchestrator-v5/tools/registry.ts:179:     * has a name; neither may be persisted into `scenarios.graph`, where the
+src/orchestrator-v5/tools/registry.ts:422:   * `options.graphState` and persisted scenarios.graph). Mutation
+src/orchestrator-v5/tools/registry.ts:632:   * ⚠ NAMED APART FROM `context.persistedGraph` ON PURPOSE (trap 21). That one
+src/orchestrator-v5/tools/propose-add-option.ts:24: * the persisted graph, and for each one it must also echo that entity's exact
+src/orchestrator-v5/tools/propose-add-option.ts:104: * Project the persisted graph into the add-option grounding.
+src/orchestrator-v5/tools/propose-add-option.ts:113:export function buildAddOptionGrounding(persistedGraph: unknown): AddOptionGrounding | null {
+src/orchestrator-v5/tools/propose-add-option.ts:114:  const graph = asRecord(persistedGraph);
+src/orchestrator-v5/tools/structural-edit-references.ts:8: *     batch naming anything the persisted graph does not have;
+src/orchestrator-v5/tools/compose-structural-edit.ts:466:    // cannot be expressed against the persisted graph. Not an error.
+src/orchestrator-v5/tools/handlers/add-constraint.ts:441:      const rawGraph = invocation.graphForTurn ?? invocation.context.persistedGraph ?? null;
+src/orchestrator-v5/tools/structural-edit-entry.ts:125:   * True when a grounding table could be built from the STRICT persisted graph
+src/orchestrator-v5/tools/propose-structural-edit.ts:187:  /** Every node id the persisted graph carries. */
+src/orchestrator-v5/tools/propose-structural-edit.ts:225:  persistedGraph: unknown,
+src/orchestrator-v5/tools/propose-structural-edit.ts:227:  const graph = asRecord(persistedGraph);
+src/orchestrator-v5/tools/handlers/run-analysis-intercept-guard.ts:4: * Legacy persisted graphs (drafted before #263 / Track S 0.13a) can carry the
+src/orchestrator-v5/tools/handlers/run-analysis-intercept-guard.ts:20: *  - It operates on a deep CLONE. The persisted `scenarios.graph`, the parsed
+src/orchestrator-v5/tools/handlers/run-analysis-intercept-guard.ts:64: * for persisted graphs — `JSON.stringify` only throws on BigInt/circular, which
+src/orchestrator-v5/tools/handler-errors.ts:56:  // persisted graph unrecoverable (non-canonical option shape that can't be
+src/orchestrator-v5/tools/handler-errors.ts:60:  // The turn's two reads of the persisted graph described DIFFERENT states: a
+src/orchestrator-v5/tools/structural-edit-batch-split.ts:152:   * APPLIED — until then the id is not in the persisted graph and the grounding
+src/orchestrator-v5/tools/handlers/analysis-ready-core.ts:4: * Read-boundary guard for `run_analysis`: given a persisted graph (any writer,
+src/orchestrator-v5/tools/handlers/analysis-ready-core.ts:70:  // No persisted graph at all (null/undefined) — distinct from SCHEMA_INVALID,
+src/orchestrator-v5/tools/handlers/analysis-ready-core.ts:126: * Assess whether a persisted graph can be analysed. TOTAL — never throws.
+src/orchestrator-v5/tools/handlers/analysis-ready-core.ts:1042: * Thrown by the run_analysis snapshot reader when EP2 finds the persisted graph
+src/orchestrator-v5/goal-target/decide-goal-target-ask.ts:44:   * arms against the persisted graph and never the withheld commit graph.
+src/orchestrator-v5/goal-target/decide-goal-target-ask.ts:46:  | 'goal_absent_from_persisted_graph'
+src/orchestrator-v5/goal-target/decide-goal-target-ask.ts:89:/** Minimal persisted-graph shape this module reads. Nothing else is touched. */
+src/orchestrator-v5/goal-target/decide-goal-target-ask.ts:122:  if (goal === undefined) return { ask: false, refusal: 'goal_absent_from_persisted_graph' };
+src/orchestrator-v5/tools/handlers/set-factor-value.ts:320:    const rawGraph = invocation.graphForTurn ?? invocation.context.persistedGraph ?? null;
+src/orchestrator-v5/tools/handlers/set-factor-value.ts:583:      // patch and the persisted graph cannot disagree about who owns the number.
+src/orchestrator-v5/tools/handlers/set-factor-value.ts:596:      // The adoption stamp rides the wire patch too, so it and the persisted graph agree.
+src/orchestrator-v5/tools/handlers/analysable-option-gate.ts:67: * The gate exists ONLY on the outbound PLoT projection; the persisted graph
+src/orchestrator-v5/tools/handlers/analysable-option-gate.ts:99:   * The RAW persisted graph — the AUTHORITY for user intervention intent
+src/orchestrator-v5/tools/handlers/run-analysis.ts:324:   * V5 state-trust: raw persisted graph BEFORE any parse, so the
+src/orchestrator-v5/tools/handlers/run-analysis.ts:513:      // The turn's two reads of the persisted graph described DIFFERENT states
+src/orchestrator-v5/tools/handlers/run-analysis.ts:699:    // Legacy persisted graphs (drafted before #263 / Track S 0.13a) can carry
+src/orchestrator-v5/tools/handlers/run-analysis.ts:705:    // persisted `scenarios.graph` and `snapshot.rawPersistedGraph` (hashed
+src/orchestrator-v5/tools/handlers/run-analysis.ts:920:            //    them the persisted graph contained NO out-of-[0,1] value at
+src/orchestrator-v5/tools/handlers/run-analysis.ts:1064:    // (`unconfirmed-goal-product.ts`). Nothing persisted; `graph_hash_at_run` is hashed from the raw persisted graph.
+src/orchestrator-v5/tools/handlers/run-analysis.ts:1206:    // computes from the Ingress-parsed persisted graph — false-stale
+src/orchestrator-v5/tools/handlers/run-analysis.ts:1211:    // persisted graph as stored in scenarios.graph BEFORE any parse.
+src/orchestrator-v5/tools/handlers/run-analysis.ts:1260:      persistedEdges: ((snapshot.rawPersistedGraph ?? snapshot.graph) as { edges?: ReadonlyArray<unknown> } | null | undefined)?.edges ?? [],
+src/orchestrator-v5/tools/handlers/run-analysis.ts:1648:            // Run's own persisted graph for labels, units and whose figure the target is.
+src/orchestrator-v5/tools/handlers/run-analysis.ts:2097:    // against the same bytes. Falls back to the persisted graph for snapshots
+src/orchestrator-v5/tools/handlers/run-analysis.ts:2356:      // Source the controlled-id set from the RAW persisted graph (covers all
+src/orchestrator-v5/tools/handlers/run-analysis.ts:2366:      // persisted graph. The question is "could any option PLoT compared read
+src/orchestrator-v5/tools/handlers/run-analysis.ts:2368:      // intervention keys PLoT received, may answer it. The persisted graph
+src/orchestrator-v5/tools/handlers/run-analysis.ts:2372:      // stays persisted-graph-wide on purpose (a safety backstop over-fires).
+src/orchestrator-v5/tools/handlers/run-analysis.ts:2903:      // exactly as today (it falls back to `context.persistedGraph`).
+src/orchestrator-v5/tools/handlers/run-input-snapshot.ts:8: * ⭐ CAPTURED FROM THE REQUEST, NOT THE GRAPH. `run-analysis.ts` transforms a copy of the persisted graph about ten
+src/orchestrator-v5/tools/handlers/unconfirmed-goal-product.ts:13: * the reason reaches the read and a cold reload the way every withheld Run's does. Nothing is persisted: the stored graph,
+src/orchestrator-v5/tools/handlers/unconfirmed-goal-product.ts:14: * `graph_hash_at_run` (hashed from the raw persisted graph) and the card are untouched, and no user declaration is minted.
+src/orchestrator-v5/tools/handlers/level-limit-baseline.ts:13: * model at that moment, by construction. The persisted graph, its hash and every reader of it are untouched.
+src/orchestrator-v5/tools/handlers/olumi-option-filter.ts:37: * The Run filter. `graph` is the persisted graph the Run read (its option nodes carry the mark); `submitted` is the
+src/orchestrator-v5/tools/handlers/no-op-helpers.ts:42: * turn and never populates it from the persisted graph. Reading it
+src/orchestrator/tools/edit-graph.ts:240:   * persisted graph. It fails honestly instead.
+src/orchestrator/tools/edit-graph.ts:2058:  // by id against the persisted graph, and the grounding validator hard-rejected
+src/orchestrator/tools/edit-graph.ts:2276:    // back (see the persist/read-back/thread note in edit-graph-dispatch.ts).
+src/orchestrator/tools/edit-graph.ts:2901:    // proved against the persisted graph id-by-id by the grounding validator,
+src/orchestrator/tools/edit-graph.ts:3167:    // above was live on every real edit. A sweep of all persisted graphs found
+src/orchestrator/tools/edit-graph.ts:3493:    // compares the applier's raw writes against the persisted canonical graph,
+src/orchestrator/tools/edit-graph.ts:3503:    // persisted graph, migration window, or a `buildStructuralFallback` graph
+src/orchestrator/tools/edit-graph.ts:3756:    //      so substituting it would silently persist an unrepaired graph
+src/orchestrator/tools/edit-graph.ts:3781:          'edit_graph PLoT reported repairs but omitted applied_graph — refusing to persist unrepaired candidateGraph',
+src/orchestrator/tools/edit-graph.ts:3818:      // If the base was already V3-invalid (legacy persisted graph,
+src/orchestrator/tools/edit-graph.ts:3847:        failureMessage = 'Synthesised candidateGraph failed GraphV3 strict parse; cannot persist a graph that would break subsequent reads';
+src/orchestrator/tools/edit-graph.ts:4017:    // Measured over every persisted graph: 98.1% have a valid base, so this
+src/orchestrator/tools/edit-graph.ts:4033:      const persistedParse = GraphV3.safeParse(appliedGraph);
+src/orchestrator/tools/edit-graph.ts:4037:        // closed rather than persist a graph we could not parse.
+src/orchestrator/tools/edit-graph.ts:4064:      const canonicalApplied = persistedParse.data as GraphV3T;
+src/orchestrator/tools/edit-graph.ts:4106:          'edit_graph B5 — an operation did not survive canonicalisation onto the persisted graph; refusing the WHOLE edit (no silent partial, no false success)',
+src/orchestrator/tools/edit-graph.ts:4115:        failureMessage = 'An operation did not survive canonicalisation onto the persisted graph';
+src/orchestrator-v5/response-finaliser.ts:501:  // 7367714928030768 vs persisted b3ebb23cfb03df1d). `freshness.current_graph_hash`
+src/orchestrator-v5/response-finaliser.ts:504:  // raw persisted/authoritative graph), so when present it is the authoritative
+src/orchestrator-v5/response-finaliser.ts:537: * The persisted-graph derivation, IF this exit may honestly use it.
+src/orchestrator-v5/response-finaliser.ts:545: * turn may have mutated it, and a persisted-graph `fresh` verdict over a mutated
+src/orchestrator/tools/analysis-ready-helper.ts:5: * it adapts persisted/request graph carriers, then delegates semantics to the
+src/orchestrator/tools/analysis-ready-helper.ts:381:// Canonical persisted-graph projection
+src/orchestrator/tools/analysis-ready-helper.ts:475:  // this persisted-graph path, so the draft path (a fresh user's first turn)
+src/orchestrator/tools/analysis-ready-helper.ts:1010: * persisted graph bytes.
+src/routes/assist.v1.scenario-graph-register.ts:8: * persisted graph**, so after an import the results describe the pre-import
+src/routes/assist.v1.scenario-graph-register.ts:74: * `appendCheckedGraphWrite` (`orchestrator-v5/persist-graph-write.ts`), which
+src/routes/assist.v1.scenario-graph-register.ts:152:import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+src/routes/assist.v1.scenario-graph-register.ts:154:import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
+src/routes/assist.v1.scenario-graph-register.ts:156:import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
+src/routes/assist.v1.scenario-graph-register.ts:971:                // when the persisted graph became UNPARSEABLE and nobody touched
+src/routes/assist.v1.scenario-graph-register.ts:1138:          // `persist-graph-write.ts`; both branches are pinned by identity in
+src/routes/assist.v1.scenario-graph-register.ts:1308:        "Graph registration — imported graph is now the persisted graph",
+src/orchestrator-v5/apply-operations.ts:126:import { projectGraphForPersistence } from './persisted-graph-projection.js';
+src/orchestrator-v5/apply-operations.ts:728:    return { ok: true, receiptId: committed.persisted_row_id, newModelRevision: analysisGraphHash };
+src/orchestrator-v5/turn-executor.ts:76:// persisted graph — the same lookup the wave-4 directive rows use for the
+src/orchestrator-v5/turn-executor.ts:168:// `context.persistedGraph` — the server-side read, never request-supplied
+src/orchestrator-v5/turn-executor.ts:716:   * V5 finaliser contract: canonical readiness from the persisted graph
+src/orchestrator-v5/turn-executor.ts:1067: * diagnostic can never pair a persisted-graph hash with request-derived
+src/orchestrator-v5/turn-executor.ts:1073: * authority (no graph, or an unrecoverable/unparseable persisted graph) → the
+src/orchestrator-v5/turn-executor.ts:1210:  // guard. `context.persistedGraph` IS read A, the state this turn's freshness
+src/orchestrator-v5/turn-executor.ts:1222:    //    yields `persistedGraph: null`, and arming the guard with `null` there
+src/orchestrator-v5/turn-executor.ts:1226:      context.persistedGraph,
+src/orchestrator-v5/turn-executor.ts:1227:      context.persistedGraphRead,
+src/orchestrator-v5/turn-executor.ts:1291:  // graph (`context.persistedGraph` — the server-side scenarios read; a
+src/orchestrator-v5/turn-executor.ts:1304:          hasCommittedGraph: context.persistedGraph != null,
+src/orchestrator-v5/turn-executor.ts:1330:  // from `context.persistedGraph` (which stays null on a degraded read).
+src/orchestrator-v5/turn-executor.ts:1357:  // True only when the same successful commit actually persisted a graph for
+src/orchestrator-v5/turn-executor.ts:1503:      modelNodeLabels: projectModelNodeLabels(context.persistedGraph),
+src/orchestrator-v5/turn-executor.ts:1619:    //     ADOPT") persists a request-supplied `graph_state` on a NON-mutating
+src/orchestrator-v5/turn-executor.ts:1672:    // (`context.persistedGraph`) — NEVER from request-supplied graph_state,
+src/orchestrator-v5/turn-executor.ts:1688:    // pointed at unrelated code (persisted-graph ingress, freshness defaults,
+src/orchestrator-v5/turn-executor.ts:1707:    // fallback below is `context.persistedGraph` (the real server-read base) —
+src/orchestrator-v5/turn-executor.ts:1708:    // correct, unchanged. But on a DEGRADED canonical read `context.persistedGraph`
+src/orchestrator-v5/turn-executor.ts:1729:      const persistedRead = context.persistedGraphRead;
+src/orchestrator-v5/turn-executor.ts:1769:          : context.persistedGraph;
+src/orchestrator-v5/turn-executor.ts:1826:              : context.persistedGraphRead?.status === 'ok_present' ? { refBaseGraph: context.persistedGraphRead.graph }
+src/orchestrator-v5/turn-executor.ts:1827:                : context.persistedGraphRead?.status === 'ok_absent' ? { refBaseGraph: null } : {}),
+src/orchestrator-v5/turn-executor.ts:2233:  // read off the persisted fact while the labels are read off the CURRENT graph,
+src/orchestrator-v5/turn-executor.ts:2263:  // persisted-graph hash with request-derived readiness. Null when there is no
+src/orchestrator-v5/turn-executor.ts:2303:              // an atomic repair commit: `context.persistedGraph` is the
+src/orchestrator-v5/turn-executor.ts:2707:      // persisted graph already loaded by buildTurnContext via
+src/orchestrator-v5/turn-executor.ts:2711:      // and the result is surfaced on context.persistedGraph for the
+src/orchestrator-v5/turn-executor.ts:2714:        const persistedGraph = context.persistedGraph;
+src/orchestrator-v5/turn-executor.ts:2715:        if (persistedGraph) {
+src/orchestrator-v5/turn-executor.ts:2716:          const parsed = GraphStateIngressSchema.safeParse(persistedGraph);
+src/orchestrator-v5/turn-executor.ts:2721:              'V5 TurnExecutor using persisted graph loaded during buildTurnContext for graph lookup fallback',
+src/orchestrator-v5/turn-executor.ts:2726:              'V5 TurnExecutor persisted graph failed ingress schema validation, falling back to no_graph',
+src/orchestrator-v5/turn-executor.ts:2762:    // Once the persisted/cold-start graph authority is resolved below, this is
+src/orchestrator-v5/turn-executor.ts:2815:      canonicalRead: context.persistedGraphRead,
+src/orchestrator-v5/turn-executor.ts:3582:        // the analysis stayed anchored to the canonical persisted graph (P0b-2).
+src/orchestrator-v5/turn-executor.ts:3953:       * Regenerate a readiness plan against the current persisted graph. This
+src/orchestrator-v5/turn-executor.ts:4055:        const baseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+src/orchestrator-v5/turn-executor.ts:4156:          analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(committed.persistedGraph);
+src/orchestrator-v5/turn-executor.ts:4157:          const readbackParsed = GraphV3.safeParse(committed.persistedGraph);
+src/orchestrator-v5/turn-executor.ts:4167:              committed.persistedGraph as GraphStateIngress | null | undefined,
+src/orchestrator-v5/turn-executor.ts:4179:          canonicalReadinessGraphForRun = committed.persistedGraph;
+src/orchestrator-v5/turn-executor.ts:4344:        const baseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+src/orchestrator-v5/turn-executor.ts:4461:        const persistedBatchGraph = mergeMutatedGraphForPersistence({
+src/orchestrator-v5/turn-executor.ts:4463:          persistedBase: baseGraph,
+src/orchestrator-v5/turn-executor.ts:4467:        effectiveTurnGraph = persistedBatchGraph as typeof outcome.appliedGraph;
+src/orchestrator-v5/turn-executor.ts:4479:            graph: persistedBatchGraph,
+src/orchestrator-v5/turn-executor.ts:4497:          analysisReadyForTurn = buildCanonicalAnalysisReadyFromGraph(committed.persistedGraph);
+src/orchestrator-v5/turn-executor.ts:4498:          const readbackParsed = GraphV3.safeParse(committed.persistedGraph);
+src/orchestrator-v5/turn-executor.ts:4508:              committed.persistedGraph as GraphStateIngress | null | undefined,
+src/orchestrator-v5/turn-executor.ts:4516:          canonicalReadinessGraphForRun = committed.persistedGraph;
+src/orchestrator-v5/turn-executor.ts:4597:        const gmBaseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+src/orchestrator-v5/turn-executor.ts:4751:            committed.persistedGraph,
+src/orchestrator-v5/turn-executor.ts:4827:        const gmBaseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+src/orchestrator-v5/turn-executor.ts:5029:            committed.persistedGraph,
+src/orchestrator-v5/turn-executor.ts:5840:          buildGraphNodeLookupFromGraph(context.persistedGraph),
+src/orchestrator-v5/turn-executor.ts:6237:            // EVERY one of them resolves in the persisted graph, so it can
+src/orchestrator-v5/turn-executor.ts:6241:              buildGraphNodeLookupFromGraph(context.persistedGraph),
+src/orchestrator-v5/turn-executor.ts:8991:          // Authority = `context.persistedGraph ?? options.graphState` (CANONICAL-
+src/orchestrator-v5/turn-executor.ts:8992:          // first; the request graph is used only when there is no persisted graph
+src/orchestrator-v5/turn-executor.ts:8996:          // already anchors the current-graph hash to `context.persistedGraph`
+src/orchestrator-v5/turn-executor.ts:9001:          // anchored to the canonical persisted graph.
+src/orchestrator-v5/turn-executor.ts:9003:            context.persistedGraph ?? options.graphState,
+src/orchestrator-v5/turn-executor.ts:9115:          // did not. On a degraded read `persistedGraph` is null, the manifest
+src/orchestrator-v5/turn-executor.ts:9120:            graph: context.persistedGraph,
+src/orchestrator-v5/turn-executor.ts:11727:          modelNodeLabels: projectModelNodeLabels(context.persistedGraph),
+src/orchestrator-v5/turn-executor.ts:11777:          const source = (context.persistedGraph ?? graphStateForTurn) as
+src/orchestrator-v5/turn-executor.ts:11802:            context.persistedGraph as { nodes?: unknown } | null | undefined
+src/orchestrator-v5/turn-executor.ts:11917:        // deliberately persist nothing: there is no proposable intent, no graph
+src/orchestrator-v5/turn-executor.ts:12137:      // Authority = `context.persistedGraph ?? options.graphState`
+src/orchestrator-v5/turn-executor.ts:12143:      // `context.persistedGraph`, "NOT the request-supplied graphStateForTurn").
+src/orchestrator-v5/turn-executor.ts:12159:                context.persistedGraph ?? options.graphState,
+src/orchestrator-v5/turn-executor.ts:12628:            // CANONICAL persisted graph (`deriveCanonicalReadiness`, :2281 — and
+src/orchestrator-v5/turn-executor.ts:12911:              // was actually analysed. `context.persistedGraph` is the
+src/orchestrator-v5/turn-executor.ts:12914:              runGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
+src/orchestrator-v5/turn-executor.ts:13034:          context.persistedGraph ?? options.graphState,
+src/orchestrator-v5/turn-executor.ts:13149:      // raw current graph — persisted when present, else the request graph —
+src/orchestrator-v5/turn-executor.ts:13153:          ? extractGraphOptionIds(context.persistedGraph ?? graphStateForTurn ?? null)
+src/orchestrator-v5/turn-executor.ts:13259:      // against a persisted graph that now needs mapping. Deriving readiness
+src/orchestrator-v5/turn-executor.ts:13261:      // `undefined` when there is no parseable authority (persisted graph
+src/orchestrator-v5/turn-executor.ts:13269:      // otherwise the persisted/canonical or post-mutation graph is parsed
+src/orchestrator-v5/turn-executor.ts:13347:          buildFactorNodeLookup(context.persistedGraph),
+src/orchestrator-v5/turn-executor.ts:13439:        // accepts the persisted graph directly).
+src/orchestrator-v5/turn-executor.ts:13450:          readRatifiedConstraints(context.persistedGraph ?? graphStateForTurn ?? null),
+src/orchestrator-v5/turn-executor.ts:13560:        // R4 lookup fix — persisted-snapshot fallback for graph-node
+src/orchestrator-v5/turn-executor.ts:13566:        persistedGraph: context.persistedGraph,
+src/orchestrator-v5/turn-executor.ts:13568:        // canonical analysis-affecting hash of context.persistedGraph,
+src/orchestrator-v5/turn-executor.ts:13576:        persistedGraphHash: currentAnalysisGraphHashForTurn,
+src/orchestrator-v5/turn-executor.ts:14314:    // advertise the unpersisted committed-graph projection.
+src/orchestrator-v5/turn-executor.ts:14321:      // per-turn ingress / persisted graph so append_turn_atomic(p_graph)
+src/orchestrator-v5/turn-executor.ts:14329:      // with NO server model persists that graph_state, so the guest's
+src/orchestrator-v5/turn-executor.ts:14337:      // explain overwrote the rich draft-persisted graph with a lossy
+src/orchestrator-v5/turn-executor.ts:14359:      // read the persisted graph and merge the mutation onto that
+src/orchestrator-v5/turn-executor.ts:14390:      //                     BACKFILLED from context.persistedGraph on follow-up
+src/orchestrator-v5/turn-executor.ts:14391:      //                     turns (:1242) — using it would let a persisted graph
+src/orchestrator-v5/turn-executor.ts:14395:      //   hasServerModel  = context.persistedGraph is non-null AND has >=1 node.
+src/orchestrator-v5/turn-executor.ts:14414:        // A persisted graph counts as a server model when it carries >=1 node.
+src/orchestrator-v5/turn-executor.ts:14425:        // The old derivation read `context.persistedGraph` directly, so a
+src/orchestrator-v5/turn-executor.ts:14426:        // DEGRADED canonical read (which collapses persistedGraph to null) was
+src/orchestrator-v5/turn-executor.ts:14430:        // `context.persistedGraphRead`, and legacy hand-built contexts derive a
+src/orchestrator-v5/turn-executor.ts:14431:        // safe state from `persistedGraph` (present → ok_present, else
+src/orchestrator-v5/turn-executor.ts:14434:          context.persistedGraphRead ??
+src/orchestrator-v5/turn-executor.ts:14435:          (context.persistedGraph != null
+src/orchestrator-v5/turn-executor.ts:14436:            ? { status: 'ok_present', graph: context.persistedGraph }
+src/orchestrator-v5/turn-executor.ts:14488:        // F3 composition — publish the PROVEN persisted graph so commitTurn's
+src/orchestrator-v5/turn-executor.ts:14538:            `V5 D1 — refusing to persist mutated graph for scenario ${context.session_id}: canonical read degraded (${canonicalRead.status === 'degraded' ? canonicalRead.errorCode : 'unknown'}) and strict reread failed (merge base unavailable)`,
+src/orchestrator-v5/turn-executor.ts:14544:          // applied the mutation against `context.persistedGraph ??
+src/orchestrator-v5/turn-executor.ts:14552:          persistedBase = degradedRereadGraph;
+src/orchestrator-v5/turn-executor.ts:14554:          // rows D / F — today's behaviour: strict-read the persisted graph. A
+src/orchestrator-v5/turn-executor.ts:14558:            persistedBase = await loadPersistedGraphStrict(context.session_id);
+src/orchestrator-v5/turn-executor.ts:14561:              `V5 D1 — refusing to persist mutated graph for scenario ${context.session_id}: persisted merge base unavailable (${err instanceof Error ? err.message : String(err)})`,
+src/orchestrator-v5/turn-executor.ts:14583:      // already-registered target (backed by the persisted graph). The swap
+src/orchestrator-v5/turn-executor.ts:14607:          persistedGraph: context.persistedGraph ?? null,
+src/orchestrator-v5/turn-executor.ts:14629:            assistant_text: formatGoalTargetNotSavedText(context.persistedGraph ?? null),
+src/orchestrator-v5/turn-executor.ts:14643:            const askGoal = findSoleGoalNode(context.persistedGraph ?? null);
+src/orchestrator-v5/turn-executor.ts:14652:                context.persistedGraph ?? null,
+src/orchestrator-v5/turn-executor.ts:14664:          // honest fallback while still persisting the graph this turn's
+src/orchestrator-v5/turn-executor.ts:14673:          // produced this turn — a swap driven by `persistedGraph` not
+src/orchestrator-v5/turn-executor.ts:14688:          // readers have no persisted graph to cross-check the fact against,
+src/orchestrator-v5/turn-executor.ts:14694:          // `persistedGraph` not backing a DESCRIBE-only claim has no graph to
+src/orchestrator-v5/turn-executor.ts:14754:      // the persisted-graph fallback loaded by buildTurnContext — the
+src/orchestrator-v5/turn-executor.ts:14990:      // is the persisted one; `llmGraphHash` is derived from the mutated graph
+src/orchestrator-v5/turn-executor.ts:15006:                (context.persistedGraph as GraphStateIngress | null | undefined) ?? undefined,
+src/orchestrator-v5/turn-executor.ts:15151:            committed.persistedGraph,
+src/orchestrator-v5/turn-executor.ts:15934:      persistedGraph: canonicalReadinessGraphForRun,
+src/orchestrator-v5/turn-executor.ts:16183:        context.persistedGraph ?? graphStateForTurn ?? null,
+src/orchestrator-v5/turn-executor.ts:16869:   * persisted graph could not be hashed; `freshness.ts`'s
+src/orchestrator-v5/turn-executor.ts:16982:                    context.persistedGraph ?? options.graphState,
+src/orchestrator-v5/turn-executor.ts:17647:  persistedGraph: unknown,
+src/orchestrator-v5/turn-executor.ts:17651:    persistedGraph && typeof persistedGraph === 'object'
+src/orchestrator-v5/turn-executor.ts:17652:      ? (persistedGraph as { nodes?: unknown }).nodes
+src/orchestrator-v5/admission/analysis-admission.ts:39: *       the sigma-floored persisted graph. Same question, same predicate,
+src/orchestrator-v5/context/turn-referents.ts:230:  /** The persisted graph's nodes — the closed label set matching runs against. */
+src/orchestrator-v5/graph/entity-refs.ts:9: * inside the persistence floor (`appendCheckedGraphWrite` must not mutate after the caller hashed).
+src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts:159: * The model, only if it is readable WHOLE: every node a record with a non-empty string id and a kind the persisted graph
+src/routes/assist.v1.graph-readiness.ts:64:   * differ whenever a caller supplies a `scenario_id` whose persisted graph is
+src/routes/assist.v1.graph-readiness.ts:95:  assessed_from: "persisted" | "request_graph";
+src/routes/assist.v1.graph-readiness.ts:130:   * pair on one scenario with the persisted graph held constant): a request graph
+src/routes/assist.v1.graph-readiness.ts:365:        if (persisted.graph !== null && persisted.graph !== undefined) {
+src/routes/assist.v1.graph-readiness.ts:366:          assessedGraph = persisted.graph;
+src/orchestrator-v5/context/context-pack-assembler.ts:1520:  // CURRENT persisted graph, while `displayAnalysis` may be a prior run whose
+src/orchestrator-v5/context/context-graph-snapshot.ts:6: * consumers, however, must never mix persisted and in-flight graph authority.
+src/orchestrator-v5/context/context-graph-snapshot.ts:166:    const persisted = validateGraph(canonicalRead.graph);
+src/orchestrator-v5/context/context-graph-snapshot.ts:179:      graph: persisted.graph,
+src/orchestrator-v5/context/factor-value-record.ts:71: * record (`context.persistedGraph ?? …`), never the request-first
+src/orchestrator-v5/context/factor-value-record.ts:143: * Project the persisted graph's factor value-state.
+src/orchestrator-v5/context/factor-value-record.ts:150:  persistedGraph: unknown,
+src/orchestrator-v5/context/factor-value-record.ts:152:  const graph = asRecord(persistedGraph);
+src/orchestrator-v5/context/factor-value-record.ts:171:      provenance: structureProvenance(node, persistedGraph),
+src/orchestrator-v5/context/turn-claim-safety.ts:129: * persisted-graph freshness derivation. A second reader would mean a second
+src/orchestrator-v5/context/turn-claim-safety.ts:137:   * The turn context's persisted-graph analysis-freshness derivation, for the
+src/orchestrator-v5/context/turn-claim-safety.ts:301:        // facts, the same persisted-graph hash and the same degraded-read flag
+src/orchestrator-v5/model-management/store-adapter.ts:387: * Narrow the persisted `graph` column — SELECTed as `unknown`, and genuinely
+src/orchestrator-v5/persisted-graph-invariants.ts:20: *     `appendCheckedGraphWrite` (`persist-graph-write.ts`) — the shared
+src/orchestrator-v5/persisted-graph-invariants.ts:32: * `persist-graph-write.ts` for the manifest and for how to re-derive it.
+src/orchestrator-v5/persisted-graph-invariants.ts:59: *     is OPTIONAL on the persisted graph and is not the authoritative goal
+src/orchestrator-v5/persisted-graph-invariants.ts:61: *     existing commit specs persist graphs that violate it.
+src/orchestrator-v5/persisted-graph-invariants.ts:77: *     contract and several live paths persist a superset of `GraphV3`.
+src/orchestrator-v5/persisted-graph-invariants.ts:311:  // persisted/ingress graph (`boundary/request-extensions.ts:91`,
+src/orchestrator-v5/context/option-identity.ts:19: * on the persisted run_analysis fact) with the current graph's option IDs. IDs
+src/orchestrator-v5/repair-graph-for-persistence.ts:5: * 0.13c-2 migration cleaned persisted `scenarios.graph`, non-draft persist paths
+src/orchestrator-v5/repair-graph-for-persistence.ts:69: * Return the graph to persist to `scenarios.graph`: a repaired CLONE when a graph
+src/orchestrator-v5/repair-graph-for-persistence.ts:88:  //    throws only on BigInt/circular, neither of which occurs in a persisted graph.)
+src/orchestrator-v5/repair-graph-for-persistence.ts:101:      '[commit] persist-site intercept repair could not clone the graph; persisting the unrepaired graph',
+src/orchestrator-v5/repair-graph-for-persistence.ts:133:  // in its own guard so an observability failure cannot persist the dirty graph.
+src/orchestrator-v5/repair-graph-for-persistence.ts:154:      '[commit] persist-site intercept repair telemetry failed; the graph WAS repaired',
+src/orchestrator-v5/compose/output-safety.ts:306:  // persisted fallback, or the just-ADOPTED graph on a first-touch turn (leg 2
+src/orchestrator-v5/diagnostics/v5-diagnostic-trace.ts:493:  // answered with readiness/coaching keyed on the persisted graph (fresh
+src/orchestrator-v5/model-management/types.ts:217:  /** Shared-reasoning facts that are not part of the persisted GraphV3
+src/cee/context-integrity/structure-origin-answer.ts:46: *     2. exactly ONE element of the persisted graph resolves from the message;
+src/cee/context-integrity/structure-origin-answer.ts:625: * `input.briefAudit.graph` = `context.persistedGraph` = the `scenarios.graph`
+src/cee/context-integrity/structure-origin-answer.ts:717: * Answer *"why is this in my model?"* from the persisted graph, or `null`.
+src/orchestrator-v5/reconcile-top-level-options.ts:284:    // to the wrong entry. `persisted-graph-invariants` already reports
+src/orchestrator-v5/reconcile-top-level-options.ts:324:      '[commit] node↔options[] reconcile detect threw; persisting the graph unchanged',
+src/orchestrator-v5/reconcile-top-level-options.ts:426:      '[commit] node↔options[] reconcile threw after cloning; persisting the pre-reconcile graph',
+src/orchestrator-v5/agent-lane/tools/get-canonical-state.ts:120:  // 3. Read the persisted state. An absent graph is reported as empty, never
+src/orchestrator-v5/agent-lane/not-modelled-carrier.ts:11: * given a projection of it. A persisted copy would start lying the moment the graph moves.
+src/orchestrator-v5/compose/recoverable-handler-causes.ts:37:    // un-analysable persisted graph is user-recoverable (graph state, not infra) —
+src/orchestrator-v5/commit.ts:47:import { projectGraphForPersistence } from './persisted-graph-projection.js';
+src/orchestrator-v5/commit.ts:49:import { checkPersistedGraphInvariants } from './persisted-graph-invariants.js';
+src/orchestrator-v5/commit.ts:50:import { appendCheckedGraphWrite } from './persist-graph-write.js';
+src/orchestrator-v5/commit.ts:217:   * `context.persistedGraph` (turn-executor), the run_analysis snapshot graph
+src/orchestrator-v5/commit.ts:221:   * (callers pass either a parsed `GraphV3T` or the raw persisted graph). When
+src/orchestrator-v5/commit.ts:233:   * at turn start from a SERVER-SIDE persisted-graph read. Threaded VERBATIM
+src/orchestrator-v5/commit.ts:238:   * (`context.persistedGraph` via the turn-executor `commitTurn` wrapper, or
+src/orchestrator-v5/commit.ts:354: * raw persisted graph) into a `GraphV3T | null` for entity-id label resolution.
+src/orchestrator-v5/commit.ts:393:   *    provided", and on a replay or conflict `persistedGraph` /
+src/orchestrator-v5/commit.ts:394:   *    `persistedAnalysisGraphHash` are a DISPLAY SNAPSHOT (the authoritative
+src/orchestrator-v5/commit.ts:444:  readonly persistedAnalysisGraphHash: string | null;
+src/orchestrator-v5/commit.ts:449:   * Exposed because `persistedAnalysisGraphHash` alone is not enough for a
+src/orchestrator-v5/commit.ts:472:  readonly persistedGraph: unknown | null;
+src/orchestrator-v5/commit.ts:1017: * `appendCheckedGraphWrite` (`persist-graph-write.ts`). (Line numbers removed
+src/orchestrator-v5/commit.ts:1138:  const persistedGraph = asGraphStateIngress(graph);
+src/orchestrator-v5/commit.ts:1139:  const full = computeGraphIdentityHash(persistedGraph);
+src/orchestrator-v5/commit.ts:1140:  const analysis = computeVersionAnalysisAffectingHashRecord(persistedGraph);
+src/orchestrator-v5/commit.ts:1291:  const persistedInvariants = checkPersistedGraphInvariants(graphForStore, {
+src/orchestrator-v5/commit.ts:1295:  const persistedAnalysisGraphHash = writesGraph
+src/orchestrator-v5/commit.ts:1296:    ? persistedInvariants.analysisGraphHash
+src/orchestrator-v5/commit.ts:1299:    ? (persistedAnalysisGraphHash ?? undefined)
+src/orchestrator-v5/commit.ts:1538:  // reconstructable from the persisted graph in context).
+src/orchestrator-v5/commit.ts:1567:  // The check itself now lives in `persist-graph-write.ts` and runs LAST,
+src/orchestrator-v5/commit.ts:1620:  // graph as NOT persisted — which is true, rather than a graph stored corrupt.
+src/orchestrator-v5/commit.ts:1808:    // `persistedGraph` / `persistedAnalysisGraphHash` this commit returns (F3).
+src/orchestrator-v5/commit.ts:2201:    persistedAnalysisGraphHash:
+src/orchestrator-v5/commit.ts:2203:        ? persistedAnalysisGraphHash
+src/orchestrator-v5/commit.ts:2207:    persistedGraph: replayReread === null ? (writesGraph ? graphForStore : null) : replayGraph,
+src/orchestrator-v5/compose/analysis-state-v1.ts:427: * persisted-graph derivation their own claim-safety read produced
+src/orchestrator-v5/agent-lane/confirm-write.ts:40: * `edgeExistsAfter` must come from a FRESH read of the persisted graph, not from
+src/orchestrator-v5/context/graph-cas-conflict.ts:41: * from a server-side persisted-graph read (`buildTurnContext`'s
+src/orchestrator-v5/context/graph-cas-conflict.ts:163:/** Expected-base hashes derived from a server-side persisted-graph read. */
+src/orchestrator-v5/context/graph-cas-conflict.ts:192: * Compute the expected-base hashes from a SERVER-SIDE persisted-graph read
+src/orchestrator-v5/context/graph-cas-conflict.ts:199:export function computeExpectedGraphCasHashes(persistedGraph: unknown): ExpectedGraphCasHashes {
+src/orchestrator-v5/context/graph-cas-conflict.ts:201:    const hashes = hashesForRawGraph(persistedGraph);
+src/orchestrator-v5/compose/judgement-signals.ts:13: * ALREADY holds for every turn — `prior_facts` and the persisted graph. No new
+src/orchestrator-v5/compose/judgement-signals.ts:16: * conversation judgements nor the persisted graph (the same structural blindness
+src/orchestrator-v5/compose/judgement-signals.ts:69: *    T1/T2 name an EDGE and are unnameable without the persisted graph's
+src/orchestrator-v5/compose/judgement-signals.ts:80: * resolved HERE (from the same persisted graph) because the offer must name the
+src/orchestrator-v5/compose/judgement-signals.ts:87: * set AS OF an earlier turn is UNRECONSTRUCTIBLE (the persisted graph is
+src/orchestrator-v5/compose/judgement-signals.ts:156:/** node id → label from the persisted graph (canvas/CEE shape: `nodes[]` with
+src/orchestrator-v5/compose/judgement-signals.ts:218: * `persistedGraph` is the HASH-GATED persisted snapshot the compose branch
+src/orchestrator-v5/compose/judgement-signals.ts:225:  persistedGraph: unknown,
+src/orchestrator-v5/compose/judgement-signals.ts:227:  const graph = readRecord(persistedGraph);
+src/orchestrator-v5/compose/judgement-signals.ts:237:  // without the persisted graph; T3 is named by the user's own words, which
+src/orchestrator-v5/compose/judgement-signals.ts:286:  // ── T2: contested in the persisted graph AND no adjudication fact (ANY
+src/orchestrator-v5/context/canonical-analysis-state.ts:112: * turn-executor's deliberate null-hash on a persisted-graph parse failure
+src/cee/constants.ts:74: * minted off the unrepaired persisted graph. See the doctrine in
+src/orchestrator-v5/persisted-graph-projection.ts:6: * hash from `persistedPostEditGraph`, and only afterwards did `commitDirectAnswer`
+src/orchestrator-v5/persist-graph-write.ts:118:} from './persisted-graph-invariants.js';
+src/orchestrator-v5/persist-graph-write.ts:139:   * `options.baseGraph === undefined` (`persisted-graph-invariants.ts:222`):
+src/orchestrator-v5/persist-graph-write.ts:245:  const persistedInvariants = checkPersistedGraphInvariants(graph, {
+src/orchestrator-v5/persist-graph-write.ts:273:      '[persist] REFUSING the write — this write INTRODUCED a structural violation into the graph',
+src/orchestrator-v5/persist-graph-write.ts:313:      '[persist] persisted-graph invariant OBSERVED but not enforced — ' +
+src/orchestrator-v5/persist-graph-write.ts:324:      '[persist] persisted-graph invariants NOT evaluated — the graph has no nodes/edges arrays',
+src/orchestrator-v5/persist-graph-write.ts:330: * Enforce the terminal persisted-graph invariants on the bytes about to be
+src/orchestrator-v5/compose/handler-failure-responses.ts:315:      // un-analysable persisted graph. Surface the honest, user-safe next step
+src/orchestrator-v5/compose/phase3-blocks.ts:65: *     construction. PR 3 owns persistence-by-graph-hash and
+src/orchestrator-v5/compose/phase3-blocks.ts:447: * option target. `fallbackGraph` is the persisted graph CEE already
+src/orchestrator-v5/compose/phase3-blocks.ts:448: * holds for the turn (`EnrichedTurnContext.persistedGraph` /
+src/orchestrator-v5/compose/phase3-blocks.ts:491: * persisted-snapshot graph the compose caller already holds. Absent / non-record
+src/orchestrator-v5/compose/phase3-blocks.ts:929: *     persisted per graph hash, so a payload minted before the policy existed
+src/orchestrator-v5/agent-lane/first-analysis.ts:122:  /** The persisted graph as read back after the construction. */
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:90:import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:154:   * does not produce). Undefined when the draft did not persist a graph;
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:199: * graph is also persisted atomically via CommitMetadata.graph for session
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:252:    // built from the persisted graph and analysisReady payload. The
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:427:  // Only on the persisted path (a non-persisted draft has no canvas graph to
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:686:  // that schema is also the edit and persistence contract, where a graph
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:884:    // The previous guard (only persist when graphOutput != null) caused
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:1121:      // reconstructable from the persisted graph, per the note below).
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:1161:        // server-side persisted-graph read (it never runs buildTurnContext),
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:1222:    // turn that had fully persisted (graph written, options reconciled, fence
+src/orchestrator-v5/handlers/draft-graph-dispatch.ts:1417:        graph_persisted: commitResult.graphPersisted,
+src/orchestrator-v5/compound-value-update-chain.ts:59: *     `mutated_graph`, so without threading the persisted graph would carry
+src/orchestrator-v5/context/context-pack-schema.ts:656: * guard read `context.persistedGraph`, so a stale or forged client
+src/orchestrator-v5/context/context-pack-schema.ts:659: * the persisted graph — an invariant maintained at the CALL SITE, not by the
+src/orchestrator-v5/context/readiness.ts:68:  const graph = context.persistedGraph;
+src/orchestrator-v5/context/graph-identity.ts:15: *   graphIdentityHash      — full persisted-graph identity for strict CAS,
+src/orchestrator-v5/context/graph-identity.ts:101:// exist in today's persisted `scenarios.graph` schema (see A0 findings) — the
+src/orchestrator-v5/context/graph-identity.ts:109:// over-EXCLUDING a real persisted field is DANGEROUS (two different graphs
+src/orchestrator-v5/context/graph-identity.ts:183: * transient-stripped, deterministically ordered persisted graph.
+src/orchestrator-v5/context/graph-identity.ts:323: * A1: deterministic, full-fidelity identity projection of a persisted graph.
+src/orchestrator-v5/context/graph-identity.ts:326: * other persisted field, plus any top-level graph keys beyond
+src/orchestrator-v5/context/graph-identity.ts:344:  // key no persisted graph held before this change moves no existing hash, so IDENTITY_NORMALISER_VERSION stands.
+src/orchestrator-v5/agent-lane/admit-model.ts:457:   * shape here made the whole persisted graph fail `GraphV3.safeParse`, which
+src/orchestrator-v5/agent-lane/admit-model.ts:2056:   * A persisted fact binds the graph it analysed by that hash ALONE: `RunAnalysisResultSchema`
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:753: * Hash from the RAW persisted graph (parsed via GraphStateIngressSchema, the
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:793:    // option IDs from the RAW persisted graph (covers the unparseable case
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:1673:        // and hashed; `context.persistedGraph` is the graph as it stood when
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:1675:        // models. The same `?? context.persistedGraph` idiom is already used
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:1678:        runGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:1742:        cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:1873:      // R4 lookup fix — persisted-snapshot fallback for graph-node
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:1877:      // registry test path fall back to the turn context's persisted graph.
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:1878:      persistedGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
+src/orchestrator-v5/handlers/chip-click-dispatch.ts:1879:      persistedGraphHash: composedRunFactGraphHash,
+src/orchestrator-v5/agent-lane/ledger-store.ts:58:   * The items that CANNOT be recovered from the persisted graph, because they
+src/orchestrator-v5/context/baseline-override-reach.ts:116:      // the persisted graph and the debug bundle both carry. Reading only one
+src/orchestrator-v5/context/grounded-selection.ts:55:   * walks the persisted graph's node array and keeps those the turn asked for,
+src/validators/numeric-bounds.ts:12: *   (a′) the persisted-graph load for run_analysis
+src/validators/numeric-bounds.ts:58: * PERSISTED graph. Every hash token is minted off the persisted graph, and the
+src/validators/numeric-bounds.ts:73: * the ONE representation every side agrees on is the raw persisted graph as
+src/validators/numeric-bounds.ts:98: *   Where the persisted graph crosses into the compute projection,
+src/validators/numeric-bounds.ts:372: * where the persisted graph crosses into the compute projection.
+src/orchestrator-v5/context/derive-stage.ts:52: * `graph_hash_at_run` matches the current persisted graph (and, under
+src/orchestrator-v5/context/derive-stage.ts:127:   * Count of options in the CURRENT persisted graph, from
+src/orchestrator-v5/context/derive-stage.ts:133:   * Whether a persisted graph was read for this scenario. Bounds the
+src/orchestrator-v5/context/derive-stage.ts:227: * SUCCESSFUL `run_analysis` fact matches the current persisted graph. So every
+src/orchestrator-v5/handlers/engine-discarded-link-gate.ts:182: * Node identity from the persisted graph, falling back to the batch's own
+src/orchestrator-v5/compose/lens-history.ts:151:  // TODAY's persisted graph and fact window; replaying it into an EARLIER
+src/validators/b1.ts:215: * WHICH AUTHORITY SURVIVES: the persisted graph. The egress-invented alternative
+src/cee/transforms/analysis-ready.ts:208:  // instead. It is the same single authority the extraction and persisted-graph
+src/orchestrator-v5/agent-lane/decision-input-ask.ts:23:/** The goal node of a persisted graph, when there is exactly one. */
+src/orchestrator-v5/compose/unsupported-action-response.ts:237:      //     composer has no view of the persisted graph, and the same path is
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:34:import { projectGraphForPersistence } from '../persisted-graph-projection.js';
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:1159:    persisted = await loadPersistedGraphStrict(payload.scenario_id);
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:1199:      'V5 propose_structural_edit — persisted graph and edit-context graph disagree; declining rather than grounding on one and applying to the other',
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:1292:        // and did not hold together against the persisted graph, which is a
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:1401:   * whole-message claim anchor matched and the persisted graph derived exactly
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:1616: * graph reached the UI via "the persisted scenarios.graph row" — a
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:1995: * writers already keep on an unparseable persisted graph
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:2070: * server-authoritative persisted graph shape before persistence.
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:2076: * it wholesale replaced the rich draft-persisted `scenarios.graph` with
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:2109: *   - `persistedBase === null` — a GENUINELY-empty `scenarios.graph` (the
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:2113: *     nodes+edges arrays) — a malformed-but-READABLE persisted graph. We
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:2143:   * Raw persisted `scenarios.graph` (pre-edit), or null for a
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:2218:      'V5 edit_graph — persisted scenarios.graph was non-null but structurally unusable; healing forward via the ingress base (no rich top-level fields recoverable from a malformed graph)',
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:2223:      'V5 edit_graph — applied mutation merged onto persisted graph shape for persistence',
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:2560:        // F-HELD fix 4a — persist the `edit_graph_add_risk` pending with the
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3131:  // against the unpersisted graph, response.graph returned to
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3161:  // V5-PERSIST-FIX-01 (H1): for an applied mutation `persistedPostEditGraph`
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3169:  // buildTurnContext's `persistedGraph`. buildTurnContext swallows
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3173:  // rich persisted graph with the lossy client echo (the exact corruption
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3178:  //   - null (genuine) → ingress-base fallback: the no-persisted-graph case
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3189:  let persistedPostEditGraph: unknown = graphState;
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3221:        'V5 edit_graph — persisted merge base unavailable (degraded read); failing closed to avoid overwriting canonical scenarios.graph with the lossy ingress echo',
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3251:    // Applying it at the point `persistedPostEditGraph` is FINALISED (rather
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3256:    persistedPostEditGraph = projectGraphForPersistence(
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3324:      persistedPostEditGraph as GraphStateIngress | null | undefined,
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3376:      // from the post-edit persisted graph (same source as the hash). When an
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3380:        ? extractGraphOptionIds(persistedPostEditGraph)
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3386:        currentGraph: persistedPostEditGraph,
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3426:        persistedPostEditGraph as GraphStateIngress | null | undefined,
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:3611:      // ingress (no persisted graph), the two are identical by construction.
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:4501:                  persistedPostEditGraph as GraphStateIngress | null | undefined,
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5135:  // stamp analysis_ready from an unpersisted graph.
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5326:      // Lane 8: a GM-live-blocked mutation persists NO graph, so it must
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5336:      // receipt narrated an edit no persisted graph carried (the DL-7 hazard
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5450:    // fact cannot exist without persistable graph state.
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5451:    // V5-PERSIST-FIX-01 (H1): persist the MERGED graph — the applied
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5452:    // nodes/edges on the persisted-base shape — not the GraphV3-stripped
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5453:    // `appliedGraph`. `persistedPostEditGraph` is that merge for an
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5457:    // persisted-graph hash in lockstep.
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5459:      ? persistedPostEditGraph ?? undefined
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5484:      persistedGraph: gmFrameBase,
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5526:        //       / prior_facts readers have no persisted graph to
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5532:        //       — the same unpersisted graph — before this guard ran.
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5537:        //       `persistedPostEditGraph` — again the unpersisted graph —
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5811:    // mutation, so route-v2 doesn't stamp a non-persisted graph
+src/orchestrator-v5/handlers/edit-graph-dispatch.ts:5813:    // blocked mutation never surfaces its unpersisted graph. ROADMAP
+src/orchestrator-v5/compose/option-effect-ask-response.ts:16: * persisted graph resolved by identity.
+src/validators/graph-validator.ts:624:  // refused: `options > 0 && decisions === 0` is real in persisted graphs here
+src/orchestrator-v5/context/goal-target-record.ts:12: *     with the persisted graph consulted only as a fallback at `:2123-2128`).
+src/orchestrator-v5/context/goal-target-record.ts:26: * `context.persistedGraph ?? options.graphState` and its comment records why:
+src/orchestrator-v5/context/goal-target-record.ts:75: *   `context.persistedGraph ?? options.graphState` (the `:2732` order), never
+src/orchestrator-v5/compose/lens-selector.ts:270:  // verdict on the persisted graph (T2). Neither is on the cage's enrichment
+src/orchestrator-v5/compose/ui-directive.ts:19: *     persisted-snapshot fallback (see buildGraphNodeLookup — the live
+src/orchestrator-v5/compose/ui-directive.ts:265:   * entities, but none of them resolves in the turn's persisted graph. That is
+src/orchestrator-v5/compose/ui-directive.ts:371: * §2.1 row 6 derivation — count the persisted graph's CONTESTED edges (the
+src/orchestrator-v5/compose/ui-directive.ts:620: *  the turn's persisted graph opens the Model tab's relationships section:
+src/orchestrator-v5/compose/ui-directive.ts:1318: *     persisted graph and already drops any node whose kind is outside the
+src/orchestrator-v5/handlers/clarify-v2-dispatch.ts:362:        if (persisted.graph != null) return null;
+src/orchestrator-v5/handlers/add-option-dispatch.ts:212: * persisted frame graph. Returns null when the graph is unreadable (→ skip),
+src/orchestrator-v5/boundary/request-extensions.ts:169: * `buildTurnContext` resolves the ids against the persisted graph into
+src/orchestrator-v5/boundary/request-extensions.ts:358:    // the UNREPAIRED persisted graph at other parse sites — so repairing here
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:356: *     commit's own persisted hash), `draft_graph`, and a `model_version_receipt` only
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:966:  /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:1200:          // The carriers the persisted graph already holds. Reading them is not
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:2253:        persistedGraph: working,
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:2896:        // Derived by traversal of the persisted graph — facts, not estimates,
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:3119:      const dry = applyLinkEffectEdit({ persistedGraph: g.raw, from: from.id, to: to.id, effect,
+src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts:3172:      const dry = applyIdentityConfirmEdit({ persistedGraph: g.raw, outcome_id: card.outcome_id, factor_ids: card.factor_ids, words: card.words,
+src/orchestrator-v5/compose/blocked-slot-claim-guard.ts:492:  readonly persistedGraph: unknown;
+src/orchestrator-v5/compose/blocked-slot-claim-guard.ts:574:  const allLabels = nodesOf(input.persistedGraph).map(nodeLabel).filter((l) => l.length > 0);
+src/orchestrator-v5/compose/blocked-slot-claim-guard.ts:600:      const grounded = groundedValuesForSlot(input.persistedGraph, slot);
+src/orchestrator-v5/compose/withheld-reason-tail.ts:333: * turn from the persisted graph, and a condition deleted since the run leaves
+src/orchestrator-v5/handlers/gm-held-execute.ts:439:  // built from real persisted graphs ended with no terminal punctuation.
+src/orchestrator-v5/handlers/gm-held-execute.ts:596:       * least one confirmed op did NOT land on the canonical persisted graph
+src/orchestrator-v5/handlers/gm-held-execute.ts:617:      /** Full persisted-shape graph for the commit write (rich fields kept). */
+src/orchestrator-v5/handlers/gm-held-execute.ts:900:  // confirmed removing must be absent from the persisted graph, whether the
+src/orchestrator-v5/handlers/gm-held-execute.ts:967:  // Every confirmed op must have landed on the CANONICAL persisted graph.
+src/orchestrator-v5/handlers/gm-held-execute.ts:984:      'GM held-execute — a confirmed op did not survive canonicalisation onto the persisted graph; refusing the WHOLE batch (no partial apply)',
+src/orchestrator-v5/handlers/gm-held-execute.ts:1003:  // persisted graph.
+src/orchestrator-v5/agent-lane/runtime/build-model.ts:1461:   * cannot quietly become "persist the smaller graph". Oversize is answered by
+src/orchestrator-v5/agent-lane/runtime/build-model.ts:1881:  // Never persist a graph the product cannot then read.
+src/orchestrator-v5/drop-null-optional-fields.ts:9: * `null` fails it — and every system-event adapter re-reads the persisted graph
+src/orchestrator-v5/drop-null-optional-fields.ts:11: * (`persisted_graph_invalid` → 500 `system_event_commit_failed`). One register
+src/orchestrator-v5/drop-null-optional-fields.ts:130:      '[persist] dropped null on schema-optional graph fields so every strict reader can read the stored bytes',
+src/orchestrator-v5/run-analysis-snapshot-binding.ts:85: * `computeAnalysisAffectingGraphHash` THROWS on a persisted graph it cannot
+src/orchestrator-v5/run-analysis-snapshot-binding.ts:103: * ⛔ WHY THE GRAPH ALONE IS NOT ENOUGH. `context.persistedGraph` is `null` in
+src/orchestrator-v5/run-analysis-snapshot-binding.ts:117: *    the removal and the discriminator it introduced (`persistedGraphRead`).
+src/orchestrator-v5/run-analysis-snapshot-binding.ts:169: * The turn's persisted graph moved between the freshness read and the
+src/orchestrator-v5/compose/goal-target-receipt-guard.ts:28: *   already-persisted graph. Otherwise the text is swapped for the honest
+src/orchestrator-v5/compose/goal-target-receipt-guard.ts:74:export function formatGoalTargetNotSavedText(persistedGraph: unknown): string {
+src/orchestrator-v5/compose/goal-target-receipt-guard.ts:75:  const surviving = extractPersistedGoalTarget(persistedGraph);
+src/orchestrator-v5/compose/goal-target-receipt-guard.ts:442:    | 'backed_by_persisted_graph'
+src/orchestrator-v5/compose/goal-target-receipt-guard.ts:453:   * readers have no persisted graph to cross-check it against and take it at
+src/orchestrator-v5/compose/goal-target-receipt-guard.ts:498: * @param persistedGraph The pre-turn persisted `scenarios.graph`, consulted
+src/orchestrator-v5/compose/goal-target-receipt-guard.ts:509:  readonly persistedGraph: unknown;
+src/orchestrator-v5/compose/goal-target-receipt-guard.ts:521:  return graphRegistersGoalTarget(args.persistedGraph)
+src/orchestrator-v5/compose/goal-target-receipt-guard.ts:522:    ? { verdict: 'pass', reason: 'backed_by_persisted_graph', consequences: NO_CONSEQUENCES }
+src/orchestrator-v5/build-turn-context.ts:107: * `persistedGraph: null` used to conflate two very different facts: "the
+src/orchestrator-v5/build-turn-context.ts:275:   * — from `prior_facts`, the SAME `persistedGraphHash` the routing path uses,
+src/orchestrator-v5/build-turn-context.ts:333:   * V5 Phase 1 brief persistence: the persisted graph from
+src/orchestrator-v5/build-turn-context.ts:343:  readonly persistedGraph: unknown | null;
+src/orchestrator-v5/build-turn-context.ts:346:   * `scenarios.graph` read that produced {@link persistedGraph}. Consumed by
+src/orchestrator-v5/build-turn-context.ts:349:   * adopt-on-first-touch clobber authoritative state). `persistedGraph` stays
+src/orchestrator-v5/build-turn-context.ts:356:   * `persistedGraph` when it is absent.
+src/orchestrator-v5/build-turn-context.ts:358:  readonly persistedGraphRead?: CanonicalGraphReadState;
+src/orchestrator-v5/build-turn-context.ts:454:   * at send time, RESOLVED against the persisted graph into something an answer
+src/orchestrator-v5/build-turn-context.ts:530:  /** Those that resolved against the persisted graph. */
+src/orchestrator-v5/build-turn-context.ts:640:   * `add_constraint` persists to `graph.goal_constraints` (top-level
+src/orchestrator-v5/build-turn-context.ts:648:   * V5 state-trust: the RAW persisted graph as stored in
+src/orchestrator-v5/build-turn-context.ts:659:   * from the same persisted JSON. The raw persisted graph is the
+src/orchestrator-v5/build-turn-context.ts:934:  // ONE derivation, ONE consumer of the new bit: it rides `persistedGraphRead`
+src/orchestrator-v5/build-turn-context.ts:958:      'V5 buildTurnContext: persisted graph read produced nothing while a completed analysis proves one existed — the absence claim is withdrawn (the model is unavailable, not absent)',
+src/orchestrator-v5/build-turn-context.ts:984:  // Single canonical persisted-graph hash, computed once and reused by both the
+src/orchestrator-v5/build-turn-context.ts:986:  const persistedGraphHash = deriveDecisionContextGraphHash(scenarioState.graph);
+src/orchestrator-v5/build-turn-context.ts:996:    derived_from_graph_hash: persistedGraphHash,
+src/orchestrator-v5/build-turn-context.ts:1002:  // persisted-graph hash the routing path uses — reused internally only, NOT emitted
+src/orchestrator-v5/build-turn-context.ts:1007:    persistedGraphHash,
+src/orchestrator-v5/build-turn-context.ts:1036:  // holds the persisted graph and the analysis-fact chain together. Within that
+src/orchestrator-v5/build-turn-context.ts:1057:  // current persisted graph".
+src/orchestrator-v5/build-turn-context.ts:1068:    graphHash: persistedGraphHash,
+src/orchestrator-v5/build-turn-context.ts:1069:    persistedGraph: scenarioState.graph,
+src/orchestrator-v5/build-turn-context.ts:1099:      persistedGraph: scenarioState.graph,
+src/orchestrator-v5/build-turn-context.ts:1105:      currentGraphHash: persistedGraphHash,
+src/orchestrator-v5/build-turn-context.ts:1127:      current_graph_hash_present: persistedGraphHash !== null,
+src/orchestrator-v5/build-turn-context.ts:1224:    persistedGraph: scenarioState.graph,
+src/orchestrator-v5/build-turn-context.ts:1225:    persistedGraphRead: canonicalGraphRead,
+src/orchestrator-v5/build-turn-context.ts:1240: * Resolve selected node ids against the persisted graph.
+src/orchestrator-v5/build-turn-context.ts:1261:  persistedGraph: unknown | null,
+src/orchestrator-v5/build-turn-context.ts:1279:    persistedGraph !== null &&
+src/orchestrator-v5/build-turn-context.ts:1280:    typeof persistedGraph === 'object' &&
+src/orchestrator-v5/build-turn-context.ts:1281:    Array.isArray((persistedGraph as { nodes?: unknown }).nodes)
+src/orchestrator-v5/build-turn-context.ts:1282:      ? ((persistedGraph as { nodes: readonly unknown[] }).nodes)
+src/orchestrator-v5/build-turn-context.ts:1327: * against the SAME persisted graph read by exact `(from,to)` identity. The V3
+src/orchestrator-v5/build-turn-context.ts:1338:  persistedGraph: unknown | null,
+src/orchestrator-v5/build-turn-context.ts:1356:  const edgeResolution = resolveEdgeSelectionIds(edgeIds, persistedGraph, graphRead);
+src/orchestrator-v5/build-turn-context.ts:1380:  persistedGraph: unknown | null,
+src/orchestrator-v5/build-turn-context.ts:1402:    persistedGraph === null ||
+src/orchestrator-v5/build-turn-context.ts:1403:    typeof persistedGraph !== 'object' ||
+src/orchestrator-v5/build-turn-context.ts:1404:    !Array.isArray((persistedGraph as { edges?: unknown }).edges)
+src/orchestrator-v5/build-turn-context.ts:1415:  for (const raw of (persistedGraph as { edges: readonly unknown[] }).edges) {
+src/orchestrator-v5/build-turn-context.ts:1556: * scenario_state + persistedGraph). Used by the pre-LLM intercept in
+src/orchestrator-v5/build-turn-context.ts:1870:  // NOT evidence that this scenario has no persisted graph: an authenticated
+src/orchestrator-v5/build-turn-context.ts:2635: * Load the persisted scenario state (graph + brief_text) from the
+src/orchestrator-v5/build-turn-context.ts:2666: * Load the persisted graph for a scenario from the session store.
+src/orchestrator-v5/build-turn-context.ts:2690: * `reason: 'no_persisted_graph'` versus `reason: 'session_store_failed'`
+src/orchestrator-v5/build-turn-context.ts:2875:  const { graph: persistedGraph, briefText } = await loadPersistedScenarioStateStrict(
+src/orchestrator-v5/build-turn-context.ts:2882:  // persisted state — otherwise this call is about to stamp `graph_hash_at_run`
+src/orchestrator-v5/build-turn-context.ts:2898:    const observedGraphHash = analysisGraphIdentityOf(persistedGraph);
+src/orchestrator-v5/build-turn-context.ts:2915:  if (persistedGraph == null) {
+src/orchestrator-v5/build-turn-context.ts:2916:    // GENUINELY no persisted graph (store reachable, scenarios.graph absent) — e.g. a
+src/orchestrator-v5/build-turn-context.ts:2930:    throw new Error(`No persisted graph found for scenario ${scenarioId}`);
+src/orchestrator-v5/build-turn-context.ts:2933:  // W2E-2 round 4 — persisted-sigma floor, BEFORE the GraphV3 parse that
+src/orchestrator-v5/build-turn-context.ts:2951:  const sigmaFloor = floorGraphSigmaForCompute(persistedGraph);
+src/orchestrator-v5/build-turn-context.ts:2969:    // rewriting a hash-projected field on a persisted graph forks its
+src/orchestrator-v5/build-turn-context.ts:3003:    if (typeof persistedGraph !== 'object') {
+src/orchestrator-v5/build-turn-context.ts:3004:      throw new AnalysisNotReadyError(assessAnalysisReadiness(persistedGraph));
+src/orchestrator-v5/build-turn-context.ts:3109:  // (the round-3 TOCTOU). Read-only: the persisted graph is never mutated.
+src/orchestrator-v5/build-turn-context.ts:3119:    persistedGraph,
+src/orchestrator-v5/build-turn-context.ts:3132:    rawPersistedGraph: canonicaliseForAnalysis(persistedGraph),
+src/orchestrator-v5/compose.ts:315:   * R4 lookup fix — the persisted scenario graph for this turn
+src/orchestrator-v5/compose.ts:316:   * (`EnrichedTurnContext.persistedGraph` on the routed path,
+src/orchestrator-v5/compose.ts:330:  readonly persistedGraph?: unknown;
+src/orchestrator-v5/compose.ts:333:   * path the run_analysis handler performs its own persisted-graph read
+src/orchestrator-v5/compose.ts:334:   * at execution time, while `persistedGraph` above was loaded at turn
+src/orchestrator-v5/compose.ts:338:   * analysis-affecting hash of `persistedGraph` that they ALREADY hold
+src/orchestrator-v5/compose.ts:346:   * derived against the same persisted graph. No hashing happens here.
+src/orchestrator-v5/compose.ts:348:  readonly persistedGraphHash?: string | null;
+src/orchestrator-v5/compose.ts:401:    input.persistedGraph,
+src/orchestrator-v5/compose.ts:402:    input.persistedGraphHash,
+src/orchestrator-v5/compose.ts:465:  persistedGraph?: unknown,
+src/orchestrator-v5/compose.ts:466:  persistedGraphHash?: string | null,
+src/orchestrator-v5/compose.ts:511:    // `persistedGraph` (closure) feeds ONLY §2.1 row 6's contested-edge
+src/orchestrator-v5/compose.ts:518:      persistedGraph,
+src/orchestrator-v5/compose.ts:559:          persistedGraphHash === graphHash ? persistedGraph : undefined;
+src/orchestrator-v5/compose.ts:663:        tryEmitUiDirective(fact, buildGraphNodeLookupFromGraph(persistedGraph), EMPTY_FRESH_BLOCKS);
+src/orchestrator-v5/compose.ts:669:      // persisted graph; fail-closed on unmet precondition / no proposal on this
+src/orchestrator-v5/compose.ts:680:        tryEmitUiDirective(fact, buildGraphNodeLookupFromGraph(persistedGraph), EMPTY_FRESH_BLOCKS);
+src/orchestrator-v5/compose.ts:689:      // persisted graph opens the Model tab's relationships section
+src/orchestrator-v5/compose.ts:695:        tryEmitUiDirective(fact, buildGraphNodeLookupFromGraph(persistedGraph), EMPTY_FRESH_BLOCKS);
+src/orchestrator-v5/compose.ts:754:        persistedGraph,
+src/orchestrator-v5/compose.ts:857:  // handled structurally: the persisted brief's `seed` / `graph_hash` /
+src/orchestrator-v5/compose.ts:1469:  // persisted graph the pipeline already holds, threaded by both callers as the
+src/orchestrator-v5/compose.ts:1471:  // persisted graph (prior-fact branch); the enrichment / ContextPack
+src/orchestrator-v5/compose.ts:1752:  persistedGraph?: unknown,
+src/orchestrator-v5/compose.ts:1871:  // persisted graph's canonical hash equals the source fact's
+src/orchestrator-v5/compose.ts:1872:  // `graph_hash_at_run`, so the persisted graph is an identity-consistent
+src/orchestrator-v5/compose.ts:1877:  const lookup = buildGraphNodeLookup(priorFact, persistedGraph);
+src/orchestrator-v5/compose.ts:1878:  // D-U F2: FRESH verdict already proved the persisted graph is identity-
+src/orchestrator-v5/compose.ts:1885:    persistedGraph,
+src/orchestrator-v5/handlers/structural-edit-decline-answers.ts:82:  /** A batch came back and did not hold together against the persisted graph. */
+src/orchestrator-v5/routing/clarification-resume.ts:29: *   - persisted graph_hash differs from live graph hash
+src/orchestrator-v5/routing/clarification-resume.ts:226:   * pending action was persisted with `preconditions.graph_hash` and
+src/orchestrator-v5/routing/clarification-resume.ts:311:  // persisted graph, and the offer pins `preconditions.graph_hash` so
+src/orchestrator-v5/routing/clarification-resume.ts:332:  // applies a persisted operator/value to the graph (there IS no graph at
+src/orchestrator-v5/routing/clarification-resume.ts:374:  const persisted = pa.preconditions?.graph_hash;
+src/orchestrator-v5/routing/clarification-resume.ts:385:    return persisted !== currentGraphHash;
+src/orchestrator-v5/routing/clarification-resume.ts:390:  return persisted !== currentGraphHash;
+src/orchestrator-v5/routing/clarification-resume.ts:820: *     the persisted value, and a diverged graph may carry a CHANGED row that
+src/orchestrator-v5/handlers/auto-run-after-draft.ts:56: * authority. If the persisted graph changed in the window (a concurrent edit
+src/orchestrator-v5/handlers/auto-run-after-draft.ts:103:  /** The post-repair graph the draft commit persisted (dg.graph). */
+src/orchestrator-v5/coaching/bound-graph.ts:26:    // The hash function throws on a persisted graph it cannot read (run-analysis-snapshot-binding.ts).
+src/orchestrator-v5/routing/configure-option-clarify.ts:21: * persisted graph (`edit-graph.ts` `batchFullyLanded`), the whole edit was
+src/orchestrator-v5/routing/configure-option-clarify.ts:347: * Pure. `graph` is the persisted graph; anything that does not strict-parse
+src/orchestrator-v5/coaching/proposal-continuation.ts:1321:  const persistedHash = entry.preconditions.graph_hash;
+src/orchestrator-v5/routing/persist-asked-question.ts:252:      'V5 asked-question persistence — no referent or no graph hash; committing the turn without a pending (fail-closed on the referent only)',
+src/orchestrator-v5/routing/option-effect-write.ts:472: * the persisted graph. So the filter is now a property of the assignment, not
+src/orchestrator-v5/routing/option-effect-write.ts:1217: * Resolve an explicit option-effect write request against the persisted graph.
+src/orchestrator-v5/routing/option-effect-write.ts:1235:  // Intent — the SHIPPED classifier, with the persisted graph's own labels.
+src/orchestrator-v5/routing/option-effect-write.ts:1302:  // measured at the persisted graph, not at the receipt. Neither this filter
+src/orchestrator-v5/coaching/decision-review-graph-projection.ts:455: *   analyses moves the persisted graph underneath, and grounding a review of
+src/orchestrator-v5/coaching/build-run-delta.ts:43: * two persisted facts (PLoT's `seed_used` echo, `graph_hash_at_run`,
+src/orchestrator-v5/routing/readiness-intake.ts:20: * deterministic readiness coaching keyed on the persisted graph, not on the
+src/orchestrator-v5/routing/readiness-intake.ts:24: * unparseable persisted graph degrades to the honest fresh-canvas answer, the
+src/orchestrator-v5/routing/readiness-intake.ts:333:  persistedGraph: unknown | null,
+src/orchestrator-v5/routing/readiness-intake.ts:336:  if (persistedGraph == null) {
+src/orchestrator-v5/routing/readiness-intake.ts:339:  const parsed = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/routing/readiness-intake.ts:348:  const assessment = assessCanonicalAnalysisReadiness(persistedGraph);
+src/orchestrator-v5/routing/readiness-intake.ts:365:        persistedGraph,
+src/orchestrator-v5/routing/expired-constraint-renewal.ts:22:  /** Hash and nodes must come from the same current persisted graph. */
+src/orchestrator-v5/routing/missing-value-answer.ts:777: * be a READ, not a write: `deriveAskedEffectPair` over the persisted graph's
+src/orchestrator-v5/routing/state-query-guard.ts:359:   * ROADMAP 2.975 — the persisted brief and graph, for answering a BRIEF-AUDIT
+src/orchestrator-v5/routing/state-query-guard.ts:559:    // `persistedGraph` null) THE SUBJECT CANNOT BE RESOLVED, SO THE DEFERRAL
+src/orchestrator-v5/routing/edit-outcome-binding.ts:14: *   `isSuccessfulAppliedMutation`  →  "is there a persisted post-edit graph to
+src/orchestrator-v5/routing/edit-outcome-binding.ts:23: * graph being persisted. Committing an unchanged graph is harmless; the harm
+src/orchestrator-v5/routing/configure-option-intent.ts:68:       * persisted-graph read could possibly change the routing decision —
+src/orchestrator-v5/routing/configure-option-intent.ts:300: * `extensions.graphState`, which the UI never sends, and the persisted graph
+src/orchestrator-v5/routing/configure-option-intent.ts:303: * persisted graph should use `resolveConfigureOptionIntent` below rather than
+src/orchestrator-v5/routing/configure-option-intent.ts:346: * persisted `scenarios.graph`. Duck-typed on purpose: it is called with an
+src/orchestrator-v5/coaching/decision-context.ts:124: * @param rawGraph persisted `scenarios.graph` (read permissively for node
+src/orchestrator-v5/coaching/decision-context.ts:201:// graph anchor when a persisted graph carries an otherwise-usable node next to
+src/orchestrator-v5/coaching/decision-review-enricher.ts:146:   * hash-gated `persistedGraph`. The enricher runs EARLIER and feeds the LLM,
+src/orchestrator-v5/coaching/decision-review-enricher.ts:152:   * The first cut of this field took `context.persistedGraph`. That is the
+src/orchestrator-v5/coaching/decision-review-enricher.ts:155:   * analyses, the handler submits graph N+1 while `context.persistedGraph` still
+src/orchestrator-v5/coaching/decision-review-enricher.ts:167:   * Both fall back to `context.persistedGraph` when the handler produced no
+src/orchestrator-v5/coaching/objective-contradiction.ts:1292: * Build the per-factor intervention view from the persisted graph.
+src/orchestrator-v5/coaching/coaching-lifecycle.ts:160:  readonly persistedGraph: unknown | null;
+src/orchestrator-v5/coaching/coaching-lifecycle.ts:183:      analysis_readiness: evaluateReadiness(input.persistedGraph, null).evaluable,
+src/orchestrator-v5/coaching/coaching-lifecycle.ts:184:      graph_projection: isGraphProjectionEvaluable(input.persistedGraph),
+src/orchestrator-v5/coaching/coaching-lifecycle.ts:210:  /** Current canonical persisted-graph hash. */
+src/orchestrator-v5/coaching/constraint-gap-disclosure.ts:893:   * persisted state and no graph to prove anything from. A caller who cannot
+src/orchestrator-v5/coaching/coaching-state.ts:100:  /** Current persisted-graph hash this signal was derived against (provenance). */
+src/orchestrator-v5/coaching/coaching-state.ts:146:  /** Current persisted-graph hash (canonical). */
+src/orchestrator-v5/coaching/coaching-state.ts:148:  /** Raw persisted `scenarios.graph` (permissive reads — no strict parse required). */
+src/orchestrator-v5/coaching/coaching-state.ts:149:  readonly persistedGraph: unknown | null;
+src/orchestrator-v5/coaching/coaching-state.ts:184:    const { decisionContext, freshness, priorFacts, graphHash, persistedGraph } = input;
+src/orchestrator-v5/coaching/coaching-state.ts:190:      ...deriveReadinessSignals(persistedGraph, graphHash),
+src/orchestrator-v5/coaching/coaching-state.ts:191:      ...deriveDefaultedValueSignals(persistedGraph, graphHash),
+src/orchestrator-v5/coaching/coaching-state.ts:286:  persistedGraph: unknown | null,
+src/orchestrator-v5/coaching/coaching-state.ts:289:  return evaluateReadiness(persistedGraph, graphHash).signals;
+src/orchestrator-v5/coaching/coaching-state.ts:303:  persistedGraph: unknown | null,
+src/orchestrator-v5/coaching/coaching-state.ts:307:    if (persistedGraph == null) return { evaluable: false, signals: [] };
+src/orchestrator-v5/coaching/coaching-state.ts:308:    const parsed = GraphV3.safeParse(persistedGraph);
+src/orchestrator-v5/coaching/coaching-state.ts:313:    const readiness = buildCanonicalAnalysisReadyFromGraph(persistedGraph);
+src/orchestrator-v5/coaching/coaching-state.ts:356:/** True when the persisted graph is a readable object carrying an `edges` array — the exact
+src/orchestrator-v5/coaching/coaching-state.ts:358:export function isGraphProjectionEvaluable(persistedGraph: unknown | null): boolean {
+src/orchestrator-v5/coaching/coaching-state.ts:359:  if (!persistedGraph || typeof persistedGraph !== 'object') return false;
+src/orchestrator-v5/coaching/coaching-state.ts:360:  return Array.isArray((persistedGraph as { edges?: unknown }).edges);
+src/orchestrator-v5/coaching/coaching-state.ts:364:  persistedGraph: unknown | null,
+src/orchestrator-v5/coaching/coaching-state.ts:370:  if (!isGraphProjectionEvaluable(persistedGraph)) return [];
+src/orchestrator-v5/coaching/coaching-state.ts:371:  const edges = (persistedGraph as { edges: unknown[] }).edges;
+src/orchestrator-v5/coaching/post-draft-narrative.ts:5: * already-available response data — the persisted graph plus the
+src/cee/draft/records/option-magnitude-census.ts:11: * WHICH, because no artefact between the model's bytes and the persisted graph
+src/cee/draft/records/objective-label.ts:1405: * persisted graph, and which this constant does not touch. Renaming this
+src/cee/unified-pipeline/stages/repair/auto-baseline-dedup.ts:71: *    the pipeline produces a valid persisted graph.

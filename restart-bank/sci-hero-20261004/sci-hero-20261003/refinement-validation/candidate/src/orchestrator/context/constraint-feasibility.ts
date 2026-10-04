@@ -1,0 +1,2483 @@
+/**
+ * Winner constraint-feasibility detection (trust-spine board item #1, CEE half).
+ *
+ * DEFECT (plan agile-finding-harp.md §1 CONFIRMED DEFECT #1): the CEE
+ * winner-surfacing code selects the leading option purely by `win_probability`
+ * and NEVER consults constraint feasibility, so a hard-constraint-violating
+ * option is surfaced as the recommended leader with no flag. Live-proven on
+ * staging (build 139150c, 2026-07-17): a £80k option violating a £65k budget
+ * constraint (`constraint_probabilities.c_budget === 0`, joint 0) still leads
+ * "by 100 percentage points" and PLoT even sets `robustness.recommended_option_id`
+ * to it.
+ *
+ * This module is the SINGLE SOURCE of the "does the WINNING option violate a
+ * hard constraint" predicate (CLAUDE.md trap #12 — derive, don't mirror). Every
+ * winner surface (analysis-compact, decision-review-enricher, the run_analysis
+ * headline) calls THIS one function so they can never disagree on infeasibility.
+ * It is PURE — the feature flag (`CEE_CONSTRAINT_INFEASIBLE_GATE`) is enforced
+ * by the callers, so this function stays trivially testable on both wire shapes.
+ *
+ * WIRE SHAPE (verified at the bytes — see the live capture cited above and
+ * tests/fixtures/cross-service/plot-to-cee.doctrine-b.code-derived.json):
+ * the per-option constraint satisfaction data arrives in TWO shapes that both
+ * flow through here:
+ *   - LIVE doctrine-B wire: `constraint_probabilities` is an OBJECT keyed by
+ *     constraint_id → P(satisfied), e.g. `{ c_budget: 0 }`, alongside
+ *     `probability_of_joint_goal`.
+ *   - Legacy / test shape: `constraint_probabilities` is an ARRAY of
+ *     `{ constraint_id, probability }`.
+ * Both are read here; the pre-existing `deriveConstraintTensions`
+ * (analysis-compact.ts) reads ONLY the array shape and is therefore silently
+ * dead on the live object wire — this module does not share that limitation.
+ */
+
+import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
+import {
+  ConstraintVerdictSchema,
+  type ConstraintVerdict as ContractConstraintVerdict,
+} from "@talchain/schemas/orchestrator";
+import { EnrichmentScaleProvenanceSchema } from "@talchain/schemas/boundary";
+
+import { identityBoundWinProbabilities, readOptionResultSources } from "./option-result-source.js";
+import {
+  OLUMI_GUESS_LIMIT_REASON,
+  PARTS_IDENTITY_UNMODELLED_REASON,
+  PLACEHOLDER_PARTS_REASON,
+  optionIdOf,
+  placeholderMovedOptions,
+  limitUnitsOf,
+  type PlaceholderPartsReason,
+} from "./placeholder-parts.js";
+import { classifyValueSource, earnsAuthorshipCredit } from "../../cee/graph-readiness/obligation-provenance.js";
+
+export interface WinnerConstraintFeasibility {
+  /** True when the WINNING option violates a hard constraint. */
+  infeasible: boolean;
+  /** The violated constraint id (for honest copy / telemetry), or null. */
+  constraintId: string | null;
+  /**
+   * WHICH criterion fired (adversarial-review P2 — the two are different
+   * claims and must carry different copy):
+   *   'hard_violation' — C1: the winner's constraint satisfaction probability
+   *     is at/below the hard floor. "Does not satisfy the constraint" is
+   *     definitionally supported.
+   *   'joint_tension' — C2: the winner's joint-goal probability is well below
+   *     its constraint satisfaction. A TENSION, not a proven violation —
+   *     copy must say "in tension with", never "does not satisfy".
+   * Null when `infeasible` is false.
+   */
+  kind: 'hard_violation' | 'joint_tension' | null;
+}
+
+/**
+ * P(constraint satisfied) at or below this floor is treated as a HARD
+ * violation of the winning option — the leader cannot satisfy the constraint.
+ * The live-proven defect emits exactly 0 (constraint node pinned at std≈0.001,
+ * a clear £80k-vs-£65k violation); a small non-zero floor keeps effectively-
+ * impossible constraints (<5% satisfaction) inside the net without flagging a
+ * merely-risky-but-feasible leader. Provisional, mirroring TENSION_THRESHOLD.
+ */
+const HARD_VIOLATION_FLOOR = 0.05;
+
+/**
+ * Joint-goal tension threshold: when the winner's `probability_of_joint_goal`
+ * is below `min(individual constraint satisfaction) × this`, the outcome lead
+ * is not backed by feasibility. Mirrors `deriveConstraintTensions`'
+ * TENSION_THRESHOLD so the two derivations agree on the array shape.
+ */
+const JOINT_TENSION_THRESHOLD = 0.7;
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+/**
+ * Extract per-constraint satisfaction probabilities from ONE option-result
+ * entry, tolerating BOTH the live object shape and the legacy array shape.
+ * Returns `[]` when no constraint probabilities are present.
+ */
+function readConstraintSatisfactionProbs(
+  entry: Record<string, unknown>,
+): Array<{ id: string; probability: number }> {
+  const raw = entry.constraint_probabilities;
+  const out: Array<{ id: string; probability: number }> = [];
+
+  // Live doctrine-B wire: OBJECT { <constraint_id>: P(satisfied) }.
+  if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        out.push({ id, probability: value });
+      }
+    }
+    return out;
+  }
+
+  // Legacy / test shape: ARRAY of { constraint_id, probability }.
+  if (Array.isArray(raw)) {
+    for (const cp of raw) {
+      const cpObj = cp as Record<string, unknown>;
+      const id = readString(cpObj.constraint_id);
+      if (id !== null && typeof cpObj.probability === "number" && Number.isFinite(cpObj.probability)) {
+        out.push({ id, probability: cpObj.probability });
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
+ * PLoT's own `not_assessed` crown-compliance reason, VERBATIM (`plot-lite-service` `src/routes/v2/crown-eligibility.ts`
+ * `CROWN_COMPLIANCE_REASONS`, @af4cd569): the UI renders the reason as the producer's claim-safe phrase
+ * (`crownCompliance.ts`, "emit verbatim, never re-derive"), so CEE writes the producer's words, never its own.
+ */
+export const CROWN_NOT_ASSESSED_REASON = 'we could not check every limit you set on this run';
+
+/**
+ * ⭐ R-c PER OPTION — WITHHELD AT THE SOURCE (AI Quality #72 5900908629). The run's result with, for each (option, limit)
+ * in `byLimit`, every carrier of that option's result on that limit removed. The class, read off a SERVED PLoT body
+ * (`b5-per-limit/17d1cd3a.plot-response.json`, Paul's journey A churn limit):
+ *   · per option, in EVERY option-result carrier the readers use (`readOptionResultSources`): the
+ *     `constraint_probabilities` entry (both wire shapes), the `constraint_margins` entry, and `probability_of_joint_goal`,
+ *     which includes that P;
+ *   · top level: a `constraint_results[]` entry is the P of ONE option (`option_id`), so its `probability` goes when that
+ *     option's is withheld (the entry's id and scale marker stay: they are the limit's, not the option's);
+ *   · `robustness.recommended_option_compliance` is PLoT's verdict on the crowned option's limits, rendered verbatim by
+ *     the UI: when the crowned option's P is withheld, or PLoT ruled an option out of the crown on a withheld P of 0 (its
+ *     crown eligibility, `isCrownPermittedByConstraints`), it becomes PLoT's own `not_assessed` with PLoT's own reason.
+ * No surface (verdict, headline, Agent context, UI) can then quote a P that moved with an unsized guess. Keys that are
+ * absent stay absent. Returns `envelope` itself when nothing is withheld. Pure.
+ */
+export function withholdOptionLimitScores<E>(envelope: E, byLimit: ReadonlyMap<string, ReadonlySet<string>>): E {
+  if (byLimit.size === 0 || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const dropFor = (id: string): string[] => [...byLimit].filter(([, ids]) => ids.has(id)).map(([cid]) => cid);
+  // Read BEFORE stripping: did PLoT rule a withheld option out of the crown on a P of 0 it can no longer show?
+  let withheldBreach = false;
+  const stripEntry = (entry: unknown): unknown => {
+    const r = readRecord(entry);
+    if (r === null) return entry;
+    const id = optionIdOf(r);
+    const drop = id === undefined ? [] : dropFor(id);
+    if (drop.length === 0) return entry;
+    const out: Record<string, unknown> = { ...r };
+    const cp = r.constraint_probabilities;
+    if (cp !== null && typeof cp === 'object' && !Array.isArray(cp)) {
+      const next = { ...(cp as Record<string, unknown>) };
+      for (const cid of drop) {
+        if (next[cid] === 0) withheldBreach = true;
+        delete next[cid];
+      }
+      out.constraint_probabilities = next;
+    } else if (Array.isArray(cp)) {
+      out.constraint_probabilities = cp.filter((x) => {
+        const hit = drop.includes(readString(readRecord(x)?.constraint_id) ?? '');
+        if (hit && readRecord(x)?.probability === 0) withheldBreach = true;
+        return !hit;
+      });
+    }
+    if (Array.isArray(r.constraint_margins)) {
+      out.constraint_margins = r.constraint_margins.filter((x) => !drop.includes(readString(readRecord(x)?.constraint_id) ?? ''));
+    }
+    if ('probability_of_joint_goal' in out) delete out.probability_of_joint_goal;
+    return out;
+  };
+  const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
+  const env = envelope as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...env };
+  if ('option_comparison' in env) out.option_comparison = strip(env.option_comparison);
+  if (Array.isArray(env.results)) out.results = strip(env.results);
+  else {
+    const nested = readRecord(env.results);
+    if (nested !== null) {
+      const n: Record<string, unknown> = { ...nested };
+      for (const k of ['option_comparison', 'options', 'option_results'] as const) if (k in nested) n[k] = strip(nested[k]);
+      out.results = n;
+    }
+  }
+  const brief = readRecord(env.decision_brief);
+  if (brief !== null && 'options' in brief) out.decision_brief = { ...brief, options: strip(brief.options) };
+  if (Array.isArray(env.constraint_results)) {
+    out.constraint_results = env.constraint_results.map((entry) => {
+      const r = readRecord(entry);
+      const id = r === null ? undefined : readString(r.option_id) ?? undefined;
+      const cid = r === null ? null : readString(r.constraint_id);
+      if (r === null || id === undefined || cid === null || !dropFor(id).includes(cid) || !('probability' in r)) return entry;
+      if (r.probability === 0) withheldBreach = true;
+      const { probability: _withheld, ...rest } = r;
+      return rest;
+    });
+  }
+  const robustness = readRecord(env.robustness);
+  if (robustness !== null) {
+    const crowned = readString(robustness.recommended_option_id);
+    const verdict = readString(robustness.recommended_option_compliance);
+    const crownedWithheld = crowned !== null && dropFor(crowned).length > 0;
+    if ((crownedWithheld || withheldBreach) && verdict !== null && verdict !== 'not_applicable' && verdict !== 'not_assessed') {
+      out.robustness = { ...robustness, recommended_option_compliance: 'not_assessed', recommended_option_compliance_reason: CROWN_NOT_ASSESSED_REASON };
+    }
+  }
+  return out as E;
+}
+
+/** The outcome figures that are claims about the goal (PLoT #416's "centre and spread"); the sample counts stay. */
+const GOAL_OUTCOME_FIGURES = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
+
+/**
+ * ⭐ F1b PER-CLAIM WITHHOLDING (contract §2, programme-docs `s1/f1b-contract`): the claim classes a goal-figure withhold
+ * removes. A withhold that keeps some carries them on its warning as `withheld_claims`, so every reader strips EXACTLY
+ * these for EXACTLY `option_ids`. ABSENT = every class: the record every pre-F1b Run (and every other withhold) carries.
+ */
+export type WithheldGoalClaim = 'goal_probability' | 'joint_probability' | 'outcome' | 'downside' | 'win_share';
+/** Everything but the option's own outcome distribution. `downside` goes: its `expected_regret` compares options. */
+export const OUTCOME_KEPT_CLAIMS: readonly WithheldGoalClaim[] = ['goal_probability', 'joint_probability', 'downside', 'win_share'];
+
+/**
+ * Leader and flip facts computed from the same comparison as the withheld figures (PLoT #416's list, R3 5888737291):
+ * which option does best when, how close it is, and what would flip it. Withheld with them.
+ */
+const COMPARISON_DERIVED_KEYS = ['flip_thresholds', 'conditional_winners', 'p_win_sensitivity', 'factor_evppi', 'decision_evpi'] as const;
+const BRIEF_LEADER_KEYS = ['headline', 'headline_banded', 'robustness', 'robustness_caveat', 'what_would_change'] as const;
+const SUMMARY_LEADER_KEYS = ['goal_fit', 'win_probability', 'leading_option', 'robustness_band'] as const;
+
+/**
+ * ⛔ (S) THE GOAL FIGURES AN UNSIZED LINK MOVES ARE WITHHELD AT THE SOURCE (DL #75 5902570568; AIQ 5902548598). For each
+ * option in `withheld` (`placeholderGoalPaths`), in EVERY option-result carrier (the `withholdOptionLimitScores` set):
+ * `probability_of_goal`, `probability_of_joint_goal`, the outcome's centre and spread, and `downside`. An option not in
+ * it keeps its chance (the status quo's earned 0). A share of runs in which an option did best is a comparison with every
+ * other option, so EVERY option's `win_probability` (and the brief's `rank`) goes, and with it the leader and every fact
+ * built on it: PLoT's brief summary, headline, crown and tipping points, `robustness` to PLoT's own empty shape (its
+ * display verdict then reads `not_assessed`). `warning` is appended to `inference_warnings`, the carrier every reader of
+ * a withheld run keys on (`GOAL_FIGURES_WITHHELD_CODES`). Returns `envelope` itself when nothing is withheld. Pure.
+ */
+export function withholdOptionGoalFigures<E>(
+  envelope: E, withheld: ReadonlySet<string>, warning: Record<string, unknown>,
+  /** Keep each withheld option's outcome distribution (F1b [R1]): only the claims AGAINST the target go. */
+  opts: { readonly keepOutcome?: boolean } = {},
+): E {
+  if (withheld.size === 0 || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const stripEntry = (entry: unknown): unknown => {
+    const r = readRecord(entry);
+    if (r === null) return entry;
+    const out: Record<string, unknown> = { ...r };
+    delete out.win_probability;
+    delete out.rank;
+    const id = optionIdOf(r);
+    if (id !== undefined && withheld.has(id)) {
+      delete out.probability_of_goal;
+      delete out.probability_of_joint_goal;
+      delete out.downside;
+      const outcome = readRecord(r.outcome);
+      if (outcome !== null && opts.keepOutcome !== true) {
+        const kept: Record<string, unknown> = { ...outcome };
+        for (const k of GOAL_OUTCOME_FIGURES) delete kept[k];
+        out.outcome = kept;
+      }
+    }
+    return out;
+  };
+  const strip = (v: unknown): unknown => (Array.isArray(v) ? v.map(stripEntry) : v);
+  const env = envelope as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...env };
+  if ('option_comparison' in env) out.option_comparison = strip(env.option_comparison);
+  if (Array.isArray(env.results)) out.results = strip(env.results);
+  else {
+    const nested = readRecord(env.results);
+    if (nested !== null) {
+      const n: Record<string, unknown> = { ...nested };
+      for (const k of ['option_comparison', 'options', 'option_results'] as const) if (k in nested) n[k] = strip(nested[k]);
+      out.results = n;
+    }
+  }
+  const brief = readRecord(env.decision_brief);
+  if (brief !== null) {
+    const b: Record<string, unknown> = { ...brief };
+    if ('options' in brief) b.options = strip(brief.options);
+    for (const k of BRIEF_LEADER_KEYS) delete b[k];
+    const summary = readRecord(brief.analysis_summary);
+    if (summary !== null) {
+      const s: Record<string, unknown> = { ...summary };
+      for (const k of SUMMARY_LEADER_KEYS) delete s[k];
+      b.analysis_summary = s;
+    }
+    out.decision_brief = b;
+  }
+  for (const k of COMPARISON_DERIVED_KEYS) delete out[k];
+  if (readRecord(env.robustness) !== null) out.robustness = { fragile_edges: [], robust_edges: [] };
+  // `win_shares_withheld`: this withhold REMOVED identity-bound usable shares (the run-delta producer's own rule, read
+  // off the envelope BEFORE the strip). Every entry's share goes above, so a later reader sees none and cannot tell a
+  // removed share from one PLoT never sent; only this record can (`runWithheldWinShares`, CODEX on CEE 864e915c P1).
+  const sharesRemoved = identityBoundWinProbabilities(env).size > 0;
+  const recorded = {
+    ...warning,
+    ...(opts.keepOutcome === true ? { withheld_claims: [...OUTCOME_KEPT_CLAIMS] } : {}),
+    ...(sharesRemoved ? { win_shares_withheld: true } : {}),
+  };
+  out.inference_warnings = [...(Array.isArray(env.inference_warnings) ? env.inference_warnings : []), recorded];
+  return out as E;
+}
+
+/**
+ * Find the option-result entry for `winnerOptionId` across every option-result
+ * source (current-first precedence — the same reader every winner surface
+ * uses). Matches on `option_id` OR `id` (the live `option_comparison` shape
+ * populates both; the `decision_brief.options` shape only `option_id`).
+ */
+function findWinnerEntry(
+  envelope: Record<string, unknown>,
+  winnerOptionId: string,
+): Record<string, unknown> | null {
+  for (const source of readOptionResultSources(envelope)) {
+    for (const entry of source) {
+      if (entry.option_id === winnerOptionId || entry.id === winnerOptionId) {
+        return entry;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Does the WINNING option violate a hard constraint? PURE detection — the
+ * caller decides (behind CEE_CONSTRAINT_INFEASIBLE_GATE) whether to act on it.
+ *
+ * Only the winner is evaluated, so a feasible leader is never flagged because a
+ * DIFFERENT option is infeasible (no false positives on non-winners).
+ *
+ * Infeasible iff EITHER:
+ *   (C1) HARD violation — the winner's minimum constraint satisfaction
+ *        probability ≤ {@link HARD_VIOLATION_FLOOR}. This is the live-proven
+ *        case (`constraint_probabilities.c_budget === 0`).
+ *   (C2) JOINT-GOAL tension — the winner's `probability_of_joint_goal` <
+ *        `min(individual) × {@link JOINT_TENSION_THRESHOLD}`. The lead's
+ *        outcome is not backed by feasibility.
+ * Returns `{ infeasible: false }` when no winner id, no matching entry, or no
+ * constraint probabilities are present (fail-open to the pre-flag behaviour).
+ */
+export function deriveWinnerConstraintInfeasibility(
+  envelope: Record<string, unknown>,
+  winnerOptionId: string | null | undefined,
+): WinnerConstraintFeasibility {
+  if (typeof winnerOptionId !== "string" || winnerOptionId.length === 0) {
+    return { infeasible: false, constraintId: null, kind: null };
+  }
+
+  const entry = findWinnerEntry(envelope, winnerOptionId);
+  if (entry === null) return { infeasible: false, constraintId: null, kind: null };
+
+  const probs = readConstraintSatisfactionProbs(entry);
+  if (probs.length === 0) return { infeasible: false, constraintId: null, kind: null };
+
+  const min = probs.reduce((lowest, cur) => (cur.probability < lowest.probability ? cur : lowest));
+
+  // C1 — hard violation (live-proven).
+  if (min.probability <= HARD_VIOLATION_FLOOR) {
+    return { infeasible: true, constraintId: min.id, kind: 'hard_violation' };
+  }
+
+  // C2 — joint-goal tension (the array-shape / red-test discriminator).
+  const joint = typeof entry.probability_of_joint_goal === "number" && Number.isFinite(entry.probability_of_joint_goal)
+    ? entry.probability_of_joint_goal
+    : null;
+  if (joint !== null && joint < min.probability * JOINT_TENSION_THRESHOLD) {
+    return { infeasible: true, constraintId: min.id, kind: 'joint_tension' };
+  }
+
+  return { infeasible: false, constraintId: null, kind: null };
+}
+
+/**
+ * ⭐ F-LIMIT (DL #70 5850643426 ruling v3 + 5850672588 tier 2; reviewer AI Conversation 5850621263) — WHAT DOES EVERY
+ * OPTION DO AGAINST ONE OF THE USER'S LIMITS ON THIS RUN?
+ *
+ * The persisted verdict is LEADER-ONLY (`deriveConstraintVerdict` evaluates the winner), so on its own it proves only
+ * "the leading option breaks a limit", never "no option meets it" (AI Conversation 5850634086). This is ONE pass over
+ * every option of the run fact's own persisted PLoT body (`result.enrichment`, the object the verdict was derived
+ * from), reusing the two EXISTING per-option rules unchanged — no threshold of its own, no persisted copy:
+ *
+ *  · `none_meets` (tier 1): the persisted verdict is `evaluated_infeasible` and EVERY option is a `hard_violation` by
+ *    {@link deriveWinnerConstraintInfeasibility} (P ≤ {@link HARD_VIOLATION_FLOOR}; "does not meet" is definitional
+ *    there — a joint-goal tension is not) on the SAME limit. Words may say "no option meets your limit".
+ *  · `likely_breaks` (tier 2): the persisted verdict was evaluated (`evaluated_feasible` or `evaluated_infeasible`) and
+ *    EVERY option is under {@link deriveLeaderLimitRisks}'s rule (a certified score < {@link LEADER_LIMIT_RISK_THRESHOLD})
+ *    on the SAME limit. Words say "more likely than not to break … on these estimates", never "meets" (AI Quality
+ *    ruling 5842498806). A coin-flip (any option ≥ 0.5) is neither.
+ *
+ * Every option must declare `constraints_decision_grade === true`, and the named limit must be one the USER ratified
+ * (`readRatifiedConstraints` of the hash-bound graph): PLoT's synthesised goal constraint condemns nothing. Otherwise
+ * `null`, and the caller keeps today's reason.
+ */
+export interface EveryOptionLimitVerdict {
+  readonly kind: 'none_meets' | 'likely_breaks';
+  readonly constraintId: string;
+}
+
+export function deriveEveryOptionLimitVerdict(
+  result: unknown,
+  ratified: readonly RatifiedConstraint[],
+): EveryOptionLimitVerdict | null {
+  const r = readRecord(result);
+  const state = readRecord(r?.constraint_verdict)?.constraint_verdict_state;
+  if (state !== 'evaluated_infeasible' && state !== 'evaluated_feasible') return null;
+  const envelope = readRecord(r?.enrichment);
+  if (envelope === null) return null;
+  const options = readOptionResultSources(envelope)[0] ?? [];
+  if (options.length === 0) return null;
+  const optionIds: string[] = [];
+  for (const entry of options) {
+    const id = readString(entry.option_id) ?? readString(entry.id);
+    if (id === null || entry.constraints_decision_grade !== true) return null;
+    optionIds.push(id);
+  }
+  const ratifiedIds = new Set(ratified.map((c) => c.constraint_id));
+
+  // Tier 1 — the leader verdict's own authority and floor, applied to every option, on one ratified limit.
+  if (state === 'evaluated_infeasible') {
+    const fails = optionIds.map((id) => deriveWinnerConstraintInfeasibility(envelope, id));
+    const limit = fails[0]?.constraintId ?? null;
+    if (limit !== null && ratifiedIds.has(limit)
+      && fails.every((f) => f.infeasible && f.kind === 'hard_violation' && f.constraintId === limit)) {
+      return { kind: 'none_meets', constraintId: limit };
+    }
+  }
+
+  // Tier 2 — the leader-limit-risk rule (certified, ratified, P < 0.5), applied to every option, on one limit.
+  const atRisk = optionIds.map((id) => new Set(deriveLeaderLimitRisks(envelope, id, ratified).map((risk) => risk.constraint_id)));
+  const named = ratified.find((c) => atRisk.every((ids) => ids.has(c.constraint_id)));
+  return named === undefined ? null : { kind: 'likely_breaks', constraintId: named.constraint_id };
+}
+
+// ===========================================================================
+// T1 — the constraint that was APPLIED, then never evaluated
+// ===========================================================================
+
+/**
+ * PLoT-originated codes whose meaning is "this hard constraint is NOT
+ * decision-grade" — the engine accepted the constraint, then refused to score
+ * it. Read off the wire; nothing here re-derives the verdict.
+ *
+ * `CONSTRAINT_OUT_OF_DOMAIN`  — the threshold cannot be expressed in the
+ *   target's domain (live: a £2,500 monetary cap attached to a normalised
+ *   [0,1] "Cost Efficiency" outcome).
+ * `CONSTRAINT_TARGET_UNRELIABLE` — the target is not decision-grade, so
+ *   goal-fit probabilities are suppressed (PLoT PR #205 withholds the whole
+ *   top-level constraint block and sets `constraints_status: 'unavailable'`).
+ */
+const CONSTRAINT_NOT_DECISION_GRADE_CODES: ReadonlySet<string> = new Set([
+  "CONSTRAINT_OUT_OF_DOMAIN",
+  "CONSTRAINT_TARGET_UNRELIABLE",
+]);
+
+/** A hard constraint the user ratified and CEE persisted on the graph. */
+export interface RatifiedConstraint {
+  readonly constraint_id: string;
+  /** User-facing label, when the persisted constraint carries one. */
+  readonly label: string | null;
+  /**
+   * WS-A ITEM 2(a) — THE VERBATIM SPAN FROM THE BRIEF this constraint was
+   * produced from (`GoalConstraintSchema.source_quote`, already on the shared
+   * contract and already persisted), when the row carries one.
+   *
+   * WHY IT IS HERE. Until now this reader took `constraint_id` and `label`
+   * only, so every disclosure built from a `RatifiedConstraint` could name a
+   * constraint by a LABEL THE DRAFTER MINTED and never by the user's own
+   * words. The measured cost is in L2A-FIDELITY-TRACE.md §4/§5.2: the single
+   * best-preserved atom in the whole corpus — *"without dropping gross margin
+   * below 78%"*, the ONLY `provenance: "explicit"` object across 76 atoms,
+   * carrying unit, magnitude, operator AND its source quote — reached the user
+   * as the label *"Keep gross margin at or above 78%"* while the analysis
+   * refused to answer; and a sibling row reached the coaching pane named
+   * **"Constraint: we"**, a literal fragment of the user's sentence taken as
+   * an entity name. A user cannot recognise, correct, or even locate a limit
+   * they are shown under a name they have never seen.
+   *
+   * `null` when the persisted row carries no quote — never fabricated, and
+   * never derived by re-reading the brief here (this module has no prose
+   * reader and must not grow one).
+   *
+   * OPTIONAL ON THE TYPE, deliberately: there is exactly ONE producer
+   * ({@link readRatifiedConstraints}, the sole reader of `goal_constraints`),
+   * so making it required would buy no safety and would instead break every
+   * hand-built fixture in the estate — including files the build typecheck
+   * excludes, i.e. breakage that would surface only in a later CI job
+   * (CLAUDE.md trap 2's refinement). Every consumer reads it as
+   * `source_quote ?? null` and treats absence exactly like `null`.
+   */
+  readonly source_quote?: string | null;
+  /**
+   * ⭐ THE TARGET NODE'S IDENTITY — the next field in `source_quote`'s own
+   * argument, for the same reason and with the same shape.
+   *
+   * `GoalConstraintSchema` declares `node_id` as REQUIRED (`z.string().min(1)`)
+   * and every persisted row carries it, but this reader took `constraint_id`,
+   * `label` and `source_quote` only — so every disclosure built from a
+   * `RatifiedConstraint` could say WHICH LIMIT failed and never WHICH NODE it
+   * was about. The Canvas lane reports the consequence from the other side:
+   * `CONSTRAINT_TARGET_UNRELIABLE` reaches them carrying no identity, so they
+   * can render only the anonymous form of the withheld-recommendation copy.
+   *
+   * `null` when the row genuinely carries none — never fabricated.
+   */
+  readonly node_id?: string | null;
+  /**
+   * The unit the threshold is stated in, when the row carries one (e.g.
+   * `"GBP"`). Read for the SAME reason as the identity: an ask about a cell
+   * must state the unit the answer will be recorded in, and the only
+   * non-fabricating source for it is the persisted row the user ratified.
+   */
+  readonly unit?: string | null;
+}
+
+/**
+ * The constraint verdict for one analysis turn. ONE meaning, five answers.
+ *
+ * WHY AN ENUM AND NOT A BOOLEAN. #703 modelled "was the user's hard constraint
+ * honoured?" as a single `unevaluated` boolean. Both of its branches turned out
+ * to be wrong for a real producer state:
+ *
+ *   - `true` on a constraint-IDENTITY failure tells the user their condition
+ *     was never checked, on a run where the engine plainly DID check
+ *     something. False statement, and it costs a valid recommendation.
+ *   - `false` on that same failure (the first attempt at fixing it) reads as
+ *     "no gap" and restores a confident leading-option claim, which asserts
+ *     the user's condition holds on evidence CEE has just admitted it cannot
+ *     read. Also a false statement, and the more dangerous of the two.
+ *
+ * There is no correct boolean, because "we could not tell" is a third answer.
+ * Every state below therefore declares its own leading-option answer in
+ * {@link MAY_NAME_LEADING_OPTION} rather than leaving callers to infer it.
+ */
+export type ConstraintVerdictState =
+  /**
+   * Nothing to withhold for: the user ratified no hard constraints AND the
+   * producer's own constraint scoring gives no reason to hold the leader back.
+   * Byte-identical to the pre-T1 product on this path.
+   */
+  | 'not_applicable'
+  /**
+   * Every ratified constraint was scored under an id we recognise, and the
+   * leading option clears the violation floor. THE RECOMMENDATION SURVIVES.
+   * (With no leading option id the leader half is vacuous — see
+   * {@link deriveConstraintVerdict}.)
+   */
+  | 'evaluated_feasible'
+  /**
+   * The producer scored constraints and the leading option breaks one. "The
+   * leader does not satisfy a limit we checked" is assertable; naming it as the
+   * answer is not.
+   */
+  | 'evaluated_infeasible'
+  /**
+   * At least one ratified constraint was NOT evaluated to decision grade, on
+   * evidence that cannot be confused with a keying failure: either the producer
+   * said so explicitly (a not-decision-grade code,
+   * `constraints_status: 'unavailable'`, or the constraint's OWN
+   * `constraint_results[].scale_provenance` marker not certifying
+   * `decision_grade: true`), or the id spaces demonstrably line up elsewhere
+   * and this constraint still has no score. "Your condition was not
+   * checked" is assertable HERE AND NOWHERE ELSE.
+   */
+  | 'unevaluated'
+  /**
+   * The producer plainly evaluated constraints, but NOT ONE of the ids it
+   * returned reconciles with anything we ratified.
+   *
+   * The seam is unenforced: CEE's persisted `constraint_id` meets PLoT's map
+   * keys across an untyped `z.record` enrichment boundary that nothing
+   * validates, and PLoT does not promise that key is CEE's id — it resolves
+   * positionally, then by `node_id`+`operator`, then falls back to a
+   * `` `${node_id}_${operator}` `` composite. So the only observable is "these
+   * two id spaces do not intersect", and from that observable "the engine
+   * checked YOUR condition" and "the engine checked a different condition" are
+   * indistinguishable.
+   *
+   * Consequently this state asserts NEITHER claim. It does not say the
+   * condition went unchecked, and it does not certify constraint-safety — so
+   * the leading option is withheld. The user-facing disclosure says the system
+   * could not reconcile which condition was evaluated, and nothing more.
+   */
+  | 'identity_unresolved';
+
+/**
+ * May a leading option be NAMED as the answer, per state? Exhaustive by
+ * construction — `Record<ConstraintVerdictState, boolean>` makes a new state
+ * without a declared answer a compile error rather than a silent `undefined`.
+ *
+ * Exactly two states permit it, and both mean "verified": either there was
+ * nothing to verify, or everything the user ratified was verified and holds.
+ * Every other state is some flavour of "we cannot stand behind that claim".
+ */
+export const MAY_NAME_LEADING_OPTION: Readonly<
+  Record<ConstraintVerdictState, boolean>
+> = Object.freeze({
+  not_applicable: true,
+  evaluated_feasible: true,
+  evaluated_infeasible: false,
+  unevaluated: false,
+  identity_unresolved: false,
+});
+
+/**
+ * ⭐ B5 — ONE TYPED VERDICT PER RATIFIED LIMIT (`@talchain/schemas` 0.60.0 `ConstraintPerLimitVerdictSchema`; meaning
+ * AI Quality #70 5855511541, Paul's 17d1 → `estimate_only` 5856308029).
+ *
+ * WHY IT EXISTS. Paul's 17d1 churn limit ("≤ 4 %") was reported met with certainty: P = 1 for every option, marked
+ * decision-grade. MG's EXECUTED replay (#70 5856264807) showed ISL compared 0.04 against Olumi's own 3 % ESTIMATE as if
+ * it had been measured. The leader-level {@link ConstraintVerdictState} cannot say that: it answers "may a leader be
+ * named", not "what was established about THIS limit".
+ *
+ * One meaning per `state`:
+ *   · `scored`: P exists on every option AND every precondition held: the producer's own per-constraint marker
+ *     certifies the threshold (framed, unclamped, decision-grade), no producer code names the limit, AND (e) the
+ *     target's level is the USER's (authorship credit, the one authority `collectLeaderEstimatedTargetIds` uses).
+ *     `reason` is ABSENT.
+ *   · `estimate_only`: as `scored`, but (e) fails: the level is Olumi's estimate (or the leader SETS the target at a
+ *     non-user level, rule (d), which folds in here). `reason` names WHOSE figure it is ({@link EstimateOnlyReason}):
+ *     `level_user_assumption` or `level_olumi_estimate` (DL CR on #2146 5859853452; AI Quality 5859849355 (a)).
+ *   · `unscored`: the producer published no trustworthy P. `reason` is the first failed precondition by
+ *     {@link PER_LIMIT_REASON_RANK}.
+ *
+ * Constraint IDS only, never labels.
+ */
+export type PerLimitState = 'scored' | 'estimate_only' | 'unscored';
+
+export interface PerLimitVerdict {
+  constraint_id: string;
+  state: PerLimitState;
+  /** Absent iff `state === 'scored'`. A documented code, never prose. */
+  reason?: string;
+}
+
+/**
+ * The run-level joint verdict (0.60.0 `ConstraintJointVerdictSchema`): `scored` iff every limit is `scored`;
+ * `estimate_only` iff none is `unscored` and at least one is `estimate_only`; otherwise `withheld` with
+ * `withheld_reason: 'limit_unscored'` and the unscored ids. It is computed over EVERY limit, never a scored subset.
+ */
+export interface JointLimitVerdict {
+  state: 'scored' | 'estimate_only' | 'withheld';
+  withheld_reason?: string;
+  constraint_ids?: string[];
+}
+
+export interface ConstraintVerdict {
+  /** Which of the five answers this turn's producer evidence selects. */
+  readonly state: ConstraintVerdictState;
+  /**
+   * The state's declared leading-option answer, copied onto every verdict so
+   * callers read it instead of re-deriving it from `state` (and disagreeing).
+   * Always `MAY_NAME_LEADING_OPTION[state]`.
+   */
+  readonly mayNameLeadingOption: boolean;
+  /** Producer-shipped not-decision-grade codes (deduped, sorted); else `[]`. */
+  readonly codes: readonly string[];
+  /**
+   * The ratified constraints this verdict is ABOUT, in graph order:
+   *   - `unevaluated` — the ones with no usable evaluation (all of them when a
+   *     code or an 'unavailable' status condemns the whole block);
+   *   - `identity_unresolved` — the full ratified set, i.e. the ids we could
+   *     not reconcile. NOTE: these are NOT "unchecked" constraints, and copy
+   *     built from them must not say so;
+   *   - every other state — empty.
+   */
+  readonly constraints: readonly RatifiedConstraint[];
+  /**
+   * The leading option's DETECTED infeasibility — carried on every state, not
+   * just `evaluated_infeasible`, so a run that is both `unevaluated` and led by
+   * an option breaking a scored constraint loses nothing to the precedence
+   * order below. `null` when the leader is feasible, or when feasibility could
+   * not be computed at all (no leading option id, no matching option entry, or
+   * no constraint probabilities — {@link deriveWinnerConstraintInfeasibility}
+   * fails open in all three).
+   */
+  readonly leaderInfeasibility: WinnerConstraintFeasibility | null;
+  /**
+   * ROADMAP 2.349 — the ratified constraints the PRODUCER DELIBERATELY REMOVED
+   * before computing, disclosed by it in `_meta.filtered_constraints`.
+   *
+   * These are NOT part of {@link constraints} and NOT part of the state
+   * derivation: they are excluded from the ratified set before any precedence
+   * step runs (see {@link deriveConstraintVerdict}). They are carried here so
+   * the disclosure can say the one thing that is TRUE about them — the
+   * analysis does not test them — instead of the one thing that is FALSE:
+   * "the engine could not evaluate your condition, re-state it in the same
+   * units". No restatement in any units can make an excluded dimension
+   * testable, so that repair step is structurally a no-op for this class.
+   *
+   * Carried on EVERY state, because a turn can have both an out-of-scope
+   * constraint and a genuinely unscored one, and neither disclosure may eat
+   * the other.
+   */
+  readonly outOfScopeConstraints: readonly RatifiedConstraint[];
+  /**
+   * ⭐ THE RATIFIED CONSTRAINTS WHOSE TARGET NODE CARRIES NO QUANTITY AT ALL —
+   * the sibling of {@link outOfScopeConstraints}, and partitioned off for
+   * EXACTLY the same reason one hop earlier.
+   *
+   * THE DEFECT THIS CLOSES, WIRE-WITNESSED (2026-08-30, 10 runs of one brief,
+   * two deployed staging builds). The brief states "our support budget for the
+   * year is £240,000". CEE's own regex extractor mints the ceiling
+   * deterministically and, in 2 of the 10 runs, the shared matcher binds it to
+   * a `risk` node labelled "Budget Overrun" — a node with NO `observed_state`,
+   * NO `scale_frame`, NO `display_value`, no unit, and no option intervening on
+   * it. The money lives on a DIFFERENT node ("Annual Support Spend",
+   * `scale_frame: 200000`) that every option does intervene on. Binding to the
+   * value-bearing node is UNREACHABLE for this brief: the matcher binds only on
+   * a unique label hit, and where the value-bearing factor is also named
+   * "budget" it supplies the second hit and the constraint is dropped instead.
+   *
+   * The engine therefore returns no score for it — GUARANTEED, by the shape of
+   * our own model, not by anything the engine did or failed to do. Rules 1-3
+   * below would read that absence as evidence and reach "withhold the leading
+   * option", and on the wire they did: `leading_option_id = null`,
+   * `withheld_reason = 'constraint_verdict_withheld'`, and the user was asked to
+   * restate a limit they had already stated unambiguously. **The 8 runs that
+   * silently ignored the limit gave the user a better product than the 2 that
+   * modelled it.**
+   *
+   * ⚠ THIS IS A NARROWING, AND ITS SAFETY ARGUMENT IS THE DIRECTION IT FAILS.
+   * The gate fires only where the target is present in the graph we hold AND
+   * carries no quantity under ANY of the fields a quantity can arrive on. A
+   * target we cannot find, a graph we cannot read, or any numeric field at all
+   * leaves the constraint in `effective` and today's withholding stands —
+   * because the dangerous direction here is a FALSE "no value", which would
+   * restore a confident leader over a limit that could have been checked.
+   *
+   * ⚠ AND IT MUST NOT BECOME A BINDING FIX. The frame question is unsettled:
+   * the same factor reads `raw_value 110000` (level) in one run and `0`
+   * (marginal) in five others with no field distinguishing them, and a stated
+   * £240,000 against `scale_frame: 200000` normalises to 1.2 — outside the
+   * [0,1] range interventions use. The surviving rows ARE frame-stamped (level),
+   * so ISL's `CONSTRAINT_FRAME_UNSPECIFIED` would NOT fire and it would compute
+   * a real Monte Carlo probability against the wrong quantity, fail-OPEN. That
+   * defect is LATENT only because binding never reaches a value-bearing node.
+   * This field moves no binding, so it stays latent.
+   *
+   * (The frame is spelled in prose above rather than as a literal on purpose:
+   * `constraint-value-frame-unattested.test.ts` scans src/ at the BYTES for a
+   * frame literal and would read a doc comment as a new stamp site.)
+   *
+   * Carried on EVERY state, like `outOfScopeConstraints`, because a turn can
+   * have both an unmeasurable target and a genuinely unscored constraint and
+   * neither disclosure may eat the other.
+   *
+   * ⚠ OPTIONAL ON THE TYPE, for the identical reason `RatifiedConstraint.
+   * source_quote` is: there is exactly ONE producer ({@link verdict}), so
+   * requiring it buys no safety, and requiring it WOULD break every hand-built
+   * `ConstraintVerdict` fixture in the estate — including files
+   * `tsconfig.build.json` excludes, i.e. breakage that surfaces only in a later
+   * CI job (CLAUDE.md trap 2's refinement). Every consumer reads it as
+   * `?? []`, and the absent value is the SAFE one: no extra disclosure, and no
+   * change to any withholding.
+   */
+  readonly unmeasuredTargetConstraints?: readonly RatifiedConstraint[];
+  /**
+   * B5 — one {@link PerLimitVerdict} per ratified limit, in graph order. ABSENT = not attested: the run had no ratified
+   * limit, or the caller supplied no baseline input. It is never defaulted, because a defaulted `scored` row would be
+   * a manufactured certificate. Independent of {@link state}: it neither grants nor withdraws the leader permission.
+   */
+  readonly perLimit?: readonly PerLimitVerdict[];
+  /** B5 — the run-level joint verdict over {@link perLimit}. Present exactly when `perLimit` is. */
+  readonly joint?: JointLimitVerdict;
+}
+
+function verdict(
+  state: ConstraintVerdictState,
+  parts: {
+    codes?: readonly string[];
+    constraints?: readonly RatifiedConstraint[];
+    leaderInfeasibility?: WinnerConstraintFeasibility | null;
+    outOfScopeConstraints?: readonly RatifiedConstraint[];
+    unmeasuredTargetConstraints?: readonly RatifiedConstraint[];
+  } = {},
+): ConstraintVerdict {
+  return {
+    state,
+    mayNameLeadingOption: MAY_NAME_LEADING_OPTION[state],
+    codes: parts.codes ?? [],
+    constraints: parts.constraints ?? [],
+    leaderInfeasibility: parts.leaderInfeasibility ?? null,
+    outOfScopeConstraints: parts.outOfScopeConstraints ?? [],
+    unmeasuredTargetConstraints: parts.unmeasuredTargetConstraints ?? [],
+  };
+}
+
+/**
+ * Read the user-ratified hard constraints.
+ *
+ * Accepts EITHER the `goal_constraints` array itself — the snapshot field the
+ * run_analysis handler forwards verbatim to PLoT, which is the tightest
+ * possible statement of "what we asked the engine to enforce" — OR any object
+ * carrying a root-level `goal_constraints` (the persisted graph, where D1's
+ * `add_constraint` writes them). Taking both means this never depends on which
+ * mirror a given call site happens to hold (CLAUDE.md trap #12).
+ *
+ * Constraints are metadata, never nodes or edges, so this array is the ONLY
+ * record of what the user ratified.
+ */
+export function readRatifiedConstraints(source: unknown): RatifiedConstraint[] {
+  const raw = Array.isArray(source)
+    ? source
+    : source !== null && typeof source === "object"
+      ? (source as Record<string, unknown>).goal_constraints
+      : undefined;
+  if (!Array.isArray(raw)) return [];
+
+  const out: RatifiedConstraint[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const id = readString(obj.constraint_id);
+    if (id === null) continue;
+    // WS-A item 2(a): the verbatim brief span, read from the SAME persisted row
+    // as the label, so the two can never come from different records.
+    out.push({
+      constraint_id: id,
+      label: readString(obj.label),
+      source_quote: readString(obj.source_quote),
+      // Same record, same hop as the label and the quote — so identity, name
+      // and the user's own words can never come from different rows.
+      node_id: readString(obj.node_id),
+      unit: readString(obj.unit),
+    });
+  }
+  return out;
+}
+
+/**
+ * Every field a NUMERIC QUANTITY can arrive on a graph node under, at the shape
+ * `run_analysis` holds (`snapshot.rawPersistedGraph`, i.e. the canonicalised V3
+ * projection). A node carrying NONE of these carries no number for a threshold
+ * to be compared against, whatever else it carries.
+ *
+ * ⚠⚠ THE LIST IS DELIBERATELY OVER-BROAD, AND THAT IS THE SAFETY ARGUMENT.
+ * {@link collectUnmeasuredConstraintTargetIds} is the only caller and its
+ * verdict RELAXES a withholding, so the dangerous error is a FALSE "carries
+ * nothing" — a node whose quantity arrives on a field this list forgot. Every
+ * additional member therefore makes the gate fire LESS often and can only cost
+ * a withholding we would have made anyway. A SHORT list is the unsafe
+ * direction; a long one is not.
+ *
+ * It is a strict SUPERSET of the `carriesValue` conjunction in
+ * `cee/transforms/schema-v3.ts` (observed_state · prior · display_value ·
+ * intercept · goal_threshold · goal_threshold_raw · success_threshold), plus the two scale carriers
+ * that module has no reason to consult (`scale_frame`, `goal_threshold_cap`)
+ * and the V1 `data` carrier. Superset, not mirror: were the two to disagree,
+ * this one says "carries a value" wherever that one does, which is the safe
+ * side of the disagreement (CLAUDE.md §9 class 5 — two gates reading different
+ * fields is how they come to contradict each other).
+ */
+const NODE_QUANTITY_FIELDS: readonly string[] = [
+  "observed_state",
+  "prior",
+  "display_value",
+  "intercept",
+  "goal_threshold",
+  "goal_threshold_raw",
+  "success_threshold",
+  "goal_threshold_cap",
+  "scale_frame",
+  "data",
+];
+
+/**
+ * Does this graph node carry NO numeric quantity at all, on ANY of the fields a
+ * quantity can arrive on ({@link NODE_QUANTITY_FIELDS})?
+ *
+ * ⚠⚠ NAME THE QUESTION, BECAUSE THERE IS A NEIGHBOURING ONE AND THEY ARE NOT
+ * THE SAME (CLAUDE.md trap 21). This predicate answers *"does the model record
+ * any number here?"*. It does NOT answer *"will PLoT's constraint-target
+ * ParameterUncertainty injection fire?"* — that one is narrower, and reads
+ * `observed_state.value` specifically
+ * (`plot-lite-service/src/integrations/isl/constraint-pu-injection.ts`
+ * `classifyConstraintPu`, derived at the bytes 14 Sep 2026). A node carrying,
+ * say, only `display_value` answers YES to this one and still gets
+ * `missing_observed_state` there.
+ *
+ * ⭐ THE ENTAILMENT RUNS ONE WAY, AND THAT IS WHY THIS PREDICATE IS THE SAFE ONE
+ * TO SPEAK FROM. "Carries no quantity" ⟹ no `observed_state.value` and no
+ * `prior` ⟹ PLoT emits `plot.constraint_no_observed_value` and ISL falls back
+ * to base = 0.0. So every node this returns `true` for is genuinely
+ * un-evaluable; the converse does not hold, and the gap it leaves is recorded
+ * rather than chased (see {@link classifyConstraintWriteAdmissibility} in
+ * `orchestrator-v5/tools/handlers/d1-shared/constraint-write-admissibility.ts`).
+ *
+ * Exported so the WRITE path and the READ path share ONE definition instead of
+ * growing a differently-named twin (CLAUDE.md trap 12 — derive, don't mirror).
+ * The two call sites consume it in OPPOSITE directions, which is exactly why
+ * the shared definition has to be conservative:
+ *   - read time ({@link collectUnmeasuredConstraintTargetIds}) uses it to
+ *     RELAX a withholding, so a false `true` costs a withholding;
+ *   - write time uses it to SPEAK, so a false `true` tells a user their valid
+ *     limit will not be checked. A short {@link NODE_QUANTITY_FIELDS} list is
+ *     the unsafe direction for BOTH.
+ */
+export function constraintTargetCarriesNoQuantity(node: Record<string, unknown>): boolean {
+  for (const field of NODE_QUANTITY_FIELDS) {
+    const v = node[field];
+    if (v !== undefined && v !== null) return false;
+  }
+  return true;
+}
+
+/** Internal alias kept so the read-time collector reads as it always did. */
+const nodeCarriesNoQuantity = constraintTargetCarriesNoQuantity;
+
+/**
+ * ⛔ THE LIMITS WHOSE LEADER RESULT IS OLUMI'S OWN ESTIMATE, NOT A CHECK (AI Quality, #70 5844226031).
+ *
+ * An option that SETS a limit's target is compared at the level it sets once ISL scores such rows (ISL #179): every
+ * draw carries that level, so its result is a flat 1 or 0. When that level is the USER's own figure, the result is a
+ * real check of what they told us. When it is not — Olumi's estimate (`cee_hypothesis`, a `cee_inference` observed
+ * level), a ratified-only estimate (`user_confirmed`), or a level with no readable owner — the "check" only restates
+ * the guess, and a `decision_grade` scale marker cannot tell the two apart: it certifies the RANGE, not whose level
+ * produced the score.
+ *
+ * WHOSE LEVEL, from ONE authority: `earnsAuthorshipCredit(classifyValueSource(stamp))` (`obligation-provenance.ts`),
+ * the predicate that file names for exactly this question ("must NOT be used to unlock comparative_leader … That is
+ * the authorship question"). No second list of sources lives here.
+ *
+ * WHICH LEVEL, from what PLoT RECEIVED (review of 3f2f6714, 5844327116): the leader's WIRE option (`gate.options`)
+ * decides whether it sets the target, because a status quo the gate HELD sets it on the wire only. For a factor the
+ * gate held on the leader (`gate.held`), the level IS that factor's own observed level, so its owner is the factor's
+ * `observed_state.source`; otherwise it is the intervention entry's own `source` (the wire entry, then the graph's).
+ * Without `wire`, the graph's option node is read (the pre-review behaviour, kept for direct callers).
+ *
+ * Returns the ratified constraint ids whose target the LEADING option sets with a level that is not the user's own.
+ * Only the leader matters: the verdict is the leader's. Pure; empty on anything malformed or absent.
+ */
+export interface LeaderWireOptions {
+  /** The options PLoT received, pre-projection objects (`run-analysis.ts` `gate.options`). */
+  readonly options: ReadonlyArray<Record<string, unknown>>;
+  /** The gate's hold record: which factor ids CEE supplied on which option (`gate.held`). */
+  readonly held: ReadonlyArray<{ readonly option_id: string; readonly factor_ids: readonly string[] }>;
+}
+
+const sourceOf = (entry: unknown): unknown =>
+  entry !== null && typeof entry === 'object' ? (entry as { source?: unknown }).source : undefined;
+
+export function collectLeaderEstimatedTargetIds(
+  graph: unknown,
+  ratified: readonly RatifiedConstraint[],
+  leadingOptionId: string | null | undefined,
+  wire?: LeaderWireOptions,
+): Set<string> {
+  const out = new Set<string>();
+  if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) return out;
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  const nodes: Record<string, unknown>[] = Array.isArray(rawNodes)
+    ? rawNodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === 'object')
+    : [];
+  const nodeById = (id: string) => nodes.find((n) => n.id === id);
+  const asObject = (v: unknown): Record<string, unknown> | undefined =>
+    v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
+  const graphInterventions = asObject(nodeById(leadingOptionId)?.interventions);
+  let setBy: Record<string, unknown> | undefined;
+  let heldFactors: ReadonlySet<string> = new Set();
+  if (wire !== undefined) {
+    const option = wire.options.find((o) => o.id === leadingOptionId || o.option_id === leadingOptionId);
+    setBy = asObject(option?.interventions);
+    heldFactors = new Set(wire.held.filter((h) => h.option_id === leadingOptionId).flatMap((h) => h.factor_ids));
+  } else {
+    setBy = graphInterventions;
+  }
+  if (setBy === undefined) return out;
+  for (const c of ratified) {
+    if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
+    if (!Object.prototype.hasOwnProperty.call(setBy, c.node_id)) continue;
+    const stamp = heldFactors.has(c.node_id)
+      ? sourceOf(asObject(nodeById(c.node_id))?.observed_state)
+      : (sourceOf(setBy[c.node_id]) ?? sourceOf(graphInterventions?.[c.node_id]));
+    if (earnsAuthorshipCredit(classifyValueSource(stamp))) continue;
+    out.add(c.constraint_id);
+  }
+  return out;
+}
+
+/**
+ * ⭐ B5 (a) — WHOSE FIGURE an `estimate_only` limit was checked against (DL CR on #2146 5859853452; AI Quality
+ * 5859849355 (a)). One code could not tell the user's own assumption from Olumi's estimate, which is either a
+ * misattribution or a wrong pass downstream.
+ *   · `level_user_assumption`: the level is `user_assumption` — the user's declared guess, or Olumi's proposed figure
+ *     the user ACCEPTED (the approved adoption writes the same literal plus `reviewed_by_user`,
+ *     `isAcceptedOlumiEstimate`). Either way accepted, never stated: the limit stays `estimate_only` and its words say
+ *     "a figure you accepted as an assumption" (`limit-checks.ts`), never "yours" (52f8cd; AIQ 5921018606);
+ *   · `level_olumi_estimate`: Olumi's (`cee_hypothesis`, `cee_inference`, a `user_confirmed` estimate the user only
+ *     endorsed: "the number is still ours", `obligation-provenance.ts`), a repair's, or no readable owner.
+ */
+export type EstimateOnlyReason = 'level_user_assumption' | 'level_olumi_estimate';
+
+/** The contract literal for a figure the user accepted as an assumption — their own or Olumi's (0.55 `OBSERVED_STATE_SOURCE_LITERALS`). */
+const USER_ASSUMPTION_SOURCE: KnownObservedStateSourceLiteral = 'user_assumption';
+
+/**
+ * The owner of one level stamp, from the ONE authority: `classifyValueSource`. `null` = the user's own figure
+ * (`earnsAuthorshipCredit`), so the limit may be `scored`. Otherwise the {@link EstimateOnlyReason}.
+ *
+ * `classifyValueSource` puts `user_assumption` and `user_confirmed` in ONE class, `user_ratified`, because neither is
+ * authorship. They differ in whose NUMBER it is, which is the question here, so that class alone is split by its
+ * stamp. Every other class decides the owner by itself. Pure.
+ */
+export function limitLevelOwnerReason(stamp: unknown): EstimateOnlyReason | null {
+  const provenance = classifyValueSource(stamp);
+  if (earnsAuthorshipCredit(provenance)) return null;
+  return provenance === 'user_ratified' && stamp === USER_ASSUMPTION_SOURCE ? 'level_user_assumption' : 'level_olumi_estimate';
+}
+
+/**
+ * B5's per-limit input, from one walk of the analysed graph: the limits whose target's level is the user's own
+ * (`userBaselineIds`, precondition (e)) and those whose level is the user's ASSUMPTION (`userAssumptionIds`, the owner
+ * of an `estimate_only` row). A limit in neither is Olumi's or has no owner. Fails toward `estimate_only` /
+ * `level_olumi_estimate`: a missing graph, target, `observed_state` or source leaves the id out of both. Pure.
+ */
+export function collectLimitLevelOwners(
+  graph: unknown,
+  ratified: readonly RatifiedConstraint[],
+  /** The options PLoT scores (run_analysis's final wire options). Omitted = no limit is withheld for its parts. */
+  options?: ReadonlyArray<Record<string, unknown>>,
+): {
+  userBaselineIds: Set<string>;
+  userAssumptionIds: Set<string>;
+  relativeChangeIds: Set<string>;
+  placeholderPartsReasons: Map<string, PlaceholderPartsReason>;
+  placeholderMovedOptionIds: Map<string, Set<string>>;
+} {
+  const out = {
+    userBaselineIds: new Set<string>(),
+    userAssumptionIds: new Set<string>(),
+    relativeChangeIds: new Set<string>(),
+    placeholderPartsReasons: new Map<string, PlaceholderPartsReason>(),
+    placeholderMovedOptionIds: new Map<string, Set<string>>(),
+  };
+  // R1 S4-core: the limits STORED as a relative change from today (`value_frame: 'change_rel'`), read off the same
+  // persisted rows the ratified list came from. ISL's `frame_verdict` must be present for these (0.61.0: absent fails
+  // closed), so {@link derivePerLimitVerdicts} needs to know which they are.
+  const rows = (graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints;
+  if (Array.isArray(rows)) {
+    for (const c of ratified) {
+      if (rows.some((r) => readRecord(r)?.constraint_id === c.constraint_id && readRecord(r)?.value_frame === 'change_rel')) {
+        out.relativeChangeIds.add(c.constraint_id);
+      }
+    }
+  }
+  const rawNodes = (graph as { nodes?: unknown } | null | undefined)?.nodes;
+  if (!Array.isArray(rawNodes)) return out;
+  // ⛔ R-c (AI Quality 5881541947 + 5882087383, DL 5881593118 + 5882019090), PER OPTION since AIQ 5900908629: an option
+  // that moves the limit's target through its parts on a link nobody has sized (or through an identity the engine does
+  // not honour) has no checkable P for that limit, in ANY frame: the P is the placeholder's. Its own P is withheld
+  // (`placeholderMovedOptionIds`, stripped from the stored result by `withholdOptionLimitScores`); the limit's row is
+  // withheld (`placeholderPartsReasons`) only when EVERY option PLoT scores is such an option. `estimate_only` says whose
+  // base it is, not that the effect size is a default, and a user-stated base cannot upgrade it. A level limit's baseline
+  // carrier no longer reads this (`level-limit-baseline.ts`): it carries, so PLoT scores every option. A limit on the
+  // goal is not read here: P(goal) is its own, disclosed claim.
+  const rawEdges = (graph as { edges?: unknown } | null | undefined)?.edges;
+  if (options !== undefined) {
+    const nodes = rawNodes.map(readRecord).filter((n): n is Record<string, unknown> => n !== null);
+    const edges = Array.isArray(rawEdges) ? rawEdges.map(readRecord).filter((e): e is Record<string, unknown> => e !== null) : [];
+    // A unit-less node is read in its own level limit's unit (the stored rows: `RatifiedConstraint` carries no frame).
+    const limitUnits = limitUnitsOf((graph as { goal_constraints?: unknown } | null | undefined)?.goal_constraints);
+    for (const c of ratified) {
+      if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
+      if (nodes.find((n) => n.id === c.node_id)?.kind === 'goal') continue;
+      const moved = placeholderMovedOptions(c.node_id, nodes, edges, options, limitUnits);
+      if (moved.size === 0) continue;
+      out.placeholderMovedOptionIds.set(c.constraint_id, new Set(moved.keys()));
+      const scored = options.map((o) => optionIdOf(o)).filter((id): id is string => id !== undefined);
+      if (scored.length > 0 && scored.every((id) => moved.has(id))) out.placeholderPartsReasons.set(c.constraint_id, [...moved.values()][0]!);
+    }
+  }
+  for (const c of ratified) {
+    if (typeof c.node_id !== 'string' || c.node_id.length === 0) continue;
+    const node = rawNodes.find((n) => readRecord(n)?.id === c.node_id);
+    const level = readRecord(readRecord(node)?.observed_state);
+    if (level === null) continue;
+    const owner = limitLevelOwnerReason(level.source);
+    if (owner === null) out.userBaselineIds.add(c.constraint_id);
+    else if (owner === 'level_user_assumption') out.userAssumptionIds.add(c.constraint_id);
+  }
+  return out;
+}
+
+/**
+ * ⭐ B5 precondition (e): the ratified limits whose TARGET'S LEVEL is the user's own figure.
+ *
+ * A limit is compared against its target's held level (ISL: `goal_baseline` + the option's same-draw difference; MG
+ * EXEC #70 5856264807). When that level is Olumi's estimate (`cee_inference`), a ratified-only estimate
+ * (`user_confirmed`), an admitted guess (`user_assumption`) or has no readable owner, P restates the estimate, so the
+ * limit is at best `estimate_only`.
+ *
+ * WHOSE LEVEL, from the SAME one authority {@link collectLeaderEstimatedTargetIds} uses:
+ * `earnsAuthorshipCredit(classifyValueSource(observed_state.source))`. No second list of sources lives here.
+ *
+ * POSITIVE ATTESTATION ONLY, so it fails toward `estimate_only`: a missing graph, a missing target, a target with no
+ * `observed_state` object (a derived node, a legacy bare number) or no source all leave the id OUT. Pure.
+ */
+export function collectUserBaselineConstraintIds(
+  graph: unknown,
+  ratified: readonly RatifiedConstraint[],
+): Set<string> {
+  return collectLimitLevelOwners(graph, ratified).userBaselineIds;
+}
+
+/**
+ * The constraint ids whose TARGET NODE carries no quantity to compare against.
+ *
+ * PURE, and it FAILS TOWARD TODAY'S BEHAVIOUR at every step — no graph, an
+ * unreadable graph, a target that is not in the graph, or a target carrying any
+ * quantity all yield "not unmeasured", which leaves {@link
+ * deriveConstraintVerdict} byte-identical to before this existed. That is the
+ * required direction: see {@link ConstraintVerdict.unmeasuredTargetConstraints}
+ * for why a false "no value" is the dangerous error and a false "has value" is
+ * merely today's product.
+ *
+ * ⚠ A MISSING TARGET IS NOT AN UNMEASURED TARGET. If the constraint names a
+ * node this graph does not contain, we have not established that it carries
+ * nothing — we have established that we could not look, and a sweep that could
+ * not look returns the same clean answer as one that looked and found nothing
+ * (standing brief §2). So it stays in `effective` and keeps withholding.
+ *
+ * @param constraintsSource the SAME two shapes {@link readRatifiedConstraints}
+ *   accepts — the `goal_constraints` array itself, or an object carrying one —
+ *   because `RatifiedConstraint` drops `node_id` and this needs it.
+ * @param graphSource an object carrying `nodes[]`.
+ */
+export function collectUnmeasuredConstraintTargetIds(
+  constraintsSource: unknown,
+  graphSource: unknown,
+): Set<string> {
+  const out = new Set<string>();
+
+  const rawConstraints = Array.isArray(constraintsSource)
+    ? constraintsSource
+    : constraintsSource !== null && typeof constraintsSource === "object"
+      ? (constraintsSource as Record<string, unknown>).goal_constraints
+      : undefined;
+  if (!Array.isArray(rawConstraints) || rawConstraints.length === 0) return out;
+
+  const rawNodes =
+    graphSource !== null && typeof graphSource === "object"
+      ? (graphSource as Record<string, unknown>).nodes
+      : undefined;
+  if (!Array.isArray(rawNodes) || rawNodes.length === 0) return out;
+
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const n of rawNodes) {
+    if (n === null || typeof n !== "object") continue;
+    const id = readString((n as Record<string, unknown>).id);
+    if (id !== null) byId.set(id, n as Record<string, unknown>);
+  }
+
+  for (const item of rawConstraints) {
+    if (item === null || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const constraintId = readString(obj.constraint_id);
+    const nodeId = readString(obj.node_id);
+    if (constraintId === null || nodeId === null) continue;
+    const node = byId.get(nodeId);
+    // Absent target ⇒ we could not look ⇒ NOT unmeasured. See the docstring.
+    if (node === undefined) continue;
+    if (nodeCarriesNoQuantity(node)) out.add(constraintId);
+  }
+  return out;
+}
+
+/**
+ * Collect every constraint id PLoT returned a satisfaction probability for.
+ *
+ * TWO sources, deliberately — reading only the per-option map threw away the
+ * producer's own canonical answer:
+ *   1. per-option `constraint_probabilities` keys (both wire shapes);
+ *   2. top-level `constraint_results[].constraint_id`, which is an EXPLICIT
+ *      `constraint_id` field rather than a map key, and is therefore the
+ *      keying-independent statement of "which constraints did the engine
+ *      score" (present on the live doctrine-B wire — see
+ *      tests/fixtures/cross-service/plot-to-cee.doctrine-b.code-derived.json).
+ * Taking both means a per-option keying quirk alone cannot make a scored
+ * constraint look unscored.
+ */
+function collectEvaluatedConstraintIds(
+  envelope: Record<string, unknown>,
+): Set<string> {
+  const seen = new Set<string>();
+  for (const source of readOptionResultSources(envelope)) {
+    for (const entry of source) {
+      for (const { id } of readConstraintSatisfactionProbs(entry as Record<string, unknown>)) {
+        seen.add(id);
+      }
+    }
+  }
+  const results = envelope.constraint_results;
+  if (Array.isArray(results)) {
+    for (const entry of results) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const id = readString((entry as Record<string, unknown>).constraint_id);
+      if (id !== null) seen.add(id);
+    }
+  }
+  return seen;
+}
+
+/**
+ * The ratified-constraint ids the LEADING option ITSELF carries a finite
+ * per-option satisfaction probability for (`option_comparison[].constraint_probabilities`,
+ * both wire shapes), or `null` when there is no leader to name.
+ *
+ * WHY: PLoT's own per-option trust marker (`constraints_decision_grade`,
+ * run.ts b09c0f2 :3346-3372) is the AND of TWO conjuncts — FULL participation
+ * (every active constraint present in THIS option's map; "a MISSING verdict is
+ * itself a trust failure") and every marker `decision_grade: true`. That
+ * aggregate carries no constraint identity, so it is not read; this is its
+ * first conjunct, bound to the leader's option id x the ratified constraint id.
+ * Without it a ratified id scored only for a DIFFERENT option (the top-level
+ * `constraint_results` row is derived from the FIRST option, :2584-2590)
+ * reached rule 4, where `deriveWinnerConstraintInfeasibility` ignores ids the
+ * leader lacks, and read as a pass for a leader that was never scored.
+ *
+ * A leader id that matches no option entry yields the EMPTY set (fail-closed).
+ * Pure.
+ */
+function collectLeaderScoredConstraintIds(
+  envelope: Record<string, unknown>,
+  leadingOptionId: string | null | undefined,
+): Set<string> | null {
+  if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) return null;
+  const entry = findWinnerEntry(envelope, leadingOptionId);
+  if (entry === null) return new Set();
+  return new Set(readConstraintSatisfactionProbs(entry).map((p) => p.id));
+}
+
+/**
+ * The constraint ids whose identity-bound `constraint_results[]` entry the
+ * PRODUCER ITSELF does not certify as decision-grade.
+ *
+ * THE FIELD. `constraint_results[i].scale_provenance` is PLoT's per-constraint
+ * trust marker (`plot-lite-service` b09c0f2 `src/types/engine-v3.ts`
+ * `ConstraintScaleProvenance`; built by `routes/v2/run.ts`
+ * `buildConstraintScaleProvenance`), typed on the shared contract CEE already
+ * pins as `EnrichmentScaleProvenanceSchema` (`@talchain/schemas/boundary`).
+ * `decision_grade` is PLoT's conjunction of every reason a probability can be
+ * numerically real and still not mean what the user asked: a threshold clamped
+ * onto [0,1], a range source outside its allowlist (`default`,
+ * `inferred_value`, ...), `range_unified: false`, or a unit mismatch. This
+ * module does not re-derive any of those reasons and does not read
+ * `threshold_clamped` on its own: the producer's conjunction is the answer.
+ *
+ * THE RULE IS THE CONTRACT'S, APPLIED WHERE IDENTITY EXISTS. An entry certifies
+ * its constraint ONLY when its marker parses under the contract schema AND
+ * `decision_grade === true`. Explicit `false` (any reason), a malformed marker,
+ * or a present entry carrying NO marker all fail closed — the contract says
+ * "Absence of this marker means NOT decision-grade (fail-closed). Consumers
+ * MUST NOT treat a missing marker as trustworthy."
+ *
+ * IDENTITY-BOUND. Only `constraint_id` is collected and the caller matches it
+ * against the ratified ids exactly, so PLoT's own synthesised goal constraint
+ * (source `default`, never ratified) condemns nothing. The per-option
+ * `constraints_decision_grade` is deliberately NOT read: it is an AND over the
+ * participating constraints with no identity, false on partial participation,
+ * so it cannot say WHICH limit is unverified.
+ *
+ * ⚠ BOUNDARY, STATED EXACTLY. A ratified constraint scored ONLY in the
+ * per-option map, with no `constraint_results` entry of its own, is not
+ * reached here (no identity-bound marker exists to read). At b09c0f2 that
+ * shape cannot occur under `constraints_status: 'computed'` (the
+ * exact-correspondence guard in `buildConstraintFields`), so it is a
+ * version-skew gap, recorded rather than closed in this change.
+ *
+ * Pure.
+ */
+function collectProducerNotDecisionGradeConstraintIds(
+  envelope: Record<string, unknown>,
+): Set<string> {
+  const out = new Set<string>();
+  const results = envelope.constraint_results;
+  if (!Array.isArray(results)) return out;
+  for (const entry of results) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const obj = entry as Record<string, unknown>;
+    const id = readString(obj.constraint_id);
+    if (id === null) continue;
+    const marker = EnrichmentScaleProvenanceSchema.safeParse(obj.scale_provenance);
+    if (!marker.success || marker.data.decision_grade !== true) out.add(id);
+  }
+  return out;
+}
+
+/**
+ * Collect every constraint id the PRODUCER DELIBERATELY REMOVED before
+ * computing, from its own disclosure channel `_meta.filtered_constraints[]`.
+ *
+ * ROADMAP 2.349. This channel is PLoT's machine-readable statement of "I threw
+ * this one away on purpose, and here is why" (`{constraint_id, node_id,
+ * reason}` — `plot-lite-service/src/types/engine-v3.ts` `CanonicalMeta`,
+ * populated at `routes/v2/run.ts` only when the list is non-empty). Until this
+ * function existed CEE had ZERO readers of it, so a constraint PLoT announced
+ * it had deleted was indistinguishable at the verdict from one the engine
+ * silently failed to score — and the second reading is what withheld the
+ * leading option on every brief carrying a time phrase.
+ *
+ * ⛔ WHICH REMOVALS ARE "OUT OF SCOPE" — AI Quality claim-permission ruling
+ * (#70 5844891057). The channel carries TWO kinds of removal, and they are
+ * different claims:
+ *   · the model CANNOT test the limit (PLoT `normalisation/constraint-filter.ts`:
+ *     `temporal_deadline`, `temporal_against_normalised_goal`) — "this analysis
+ *     does not test that" is true, and the leader may be named on what it does test;
+ *   · PLoT REFUSED a limit it could test once its frame or units are stated
+ *     (ROADMAP 2.878 `delta_frame_value_altered_by_normalisation`; PLoT #370
+ *     `percent_unit_disagrees_with_target_frame`) — that is "not checked", owed a
+ *     units repair, and the leader stays withheld until it is.
+ * So only the first kind is partitioned off ({@link OUT_OF_SCOPE_FILTER_REASONS}).
+ * Every other reason — a fidelity refusal, one CEE has never seen, or none —
+ * stays a ratified limit with no score, and rule 3 makes it `unevaluated`.
+ * The list sits on the PERMISSIVE side on purpose: a reason missing from it
+ * fails toward withholding, never toward naming a leader past a limit nobody
+ * checked. (This supersedes 2.349's "no reason allowlist": presence proves the
+ * limit was not scored, not that the model cannot score it.)
+ *
+ * IDENTITY-BOUND. Only ids are collected, and the caller matches them against
+ * the ratified ids exactly — a filtered record naming something we never
+ * ratified excludes nothing.
+ *
+ * Fails CLOSED (empty set) on every malformed shape, so a garbled `_meta`
+ * withholds exactly as it does today rather than silently naming a leader.
+ *
+ * Pure.
+ */
+function collectProducerFilteredConstraintIds(
+  envelope: Record<string, unknown>,
+): { outOfScope: Set<string>; refused: Set<string> } {
+  const out = { outOfScope: new Set<string>(), refused: new Set<string>() };
+  for (const { id, reason } of readProducerFilteredEntries(envelope)) {
+    (reason !== null && OUT_OF_SCOPE_FILTER_REASONS.has(reason) ? out.outOfScope : out.refused).add(id);
+  }
+  return out;
+}
+
+/**
+ * The producer's `_meta.filtered_constraints[]` entries, in wire order: `{constraint_id, reason}` only. The ONE walk
+ * of that channel, shared by the leader verdict ({@link collectProducerFilteredConstraintIds}) and B5's per-limit rows
+ * (which need the reason, not just the partition). Fails CLOSED (empty) on every malformed shape.
+ */
+function readProducerFilteredEntries(
+  envelope: Record<string, unknown>,
+): Array<{ id: string; reason: string | null }> {
+  const out: Array<{ id: string; reason: string | null }> = [];
+  const meta = envelope._meta;
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return out;
+  const filtered = (meta as Record<string, unknown>).filtered_constraints;
+  if (!Array.isArray(filtered)) return out;
+  for (const entry of filtered) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const id = readString((entry as Record<string, unknown>).constraint_id);
+    if (id === null) continue;
+    out.push({ id, reason: readString((entry as Record<string, unknown>).reason) });
+  }
+  return out;
+}
+
+/**
+ * The producer's removal reasons that mean "the model cannot test this limit"
+ * (PLoT `normalisation/constraint-filter.ts`, verified at PLoT staging
+ * `b09c0f2`). The ONLY reasons partitioned off as out of scope — see
+ * {@link collectProducerFilteredConstraintIds}.
+ */
+export const OUT_OF_SCOPE_FILTER_REASONS: ReadonlySet<string> = new Set([
+  'temporal_deadline',
+  'temporal_against_normalised_goal',
+]);
+
+/** Codes on the producer's warning channels that mean "not decision-grade". */
+function collectNotDecisionGradeCodes(
+  envelope: Record<string, unknown>,
+): string[] {
+  const found = new Set<string>();
+  for (const key of ["inference_warnings", "critiques"] as const) {
+    const arr = envelope[key];
+    if (!Array.isArray(arr)) continue;
+    for (const entry of arr) {
+      if (entry === null || typeof entry !== "object") continue;
+      const code = readString((entry as Record<string, unknown>).code);
+      if (code !== null && CONSTRAINT_NOT_DECISION_GRADE_CODES.has(code)) {
+        found.add(code);
+      }
+    }
+  }
+  return [...found].sort();
+}
+
+/**
+ * THE constraint verdict for one analysis turn — the single owner of the
+ * meaning "was the user's hard constraint honoured?".
+ *
+ * DEFECT THIS EXISTS TO CLOSE (reported 1/1 on live staging): a user asks for
+ * "total three-year cost below £2,500"; CEE replies "Added constraint: …";
+ * PLoT returns `CONSTRAINT_OUT_OF_DOMAIN` and withholds goal-fit under
+ * `CONSTRAINT_TARGET_UNRELIABLE`; and CEE nevertheless leads with "MacBook Pro
+ * currently leads by 18 percentage points", disclosing nothing. The user's
+ * stated condition was accepted, silently discarded by the engine, and the
+ * product asserted a recommendation anyway.
+ *
+ * Every signal is READ FROM THE PRODUCER — the codes, the status field, the
+ * per-option probabilities and the top-level `constraint_results` are all
+ * PLoT's own output. Nothing here re-derives a verdict PLoT already computed,
+ * and nothing here mirrors PLoT's key-resolution rule (CLAUDE.md trap #12):
+ * where that rule produces ids CEE cannot reconcile, the verdict SAYS SO
+ * ({@link ConstraintVerdictState} `identity_unresolved`) instead of guessing.
+ *
+ * PRECEDENCE, most-certain evidence first. Exactly one state is returned:
+ *
+ *   0. (2.349) Constraints the producer DISCLOSED IT REMOVED before computing
+ *      (`_meta.filtered_constraints`) are partitioned out of the ratified set
+ *      first, onto {@link ConstraintVerdict.outOfScopeConstraints}. Their
+ *      absence from the results is guaranteed by the producer's own decision
+ *      and is therefore not evidence about anything — it must not reach rules
+ *      1–3, all of which would read it as a reason to withhold. If nothing
+ *      survives the partition the answer is `not_applicable`, the same as for
+ *      a turn with no ratified constraints.
+ *   1. (S1/S2) An explicit producer verdict — a not-decision-grade CODE, or
+ *      any PRESENT `constraints_status` other than `'computed'` — condemns the whole constraint
+ *      block, so every ratified constraint is `unevaluated`. This outranks the
+ *      identity question because the producer has told us in words that it did
+ *      not reach decision grade; no id reconciliation is needed to believe it.
+ *   2. Evaluations present but ZERO reconcile ⇒ `identity_unresolved`. Zero
+ *      overlap is required: a single match proves the id spaces DO line up, so
+ *      any remaining unscored constraint is genuinely unscored.
+ *   3. (S3) A ratified constraint with no score, where step 2 did not fire, OR
+ *      one whose identity-bound `constraint_results` entry the producer does
+ *      not certify as decision-grade ⇒ `unevaluated` for exactly those
+ *      constraints. This is the honest "applied, then silently unscored" case,
+ *      it covers "nothing was scored at all" (no evaluations ⇒ no id space to
+ *      reconcile ⇒ no ambiguity), and it covers "scored on a scale the
+ *      producer itself says is not decision-grade" (C50 U1: a clamped
+ *      threshold scoring P = 1 for every option).
+ *   4. Otherwise every ratified constraint was scored, and the LEADER decides:
+ *      `evaluated_infeasible` if it breaks one, else `evaluated_feasible`.
+ *
+ * `unevaluated` outranks `evaluated_infeasible` when both are true (constraint
+ * A scored and violated, constraint B never scored): the unevaluated disclosure
+ * is the one that names a condition and offers a repair step, and the
+ * infeasibility is not lost — it is carried on
+ * {@link ConstraintVerdict.leaderInfeasibility} in every state.
+ *
+ * Why {@link deriveWinnerConstraintInfeasibility} cannot cover the gap on its
+ * own: it FAILS OPEN when no constraint probabilities are present
+ * (`probs.length === 0 → infeasible: false`). PLoT's suppressed-unreliable
+ * variant withholds exactly those probabilities, so the suppressed case is
+ * indistinguishable from the no-constraints case at that predicate. This
+ * function distinguishes them by consulting what the user ratified.
+ *
+ * With no ratified constraints the only question left is the pre-T1 one — does
+ * the producer's own scoring show the leader breaking a constraint? — so the
+ * result is `evaluated_infeasible` or `not_applicable`, and every caller stays
+ * byte-identical to its pre-T1 behaviour. `not_applicable` therefore means
+ * "nothing to withhold for", NOT merely "no ratified constraints"; collapsing
+ * it to the latter would silently un-fix trust-spine board #1.
+ *
+ * PURE. The `CEE_CONSTRAINT_INFEASIBLE_GATE` feature flag is enforced by the
+ * callers, exactly as it is for {@link deriveWinnerConstraintInfeasibility}, so
+ * this function stays trivially testable and the gate keeps one owner.
+ *
+ * B5: the exported {@link deriveConstraintVerdict} is this function plus the per-limit rows. This one is unchanged.
+ */
+function deriveLeaderClaimVerdict(
+  envelope: Record<string, unknown>,
+  ratified: readonly RatifiedConstraint[],
+  leadingOptionId: string | null | undefined,
+  /**
+   * Constraint ids whose target node carries no quantity — derived by
+   * {@link collectUnmeasuredConstraintTargetIds} at the ONE call site that
+   * holds the graph. OPTIONAL, and the omitted value is the SAFE one: an empty
+   * set makes this function byte-identical to its pre-narrowing behaviour, so a
+   * caller who forgets loses the narrowing and cannot gain a false leader
+   * (the same optionality argument `buildConstraintDisclosure`'s `brief`
+   * parameter makes, and for the same reason).
+   */
+  unmeasuredTargetIds?: ReadonlySet<string>,
+  /**
+   * Constraint ids whose target the LEADING option sets with a non-user level ({@link collectLeaderEstimatedTargetIds}),
+   * derived at the call site that holds the analysed graph. OPTIONAL, and omitted is today's verdict exactly.
+   */
+  leaderEstimatedTargetIds?: ReadonlySet<string>,
+  /**
+   * A2 follow-up: the STRICT limits the LEADING option sets at exactly their threshold ({@link STRICT_THRESHOLD_PIN_REASON}),
+   * derived at the call site that holds the wire options. OPTIONAL, and omitted is today's verdict exactly.
+   */
+  leaderStrictThresholdPinIds?: ReadonlySet<string>,
+  /**
+   * R-c: the limits whose target the options move only through links nobody sized ({@link collectLimitLevelOwners}'s
+   * `placeholderPartsReasons`). OPTIONAL, and omitted is today's verdict exactly.
+   */
+  placeholderPartsIds?: ReadonlySet<string>,
+): ConstraintVerdict {
+  // Computed unconditionally so it can be carried on every state (see
+  // `leaderInfeasibility`). Fails open to `{ infeasible: false }`.
+  const leaderRaw = deriveWinnerConstraintInfeasibility(envelope, leadingOptionId);
+  const leader = leaderRaw.infeasible ? leaderRaw : null;
+
+  // ROADMAP 2.349 — STEP 0, BEFORE EVERY PRECEDENCE RULE BELOW. Partition off
+  // the constraints the producer says it DELIBERATELY REMOVED before computing
+  // (`_meta.filtered_constraints`). They are not evidence about the engine's
+  // behaviour on the user's conditions: their absence from the results is
+  // GUARANTEED by the producer's own disclosed decision, not observed.
+  //
+  // It has to happen here rather than inside any single step, because the
+  // absence of a score for a removed constraint would otherwise be read as
+  // evidence by THREE different rules below (the block-level codes rule, the
+  // identity rule, and the unscored rule) — and every one of them would reach
+  // "withhold the leading option" from a fact that says nothing about the
+  // engine at all.
+  //
+  // `effective` is what the rest of this function reasons over; `outOfScope`
+  // rides on the verdict for the disclosure. When they partition to nothing,
+  // the answer is the SAME one a turn with no ratified constraints gets —
+  // `not_applicable`, "nothing to withhold for" — because after removing what
+  // the producer never looked at, there is nothing left to have an opinion
+  // about.
+  const producerFiltered = collectProducerFilteredConstraintIds(envelope);
+  const outOfScope: RatifiedConstraint[] = [];
+  // ⭐ STEP 0b — THE SAME PARTITION, ONE HOP EARLIER IN THE CAUSAL CHAIN.
+  //
+  // Step 0 above removes what the PRODUCER told us it never looked at. This
+  // removes what OUR OWN MODEL made unlookable: a constraint bound to a node
+  // that carries no quantity cannot be scored by any engine, so its absence
+  // from the results is guaranteed by construction and is not evidence about
+  // anything. Feeding it to rules 1-3 reaches "withhold the leading option"
+  // from a fact about our node shapes — which is exactly what the wire showed
+  // (see `unmeasuredTargetConstraints`).
+  //
+  // ⚠ PRECEDENCE: the producer's own disclosure WINS. A constraint that is both
+  // producer-filtered and unmeasured is reported as out-of-scope, because that
+  // is the stronger and more specific statement and the two disclosures must
+  // not both speak about one row.
+  const unmeasured: RatifiedConstraint[] = [];
+  const effective: RatifiedConstraint[] = [];
+  for (const c of ratified) {
+    if (producerFiltered.outOfScope.has(c.constraint_id)) {
+      outOfScope.push(c);
+    } else if (producerFiltered.refused.has(c.constraint_id)) {
+      // REFUSED by the producer (ruling #70 5844891057): it stays a ratified limit with no score, so
+      // rule 3 makes it `unevaluated`, before the unmeasured partition could name a leader past it.
+      effective.push(c);
+    } else if (unmeasuredTargetIds?.has(c.constraint_id) === true) {
+      unmeasured.push(c);
+    } else {
+      effective.push(c);
+    }
+  }
+
+  if (effective.length === 0) {
+    return leaderRaw.infeasible
+      ? verdict('evaluated_infeasible', {
+          leaderInfeasibility: leaderRaw,
+          outOfScopeConstraints: outOfScope,
+          unmeasuredTargetConstraints: unmeasured,
+        })
+      : verdict('not_applicable', {
+          outOfScopeConstraints: outOfScope,
+          unmeasuredTargetConstraints: unmeasured,
+        });
+  }
+
+  const codes = collectNotDecisionGradeCodes(envelope);
+  // Any PRESENT status other than 'computed' is the producer saying the block
+  // carries no decision-grade verdict. PLoT b09c0f2 emits 'unavailable' and
+  // 'error' (ConstraintFeatureStatus also types 'skipped'); reading only
+  // 'unavailable' let an 'error' run's per-option probabilities — which carry
+  // no per-row scale marker — reach rule 4 as a pass. Absent status is today's
+  // path (older/hand-built envelopes).
+  const statusRaw = envelope.constraints_status;
+  const statusUnavailable =
+    statusRaw !== undefined && statusRaw !== null && statusRaw !== "computed";
+
+  // 1. The producer's own explicit verdict on the whole block.
+  if (codes.length > 0 || statusUnavailable) {
+    return verdict('unevaluated', {
+      codes,
+      constraints: [...effective],
+      leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
+      unmeasuredTargetConstraints: unmeasured,
+    });
+  }
+
+  const evaluated = collectEvaluatedConstraintIds(envelope);
+  // A limit the producer REFUSED is unscored for a reason it stated, not because the id spaces
+  // failed to line up — so it never counts toward rule 2's "nothing reconciles" (it lands in rule 3).
+  const reconcilable = effective.filter((c) => !producerFiltered.refused.has(c.constraint_id));
+  const unscored = reconcilable.filter((c) => !evaluated.has(c.constraint_id));
+
+  // 2. Evaluations exist; not one of them is an id we ratified.
+  if (evaluated.size > 0 && reconcilable.length > 0 && unscored.length === reconcilable.length) {
+    return verdict('identity_unresolved', {
+      constraints: [...effective],
+      leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
+      unmeasuredTargetConstraints: unmeasured,
+    });
+  }
+
+  // 3. NOT VERIFIED — the union of three statements, in graph order:
+  //    (a) genuinely unscored: nothing was evaluated at all, or the overlap
+  //        above proves the id spaces line up and these still have no score;
+  //    (b) scored, but the producer's own per-constraint marker does not
+  //        certify the score as decision-grade (clamp, default range, unit,
+  //        range divergence, or a missing/malformed marker). PLoT's doctrine:
+  //        "an untrusted scale licenses neither a compliance claim nor a breach
+  //        claim", so (b) outranks rule 4 in BOTH directions. An id in (b) is
+  //        always in `evaluated` (constraint_results ids are collected there),
+  //        so rule 2 above can never be reached by it.
+  //    (c) the LEADING option itself carries no per-option score for it
+  //        (collectLeaderScoredConstraintIds): the identity-bound half of
+  //        PLoT's per-option `constraints_decision_grade` participation rule.
+  //    (d) the LEADING option SETS the limit's target with a level that is not
+  //        the user's ({@link collectLeaderEstimatedTargetIds}): its score is
+  //        Olumi's own estimate restated, so it licenses neither a compliance
+  //        nor a breach claim (AI Quality, #70 5844226031).
+  //    (e) the LEADING option sets a STRICT limit's own target at EXACTLY its
+  //        threshold (A2 follow-up, DL verdict on #2180): "under 4%" is not met
+  //        at 4%, and the engine, holding "<=", counts it as met. Its score is
+  //        withheld, never read as a pass (nor as a breach: nothing is modelled).
+  //    (f) R-c (AI Quality 5881541947 / 5882087383): the options move the limit's target only through links nobody
+  //        sized, so every option's score for it is the placeholder's. Like (b), it licenses neither a compliance nor
+  //        a breach claim, and the limit card says so.
+  //    `codes` stays `[]` for (b), (d), (e) and (f): the producer shipped no code, and a
+  //    CEE-minted one must never be filed as a producer code.
+  const notDecisionGrade = collectProducerNotDecisionGradeConstraintIds(envelope);
+  const leaderScored = collectLeaderScoredConstraintIds(envelope, leadingOptionId);
+  const unverified = effective.filter(
+    (c) =>
+      !evaluated.has(c.constraint_id) ||
+      notDecisionGrade.has(c.constraint_id) ||
+      (leaderScored !== null && !leaderScored.has(c.constraint_id)) ||
+      leaderEstimatedTargetIds?.has(c.constraint_id) === true ||
+      leaderStrictThresholdPinIds?.has(c.constraint_id) === true ||
+      placeholderPartsIds?.has(c.constraint_id) === true,
+  );
+  if (unverified.length > 0) {
+    return verdict('unevaluated', {
+      constraints: unverified,
+      leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
+      unmeasuredTargetConstraints: unmeasured,
+    });
+  }
+
+  // 4. Everything the user ratified was scored. The leader decides.
+  return leaderRaw.infeasible
+    ? verdict('evaluated_infeasible', {
+        leaderInfeasibility: leaderRaw,
+        outOfScopeConstraints: outOfScope,
+        unmeasuredTargetConstraints: unmeasured,
+      })
+    : verdict('evaluated_feasible', {
+        outOfScopeConstraints: outOfScope,
+        unmeasuredTargetConstraints: unmeasured,
+      });
+}
+
+/**
+ * THE constraint verdict for one analysis turn: the single owner of "was the user's hard constraint honoured?"
+ * (`@talchain/schemas` `handler-results.ts` names this function as that owner).
+ *
+ * It returns {@link deriveLeaderClaimVerdict}'s verdict (every precedence rule documented there, unchanged) and, when
+ * the caller supplies `perLimitInput` and the user ratified at least one limit, B5's typed rows: one
+ * {@link PerLimitVerdict} per ratified limit plus the run-level {@link JointLimitVerdict}. The rows are ADDITIVE:
+ * they never change `state`, `mayNameLeadingOption` or any other member, so a caller that omits `perLimitInput` gets
+ * today's verdict exactly, and absence of the rows means "not attested", never "scored".
+ */
+export function deriveConstraintVerdict(
+  envelope: Record<string, unknown>,
+  ratified: readonly RatifiedConstraint[],
+  leadingOptionId: string | null | undefined,
+  /** See {@link deriveLeaderClaimVerdict}. Deliberately NOT passed by run_analysis. */
+  unmeasuredTargetIds?: ReadonlySet<string>,
+  /** {@link collectLeaderEstimatedTargetIds}. Also folds into B5's `estimate_only` (rule (d)). */
+  leaderEstimatedTargetIds?: ReadonlySet<string>,
+  /**
+   * B5. {@link collectLimitLevelOwners} over the analysed graph. OPTIONAL, and omitted is the SAFE value: no rows are
+   * attested (never a defaulted `scored`). Both sets are required when it is given, so no caller can omit the owner.
+   */
+  perLimitInput?: {
+    readonly userBaselineIds: ReadonlySet<string>;
+    readonly userAssumptionIds: ReadonlySet<string>;
+    /** R1 S4-core: limits stored `change_rel` ({@link collectLimitLevelOwners}). Omitted = none known (as before). */
+    readonly relativeChangeIds?: ReadonlySet<string>;
+    /** R-c: limits withheld for their target's unsized parts, with why ({@link collectLimitLevelOwners}). */
+    readonly placeholderPartsReasons?: ReadonlyMap<string, string>;
+    /** R-c per option: per limit, the options whose own P is withheld for it ({@link collectLimitLevelOwners}). */
+    readonly placeholderMovedOptionIds?: ReadonlyMap<string, ReadonlySet<string>>;
+  },
+  /**
+   * ⭐ A2 follow-up (DL verdict on #2180): option id → the STRICT limits that option sets at EXACTLY their threshold
+   * (`strictLimitsPinnedAtThreshold`, `level-limit-baseline.ts`). That option's result for that limit is WITHHELD, here,
+   * so every surface inherits it: the leader's under rule 3 (e), and the limit's per-limit row as `unscored` with
+   * {@link STRICT_THRESHOLD_PIN_REASON} whichever option pins it. OPTIONAL, and omitted is today's verdict exactly.
+   */
+  strictThresholdPins?: ReadonlyMap<string, ReadonlySet<string>>,
+): ConstraintVerdict {
+  const leaderVerdict = deriveLeaderClaimVerdict(
+    envelope,
+    ratified,
+    leadingOptionId,
+    unmeasuredTargetIds,
+    leaderEstimatedTargetIds,
+    typeof leadingOptionId === 'string' ? strictThresholdPins?.get(leadingOptionId) : undefined,
+    perLimitInput?.placeholderPartsReasons !== undefined
+      ? new Set(
+        perLimitInput.placeholderMovedOptionIds === undefined
+          ? perLimitInput.placeholderPartsReasons.keys()
+          // R-c per option: exactly the limits for which the LEADING option's own P is withheld (a placeholder moves
+          // its target). A leader no placeholder moves is decided on its own P, whatever the other options do.
+          : [...perLimitInput.placeholderMovedOptionIds]
+            .filter(([, ids]) => typeof leadingOptionId === 'string' && ids.has(leadingOptionId)).map(([cid]) => cid),
+      )
+      : undefined,
+  );
+  if (perLimitInput === undefined || ratified.length === 0) return leaderVerdict;
+  const pinnedIds = new Set([...(strictThresholdPins?.values() ?? [])].flatMap((ids) => [...ids]));
+  const perLimit = derivePerLimitVerdicts(envelope, ratified, perLimitInput, leaderEstimatedTargetIds, pinnedIds);
+  return { ...leaderVerdict, perLimit, joint: deriveJointLimitVerdict(perLimit) };
+}
+
+// ===========================================================================
+// B5 — ONE TYPED VERDICT PER LIMIT
+// ===========================================================================
+
+/**
+ * ⭐ A2 follow-up (DL verdict on #2180): CEE's per-limit reason for a STRICT limit ("under 4%", held `<=` beside
+ * `operator_as_stated: "<"`) that some option sets at EXACTLY its threshold. The producer scored `<=`, so that option's P
+ * says the limit is met where the user's words say it is not; the row is `unscored` and this names why. Ranked LAST: it
+ * is the reason only when every producer precondition held (a limit with no P keeps its own reason).
+ */
+export const STRICT_THRESHOLD_PIN_REASON = 'level_set_at_strict_threshold';
+
+/**
+ * R1 S4-core: ISL's `frame_verdict` says the base a limit was compared on is NOT the user's, while CEE reads that same
+ * level as the user's own. The hops disagree about whose figure it is, so the row is `unscored` (CEE's own code).
+ */
+export const BASE_OWNER_UNESTABLISHED_REASON = 'base_owner_unestablished';
+
+/**
+ * The per-limit `reason` codes, ranked by the precondition they report (AI Quality 5855511541: "reason names the FIRST
+ * failed precondition"). Lower is earlier; ties keep the first reason found. A code is a `string` on the contract so a
+ * consumer on an older pin never fails to parse a new one (hazard 1).
+ *
+ *   · AI Quality's documented codes, in precondition order: `threshold_unframed` (a), `target_unanchored` (b),
+ *     `threshold_clamped` (c), `CONSTRAINT_NOT_CONVERTIBLE` / `CONSTRAINT_OUT_OF_DOMAIN` (d; producer codes verbatim),
+ *     `CONSTRAINT_TARGET_UNRELIABLE` (producer code verbatim), `tally_units_incoherent`.
+ *   · A producer removal reason CEE does not map (e.g. `temporal_deadline`) is passed VERBATIM and ranks after those.
+ *     So does `limit_unscored`, PLoT #378's reason for a limit its `joint_withheld.constraint_ids` names.
+ *   · CEE's own codes for "no P, and no precondition could be named": `identity_unresolved` (no returned id reconciles
+ *     with a ratified one), `constraint_block_withheld` (the producer withheld the whole constraint block, or shipped a
+ *     block code naming no limit, and this limit is not independently certified), `no_score_returned` (not every
+ *     option carries a P), and `not_decision_grade` (every option carries a P, but the per-constraint marker is
+ *     absent, malformed or not decision-grade for a reason it does not name).
+ *
+ * `target_unanchored` and `tally_units_incoherent` are ranked but NOT PRODUCED today: no producer field reports them
+ * yet (ISL B1a's `level_anchor_source` is the planned carrier for the first). {@link STRICT_THRESHOLD_PIN_REASON} is
+ * CEE's own and ranks after every other code.
+ */
+export const PER_LIMIT_REASON_RANK: ReadonlyMap<string, number> = new Map([
+  ['threshold_unframed', 1],
+  ['target_unanchored', 2],
+  [PLACEHOLDER_PARTS_REASON, 2],
+  [PARTS_IDENTITY_UNMODELLED_REASON, 2],
+  [OLUMI_GUESS_LIMIT_REASON, 2],
+  ['threshold_clamped', 3],
+  ['CONSTRAINT_NOT_CONVERTIBLE', 4],
+  ['CONSTRAINT_OUT_OF_DOMAIN', 4],
+  ['CONSTRAINT_TARGET_UNRELIABLE', 5],
+  ['tally_units_incoherent', 6],
+  ['identity_unresolved', 8],
+  ['constraint_block_withheld', 9],
+  ['no_score_returned', 10],
+  ['not_decision_grade', 11],
+  [BASE_OWNER_UNESTABLISHED_REASON, 11],
+  [STRICT_THRESHOLD_PIN_REASON, 12],
+]);
+/** A producer removal reason CEE does not map, passed verbatim: after the named preconditions, before CEE's own codes. */
+const UNMAPPED_PRODUCER_REASON_RANK = 7;
+
+/** The producer's warning codes that, NAMING a limit, mean that limit was not scored to decision grade (verbatim). */
+const PER_LIMIT_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'CONSTRAINT_NOT_CONVERTIBLE',
+  'CONSTRAINT_OUT_OF_DOMAIN',
+  'CONSTRAINT_TARGET_UNRELIABLE',
+]);
+
+/** Producer removal reasons meaning the threshold could not be carried through the target's frame (precondition (a)). */
+const FRAME_REFUSAL_REASONS: ReadonlySet<string> = new Set([
+  'delta_frame_value_altered_by_normalisation',
+  'percent_unit_disagrees_with_target_frame',
+]);
+
+/**
+ * The structured identity a producer warning carries: a constraint, a node, a `nodes[<id>]` field path, or (PLoT #378)
+ * a `constraint_ids` list.
+ *
+ * `constraintIds` is PLoT #378's `constraint_ids`: CONSTRAINT_TARGET_UNRELIABLE is emitted once per target NODE and
+ * names every withheld limit on it by ratified id. When present (at least one non-empty string) it is AUTHORITATIVE:
+ * the warning is about exactly those limits, so it is never widened to another limit on the same node. `null` when
+ * the field is absent or names nothing, which keeps every older payload on the pre-#378 rule byte for byte.
+ */
+function warningIdentity(entry: Record<string, unknown>): {
+  constraintId: string | null;
+  constraintIds: string[] | null;
+  nodeIds: string[];
+} {
+  const nodeIds: string[] = [];
+  const nodeId = readString(entry.node_id);
+  if (nodeId !== null) nodeIds.push(nodeId);
+  if (Array.isArray(entry.affected_node_ids)) {
+    for (const id of entry.affected_node_ids) if (typeof id === 'string' && id.length > 0) nodeIds.push(id);
+  }
+  const field = readString(entry.field);
+  const match = field === null ? null : /^nodes\[([^\]]+)\]/.exec(field);
+  if (match?.[1] !== undefined) nodeIds.push(match[1]);
+  return { constraintId: readString(entry.constraint_id), constraintIds: readConstraintIdList(entry.constraint_ids), nodeIds };
+}
+
+/** A producer `constraint_ids` list: its non-empty strings, or `null` when absent, malformed or naming nothing. */
+function readConstraintIdList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  return ids.length > 0 ? ids : null;
+}
+
+/**
+ * PLoT #378's `joint_withheld.constraint_ids`: the limits the producer ITSELF says it did not score on this run (its
+ * reason, `limit_unscored`, is the joint's). Empty when the field is absent, which is every pre-#378 payload.
+ */
+function readJointWithheldConstraintIds(envelope: Record<string, unknown>): ReadonlySet<string> {
+  return new Set(readConstraintIdList(readRecord(envelope.joint_withheld)?.constraint_ids) ?? []);
+}
+
+/** The per-limit reason for a limit named in `joint_withheld` (the producer's code, verbatim; unmapped rank). */
+const JOINT_WITHHELD_REASON = 'limit_unscored';
+
+/**
+ * The per-limit rows. For each ratified limit (graph order, first occurrence of an id), every reason the producer's
+ * evidence gives is collected and the earliest-ranked one is reported; with none, the baseline decides between
+ * `scored` and `estimate_only`.
+ *
+ * ⛔ ONE UNSCOREABLE LIMIT NEVER SILENCES ANOTHER. A limit's reasons come from evidence bound to ITS identity: its
+ * `constraint_results` marker, its per-option P, a warning naming its constraint or target node (or, PLoT #378, naming
+ * it in `constraint_ids`, which then binds to exactly the limits listed), a filter entry naming it, or PLoT #378's
+ * `joint_withheld.constraint_ids` naming it (`limit_unscored`). Two block-level signals are the only exceptions, and
+ * both are the producer speaking about the block:
+ *   · `constraints_status` present and not `'computed'`: the producer withheld the block, so no limit has a P;
+ *   · a refusal code carrying NO identity. With one limit it can only be about that limit (reported verbatim). With
+ *     several it is placed only on limits NOT independently certified (marker + a P on every option), because a code
+ *     that names nobody cannot be about a limit the producer certified by id; if every limit is certified the code
+ *     cannot be placed, and all of them fail closed.
+ *
+ * Pure.
+ */
+function derivePerLimitVerdicts(
+  envelope: Record<string, unknown>,
+  ratified: readonly RatifiedConstraint[],
+  levels: {
+    readonly userBaselineIds: ReadonlySet<string>;
+    readonly userAssumptionIds: ReadonlySet<string>;
+    readonly relativeChangeIds?: ReadonlySet<string>;
+    readonly placeholderPartsReasons?: ReadonlyMap<string, string>;
+    readonly placeholderMovedOptionIds?: ReadonlyMap<string, ReadonlySet<string>>;
+  },
+  leaderEstimatedTargetIds: ReadonlySet<string> | undefined,
+  /** A2 follow-up: the strict limits some option sets at exactly their threshold ({@link STRICT_THRESHOLD_PIN_REASON}). */
+  strictThresholdPinnedIds: ReadonlySet<string>,
+): PerLimitVerdict[] {
+  const { userBaselineIds, userAssumptionIds } = levels;
+  const seen = new Set<string>();
+  const limits = ratified.filter((c) => (seen.has(c.constraint_id) ? false : (seen.add(c.constraint_id), true)));
+  const filteredEntries = readProducerFilteredEntries(envelope);
+  const filteredIds = new Set(filteredEntries.map((e) => e.id));
+  const effective = limits.filter((c) => !filteredIds.has(c.constraint_id));
+
+  const statusRaw = envelope.constraints_status;
+  const blockWithheld = statusRaw !== undefined && statusRaw !== null && statusRaw !== 'computed';
+
+  // Refusal codes, split by whether they carry identity.
+  const namedRefusals: Array<{ code: string } & ReturnType<typeof warningIdentity>> = [];
+  const unattributed: string[] = [];
+  for (const key of ['inference_warnings', 'critiques'] as const) {
+    const arr = envelope[key];
+    if (!Array.isArray(arr)) continue;
+    for (const entry of arr) {
+      const rec = readRecord(entry);
+      const code = readString(rec?.code);
+      if (rec === null || code === null || !PER_LIMIT_REFUSAL_CODES.has(code)) continue;
+      const identity = warningIdentity(rec);
+      if (identity.constraintId === null && identity.constraintIds === null && identity.nodeIds.length === 0) {
+        if (!unattributed.includes(code)) unattributed.push(code);
+      } else {
+        namedRefusals.push({ code, ...identity });
+      }
+    }
+  }
+
+  // Rule 2's observable, per limit: evaluations exist and not one reconciles with a ratified id.
+  const evaluated = collectEvaluatedConstraintIds(envelope);
+  const identityUnresolved =
+    evaluated.size > 0 && effective.length > 0 && effective.every((c) => !evaluated.has(c.constraint_id));
+
+  const options = readOptionResultSources(envelope)[0] ?? [];
+  const results = Array.isArray(envelope.constraint_results) ? envelope.constraint_results : [];
+  const jointWithheldIds = readJointWithheldConstraintIds(envelope);
+
+  /** R-c per option: the limits for which every option in the result had its own P withheld. */
+  const noneCounted = new Set<string>();
+  /** Reasons from the limit's OWN identity-bound evidence. Empty = the producer certified it by id. */
+  const ownReasons = (c: RatifiedConstraint): string[] => {
+    const reasons: string[] = [];
+    if (identityUnresolved) reasons.push('identity_unresolved');
+    for (const r of namedRefusals) {
+      const names =
+        r.constraintIds !== null
+          ? r.constraintIds.includes(c.constraint_id) || r.constraintId === c.constraint_id
+          : r.constraintId === c.constraint_id || (typeof c.node_id === 'string' && r.nodeIds.includes(c.node_id));
+      if (names) reasons.push(r.code);
+    }
+    if (jointWithheldIds.has(c.constraint_id)) reasons.push(JOINT_WITHHELD_REASON);
+    const rows = results.map(readRecord).filter((r) => r !== null && readString(r.constraint_id) === c.constraint_id);
+    if (rows.length === 0) reasons.push('not_decision_grade');
+    // ⛔ R1 S4-core (0.61.0, meaning AIQ 5871459631; Codex DL blocker 5880319881): ISL's verdict on the FRAME. A limit
+    // stored as a RELATIVE change is compared on today's level, so its P is the user's finding only when ISL says
+    // `scored`; ABSENT (a pre-R1 ISL, or a hop that dropped it) fails closed, exactly as an absent `scale_provenance`.
+    if (levels.relativeChangeIds?.has(c.constraint_id) === true
+      && !rows.some((r) => r?.frame_verdict === 'scored' || r?.frame_verdict === 'estimate_only')) {
+      reasons.push('not_decision_grade');
+    }
+    for (const row of rows) {
+      const marker = EnrichmentScaleProvenanceSchema.safeParse(row?.scale_provenance);
+      if (!marker.success) {
+        reasons.push('not_decision_grade');
+        continue;
+      }
+      if (marker.data.range_unified === false) reasons.push('threshold_unframed');
+      if (marker.data.threshold_clamped !== undefined) reasons.push('threshold_clamped');
+      if (marker.data.decision_grade !== true) reasons.push('not_decision_grade');
+    }
+    // R-c per option: an option whose own P for this limit was withheld (a placeholder moves its target) is not counted;
+    // the row speaks for the options that were checked. None left is the per-limit R-c reason, pushed below.
+    const withheldFor = levels.placeholderMovedOptionIds?.get(c.constraint_id);
+    const counted = withheldFor === undefined ? options : options.filter((o) => !withheldFor.has(optionIdOf(o) ?? ''));
+    if (withheldFor !== undefined && counted.length === 0) noneCounted.add(c.constraint_id);
+    const everyOptionScores =
+      counted.length > 0 &&
+      counted.every((o) => readConstraintSatisfactionProbs(o).some((p) => p.id === c.constraint_id));
+    if (!everyOptionScores) reasons.push('no_score_returned');
+    return reasons;
+  };
+
+  const own = new Map(effective.map((c) => [c.constraint_id, ownReasons(c)] as const));
+  const everyLimitCertified = effective.every((c) => own.get(c.constraint_id)!.length === 0);
+
+  const firstFailed = (reasons: readonly string[]): string =>
+    reasons.reduce((best, r) =>
+      (PER_LIMIT_REASON_RANK.get(r) ?? UNMAPPED_PRODUCER_REASON_RANK) <
+      (PER_LIMIT_REASON_RANK.get(best) ?? UNMAPPED_PRODUCER_REASON_RANK)
+        ? r
+        : best,
+    );
+
+  return limits.map((c): PerLimitVerdict => {
+    // Removed by the producer before computing: never a P. Frame refusals are precondition (a); others verbatim.
+    if (filteredIds.has(c.constraint_id)) {
+      const reasons = filteredEntries
+        .filter((e) => e.id === c.constraint_id)
+        .map((e) =>
+          e.reason === null ? 'no_score_returned' : FRAME_REFUSAL_REASONS.has(e.reason) ? 'threshold_unframed' : e.reason,
+        );
+      return { constraint_id: c.constraint_id, state: 'unscored', reason: firstFailed(reasons) };
+    }
+    const reasons = [...own.get(c.constraint_id)!];
+    const certified = reasons.length === 0;
+    if (blockWithheld || (unattributed.length > 0 && (effective.length === 1 || !certified || everyLimitCertified))) {
+      if (effective.length === 1 && unattributed.length > 0) reasons.push(...unattributed);
+      else reasons.push('constraint_block_withheld');
+    }
+    // Pushed after `certified` is read: it is CEE's reading of the words, never producer evidence about the block.
+    if (strictThresholdPinnedIds.has(c.constraint_id)) reasons.push(STRICT_THRESHOLD_PIN_REASON);
+    // R-c: CEE's reading of the model's links, like the pin above — never producer evidence about the block. Per option
+    // (AIQ 5900908629), the row is withheld for its parts only when NO option it would fold over is left: an option in
+    // the result that no placeholder moves (the status quo PLoT scores beside the wire options) is still checked.
+    const partsReason = levels.placeholderPartsReasons?.get(c.constraint_id);
+    if (partsReason !== undefined && (levels.placeholderMovedOptionIds?.get(c.constraint_id) === undefined || noneCounted.has(c.constraint_id))) {
+      reasons.push(partsReason);
+    }
+    // ISL's `estimate_only`: the base it compared on is NOT the user's (Olumi's estimate, or an owner it could not
+    // establish). It only ever LOWERS a row. When CEE reads that same level as the user's own, the two hops disagree
+    // about whose figure it is, so neither "scored" nor "only Olumi's estimates" would be true: the row fails closed.
+    const islEstimateOnly = results.some((r) => readRecord(r)?.constraint_id === c.constraint_id && readRecord(r)?.frame_verdict === 'estimate_only');
+    const usersOwnLevel =
+      userBaselineIds.has(c.constraint_id) && leaderEstimatedTargetIds?.has(c.constraint_id) !== true;
+    if (islEstimateOnly && usersOwnLevel) reasons.push(BASE_OWNER_UNESTABLISHED_REASON);
+    if (reasons.length > 0) return { constraint_id: c.constraint_id, state: 'unscored', reason: firstFailed(reasons) };
+    if (usersOwnLevel) return { constraint_id: c.constraint_id, state: 'scored' };
+    // (a) WHOSE figure. A level that is not the user's names its own owner. When the level IS the user's, only rule (d)
+    // leaves the row here: the leader SETS the target, at an intervention's level whose vocabulary (brief_extraction |
+    // user_specified | cee_hypothesis) holds no user assumption, so it is Olumi's or has no owner.
+    const reason: EstimateOnlyReason =
+      !userBaselineIds.has(c.constraint_id) && userAssumptionIds.has(c.constraint_id)
+        ? 'level_user_assumption'
+        : 'level_olumi_estimate';
+    return { constraint_id: c.constraint_id, state: 'estimate_only', reason };
+  });
+}
+
+/** The joint over EVERY row (AI Quality 5855511541, B5 rule 2). Pure. */
+function deriveJointLimitVerdict(rows: readonly PerLimitVerdict[]): JointLimitVerdict {
+  const unscored = rows.filter((r) => r.state === 'unscored').map((r) => r.constraint_id);
+  if (unscored.length > 0) return { state: 'withheld', withheld_reason: 'limit_unscored', constraint_ids: unscored };
+  return rows.some((r) => r.state === 'estimate_only') ? { state: 'estimate_only' } : { state: 'scored' };
+}
+
+// ===========================================================================
+// THE LEADER PROBABLY BREAKS A LIMIT IT IS ALLOWED TO BE NAMED UNDER
+// ===========================================================================
+
+/**
+ * Below this, a scored and ratified limit is more likely BROKEN than met by the leading option (AI Quality claim-permission
+ * ruling, #70 5842498806, accepted by Delivery Lead 5842513799).
+ */
+export const LEADER_LIMIT_RISK_THRESHOLD = 0.5;
+
+/** One ratified limit the leading option is more likely than not to break, on a producer-certified score. */
+export interface LeaderLimitRisk {
+  readonly constraint_id: string;
+  readonly label: string | null;
+  readonly source_quote: string | null;
+  /** P(the LEADING option meets this limit), read from the leader's own per-option score. */
+  readonly probability: number;
+}
+
+/**
+ * ⛔ THE ONE PREDICATE for "the leader may be named, but it probably breaks the user's limit" — consumed by the reply
+ * (OpenAI Runtime) and the card (R&C), never re-derived (#70 5842539827).
+ *
+ * WHY. `deriveConstraintVerdict` returns `evaluated_infeasible` only at P ≤ {@link HARD_VIOLATION_FLOOR} (a "does not
+ * satisfy" claim is definitional there). From just above that floor to 0.99 it is `evaluated_feasible`: the leader is
+ * permitted and `constraint-gap-disclosure` says nothing. A leader that meets the limit with P = 0.3 was therefore named
+ * with the limit unmentioned — silent. The ruling: while a ratified limit is scored and the leader's P < 0.5, the leader
+ * may be named ONLY if the same reply/card names the limit and says it is more likely than not to be broken on these
+ * estimates; never "meets", "keeps … under" or "within".
+ *
+ * RETURNED ONLY ON EVIDENCE, each conjunct identity-bound to the ratified `constraint_id` (the #1943 rules, reused):
+ *   · the limit is RATIFIED (only `ratified` is iterated — PLoT's synthesised goal constraint condemns nothing);
+ *   · its `constraint_results` entry is PRODUCER-CERTIFIED: the marker parses under the contract and
+ *     `decision_grade === true` (a clamped, defaulted or unit-mismatched score licenses neither a compliance nor a
+ *     breach claim — those are `unevaluated`, whose own disclosure already speaks);
+ *   · the LEADER carries its own finite per-option score for it (`findWinnerEntry` → `constraint_probabilities`);
+ *   · that score is < {@link LEADER_LIMIT_RISK_THRESHOLD}.
+ * No leader, no matching entry, or no certified score ⇒ `[]` — this predicate never invents a risk.
+ *
+ * It does not read the verdict state: callers gate on `evaluated_feasible` (under `unevaluated` the limit copy already
+ * speaks; under `evaluated_infeasible` the leader is withheld). Pure; graph order.
+ */
+export function deriveLeaderLimitRisks(
+  envelope: Record<string, unknown>,
+  leadingOptionId: string | null | undefined,
+  ratified: readonly RatifiedConstraint[],
+): LeaderLimitRisk[] {
+  if (typeof leadingOptionId !== 'string' || leadingOptionId.length === 0) return [];
+  const entry = findWinnerEntry(envelope, leadingOptionId);
+  if (entry === null) return [];
+  const leaderProbability = new Map(readConstraintSatisfactionProbs(entry).map((p) => [p.id, p.probability] as const));
+  const certified = collectProducerCertifiedConstraintIds(envelope);
+  const out: LeaderLimitRisk[] = [];
+  for (const c of ratified) {
+    const probability = leaderProbability.get(c.constraint_id);
+    if (probability === undefined || !certified.has(c.constraint_id)) continue;
+    if (probability < LEADER_LIMIT_RISK_THRESHOLD) {
+      out.push({ constraint_id: c.constraint_id, label: c.label, source_quote: c.source_quote ?? null, probability });
+    }
+  }
+  return out;
+}
+
+/**
+ * B5 (DL 5859845823) — the run's stored per-limit rows and joint, read off a `run_analysis` fact's typed
+ * `constraint_verdict`: the source of the graph read's `analysis_limit_verdicts` and so of the turn's `limit_verdicts`.
+ * `null` unless the fact attests rows: absent, malformed or empty `per_limit`, or no joint (absent = not attested, never
+ * defaulted). Each half is checked by the 0.60 contract's own member schema. Pure.
+ */
+export interface StoredLimitVerdicts {
+  readonly per_limit: PerLimitVerdict[];
+  readonly joint: JointLimitVerdict;
+}
+
+const PerLimitRowsSchema = ConstraintVerdictSchema.shape.per_limit.unwrap();
+const JointVerdictSchema = ConstraintVerdictSchema.shape.joint.unwrap();
+
+/** A `{per_limit, joint}` pair the contract accepts, with at least one row; otherwise `null`. */
+export function readLimitVerdicts(value: unknown): StoredLimitVerdicts | null {
+  if (!isPlainObject(value)) return null;
+  const record = value as Record<string, unknown>;
+  const rows = PerLimitRowsSchema.safeParse(record.per_limit);
+  const joint = JointVerdictSchema.safeParse(record.joint);
+  if (!rows.success || !joint.success || rows.data.length === 0) return null;
+  return { per_limit: rows.data as PerLimitVerdict[], joint: joint.data as JointLimitVerdict };
+}
+
+export function readLimitVerdictsFromResult(result: unknown): StoredLimitVerdicts | null {
+  if (!isPlainObject(result)) return null;
+  return readLimitVerdicts((result as Record<string, unknown>).constraint_verdict);
+}
+
+/**
+ * ⭐ THE ONE READER over a persisted run fact — the readback carrier's source (#70 5842617884 / 5842658396).
+ *
+ * The transport block drops `constraint_results` (`P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`), so
+ * {@link deriveLeaderLimitRisks} over a readback block can only ever return `[]`. The FACT does not drop it: the run
+ * fact stores `enrichment` = the verbatim PLoT body (`run-analysis.ts`, `enrichment: response`) and
+ * `leading_option_id` = the SAME variable {@link deriveConstraintVerdict} was given. So the carrier reads the risks off
+ * the fact, beside {@link readConstraintVerdictStateFromResult}, under the same freshness gate — the same bytes the
+ * verdict used, no second envelope, no schema change.
+ *
+ * `ratified` is the caller's `readRatifiedConstraints` of the hash-bound graph (identical to the run's set while the
+ * freshness gate holds). `null` when the fact carries no PLoT body to read; `[]` when it does and no limit is at risk.
+ * Pure.
+ */
+export function readLeaderLimitRisksFromResult(
+  result: unknown,
+  ratified: readonly RatifiedConstraint[],
+): LeaderLimitRisk[] | null {
+  if (!isPlainObject(result)) return null;
+  const record = result as Record<string, unknown>;
+  const enrichment = record.enrichment;
+  if (!isPlainObject(enrichment)) return null;
+  const leader = typeof record.leading_option_id === 'string' && record.leading_option_id.length > 0
+    ? record.leading_option_id
+    : null;
+  return deriveLeaderLimitRisks(enrichment as Record<string, unknown>, leader, ratified);
+}
+
+/**
+ * The constraint ids whose `constraint_results` entry the PRODUCER certifies: the marker parses under
+ * `EnrichmentScaleProvenanceSchema` AND `decision_grade === true`. The positive twin of
+ * {@link collectProducerNotDecisionGradeConstraintIds} — same parse, same rule — for a caller that needs PROOF of
+ * certification rather than proof of its absence (a ratified id with no entry at all is in neither set). Pure.
+ */
+function collectProducerCertifiedConstraintIds(envelope: Record<string, unknown>): Set<string> {
+  const out = new Set<string>();
+  const results = envelope.constraint_results;
+  if (!Array.isArray(results)) return out;
+  for (const entry of results) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const obj = entry as Record<string, unknown>;
+    const id = readString(obj.constraint_id);
+    if (id === null) continue;
+    const marker = EnrichmentScaleProvenanceSchema.safeParse(obj.scale_provenance);
+    if (marker.success && marker.data.decision_grade === true) out.add(id);
+  }
+  return out;
+}
+
+// ===========================================================================
+// T1 — PERSISTING the verdict alongside the analysis facts
+// ===========================================================================
+
+/**
+ * The key CEE STAMPED its claim-safety verdict under, inside the run_analysis
+ * fact's `result.enrichment`, before `@talchain/schemas@0.25.0`.
+ *
+ * ⚠ LEGACY READ PATH ONLY — NOTHING WRITES THIS ANY MORE. The verdict now
+ * rides the first-class {@link ConstraintVerdictSchema} field
+ * `result.constraint_verdict` (0.25.0), written by the single stamp site in
+ * `run_analysis`. Read via {@link readMayNameLeadingOptionFromResult}, which
+ * prefers the typed field and falls back HERE.
+ *
+ * WHY THE INTERIM EXISTED. `RunAnalysisResultSchema` is `.strict()`, so an
+ * extra key on `result` failed BOTH the handler's own
+ * `RunAnalysisHandlerFactSchema.safeParse` on write AND
+ * `HandlerFactSchema.safeParse` on every read (`session/supabase-store.ts`
+ * `readFactsWithTurnFor:612`, which THROWS `SessionReadError` rather than
+ * skipping). Moving the field therefore needed a schemas release, which was
+ * blocked behind V5-CI-01. 0.25.0 IS that release, and it mirrors
+ * {@link PersistedClaimSafety} verbatim.
+ *
+ * WHY THIS KEY STILL HAS A READER, and why that is not the mirror trap.
+ * Every run_analysis fact persisted between #710 and the 0.25.0 adoption
+ * carries the interim stamp and nothing else. There is no data migration
+ * (A1 ruling), so dropping this reader would silently reclassify every one of
+ * those rows as "unknown" ⇒ withheld — costing real users their leader-presuming
+ * cards on a re-opened historic analysis, for no safety gain. The two keys are
+ * not two copies of a live meaning: exactly one of them is ever present on a
+ * given fact, and the newer wins. That is a migration ramp, not a mirror.
+ *
+ * It never reached the wire either way: `toSafeTransportEnrichment`
+ * (`compose.ts`) projects enrichment through the
+ * `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` allowlist, and this key is deliberately
+ * absent from it.
+ */
+export const CEE_CLAIM_SAFETY_ENRICHMENT_KEY = '__cee_claim_safety';
+
+/**
+ * The persisted projection of {@link ConstraintVerdict} — the FACT ABOUT THE
+ * ANALYSIS that "may a leading option be named" is.
+ *
+ * Only the two fields any consumer needs are stored. `constraints` and
+ * `leaderInfeasibility` carry user labels and producer detail; they are
+ * deliberately NOT persisted here, because nothing downstream of the single
+ * derivation reads them and a second copy of a label is a second thing to
+ * drift.
+ *
+ * `@talchain/schemas@0.25.0`'s `ConstraintVerdictSchema` mirrors this interface
+ * VERBATIM — member names, types and order — and the package's own docstring
+ * says so. It is therefore assignable to the typed field with no adapter, and
+ * the compile-time assertion below is what keeps that true.
+ */
+export interface PersistedClaimSafety {
+  /** Verbatim {@link ConstraintVerdict.mayNameLeadingOption}. */
+  readonly may_name_leading_option: boolean;
+  /** Verbatim {@link ConstraintVerdict.state}, for telemetry and triage. */
+  readonly constraint_verdict_state: ConstraintVerdictState;
+  /** B5 (0.60.0) — verbatim {@link ConstraintVerdict.perLimit}. Absent = not attested. */
+  readonly per_limit?: PerLimitVerdict[];
+  /** B5 (0.60.0) — verbatim {@link ConstraintVerdict.joint}. Present exactly when `per_limit` is. */
+  readonly joint?: JointLimitVerdict;
+}
+
+/**
+ * FAIL-LOUD DRIFT BOLT (CLAUDE.md trap #12 — the mirror must break at build
+ * time, not silently). `PersistedClaimSafety` and the contract's
+ * `ConstraintVerdict` are two declarations of one shape in two repos. If a
+ * future schemas release changes the field names, the member types, or the
+ * state enum, THIS LINE fails `pnpm typecheck` — the gate — instead of the
+ * skew reaching a wire field nobody re-checked (parent CLAUDE.md hazard 1:
+ * "a value that validates in the producer can vanish at the consumer").
+ *
+ * Bidirectional on purpose: assignability in one direction alone would let the
+ * contract grow a member this interface never learns about.
+ */
+const _persistedClaimSafetyMatchesContract: ContractConstraintVerdict extends PersistedClaimSafety
+  ? PersistedClaimSafety extends ContractConstraintVerdict
+    ? true
+    : never
+  : never = true;
+void _persistedClaimSafetyMatchesContract;
+
+/**
+ * Project the verdict into the shape persisted on the fact.
+ *
+ * Called EXACTLY ONCE, in `run_analysis`, immediately after the single
+ * `deriveConstraintVerdict` call that owns this meaning. Every other surface
+ * READS it (see {@link readMayNameLeadingOptionFromResult}) rather than
+ * deriving its own — two derivations can see different inputs (the handler
+ * reads `snapshot.goal_constraints`; compose would read a hash-gated persisted
+ * graph that is `undefined` whenever the gate fails) and produce an internally
+ * inconsistent response, which is the exact defect class this closes
+ * (CLAUDE.md trap #12).
+ *
+ * Pure.
+ */
+export function projectClaimSafety(verdict: ConstraintVerdict): PersistedClaimSafety {
+  return {
+    may_name_leading_option: verdict.mayNameLeadingOption,
+    constraint_verdict_state: verdict.state,
+    // B5: copied only when attested, so a verdict without rows persists today's two keys byte for byte.
+    ...(verdict.perLimit !== undefined ? { per_limit: verdict.perLimit.map((row) => ({ ...row })) } : {}),
+    ...(verdict.joint !== undefined
+      ? {
+          joint: {
+            ...verdict.joint,
+            ...(verdict.joint.constraint_ids !== undefined ? { constraint_ids: [...verdict.joint.constraint_ids] } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * Read "may a leading option be named" off a persisted run_analysis fact's
+ * `result`. THE reader — every claim-safety surface calls this one.
+ *
+ * TYPED FIRST, INTERIM SECOND, FAIL CLOSED THIRD:
+ *
+ *   1. `result.constraint_verdict` — the 0.25.0 contract field, written by
+ *      every fact from this release onward. PRESENT-but-malformed stops here
+ *      and answers `false`; it does NOT fall through (see
+ *      {@link typedVerdictIsPresent} for why `undefined` is the only absence).
+ *   2. `result.enrichment.__cee_claim_safety` — the interim stamp, present on
+ *      every fact persisted between #710 and this release. Kept as a FALLBACK
+ *      because there is no data migration (A1 ruling); see
+ *      {@link CEE_CLAIM_SAFETY_ENRICHMENT_KEY} for why that is a ramp and not
+ *      a mirror. Exactly one of the two is ever present on a given fact.
+ *   3. Neither ⇒ `false` (withheld).
+ *
+ * WHY CLOSED, unchanged from the interim reader and still the only safe
+ * reading:
+ *
+ *   - Every fact written before #710 carries neither, and for those the
+ *     verdict is genuinely unknown. "Unknown" and "verified feasible" are
+ *     different claims, and only the second licenses naming a leader.
+ *   - A future write path that forgets to stamp is a bug. Failing open would
+ *     make that bug silent and re-open the P0 (G-CEE-1 walk, staging
+ *     `1c078f0`): "no option can be put forward yet" printed directly above
+ *     "The MacBook Pro leads by a margin of about 52 percentage points".
+ *
+ * The cost of the closed default is content, not correctness: a rebuilt view
+ * of a historic analysis drops its leader-presuming cards. The cost of an open
+ * default is the product asserting a recommendation it has just told the user
+ * it cannot make.
+ */
+export function readMayNameLeadingOptionFromResult(result: unknown): boolean {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return false;
+  const typed = (result as Record<string, unknown>).constraint_verdict;
+  if (typedVerdictIsPresent(typed)) {
+    return isPlainObject(typed)
+      ? (typed as Record<string, unknown>).may_name_leading_option === true
+      : // PRESENT but not an object ⇒ fail closed, never fall through. See
+        // {@link typedVerdictIsPresent}.
+        false;
+  }
+  // The ramp's second rung. This is the ONE legitimate call to the legacy
+  // enrichment-only reader in the codebase — it is reached only when the typed
+  // 0.25.0 field is ABSENT, which is exactly the interim-stamp population.
+  return legacyReadMayName_DO_NOT_USE((result as Record<string, unknown>).enrichment);
+}
+
+/** A non-null, non-array object — the only shape a typed verdict can take. */
+function isPlainObject(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Is `result.constraint_verdict` PRESENT, whatever shape it arrived in? (F5)
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE INVARIANT THIS RESTORES, WHICH WAS STATED AND THEN ENFORCED OVER A STRICT
+ * SUBSET OF ITS OWN SCOPE.
+ *
+ * `constraint-verdict-typed-field.test.ts` already declares the rule: "a typed
+ * field that is present but junk is a producer bug; reading past it to an older
+ * key would let the bug pick the more permissive of two answers." Both readers
+ * entered the typed branch on `!== null && typeof === 'object' && !isArray`, so
+ * exactly three OBJECT junk shapes were covered. A `constraint_verdict` that is
+ * `true`, `'feasible'`, `[]`, `0` or `null` skipped the branch ENTIRELY and fell
+ * through to `enrichment.__cee_claim_safety` — which can answer `true`. The
+ * invariant was written down and then routed around by every non-object value.
+ *
+ * `ABSENT` IS `undefined` AND NOTHING ELSE, and that is derived, not chosen:
+ * the contract declares `constraint_verdict: z.optional(z.object(...))`
+ * (`@talchain/schemas@0.25.0` handler-results), so it is either absent or a
+ * strict object. `null` is not a legal value, which is why `null` is treated
+ * here as PRESENT-and-malformed rather than as absence. That is also the only
+ * safe reading: a stray `null` from a future writer or a DB default must not be
+ * able to buy the permissive answer.
+ *
+ * The ONE thing this must not break is the migration ramp: `undefined` still
+ * reaches the interim stamp, or every fact persisted between #710 and 0.25.0
+ * would be silently reclassified as withheld.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+function typedVerdictIsPresent(value: unknown): boolean {
+  return value !== undefined;
+}
+
+/**
+ * Read the persisted verdict STATE off a run_analysis fact's `result`.
+ *
+ * The sibling of {@link readMayNameLeadingOptionFromResult}, walking the SAME
+ * two-step ladder (typed `result.constraint_verdict` first, interim
+ * `result.enrichment.__cee_claim_safety` second) so the boolean and the state
+ * can never be read from different stamps on one fact.
+ *
+ * WHY A SEPARATE READER, AND WHY IT RETURNS `null` RATHER THAN A STATE.
+ * The boolean's fail-closed default is `false` because "withhold" is always a
+ * safe action. A STATE has no such safe default: every one of the five states
+ * makes a positive claim about what happened to the user's condition, and
+ * inventing one would put a sentence on the screen that the evidence does not
+ * support — the exact conflation `ConstraintVerdictState`'s own docstring says
+ * there is "no correct boolean" for. `null` therefore means "not recorded", and
+ * the one consumer ({@link buildConstraintDisclosureFromState} via
+ * `compose/withheld-explanation-answer.ts`) degrades to leader-free copy with
+ * NO named condition rather than guessing a voice.
+ *
+ * Unknown or new state strings are rejected against {@link MAY_NAME_LEADING_OPTION}
+ * — the enum's own key set — rather than a hand-listed copy, so a sixth state
+ * added to the contract reads as `null` (honest absence) instead of silently
+ * flowing into an exhaustive switch that cannot handle it.
+ */
+export function readConstraintVerdictStateFromResult(
+  result: unknown,
+): ConstraintVerdictState | null {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return null;
+  const record = result as Record<string, unknown>;
+  const typed = record.constraint_verdict;
+  // F5 — the SAME present-but-malformed rule as the boolean reader, and it must
+  // be the same or the two readers walk different ladders on one fact. A junk
+  // typed field that fail-closes the permission while the STATE is read from the
+  // interim would break the property this reader's docstring rests on: "the
+  // boolean and the state can never be read from different stamps on one fact".
+  if (typedVerdictIsPresent(typed)) {
+    return isPlainObject(typed)
+      ? asVerdictState((typed as Record<string, unknown>).constraint_verdict_state)
+      : null;
+  }
+  const enrichment = record.enrichment;
+  if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) {
+    return null;
+  }
+  const stamp = (enrichment as Record<string, unknown>)[CEE_CLAIM_SAFETY_ENRICHMENT_KEY];
+  if (stamp === null || typeof stamp !== 'object' || Array.isArray(stamp)) return null;
+  return asVerdictState((stamp as Record<string, unknown>).constraint_verdict_state);
+}
+
+/**
+ * The selected Run itself withheld a leader while recording that no limit
+ * caused the withhold: either no limit applied or the evaluated limit passed.
+ * Its actual reason is not thereby known, but a consumer must not turn that
+ * pair into a claim that a limit failed.
+ */
+export function leaderWithheldWithoutConstraintCause(result: unknown): boolean {
+  const state = readConstraintVerdictStateFromResult(result);
+  return !readMayNameLeadingOptionFromResult(result)
+    && (state === 'not_applicable' || state === 'evaluated_feasible');
+}
+
+/** Narrow an unknown to a contract state, or `null`. Derived from the enum. */
+export function asVerdictState(value: unknown): ConstraintVerdictState | null {
+  if (typeof value !== 'string') return null;
+  return Object.prototype.hasOwnProperty.call(MAY_NAME_LEADING_OPTION, value)
+    ? (value as ConstraintVerdictState)
+    : null;
+}
+
+/**
+ * ⛔ DEPRECATED, AND DELIBERATELY UNAUTOCOMPLETABLE. Do not call this.
+ * Call {@link readMayNameLeadingOptionFromResult}.
+ *
+ * LEGACY reader — the interim `enrichment.__cee_claim_safety` stamp ONLY. It is
+ * the second rung of the `FromResult` ladder, not a reader in its own right.
+ *
+ * ⚠ RENAMED 2026-07-27 (R8), AND THE NAME IS THE FIX. It used to be called
+ * `readMayNameLeadingOption` — one autocomplete keystroke away from
+ * `readMayNameLeadingOptionFromResult`, the reader every claim-safety surface
+ * is supposed to call, and IDENTICAL in signature-shape at the call site. The
+ * failure mode of picking the wrong one is not a crash and not a test failure:
+ * on any fact written from `@talchain/schemas@0.25.0` onward the verdict lives
+ * at `result.constraint_verdict`, this function cannot see it, and it returns
+ * `false` for EVERY turn — permitted or withheld alike. That is SILENT
+ * UNIVERSAL WITHHOLDING: the product stops making recommendations it is
+ * entitled to make, no alarm fires, and the symptom is a content regression
+ * nobody can attribute. `decision-review-enricher.ts` has already been bitten
+ * by exactly this read (see the `mayNameLeadingOption` parameter's docstring
+ * there) and was fixed by threading the verdict instead.
+ *
+ * It is not deleted because it has one real caller: the `FromResult` reader
+ * below delegates to it for the migration ramp, and the ramp's own fallback
+ * deserves its own test. It stays EXPORTED only for that test — production has
+ * no business importing it, and the name now says so.
+ */
+export function legacyReadMayName_DO_NOT_USE(enrichment: unknown): boolean {
+  if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) {
+    return false;
+  }
+  const stamp = (enrichment as Record<string, unknown>)[CEE_CLAIM_SAFETY_ENRICHMENT_KEY];
+  if (stamp === null || typeof stamp !== 'object' || Array.isArray(stamp)) return false;
+  const value = (stamp as Record<string, unknown>).may_name_leading_option;
+  return value === true;
+}

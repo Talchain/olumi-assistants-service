@@ -1,0 +1,11 @@
+{
+  "verified_at": "2026-10-03T09:57:17.935129+00:00",
+  "source_owner": "Delivery Executor read-only census",
+  "source": "/Users/paulslee/Documents/GitHub/output/ai-experience-executor-20261003/context2529-census/CENSUS.md",
+  "source_sha256": "041d0b225d0aa46ec9147d0ceb21cdfb518be863ecef80832f321e2feb895672",
+  "board87_comment": 5967964510,
+  "verdict": "REBASE_SAFE for six original hunks, source census only",
+  "sci_followup_handoff": "5963981266 UNAPPLIED; current typed fact/selected current Run context carrier remains owner scope decision",
+  "implementation_authority": "No edit/rebase/push/test lease. Restart gate active; PTL must explicitly allocate existing Context writer after closure",
+  "no_runtime_or_test_claim": true
+}

@@ -1,0 +1,11 @@
+{
+  "checked_at": "2026-10-03T15:08:56.699203+00:00",
+  "state": "PARKED",
+  "owned_worktree_exists": false,
+  "owned_command_processes": [],
+  "owned_cwd_processes": [],
+  "heartbeat": "PAUSED",
+  "new_commit_push_merge": false,
+  "restart_safe_for_this_workstream": true,
+  "restart_blocker": null
+}

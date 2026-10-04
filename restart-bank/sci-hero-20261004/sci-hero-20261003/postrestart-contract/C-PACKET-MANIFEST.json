@@ -1,0 +1,24 @@
+{
+  "current_head": "ef65fe160eb58f37b2a40f5c2d236dcbe81b2a58",
+  "built_at": "2026-10-03T11:35:05.972957+00:00",
+  "files": [
+    {
+      "path": "src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "bytes": 4809,
+      "sha256": "3743bf5b812e46e9355b7ff05e4b3960a2d459411fed971aefb02af62140dfa8",
+      "base_sha256": "13adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/tipping-point-interaction.contract.test.ts",
+      "bytes": 6917,
+      "sha256": "a7cc0ce966821be41ef06469eca943cab83d189fca5352c831d6705c938c732a",
+      "base_sha256": null
+    }
+  ],
+  "source_census": "coaching current-row reply offers Talk-it-through only; no factor/Run-bound refinement entry",
+  "source_lease": "root two-path disjoint conditional ruling; no A/hotspot/policy edits",
+  "focused_execution": "NOT_STARTED; DEPENDENCY_STOP: Vitest resolution timed out, no verified independent compatible runner and thin current-source imports incomplete; shared slot RELEASED",
+  "pre_review": "NOT_REQUESTED: actual focusedPASS prerequisite unmet",
+  "release_ready": false,
+  "paid_browser_provider_calls": 0
+}

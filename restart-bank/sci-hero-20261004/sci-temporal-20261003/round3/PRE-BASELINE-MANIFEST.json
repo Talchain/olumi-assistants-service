@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-03T22:36:30.537223+00:00",
+  "head": "5d2c05dda1d9970b6618693b57ec875d544cc312",
+  "files": {
+    "src/orchestrator-v5/__tests__/apply-operations.test.ts": "5d131daddab56867549195e05d4d4c9cfc12e244decaf7f054b7b37ecf4c85ce",
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "70cc2f0e9913a1f0612f89d878db70fb707c872a0ddcb939258db13e589693c3",
+    "src/orchestrator-v5/apply-operations.ts": "4c6d2b7f1e32ef15060fbc8fde4e827e5f7d9138769984e08c0de6ef870dc1a8",
+    "src/orchestrator-v5/graph-management/field-safety.ts": "07b5fb1b3f049c64be417cac9391b9b91dfe91a03255651b3054341ab6571704",
+    "src/orchestrator-v5/normalise-option-interventions.ts": "3918350e7aa3f2874940fd0a69a7bb4498fab0eec640c99cdbd0f40824531223",
+    "src/orchestrator-v5/system-events/dispatch.ts": "62c12caf4f01ad9b7cf1856ddc05ab3ad2418e801735ae106649baf4cc4d9db0",
+    "src/orchestrator-v5/system-events/option-intervention-edit.ts": "93783983aa8c0a5d9ce78befa8552c7657e3d36ab7f50f9e00f61930b2fdbed6",
+    "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts": "b10d6b47185cf180406c16ccd2ece65627a107c424e898ba46c4c1bb9f16c180",
+    "src/orchestrator/tools/edit-graph.ts": "bf99bf3fece47d68a97dd8735e809017066ab4036f368e64330258e82182b151",
+    "src/orchestrator/tools/encode-option-interventions.ts": "a6b12b78621c2e2f4dfb230b935737503eed238f576c3cea3c8480096936bcad",
+    "tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts": "18a7c8e3ecef8ec9901562d1bb42b983d95e45bc81bf4646425e53c551ba1552",
+    "tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts": "0fd0999d602d2c579f225df48b5684f13551ed5ee3ec12f5b67392b1eb50d243",
+    "tests/unit/orchestrator-v5/normalise-option-interventions.test.ts": "a9ea9eecfb57305de695f5cd8fe9f4cf1915c8df9b1501d76119cf723468c6e1"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "at": "2026-10-03T21:38:20.426934+00:00",
+  "mutants": [
+    {
+      "mutant": "CAPLESS",
+      "source": "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts",
+      "source_sha256_before_after": "60c3ad4cf7c3f4a70d5de471e645f0e76988e3b04020038b517a674c4239f3e8",
+      "restored": true,
+      "exit_code": 1,
+      "total_tests": 18,
+      "failed_tests": 1,
+      "failures": [
+        {
+          "name": "the user's likely range for an option's level survives propose \u2192 approval \u2192 the real door \u2192 the persisted cell capless opt_lift/fac_downtime preserves the range the user approved through the real writer",
+          "message": [
+            "AssertionError: expected { value: 0.5, \u2026(2) } to match object { value: 0.5, \u2026(2) }\n(4 matching properties omitted from actual)\n    at Proxy.<anonymous> (file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+expect@4.1.10/node_modules/@vitest/expect/dist/index.js:1283:10)\n    at Proxy.<anonymous> (file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+expect@4.1.10/node_modules/@vitest/expect/dist/index.js:1156:15)\n    at Proxy.methodWrapper (file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/chai@6.2.2/node_modules/chai/index.js:1700:25)\n    at /private/tmp/sci-temporal-2382/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts:164:24\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+          ]
+        }
+      ],
+      "command": [
+        "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts",
+        "-t",
+        "capless",
+        "--maxWorkers=1",
+        "--reporter=json",
+        "--outputFile=/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/MUTANT-CAPLESS.json"
+      ]
+    },
+    {
+      "mutant": "WHOLE-MAP",
+      "source": "src/orchestrator/tools/encode-option-interventions.ts",
+      "source_sha256_before_after": "69006208ba308751669011009446b612c303ba33852907782637f6623b49c26d",
+      "restored": true,
+      "exit_code": 1,
+      "total_tests": 43,
+      "failed_tests": 1,
+      "failures": [
+        {
+          "name": "a stated range stays with ITS quantity across a replacement figure numeric whole-map opt_l/fac_dt unit edit drops inherited 5\u201320 days",
+          "message": [
+            "AssertionError: expected true to be false // Object.is equality\n    at /private/tmp/sci-temporal-2382/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts:424:42\n    at file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)\n    at file:///private/tmp/sci-temporal-2382/node_modules/.pnpm/@vitest+runner@4.1.10/node_modules/@vitest/runner/dist/chunk-artifact.js:2955:64"
+          ]
+        }
+      ],
+      "command": [
+        "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts",
+        "-t",
+        "numeric whole-map opt_l/fac_dt unit edit",
+        "--maxWorkers=1",
+        "--reporter=json",
+        "--outputFile=/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/MUTANT-WHOLE-MAP.json"
+      ]
+    }
+  ]
+}

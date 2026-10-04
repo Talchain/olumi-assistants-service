@@ -1,0 +1,45 @@
+{
+  "$ref": "#/definitions/EnrichmentNearTieSchema",
+  "definitions": {
+    "EnrichmentNearTieSchema": {
+      "type": "object",
+      "properties": {
+        "is_tie": {
+          "type": "boolean"
+        },
+        "top_option_id": {
+          "type": "string"
+        },
+        "second_option_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tied_option_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gap": {
+          "type": "number"
+        },
+        "threshold": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "is_tie",
+        "top_option_id",
+        "second_option_id",
+        "tied_option_ids",
+        "gap",
+        "threshold"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

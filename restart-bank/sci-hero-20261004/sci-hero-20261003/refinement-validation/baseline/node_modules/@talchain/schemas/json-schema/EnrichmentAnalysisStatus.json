@@ -1,0 +1,16 @@
+{
+  "$ref": "#/definitions/EnrichmentAnalysisStatus",
+  "definitions": {
+    "EnrichmentAnalysisStatus": {
+      "type": "string",
+      "enum": [
+        "computed",
+        "partial",
+        "failed",
+        "blocked"
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

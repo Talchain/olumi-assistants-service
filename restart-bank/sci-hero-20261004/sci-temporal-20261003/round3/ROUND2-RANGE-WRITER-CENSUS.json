@@ -1,0 +1,344 @@
+{
+  "time_utc": "2026-10-03T23:30:37.814121+00:00",
+  "head": "67e4e03e5b24cc9365f131ffeff239a5fbfbc077",
+  "production_ts_count": 1280,
+  "scope": "Existing writer-population guard corpus; comment-stripped textual scan preserving original source line numbers; not a deployed catalogue or SQL execution.",
+  "callers": {
+    "terminal_append": [
+      {
+        "path": "src/orchestrator-v5/persist-graph-write.ts",
+        "line": 376
+      }
+    ],
+    "checked_append": [
+      {
+        "path": "src/orchestrator-v5/commit.ts",
+        "line": 1628
+      },
+      {
+        "path": "src/routes/assist.v1.scenario-graph-register.ts",
+        "line": 1119
+      },
+      {
+        "path": "src/routes/agent-v1-turn.ts",
+        "line": 1938
+      },
+      {
+        "path": "src/routes/agent-v1-turn.ts",
+        "line": 3433
+      }
+    ],
+    "terminal_check": [
+      {
+        "path": "src/orchestrator-v5/persist-graph-write.ts",
+        "line": 362
+      },
+      {
+        "path": "src/routes/assist.v1.scenario-graph-register.ts",
+        "line": 1101
+      },
+      {
+        "path": "src/routes/assist.v1.scenario-versions.ts",
+        "line": 1187
+      }
+    ],
+    "restore_atomic": [
+      {
+        "path": "src/routes/assist.v1.scenario-versions.ts",
+        "line": 1258
+      }
+    ],
+    "legacy_draft_call": [],
+    "turn_producers": [
+      {
+        "path": "src/orchestrator-v5/turn-executor.ts",
+        "line": 1814
+      },
+      {
+        "path": "src/orchestrator-v5/apply-operations.ts",
+        "line": 665
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 916
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 1270
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 1549
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 1614
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 2004
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 2071
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 2404
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 2466
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 3411
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 3536
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 3760
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 3819
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 4119
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 4180
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 4487
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 4547
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 4855
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 4914
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/dispatch.ts",
+        "line": 5258
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/olumi-option-adoption.ts",
+        "line": 145
+      },
+      {
+        "path": "src/orchestrator-v5/routing/persist-asked-question.ts",
+        "line": 263
+      },
+      {
+        "path": "src/orchestrator-v5/handlers/clarify-v2-dispatch.ts",
+        "line": 232
+      },
+      {
+        "path": "src/orchestrator-v5/handlers/edit-graph-dispatch.ts",
+        "line": 5702
+      },
+      {
+        "path": "src/orchestrator-v5/handlers/chip-click-dispatch.ts",
+        "line": 1168
+      },
+      {
+        "path": "src/orchestrator-v5/handlers/chip-click-dispatch.ts",
+        "line": 2304
+      },
+      {
+        "path": "src/orchestrator-v5/handlers/draft-graph-dispatch.ts",
+        "line": 1113
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 3296
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 4106
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 4293
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 4360
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 5082
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 5869
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 6098
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 7051
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 7357
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 8011
+      },
+      {
+        "path": "src/orchestrator/route-v2.ts",
+        "line": 8582
+      }
+    ],
+    "projection": [
+      {
+        "path": "src/orchestrator-v5/commit.ts",
+        "line": 1272
+      },
+      {
+        "path": "src/orchestrator-v5/apply-operations.ts",
+        "line": 614
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/structural-delete.ts",
+        "line": 722
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/edge-strength-edit.ts",
+        "line": 657
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/structural-rename.ts",
+        "line": 439
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/structural-rename.ts",
+        "line": 705
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 161
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 291
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 324
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 506
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 660
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 766
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 796
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 821
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 830
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+        "line": 861
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/structural-add-edge.ts",
+        "line": 465
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/olumi-option-adoption.ts",
+        "line": 61
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/olumi-option-adoption.ts",
+        "line": 85
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/structural-add.ts",
+        "line": 598
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-status-edit.ts",
+        "line": 226
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/option-status-edit.ts",
+        "line": 244
+      },
+      {
+        "path": "src/orchestrator-v5/system-events/editable-graph.ts",
+        "line": 29
+      },
+      {
+        "path": "src/orchestrator-v5/handlers/edit-graph-dispatch.ts",
+        "line": 3256
+      },
+      {
+        "path": "src/orchestrator-v5/handlers/edit-graph-dispatch.ts",
+        "line": 5635
+      },
+      {
+        "path": "src/orchestrator-v5/handlers/draft-graph-dispatch.ts",
+        "line": 926
+      },
+      {
+        "path": "src/routes/assist.v1.scenario-graph-register.ts",
+        "line": 878
+      },
+      {
+        "path": "src/routes/assist.v1.scenario-graph-register.ts",
+        "line": 1005
+      },
+      {
+        "path": "src/routes/assist.v1.scenario-versions.ts",
+        "line": 1070
+      }
+    ]
+  },
+  "sql_writer_migrations": [
+    "supabase/migrations/20260422120000_v5_store_draft_graph.sql",
+    "supabase/migrations/20260422200000_v5_append_turn_atomic_with_graph.sql",
+    "supabase/migrations/20260422210000_v5_append_turn_atomic_graph_idempotency_fix.sql",
+    "supabase/migrations/20260502120000_v5_brief_text_persistence.sql",
+    "supabase/migrations/20260505120000_v5_pending_actions.sql",
+    "supabase/migrations/20260602120000_v5_coaching_state_snapshot.sql",
+    "supabase/migrations/20260609120000_v5_conversation_content.sql",
+    "supabase/migrations/20260711000000_v5_append_turn_atomic_for_share.sql",
+    "supabase/migrations/20260717120000_v5_append_turn_atomic_v3_graph_cas.sql",
+    "supabase/migrations/20260731130000_v5_turn_fence_atomic_append.sql",
+    "supabase/migrations/20260802120000_v5_turn_fence_atomic_append_generation_key.sql",
+    "supabase/migrations/20260806120000_v5_turn_fence_first_write_exemption.sql",
+    "supabase/migrations/20260824200000_c8_atomic_model_version_restore.sql"
+  ]
+}

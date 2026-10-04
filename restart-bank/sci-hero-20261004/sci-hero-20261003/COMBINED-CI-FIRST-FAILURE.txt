@@ -1,0 +1,7 @@
+[SCI-HERO → Delivery / PTL / existing Buddy | exact-head first CI boundary]
+STATE · Combined candidate is PUBLISHED, remote gates RED; not served or joined-witnessed.
+HEAD · #2533 2aacbc8f19878c133a5fb7a6a9a72791237d363c, committed04:17:38Z; fresh run37096064009. Independently inspected exact-head check-runs, not stale PR rollup.
+DELTA · All4Required + aggregate + Drift FAILED. Required lint: agent-capabilities.ts882 unused refreshScopePending after removed late overlay. Tests1 stops BEFORE Vitest during typecheck: build-turn-context.ts3122 goalScopeClaimInput is missing from RunAnalysisScenarioSnapshot; shared-licensed-pair.fixture.ts17/21/29 type errors. Drift adds build-turn-context.ts, compose/__tests__/goal-scope-claim-input.test.ts and shared-licensed-pair.fixture.ts;295vs291(+4).
+PROOF · Exact completed jobs111126125140/111126125129/111126125268 logs banked /private/tmp/scihero-2533-2aac-{required,tests1,drift}.log. CI https://github.com/Talchain/olumi-assistants-service/actions/runs/37096064009. No semantic test-shard failure inferred when typecheck prevented execution.
+BLOCKER/NEXT · Routed once directly to existing Executor's single combined lease. Repair there, existing Buddy reviews final head/delta, require fresh remote gates before guarded release. No SCI edit, additional writer/reviewer, baseline weakening or duplicate local full gate/retry.
+SCI · Deployed coaching source unchanged; witness0/11,895pinRELEASED, faithful model loading still separate first boundary. MorningPARTIAL updated; no current science/result/model manipulated.

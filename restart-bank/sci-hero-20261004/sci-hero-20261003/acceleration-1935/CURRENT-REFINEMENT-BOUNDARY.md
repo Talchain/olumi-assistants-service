@@ -1,0 +1,11 @@
+# Current tipping-point refinement boundary
+
+Current source census against CEE11e8fe24ff289fbbb68e074bba22c89055e9661a (serving identity supplied by current Delivery checkpoint; no duplicate health watch).
+
+- `tipping-point-coaching.ts` remains exactly the original packet baseline SHA25613adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca. The banked two-file patch passes an actual git apply --check against the current leaf. This is applicability evidence only; focused tests remain NOT_RUN and review/integration uncompleted.
+- Canonical route `src/routes/agent-v1-turn.ts` lines1729–1733 (retry) and2900–2901 (normal follow-up) both offer only TALK_IT_THROUGH_CHIP for the tipping response. The route contains no tippingPointRefinementFor, readTippingPointRefinement or agent-refine-tipping-factor prefix. No grounded factor-refinement entry is joined by this route.
+- The currentness boundary already exists: terminal WHAT reads canonical state2426–2433; final current read2765–2771 rejects a stale found fact via existing runExplanationMatches. Retain those authorities and final fresh read.
+- Smallest coherent next change is the existing two-file leaf/control packet plus root-owned normal/retry route offer and canonical factor-ID target resolver feeding the native interaction/explicit approval path. Offer only after the resolver/approval consumer is joined. Validate wrong factor/Run, stale, no-signal, same-graph/new-Run and cold-read against real imports; no duplicate permission/currentness logic or preselected numeric edit.
+- ScienceUI now owns SCI-CHANGE220/221/222 numerical work; this census creates no numerical writer/reviewer/release overlap. Original paid-case STOP and no VOI-positive fabrication remain. Scope/source mapping complete; no runtime, CI, serving, approved edit or JOURNEY claim.
+
+Performance corrections applied: current owners and immutable source first; use cached tree for paths after a mistaken route-path404; reuse original packet instead of rewriting; one precise boundary handoff rather than unchanged polling/recovery; secure real import closure before another focused test attempt. Root remains sole route integrator. Current user acceleration instruction revokes SCI's earlier human restart stop for useful scoped work; exact file/hunk leases must be reconfirmed before writes.

@@ -1,0 +1,21 @@
+{
+  "verified_at": "2026-10-03T09:52:32.942244+00:00",
+  "repo_worktree": "/private/tmp/scihero-cee-1790984347",
+  "branch": "sci-hero/deterministic-tipping-point-coaching",
+  "head": "097f432b64d98fc447f32344ff2efa97a4d05856",
+  "upstream": "097f432b64d98fc447f32344ff2efa97a4d05856",
+  "remote_head": "097f432b64d98fc447f32344ff2efa97a4d05856",
+  "worktree_porcelain": "",
+  "untracked": [],
+  "ignored_outside_dependencies": [
+    "src/generated/openapi.d.ts"
+  ],
+  "processes_with_owned_cwd": [],
+  "archive": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/temporary-science-evidence.tar.gz",
+  "archive_bytes": 10724592,
+  "archive_sha256": "fac5268cf84f0fef2a0fcaf3458b43c4d972ce988cda779bc2e56a39f4597d19",
+  "temporary_files_banked": 374,
+  "temporary_original_bytes": 129336508,
+  "temporary_index": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/temporary-file-index.json",
+  "historical_fixture_is_not_acceptance": true
+}

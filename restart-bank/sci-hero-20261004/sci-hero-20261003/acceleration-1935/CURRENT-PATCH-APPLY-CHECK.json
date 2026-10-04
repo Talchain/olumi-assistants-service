@@ -1,0 +1,11 @@
+{
+  "checked_at": "2026-10-03T19:38:06.556987+00:00",
+  "head": "11e8fe24ff289fbbb68e074bba22c89055e9661a",
+  "validation": "PATCH_APPLY_CHECK_ONLY",
+  "exit_code": 0,
+  "stdout": "",
+  "stderr": "",
+  "patch_sha256": "c0ad5e7e5a0c70353687bdacbc3870daca378b559c26d0b075cfd61d0038b688",
+  "functional_tests": "NOT_RUN",
+  "product_source_mutated": false
+}

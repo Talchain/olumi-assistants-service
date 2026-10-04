@@ -1,0 +1,20 @@
+--- a/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
++++ b/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
+@@ -4260,7 +4260,7 @@
+         // A typed range and its level are shown together for explicit approval. Equivalent wording must not
+         // change that reading; the existing literal-figure guard remains for ordinary, non-range levels.
+         const rangeRequested = i?.likely_low !== undefined || i?.likely_high !== undefined
+-          || i?.range_meaning !== undefined || i?.range_user_stated !== undefined;
++          || i?.range_meaning !== undefined || i?.range_user_stated === true;
+         const userWrote = claimedByUser && (rangeRequested
+           || figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
+         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
+@@ -4290,7 +4290,7 @@
+         const hasLow = i?.likely_low !== undefined;
+         const hasHigh = i?.likely_high !== undefined;
+         let likelyRange: { low: number; high: number } | undefined;
+-        if (hasLow || hasHigh || i?.range_meaning !== undefined || i?.range_user_stated !== undefined) {
++        if (hasLow || hasHigh || i?.range_meaning !== undefined || i?.range_user_stated === true) {
+           const low = Number(i?.likely_low);
+           const high = Number(i?.likely_high);
+           const why = !hasLow || !hasHigh ? 'a likely range needs both its low and its high end'

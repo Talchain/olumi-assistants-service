@@ -1,0 +1,22 @@
+{
+  "head": "2677b3d9496d9d0c6bd7744f0c8131d37b3f1ac6",
+  "target_bytes_match_pre_refresh": {
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": {
+      "pre_refresh_hash": "70cc2f0e9913a1f0612f89d878db70fb707c872a0ddcb939258db13e589693c3",
+      "final_git_blob_sha256": "70cc2f0e9913a1f0612f89d878db70fb707c872a0ddcb939258db13e589693c3"
+    },
+    "src/orchestrator-v5/graph-management/field-safety.ts": {
+      "pre_refresh_hash": "07b5fb1b3f049c64be417cac9391b9b91dfe91a03255651b3054341ab6571704",
+      "final_git_blob_sha256": "07b5fb1b3f049c64be417cac9391b9b91dfe91a03255651b3054341ab6571704"
+    },
+    "src/orchestrator-v5/normalise-option-interventions.ts": {
+      "pre_refresh_hash": "3918350e7aa3f2874940fd0a69a7bb4498fab0eec640c99cdbd0f40824531223",
+      "final_git_blob_sha256": "3918350e7aa3f2874940fd0a69a7bb4498fab0eec640c99cdbd0f40824531223"
+    },
+    "src/orchestrator/tools/encode-option-interventions.ts": {
+      "pre_refresh_hash": "a6b12b78621c2e2f4dfb230b935737503eed238f576c3cea3c8480096936bcad",
+      "final_git_blob_sha256": "a6b12b78621c2e2f4dfb230b935737503eed238f576c3cea3c8480096936bcad"
+    }
+  },
+  "limits": "Mutants ran on current0.75 repaired source before final commit; caller rejection-code/typecheck and unused-variable/test formatting fixes followed. Final454 controls ran at2677. No historical-pin transfer."
+}

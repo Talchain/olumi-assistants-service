@@ -1,0 +1,183 @@
+[
+  {
+    "name": "unapproved-generic-ranges",
+    "exit": 1,
+    "semantic_failures": [
+      "applyOperations \u2014 the accept path writes what was consented to generic approved operation cannot smuggle a range: whole",
+      "applyOperations \u2014 the accept path writes what was consented to generic approved operation cannot smuggle a range: nested",
+      "applyOperations \u2014 the accept path writes what was consented to generic approved operation cannot smuggle a range: leaf",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge generic edit_graph cannot smuggle a user range: 'off'/'whole'",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge generic edit_graph cannot smuggle a user range: 'off'/'nested'",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge generic edit_graph cannot smuggle a user range: 'shadow'/'whole'",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge generic edit_graph cannot smuggle a user range: 'shadow'/'nested'"
+    ],
+    "passed_controls": [
+      "applyOperations \u2014 the accept path writes what was consented to a same-figure data-path rewrite keeps its valid quote through commit and cold read",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge generic edit_graph cannot smuggle a user range: 'off'/'leaf'",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge generic edit_graph cannot smuggle a user range: 'shadow'/'leaf'",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge generic edit_graph cannot smuggle a user range: 'live'/'whole'",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge generic edit_graph cannot smuggle a user range: 'live'/'nested'",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge generic edit_graph cannot smuggle a user range: 'live'/'leaf'",
+      "#1740 R5 \u2014 the graph handed to store.append, after the edit-path persistence merge single value leaf: the stored factor carries the user value and NO extractionType; the sibling keeps its marker"
+    ],
+    "command": [
+      "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "src/orchestrator-v5/__tests__/apply-operations.test.ts",
+      "tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts",
+      "--maxWorkers=1",
+      "--reporter=json",
+      "--outputFile=/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/MUTANT-unapproved-generic-ranges.json",
+      "-t",
+      "generic.*smuggle|same-figure data-path|single value leaf"
+    ],
+    "seconds": 6.91,
+    "byte_exact_restore": {
+      "src/orchestrator-v5/graph-management/field-safety.ts": true,
+      "src/orchestrator/tools/encode-option-interventions.ts": true
+    }
+  },
+  {
+    "name": "wording-gate",
+    "exit": 1,
+    "semantic_failures": [
+      "the user's likely range for an option's level survives propose \u2192 approval \u2192 the real door \u2192 the persisted cell equivalent typed likely range is admitted and explicitly approved with most likely ten days"
+    ],
+    "passed_controls": [
+      "the user's likely range for an option's level survives propose \u2192 approval \u2192 the real door \u2192 the persisted cell equivalent typed likely range is admitted and explicitly approved with most likely 10 days"
+    ],
+    "command": [
+      "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts",
+      "--maxWorkers=1",
+      "--reporter=json",
+      "--outputFile=/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/MUTANT-wording-gate.json",
+      "-t",
+      "equivalent typed"
+    ],
+    "seconds": 6.89,
+    "byte_exact_restore": {
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": true
+    }
+  },
+  {
+    "name": "capless-carrier",
+    "exit": 1,
+    "semantic_failures": [
+      "the user's likely range for an option's level survives propose \u2192 approval \u2192 the real door \u2192 the persisted cell capless opt_lift/fac_downtime retains raw/unit/range: compound=false declaredUnit=true",
+      "the user's likely range for an option's level survives propose \u2192 approval \u2192 the real door \u2192 the persisted cell capless opt_lift/fac_downtime retains raw/unit/range: compound=false declaredUnit=false",
+      "the user's likely range for an option's level survives propose \u2192 approval \u2192 the real door \u2192 the persisted cell capless opt_lift/fac_downtime retains raw/unit/range: compound=true declaredUnit=true",
+      "the user's likely range for an option's level survives propose \u2192 approval \u2192 the real door \u2192 the persisted cell capless opt_lift/fac_downtime retains raw/unit/range: compound=true declaredUnit=false"
+    ],
+    "passed_controls": [
+      "the user's likely range for an option's level survives propose \u2192 approval \u2192 the real door \u2192 the persisted cell CONTROL: a level with no range is written exactly as before (no `range` key)"
+    ],
+    "command": [
+      "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts",
+      "--maxWorkers=1",
+      "--reporter=json",
+      "--outputFile=/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/MUTANT-capless-carrier.json",
+      "-t",
+      "capless|CONTROL: a level with no range"
+    ],
+    "seconds": 9.67,
+    "byte_exact_restore": {
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": true
+    }
+  },
+  {
+    "name": "quantity-frame-identity",
+    "exit": 1,
+    "semantic_failures": [
+      "a stated range stays with ITS quantity across a replacement figure native quantity unchanged by cap/value renormalization keeps its range",
+      "a stated range stays with ITS quantity across a replacement figure adding a cell unit compares the inherited factor unit: days"
+    ],
+    "passed_controls": [
+      "a stated range stays with ITS quantity across a replacement figure numeric whole-map unchanged quantity retains its stated range",
+      "a stated range stays with ITS quantity across a replacement figure adding a cell unit compares the inherited factor unit: weeks"
+    ],
+    "command": [
+      "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts",
+      "--maxWorkers=1",
+      "--reporter=json",
+      "--outputFile=/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/MUTANT-quantity-frame-identity.json",
+      "-t",
+      "native quantity unchanged|adding a cell unit|numeric whole-map unchanged quantity"
+    ],
+    "seconds": 1.09,
+    "byte_exact_restore": {
+      "src/orchestrator/tools/encode-option-interventions.ts": true
+    }
+  },
+  {
+    "name": "effective-unit-loss",
+    "exit": 1,
+    "semantic_failures": [
+      "a stated range stays with ITS quantity across a replacement figure removing the only effective unit drops the inherited range",
+      "a stated range stays with ITS quantity across a replacement figure adding a cell unit compares the inherited factor unit: weeks"
+    ],
+    "passed_controls": [
+      "a stated range stays with ITS quantity across a replacement figure numeric whole-map unchanged quantity retains its stated range",
+      "a stated range stays with ITS quantity across a replacement figure adding a cell unit compares the inherited factor unit: days"
+    ],
+    "command": [
+      "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts",
+      "--maxWorkers=1",
+      "--reporter=json",
+      "--outputFile=/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/MUTANT-effective-unit-loss.json",
+      "-t",
+      "removing the only|adding a cell unit|numeric whole-map unchanged quantity"
+    ],
+    "seconds": 1.08,
+    "byte_exact_restore": {
+      "src/orchestrator/tools/encode-option-interventions.ts": true
+    }
+  },
+  {
+    "name": "legacy-range-loss",
+    "exit": 1,
+    "semantic_failures": [
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'nested' overlay=false range='valid'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'nested' overlay=true range='valid'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'slash' overlay=false range='valid'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'slash' overlay=true range='valid'"
+    ],
+    "passed_controls": [
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'nested' overlay=false range='malformed'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'nested' overlay=false range='absent'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'nested' overlay=true range='malformed'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'nested' overlay=true range='absent'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'slash' overlay=false range='malformed'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'slash' overlay=false range='absent'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'slash' overlay=true range='malformed'",
+      "normaliseOptionInterventionContract (V5 edit_graph P0) legacy opt_range/fac_days cold read: 'slash' overlay=true range='absent'"
+    ],
+    "command": [
+      "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "tests/unit/orchestrator-v5/normalise-option-interventions.test.ts",
+      "--maxWorkers=1",
+      "--reporter=json",
+      "--outputFile=/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/MUTANT-legacy-range-loss.json",
+      "-t",
+      "legacy opt_range"
+    ],
+    "seconds": 1.95,
+    "byte_exact_restore": {
+      "src/orchestrator-v5/normalise-option-interventions.ts": true
+    }
+  }
+]

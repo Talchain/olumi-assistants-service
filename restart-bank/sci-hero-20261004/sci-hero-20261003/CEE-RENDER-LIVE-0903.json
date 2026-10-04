@@ -1,0 +1,15 @@
+{
+  "checked_at": "2026-10-03T08:59:23.351Z",
+  "commit": {
+    "createdAt": "2026-10-03T08:56:34Z",
+    "id": "ef65fe160eb58f37b2a40f5c2d236dcbe81b2a58",
+    "message": "B3: preserve model upgrade delta and approved comparison context (#2537)\n\n* fix(b3): offer inferred objectives and disclose comparison baselines\n\n* fix(b3): retain partial computations in comparison disclosures\n\n* Preserve the existing factor census in the canonical read\n\n* fix(b3): keep comparison basis visible without repetition\n\n* fix(b3): place bound host lines before collapsed questions\n\n* fix(b3): preserve final proposal ID scrubbing after placement\n\n* fix(agent): retain scope question ownership during B3 integration\n\n* fix(agent): scrub retained scope display before final deduplication\n\n* fix(b3): bind replay and history to displayed host asks\n\n* fix(b3): normalize exact narrator copies of the host ask\n\n* test(b3): pin owed disclosures through normalized narration"
+  },
+  "createdAt": "2026-10-03T08:56:36.838479Z",
+  "finishedAt": "2026-10-03T08:58:40.177298Z",
+  "id": "dep-db0c6h3tqb8s7388q8u0",
+  "startedAt": "2026-10-03T08:56:36.814238Z",
+  "status": "live",
+  "trigger": "new_commit",
+  "updatedAt": "2026-10-03T08:59:13.47765Z"
+}

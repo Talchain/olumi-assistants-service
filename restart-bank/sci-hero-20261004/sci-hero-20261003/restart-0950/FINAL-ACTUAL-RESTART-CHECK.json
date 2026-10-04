@@ -1,0 +1,28 @@
+{
+  "verified_at": "2026-10-03T10:00:17.956269+00:00",
+  "requested_by": "Paul direct stop/restart instruction",
+  "workstream": "SCI-HERO",
+  "state": "PARKED",
+  "repo_worktree": "/private/tmp/scihero-cee-1790984347",
+  "branch": "sci-hero/deterministic-tipping-point-coaching",
+  "head": "097f432b64d98fc447f32344ff2efa97a4d05856",
+  "upstream": "097f432b64d98fc447f32344ff2efa97a4d05856",
+  "live_remote_head": "097f432b64d98fc447f32344ff2efa97a4d05856",
+  "worktree": "clean",
+  "uncommitted": [],
+  "untracked": [],
+  "ignored_outside_dependencies": [
+    "src/generated/openapi.d.ts"
+  ],
+  "owned_cwd_processes": [],
+  "owned_path_processes": [],
+  "archive_members_verified": 374,
+  "archive_sha256": "fac5268cf84f0fef2a0fcaf3458b43c4d972ce988cda779bc2e56a39f4597d19",
+  "generated_matches": true,
+  "historical_fixture_matches": true,
+  "heartbeat_status": "PAUSED",
+  "restart_safe": true,
+  "restart_blocker": null,
+  "delivery_still_partial": true,
+  "finder_metadata_is_not_workstream_evidence": true
+}

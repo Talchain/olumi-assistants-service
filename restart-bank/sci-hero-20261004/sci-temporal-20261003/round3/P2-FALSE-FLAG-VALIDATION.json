@@ -1,0 +1,26 @@
+{
+  "time_utc": "2026-10-03T23:52:54.464482+00:00",
+  "exact_head": "67e4e03e5b24cc9365f131ffeff239a5fbfbc077",
+  "checkout": "/private/tmp/sci-temporal-2382",
+  "test_source_delta": "eight added controls only; tested then banked and byte-restored",
+  "source_patch": "two range-request predicates only; apply-checked UNAPPLIED, runtime bytes unchanged",
+  "result": {
+    "total": 32,
+    "passed": 30,
+    "failed": 2,
+    "expected_red_cases": [
+      "ordinary level: explicit false range flag equals omitted, compound=false",
+      "ordinary level: explicit false range flag equals omitted, compound=true"
+    ]
+  },
+  "contrasts": "explicit false with actual bounds remains refused; true flag without bounds remains refused; false flag cannot bypass ordinary user-figure grounding; both ports",
+  "startup_failure": "Unsupported --minWorkers; no test ran; raw log retained separately; retried once with current maxWorkers=1 and no-file-parallelism",
+  "required_ci": "all four Required checks and Drift SUCCESS at exact67e4; independent4P1+1P2 review hold still applies",
+  "publication": "no source/test commit or push; no authority-floor edits",
+  "sha256": {
+    "P2-FALSE-FLAG-CONTROLS.patch": "824e72f275d21bc36d0bd19967625c7a44c4400eacea4df7b3da9ab1a86333e0",
+    "P2-FALSE-FLAG-RUNTIME-UNAPPLIED.patch": "9de49dde7343a47f47e357c9afbe4e2f3cceb57e67b5c3606e4d87922820ad1a",
+    "P2-FALSE-FLAG-RED.json": "7f8c6e2fa651982c834ef850a2824bea6585360030e34ea391cc73c67de08e8d"
+  },
+  "limitations": "New test overlay at67e4, not green candidate validation. Proposed runtime patch has not run. No deployment or journey claim."
+}

@@ -1,0 +1,69 @@
+{
+  "$comment": [
+    "Declared repo map for the adoption manifest (arch step 2, S0).",
+    "Every producer/consumer test reference in adoption-manifest.json is written as",
+    "  <repo_key>:<path-from-repo-root>::<test name>",
+    "and its <repo_key> MUST appear here. check-adoption-manifest.mjs rejects unknown keys.",
+    "",
+    "When OLUMI_ESTATE_ROOT is set (a directory containing sibling checkouts named",
+    "`local_dir`), the checker additionally asserts each referenced test FILE exists.",
+    "Without it, existence checking is reported as SKIPPED \u2014 loudly, never silently.",
+    "",
+    "READ `authoritative_ref` BEFORE VERIFYING ANYTHING (measured 2026-07-26):",
+    "olumi-schemas is the ONLY repo in this estate whose `main` is live. It has no",
+    "`staging` branch at all. Every other repo integrates on `staging`, and its `main`",
+    "is months stale \u2014 CEE main 2026-01-20, UI main 2026-03-17, PLoT main 2026-02-25,",
+    "ISL main 2026-02-26, against staging HEADs all dated 2026-07-26. ISL staging HEAD",
+    "7d144c7fb is byte-for-byte the sha its live /health reports, so staging is what is",
+    "deployed. A test-existence or field-adoption check run against `main` on any of the",
+    "four services silently measures a five-month-old estate and reports a false verdict.",
+    "This was hit and corrected while building S0."
+  ],
+  "repos": {
+    "schemas": {
+      "remote": "https://github.com/Talchain/olumi-schemas.git",
+      "local_dir": "olumi-schemas",
+      "role": "shared contract package (@talchain/schemas) \u2014 declares, never produces",
+      "authoritative_ref": "main",
+      "authoritative_ref_head_at_seed": "bdf52eee3",
+      "head_dated": "2026-07-23",
+      "ref_note": "the only repo whose main is live; NO staging branch exists"
+    },
+    "cee": {
+      "remote": "https://github.com/Talchain/olumi-assistants-service.git",
+      "local_dir": "olumi-assistants-service",
+      "role": "Cognitive Enhancement Engine \u2014 orchestrator + meaning layer",
+      "authoritative_ref": "staging",
+      "authoritative_ref_head_at_seed": "1c078f09a",
+      "head_dated": "2026-07-26",
+      "ref_note": "main is stale since 2026-01-20"
+    },
+    "ui": {
+      "remote": "https://github.com/Talchain/DecisionGuideAI.git",
+      "local_dir": "DecisionGuideAI",
+      "role": "front end",
+      "authoritative_ref": "staging",
+      "authoritative_ref_head_at_seed": "cca88f156",
+      "head_dated": "2026-07-26",
+      "ref_note": "main is stale since 2026-03-17"
+    },
+    "plot": {
+      "remote": "https://github.com/Talchain/plot-lite-service.git",
+      "local_dir": "plot-lite-service",
+      "role": "PLoT \u2014 trust/correction boundary in front of ISL (subject to D-PLoT)",
+      "authoritative_ref": "staging",
+      "authoritative_ref_head_at_seed": "3c0201b8d",
+      "head_dated": "2026-07-26",
+      "ref_note": "main is stale since 2026-02-25"
+    },
+    "isl": {
+      "remote": "https://github.com/Talchain/Inference-Service-Layer.git",
+      "local_dir": "Inference-Service-Layer",
+      "role": "Inference Service Layer \u2014 deterministic numerics",
+      "authoritative_ref": "staging",
+      "authoritative_ref_head_at_seed": "7d144c7fb",
+      "head_dated": "2026-07-26",
+      "ref_note": "main is stale since 2026-02-26; this sha is what /health reports live"
+    }
+  }
+}

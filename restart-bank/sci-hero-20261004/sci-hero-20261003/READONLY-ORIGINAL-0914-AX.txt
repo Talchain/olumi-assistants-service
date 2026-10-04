@@ -1,0 +1,401 @@
+Browser tab: 2, Title: "Olumi", URL: "https://6ac05a915c6a060008dbdbcd--olumi.netlify.app/?tab=results#/canvas".
+0 AXWebArea Olumi, URL: 6ac05a915c6a060008dbdbcd--olumi.netlify.app/?tab=results#/canvas
+	1 container
+		2 container root
+			3 container
+				4 link Description: Olumi home, Value: 6ac05a915c6a060008dbdbcd--olumi.netlify.app/
+				5 button Description: Rename model, currently Pricing scope — disposable acceptance, Help: Rename model
+				6 pop up button (collapsed) Description: Open model menu, Secondary Actions: Expand
+				7 button (collapsed) Description: Version history, Secondary Actions: Expand
+				8 button (collapsed) Description: Decision brief, Secondary Actions: Expand
+				9 pop up button (collapsed) Description: More options, Secondary Actions: Expand
+				10 pop up button (collapsed) Description: Account menu, Secondary Actions: Expand
+			11 container
+				12 container
+					13 container
+						14 image
+							15 edge Connection from Should we increase the Pro plan price from £49 to £59 per month with the next… to Keep Pro at £49. Structural link (not analysed)
+								16 image Option of this decision
+						17 image
+							18 edge Connection from Should we increase the Pro plan price from £49 to £59 per month with the next… to Raise Pro to £59. Structural link (not analysed)
+								19 image Option of this decision
+						20 image
+							21 edge Connection from Should we increase the Pro plan price from £49 to £59 per month with the next… to Raise Pro to £55. Structural link (not analysed)
+								22 image Option of this decision
+						23 image
+							24 edge Connection from Raise Pro to £59 to Pro plan price. Structural link (not analysed)
+								25 image This option affects this factor
+						26 image
+							27 edge Connection from Raise Pro to £55 to Pro plan price. Structural link (not analysed)
+								28 image This option affects this factor
+						29 image
+							30 edge Connection from Keep Pro at £49 to Pro plan price. Structural link (not analysed)
+								31 image This option affects this factor
+						32 image
+							33 edge Connection from Pro plan price to MRR. Strong boost. Double-click to set its strength
+						34 image
+							35 edge Connection from Pro paying subscribers to MRR. Strong boost. Double-click to set its strength
+						36 image
+							37 edge Connection from Pro plan price to Monthly churn. Moderate boost. Double-click to set its strength
+						38 image
+							39 edge Connection from Monthly churn to MRR lost to price-sensitive churn. Strong boost. Double-click to set its strength
+						40 image
+							41 edge Connection from MRR lost to price-sensitive churn to MRR. Strong drag. By definition. Double-click to inspect
+						42 container Effect direction: positive
+							43 text +
+						44 container Effect direction: positive
+							45 text +
+						46 container Effect direction: positive
+							47 text +
+						48 container Effect direction: positive
+							49 text +
+						50 container Effect direction: negative
+							51 text −
+						52 container Question: Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?. Open details. Double-click to rename it
+							53 container
+								54 button Challenge Should we increase the Pro plan price from £49 to £59 per month with the next…
+								55 pop up button More actions for Should we increase the Pro plan price from £49 to £59 per month with the next…
+								56 button Challenge this result
+							57 container Input connection
+							58 text Should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?
+							59 button Expand description
+							60 container
+								61 text 3 alternatives
+								62 text Evidence priority: Pro paying subscribers
+								63 text On the data so far, this run gave no share of runs for the options. Compare them on what each one changes.
+							64 container Output connection
+						65 container Option: Keep Pro at £49. Open details. Option 1 — the order the options were first laid out in, not a ranking. Double-click to rename it
+							66 container
+								67 button Challenge Keep Pro at £49
+								68 pop up button More actions for Keep Pro at £49
+								69 button Why does this do better or worse on your goal?
+							70 container Input connection
+							71 container
+								72 text O1 Keep Pro at £49
+							73 container
+								74 text Baseline · no changes Reference for the other alternatives.
+								75 container Compared · share not shown. Olumi isn't naming an option on this run.
+							76 container Output connection
+						77 container Option: Raise Pro to £59. Open details. Option 2 — the order the options were first laid out in, not a ranking. Double-click to rename it
+							78 container
+								79 button Challenge Raise Pro to £59
+								80 pop up button More actions for Raise Pro to £59
+								81 button 1 factor target. Open the inspector to change them.
+								82 button Ask Olumi about Raise Pro to £59
+							83 container Input connection
+							84 container
+								85 text O2 Raise Pro to £59
+							86 container
+								87 definition list
+									88 container Pro plan price
+										89 text Pro plan price
+										90 container Pro plan price: £49 per subscriber / month → £59 per subscriber / month. From the factor’s current value in the model. Target: from your brief.
+											91 button Pro plan price, as this option sets it — click to edit
+												92 text £49
+												93 text → 
+												94 text £59 per subscriber / month
+											95 button Pro plan price target: From your brief
+								96 container Compared · share not shown. Olumi isn't naming an option on this run.
+							97 container Output connection
+						98 container Option: Raise Pro to £55. Open details. Option 3 — the order the options were first laid out in, not a ranking. Double-click to rename it
+							99 container
+								100 button Challenge Raise Pro to £55
+								101 pop up button More actions for Raise Pro to £55
+								102 button 1 factor target. Open the inspector to change them.
+								103 button Ask Olumi about Raise Pro to £55
+							104 container Input connection
+							105 container
+								106 text O3 Raise Pro to £55
+							107 image Olumi suggested this
+							108 container
+								109 definition list
+									110 container Pro plan price
+										111 text Pro plan price
+										112 container Pro plan price: £49 per subscriber / month → £55 per subscriber / month. From the factor’s current value in the model.
+											113 button Pro plan price, as this option sets it — click to edit
+												114 text £49
+												115 text → 
+												116 text £55 per subscriber / month
+											117 button Olumi chose this target; it is not yet confirmed. Open the details to set or confirm it.
+								118 text Olumi suggested this option. It isn't one of yours, so this run compared your options without it. It has no rank and no probability.
+							119 container Output connection
+						120 container Factor: Pro paying subscribers. Open details. Factor 1. Double-click to rename it
+							121 container
+								122 button Challenge Pro paying subscribers
+								123 pop up button More actions for Pro paying subscribers
+								124 button Confirm this first?
+							125 container Input connection
+							126 button Worth reviewing: Driver 1 of 3 ranked in this run: the comparison responds strongly to it. How sure are you of its value? Its value is Olumi’s estimate, not yet confirmed.
+							127 container
+								128 text F1 Pro paying subscribers
+							129 container
+								130 text 300
+								131 text subscribers
+								132 button Estimate not yet confirmed — this value was filled in for you. Open the details to set or confirm it.
+								133 button Driver 1 of 3 ranked in this run. Ranked by how strongly the comparison responds to each factor in this model. Bar: relative sensitivity, 100% of the top-ranked driver. Relative to the top-ranked driver in this model, not a causal contribution percentage. How sure are you of its value?
+							134 container Output connection
+						135 container Factor: Pro plan price. Open details. Factor 2. Double-click to rename it
+							136 container
+								137 button Challenge Pro plan price
+								138 pop up button More actions for Pro plan price
+								139 button Ask Olumi about Pro plan price
+							140 container Input connection
+							141 button Worth reviewing: Driver 3 of 3 ranked in this run: the comparison responds strongly to it. How sure are you of its value?
+							142 container
+								143 text F2 Pro plan price
+							144 container
+								145 button Value for Pro plan price — click to edit
+									146 text £49
+									147 text per subscriber / month
+								148 button Pro plan price: From your brief
+								149 button Driver 3 of 3 ranked in this run. Ranked by how strongly the comparison responds to each factor in this model. Bar: relative sensitivity, 0% of the top-ranked driver. Relative to the top-ranked driver in this model, not a causal contribution percentage. How sure are you of its value?
+							150 container Output connection
+						151 container Factor: Monthly churn. Open details. Factor 3. Double-click to rename it
+							152 container
+								153 button Challenge Monthly churn
+								154 pop up button More actions for Monthly churn
+								155 button What’s the evidence?
+							156 container Input connection
+							157 button Worth reviewing: Driver 2 of 3 ranked in this run: the comparison responds strongly to it. How sure are you of its value? Its value is Olumi’s estimate, not yet confirmed.
+							158 container
+								159 text F3 Monthly churn
+							160 container
+								161 text 3%
+								162 button Estimate not yet confirmed — this value was filled in for you. Open the details to set or confirm it.
+								163 button Driver 2 of 3 ranked in this run. Ranked by how strongly the comparison responds to each factor in this model. Bar: relative sensitivity, 40% of the top-ranked driver. Relative to the top-ranked driver in this model, not a causal contribution percentage. How sure are you of its value?
+							164 container Output connection
+						165 container Risk: MRR lost to price-sensitive churn. Open details. Risk 1. Double-click to rename it
+							166 container
+								167 button Challenge MRR lost to price-sensitive churn
+								168 pop up button More actions for MRR lost to price-sensitive churn
+								169 button What would we see first?
+							170 container Input connection
+							171 container
+								172 text R1 MRR lost to price-sensitive churn
+							173 image Olumi suggested this
+							174 text Likelihood and impact not set yet
+							175 container Output connection
+						176 container Goal: MRR. Open details. Double-click to rename it
+							177 container
+								178 button Challenge MRR
+								179 pop up button More actions for MRR
+								180 button Is this the real goal?
+							181 container Input connection
+							182 text MRR
+							183 container
+								184 text Target:
+								185 button Target for MRR — click to edit
+								186 button Target: From your brief
+								187 container Limit you set: Monthly churn ≤ 4%
+							188 container Output connection
+					189 image
+				190 container Canvas tools
+					191 pop up button Add to model
+					192 checkbox Description: Select mode, Value: 1
+					193 checkbox Description: Hand mode, Value: 0
+					194 button Undo
+					195 checkbox Description: Graph lens, Value: 0
+				196 button (collapsed) Key, Secondary Actions: Expand
+				197 container Viewport controls
+					198 button Zoom out
+					199 button Zoom in
+					200 button Fit to view
+					201 pop up button (collapsed) Description: More view options, Secondary Actions: Expand
+				202 container Outputs dock
+					203 container
+						204 text Analysis
+						205 container Outputs sections
+							206 tab group Outputs sections
+								207 tab (selectable, settable, boolean) Olumi, Value: 0, ID: outputs-dock-tab-olumi
+								208 tab (selected, settable, boolean) Analysis, Value: 1, ID: outputs-dock-tab-results
+								209 tab (selectable, settable, boolean) Reasoning, Value: 0, ID: outputs-dock-tab-analysisNew
+								210 tab (selectable, settable, boolean) Compare, Value: 0, ID: outputs-dock-tab-compare
+								211 tab (selectable, settable, boolean) Model, Value: 0, ID: outputs-dock-tab-diagnostics
+						212 button Inspect this analysis
+						213 button (collapsed) Description: More controls, Secondary Actions: Expand
+						214 button Collapse outputs dock
+					215 container Description: Analysis, ID: outputs-dock-panel
+						216 container
+							217 text Some analysis features unavailable
+							218 image
+							219 text Comparison
+							220 image
+							221 text Drivers
+							222 image
+							223 text Robustness
+							224 button Dismiss warning
+								225 image
+							226 text Overview
+							227 heading Pricing scope — disposable acceptance, Value: 2
+								228 text Pricing scope — disposable acceptance
+							229 container Decision classification
+								230 button 4 more things to say about this decision (stakes, reversibility, horizon and risk). Open the overview to set them.
+									231 text +
+									232 text 4
+									233 text to set
+							234 pop up button (collapsed) Actions, Secondary Actions: Expand
+							235 button (collapsed) Framing has the basics Monthly churn ≤ 4%, Secondary Actions: Expand
+								236 text Framing has the basics
+								237 text Monthly churn ≤ 4%
+							238 text Analysis reflects the current model.
+							239 container Analysis caveats
+								240 text Your goal's target was recorded, but Olumi can't yet compare it with where the goal stands today, so the share of model runs that reach it is not shown rather than guessed.
+								241 button (collapsed) Show more, Secondary Actions: Expand
+								242 text One more limitation is listed under Advanced and receipts.
+							243 container Behind this result
+								244 heading Behind this result, Value: 3, ID: :rah:-heading
+									245 text Behind this result
+								246 text Top drivers, the values Olumi assumed, and what could change.
+								247 definition list :rah:
+									248 container What matters
+										249 text What matters
+									250 content list What matters
+										251 text Pro paying subscribers
+									252 container What Olumi assumed
+										253 text What Olumi assumed
+									254 content list What Olumi assumed
+										255 text Estimated by Olumi: the effect of "Raise Pro to £55" on "Pro plan price". No figure for this was stated in your brief.
+								256 button (collapsed) Show all brief details, Secondary Actions: Expand
+							257 button How these numbers are computed
+							258 button What changed since the last analysis run?
+							259 container Analysis
+								260 heading Here is how your options compare., Value: 3
+									261 text Here is how your options compare.
+								262 text Olumi can compare your options, but can't yet test them against your target (at least £20,000 / month), because it needs today's level of MRR and the model doesn't yet say how Pro plan price turns into MRR. What is MRR today?
+								263 text Comparing 2 of 3 options. Raise Pro to £55 was left out.  Ranks and comparative percentages describe those 2 only.
+								264 tab group Results lens
+									265 tab (selectable, settable, boolean) Goal fit (not available for this run), ID: :rai:-tab-goal, Value: 0
+Goal fit
+(
+not available for this run
+)
+									266 tab (selected, settable, boolean) Likely outcome (not available for this run), ID: :rai:-tab-outcome, Value: 1
+Likely outcome
+(
+not available for this run
+)
+								267 container Description: Likely outcome (not available for this run), ID: :rai:
+									268 text Not shown. Olumi can compare your options, but can't yet test them against your target (at least £20,000 / month), because it needs today's level of MRR and the model doesn't yet say how Pro plan price turns into MRR. What is MRR today?
+								269 button Main driver: Pro paying subscribers
+								270 button (expanded) Why and what could change it Drivers, flip risks, trade-offs and what to resolve next, Secondary Actions: Collapse
+									271 text Why and what could change it
+									272 text Drivers, flip risks, trade-offs and what to resolve next
+								273 text Ranked by effect on the analysed outcome. Evidence quality is separate.
+								274 button Pro paying subscribers (increases the outcome) estimated value
+									275 text Pro paying subscribers
+									276 text (
+									277 text increases the outcome
+									278 text )
+									279 container estimated value
+										280 text est.
+								281 button Pro plan price (increases the outcome)
+									282 text Pro plan price
+									283 text (
+									284 text increases the outcome
+									285 text )
+								286 button Monthly churn (decreases the outcome) estimated value
+									287 text Monthly churn
+									288 text (
+									289 text decreases the outcome
+									290 text )
+									291 container estimated value
+										292 text est.
+								293 container What to act on next
+									294 container Description: Dominant factor warning. Dominant factor: Pro paying subscribers has relative influence of 100% within this analysis. If your assumptions about this factor are wrong, the result could change., Help: Dominant factor: Pro paying subscribers has relative influence of 100% within this analysis. If your assumptions about this factor are wrong, the result could change.
+										295 text Dominant factor:
+										296 text Pro paying subscribers
+										297 text has relative influence of 100% within this analysis.
+										298 button Validate Pro paying subscribers on canvas
+									299 text What we checked
+									300 text Leading option not assessed
+									301 text Robustness not established
+									302 text Evidence not assessed
+									303 text Something missing from the results?
+									304 button Tell AI about something missing from the results
+									305 button Dismiss
+								306 button Scroll to the actions panel below
+							307 button (collapsed) What you gave me, and what I did with it 1 of 5 figures I found in your brief isn't in the model yet, Secondary Actions: Expand
+								308 text What you gave me, and what I did with it
+								309 text 1 of 5 figures I found in your brief isn't in the model yet
+							310 container Strengthen your model
+								311 heading Strengthen your model, Value: 2
+									312 text Strengthen your model
+								313 text 0 addressed · 0 worth checking
+								314 text No recommendations need attention right now.
+								315 button (collapsed) Show addressed and dismissed, Secondary Actions: Expand
+							316 heading Your options, Value: 3
+								317 text Your options
+							318 text Comparing 2 of 3 options. Raise Pro to £55 was left out.  Ranks and comparative percentages describe those 2 only.
+							319 button Option 1 Keep Pro at £49 Baseline What would make this better supported?
+								320 text Option 
+								321 text 1
+								322 text Keep Pro at £49
+								323 text Baseline
+								324 button What would make this better supported?
+							325 button Option 2 Raise Pro to £59 What would make this better supported?
+								326 text Option 
+								327 text 2
+								328 text Raise Pro to £59
+								329 button What would make this better supported?
+							330 text Raise Pro to £55 Not analysed Olumi suggested this option. It isn't one of yours, so this run compared your options without it. It has no rank and no probability.
+							331 button What if I tried a different approach?
+							332 text Not every option is equally specified
+							333 text Keep Pro at £49 has 0 of 3 set. Raise Pro to £59 has 1 of 3 set. Raise Pro to £55 has 1 of 3 set. While some effects are unset, treat the ranking as which option currently scores higher, not as a settled result.
+							334 content list
+								335 container
+									336 text Keep Pro at £49 : no effect set on  Pro plan price, Pro paying subscribers, Monthly churn
+								337 container
+									338 text Raise Pro to £59 : no effect set on  Pro paying subscribers, Monthly churn
+								339 container
+									340 text Raise Pro to £55 : no effect set on  Pro paying subscribers, Monthly churn
+							341 container What's driving this
+								342 button (collapsed) What's driving this 3 Factors with the strongest current influence on the result, Secondary Actions: Expand
+									343 heading What's driving this, Value: 3, ID: :rav:
+										344 text What's driving this
+									345 text 3
+									346 text Factors with the strongest current influence on the result
+							347 container Advanced and receipts
+								348 button (expanded) Advanced and receipts, Secondary Actions: Collapse
+									349 heading Advanced and receipts, Value: 3, ID: :rbd:
+										350 text Advanced and receipts
+								351 container Advanced and receipts, ID: :rbe:
+									352 heading Risk profile, Value: 4
+										353 text Risk profile
+									354 text Persistent profile: used when analysis is rerun.
+									355 Risk profile
+										356 radio button Risk Averse, Value: 0
+										357 radio button Neutral, Value: 0
+										358 radio button Risk Seeking, Value: 0
+									359 container trust-narrative
+										360 heading Trust narrative, Value: 4
+											361 text Trust narrative
+										362 content list
+											363 text Some links have no figure for how much it would take to overturn them, because reversing them would give the same answer. Your results stand.
+											364 text Part of this analysis was limited
+										365 text This analysis uses a simplified cause-and-effect model. Some sources of uncertainty (starting levels, and random variation in each factor) are not yet included, so the real spread may be wider than shown.
+									366 heading Analysis details, Value: 4
+										367 text Analysis details
+									368 definition list
+										369 container Sensitive assumptions
+											370 text Sensitive assumptions
+										371 text 0
+										372 container Stable edges
+											373 text Stable edges
+										374 text 0
+										375 container Graph size
+											376 text Graph size
+										377 container
+											378 text 9 nodes ,  11 edges
+										379 container Hash (local)
+											380 text Hash (local)
+										381 container
+											382 container v5:8b4f1219ee43c4ed (locally derived — not an engine hash)
+												383 text v5:8b4f1219e …
+											384 button Copy hash to clipboard
+												385 image
+						386 container
+							387 text Robustness unknown
+							388 button Rerun
+					389 button Open Olumi: Ask about the latest analysis…
+
+The focused UI element is 270 button (expanded) Why and what could change it Drivers, flip risks, trade-offs and what to resolve next, Secondary Actions: Collapse

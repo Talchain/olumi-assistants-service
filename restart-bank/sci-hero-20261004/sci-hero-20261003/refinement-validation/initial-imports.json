@@ -1,0 +1,62 @@
+[
+  {
+    "path": "package.json",
+    "bytes": 9158,
+    "blob_sha": "901079147ffa804d0337a8d094fa61724102372d",
+    "sha256": "dd49b17201b330d69a13894d8ba4550b7f52167a22fc67abed7bf8da14332ce2"
+  },
+  {
+    "path": "vitest.config.ts",
+    "bytes": 2809,
+    "blob_sha": "e0f4a1ee97175ef21c43a3bd869d4f123768a0c9",
+    "sha256": "f7bd7b1bee9b1781baa4fcb024a94bf9520e741248537493141fefdbdbe4e529"
+  },
+  {
+    "path": "tsconfig.json",
+    "bytes": 670,
+    "blob_sha": "8d76f9451bb65d3e6ed4aaa628fa930d9eee8b73",
+    "sha256": "5d956e1bb3f4483580d95e40c06da0f4a99e9ffb36c18ee6a370473c0b8a8b36"
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/guidance/index.ts",
+    "bytes": 478,
+    "blob_sha": "f77395f5a442fffdc34d8003ce7dd26956a84695",
+    "sha256": "0c920ee3bda62c7d27616cacf1e3497e89cacc1d6fcd3aac29c5e889423e0049"
+  },
+  {
+    "path": "src/orchestrator-v5/boundary/request-extensions.ts",
+    "bytes": 20605,
+    "blob_sha": "d6d9ca03e4ba21d87c0003d9f2a7e6e369a070a5",
+    "sha256": "947571ee35357e24574d427191401f2b65e16dc756519376a41603d9279ba339"
+  },
+  {
+    "path": "src/orchestrator-v5/agent-lane/history-store.ts",
+    "bytes": 24782,
+    "blob_sha": "9559129716fbbfb99f4a697dca6ef4beaf08e749",
+    "sha256": "2a6bd665ef23de891113b3215f7b97bb7fda5b759d0af6d44b9bf1812cb56be6"
+  },
+  {
+    "path": "src/orchestrator-v5/coaching/select-factor-evppi.ts",
+    "bytes": 14065,
+    "blob_sha": "8d8936e2418bcae2faea7bd7f5c4676630cad256",
+    "sha256": "aa7bf6d694d33af1f8ec7fd0f65abfd86914f8c771f650ae6470dd6964a43dc0"
+  },
+  {
+    "path": "src/orchestrator-v5/context/analysis-signals.ts",
+    "bytes": 33498,
+    "blob_sha": "4221189430adfaa35f70bb599f890368beee781b",
+    "sha256": "70df882d6be0d2aac26fa21766af7b67a563cdca00c42fdda7587390dabdb90b"
+  },
+  {
+    "path": "src/cee/draft/records/unit-scale-class.ts",
+    "bytes": 21730,
+    "blob_sha": "28d70a63287d26ab33b8330f37953459ab45f21f",
+    "sha256": "47c0ac407feb60156941727962eb637a3f6437dca1c2a49a926dae40b98014e0"
+  },
+  {
+    "path": "src/orchestrator/context/option-result-source.ts",
+    "bytes": 15589,
+    "blob_sha": "911209e09330cc64a58beb7e31af8e90ed3757ee",
+    "sha256": "b3111c54e7ff8ab0ad965941636766d7755f53ad01902034beb12c9f7b10a97b"
+  }
+]

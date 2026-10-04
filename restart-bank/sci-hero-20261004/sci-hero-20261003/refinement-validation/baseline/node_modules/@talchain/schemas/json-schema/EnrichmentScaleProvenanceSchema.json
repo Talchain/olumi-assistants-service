@@ -1,0 +1,36 @@
+{
+  "$ref": "#/definitions/EnrichmentScaleProvenanceSchema",
+  "definitions": {
+    "EnrichmentScaleProvenanceSchema": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "range_unified": {
+          "type": "boolean",
+          "description": "True iff the constraint threshold's normalisation range is identical by construction to the range the node's interventions used or would use; false precisely when resolution diverged (e.g. a producer-declared cap overridden by a measured intervention spread)."
+        },
+        "threshold_clamped": {
+          "type": "string",
+          "enum": [
+            "low",
+            "high"
+          ]
+        },
+        "decision_grade": {
+          "type": "boolean",
+          "description": "Absence of this marker means NOT decision-grade (fail-closed). Consumers MUST NOT treat a missing marker as trustworthy."
+        }
+      },
+      "required": [
+        "source",
+        "range_unified",
+        "decision_grade"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

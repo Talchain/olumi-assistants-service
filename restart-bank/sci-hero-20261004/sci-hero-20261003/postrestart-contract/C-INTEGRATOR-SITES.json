@@ -1,0 +1,29 @@
+{
+  "current_head": "ef65fe160eb58f37b2a40f5c2d236dcbe81b2a58",
+  "read_only_route": "/Users/paulslee/Documents/GitHub/output/ai-experience-executor-20261003/context2529-census/served/src/routes/agent-v1-turn.ts",
+  "route_sha256": "7ec7d694829a0bce3b1766f65a3887e7496539af4a04a05dc7f8e531c2b96804",
+  "sites": [
+    {
+      "line": 30,
+      "purpose": "import C leaf helper/resolver only when consumer is coherent"
+    },
+    {
+      "line": 1727,
+      "purpose": "canonical WHAT replay reconstructs current action, never saved words"
+    },
+    {
+      "line": 2412,
+      "purpose": "WHAT current fact; bound refinement dispatch must resolve current factor/Run before effects"
+    },
+    {
+      "line": 2751,
+      "purpose": "existing fresh final read rejects moved Run"
+    },
+    {
+      "line": 2886,
+      "purpose": "current WHAT offeredSpecific currently only Talk-it-through; typed refinement gated on actual target/approval consumer"
+    }
+  ],
+  "no_hotspot_file_edited": true,
+  "ready_for_apply": false
+}

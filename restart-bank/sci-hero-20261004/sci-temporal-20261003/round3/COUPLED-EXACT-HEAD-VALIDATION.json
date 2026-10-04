@@ -1,0 +1,34 @@
+{
+  "time_utc": "2026-10-03T23:16:10.690744+00:00",
+  "checkout": "/private/tmp/sci-temporal-2382",
+  "precommit_head": "dcaa7c9a6b9b97f9ebf2a10af03cd6df97c25de7",
+  "source_sha256": {
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "8aff7595dde78860fecadd12c7cf8862d6db30a03b251dafd278d3cec0694aae",
+    "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts": "71c0f5073787ba618fd28d475203f1a3868a8b8751ad61c4fd81e7bdf33c6836"
+  },
+  "focused": {
+    "tests": 78,
+    "passed": 78,
+    "failed": 0,
+    "report": "COUPLED-CORRECTION-FOCUSED.json",
+    "controls": "Original capless/no-range negative plus adjacent approved range single/compound and encoder controls"
+  },
+  "pnpm_typecheck": {
+    "exit_code": 0,
+    "session": 55100,
+    "log": "COUPLED-SOURCE-TYPECHECK.log",
+    "schemas": "project-bound 0.75.0 guard PASS"
+  },
+  "scoped_eslint": {
+    "exit_code": 0,
+    "session": 83835,
+    "log": "COUPLED-SCOPED-LINT.log",
+    "paths": [
+      "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts",
+      "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts"
+    ]
+  },
+  "limitations": "Local source and mocked contract evidence; fresh changed-head Required/Drift and same independent review remain owed; no serving or JOURNEY claim",
+  "validated_head": "67e4e03e5b24cc9365f131ffeff239a5fbfbc077",
+  "source_bytes_match_committed_head": true
+}

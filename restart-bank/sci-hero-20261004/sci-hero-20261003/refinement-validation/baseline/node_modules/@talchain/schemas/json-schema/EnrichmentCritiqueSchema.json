@@ -1,0 +1,55 @@
+{
+  "$ref": "#/definitions/EnrichmentCritiqueSchema",
+  "definitions": {
+    "EnrichmentCritiqueSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "user_message": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "affected_option_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "affected_node_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "blocks_analysis": {
+          "type": "boolean"
+        },
+        "suggestion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

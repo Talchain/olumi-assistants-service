@@ -1,0 +1,73 @@
+{
+  "restored_leaf_sha256": "3743bf5b812e46e9355b7ff05e4b3960a2d459411fed971aefb02af62140dfa8",
+  "results": [
+    {
+      "name": "wrong-factor",
+      "exit_code": 1,
+      "tests": 40,
+      "failed_tests": 2,
+      "killed_by_assertions": true,
+      "failed_assertions": [
+        "current-Run tipping-point refinement entry targets the same real factor and Run as the exact neutral threshold",
+        "current-Run tipping-point refinement entry feeds the real selection parser and edit matcher the factor ID, even with a duplicate label"
+      ]
+    },
+    {
+      "name": "wrong-threshold",
+      "exit_code": 1,
+      "tests": 40,
+      "failed_tests": 4,
+      "killed_by_assertions": true,
+      "failed_assertions": [
+        "deterministic tipping-point coaching and checker/fallback uses the existing Run identity control and exact factor threshold, with no EVPPI prerequisite",
+        "deterministic tipping-point coaching and checker/fallback allows a grounded short elaboration without generating the factor or number",
+        "existing RC selector consumes the same fact without reprioritisation keeps P2 and existing Widen priority: a P1 intervention may still precede it",
+        "current-Run tipping-point refinement entry targets the same real factor and Run as the exact neutral threshold"
+      ]
+    },
+    {
+      "name": "wrong-direction",
+      "exit_code": 1,
+      "tests": 40,
+      "failed_tests": 4,
+      "killed_by_assertions": true,
+      "failed_assertions": [
+        "deterministic tipping-point coaching and checker/fallback uses the existing Run identity control and exact factor threshold, with no EVPPI prerequisite",
+        "deterministic tipping-point coaching and checker/fallback allows a grounded short elaboration without generating the factor or number",
+        "existing RC selector consumes the same fact without reprioritisation keeps P2 and existing Widen priority: a P1 intervention may still precede it",
+        "current-Run tipping-point refinement entry targets the same real factor and Run as the exact neutral threshold"
+      ]
+    },
+    {
+      "name": "old-run-reuse",
+      "exit_code": 1,
+      "tests": 40,
+      "failed_tests": 2,
+      "killed_by_assertions": true,
+      "failed_assertions": [
+        "current-Run tipping-point refinement entry refuses missing identity, a foreign scenario, forged ID and generic text",
+        "current-Run tipping-point refinement entry rejects an older action after a same-graph rerun instead of reusing its binding"
+      ]
+    },
+    {
+      "name": "label-only-binding",
+      "exit_code": 1,
+      "tests": 40,
+      "failed_tests": 1,
+      "killed_by_assertions": true,
+      "failed_assertions": [
+        "current-Run tipping-point refinement entry does not promote a same-label factor to the selected factor identity"
+      ]
+    },
+    {
+      "name": "silent-value-payload",
+      "exit_code": 1,
+      "tests": 40,
+      "failed_tests": 1,
+      "killed_by_assertions": true,
+      "failed_assertions": [
+        "current-Run tipping-point refinement entry begins an interaction without supplying a value, mutation handler or approval"
+      ]
+    }
+  ]
+}

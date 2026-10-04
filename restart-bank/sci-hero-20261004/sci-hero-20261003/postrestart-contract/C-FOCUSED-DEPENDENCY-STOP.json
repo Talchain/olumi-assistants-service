@@ -1,0 +1,39 @@
+{
+  "verified_at": "2026-10-03T12:17:58.587707+00:00",
+  "packet_base": "ef65fe160eb58f37b2a40f5c2d236dcbe81b2a58",
+  "packet_hashes_verified": true,
+  "focused_test": "NOT_STARTED",
+  "verdict": "DEPENDENCY_STOP",
+  "runtime_node": "bundled v24.19.0",
+  "runtime_resolution": "require.resolve(vitest/package.json) in independent packet/bundled/global paths timed out at10seconds; subprocess.run killed its child and the command exited",
+  "compatible_vitest_runtime": "UNCONFIRMED; no global absence inferred",
+  "known_tooling_paths": [
+    {
+      "path": "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/vitest/vitest.mjs",
+      "present": false
+    },
+    {
+      "path": "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/typescript/lib/typescript.js",
+      "present": false
+    },
+    {
+      "path": "/opt/homebrew/bin/vitest",
+      "present": false
+    }
+  ],
+  "missing_isolated_source_inputs": [
+    "src/orchestrator-v5/agent-lane/guidance/index.ts",
+    "src/orchestrator-v5/agent-lane/history-store.ts",
+    "src/orchestrator-v5/coaching/select-factor-evppi.ts",
+    "src/orchestrator-v5/context/analysis-signals.ts",
+    "src/cee/draft/records/unit-scale-class.ts",
+    "src/orchestrator/context/option-result-source.ts",
+    "tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json"
+  ],
+  "source_test_failure_count": null,
+  "no_install_clone_new_framework": true,
+  "no_A_tracked_checkout_used": true,
+  "no_paid_provider_browser": true,
+  "focused_slot": "RELEASED",
+  "free_gib": 3.23
+}

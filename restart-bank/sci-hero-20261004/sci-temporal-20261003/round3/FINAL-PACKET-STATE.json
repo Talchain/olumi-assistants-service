@@ -1,0 +1,142 @@
+{
+  "workstream": "SCI-TEMPORAL / existing SCI-HERO C01a0feed",
+  "at": "2026-10-03T22:53:54.063056+00:00",
+  "state": "PUSHED_FOR_DL_FINAL_INDEPENDENT_REVIEW",
+  "repo": "/private/tmp/sci-temporal-2382",
+  "branch": "claude/focused-ritchie-vf0xpz",
+  "exact_head": "2677b3d9496d9d0c6bd7744f0c8131d37b3f1ac6",
+  "remote_status": "pushed / PR2382 OPEN / not merged / not deployed",
+  "worktree": "clean",
+  "authored_repair_files": {
+    "src/orchestrator-v5/__tests__/apply-operations.test.ts": "5d131daddab56867549195e05d4d4c9cfc12e244decaf7f054b7b37ecf4c85ce",
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "70cc2f0e9913a1f0612f89d878db70fb707c872a0ddcb939258db13e589693c3",
+    "src/orchestrator-v5/apply-operations.ts": "4c6d2b7f1e32ef15060fbc8fde4e827e5f7d9138769984e08c0de6ef870dc1a8",
+    "src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts": "22d865b1b7fb509d84c64f835770deaa4fec3a9c4bd26236619adc8ef3653778",
+    "src/orchestrator-v5/graph-management/field-safety.ts": "07b5fb1b3f049c64be417cac9391b9b91dfe91a03255651b3054341ab6571704",
+    "src/orchestrator-v5/normalise-option-interventions.ts": "3918350e7aa3f2874940fd0a69a7bb4498fab0eec640c99cdbd0f40824531223",
+    "src/orchestrator-v5/system-events/__tests__/option-intervention-edit.test.ts": "715fbc02dad820cdbd074fa9d8120f4cb5266b7807803a6b1122f9f3b4958c08",
+    "src/orchestrator-v5/system-events/dispatch.ts": "62c12caf4f01ad9b7cf1856ddc05ab3ad2418e801735ae106649baf4cc4d9db0",
+    "src/orchestrator-v5/system-events/option-intervention-edit.ts": "cb1d4b382ac9629b1c911423bf914e551bc05ceacb4e14a2a15d91837ec0ab3d",
+    "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts": "b10d6b47185cf180406c16ccd2ece65627a107c424e898ba46c4c1bb9f16c180",
+    "src/orchestrator/tools/edit-graph.ts": "15e10859a7632db042c7995d416cc0d89e836a08cf6e5d60e9ef72e9105b204e",
+    "src/orchestrator/tools/encode-option-interventions.ts": "a6b12b78621c2e2f4dfb230b935737503eed238f576c3cea3c8480096936bcad",
+    "tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts": "18a7c8e3ecef8ec9901562d1bb42b983d95e45bc81bf4646425e53c551ba1552",
+    "tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts": "f18ede34a2c89b0a04f782957f2a6c52aa1ffd4d3d1e566b7c03b9aa7f6e8788",
+    "tests/unit/orchestrator-v5/normalise-option-interventions.test.ts": "34f01d04b673e01849df2ebd23c8b9e5d3b4b1f1b032bed812770c0b0a6bdbd3"
+  },
+  "repair_delta": "15 files, 241 additions/31 removals; full existing feature PR25 files against3ede",
+  "baseline": "3ede57eb27d525d7492866792861120ffb2ccaa2 / served schemas0.75",
+  "baseline_merge": "9c8c18f30cf0f562df61f13bcca81fecd543115c",
+  "validation": {
+    "focused": "454/454 PASS at exact2677 head/current0.75",
+    "mutants": "6/6 semantic detection with passing contrasts and byte-exact restoration; no stale baseline gate credit",
+    "typecheck": "pnpm typecheck PASS / source bytes match final head",
+    "scoped_lint": "PASS",
+    "schemas": "project-bound0.75.0 guard PASS",
+    "required_ci": [
+      {
+        "name": "Graph Evaluator (advisory)",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE"
+      },
+      {
+        "name": "Required \u2014 lint, typecheck, guards",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "Conversation Harness Gates (advisory)",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "CodeQL Analysis",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "check-schemas",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "Golden Journey Replay (advisory)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "Validate OpenAPI Spec",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "validate-event-names",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "Test-skip inventory (AST, ratcheted)",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "Required \u2014 tests 1/3",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "Snyk Security Scan",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "Required \u2014 tests 2/3",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "Required \u2014 tests 3/3",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "Full Test Suite (advisory)",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "Dependency Review",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "name": "Integration Tests (advisory)",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "Typecheck Drift (ratchet)",
+        "status": "IN_PROGRESS",
+        "conclusion": ""
+      },
+      {
+        "name": "Security Audit",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE"
+      },
+      {
+        "name": "Live LLM key availability",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      }
+    ],
+    "independent_review": "5d2 CHANGES_REQUIRED superseded only by new repair request; final review owed via DL",
+    "serving_journey": "NOT CLAIMED / no new provider or browser action"
+  },
+  "test_limit": "Real proposal/approval/native writer/generic write/canonical projection paths with mocked storage, synthetic fixtures and no external serving. Inherited broad science evidence unchanged.",
+  "next": "DL final independent exact-head review +current Required/Drift -> guarded release; Root retains served joined SCI-HERO refinement journey. No new most-likely lane until2382 merge.",
+  "recovery": "Read CURRENT-STATE.json and HANDOFF.md; cd /private/tmp/sci-temporal-2382; git status --short; git rev-parse HEAD; verify PR2382 exact head and fresh Required/review before further action. Do not clone/reinstall/repeat broad gates or self-approve.",
+  "delivery_receipt": "https://github.com/Talchain/olumi-programme-docs/issues/87#issuecomment-5974350074",
+  "local_only_artifacts": "/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3",
+  "running_foreground_worker": "none: all authored test/typecheck/lint/push sessions completed"
+}

@@ -1,0 +1,5 @@
+{
+  "checked_utc": "2026-10-04T09:46:58.540924+00:00",
+  "running_owned_workers": [],
+  "check": "lsof actual cwd for Node/Vitest/Codex; unrelated lane processes preserved"
+}

@@ -1,0 +1,657 @@
+[
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/B1-FIRST-RUN-SCI-FINDING.json",
+    "bytes": 1443,
+    "sha256": "a4050e68ef4473f135e14b01ee93ca30a878d30a7a13e3aaa7700d057c8a1131"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/B3-CANDIDATE-GATES-0830.json",
+    "bytes": 3846,
+    "sha256": "ec94acabb33e7b02da5631fe5b2cbd36cc50b63308b28a6dcd7c88687e07f472"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/B3-UI-GATES-0850.json",
+    "bytes": 4125,
+    "sha256": "3585dc7e93bd084bdb35251e41789c0a02725d8e4595e58606ac0ff3bab6bf5b"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/CEE-PUBLIC-0902.json",
+    "bytes": 780,
+    "sha256": "48fbe1b15d686c23fb826245e478aaa42e0f2ab701ce335f754dbc75049cb38a"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/CEE-RENDER-LIVE-0903.json",
+    "bytes": 1249,
+    "sha256": "c93dd074d756f789145e07671f940fb5ea611e10e93dcbe35e5c97f13a0c6b35"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/COMBINED-CI-FIRST-FAILURE.txt",
+    "bytes": 1580,
+    "sha256": "eb71a7b90f936a4ef54a64ee73be43e700d9f055fa8fa9ae04bf1b0a26fc0ddf"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/CONTEXT-P0-68454-INTEGRATION.patch",
+    "bytes": 1710,
+    "sha256": "5b6f674656452666ecd6e3908937b5aac2d71df1a4c18cb0070ce47dc128cec4"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/E7-CI-FIRST-FAILURE.txt",
+    "bytes": 1224,
+    "sha256": "811fdc0ef645f0fd7aa0c3ae4750a73e3a7b33393a937af1369864d23505da6a"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/IMPORT-FIDELITY-BOUNDARY.md",
+    "bytes": 2752,
+    "sha256": "fb70613785c26be7528ca086e4a370982d8ecf8e385d12920667d4419467ad76"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/IMPORT-FIDELITY-HANDOFF.txt",
+    "bytes": 1852,
+    "sha256": "50f8b479229b760646e32e0dc77e27f0fec54257464cd4cc9524b37786907530"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/MORNING-MANUAL-TEST.md",
+    "bytes": 10218,
+    "sha256": "3aa4f443e878780ad9560fe5a7551bbbbe0ba68c831f09312b3a1e8f4f7cd665"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/OVERNIGHT-STATE.md",
+    "bytes": 112058,
+    "sha256": "0aa9bb5dfa602e1c21c96a4522f29ee1367df752a672e6a0e5080ed11393c6ab"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/READONLY-ORIGINAL-0914-AX.txt",
+    "bytes": 23088,
+    "sha256": "7404682acbb1cb0a79fdedd989da8f929d2f9ebc349a8def9dacfc2f67cba90e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/READONLY-ORIGINAL-0914-BOUNDARY.json",
+    "bytes": 1666,
+    "sha256": "689d74833c4fecfb40dbec43364cc8eff2952dade6e7490abeaf4e7d317d27df"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/READONLY-ORIGINAL-0914-TABS.json",
+    "bytes": 229,
+    "sha256": "a8d81e6fe700161dbec12f7589fe6747b5e1946df2d587495714ff77a15143d9"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/READONLY-PICKUP-0914-85.md",
+    "bytes": 2197,
+    "sha256": "f9a16f0e700a6c8606735c5bc66c0ee6dbfdc72845a72d54fab8725a8b478060"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/READONLY-PICKUP-0914-87.md",
+    "bytes": 1143,
+    "sha256": "31ee4c6b4ea2b431f690a17843e502918d46cba72c5004b06f653d9d12029d7e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/READONLY-PICKUP-0914-POSTED.json",
+    "bytes": 363,
+    "sha256": "334e3536241d41847b5effb8490b59672c5f1e35dea1a7d02d5037c23d58be26"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/RESTART-HANDOFF.md",
+    "bytes": 7015,
+    "sha256": "8a97581c5ab607f2c469acca7a8e282099ee08c06d348353b5c83fa78620a075"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/RESTART-SAFETY-DIRECT-RECHECK-POSTED.json",
+    "bytes": 158,
+    "sha256": "c9bd0111a0f68c6879365958a99ad3e3f9fe3cd35c1dfebd4d61b0cfa359047a"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/RESTART-SAFETY-POSTED.json",
+    "bytes": 363,
+    "sha256": "60f4e2f2de55835b6e4633e4d3a9192a481cd0dc088c526532e55ef3a5e96618"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/RESTART-SAFETY-RECEIPT-85.md",
+    "bytes": 3392,
+    "sha256": "302346c75440d6085c8191e4567c80662962bafdf037c2991fea9fdd4548c65d"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/RESTART-SAFETY-RECEIPT-87.md",
+    "bytes": 729,
+    "sha256": "db8a99e252bbde903c25e24a8d16672115f0075de51e1852323fb8c28ecdc0ab"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/ROUTE-SEAM-HANDOFF.md",
+    "bytes": 2399,
+    "sha256": "ae22590a1e4da145d790cee1e4f993bc68f2dbac6db8d8679f9c68cab9830b4c"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/SCI-B1-READONLY-INTERPRETATION-0921.json",
+    "bytes": 4417,
+    "sha256": "2d463e58562e59df19571cd851cc18a69c0780b104708ef332f7fb7442f919cd"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/SCI-B1-READONLY-INTERPRETATION-0921.md",
+    "bytes": 1483,
+    "sha256": "dc5d14cf6a2d82091db5d45ed589296f2ca5a825e9211c267476766e0ab4316a"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/SCI-INITIAL-UNAVAILABLE-UI.jpg",
+    "bytes": 128943,
+    "sha256": "7cb0e9e9fea64f51c21e7bf8d703d6b56039abddc51d80e73652270c355558f1"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/SCI-INITIAL-UNAVAILABLE-UI.txt",
+    "bytes": 23277,
+    "sha256": "4bf827b2b1888c2db1d42b8c2f1a604c2691163802ae5e8436d34a48913613b5"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/SCI-INTERPRETATION-FINAL-0926-85.md",
+    "bytes": 2297,
+    "sha256": "e85fdb73102f51749a2d0dbec7c8d0fedb2e108f5053d9cd94cc131a69b32d3e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/SCI-INTERPRETATION-FINAL-0926-87.md",
+    "bytes": 1027,
+    "sha256": "73dc2fa16d708c60a972710455ffa76a0eedf87ada24a3c7168bb7402711f77b"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/SCI-INTERPRETATION-FINAL-0926-POSTED.json",
+    "bytes": 363,
+    "sha256": "d6de3768637ce39944f2c5a946b00e3c9e341e7f0acdd5f8424b6311e9390910"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/SERVED-TUPLE-0534.json",
+    "bytes": 2731,
+    "sha256": "d30e0f5744712a690f27dab9744542ba45b451c4e95cc3902171efc58a73e9d8"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/SERVED-TUPLE-0906.json",
+    "bytes": 1861,
+    "sha256": "4c67576471bb53b4961f0702af9fcc777f22fe4285a4a92822cfebcfe596a22a"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/STATE-SNAPSHOT-0144.md",
+    "bytes": 7793,
+    "sha256": "e1bd973ffa85bf9b0378d3d6c6f2b6611a17ea5fedec97fb4b723fadccd42348"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/UI-NETLIFY-READY-0906.json",
+    "bytes": 603,
+    "sha256": "365e45b58acdbfec85b8c414f6a0cea6069c73ca7594958a56bdd58de6903acd"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/UI-PUBLIC-0905.json",
+    "bytes": 921,
+    "sha256": "129b5ba6304269955309c2ca8d0bd844bb8c6a50e35012749d7732c72c7b3bce"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/WITNESS-SEEDS.json",
+    "bytes": 2448,
+    "sha256": "a921c0c9a77e73aed1cd0c13156ba3bc78993b0bb85c103aa24d19c0f80a1579"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/WITNESS-STATE.md",
+    "bytes": 13111,
+    "sha256": "7256947636d868228f5959981b3b70544b855b9970fad66ee8be68fc4792cd08"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/no-signal-model-graph.json",
+    "bytes": 10069,
+    "sha256": "8dfd80a4487bf77fbd685f764d8290be2739c93e67b09e113180e434642fb441"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/node-test.log",
+    "bytes": 4835,
+    "sha256": "fd51e3b8f481c13b9e8f712b12a9682e01f9ce4be41cee679714b869fe48e526"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/original-guest-model-backup.json",
+    "bytes": 64392,
+    "sha256": "5a262325b61248446f880fa1e89dbbc7994c779168381acdd5615b669532cd91"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/positive-model-graph.json",
+    "bytes": 14632,
+    "sha256": "69cc75e216c1ba6f9ebad45f5280b97b6b98bc161faa09341e70af538f99886f"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-ACK-POSTED.json",
+    "bytes": 158,
+    "sha256": "a29e7d10b4eb3ad4d69abce3806772bed577da6ff893e717657b0a0485d9aff5"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-ACK.md",
+    "bytes": 1601,
+    "sha256": "433282d870759c210fc59210e2cf1cdd5d1b76de794124fb1f4ea6f092dda923"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-CONTRACT-PACKET.md",
+    "bytes": 7555,
+    "sha256": "13133537d167cbdb135b54b1b582bfe39ecdfe3f01d3f31d16844846330a13ce"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-DEPENDENCY-POSTED.json",
+    "bytes": 158,
+    "sha256": "33677a9a87e351e8b679c073c0358d37c0cc0ef86d89eef062169a68a6e41b6f"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-DEPENDENCY-RECEIPT-85.md",
+    "bytes": 1083,
+    "sha256": "b14940674157fd9070c18a706127ee0bdbd32b230468abe44bba0c6f142fd2c1"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-FOCUSED-DEPENDENCY-STOP.json",
+    "bytes": 1607,
+    "sha256": "2e644aad0cc7c1bf5678762d93534285393463d2004695740482fc744c4d3744"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-FOCUSED-DEPENDENCY-STOP.log",
+    "bytes": 251,
+    "sha256": "23e6cdf00accaf37663d73282ef72a6e155389729372163f5fe6a2975e9273f9"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-INTEGRATOR-SITES.json",
+    "bytes": 1023,
+    "sha256": "d3dd982c4d7b4618382db886f82f6023f9542fc99c07c9bc817f9ffd4ea787b0"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-LEAF-AND-CONTROL.patch",
+    "bytes": 10715,
+    "sha256": "c0ad5e7e5a0c70353687bdacbc3870daca378b559c26d0b075cfd61d0038b688"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-PACKET-MANIFEST.json",
+    "bytes": 1188,
+    "sha256": "329fa151f785cfceb16589fde228fdb5230f1509d3061b7cea8fa009b93ebbee"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-PACKET-POSTED.json",
+    "bytes": 158,
+    "sha256": "627124bf902d098d73c0fd19c989caee781157442c320451e4c34b3f382ba768"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-PACKET-RECEIPT-85.md",
+    "bytes": 1240,
+    "sha256": "d039b488d74f3e490add72522e44b7ce2e51d967c0716b1e138b972b8d887b12"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/board85-1110.json",
+    "bytes": 14279,
+    "sha256": "e54a59be01884dce8cfefe1abe2c144fcd540b0ba9ce92ac8f3ab675ad9a89ae"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/board85-resumption.json",
+    "bytes": 122890,
+    "sha256": "6a3bd8e6ce6e4062a401d9f39d35f214066f246f12b5c98ed8f4b6171d9bcbd8"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/board87-1110.json",
+    "bytes": 11127,
+    "sha256": "1e2bdeed7e014de6e9c758d3bc46099aff1152e0f915f6ba8c4ea59ac37ea0af"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/board87-resumption.json",
+    "bytes": 48178,
+    "sha256": "fb0e40389fb4ed57a509a557ffb602632540b3d07a08ab26e995ebd04a4f124b"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-cee-tree.json",
+    "bytes": 1935533,
+    "sha256": "87eef9f53571ab7df43f5787299d0e3b8bb42b2e3263cc78cf0208624262e08b"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/manifest.json",
+    "bytes": 2637,
+    "sha256": "91b204efd784c57c1241b68d70397f71fc1d52a5cb7970d5ba01052b67bd6575"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.route.test.ts",
+    "bytes": 7498,
+    "sha256": "a91820e315536bd31c719ca06ea2aa72167ccd8022bdf9982e15da198f6c39ae"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.test.ts",
+    "bytes": 7860,
+    "sha256": "94ca780a61b5d201bd6deeb22d1582e0205b935bf596b58b8aabfc7fb9a8b9af"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/decision-sensitivity.ts",
+    "bytes": 14565,
+    "sha256": "9179542938c06844919fd87a02139cd0656543b801fb6d4fdfb68107a6775a4a"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/run-explanation.ts",
+    "bytes": 3757,
+    "sha256": "06c0afaf1b0e0876eb8989d135aa8664e47923cd1cb92107c80c01ecad0ad4c1"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+    "bytes": 2988,
+    "sha256": "13adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/boundary/request-extensions.ts",
+    "bytes": 20605,
+    "sha256": "947571ee35357e24574d427191401f2b65e16dc756519376a41603d9279ba339"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/compose/flip-proposal.ts",
+    "bytes": 25181,
+    "sha256": "15df74ef5bd4e5e94a136d7a0d361c691116de476ae52bbabd9334c311882dd9"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/compose/types.ts",
+    "bytes": 2507,
+    "sha256": "3e0c64b537c5d3d3085dce2dda59d1040e871b7dcab23e8e59301045483f5b15"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/context/analysis-interpretation-identity.ts",
+    "bytes": 9494,
+    "sha256": "54ce2ec644c023d1e2b733be0aaa09f96449fe0f8b68ee6f70ee73c5ac4a705d"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/context/flip-threshold-rows.ts",
+    "bytes": 21960,
+    "sha256": "291de9d7356280f1b6767d4cf31a366107be75e1c57a540f5d8761e65802c56a"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/durable-packet-manifest.json",
+    "bytes": 8444,
+    "sha256": "59d6a123908e433a0a2f7474e311b7b42e4c4d5e6c119bf06185ac3be6a45100"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/packet/src/orchestrator-v5/agent-lane/__tests__/tipping-point-interaction.contract.test.ts",
+    "bytes": 6917,
+    "sha256": "a7cc0ce966821be41ef06469eca943cab83d189fca5352c831d6705c938c732a"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/packet/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+    "bytes": 4809,
+    "sha256": "3743bf5b812e46e9355b7ff05e4b3960a2d459411fed971aefb02af62140dfa8"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/ptl-85-allocation.json",
+    "bytes": 8383,
+    "sha256": "b132a69b820e401a2fffe2922072f368b7e658eb36ac70f487d08cfbbd4da26c"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/ptl-87-allocation.json",
+    "bytes": 6055,
+    "sha256": "c632542f8ed24d34bf3c34f70b4cc19d501c04b541d9d61f44a083ad2ca0dd74"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/CONTEXT-OWNER-CENSUS-0956.md",
+    "bytes": 5530,
+    "sha256": "041d0b225d0aa46ec9147d0ceb21cdfb518be863ecef80832f321e2feb895672"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/FINAL-ACTUAL-RESTART-CHECK.json",
+    "bytes": 1017,
+    "sha256": "e61d724ce741b0a02538dae1a1bf1a5cc0027b66ba083bc973a7ed1ea8a688b2"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/automation-paused.toml",
+    "bytes": 1711,
+    "sha256": "bb705345ff23d89308f69b85388d3ad8fdbc2c3d65c7238b6eb7ade72a4cacd6"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/board85-0956.json",
+    "bytes": 11654,
+    "sha256": "7f6917643f6f44d04dfcc19ce40c40e35e54a151235c399e992a7a09fa199029"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/board87-0956.json",
+    "bytes": 20469,
+    "sha256": "f363a89d3e6b8c1d345dbeda529ca76b0eb6c0835e97a2135edc6ece8a514d66"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/checkout-and-bank-receipt.json",
+    "bytes": 984,
+    "sha256": "8f39160fba2f731795849b1c9ecf11c4edf559bff70f25aa9ec55cf27987c460"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/context-owner-census-receipt.json",
+    "bytes": 744,
+    "sha256": "de327539147b14fdb4970ac10373c15946e498200d3b9e8a99547976bc8148bc"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/durable-file-manifest.json",
+    "bytes": 16388,
+    "sha256": "f9d7fc3798230ea181e82aef58dae4c98ea89f1c243feb794930903d8586a9dd"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/historical-positive-fixture.json",
+    "bytes": 45679,
+    "sha256": "36f120f70a075503ba017f15c112e62e52dce21bdf583a4d9bd142bdc619a654"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/openapi.generated.d.ts",
+    "bytes": 229956,
+    "sha256": "495ec38deda96b8e3a99ed07d8aaa4c1ea40dfb88a30ee2e27411d423fee67c4"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/owned-process-argument-scan.json",
+    "bytes": 180,
+    "sha256": "dcc23d2f519a0360062d8f8cfbd3c0c0e04fd347e98802c5ba65516d56af54ee"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/remote-branch.json",
+    "bytes": 542,
+    "sha256": "306ba0d35b40cf41a93a526ebf8f0d3d94c5a8139d572cf861ed306e61890a36"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/temporary-file-index.json",
+    "bytes": 88337,
+    "sha256": "ca534104031693628e327929613ddc33f32db7667d0cb44efae1a0c1af48d1a2"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-0950/temporary-science-evidence.tar.gz",
+    "bytes": 10724592,
+    "sha256": "fac5268cf84f0fef2a0fcaf3458b43c4d972ce988cda779bc2e56a39f4597d19"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/BANK-VERIFICATION.json",
+    "bytes": 627,
+    "sha256": "bba5a5687094276efdea3ca081e3283aa995cc46fa8c21957d9a0afd382c6e34"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/CONTINUATION-HOLD.md",
+    "bytes": 498,
+    "sha256": "02a7f79ea27e2174a89e9f5b0411317a3d118e407ab7dbcae1b2cb5fa1428985"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/FINAL-ACTUAL-RESTART-CHECK.json",
+    "bytes": 302,
+    "sha256": "59a22023fc7eed0d8fb6906bf733be847dd36147f8d3a51625e459a309722957"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/PREVIOUS-RESTART-HANDOFF.md",
+    "bytes": 6937,
+    "sha256": "eafa0e544506840d1be14591d072fcde170d6e6f2a0d7b2d61eae47af173c76f"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/RESTART-HANDOFF.md",
+    "bytes": 7015,
+    "sha256": "8a97581c5ab607f2c469acca7a8e282099ee08c06d348353b5c83fa78620a075"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/RESTART-RECEIPT.md",
+    "bytes": 1145,
+    "sha256": "7dc91d18788eaa6cfef88ccd25f68fb51306305e86594a52ceb83f2daaa83997"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/RESTART-RECEIPTS-POSTED.json",
+    "bytes": 375,
+    "sha256": "0d4afddbc36ccdc7a847bd4ef4d0b4edf8767d1e0293085970a7c68a951e9630"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/archive-file-index.json",
+    "bytes": 34288,
+    "sha256": "589f8f5dc415e3de78e79d9ffcfc510f8539380aea6524a17b2c56b7ba4270bc"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/branch.json",
+    "bytes": 503,
+    "sha256": "f65a108f88c114dedb383d5fe14085d6792a6ac963b60762a5271e46cf77973e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/cwd-census.txt",
+    "bytes": 26832,
+    "sha256": "41fe83947e822517b984290f9940515dfb6b1ad8e8bb47cf7e8ff3fc74a08157"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/final-cwd-census.txt",
+    "bytes": 27614,
+    "sha256": "e87a053d22ade259038d0321a499d1e435feff6b6df042515cea2423f45fb696"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/final-process-census.txt",
+    "bytes": 207544,
+    "sha256": "a93e4c6d7d413bf780e91d5f2eee68ed80c671f2d10fdf68e979831582f4c051"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/heartbeat-paused.toml",
+    "bytes": 1711,
+    "sha256": "bb705345ff23d89308f69b85388d3ad8fdbc2c3d65c7238b6eb7ade72a4cacd6"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/original-user-pasted-request.txt",
+    "bytes": 14423,
+    "sha256": "814af384d835f878dd9c050b852f7ccc3a19db8894abc8ec81718c9c0d88d8f6"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/pr2531.json",
+    "bytes": 19853,
+    "sha256": "561e28ec7c51d9ef44502ef9b026cee81288097d468a44856a0e7d4ad618eb64"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/pr2536.json",
+    "bytes": 21462,
+    "sha256": "92c5b1d0ac6566a3c79db9f9aafce58ea979afecb3109b894b520862b4a467fa"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/process-census.txt",
+    "bytes": 207353,
+    "sha256": "140e1a4b62a58fae133e6d0c6f5a519178c9bc8cfb5ed22e00bb3fb33da0100e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/process-check.json",
+    "bytes": 259,
+    "sha256": "33797b5439eddf63116cfc758b0d9743ecb80229c9d692f12125b4b97860f517"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/remote-check.json",
+    "bytes": 207,
+    "sha256": "f02eede2b4738851b136d124ee59c567056e19cb3295f705b4d702ad470d2575"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/workstream-evidence.tar.gz",
+    "bytes": 11359095,
+    "sha256": "a1eafded491858c1235715861d4a06c3443d44a3b2db0c120cff8592fcda1c4e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/sci-hero-pr1-mutants.json",
+    "bytes": 246,
+    "sha256": "a102209e8903d6c22eeb8a55101c5bb3d198fbf381b289bed85387d6919bde5d"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/sci-hero-pr1-unit-guard-fix.log",
+    "bytes": 488,
+    "sha256": "65900b86eb4b12581a1c391407797de03fc8967590c73f981f07db4725b967d7"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/sci-hero-pr2-exact-44d90.log",
+    "bytes": 48722,
+    "sha256": "5c48b22ade045ec91aba4cf939bb793996ecb5797c9d379b0bc80f43c3f4e4d0"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/sci-hero-pr2-final-lint.log",
+    "bytes": 264,
+    "sha256": "39932211634b7edadfdfe6f4242017aaec8451aac0642f5038c42aed6543184e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/sci-hero-pr2-lint.log",
+    "bytes": 264,
+    "sha256": "39932211634b7edadfdfe6f4242017aaec8451aac0642f5038c42aed6543184e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/sci-hero-pr2-mutants.json",
+    "bytes": 780,
+    "sha256": "efcbeb9cff085e8410ac8c7040937e1bc71ae45d647f9dcf30623503f8e79c0f"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/sci-hero-pr2-typecheck.log",
+    "bytes": 1539,
+    "sha256": "339c7b5ef7f86989a7aeb3a52e642a0f64e939e382851250a1f3a25a39991871"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/science-engine-current/allocation-5970232617.json",
+    "bytes": 8080,
+    "sha256": "965357d070a59db208c56fce79ce76f0e53697101da84dcb492730ed3ec5d56f"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/science-engine-current/allocation-5970232875.json",
+    "bytes": 5249,
+    "sha256": "03bb8072cb456d01b5f10f73032dfcc0e51f2ed5e1ccb9a0505852ac6b02d6ef"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/science-engine-current/allocation-5970249720.json",
+    "bytes": 6986,
+    "sha256": "aa8bda5c26b5b1f6b532c7ca00d90ede1187b431b2883edf82047b1a26844715"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/science-engine-current/olumi-assistants-service-2522-metadata.json",
+    "bytes": 26160,
+    "sha256": "725dae15d1a567edfefd23ebab7e5a150103df517358e09f929f9102921af0e8"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/scihero-2536-baseline-proof.txt",
+    "bytes": 299,
+    "sha256": "f3d875b1e9310ab37c5cb3b6a37a5219534c01375403016a2dbfe41cbb87db3e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/scihero-pr2-ci-repair-lint.log",
+    "bytes": 264,
+    "sha256": "39932211634b7edadfdfe6f4242017aaec8451aac0642f5038c42aed6543184e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/scihero-pr2-ci-repair.log",
+    "bytes": 47265,
+    "sha256": "ad10a9cfa5043227e1c14a9a4e5e64ce547e3b3cd510a5d2f45f96b10e6b1de8"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/scihero-pr2-exact-a7fd116.log",
+    "bytes": 88622,
+    "sha256": "9261800dffd17b25107f90f6546bd353713917f0b2dfd7520ad053bafaf54eef"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/scihero-pr2-refreshed-focused.log",
+    "bytes": 88325,
+    "sha256": "c1e246b45e91ec0147c75b7a66ee41f17e3c0efa1564b470d348391715dcd2a8"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/scihero-pr2-refreshed-lint.log",
+    "bytes": 264,
+    "sha256": "39932211634b7edadfdfe6f4242017aaec8451aac0642f5038c42aed6543184e"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/scihero-pr2-refreshed-typecheck.log",
+    "bytes": 1895,
+    "sha256": "abd57212578606760f4cf19b3913084cce4c879c213379d4db6c46b0548bb40a"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/scihero-r3-ef0d-independent-review.md",
+    "bytes": 1861,
+    "sha256": "e343cf8f0b51ae3ab66fdab8f503bb186140ee431ad2b61faad96e55e4fc665f"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/scihero-r3-independent-review.md",
+    "bytes": 1945,
+    "sha256": "61a3758ec9dc9486320fe74fcab5a4c1e453c55c276902773c1ff84160369aa3"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/witness-auth-boundary.jpg",
+    "bytes": 27131,
+    "sha256": "34f4db9aa55b4e8f575e24ff790e92c976b3f0e8be8381294163e1b09bde2850"
+  },
+  {
+    "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/witness-auth-boundary.json",
+    "bytes": 2131,
+    "sha256": "850c715a3564f36c8fc77e56540ecb98f5b8e0ef18db43bf48cfedf1ee097325"
+  }
+]

@@ -1,0 +1,105 @@
+{
+  "cee": {
+    "conclusion": "",
+    "headSha": "537d5280062a2b8597c902c7089d6840d531f207",
+    "jobs": [
+      {
+        "name": "Required \u2014 lint, typecheck, guards",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111162827792"
+      },
+      {
+        "name": "Live LLM key availability",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111162827917"
+      },
+      {
+        "name": "Security Audit",
+        "status": "completed",
+        "conclusion": "failure",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111162827925"
+      },
+      {
+        "name": "Full Test Suite (advisory)",
+        "status": "in_progress",
+        "conclusion": "",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111162827931"
+      },
+      {
+        "name": "Required \u2014 tests 2/3",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111162827936"
+      },
+      {
+        "name": "Required \u2014 tests 1/3",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111162827938"
+      },
+      {
+        "name": "Integration Tests (advisory)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111162827946"
+      },
+      {
+        "name": "Typecheck Drift (ratchet)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111162827973"
+      },
+      {
+        "name": "Required \u2014 tests 3/3",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111162827997"
+      },
+      {
+        "name": "Lint, TypeCheck, Unit Tests",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111164769372"
+      },
+      {
+        "name": "Live LLM Integration Tests",
+        "status": "completed",
+        "conclusion": "skipped",
+        "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179/job/111164814148"
+      }
+    ],
+    "status": "in_progress",
+    "url": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37108914179"
+  },
+  "ui": [
+    {
+      "conclusion": "",
+      "databaseId": 37109795921,
+      "event": "workflow_dispatch",
+      "headSha": "7299524769adb31d0898760ec73860356199ff87",
+      "status": "in_progress",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921",
+      "workflowName": "Staging Tests"
+    },
+    {
+      "conclusion": "success",
+      "databaseId": 37109635438,
+      "event": "pull_request",
+      "headSha": "7299524769adb31d0898760ec73860356199ff87",
+      "status": "completed",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109635438",
+      "workflowName": "Contract Validation"
+    },
+    {
+      "conclusion": "success",
+      "databaseId": 37109635367,
+      "event": "pull_request",
+      "headSha": "7299524769adb31d0898760ec73860356199ff87",
+      "status": "completed",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109635367",
+      "workflowName": "Staging Tests"
+    }
+  ]
+}

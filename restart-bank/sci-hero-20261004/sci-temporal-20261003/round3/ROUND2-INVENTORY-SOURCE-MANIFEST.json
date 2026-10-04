@@ -1,0 +1,17 @@
+{
+  "head": "67e4e03e5b24cc9365f131ffeff239a5fbfbc077",
+  "sha256": {
+    "src/orchestrator-v5/persist-graph-write.ts": "86134aebcd3c598d93c33cdb100f886c3174874fcf29a2f803e365f129f85b99",
+    "src/orchestrator-v5/commit.ts": "1877df9093481862804409a0473e7e06a1fad21668ed9bad6d1bad9bd74dc145",
+    "src/routes/assist.v1.scenario-graph-register.ts": "7a4bb11bf64176c6974372e8e2992e243ed1c67af418be3c2bed769d8429eb0c",
+    "src/routes/assist.v1.scenario-versions.ts": "af31634488880036e5d8001afcfb2ab8c64742f250d8ebd8a4a0d0fec4a7c979",
+    "src/orchestrator-v5/persisted-graph-projection.ts": "be63ece37b179d8f448ff703e53e97971887edb3091f3036da6c4f1f3ef2f2af",
+    "src/orchestrator-v5/intervention-range.ts": "bfdc0d9a3dd93936248d0a97bd4d546187e5fb4546e4483a7e81b2c775d46526",
+    "src/orchestrator/tools/encode-option-interventions.ts": "a6b12b78621c2e2f4dfb230b935737503eed238f576c3cea3c8480096936bcad",
+    "src/orchestrator/tools/edit-graph.ts": "15e10859a7632db042c7995d416cc0d89e836a08cf6e5d60e9ef72e9105b204e",
+    "src/orchestrator-v5/apply-operations.ts": "4c6d2b7f1e32ef15060fbc8fde4e827e5f7d9138769984e08c0de6ef870dc1a8",
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "8aff7595dde78860fecadd12c7cf8862d6db30a03b251dafd278d3cec0694aae",
+    "src/orchestrator-v5/agent-lane/approved-adoption-context.ts": "b83fc502a157d2cb62add4ab09de15bfe46d8ff2b483a67cf23740e04479fdcc"
+  },
+  "worktree": ""
+}

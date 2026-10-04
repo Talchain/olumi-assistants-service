@@ -1,0 +1,58 @@
+{
+  "ui": {
+    "sha": "622ac23570690d0056a45bbc152c49e44d2b262d",
+    "deploy_id": "6ac05a915c6a060008dbdbcd",
+    "url": "https://6ac05a915c6a060008dbdbcd--olumi.netlify.app",
+    "alias": "https://staging--olumi.netlify.app",
+    "state": "ready",
+    "public_version_matched": true
+  },
+  "cee": {
+    "sha": "ff5a2c253a61d7a64c40d10e3cc00d4e8827f2da",
+    "deploy_id": "dep-db095otg1s2s738gapb0",
+    "state": "live",
+    "verified_at": "2026-10-03T05:34:11.979994+00:00",
+    "deploy_finished_at": "2026-10-03T05:32:21.479424Z",
+    "public_build": "ff5a2c2",
+    "public_build_matched": true,
+    "verification": "authenticated Render full SHA LIVE + HTTP200 matching public build"
+  },
+  "plot": {
+    "sha": "4526e4322764ba9b33690cdcd87320bc9e77261f",
+    "deploy_id": "dep-dav9v8o473hc73ahkmog",
+    "state": "live",
+    "verified_at": "2026-10-03T05:34:11.979994+00:00",
+    "verification": "authenticated Render LIVE full SHA"
+  },
+  "isl": {
+    "sha": "842254da5aab6ff9aa8caf9c2ace1a59cc42e600",
+    "deploy_id": "dep-dav9nng473hc73ah88f0",
+    "state": "live",
+    "verified_at": "2026-10-03T05:34:11.979994+00:00",
+    "verification": "authenticated Render LIVE full SHA"
+  },
+  "readiness": "PARTIAL",
+  "pending_candidate": {
+    "repo": "Talchain/olumi-assistants-service",
+    "pr": 2533,
+    "source_head": "107cb7f4151524c285af825a972ed7f6740198d4",
+    "source_state": "published test-only repair; production blobs unchanged from e7",
+    "review": "FINAL independentHIGH5399181467 at exact107; PTLrelease-eligible5965959338",
+    "ci": "run37099009695 Required4/4 +aggregate +Drift ALLSUCCESS;3153files/54243testsPASS,0unexpected",
+    "merged": true,
+    "deployed": true,
+    "served": true,
+    "joined_browser": "accepted B1\u2192SCI single case about to start; no witness claim",
+    "source_tree": "8f5e279e1e10ac5e812c9c6a83a86415f16e4d9c",
+    "merge_sha": "ff5a2c253a61d7a64c40d10e3cc00d4e8827f2da",
+    "merge_tree": "8f5e279e1e10ac5e812c9c6a83a86415f16e4d9c",
+    "merged_at": "2026-10-03T05:30:09Z",
+    "deploy_id": "dep-db095otg1s2s738gapb0",
+    "deploy_state": "live",
+    "served_at": "2026-10-03T05:34:11.979994+00:00"
+  },
+  "transcript_free_claim": "canonical-only non-paid CONTROL can prove retention/derived reads; fresh Agent inference remains BLOCKED/PARTIAL",
+  "checkpoint_updated_at": "2026-10-03T05:34:11.979994+00:00",
+  "deterministic_science_coaching": "selected-Run canonical fact/retry path uses zero provider/tool calls in source; actual joined threshold/action/rerun/reload witness owed",
+  "joined_witness_hold": "CEE ff5/UI622 held until accepted B1\u2192SCI case completes or first genuine external/runtime nonconflicting stop receipt; B3 follows current PTL ruling"
+}

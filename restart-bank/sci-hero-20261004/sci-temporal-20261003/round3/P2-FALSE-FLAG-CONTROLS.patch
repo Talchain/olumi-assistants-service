@@ -1,0 +1,48 @@
+diff --git a/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts b/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
+index 946d7a031..3958d859e 100644
+--- a/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
++++ b/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
+@@ -249,4 +249,43 @@ describe('the user\'s likely range for an option\'s level survives propose → a
+     expect(out?.ok, JSON.stringify(out)).toBe(true);
+     expect(Object.hasOwn(liftCell(), 'range')).toBe(false);
+   });
++
++  it.each([false, true])('ordinary level: explicit false range flag equals omitted, compound=%s', async (compound) => {
++    const text = 'For Lift-and-shift, migration downtime is 10 days.';
++    const omitted = await proposeAndApprove({ value: 10 }, text, compound);
++    expect(omitted.proposed.ok, JSON.stringify(omitted.proposed)).toBe(true);
++    expect(omitted.out?.ok, JSON.stringify(omitted.out)).toBe(true);
++    const expectedCell = JSON.parse(JSON.stringify(liftCell()));
++    const expectedHash = currentHash();
++    expect(Object.hasOwn(expectedCell, 'range')).toBe(false);
++    expect(rows.size).toBe(1);
++
++    persisted = servedGraph();
++    rows.clear();
++    const explicitFalse = await proposeAndApprove({ value: 10, range_user_stated: false }, text, compound);
++    expect(explicitFalse.proposed.ok, JSON.stringify(explicitFalse.proposed)).toBe(true);
++    expect(explicitFalse.out?.ok, JSON.stringify(explicitFalse.out)).toBe(true);
++    expect(liftCell()).toEqual(expectedCell);
++    expect(currentHash()).toBe(expectedHash);
++    expect(rows.size).toBe(1);
++  });
++
++  it.each([
++    [false, { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'likely_range', range_user_stated: false }],
++    [true, { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'likely_range', range_user_stated: false }],
++    [false, { value: 10, range_user_stated: true }],
++    [true, { value: 10, range_user_stated: true }],
++  ])('incomplete or unclaimed actual range stays refused, compound=%s level=%j', async (compound, level) => {
++    const { proposed } = await proposeAndApprove(level, TEXT, compound);
++    expect(proposed.ok).toBe(false);
++    expect(JSON.stringify(proposed)).toMatch(/likely range/i);
++    expect(rows.size).toBe(0);
++  });
++
++  it.each([false, true])('false range flag cannot bypass ordinary user-figure grounding, compound=%s', async (compound) => {
++    const { proposed } = await proposeAndApprove({ value: 30, range_user_stated: false },
++      'For Lift-and-shift, migration downtime is 10 days.', compound);
++    expect(proposed.ok).toBe(false);
++    expect(rows.size).toBe(0);
++  });
+ });

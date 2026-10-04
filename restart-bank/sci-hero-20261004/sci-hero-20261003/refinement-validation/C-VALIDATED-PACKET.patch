@@ -1,0 +1,219 @@
+--- a/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts
++++ b/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts
+@@ -1,15 +1,25 @@
+ /** A deterministic RC-WHAT-CHANGES answer on the canonical reader's selected Run. No new truth or persistence. */
++import { createHash } from 'node:crypto';
+ import { tippingPointOf, type TippingPoint } from './decision-sensitivity.js';
++import type { SuggestedAction } from '../compose/types.js';
+ import { checkMethodTurn } from './guidance/index.js';
+ import type { MethodInputs } from './guidance/types.js';
+ import { runExplanationChip, RUN_EXPLANATION_UNAVAILABLE_TEXT, type RunExplanationRead } from './run-explanation.js';
+ 
+ export const TIPPING_POINT_PRESS_ID = 'agent-next-what-would-change';
++export const TIPPING_POINT_REFINEMENT_PREFIX = 'agent-refine-tipping-factor:';
+ type Found = Extract<TippingPoint, { status: 'found' }>;
+ export type TippingPointCoaching =
+   | { readonly kind: 'found'; readonly run_key: string; readonly fact: Found; readonly reply: string; readonly check_inputs: MethodInputs }
+   | { readonly kind: 'unavailable'; readonly reply: string }
+   | { readonly kind: 'no_signal'; readonly status: Exclude<TippingPoint['status'], 'found'>; readonly reply: string };
++
++/** A conversation entry, not an approved edit or a mutation handler. */
++export interface TippingPointRefinement {
++  readonly factor_id: string;
++  readonly run_key: string;
++  readonly action: SuggestedAction;
++}
+ 
+ /** The existing Explain control owns currentness and full Run binding; this consumer neither computes nor grants it. */
+ export function tippingPointCoachingFor(scenarioId: string, read: RunExplanationRead): TippingPointCoaching {
+@@ -27,6 +37,31 @@
+       tipping_point: fact, 'run.kind': 'complete_current' } };
+ }
+ 
++/** Reuse the same current fact; the integrator resolves the ID again before beginning refinement. */
++export function tippingPointRefinementFor(scenarioId: string, read: RunExplanationRead): TippingPointRefinement | null {
++  const plan = tippingPointCoachingFor(scenarioId, read);
++  if (plan.kind !== 'found') return null;
++  const binding = { run_key: plan.run_key, factor_id: plan.fact.factor_id };
++  const digest = createHash('sha256').update(JSON.stringify(binding)).digest('hex').slice(0, 16);
++  return { ...binding, action: {
++    id: `${TIPPING_POINT_REFINEMENT_PREFIX}${digest}`,
++    label: `Refine ${plan.fact.label}`,
++    message: `Help me refine ${plan.fact.label}. Ask me what value or evidence to use before proposing an edit.`,
++  } };
++}
++
++/** Dispatch recognition only; this prefix does not license a factor, Run or edit. */
++export function isTippingPointRefinementAction(id: unknown): id is string {
++  return typeof id === 'string' && id.startsWith(TIPPING_POINT_REFINEMENT_PREFIX);
++}
++
++/** Recover the actual factor ID from today's selected fact, never from a label or old chip text. */
++export function readTippingPointRefinement(id: unknown, scenarioId: string, read: RunExplanationRead): TippingPointRefinement | null {
++  if (!isTippingPointRefinementAction(id)) return null;
++  const current = tippingPointRefinementFor(scenarioId, read);
++  return current !== null && current.action.id === id ? current : null;
++}
++
+ /** One optional elaboration call may follow this instruction; the grounded sentence is supplied, never generated. */
+ export function tippingPointDirective(plan: Extract<TippingPointCoaching, { kind: 'found' }>): string {
+   return `RC-WHAT-CHANGES: begin with this exact sentence, verbatim: ${JSON.stringify(plan.reply)} `
+--- /dev/null
++++ b/src/orchestrator-v5/agent-lane/__tests__/tipping-point-interaction.contract.test.ts
+@@ -0,0 +1,156 @@
++/** Fixture-first interaction binding; no provider, inference, write or served-journey claim. */
++import { readFileSync } from 'node:fs';
++import { describe, expect, it } from 'vitest';
++import { runExplanationChip, type RunExplanationRead } from '../run-explanation.js';
++import * as tipping from '../tipping-point-coaching.js';
++import { parseRequestExtensions } from '../../boundary/request-extensions.js';
++import { buildGraphLookup } from '../../routing/graph-lookup-adapter.js';
++import { tryDeterministicValueUpdate } from '../../routing/deterministic-value-update.js';
++import { extractQuantities } from '../../context/cqe/extract-quantities.js';
++import { approvalChipIdFor, typedApprovalOf } from '../approval-chips.js';
++const { isTippingPointRefinementAction, readTippingPointRefinement, tippingPointCoachingFor,
++  tippingPointRefinementFor } = tipping;
++
++type Rec = Record<string, unknown>;
++const positive = JSON.parse(readFileSync(new URL(
++  '../../../../tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json', import.meta.url), 'utf8')) as Rec;
++const scenario = 'sci-tipping-interaction-contract';
++const hash = positive.graph_hash as string;
++const at = '2026-10-03T00:00:00.000Z';
++const result = { type: 'analysis_result', computed_against_hash: hash, enrichment: positive.enrichment };
++const current: RunExplanationRead = { graphHash: hash, analysisResult: result,
++  analysisState: { run_state: { kind: 'complete_current', computed_at: at },
++    leader_claim: { permitted: false, withheld_reason: 'goal_scope_unresolved' } } };
++// Resolve inside each test: baseline RED must run assertions, not fail module collection.
++const refinement = () => {
++  expect(tippingPointRefinementFor).toBeTypeOf('function');
++  const entry = tippingPointRefinementFor(scenario, current);
++  expect(entry).not.toBeNull();
++  return entry!;
++};
++
++describe('current-Run tipping-point refinement entry', () => {
++  it('targets the same real factor and Run as the exact neutral threshold', () => {
++    const plan = tippingPointCoachingFor(scenario, current);
++    expect(plan.kind).toBe('found');
++    if (plan.kind !== 'found') throw new Error('Missing positive control');
++    expect(plan.reply).toBe('Pro plan price is a factor that could change this: the comparison could change if it rises above 55.76 GBP/month.');
++    expect(refinement().factor_id).toBe(plan.fact.factor_id);
++    expect(refinement().factor_id).toBe('pro_plan_price');
++    expect((positive.graph as { nodes: { id: string; kind: string }[] }).nodes)
++      .toContainEqual(expect.objectContaining({ id: refinement().factor_id, kind: 'factor' }));
++    expect(refinement().run_key).toBe(plan.run_key);
++    expect(refinement().run_key).toBe(runExplanationChip(scenario, current)!.id);
++    expect(refinement().action.label).toBe('Refine Pro plan price');
++    expect(readTippingPointRefinement(refinement().action.id, scenario, current)).toEqual(refinement());
++  });
++
++  it('begins an interaction without supplying a value, mutation handler or approval', () => {
++    const before = JSON.stringify(current);
++    const offered = tippingPointRefinementFor(scenario, current)!;
++    expect(Object.keys(offered.action).sort()).toEqual(['id', 'label', 'message']);
++    expect(offered.action.message).toContain('Ask me what value or evidence to use before proposing an edit.');
++    expect(offered.action.message).not.toMatch(/55\.76|56|wins|would lead|most important|most worth/iu);
++    expect(offered).not.toHaveProperty('pending_action');
++    expect(offered).not.toHaveProperty('approved');
++    expect(JSON.stringify(current)).toBe(before);
++  });
++
++  it('does not promote a same-label factor to the selected factor identity', () => {
++    const changed = structuredClone(positive.enrichment) as { flip_thresholds: { factor_id: string; flip_value: number | null }[] };
++    const row = changed.flip_thresholds.find(r => r.factor_id === 'pro_plan_price' && r.flip_value !== null)!;
++    row.factor_id = 'monthly_churn'; // Deliberately keep the same display label.
++    const other: RunExplanationRead = { ...current, analysisResult: { ...result, enrichment: changed } };
++    const wrong = tippingPointRefinementFor(scenario, other)!;
++    expect(wrong.factor_id).toBe('monthly_churn');
++    expect(wrong.action.label).toBe(refinement().action.label);
++    expect(wrong.action.id).not.toBe(refinement().action.id);
++    expect(readTippingPointRefinement(wrong.action.id, scenario, current)).toBeNull();
++  });
++
++  it.each(['complete_stale', 'running', 'never_run', 'unknown'])('offers and resolves no entry for %s', kind => {
++    const unavailable: RunExplanationRead = { ...current,
++      analysisState: { run_state: { kind, computed_at: at } } };
++    expect(tippingPointRefinementFor(scenario, unavailable)).toBeNull();
++    expect(readTippingPointRefinement(refinement().action.id, scenario, unavailable)).toBeNull();
++  });
++
++  it('refuses missing identity, a foreign scenario, forged ID and generic text', () => {
++    const missing: RunExplanationRead = { ...current, analysisState: { run_state: { kind: 'complete_current' } } };
++    expect(tippingPointRefinementFor(scenario, missing)).toBeNull();
++    expect(readTippingPointRefinement(refinement().action.id, 'another-scenario', current)).toBeNull();
++    expect(readTippingPointRefinement(`${refinement().action.id}wrong`, scenario, current)).toBeNull();
++    expect(readTippingPointRefinement('agent-talk-it-through', scenario, current)).toBeNull();
++    expect(isTippingPointRefinementAction(null)).toBe(false);
++  });
++
++  it('rejects an older action after a same-graph rerun instead of reusing its binding', () => {
++    const newer: RunExplanationRead = { ...current,
++      analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-03T00:01:00.000Z' } } };
++    expect(tippingPointRefinementFor(scenario, newer)!.action.id).not.toBe(refinement().action.id);
++    expect(readTippingPointRefinement(refinement().action.id, scenario, newer)).toBeNull();
++  });
++
++  it('does not revive an older crossing beside a newer degraded or absent result', () => {
++    for (const analysisResult of [undefined, { type: 'analysis_unavailable' },
++      { ...result, enrichment: {} }]) {
++      const degraded: RunExplanationRead = { ...current, analysisResult,
++        analysisState: { run_state: { kind: 'complete_current', computed_at: '2026-10-03T00:01:00.000Z' } } };
++      expect(tippingPointRefinementFor(scenario, degraded)).toBeNull();
++      expect(readTippingPointRefinement(refinement().action.id, scenario, degraded)).toBeNull();
++    }
++  });
++
++  it.each([
++    ['no_flip_in_range', { flip_thresholds: [{ factor_id: 'pro_plan_price', factor_label: 'Pro plan price',
++      current_value: 49, flip_value: null, flip_reason: 'structurally_invariant' }] }],
++    ['not_evaluated', {}],
++    ['unresolved', { flip_thresholds: [{ factor_id: 'pro_plan_price', current_value: 49,
++      flip_value: null, flip_reason: 'unresolved' }] }],
++  ])('keeps %s distinct and offers no refinement entry', (status, enrichment) => {
++    const noSignal: RunExplanationRead = { ...current, analysisResult: { ...result, enrichment } };
++    expect(tippingPointCoachingFor(scenario, noSignal)).toMatchObject({ kind: 'no_signal', status });
++    expect(tippingPointRefinementFor(scenario, noSignal)).toBeNull();
++  });
++
++  it('reconstructs the same interaction binding from canonical state without transcript', () => {
++    expect(tippingPointRefinementFor(scenario, JSON.parse(JSON.stringify(current)))).toEqual(refinement());
++  });
++
++  it('feeds the real selection parser and edit matcher the factor ID, even with a duplicate label', () => {
++    const entry = refinement();
++    const graph = structuredClone(positive.graph) as { nodes: { id: string; kind: string; label: string }[]; edges: unknown[] };
++    const factor = graph.nodes.find(node => node.id === entry.factor_id)!;
++    graph.nodes.push({ ...factor, id: 'duplicate-price-label' });
++    const before = JSON.stringify(graph);
++    const parsed = parseRequestExtensions({ graph_state: graph,
++      selected_elements: [{ id: entry.factor_id, kind: 'node', label: factor.label }] }, 'sci-refinement-contract');
++    expect(parsed.ok).toBe(true);
++    if (!parsed.ok) throw new Error('Native boundary rejected the contract');
++    expect(parsed.value.selectedElements?.node_ids).toEqual(['pro_plan_price']);
++    const lookup = buildGraphLookup(parsed.value.graphState);
++    expect(lookup.kind).toBe('ok');
++    if (lookup.kind !== 'ok') throw new Error('Native graph adapter rejected the fixture');
++    const factorIds = new Set(graph.nodes.filter(node => node.kind === 'factor').map(node => node.id));
++    const message = 'Set Pro plan price to 56 GBP/month'; // The user supplies the new value, not the refinement chip.
++    const quantities = extractQuantities(message);
++    expect(tryDeterministicValueUpdate(message, quantities, lookup.lookup, [], factorIds))
++      .toMatchObject({ matched: true, dispatch: 'clarify' });
++    expect(tryDeterministicValueUpdate(message, quantities, lookup.lookup,
++      parsed.value.selectedElements!.node_ids, factorIds))
++      .toMatchObject({ matched: true, dispatch: 'set_factor_value', candidate: { id: entry.factor_id }, quantity: { value: 56 } });
++    expect(tryDeterministicValueUpdate(entry.action.message, extractQuantities(entry.action.message),
++      lookup.lookup, parsed.value.selectedElements!.node_ids, factorIds).matched).toBe(false);
++    expect(JSON.stringify(graph)).toBe(before);
++  });
++
++  it('cannot become native typed approval; approval binds the subsequently offered proposal', () => {
++    const entry = refinement();
++    expect(typedApprovalOf({ chip: entry.action, message: 'Yes, apply it', approved: true })).toBeUndefined();
++    expect(typedApprovalOf({ message: 'Yes, apply it', approved: true })).toBeUndefined();
++    const proposalId = 'prop_abcdef123456';
++    expect(typedApprovalOf({ chip: { id: approvalChipIdFor(proposalId) } })).toBe(proposalId);
++    expect(typedApprovalOf({ chip: { id: approvalChipIdFor('forged-proposal') } })).toBeUndefined();
++    // Decoder evidence only: no native write/commit or served approval journey is exercised here.
++  });
++});

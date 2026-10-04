@@ -1,0 +1,11 @@
+ WARN  Issue while reading "/private/tmp/scihero-cee-1790984347/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/private/tmp/scihero-cee-1790984347/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /private/tmp/scihero-cee-1790984347
+
+
+ Test Files  2 passed (2)
+      Tests  38 passed (38)
+   Start at  01:52:02
+   Duration  2.51s (transform 1.23s, setup 151ms, import 1.75s, tests 393ms, environment 0ms)
+

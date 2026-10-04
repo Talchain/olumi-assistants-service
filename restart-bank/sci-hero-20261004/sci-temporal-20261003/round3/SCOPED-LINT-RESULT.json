@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/opt/homebrew/opt/node@20/bin/pnpm",
+    "exec",
+    "eslint",
+    "src/orchestrator-v5/__tests__/apply-operations.test.ts",
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts",
+    "src/orchestrator-v5/apply-operations.ts",
+    "src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts",
+    "src/orchestrator-v5/graph-management/field-safety.ts",
+    "src/orchestrator-v5/normalise-option-interventions.ts",
+    "src/orchestrator-v5/system-events/__tests__/option-intervention-edit.test.ts",
+    "src/orchestrator-v5/system-events/dispatch.ts",
+    "src/orchestrator-v5/system-events/option-intervention-edit.ts",
+    "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts",
+    "src/orchestrator/tools/edit-graph.ts",
+    "src/orchestrator/tools/encode-option-interventions.ts",
+    "tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts",
+    "tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts",
+    "tests/unit/orchestrator-v5/normalise-option-interventions.test.ts"
+  ],
+  "exit": 1
+}

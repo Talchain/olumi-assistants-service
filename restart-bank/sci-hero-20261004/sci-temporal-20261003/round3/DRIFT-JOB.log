@@ -1,0 +1,293 @@
+﻿2026-10-03T22:51:53.8990486Z Current runner version: '2.337.0'
+2026-10-03T22:51:53.9015243Z ##[group]Runner Image Provisioner
+2026-10-03T22:51:53.9016111Z Hosted Compute Agent
+2026-10-03T22:51:53.9016790Z Version: 20260901.588
+2026-10-03T22:51:53.9017446Z Commit: f88ec8081b781fac6c440065ac7ff9e710ce3d0b
+2026-10-03T22:51:53.9018169Z Build Date: 2026-09-01T19:56:44Z
+2026-10-03T22:51:53.9018964Z Worker ID: {cdbee758-7cbf-419a-b1e2-7d9363f3bf96}
+2026-10-03T22:51:53.9019683Z Azure Region: westus2
+2026-10-03T22:51:53.9020339Z ##[endgroup]
+2026-10-03T22:51:53.9022127Z ##[group]Operating System
+2026-10-03T22:51:53.9022776Z Ubuntu
+2026-10-03T22:51:53.9023445Z 24.04.5
+2026-10-03T22:51:53.9023969Z LTS
+2026-10-03T22:51:53.9024523Z ##[endgroup]
+2026-10-03T22:51:53.9025093Z ##[group]Runner Image
+2026-10-03T22:51:53.9025694Z Image: ubuntu-24.04
+2026-10-03T22:51:53.9026342Z Version: 20260927.320.1
+2026-10-03T22:51:53.9027594Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260927.320/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-03T22:51:53.9029225Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260927.320
+2026-10-03T22:51:53.9030236Z ##[endgroup]
+2026-10-03T22:51:53.9031804Z ##[group]GITHUB_TOKEN Permissions
+2026-10-03T22:51:53.9033791Z Contents: read
+2026-10-03T22:51:53.9034536Z Metadata: read
+2026-10-03T22:51:53.9035110Z Packages: read
+2026-10-03T22:51:53.9035742Z ##[endgroup]
+2026-10-03T22:51:53.9037769Z Secret source: Actions
+2026-10-03T22:51:53.9038689Z Cache mode: write
+2026-10-03T22:51:53.9039509Z Prepare workflow directory
+2026-10-03T22:51:53.9372127Z Prepare all required actions
+2026-10-03T22:51:53.9421646Z Getting action download info
+2026-10-03T22:51:54.3087730Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-03T22:51:54.4071781Z Download action repository 'pnpm/action-setup@v4' (SHA:b906affcce14559ad1aafd4ab0e942779e9f58b1)
+2026-10-03T22:51:54.6438675Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-10-03T22:51:54.8325361Z Complete job name: Typecheck Drift (ratchet)
+2026-10-03T22:51:54.9135263Z ##[group]Run actions/checkout@v4
+2026-10-03T22:51:54.9136519Z with:
+2026-10-03T22:51:54.9137049Z   repository: Talchain/olumi-assistants-service
+2026-10-03T22:51:54.9141290Z   token: ***
+2026-10-03T22:51:54.9141738Z   ssh-strict: true
+2026-10-03T22:51:54.9142195Z   ssh-user: git
+2026-10-03T22:51:54.9142644Z   persist-credentials: true
+2026-10-03T22:51:54.9143128Z   clean: true
+2026-10-03T22:51:54.9143574Z   sparse-checkout-cone-mode: true
+2026-10-03T22:51:54.9144090Z   fetch-depth: 1
+2026-10-03T22:51:54.9144516Z   fetch-tags: false
+2026-10-03T22:51:54.9144965Z   show-progress: true
+2026-10-03T22:51:54.9145411Z   lfs: false
+2026-10-03T22:51:54.9145819Z   submodules: false
+2026-10-03T22:51:54.9146271Z   set-safe-directory: true
+2026-10-03T22:51:54.9146776Z   allow-unsafe-pr-checkout: false
+2026-10-03T22:51:54.9147601Z ##[endgroup]
+2026-10-03T22:51:55.0208495Z Syncing repository: Talchain/olumi-assistants-service
+2026-10-03T22:51:55.0211934Z ##[group]Getting Git version info
+2026-10-03T22:51:55.0214477Z Working directory is '/home/runner/work/olumi-assistants-service/olumi-assistants-service'
+2026-10-03T22:51:55.0216761Z [command]/usr/bin/git version
+2026-10-03T22:51:55.0278481Z git version 2.55.0
+2026-10-03T22:51:55.0308240Z ##[endgroup]
+2026-10-03T22:51:55.0315627Z Temporarily overriding HOME='/home/runner/work/_temp/a2d4f2de-275f-4a6a-9e9d-c16776f9f41f' before making global git config changes
+2026-10-03T22:51:55.0318135Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-03T22:51:55.0320515Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/olumi-assistants-service/olumi-assistants-service
+2026-10-03T22:51:55.0380159Z Deleting the contents of '/home/runner/work/olumi-assistants-service/olumi-assistants-service'
+2026-10-03T22:51:55.0397526Z ##[group]Initializing the repository
+2026-10-03T22:51:55.0399264Z [command]/usr/bin/git init /home/runner/work/olumi-assistants-service/olumi-assistants-service
+2026-10-03T22:51:55.0506432Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-03T22:51:55.0508564Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-03T22:51:55.0509659Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-03T22:51:55.0510484Z hint: call:
+2026-10-03T22:51:55.0511536Z hint:
+2026-10-03T22:51:55.0512187Z hint: 	git config --global init.defaultBranch <name>
+2026-10-03T22:51:55.0513020Z hint:
+2026-10-03T22:51:55.0513796Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-03T22:51:55.0514826Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-03T22:51:55.0515733Z hint:
+2026-10-03T22:51:55.0516271Z hint: 	git branch -m <name>
+2026-10-03T22:51:55.0516884Z hint:
+2026-10-03T22:51:55.0517621Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-03T22:51:55.0523999Z Initialized empty Git repository in /home/runner/work/olumi-assistants-service/olumi-assistants-service/.git/
+2026-10-03T22:51:55.0535574Z [command]/usr/bin/git remote add origin https://github.com/Talchain/olumi-assistants-service
+2026-10-03T22:51:55.0590135Z ##[endgroup]
+2026-10-03T22:51:55.0592106Z ##[group]Disabling automatic garbage collection
+2026-10-03T22:51:55.0595630Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-03T22:51:55.0630761Z ##[endgroup]
+2026-10-03T22:51:55.0632867Z ##[group]Setting up auth
+2026-10-03T22:51:55.0641972Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-03T22:51:55.0685435Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-03T22:51:55.1101496Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-03T22:51:55.1142543Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-03T22:51:55.1367578Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-03T22:51:55.1406144Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-03T22:51:55.1631175Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-03T22:51:55.1671999Z ##[endgroup]
+2026-10-03T22:51:55.1673014Z ##[group]Fetching the repository
+2026-10-03T22:51:55.1683086Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +c0990a5a0482fbc5a4093fab5944b2e480c7a6ff:refs/remotes/pull/2382/merge
+2026-10-03T22:51:56.2968045Z From https://github.com/Talchain/olumi-assistants-service
+2026-10-03T22:51:56.2970509Z  * [new ref]         c0990a5a0482fbc5a4093fab5944b2e480c7a6ff -> pull/2382/merge
+2026-10-03T22:51:56.2974717Z ##[endgroup]
+2026-10-03T22:51:56.2976595Z ##[group]Determining the checkout info
+2026-10-03T22:51:56.2978394Z ##[endgroup]
+2026-10-03T22:51:56.2992393Z [command]/usr/bin/git sparse-checkout disable
+2026-10-03T22:51:56.3047856Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-03T22:51:56.3086081Z ##[group]Checking out the ref
+2026-10-03T22:51:56.3089444Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/2382/merge
+2026-10-03T22:51:56.9337313Z Note: switching to 'refs/remotes/pull/2382/merge'.
+2026-10-03T22:51:56.9338184Z 
+2026-10-03T22:51:56.9338649Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-10-03T22:51:56.9339604Z changes and commit them, and you can discard any commits you make in this
+2026-10-03T22:51:56.9340651Z state without impacting any branches by switching back to a branch.
+2026-10-03T22:51:56.9342162Z 
+2026-10-03T22:51:56.9342638Z If you want to create a new branch to retain commits you create, you may
+2026-10-03T22:51:56.9343418Z do so (now or later) by using -c with the switch command. Example:
+2026-10-03T22:51:56.9343957Z 
+2026-10-03T22:51:56.9344179Z   git switch -c <new-branch-name>
+2026-10-03T22:51:56.9344540Z 
+2026-10-03T22:51:56.9344847Z Or undo this operation with:
+2026-10-03T22:51:56.9345113Z 
+2026-10-03T22:51:56.9345406Z   git switch -
+2026-10-03T22:51:56.9345675Z 
+2026-10-03T22:51:56.9346101Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-10-03T22:51:56.9346606Z 
+2026-10-03T22:51:56.9347150Z HEAD is now at c0990a5 Merge 2677b3d9496d9d0c6bd7744f0c8131d37b3f1ac6 into 3ede57eb27d525d7492866792861120ffb2ccaa2
+2026-10-03T22:51:56.9375094Z ##[endgroup]
+2026-10-03T22:51:56.9409876Z [command]/usr/bin/git log -1 --format=%H
+2026-10-03T22:51:56.9440649Z c0990a5a0482fbc5a4093fab5944b2e480c7a6ff
+2026-10-03T22:51:56.9764435Z ##[group]Run pnpm/action-setup@v4
+2026-10-03T22:51:56.9764859Z with:
+2026-10-03T22:51:56.9765140Z   version: 9
+2026-10-03T22:51:56.9765427Z   dest: ~/setup-pnpm
+2026-10-03T22:51:56.9765734Z   run_install: null
+2026-10-03T22:51:56.9766027Z   cache: false
+2026-10-03T22:51:56.9766339Z   cache_dependency_path: pnpm-lock.yaml
+2026-10-03T22:51:56.9766762Z   package_json_file: package.json
+2026-10-03T22:51:56.9767130Z   standalone: false
+2026-10-03T22:51:56.9767423Z ##[endgroup]
+2026-10-03T22:51:57.1224852Z ##[group]Running self-installer...
+2026-10-03T22:51:57.5483659Z  WARN  Issue while reading "/home/runner/setup-pnpm/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+2026-10-03T22:51:57.5631311Z (node:2363) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-03T22:51:57.5632925Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-03T22:51:57.7557269Z Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-10-03T22:51:57.7648818Z Packages: +1
+2026-10-03T22:51:57.7649622Z +
+2026-10-03T22:51:58.1713649Z Progress: resolved 1, reused 0, downloaded 1, added 1, done
+2026-10-03T22:51:58.1991283Z 
+2026-10-03T22:51:58.1991682Z dependencies:
+2026-10-03T22:51:58.1992199Z + pnpm 9.15.9 (12.9.1 is available)
+2026-10-03T22:51:58.1992595Z 
+2026-10-03T22:51:58.2024381Z Done in 893ms
+2026-10-03T22:51:58.2207661Z ##[endgroup]
+2026-10-03T22:51:58.2208220Z Installation Completed!
+2026-10-03T22:51:58.2415015Z ##[group]Run actions/setup-node@v4
+2026-10-03T22:51:58.2415338Z with:
+2026-10-03T22:51:58.2415539Z   node-version: 20
+2026-10-03T22:51:58.2415754Z   cache: pnpm
+2026-10-03T22:51:58.2415958Z   always-auth: false
+2026-10-03T22:51:58.2416182Z   check-latest: false
+2026-10-03T22:51:58.2419069Z   token: ***
+2026-10-03T22:51:58.2419274Z env:
+2026-10-03T22:51:58.2419541Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-10-03T22:51:58.2419882Z ##[endgroup]
+2026-10-03T22:51:58.3852976Z Attempting to download 20...
+2026-10-03T22:51:58.3960152Z (node:2377) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-03T22:51:58.3961683Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-03T22:51:58.8994664Z Acquiring 20.20.2 - x64 from https://github.com/actions/node-versions/releases/download/20.20.2-23521894959/node-20.20.2-linux-x64.tar.gz
+2026-10-03T22:51:59.4294450Z Extracting ...
+2026-10-03T22:51:59.4436107Z [command]/usr/bin/tar xz --strip 1 --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/72035c22-b892-4151-b093-b31042781a00 -f /home/runner/work/_temp/d2e65db2-abe8-4da7-9131-8facb60da7a4
+2026-10-03T22:52:00.4846874Z Adding to the cache ...
+2026-10-03T22:52:02.2622139Z ##[group]Environment details
+2026-10-03T22:52:02.5091816Z node: v20.20.2
+2026-10-03T22:52:02.5092249Z npm: 10.8.2
+2026-10-03T22:52:02.5092808Z yarn: 1.22.22
+2026-10-03T22:52:02.5094387Z ##[endgroup]
+2026-10-03T22:52:02.5119296Z [command]/home/runner/setup-pnpm/node_modules/.bin/pnpm store path --silent
+2026-10-03T22:52:02.9030176Z  WARN  Issue while reading "/home/runner/work/olumi-assistants-service/olumi-assistants-service/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+2026-10-03T22:52:02.9033016Z  WARN  Issue while reading "/home/runner/work/olumi-assistants-service/olumi-assistants-service/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+2026-10-03T22:52:02.9097962Z /home/runner/setup-pnpm/node_modules/.bin/store/v3
+2026-10-03T22:52:03.1537168Z Cache hit for: node-cache-Linux-x64-pnpm-a971adfbf7e93038397952a990667d4b746cb64dc403f1e2ff9921010b3b249f
+2026-10-03T22:52:03.1655989Z (node:2377) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-03T22:52:04.4605058Z Received 4194304 of 97165781 (4.3%), 4.0 MBs/sec
+2026-10-03T22:52:05.2227575Z Received 97165781 of 97165781 (100.0%), 52.6 MBs/sec
+2026-10-03T22:52:05.2228637Z Cache Size: ~93 MB (97165781 B)
+2026-10-03T22:52:05.2264307Z [command]/usr/bin/tar -xf /home/runner/work/_temp/dddbd144-a4c1-4547-b66b-50af7974e891/cache.tzst -P -C /home/runner/work/olumi-assistants-service/olumi-assistants-service --use-compress-program unzstd
+2026-10-03T22:52:07.3442790Z Cache restored successfully
+2026-10-03T22:52:07.3493931Z Cache restored from key: node-cache-Linux-x64-pnpm-a971adfbf7e93038397952a990667d4b746cb64dc403f1e2ff9921010b3b249f
+2026-10-03T22:52:07.3687517Z ##[group]Run pnpm install --frozen-lockfile
+2026-10-03T22:52:07.3687930Z [36;1mpnpm install --frozen-lockfile[0m
+2026-10-03T22:52:07.3969369Z shell: /usr/bin/bash -e {0}
+2026-10-03T22:52:07.3969702Z env:
+2026-10-03T22:52:07.3970032Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-10-03T22:52:07.3970459Z   NPM_PACKAGES_TOKEN: 
+2026-10-03T22:52:07.3970757Z ##[endgroup]
+2026-10-03T22:52:07.8973989Z Lockfile is up to date, resolution step is skipped
+2026-10-03T22:52:07.9867075Z Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-10-03T22:52:08.1507988Z Packages: +998
+2026-10-03T22:52:08.1509181Z ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+2026-10-03T22:52:08.9883102Z Progress: resolved 998, reused 993, downloaded 0, added 55
+2026-10-03T22:52:09.9892681Z Progress: resolved 998, reused 994, downloaded 0, added 857
+2026-10-03T22:52:10.0812900Z Progress: resolved 998, reused 994, downloaded 0, added 998, done
+2026-10-03T22:52:10.8558148Z 
+2026-10-03T22:52:10.8558785Z dependencies:
+2026-10-03T22:52:10.8559353Z + @anthropic-ai/sdk 0.68.0
+2026-10-03T22:52:10.8559863Z + @fastify/compress 8.3.0
+2026-10-03T22:52:10.8560424Z + @fastify/cors 10.1.0
+2026-10-03T22:52:10.8561171Z + @fastify/helmet 13.0.2
+2026-10-03T22:52:10.8561735Z + @fastify/rate-limit 10.3.0
+2026-10-03T22:52:10.8562265Z + @sentry/node 10.42.0
+2026-10-03T22:52:10.8562835Z + @supabase/supabase-js 2.90.1
+2026-10-03T22:52:10.8563388Z + @talchain/schemas 0.75.0
+2026-10-03T22:52:10.8563872Z + archiver 7.0.1
+2026-10-03T22:52:10.8564304Z + compromise 14.15.0
+2026-10-03T22:52:10.8564788Z + compromise-numbers 1.4.0
+2026-10-03T22:52:10.8565064Z + dotenv 17.2.3
+2026-10-03T22:52:10.8565381Z + fastify 5.8.5
+2026-10-03T22:52:10.8565801Z + fastify-plugin 5.1.0
+2026-10-03T22:52:10.8566295Z + hot-shots 11.2.0
+2026-10-03T22:52:10.8566709Z + ioredis 5.8.2
+2026-10-03T22:52:10.8567088Z + jose 5.10.0
+2026-10-03T22:52:10.8567475Z + openai 6.7.0
+2026-10-03T22:52:10.8567962Z + papaparse 5.5.3
+2026-10-03T22:52:10.8568426Z + pdf-parse 1.1.4
+2026-10-03T22:52:10.8568832Z + pino 9.14.0
+2026-10-03T22:52:10.8569208Z + postgres 3.4.7
+2026-10-03T22:52:10.8569577Z + undici 7.29.0
+2026-10-03T22:52:10.8569958Z + zod 3.25.76
+2026-10-03T22:52:10.8570164Z 
+2026-10-03T22:52:10.8570328Z devDependencies:
+2026-10-03T22:52:10.8571120Z + @apidevtools/swagger-cli 4.0.4
+2026-10-03T22:52:10.8571640Z + @eslint/js 9.39.1
+2026-10-03T22:52:10.8572394Z + @playwright/test 1.56.1
+2026-10-03T22:52:10.8572855Z + @types/archiver 7.0.0
+2026-10-03T22:52:10.8573306Z + @types/ioredis 5.0.0
+2026-10-03T22:52:10.8573805Z + @types/node 20.19.24
+2026-10-03T22:52:10.8574283Z + @types/papaparse 5.3.16
+2026-10-03T22:52:10.8574771Z + @types/pdf-parse 1.1.5
+2026-10-03T22:52:10.8575353Z + @typescript-eslint/eslint-plugin 8.48.0
+2026-10-03T22:52:10.8576019Z + @typescript-eslint/parser 8.48.0
+2026-10-03T22:52:10.8576570Z + @vitest/coverage-v8 4.1.10
+2026-10-03T22:52:10.8577098Z + ajv 8.18.0
+2026-10-03T22:52:10.8577510Z + ajv-formats 3.0.1
+2026-10-03T22:52:10.8577859Z + artillery 2.0.27
+2026-10-03T22:52:10.8578270Z + eslint 9.39.1
+2026-10-03T22:52:10.8578678Z + fast-check 3.23.2
+2026-10-03T22:52:10.8579170Z + openapi-typescript 7.10.1
+2026-10-03T22:52:10.8579675Z + playwright 1.56.1
+2026-10-03T22:52:10.8580118Z + prettier 3.6.2
+2026-10-03T22:52:10.8580539Z + tsx 4.20.6
+2026-10-03T22:52:10.8581352Z + typescript 5.9.3
+2026-10-03T22:52:10.8581839Z + vitest 4.1.10
+2026-10-03T22:52:10.8582231Z + yaml 2.8.1
+2026-10-03T22:52:10.8582666Z + zod-to-json-schema 3.25.1
+2026-10-03T22:52:10.8582981Z 
+2026-10-03T22:52:10.8879673Z Done in 3.4s using pnpm v9.15.9
+2026-10-03T22:52:10.9082061Z ##[group]Run pnpm openapi:generate
+2026-10-03T22:52:10.9082436Z [36;1mpnpm openapi:generate[0m
+2026-10-03T22:52:10.9149135Z shell: /usr/bin/bash -e {0}
+2026-10-03T22:52:10.9149435Z env:
+2026-10-03T22:52:10.9149743Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-10-03T22:52:10.9150136Z ##[endgroup]
+2026-10-03T22:52:11.3244537Z  WARN  Issue while reading "/home/runner/work/olumi-assistants-service/olumi-assistants-service/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+2026-10-03T22:52:11.3247342Z  WARN  Issue while reading "/home/runner/work/olumi-assistants-service/olumi-assistants-service/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+2026-10-03T22:52:11.3382465Z 
+2026-10-03T22:52:11.3383962Z > olumi-assistants-service@1.12.0 openapi:generate /home/runner/work/olumi-assistants-service/olumi-assistants-service
+2026-10-03T22:52:11.3385952Z > openapi-typescript openapi.yaml -o src/generated/openapi.d.ts
+2026-10-03T22:52:11.3386881Z 
+2026-10-03T22:52:12.1023015Z ✨ openapi-typescript 7.10.1
+2026-10-03T22:52:12.3727450Z 🚀 openapi.yaml → src/generated/openapi.d.ts [273.4ms]
+2026-10-03T22:52:12.4075186Z ##[group]Run bash scripts/ci/typecheck-ratchet.sh
+2026-10-03T22:52:12.4075873Z [36;1mbash scripts/ci/typecheck-ratchet.sh[0m
+2026-10-03T22:52:12.4145994Z shell: /usr/bin/bash -e {0}
+2026-10-03T22:52:12.4146251Z env:
+2026-10-03T22:52:12.4146519Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-10-03T22:52:12.4146846Z ##[endgroup]
+2026-10-03T22:53:43.1885588Z ##[error]New file(s) with TypeScript errors (not in scripts/ci/typecheck-baseline.txt):
+2026-10-03T22:53:43.1895566Z   + src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
+2026-10-03T22:53:43.1908430Z ##[error]Typecheck drift ratchet FAILED — current: 101 files / 291 errors vs baseline 103 files / 291 errors.
+2026-10-03T22:53:43.1910697Z To intentionally accept new drift, update scripts/ci/typecheck-baseline.txt (count + paths) in the same PR with explicit reviewer sign-off.
+2026-10-03T22:53:43.1927791Z ##[error]Process completed with exit code 1.
+2026-10-03T22:53:43.2016978Z Post job cleanup.
+2026-10-03T22:53:43.3489232Z Pruning is unnecessary.
+2026-10-03T22:53:43.3690223Z Post job cleanup.
+2026-10-03T22:53:43.4643608Z [command]/usr/bin/git version
+2026-10-03T22:53:43.4688227Z git version 2.55.0
+2026-10-03T22:53:43.4729280Z Temporarily overriding HOME='/home/runner/work/_temp/36a00fef-ef30-401e-9fd5-5d6671167f68' before making global git config changes
+2026-10-03T22:53:43.4731184Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-03T22:53:43.4736345Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/olumi-assistants-service/olumi-assistants-service
+2026-10-03T22:53:43.4780730Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-03T22:53:43.4817604Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-03T22:53:43.5073973Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-03T22:53:43.5106154Z http.https://github.com/.extraheader
+2026-10-03T22:53:43.5119097Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-10-03T22:53:43.5155663Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-03T22:53:43.5427104Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-03T22:53:43.5468043Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-03T22:53:43.5865017Z Cleaning up orphan processes
+2026-10-03T22:53:43.6144834Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, pnpm/action-setup@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

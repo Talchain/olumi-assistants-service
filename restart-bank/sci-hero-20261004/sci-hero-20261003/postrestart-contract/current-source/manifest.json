@@ -1,0 +1,65 @@
+{
+  "ref": "ef65fe160eb58f37b2a40f5c2d236dcbe81b2a58",
+  "files": [
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.route.test.ts",
+      "git_blob_sha": "ebe480ad91d55aeaaed6c71c5a34da8565319df4",
+      "sha256": "a91820e315536bd31c719ca06ea2aa72167ccd8022bdf9982e15da198f6c39ae",
+      "bytes": 7498
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.test.ts",
+      "git_blob_sha": "b81225fc7826cc4e2e4565fd1b2f4535e262631d",
+      "sha256": "94ca780a61b5d201bd6deeb22d1582e0205b935bf596b58b8aabfc7fb9a8b9af",
+      "bytes": 7860
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/decision-sensitivity.ts",
+      "git_blob_sha": "7ee9255b71b98bc3427a9215eb68d33a3fb6ab61",
+      "sha256": "9179542938c06844919fd87a02139cd0656543b801fb6d4fdfb68107a6775a4a",
+      "bytes": 14565
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/run-explanation.ts",
+      "git_blob_sha": "514701cf9c90f3d686638f4955d9fc8c29a94b87",
+      "sha256": "06c0afaf1b0e0876eb8989d135aa8664e47923cd1cb92107c80c01ecad0ad4c1",
+      "bytes": 3757
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "git_blob_sha": "75c40f735dcfd5c16b451c0b1966ff75d0364014",
+      "sha256": "13adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca",
+      "bytes": 2988
+    },
+    {
+      "path": "src/orchestrator-v5/boundary/request-extensions.ts",
+      "git_blob_sha": "d6d9ca03e4ba21d87c0003d9f2a7e6e369a070a5",
+      "sha256": "947571ee35357e24574d427191401f2b65e16dc756519376a41603d9279ba339",
+      "bytes": 20605
+    },
+    {
+      "path": "src/orchestrator-v5/compose/flip-proposal.ts",
+      "git_blob_sha": "f1d8dd00d064cbe717b25e6ad9c1a0514a13d2fb",
+      "sha256": "15df74ef5bd4e5e94a136d7a0d361c691116de476ae52bbabd9334c311882dd9",
+      "bytes": 25181
+    },
+    {
+      "path": "src/orchestrator-v5/compose/types.ts",
+      "git_blob_sha": "dddd4fb437d41e32331a1be07ed89ac8ced57c19",
+      "sha256": "3e0c64b537c5d3d3085dce2dda59d1040e871b7dcab23e8e59301045483f5b15",
+      "bytes": 2507
+    },
+    {
+      "path": "src/orchestrator-v5/context/analysis-interpretation-identity.ts",
+      "git_blob_sha": "885dcf6a14c4d5384a678b270bd0a2ca6427820b",
+      "sha256": "54ce2ec644c023d1e2b733be0aaa09f96449fe0f8b68ee6f70ee73c5ac4a705d",
+      "bytes": 9494
+    },
+    {
+      "path": "src/orchestrator-v5/context/flip-threshold-rows.ts",
+      "git_blob_sha": "207905107ad8d4034827db6ba20f0209828c608f",
+      "sha256": "291de9d7356280f1b6767d4cf31a366107be75e1c57a540f5d8761e65802c56a",
+      "bytes": 21960
+    }
+  ]
+}

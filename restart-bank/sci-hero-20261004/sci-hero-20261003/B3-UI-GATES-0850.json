@@ -1,0 +1,116 @@
+{
+  "conclusion": "success",
+  "headSha": "7299524769adb31d0898760ec73860356199ff87",
+  "jobs": [
+    {
+      "name": "Install & Cache",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165328904"
+    },
+    {
+      "name": "Does this PR change the Core suite itself?",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165329029"
+    },
+    {
+      "name": "Security Audit (pnpm)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391012"
+    },
+    {
+      "name": "Canvas Browser Gate (advisory)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391030"
+    },
+    {
+      "name": "Typecheck Gate Self-Test",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391052"
+    },
+    {
+      "name": "Flag Deployment Drift (report only)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391069"
+    },
+    {
+      "name": "Production Build",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391081"
+    },
+    {
+      "name": "TypeScript + Lint",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391102"
+    },
+    {
+      "name": "Visual Regression (advisory)",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391103"
+    },
+    {
+      "name": "Full Test Suite (shard 3/6)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391142"
+    },
+    {
+      "name": "Full Test Suite (shard 6/6)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391143"
+    },
+    {
+      "name": "Full Test Suite (shard 5/6)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391164"
+    },
+    {
+      "name": "Full Test Suite (shard 2/6)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391165"
+    },
+    {
+      "name": "Full Test Suite (shard 1/6)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391172"
+    },
+    {
+      "name": "Full Test Suite (shard 4/6)",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165391221"
+    },
+    {
+      "name": "Core E2E \u00b7 System E (advisory)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111165392214"
+    },
+    {
+      "name": "Full Test Suite Summary",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111167622493"
+    },
+    {
+      "name": "Staging Gate",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921/job/111167641304"
+    }
+  ],
+  "status": "completed",
+  "url": "https://github.com/Talchain/DecisionGuideAI/actions/runs/37109795921"
+}

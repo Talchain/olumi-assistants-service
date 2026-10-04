@@ -1,0 +1,1 @@
+export default { test: { include: ['src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.test.ts', 'src/orchestrator-v5/agent-lane/__tests__/tipping-point-interaction.contract.test.ts'], pool: 'forks', maxWorkers: 1, fileParallelism: false, testTimeout: 10000 } };

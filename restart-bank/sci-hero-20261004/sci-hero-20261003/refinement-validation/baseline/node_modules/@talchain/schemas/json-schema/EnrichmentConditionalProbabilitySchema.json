@@ -1,0 +1,30 @@
+{
+  "$ref": "#/definitions/EnrichmentConditionalProbabilitySchema",
+  "definitions": {
+    "EnrichmentConditionalProbabilitySchema": {
+      "type": "object",
+      "properties": {
+        "given_constraint_id": {
+          "type": "string"
+        },
+        "target_constraint_id": {
+          "type": "string"
+        },
+        "probability": {
+          "type": "number"
+        },
+        "effective_sample_size": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "given_constraint_id",
+        "target_constraint_id",
+        "probability"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

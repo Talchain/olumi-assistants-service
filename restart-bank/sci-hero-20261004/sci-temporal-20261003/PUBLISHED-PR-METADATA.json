@@ -1,0 +1,200 @@
+{
+  "baseRefName": "staging",
+  "changedFiles": 16,
+  "headRefName": "claude/focused-ritchie-vf0xpz",
+  "headRefOid": "5d2c05dda1d9970b6618693b57ec875d544cc312",
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:41:58Z",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972617/job/111299297199",
+      "name": "Conversation Harness Gates (advisory)",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": "Conversation Harness Gates"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:42:02Z",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972637/job/111299297177",
+      "name": "Graph Evaluator (advisory)",
+      "startedAt": "2026-10-03T21:41:16Z",
+      "status": "COMPLETED",
+      "workflowName": "Graph Evaluator"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972661/job/111299297347",
+      "name": "Required \u2014 lint, typecheck, guards",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "IN_PROGRESS",
+      "workflowName": ".github/workflows/ci.yml"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972679/job/111299297385",
+      "name": "CodeQL Analysis",
+      "startedAt": "2026-10-03T21:41:16Z",
+      "status": "IN_PROGRESS",
+      "workflowName": "Security Scanning"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:41:36Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972699/job/111299297555",
+      "name": "check-schemas",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": "Contract schemas"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:41:44Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972628/job/111299297273",
+      "name": "Golden Journey Replay (advisory)",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": "Golden Journey Replay"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:42:04Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972738/job/111299297224",
+      "name": "Validate OpenAPI Spec",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": "OpenAPI Validation"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:42:03Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972673/job/111299297143",
+      "name": "validate-event-names",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": "Telemetry Event Name Validation"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:41:46Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972691/job/111299297138",
+      "name": "Test-skip inventory (AST, ratcheted)",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": "Test Skip Guard"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972661/job/111299297327",
+      "name": "Required \u2014 tests 1/3",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "IN_PROGRESS",
+      "workflowName": ".github/workflows/ci.yml"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:41:52Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972679/job/111299297391",
+      "name": "Snyk Security Scan",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": "Security Scanning"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972661/job/111299297353",
+      "name": "Required \u2014 tests 2/3",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "IN_PROGRESS",
+      "workflowName": ".github/workflows/ci.yml"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972661/job/111299297429",
+      "name": "Required \u2014 tests 3/3",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "IN_PROGRESS",
+      "workflowName": ".github/workflows/ci.yml"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972661/job/111299297297",
+      "name": "Full Test Suite (advisory)",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "IN_PROGRESS",
+      "workflowName": ".github/workflows/ci.yml"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:41:23Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972679/job/111299297120",
+      "name": "Dependency Review",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": "Security Scanning"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "0001-01-01T00:00:00Z",
+      "conclusion": "",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972661/job/111299297314",
+      "name": "Integration Tests (advisory)",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "IN_PROGRESS",
+      "workflowName": ".github/workflows/ci.yml"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:42:46Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972661/job/111299297352",
+      "name": "Typecheck Drift (ratchet)",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": ".github/workflows/ci.yml"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:41:27Z",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972661/job/111299297176",
+      "name": "Security Audit",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": ".github/workflows/ci.yml"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-03T21:41:17Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/Talchain/olumi-assistants-service/actions/runs/37155972661/job/111299297281",
+      "name": "Live LLM key availability",
+      "startedAt": "2026-10-03T21:41:14Z",
+      "status": "COMPLETED",
+      "workflowName": ".github/workflows/ci.yml"
+    }
+  ],
+  "url": "https://github.com/Talchain/olumi-assistants-service/pull/2382"
+}

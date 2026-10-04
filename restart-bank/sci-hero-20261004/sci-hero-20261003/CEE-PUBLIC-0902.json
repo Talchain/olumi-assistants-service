@@ -1,0 +1,27 @@
+{
+  "checked_at": "2026-10-03T09:03:02.325842+00:00",
+  "url": "https://cee-staging.onrender.com/healthz",
+  "http_status": 200,
+  "body": {
+    "ok": true,
+    "build": "ef65fe1",
+    "degraded": false,
+    "service": "assistants",
+    "version": "1.12.0",
+    "prompts_ready": true,
+    "critical_prompts_pms": true,
+    "prompt_environment": "staging",
+    "graph_cas": {
+      "app_mode": "observe",
+      "rpc_mode": "enforce",
+      "enforcing": true,
+      "requires_expected_hash": true
+    },
+    "schema_write_version": "0.74.0",
+    "schema_read_versions": [
+      "0.74.0"
+    ],
+    "schema_sha": "c799085d3cdc225c3eff4496a7f5dfd5e645da521af1f151fb90915050ca2622",
+    "contract_manifest_sha": "ddcf9b806925170d1906555d6122aa8151eb71b3377b9cd0464b31e1fc84a3c1"
+  }
+}

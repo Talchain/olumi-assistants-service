@@ -1,0 +1,2418 @@
+{
+  "checked_at": "2026-10-03T20:20:15.595012+00:00",
+  "archive": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/C-FINAL-PACKET.tgz",
+  "sha256": "b4fb99b797018a9d5e393f7bdf5d0d7c3e4e574fad7fc1df607d594e76914839",
+  "bytes": 5404896,
+  "members": [
+    {
+      "path": "ACK-POSTED.json",
+      "sha256": "5dae4b8fda5f73c721dfdd1cf658310791aee7a7db36cc94d71679357c39d569"
+    },
+    {
+      "path": "ACK.md",
+      "sha256": "ff66f102f027fe83686e38cb63e4d35a217aa5ee10ce227376766f646142500f"
+    },
+    {
+      "path": "ACTUAL-RUNTIME-PROOF.json",
+      "sha256": "6596e14998995bcb177f312292ac985fdb8935be79594976bf33649760f2f28d"
+    },
+    {
+      "path": "APPLY-CHECK.json",
+      "sha256": "e4e32d4c8e63b5cac21c9de8ec025a81bd9583217f3f20bd39e4044745275ca8"
+    },
+    {
+      "path": "C-VALIDATED-MANIFEST.json",
+      "sha256": "87e923d7426f467608f9a74383f260b46d77298f3fda06a8568648483d0d8fea"
+    },
+    {
+      "path": "C-VALIDATED-PACKET.patch",
+      "sha256": "4bb08509be92af28007f7840e651fe63aed97b2f73960a41a430a84ea1629adc"
+    },
+    {
+      "path": "COMPOSITION-5973046997.patch",
+      "sha256": "4847dce4dc068e6b31098943c65d0ae3d549d471c62a02a98bdd80d077c8af6b"
+    },
+    {
+      "path": "COMPOSITION-COMPARE.json",
+      "sha256": "7f977fccd9ad7ed95e68930c590ddf41b10f9df5d3475ce2d3dec876c4e1d371"
+    },
+    {
+      "path": "IMPORT-CLOSURE-MANIFEST.json",
+      "sha256": "6df43c68b57443f6288d8a6609190eaf4007b9d4559baa6880b4885aba774c3a"
+    },
+    {
+      "path": "INTEGRATOR-CONTRACT-FIXTURE.json",
+      "sha256": "71029fadae055baa24b1e6c76088c83fb28e469d080cc3cfc87fe9501eb98604"
+    },
+    {
+      "path": "INTEGRATOR-HANDOFF.md",
+      "sha256": "01fe0195f9191dee51c5927e435e207ce570fc4bf5acf46df35898f5bf98d4b4"
+    },
+    {
+      "path": "LEAD-PROGRESS.md",
+      "sha256": "d6630ee9494cc0c66d6ec1a46d5e1e8dc2bb0ea98dbb3b725d58fa48c05d2f66"
+    },
+    {
+      "path": "LEAD-RECEIPT.json",
+      "sha256": "548c6f2d8a1d8daa8f3320f9982d07e00d24d8b17ebc0809e6fb1cd405e01f58"
+    },
+    {
+      "path": "MUTANTS.json",
+      "sha256": "7f8e96c752b971dc1986469cdd8c1586a1c5eceefea7c9ec323e67881d1454a7"
+    },
+    {
+      "path": "RESIDENT-SCHEMAS-PIN.json",
+      "sha256": "0edb7da05473538cfa5567b7addbf5c10a463d24b4f76558052310c96bd1b763"
+    },
+    {
+      "path": "authority-5972806891.json",
+      "sha256": "237737f0f487c28cd0cd546c259a08232374586fa457f46539d245f0ea13dede"
+    },
+    {
+      "path": "authority-5972807104.json",
+      "sha256": "4642437f1fd30984b8b385d62e0b88c65291aace17085c81b20f45717f78a822"
+    },
+    {
+      "path": "baseline/package.json",
+      "sha256": "dd49b17201b330d69a13894d8ba4550b7f52167a22fc67abed7bf8da14332ce2"
+    },
+    {
+      "path": "baseline/src/adapters/llm/extraction.ts",
+      "sha256": "210ec02a63ce981d95c1b3db9bfd772be94a63b6374ff6480daa93811f2043d5"
+    },
+    {
+      "path": "baseline/src/adapters/llm/provider-policy.ts",
+      "sha256": "5b7a4890b1ff97a6ee02521bc8e976c899bb4618832e9a1c6d07332e29024da0"
+    },
+    {
+      "path": "baseline/src/cee/baseline-identity.ts",
+      "sha256": "58322df8c553542e4ddd4759f4d694cca164acd1afa2dcbc269ce4311921f4a1"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/constraint-display-name.ts",
+      "sha256": "f8c596fc2eaf38972d80173ccc200c5464fcc2a63e6f43272f956ea8813026eb"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/constraint-frame-evidence.ts",
+      "sha256": "81d1ef65dd2a9b3aa8950ba0f6ac9f021989d85c013eb7d13bfad82b4c9e9a6a"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/deadline-extractor.ts",
+      "sha256": "1095326172ce56ed7dc87a519b8ac24bf43a9bdee332e030dc71b4e69520e097"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/extractor.ts",
+      "sha256": "3ea39bf2b8b508086126e17a9767053aacb154b55abb48aa61eee32111ff1b5b"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/index.ts",
+      "sha256": "bbfc8c2ab549afd1d92d2606e21747ca2994a422bd99347f1e11eda4c8a814c5"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/mintable-target-kinds.ts",
+      "sha256": "f705d4a2dfe7ea42b1ee67aa00b8d5786d6859f1ce2decda0a5ed94ec50e6dfe"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/motion-grammar.ts",
+      "sha256": "b2a5451f217ba7d4fc49b3e29aa612a28ab15994402287e5bce7b7165ebc6861"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/node-generator.ts",
+      "sha256": "3b7c672a0e4473d21017a192a7228f78a945f6761cba5ce609f6a615f35582b5"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/qualitative-proxy.ts",
+      "sha256": "d4ccbd75b83ce54daf2909daea0415450290ac44b0d5eb0165e9f87004281697"
+    },
+    {
+      "path": "baseline/src/cee/compound-goal/risk-polarity.ts",
+      "sha256": "f01c37b0164d2537c42414cbb09e82b8ab70d1a7439f6ca7ee03a83a086cc7da"
+    },
+    {
+      "path": "baseline/src/cee/constants.ts",
+      "sha256": "d9313232f61bfc39424764039e966e42e1ec940bfa2bb986f4ca9aa4bd225fd0"
+    },
+    {
+      "path": "baseline/src/cee/context-integrity/brief-audit-answer.ts",
+      "sha256": "c4f6136d1a3b8b8f0944a16fc52e28d55f8f995aee33c70017484ce7bb4a9016"
+    },
+    {
+      "path": "baseline/src/cee/context-integrity/not-modelled-manifest.ts",
+      "sha256": "57ba4d934e3ba21fa9b415ccbf3ab962ebc5246c904dbd86b7a1737019b3c24e"
+    },
+    {
+      "path": "baseline/src/cee/context-integrity/stated-role-vocabulary.ts",
+      "sha256": "795442709d698cda5bf442305d97d508d41b3209d376243f8d73214e93b167e0"
+    },
+    {
+      "path": "baseline/src/cee/context-integrity/structure-origin-answer.ts",
+      "sha256": "a75dd0c3e1105d18b5cebc3759db15a62abf750ef31d9f1f9b542c42b1e30625"
+    },
+    {
+      "path": "baseline/src/cee/corrections.ts",
+      "sha256": "8c8d6770fba67af2db7e601c699f22671c6509a6049f7de6113d0541a364ea29"
+    },
+    {
+      "path": "baseline/src/cee/draft/records/claim-label-shape.ts",
+      "sha256": "43cf6079cc2f05fd50e5d4cdac78f376e51345f4418db5dab1a39fe729808c99"
+    },
+    {
+      "path": "baseline/src/cee/draft/records/label-bound.ts",
+      "sha256": "edbf16018b9e23b7312599bc407814503b2499642a4906ce1c8707e1621665f6"
+    },
+    {
+      "path": "baseline/src/cee/draft/records/objective-label.ts",
+      "sha256": "c065f2c20c96370d8125b57ac0e56c726fc8f1afd097c49f432b8405618c5dff"
+    },
+    {
+      "path": "baseline/src/cee/draft/records/projector.ts",
+      "sha256": "c96c9673d5c5c568e97c421b666fb266e7f2cc49212ce6d096abb39837a976f5"
+    },
+    {
+      "path": "baseline/src/cee/draft/records/unit-scale-class.ts",
+      "sha256": "47c0ac407feb60156941727962eb637a3f6437dca1c2a49a926dae40b98014e0"
+    },
+    {
+      "path": "baseline/src/cee/extraction/numeric-parser.ts",
+      "sha256": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91"
+    },
+    {
+      "path": "baseline/src/cee/factor-extraction/display-value.ts",
+      "sha256": "f5d88c71c54371d903cbe193f2aa8d62ffd67ccbe25ae0af2ee0e66f207da480"
+    },
+    {
+      "path": "baseline/src/cee/factor-extraction/goal-baseline-admissibility.ts",
+      "sha256": "16f3f1629d20a91d05793e222ee949e43f5dd5e73f9a978b408007c91a17021e"
+    },
+    {
+      "path": "baseline/src/cee/factor-extraction/goal-label-target.ts",
+      "sha256": "d8466b52e18eb6b630aa7d38e947d5b899b91d99572a0efa31e5e3d440027720"
+    },
+    {
+      "path": "baseline/src/cee/factor-extraction/index.ts",
+      "sha256": "e9121200ea5947d91c912a78dddaa732d3a79bf00bdc1b0c8ad9852a342a49b1"
+    },
+    {
+      "path": "baseline/src/cee/factor-extraction/llm-extractor.ts",
+      "sha256": "4799953dc1d9139907932d63976878ff4f9a154f8735578361fc1035620b9d28"
+    },
+    {
+      "path": "baseline/src/cee/factor-extraction/merge.ts",
+      "sha256": "faf41ae4d486ace738ef1b7e0137c64f0da3bee026618b4ed22a18c8a74ee975"
+    },
+    {
+      "path": "baseline/src/cee/factor-extraction/stated-level.ts",
+      "sha256": "3124550400f48ded3cab38ed73972cb83251f54e91156a02028a5f5f210c3e5b"
+    },
+    {
+      "path": "baseline/src/cee/graph-readiness/identity-frames.ts",
+      "sha256": "a84c88d5f6b1dbbfe7297f634a2a48daadb77769482980c3e02193218451de15"
+    },
+    {
+      "path": "baseline/src/cee/graph-readiness/obligation-provenance.ts",
+      "sha256": "ce0c69bb4f280d497cf6cbbdf2fdd06c71299b9c8a4a8720ba421899877e3bc2"
+    },
+    {
+      "path": "baseline/src/cee/magnitude/frame-defaulted-links.ts",
+      "sha256": "567a0c7084c9011b97376becbd9b84610c3b5f8fc7f58e5bc3e908a814f8a812"
+    },
+    {
+      "path": "baseline/src/cee/magnitude/link-effect.ts",
+      "sha256": "6a31443b6f687c8f9c5136f6586cb14397feecf424b46e3f870b527cba3f7f6c"
+    },
+    {
+      "path": "baseline/src/cee/magnitude/link-sizing.ts",
+      "sha256": "32fea196f6b9b4ced633e479a357604e218abd6e96f072a732e6aaf80fbe33e2"
+    },
+    {
+      "path": "baseline/src/cee/provenance/brief-binding.ts",
+      "sha256": "6595e389348744c2cfd788267175f6222eedca7554113136bfc39b45043ebb80"
+    },
+    {
+      "path": "baseline/src/cee/provenance/stated-amounts.ts",
+      "sha256": "993ee502fca6b81283d26880df5d899f6b972bbfb9e5fe3a8433906acbb4b77f"
+    },
+    {
+      "path": "baseline/src/cee/provenance/unquantified-factor.ts",
+      "sha256": "ccf05c281fe13282ad021d226a6df779e2cfd3ac0129f7cb946e3e61c090c2fd"
+    },
+    {
+      "path": "baseline/src/cee/signals/brief-signals.ts",
+      "sha256": "1f180f069674bf28e051b3093bd4e8b50969acf0b532c85e207e48fd7a616187"
+    },
+    {
+      "path": "baseline/src/cee/structure/compound-goal-label.ts",
+      "sha256": "b2d80e035689d25e005bfd0cfdf193b5edb377ec3826704efde0fb49fc5c03c7"
+    },
+    {
+      "path": "baseline/src/cee/structure/goal-inference.ts",
+      "sha256": "f87960d3edff50ad6f2f1102eb4481ea27b85ad242c2b78db1925c50edae4576"
+    },
+    {
+      "path": "baseline/src/cee/structure/index.ts",
+      "sha256": "1e23d104799a226bc66b7e48a1d809a78308e47c2899cd5e1d2d34f08ae523a4"
+    },
+    {
+      "path": "baseline/src/cee/structure/status-quo-patterns.ts",
+      "sha256": "8f651eb108e23ab2f7ddbb7e55db8ecfa6a02c36f9c201695b4eb94836b3306b"
+    },
+    {
+      "path": "baseline/src/cee/transforms/analysis-ready.ts",
+      "sha256": "571b1dcb6ef7734ab7bcf68fa213e3b021f811e5c32cc29b544e26c8558cc6ad"
+    },
+    {
+      "path": "baseline/src/cee/transforms/label-echo.ts",
+      "sha256": "2fedb5cfd6c6199f896cb4067b23d4f845dbbe21598e09a4eadbaf472d91b95c"
+    },
+    {
+      "path": "baseline/src/cee/transforms/option-status.ts",
+      "sha256": "2f48a9e12f05d8993269457b20275f59b60a22ed1f82cab330cc36c0d6a565f1"
+    },
+    {
+      "path": "baseline/src/cee/transforms/provenance-display.ts",
+      "sha256": "7f814c9a68c25ad74ada54ee3f0bc012fd277e61aa0cade0c07040ecaa109ac0"
+    },
+    {
+      "path": "baseline/src/cee/unified-pipeline/stages/repair/no-op-target-repair.ts",
+      "sha256": "39d4587dd597083af53ea6b047711d5d450bcb3abd5f9d3a32e96f3b6b70f26f"
+    },
+    {
+      "path": "baseline/src/cee/unified-pipeline/stages/repair/status-quo-fix.ts",
+      "sha256": "120ee5d7da2f9f04c976f3880dd8f690649ed0973d20e9740f213a5955d22ff5"
+    },
+    {
+      "path": "baseline/src/cee/unified-pipeline/utils/edge-format.ts",
+      "sha256": "cf4dc39456dd070b7d6a4d9d95de0df7bdf302a7f117ae1d5cebb9f246ea3462"
+    },
+    {
+      "path": "baseline/src/cee/unified-pipeline/utils/field-deletion-audit.ts",
+      "sha256": "4d8a8d5324b2b170c83df8e61e1ba1e8b5adaea64b32254b35f3c1070234a038"
+    },
+    {
+      "path": "baseline/src/cee/utils/id-normalizer.ts",
+      "sha256": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4"
+    },
+    {
+      "path": "baseline/src/cee/validation/classifier.ts",
+      "sha256": "fa342f228be4351b267c5f48603bbca070f732a1161ef949a09ff08d15ae81ad"
+    },
+    {
+      "path": "baseline/src/config/env-resolver.ts",
+      "sha256": "a2aabb012b800443238542b33b2b821be66cfd45ac29533e03868bd85bc11534"
+    },
+    {
+      "path": "baseline/src/config/graphCaps.ts",
+      "sha256": "b841da2d3dc91aa736fde44dde79796d950c5c05874d921214e000ff6bace2ad"
+    },
+    {
+      "path": "baseline/src/config/index.ts",
+      "sha256": "7f7dea69615b19b2edb5857aca827ec5ccff3a253ef7407fca2ca3bc6a78bccb"
+    },
+    {
+      "path": "baseline/src/config/model-aliases.ts",
+      "sha256": "be2e3aa81ffc67613ad4b8c0515c07b1cd525e3d2d25b2c0a1ebe9799e7cd7f3"
+    },
+    {
+      "path": "baseline/src/config/model-assignment.ts",
+      "sha256": "bd4dfd35babf097fe9394c7ad25fd9a3c234bfc5de626ae4d7533ec0989918fe"
+    },
+    {
+      "path": "baseline/src/config/model-routing.ts",
+      "sha256": "9b3e1ec08e4fdec1f184442375abfc4161bb164244d5a6257d00d2b2d87531fb"
+    },
+    {
+      "path": "baseline/src/config/models.ts",
+      "sha256": "0dc9b89081acd647b5382d56a6dbc7079cbd13a45470b1472a1db7c5cba92445"
+    },
+    {
+      "path": "baseline/src/config/timeouts.ts",
+      "sha256": "7e15ae064040f726027afa4c101598d9bb2628b3fdcab628f1fa5a99345e4758"
+    },
+    {
+      "path": "baseline/src/context/caller.ts",
+      "sha256": "bad6269cc329b5ec1e6f4dda2777790f2b39c42d2cda1ddedfe99121602b9971"
+    },
+    {
+      "path": "baseline/src/context/context-pack.ts",
+      "sha256": "2b70fa783be747c82a75d8008677be8b8750a48b10de3cff6efa7ccc84ca76f2"
+    },
+    {
+      "path": "baseline/src/context/index.ts",
+      "sha256": "2747c0a79ac4df8110b02b6ef3336d929089aa0b81e2ca62de77652671e290c2"
+    },
+    {
+      "path": "baseline/src/context/resolver.ts",
+      "sha256": "aaf1a4d04546614a79cef1cad48d473f7dfc248a1c71daa8a1618895bcf637cb"
+    },
+    {
+      "path": "baseline/src/context/types.ts",
+      "sha256": "125e0c6ced39da8028914195f01776d8e14c9e73c7a5abe2480d5cbf1613cf96"
+    },
+    {
+      "path": "baseline/src/dsk/canonicalise.ts",
+      "sha256": "89fcdb36f571ff9265360b3f3b4a1ebc9a4bca16a75c540409604e1d9f830a2e"
+    },
+    {
+      "path": "baseline/src/dsk/hash.ts",
+      "sha256": "00d9b8718883918b4b55f6ba4f300d7e853b413d2cc2d63d78caf6efcb66c6ce"
+    },
+    {
+      "path": "baseline/src/dsk/stage-edge.ts",
+      "sha256": "43bda672bbeb9583c14cde4d01c00ba1890f34ed48bbd57af29499c7fbd71d8b"
+    },
+    {
+      "path": "baseline/src/graph/inert-risk.ts",
+      "sha256": "a3be303959c0c4d23cd9b249c86be86b76138ce3f18188e8c26da2445759676e"
+    },
+    {
+      "path": "baseline/src/graph/limit-sink-branch.ts",
+      "sha256": "e5aa619e931d00d2b32233dcf8275a96a22bf2c361c0f8d4def423306d1a249c"
+    },
+    {
+      "path": "baseline/src/graph/reachability.ts",
+      "sha256": "2c19be073ca8e33087c545e3d2eef0d1f911f66e1d0f06689cd507628f42037f"
+    },
+    {
+      "path": "baseline/src/graph/repair-authored-edge.ts",
+      "sha256": "ea4ea3c5454973f79de9f9c1d189fd70846def212a67d904dd1dad7b61869b87"
+    },
+    {
+      "path": "baseline/src/orchestrator/canonicalise-value-ops.ts",
+      "sha256": "74284f545ee280d6856c884a6162f86d06f4af2731cd0f1c280863b63d5b572e"
+    },
+    {
+      "path": "baseline/src/orchestrator/context/constants.ts",
+      "sha256": "2aaac507613821a896014dbaac591a7e679cbca61a2d1eb0a1a72cf029af3a23"
+    },
+    {
+      "path": "baseline/src/orchestrator/context/constraint-feasibility.ts",
+      "sha256": "5de277a2d1fc34d2651835e73338b4516f08d4d669eb128a0f7408730bc49514"
+    },
+    {
+      "path": "baseline/src/orchestrator/context/option-result-source.ts",
+      "sha256": "b3111c54e7ff8ab0ad965941636766d7755f53ad01902034beb12c9f7b10a97b"
+    },
+    {
+      "path": "baseline/src/orchestrator/context/placeholder-parts.ts",
+      "sha256": "78584755394bceec8fd3417e7674223819c3c1e7ecaa236aa54d94c47843da1b"
+    },
+    {
+      "path": "baseline/src/orchestrator/context/stable-stringify.ts",
+      "sha256": "33e5b5be9ab7128665d10e712a73ee7fe81fffd48d46f154034ea0fde43d74e5"
+    },
+    {
+      "path": "baseline/src/orchestrator/graph-structure-validator.ts",
+      "sha256": "d87cfef6d06cb33756400cf5260aeb5912097f3ed022fb55bafa6ac61da62dba"
+    },
+    {
+      "path": "baseline/src/orchestrator/routing/edit-graph-intent-regex.ts",
+      "sha256": "90d0e2cf6c9f9956ba1813a53426b48333810db2244b4494eb5d8b6eb411b320"
+    },
+    {
+      "path": "baseline/src/orchestrator/shared/encoded-intervention-admissibility.ts",
+      "sha256": "368e8f79ce0a21b11ea861ee5bf44b1ba4b0a2620d61c482b0c8d8579ad3e2d2"
+    },
+    {
+      "path": "baseline/src/orchestrator/shared/entity-id-pattern.ts",
+      "sha256": "56be9e1df8f87690bafa133b2b371b4da262b90613a652c2c0bdc60d28bd8356"
+    },
+    {
+      "path": "baseline/src/orchestrator/shared/forbidden-tokens.ts",
+      "sha256": "409e076de1ca8591ae44cae3d7bf5174cfa9dbb577af19dabe6f4dcf619d21e6"
+    },
+    {
+      "path": "baseline/src/orchestrator/shared/fragile-edge-authority.ts",
+      "sha256": "20a5bf156300c0bf23ed0efd0478560f54fc5b1ee730fed4cbd149346eba2b8a"
+    },
+    {
+      "path": "baseline/src/orchestrator/shared/output-safety.ts",
+      "sha256": "2e1a29c7d6358bdaea8230f8e21264d4173d3db6a0855f439c7dfd6c4f8c38c4"
+    },
+    {
+      "path": "baseline/src/orchestrator/shared/referent-resolver.ts",
+      "sha256": "f31a7bfe3f2aa74ecfacb528fd12badb33ab18a0f3ad4405e359718a156a4c40"
+    },
+    {
+      "path": "baseline/src/orchestrator/tools/analysis-ready-helper.ts",
+      "sha256": "c5610f06a91fd6d053ab3c9128601e9a5c12fca37c8d2d7a6a8f31a24b0fe386"
+    },
+    {
+      "path": "baseline/src/orchestrator/tools/encode-option-interventions.ts",
+      "sha256": "99ccc6864a0cef81b20caca2e7668599ebda790d97c855c079ad87585c1a5e61"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/admission/analysis-admission.ts",
+      "sha256": "7325d927ae966654f0528b910532dd29c00a153c627fc3951c55fce23464e66c"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/admission/target-testability.ts",
+      "sha256": "c2b393f8477e26522b0ddbeb8d40dfbb8b9b5e761cabc5b9cfa9bad1dd39cd6a"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.test.ts",
+      "sha256": "94ca780a61b5d201bd6deeb22d1582e0205b935bf596b58b8aabfc7fb9a8b9af"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/__tests__/tipping-point-interaction.contract.test.ts",
+      "sha256": "da2bfa47b097f236d40204cccafb668628925351e4c7fed95fc9280080be3d38"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/admit-candidate.ts",
+      "sha256": "2f4d024ec95cd865735564204de41e2d8a7e40411fb25ca72ded374380915e28"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/admit-constraint.ts",
+      "sha256": "3cb42c09b46a526a1e0b7e3035b81fbe2547b15349089d78a3e791070bbd6976"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/admit-model.ts",
+      "sha256": "00c9f0cba6e073f9b6bd26122ef30114f211bebd4d46a992afe296e548863368"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/approval-chips.ts",
+      "sha256": "57a28ca5bb3f11d36cf0a773441b778ebabfe1e5393e999d8b03dcb279bca8cc"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/counted-nouns.ts",
+      "sha256": "b89db2aef123b960fda2042f0e896c8939fbcd622b3ccafb3f9c087d245fed05"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/decision-sensitivity.ts",
+      "sha256": "9179542938c06844919fd87a02139cd0656543b801fb6d4fdfb68107a6775a4a"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/goal-certainty.ts",
+      "sha256": "1969938eca5ee13354ce220bfcc5018085b250a9da4ff3aec9de44960f607c8f"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/goal-scope.ts",
+      "sha256": "ef46d33a2d1a53ab24c05cd98c08283739a97a31edfd98b9a478210da3079cc7"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/guidance/index.ts",
+      "sha256": "0c920ee3bda62c7d27616cacf1e3497e89cacc1d6fcd3aac29c5e889423e0049"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/guidance/method-turn-check.ts",
+      "sha256": "f2768e4ff0062e370d08e5cdd85b86dea24c49ff4e1bb145f81d9be3da9b7ff9"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/guidance/plan.ts",
+      "sha256": "031168ab4a944445be44f70743ef223ae9daa8a670d6a21bb0651a5c0f60d8c8"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/guidance/policy.ts",
+      "sha256": "5bfb7a5e28415117f458a9ba6b9ddcb06c6124a7df4ca8b6ed15c2cb5b839c46"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/guidance/reasoning-interventions.json",
+      "sha256": "9d93844e20dfcf7525c3c93d4c9254a4f739fb7a0b302663019c606c8159178a"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/guidance/render.ts",
+      "sha256": "98c185c66a28f5653c1554e1eb72e713f1be09c7e41bad79779a17b6d1775880"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/guidance/select-strengthen-placeholder.ts",
+      "sha256": "b88106ec1e6bba687789d71bef6baacee179a24ad0a315fc686f78344684913c"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/guidance/select.ts",
+      "sha256": "1cf3a9fb5ca1044040b82430e1ded7ffbcabea3e44216fd97a23331ca1dd489c"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/guidance/state-key.ts",
+      "sha256": "34a777fa9ee1966798a5cabe316121392d2c8dad10e7cb2470ebc0e25488b88d"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/history-store.ts",
+      "sha256": "2a6bd665ef23de891113b3215f7b97bb7fda5b759d0af6d44b9bf1812cb56be6"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/horizon-attestation.ts",
+      "sha256": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/identity-card.ts",
+      "sha256": "5305b02ad644e1121a5231024c1092fc6073fb983295727b7c1e66c4ca6f597b"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/limit-frame.ts",
+      "sha256": "ce35d161ba309a1e7a5cb91180337c740262c8e7b987279ef531db8e698c4793"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/limit-operator-words.ts",
+      "sha256": "57a07045ef1f3d41fa7419ebc60604bbb8873017693fc01ae7e98c73468c2114"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/method-turn/method-turn.ts",
+      "sha256": "b1f756687493560f943144673480ab8ed24296c008c47c4d798f04a34dccdf81"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/normalising-goal-frame.ts",
+      "sha256": "3fc955592dc82193154004ae6f48a35771d278e57d1063e54c4228076aea8b1c"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/one-route-per-effect.ts",
+      "sha256": "cb5a7fb7847cabb46ef39b2ebe5667824f82d47c092fcbf2faec2a68924b9bc8"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/product-goal-extra-parent.ts",
+      "sha256": "d3d85d25d35f19eb94de69a48d8b1a435b6531540a38e7765fb48d1922d71afe"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/product-goal-rate-operand.ts",
+      "sha256": "c7b3b6be4fe17896a5f5249eae9c5a5782eb6592529ea303e98565443f397e65"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/reconciling-product.ts",
+      "sha256": "52a6986fdf326cbe7a303974398273a3bf54f7482ade043e42276f0e131bd378"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/refit-frames.ts",
+      "sha256": "20a64016af4fd9255331c558be5296ff928ed3ec4747960dac8ab3f7c02e6d4e"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/rerun-explanation.ts",
+      "sha256": "a80a64ee2b8955e13697b1b932099da8fe3cffae91bf2f7ce0c5e5ea3c8db86b"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/run-explanation.ts",
+      "sha256": "06c0afaf1b0e0876eb8989d135aa8664e47923cd1cb92107c80c01ecad0ad4c1"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/same-unit.ts",
+      "sha256": "012bfaed9c6ca8510eac06095c4be3fd3c557cf8b23151146a55df04c4f666a0"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/say-figure.ts",
+      "sha256": "bc5d86428e7b6cb48aab2ac41a82cebca82fddd2cd0ac5dc25470ab95865c524"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/science/method-science-context.ts",
+      "sha256": "8a3491a82fbb55688e64b7bc0c71f5ccb15e45e7ff7d3a945cbd678aa079beae"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/stated-by-user.ts",
+      "sha256": "274ca95f610178442382249d6715b601afe48df2eb955f229390672717b03153"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/strengthen-press.ts",
+      "sha256": "709d9b7e7d85e171542a26860652d08b915180520cd29f6a5af1c59a6d8dbe70"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/structural-facts.ts",
+      "sha256": "780e973a134fc82ec68a878a26916ba882049ba1e90839ca3c3f93fffe8b4d1b"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "sha256": "13adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts",
+      "sha256": "89aa9fc8d080c45b75f68bba980e381b57c87f7e1abecd69caf934a343c87521"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/agent-lane/unit-conflict.ts",
+      "sha256": "799f60f6530ee67c93338c8539a0c27aad496a342cf8412fc88f4decf33f6105"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/boundary/request-extensions.ts",
+      "sha256": "947571ee35357e24574d427191401f2b65e16dc756519376a41603d9279ba339"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/clarify-v2/rubric.ts",
+      "sha256": "a0f2e9cfb2cf9063d3ae7e7f1660272b5268d30e9ac0c4f7968c348d5d06cb4d"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/__tests__/fixtures/paul-run-17d1cd3a-next-move.json",
+      "sha256": "99e16bc8e5a26b71b5611821a9143abe55d9179455e9e460aff6fd9876d7bc22"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/assistant-text-defences.ts",
+      "sha256": "028fb4c516ac3209b58e2776a086e6b65901f893773e59db7489bf4cfc043e57"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/coaching-chip-registry.ts",
+      "sha256": "825783a92f76c1ffbb1d09a6dd737230c5bf1aa6f19d9ebde4e4a3e41b4aa76e"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/constraint-gap-copy.ts",
+      "sha256": "5d87d884b957485490e4f8e20472b65939d734a5a51792902589308d70a66d4b"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/fragile-edge-offer-text.ts",
+      "sha256": "f951c4aebcc327e88c37b2a44d4b01e3a9bd11c9c5fd365c6d522a554b72b032"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/grounded-counter-case.ts",
+      "sha256": "2febb9946c18e4f9334a964654528ae1da0e2cda1ea95f1ed57ff63d23ef9ef5"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/grounded-sensitivity-body.ts",
+      "sha256": "2f07d00ccf63914bcb497e046f2f92488ac0454c035aa21403cb60dbaf0d26ab"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/intervention-tiers.ts",
+      "sha256": "dcddfe0d4911610fe5ed8d9458a9c67362de271680cc9c4c1b88a34ff16ed2ad"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/judgement-offer-text.ts",
+      "sha256": "3897ce979929d0688b04dc5cebf9c68c05f3331cadd83ef564a870c17ed2ef83"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/objective-contradiction.ts",
+      "sha256": "c6d7469c93218bd054bef1ec12c0051e39a08de66f698df0b60602ed77526b1d"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/pick-raw-robustness.ts",
+      "sha256": "3167c13eba20cd408ba7940264f4fb1aedd7298971d27b26ae220f3eb4730a67"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/robustness-honesty.ts",
+      "sha256": "e927d638a50e8b807b16ea76003d3219bebe02426a5687e47e7c998ece62d938"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/select-factor-evppi.ts",
+      "sha256": "aa7bf6d694d33af1f8ec7fd0f65abfd86914f8c771f650ae6470dd6964a43dc0"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/select-fragile-edge.ts",
+      "sha256": "5b9c13d7d29d85eb06bd12587d46603007a116872f39c15f8ccf5d521656d13e"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/stated-dissent-offer-text.ts",
+      "sha256": "d4d026842d1a94507cf7f150345ae10d2abb83677b357f2348f61c60c1665380"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/coaching/typed-intent-directive.ts",
+      "sha256": "1f16fb61ecdb307511a2c4b051c4254e038edd521eda01e1011554b5ac7f7615"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/analysis-state-v1.ts",
+      "sha256": "420219da522939e413c84de811b628bd3ee80e327e7abe8065ba4d6d6f20b180"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/block-id.ts",
+      "sha256": "6115ed69aa1488845d756427f8937dc33a4cec85157ef31aa6e87a5fb2e778f7"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/claim-safety-cage.ts",
+      "sha256": "c08e7666482382a85e6182cb52f410c47b1c6a28d9f20ed3142108cf73f570f3"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/confidence-bands.ts",
+      "sha256": "e7f02c3e530dd3526061458b2de5ea69d4b377af2a7f75a3fb4c29356419ddd2"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/dsk-bundle-record.ts",
+      "sha256": "be1a86f126bfc0c60291292bef506d02ccd83208472740921e923724a6b03ede"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/dsk-claim-record.ts",
+      "sha256": "c82c74a36ec422360e6a4f8d600a44c997c19ea1123ac3dd61a2fbf0b5d28545"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/dsk-protocol-record.ts",
+      "sha256": "f125a865730a6cfa790572960ee8e2ea837f275c5839999c513f8b1dd8014f04"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/edge-address.ts",
+      "sha256": "5ed2f55b02a0ebd69e09a47854bf53b0774a61aeb298d2eddbdee81e96fc28e5"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/edit-clarify-response.ts",
+      "sha256": "37150f0e6bf752a1d9f46b4d33cef6f462c233b06c0f400bbef508465f831cb7"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/flip-threshold-card-row.ts",
+      "sha256": "d35b9accdddda0f6934d1b06896c59103faf4ad447229a51b1a386f404528fae"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/forbidden-user-facing-phrases.ts",
+      "sha256": "2eae4ce3c2be4ab1a8d485133051223e9629ab9c4ac12d75671665110cd34533"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/format-factor-value.ts",
+      "sha256": "c944c4d698e019735cbcef60a6bcb33465772bc720fb0967c49559bfc38fd2a6"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/goal-probability-transport.ts",
+      "sha256": "e379fba8f6e344d6f6def187d75613aa5c2ff0dbd1234ee40635a481e66b89c1"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/guidance-signals.ts",
+      "sha256": "44081f6492ba60c723e03ee1b4c912ab4d3d192eb4d5fdc5a4c9a04d1cbc3ded"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/helpers.ts",
+      "sha256": "9d77654c74f87c4e91d1d2005a1c8fcdd2079a01571079c901d85b1391916068"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/judgement-signals.ts",
+      "sha256": "e0bfb371e1c0362bccca44a2a371bb61599ca909f87f98aab8a31dfb98355b34"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/leader-licence.ts",
+      "sha256": "da22daff633408d54cb138f5d18daf10e998b9fcfbf93f2013a67b34f19bee86"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/leading-option-egress-guard.ts",
+      "sha256": "8dd82267de2c34a3c74bd833fc7b007b3e0f2353026156714950567e1ef15636"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/lens-history.ts",
+      "sha256": "3d7ba8e5fa96328fb0f0adfaca7861b5d33ee3850c369cb259900d6e1cb2a54f"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/lens-selector.ts",
+      "sha256": "e722738652a7c0a7661cccc091f05ec19cad00386b11fed0b618c4b657823cc0"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/phase3-blocks.ts",
+      "sha256": "86ec81da01dd4a05865cb4e58c4d3ac40a30f8f2932ab9429d3c001a08d232a9"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/redactable-units.ts",
+      "sha256": "cfdc1c1d68e5c0a45c7d1e62285c5360f9f975a13e1e3db54672a14c8c7f41a9"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/resolve-label.ts",
+      "sha256": "20642a887c5c66b1b7f701030c12eb34301e7e67f42d912dfa3f6f534bcab052"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/sanitise-enrichment.ts",
+      "sha256": "d1584f4506890009990f88e275525681f26ffba87b3621ed0d35a65e8a0995a8"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/terminology-rewrite.ts",
+      "sha256": "d4c5a9422979a06eb5b862e08aaae3d63b361467451f23c80bfe92bdf2e70043"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/tied-option-ordering.ts",
+      "sha256": "e7281a37c38dc37bfab93c7f7cfd9767f7ef31791c460d3fb3a1190096295c01"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/ui-directive.ts",
+      "sha256": "d9bcae77cf52a3c463d164406188fb4a75c7254dc4ef486007589bbb2caa56d4"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/unapplied-edit-reply.ts",
+      "sha256": "3fa6285181d707eb77c2dc9de45751e7d906162a0b7f513e4d7a00a771dd6ed3"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/unrequested-analysis-confinement.ts",
+      "sha256": "969514f5c316841dc938f8f1fd29a8bebb639f111d70dd996670abd9097a8065"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose/withheld-claim-projection.ts",
+      "sha256": "83052f1060a73f493aeda17e989f9acde77d65018c54b429a02d2b7404d08cfb"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/compose.ts",
+      "sha256": "2295339bf1c708b6ecb9abbdfa201db76f98c38b8ad8a410ca9e7fd88d9eb481"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/analysis-interpretation-identity.ts",
+      "sha256": "54ce2ec644c023d1e2b733be0aaa09f96449fe0f8b68ee6f70ee73c5ac4a705d"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/analysis-refusal-continuity.ts",
+      "sha256": "c3ea8f90e6063074d15e984ccf18821d91197b4c86bc20bf329a9d6fe61a73ac"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/analysis-signals.ts",
+      "sha256": "70df882d6be0d2aac26fa21766af7b67a563cdca00c42fdda7587390dabdb90b"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/canonical-analysis-state.ts",
+      "sha256": "1eec0439dd2c76f9874762ccbe712b32d17332bc06f45d447f60ecdb4acfdf77"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/cqe/compromise-backstop.ts",
+      "sha256": "423522b9d73e234f53d3eafd1f7441a086a99f1975359336e11ed5f47d08f63d"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/cqe/extract-quantities.ts",
+      "sha256": "2cc598dfb3170341354233853689ceb40f050ca1ee8982df2efaeb80079d4b80"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/cqe/pattern-trace.ts",
+      "sha256": "07af8681d27a85a2468f06785033eeeab465859c54e58eabdc4541da8e298b55"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/cqe/post-filters.ts",
+      "sha256": "71bfa6e4623b00fb29953ba828f993c254986429ff5416e3150dbf5ab6243052"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/cqe/pre-normalise.ts",
+      "sha256": "8c30678a6c7fd13001cd9447fba7907ff052650fd8a6eaec5c7b9382690cde68"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/cqe/rules.ts",
+      "sha256": "4d6bc41a7d928704e1868efa35a10d1502d3edebc90bc6fb44be146b1d2f4e1e"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/cqe/word-numbers.ts",
+      "sha256": "6b182517b75bf5764503ed28347aa2ed9e256eebd8e3344a6f2be68be6e1949f"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/derive-stage.ts",
+      "sha256": "68929385ccb61177d1c715d523e4c5579657933e3a86cedc7042f992650b2407"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/flip-threshold-rows.ts",
+      "sha256": "291de9d7356280f1b6767d4cf31a366107be75e1c57a540f5d8761e65802c56a"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/freshness.ts",
+      "sha256": "ecaaafdac828a98e469838d9e66da45d31f9fc15127aff3858eda0f5a3de461a"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/graph-hash.ts",
+      "sha256": "16f96d7d8435281c42e7ebca76812f7578fe7b77c7879e4a071af07207e31352"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/intervention-controlled-drivers.ts",
+      "sha256": "5d7d6907365e13d38c4244340d5b39e50fe4e595e48bb40755b2704652ff57d7"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/option-identity.ts",
+      "sha256": "c97c3e05961e9fdb783b7db9d744f71f02125daa2b394c3ff10dba230d1936a4"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/run-goal-unit.ts",
+      "sha256": "154c9a506990d32b656e55b33cf5fda1baf7c69f3d6fec77fb89e6cfde5eebea"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/run-initiator.ts",
+      "sha256": "a8a984fe7fa66bb2adabd9b761c014ca0cd3664019d21f045954ca07e301b059"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/context/turn-referents.ts",
+      "sha256": "0ef9b4b0fcaefe57ad8e44bd5b759a9cc538b5d105ee8e3730088d68303e6c3b"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/format/edge-strength-bands.ts",
+      "sha256": "b8adbe2f83bba287649d02cb415c70aa1f24e7243930aa078737ba92ac40aaa7"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/format/format-analysis-value.ts",
+      "sha256": "93bec2c3fff47d88df20c30fecb354d9cc3f1bb559e4ad4c57d3205f06c55146"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/format/influence-bands.ts",
+      "sha256": "f338d5403f2d86e7439ea143b0e80963950c3edf97050d1deecf6f712615951a"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/goal-target/goal-direction.ts",
+      "sha256": "ed1f2efd98a0dfb5bc46021993221bdb06c98b83086ea7915e14025d081b4941"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/goal-target/goal-level-reading.ts",
+      "sha256": "59c06bda8b5058e09b91bd7e16230c56ceed94a83b5a4032593c4b482f98555c"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/graph-management/adapters/edit-graph-producer.ts",
+      "sha256": "789527675dd318d889de2e7ba9bc49e598184111da666dfd202f6b3f0a3096fb"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/graph-management/field-safety.ts",
+      "sha256": "af14b46ce32b975edff1310463c36d6c0f9074d227c0bf813cfc0aee38ea31c2"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/graph-management/reason-codes.ts",
+      "sha256": "c448f401ed1ad845366a744ed8e686c37d18d506d6ac554fa485d0b4b024e221"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/analytical-intent.ts",
+      "sha256": "c39648cc968d0482545a0d67c96d95283658fcfeed3d4e8649cdc50e3bba94a4"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/analytical-question-guard.ts",
+      "sha256": "3db7ed402c2dc89b9884cba29f254769423cafdf3333036fa15e3007b1538839"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/constraint-mutation-signal.ts",
+      "sha256": "631debec06981b51c2086b9ef630ddc00ea8d8008985aec6916a63e34ffdf45a"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/deterministic-value-update.ts",
+      "sha256": "f72b5ae6cef8016ff9eeb6a50f543fac7a09f5ebda6b308be0637696bb8e0db6"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/edit-part-decomposition.ts",
+      "sha256": "5ab198e1ea1591975c53d8ed96cd587e7f2c7e76ca1ccc0074b8eeba4204804c"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/graph-lookup-adapter.ts",
+      "sha256": "471830eb7f268f0a1e196dc8e8356a2768137fb350f85a4c450b11f47d8bfd32"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/judgement-request.ts",
+      "sha256": "05fd756a83b2539b231ba52dcd6ed24947b38076b6b58e585abb9f88d1a9a5c5"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/mutation-warrant.ts",
+      "sha256": "60ae4ad76d22a9930f4bd6afe20ea9315fd4c24d9b11fd699771786e6779486c"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/option-intervention-guard.ts",
+      "sha256": "fca9663c61551f4bc4399555cb5c3b36c6b17d2fdf09f8bb65d308f4e44428d6"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/ordinary-text-authority.ts",
+      "sha256": "7d4403af0e03a3f601f6fb52b67315ad1a4e92b790aff4483f2b69fe79254cca"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/state-query-guard.ts",
+      "sha256": "559c1610e9f6e09bec78d983795f61589206ca9ae01e23fe434fdaa3ee0aa3e2"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/validator.ts",
+      "sha256": "8963a9533c868e21a5a2c14c01a3c95ce95699d37f3547e8c37792eb3c28d666"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/routing/value-unit-resolution.ts",
+      "sha256": "a4fb1b447fcebd645fff9ec8d0000b85d3b7bfda16929e08531f215e435df9a1"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/session/conversation-as-seen.ts",
+      "sha256": "94a870a25832c14b72a43ad46b58119a57e44c5517b37e66976daaeb6023c896"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/session/pending-action.ts",
+      "sha256": "7aef7295d8a64025ff1e0d0a64380e5a1adb93611ad6ce27eca73d1752c7db6d"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handler-errors.ts",
+      "sha256": "9f8c94806d72680315b55b0fd835ee86c1fe4096771296aa61408945e02b385b"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/add-constraint.ts",
+      "sha256": "92b2df74266c7c394b5d82b75e7e2686ced32a1f9c805509d078e043ea4084b8"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/analysable-option-gate.ts",
+      "sha256": "626ca4d8ab839484b49a56fc649b0ed84ed606429f61471ed7889073c9251d97"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/analysis-ready-core.ts",
+      "sha256": "d3b3251d0c3dfd3bf7084c6118efe1af3e0d614ff49d91e90af8812ba0fdff6c"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts",
+      "sha256": "c450f3105b71eebb7806aa58b96dd6b2ab5a818b3fabc477e39349e148910c76"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/constraint-target-alternative.ts",
+      "sha256": "8d45714946522ea51cf87a073e0484a6c7b3bf83b9b1c8dba6e05e8b8846832b"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/constraint-write-admissibility.ts",
+      "sha256": "a8516b3e354fcbc85d5fa077ce20e347e893a3d43ac341a8f8625bef53d7f45f"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/error-boundary.ts",
+      "sha256": "be4ef51008191cc98285785b398e02c2f9c1d42876b12d966a992b7ff99defa6"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/errors.ts",
+      "sha256": "c29365690d90d8c373eff1a95193833289cb5ff597aa1aba5c58ebd32007d0da"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.ts",
+      "sha256": "47d512e11a69ce26d8bae7500e9e5754a4def51cd7a24f47d66d0e7c872112ef"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/format-confirmation.ts",
+      "sha256": "e1a428317c6c6572cb8b50f14af777cba0a4550dead29b70f464a6579cc4d09f"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.ts",
+      "sha256": "4d1392d1a1f613862fe99e76999b1d93ee276ff60e952eabfe3bd5c8ab3fb727"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/scale-frame.ts",
+      "sha256": "68f6f596a3e1d3c96826d2ab8f110feafc1c8fb774626f4b977c90e76cdc4945"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/d1-shared/user-guidance.ts",
+      "sha256": "233133fa3680f2cd25f964c59e90c4f925ff4ce9dab52517c23d6fba05019c0f"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/option-participation.ts",
+      "sha256": "acee1d10779080e5c63318af7097b466aa4ecbe6be137b3d63e9fdaeb748e268"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/handlers/run-goal-certainty.ts",
+      "sha256": "107514fa353f8a3cde96386031687b140814f63546ec7b699ed750842532071f"
+    },
+    {
+      "path": "baseline/src/orchestrator-v5/tools/plot-intervention-scale.ts",
+      "sha256": "5d9c1fd006bc239b27a3ca2550d70b8cca30976bf4fd1cd816d5b7af41c0fd77"
+    },
+    {
+      "path": "baseline/src/schemas/analysis-ready.ts",
+      "sha256": "ff367c35a4a6b306a92be189209a965873eb19a35ecaa4d9698a9501d91e1471"
+    },
+    {
+      "path": "baseline/src/schemas/assist.ts",
+      "sha256": "fdaff1b627746c72923d834e3a15a6956c1384ed9173e43c5fe53062815242a8"
+    },
+    {
+      "path": "baseline/src/schemas/causal-claims.ts",
+      "sha256": "59c6d655c324f3dd9932fab5a53432e70944b72e34a94ba169810fc3dc78d499"
+    },
+    {
+      "path": "baseline/src/schemas/cee-v3.ts",
+      "sha256": "9aaa66ded50c062d5f35d44c7047c909b8f446e53b50f8f0a5287d1191b1692d"
+    },
+    {
+      "path": "baseline/src/schemas/goal-scope.ts",
+      "sha256": "de7ba844d36977d579ae5aee7d870550420d0c24dd3d2b41ea6ca6cab06942c4"
+    },
+    {
+      "path": "baseline/src/schemas/graph.ts",
+      "sha256": "d8c2974a657586fede58b62b212e326f03357b5160620c76a35b8dc9a43172ee"
+    },
+    {
+      "path": "baseline/src/schemas/llmExtraction.ts",
+      "sha256": "5e3691e6b43765038d4ce19bdb7133a8800f6dfa570c56b1455b2fdf5e1af764"
+    },
+    {
+      "path": "baseline/src/utils/amount-range.ts",
+      "sha256": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d"
+    },
+    {
+      "path": "baseline/src/utils/cardinal-words.ts",
+      "sha256": "198c8ed2e5a678539560b4ff8e91c1f9ccd025319e3bf237d1c7b791cde6b499"
+    },
+    {
+      "path": "baseline/src/utils/currency-alphabet.ts",
+      "sha256": "32b396c15eb04a351e65bcc103981a6d4db202134d1774a2641c3386ca92510d"
+    },
+    {
+      "path": "baseline/src/utils/goal-threshold-cap.ts",
+      "sha256": "02bf56a559b9ee0667ea00bcb38b6f1c40291b06f6122097182c86b4e3624689"
+    },
+    {
+      "path": "baseline/src/utils/goal-threshold-trio.ts",
+      "sha256": "fac3910a537c05cde183007185b0e43a69467787be42e0f7da0d802fa3dad23a"
+    },
+    {
+      "path": "baseline/src/utils/logger-config.ts",
+      "sha256": "459d8ad40858962e785d30b53e6318b1a3a77cca36eef9bfe6040bb40cc775d9"
+    },
+    {
+      "path": "baseline/src/utils/magnitude-alphabet.ts",
+      "sha256": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df"
+    },
+    {
+      "path": "baseline/src/utils/reduction-framing.ts",
+      "sha256": "f65d5fdc450ac9c3fa4b2806f29d4b6b8351424c25af6a41611d27f7bacaa79f"
+    },
+    {
+      "path": "baseline/src/utils/request-id.ts",
+      "sha256": "f08881cf78cfa7e4fe12ff4553c6375602c57ec5f6474f573f24de2d1619bdb1"
+    },
+    {
+      "path": "baseline/src/utils/response-hash.ts",
+      "sha256": "d986bbcc423e2aa63ac1b72af9c8eaa2853276304dfcc8deec5a5fa699d4ae00"
+    },
+    {
+      "path": "baseline/src/utils/telemetry.ts",
+      "sha256": "81270821728983de7503a6114fc6d00a11da3d6a2c7365afb46fd9356a8a2ab2"
+    },
+    {
+      "path": "baseline/src/validators/decision-free-shape.ts",
+      "sha256": "d6dce22552e4b74ce2a2b3d2f09baf7e64ecd6ec6108b7ab819fee96aef99d1d"
+    },
+    {
+      "path": "baseline/src/validators/graph-validator.ts",
+      "sha256": "78e2679459e9cac8bb631d2ccc756f0c6060940f3364217ccc92189aa5a3a632"
+    },
+    {
+      "path": "baseline/src/validators/graph-validator.types.ts",
+      "sha256": "edee920014b4cfcd99af78a62f3c3e60915110791f2f4649177c713d9dd67d0d"
+    },
+    {
+      "path": "baseline/src/validators/numeric-bounds.ts",
+      "sha256": "760abbb3f99801e816d2e15f7ecea8feb0ac1e47feb4846d8520cf5d3c8ed2fa"
+    },
+    {
+      "path": "baseline/src/validators/option-no-op.ts",
+      "sha256": "952aedb4a8d98d77f9b1188f273634c63dfb2c482b3a6070e77e64bd9d4201c4"
+    },
+    {
+      "path": "baseline/src/validators/structural-reconciliation.ts",
+      "sha256": "3c74a915bd2b036bf1671cb46bb57f6ff697980fb3de2602fbffac5b4b7edb43"
+    },
+    {
+      "path": "baseline/src/validators/violation-paths.ts",
+      "sha256": "bac230bffeb328cd75dbd843bb0c707d20399f245e06357e5cabf80829a80e7c"
+    },
+    {
+      "path": "baseline/tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json",
+      "sha256": "36f120f70a075503ba017f15c112e62e52dce21bdf583a4d9bd142bdc619a654"
+    },
+    {
+      "path": "baseline/tsconfig.json",
+      "sha256": "5d956e1bb3f4483580d95e40c06da0f4a99e9ffb36c18ee6a370473c0b8a8b36"
+    },
+    {
+      "path": "baseline/vitest.config.ts",
+      "sha256": "f7bd7b1bee9b1781baa4fcb024a94bf9520e741248537493141fefdbdbe4e529"
+    },
+    {
+      "path": "baseline/vitest.focused.config.mjs",
+      "sha256": "139a77a98c503b59264b751173b7a6adf5dbc3a7c6b85d44acbaed9afa603717"
+    },
+    {
+      "path": "baseline-red-final.json",
+      "sha256": "0fbcdda4ed11445b7dde12877a445428d3d110c7df3070738f2dcde10b235a85"
+    },
+    {
+      "path": "baseline-red-final.log",
+      "sha256": "81a469ba7a7c4d0aa24b164f8eea6bbf48d8da539cf36d4c057f8034c8634109"
+    },
+    {
+      "path": "baseline-red.json",
+      "sha256": "f015f40fa0b5b10e0848b7605f7d12da2102cf64dfcb1ed214ad4946d1457c7b"
+    },
+    {
+      "path": "baseline-red.log",
+      "sha256": "acb4ee0909ac4d137dadc913bdbb611b853557e859f8dce9253dd5dd15faf15d"
+    },
+    {
+      "path": "candidate/emit-contract-fixture.ts",
+      "sha256": "6d717797c86603ba1d7ef8b6aa3cf8f488692a251da357e8681cc84e7f790d8e"
+    },
+    {
+      "path": "candidate/package.json",
+      "sha256": "dd49b17201b330d69a13894d8ba4550b7f52167a22fc67abed7bf8da14332ce2"
+    },
+    {
+      "path": "candidate/src/adapters/llm/extraction.ts",
+      "sha256": "210ec02a63ce981d95c1b3db9bfd772be94a63b6374ff6480daa93811f2043d5"
+    },
+    {
+      "path": "candidate/src/adapters/llm/provider-policy.ts",
+      "sha256": "5b7a4890b1ff97a6ee02521bc8e976c899bb4618832e9a1c6d07332e29024da0"
+    },
+    {
+      "path": "candidate/src/cee/baseline-identity.ts",
+      "sha256": "58322df8c553542e4ddd4759f4d694cca164acd1afa2dcbc269ce4311921f4a1"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/constraint-display-name.ts",
+      "sha256": "f8c596fc2eaf38972d80173ccc200c5464fcc2a63e6f43272f956ea8813026eb"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/constraint-frame-evidence.ts",
+      "sha256": "81d1ef65dd2a9b3aa8950ba0f6ac9f021989d85c013eb7d13bfad82b4c9e9a6a"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/deadline-extractor.ts",
+      "sha256": "1095326172ce56ed7dc87a519b8ac24bf43a9bdee332e030dc71b4e69520e097"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/extractor.ts",
+      "sha256": "3ea39bf2b8b508086126e17a9767053aacb154b55abb48aa61eee32111ff1b5b"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/index.ts",
+      "sha256": "bbfc8c2ab549afd1d92d2606e21747ca2994a422bd99347f1e11eda4c8a814c5"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/mintable-target-kinds.ts",
+      "sha256": "f705d4a2dfe7ea42b1ee67aa00b8d5786d6859f1ce2decda0a5ed94ec50e6dfe"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/motion-grammar.ts",
+      "sha256": "b2a5451f217ba7d4fc49b3e29aa612a28ab15994402287e5bce7b7165ebc6861"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/node-generator.ts",
+      "sha256": "3b7c672a0e4473d21017a192a7228f78a945f6761cba5ce609f6a615f35582b5"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/qualitative-proxy.ts",
+      "sha256": "d4ccbd75b83ce54daf2909daea0415450290ac44b0d5eb0165e9f87004281697"
+    },
+    {
+      "path": "candidate/src/cee/compound-goal/risk-polarity.ts",
+      "sha256": "f01c37b0164d2537c42414cbb09e82b8ab70d1a7439f6ca7ee03a83a086cc7da"
+    },
+    {
+      "path": "candidate/src/cee/constants.ts",
+      "sha256": "d9313232f61bfc39424764039e966e42e1ec940bfa2bb986f4ca9aa4bd225fd0"
+    },
+    {
+      "path": "candidate/src/cee/context-integrity/brief-audit-answer.ts",
+      "sha256": "c4f6136d1a3b8b8f0944a16fc52e28d55f8f995aee33c70017484ce7bb4a9016"
+    },
+    {
+      "path": "candidate/src/cee/context-integrity/not-modelled-manifest.ts",
+      "sha256": "57ba4d934e3ba21fa9b415ccbf3ab962ebc5246c904dbd86b7a1737019b3c24e"
+    },
+    {
+      "path": "candidate/src/cee/context-integrity/stated-role-vocabulary.ts",
+      "sha256": "795442709d698cda5bf442305d97d508d41b3209d376243f8d73214e93b167e0"
+    },
+    {
+      "path": "candidate/src/cee/context-integrity/structure-origin-answer.ts",
+      "sha256": "a75dd0c3e1105d18b5cebc3759db15a62abf750ef31d9f1f9b542c42b1e30625"
+    },
+    {
+      "path": "candidate/src/cee/corrections.ts",
+      "sha256": "8c8d6770fba67af2db7e601c699f22671c6509a6049f7de6113d0541a364ea29"
+    },
+    {
+      "path": "candidate/src/cee/draft/records/claim-label-shape.ts",
+      "sha256": "43cf6079cc2f05fd50e5d4cdac78f376e51345f4418db5dab1a39fe729808c99"
+    },
+    {
+      "path": "candidate/src/cee/draft/records/label-bound.ts",
+      "sha256": "edbf16018b9e23b7312599bc407814503b2499642a4906ce1c8707e1621665f6"
+    },
+    {
+      "path": "candidate/src/cee/draft/records/objective-label.ts",
+      "sha256": "c065f2c20c96370d8125b57ac0e56c726fc8f1afd097c49f432b8405618c5dff"
+    },
+    {
+      "path": "candidate/src/cee/draft/records/projector.ts",
+      "sha256": "c96c9673d5c5c568e97c421b666fb266e7f2cc49212ce6d096abb39837a976f5"
+    },
+    {
+      "path": "candidate/src/cee/draft/records/unit-scale-class.ts",
+      "sha256": "47c0ac407feb60156941727962eb637a3f6437dca1c2a49a926dae40b98014e0"
+    },
+    {
+      "path": "candidate/src/cee/extraction/numeric-parser.ts",
+      "sha256": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91"
+    },
+    {
+      "path": "candidate/src/cee/factor-extraction/display-value.ts",
+      "sha256": "f5d88c71c54371d903cbe193f2aa8d62ffd67ccbe25ae0af2ee0e66f207da480"
+    },
+    {
+      "path": "candidate/src/cee/factor-extraction/goal-baseline-admissibility.ts",
+      "sha256": "16f3f1629d20a91d05793e222ee949e43f5dd5e73f9a978b408007c91a17021e"
+    },
+    {
+      "path": "candidate/src/cee/factor-extraction/goal-label-target.ts",
+      "sha256": "d8466b52e18eb6b630aa7d38e947d5b899b91d99572a0efa31e5e3d440027720"
+    },
+    {
+      "path": "candidate/src/cee/factor-extraction/index.ts",
+      "sha256": "e9121200ea5947d91c912a78dddaa732d3a79bf00bdc1b0c8ad9852a342a49b1"
+    },
+    {
+      "path": "candidate/src/cee/factor-extraction/llm-extractor.ts",
+      "sha256": "4799953dc1d9139907932d63976878ff4f9a154f8735578361fc1035620b9d28"
+    },
+    {
+      "path": "candidate/src/cee/factor-extraction/merge.ts",
+      "sha256": "faf41ae4d486ace738ef1b7e0137c64f0da3bee026618b4ed22a18c8a74ee975"
+    },
+    {
+      "path": "candidate/src/cee/factor-extraction/stated-level.ts",
+      "sha256": "3124550400f48ded3cab38ed73972cb83251f54e91156a02028a5f5f210c3e5b"
+    },
+    {
+      "path": "candidate/src/cee/graph-readiness/identity-frames.ts",
+      "sha256": "a84c88d5f6b1dbbfe7297f634a2a48daadb77769482980c3e02193218451de15"
+    },
+    {
+      "path": "candidate/src/cee/graph-readiness/obligation-provenance.ts",
+      "sha256": "ce0c69bb4f280d497cf6cbbdf2fdd06c71299b9c8a4a8720ba421899877e3bc2"
+    },
+    {
+      "path": "candidate/src/cee/magnitude/frame-defaulted-links.ts",
+      "sha256": "567a0c7084c9011b97376becbd9b84610c3b5f8fc7f58e5bc3e908a814f8a812"
+    },
+    {
+      "path": "candidate/src/cee/magnitude/link-effect.ts",
+      "sha256": "6a31443b6f687c8f9c5136f6586cb14397feecf424b46e3f870b527cba3f7f6c"
+    },
+    {
+      "path": "candidate/src/cee/magnitude/link-sizing.ts",
+      "sha256": "32fea196f6b9b4ced633e479a357604e218abd6e96f072a732e6aaf80fbe33e2"
+    },
+    {
+      "path": "candidate/src/cee/provenance/brief-binding.ts",
+      "sha256": "6595e389348744c2cfd788267175f6222eedca7554113136bfc39b45043ebb80"
+    },
+    {
+      "path": "candidate/src/cee/provenance/stated-amounts.ts",
+      "sha256": "993ee502fca6b81283d26880df5d899f6b972bbfb9e5fe3a8433906acbb4b77f"
+    },
+    {
+      "path": "candidate/src/cee/provenance/unquantified-factor.ts",
+      "sha256": "ccf05c281fe13282ad021d226a6df779e2cfd3ac0129f7cb946e3e61c090c2fd"
+    },
+    {
+      "path": "candidate/src/cee/signals/brief-signals.ts",
+      "sha256": "1f180f069674bf28e051b3093bd4e8b50969acf0b532c85e207e48fd7a616187"
+    },
+    {
+      "path": "candidate/src/cee/structure/compound-goal-label.ts",
+      "sha256": "b2d80e035689d25e005bfd0cfdf193b5edb377ec3826704efde0fb49fc5c03c7"
+    },
+    {
+      "path": "candidate/src/cee/structure/goal-inference.ts",
+      "sha256": "f87960d3edff50ad6f2f1102eb4481ea27b85ad242c2b78db1925c50edae4576"
+    },
+    {
+      "path": "candidate/src/cee/structure/index.ts",
+      "sha256": "1e23d104799a226bc66b7e48a1d809a78308e47c2899cd5e1d2d34f08ae523a4"
+    },
+    {
+      "path": "candidate/src/cee/structure/status-quo-patterns.ts",
+      "sha256": "8f651eb108e23ab2f7ddbb7e55db8ecfa6a02c36f9c201695b4eb94836b3306b"
+    },
+    {
+      "path": "candidate/src/cee/transforms/analysis-ready.ts",
+      "sha256": "571b1dcb6ef7734ab7bcf68fa213e3b021f811e5c32cc29b544e26c8558cc6ad"
+    },
+    {
+      "path": "candidate/src/cee/transforms/label-echo.ts",
+      "sha256": "2fedb5cfd6c6199f896cb4067b23d4f845dbbe21598e09a4eadbaf472d91b95c"
+    },
+    {
+      "path": "candidate/src/cee/transforms/option-status.ts",
+      "sha256": "2f48a9e12f05d8993269457b20275f59b60a22ed1f82cab330cc36c0d6a565f1"
+    },
+    {
+      "path": "candidate/src/cee/transforms/provenance-display.ts",
+      "sha256": "7f814c9a68c25ad74ada54ee3f0bc012fd277e61aa0cade0c07040ecaa109ac0"
+    },
+    {
+      "path": "candidate/src/cee/unified-pipeline/stages/repair/no-op-target-repair.ts",
+      "sha256": "39d4587dd597083af53ea6b047711d5d450bcb3abd5f9d3a32e96f3b6b70f26f"
+    },
+    {
+      "path": "candidate/src/cee/unified-pipeline/stages/repair/status-quo-fix.ts",
+      "sha256": "120ee5d7da2f9f04c976f3880dd8f690649ed0973d20e9740f213a5955d22ff5"
+    },
+    {
+      "path": "candidate/src/cee/unified-pipeline/utils/edge-format.ts",
+      "sha256": "cf4dc39456dd070b7d6a4d9d95de0df7bdf302a7f117ae1d5cebb9f246ea3462"
+    },
+    {
+      "path": "candidate/src/cee/unified-pipeline/utils/field-deletion-audit.ts",
+      "sha256": "4d8a8d5324b2b170c83df8e61e1ba1e8b5adaea64b32254b35f3c1070234a038"
+    },
+    {
+      "path": "candidate/src/cee/utils/id-normalizer.ts",
+      "sha256": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4"
+    },
+    {
+      "path": "candidate/src/cee/validation/classifier.ts",
+      "sha256": "fa342f228be4351b267c5f48603bbca070f732a1161ef949a09ff08d15ae81ad"
+    },
+    {
+      "path": "candidate/src/config/env-resolver.ts",
+      "sha256": "a2aabb012b800443238542b33b2b821be66cfd45ac29533e03868bd85bc11534"
+    },
+    {
+      "path": "candidate/src/config/graphCaps.ts",
+      "sha256": "b841da2d3dc91aa736fde44dde79796d950c5c05874d921214e000ff6bace2ad"
+    },
+    {
+      "path": "candidate/src/config/index.ts",
+      "sha256": "7f7dea69615b19b2edb5857aca827ec5ccff3a253ef7407fca2ca3bc6a78bccb"
+    },
+    {
+      "path": "candidate/src/config/model-aliases.ts",
+      "sha256": "be2e3aa81ffc67613ad4b8c0515c07b1cd525e3d2d25b2c0a1ebe9799e7cd7f3"
+    },
+    {
+      "path": "candidate/src/config/model-assignment.ts",
+      "sha256": "bd4dfd35babf097fe9394c7ad25fd9a3c234bfc5de626ae4d7533ec0989918fe"
+    },
+    {
+      "path": "candidate/src/config/model-routing.ts",
+      "sha256": "9b3e1ec08e4fdec1f184442375abfc4161bb164244d5a6257d00d2b2d87531fb"
+    },
+    {
+      "path": "candidate/src/config/models.ts",
+      "sha256": "0dc9b89081acd647b5382d56a6dbc7079cbd13a45470b1472a1db7c5cba92445"
+    },
+    {
+      "path": "candidate/src/config/timeouts.ts",
+      "sha256": "7e15ae064040f726027afa4c101598d9bb2628b3fdcab628f1fa5a99345e4758"
+    },
+    {
+      "path": "candidate/src/context/caller.ts",
+      "sha256": "bad6269cc329b5ec1e6f4dda2777790f2b39c42d2cda1ddedfe99121602b9971"
+    },
+    {
+      "path": "candidate/src/context/context-pack.ts",
+      "sha256": "2b70fa783be747c82a75d8008677be8b8750a48b10de3cff6efa7ccc84ca76f2"
+    },
+    {
+      "path": "candidate/src/context/index.ts",
+      "sha256": "2747c0a79ac4df8110b02b6ef3336d929089aa0b81e2ca62de77652671e290c2"
+    },
+    {
+      "path": "candidate/src/context/resolver.ts",
+      "sha256": "aaf1a4d04546614a79cef1cad48d473f7dfc248a1c71daa8a1618895bcf637cb"
+    },
+    {
+      "path": "candidate/src/context/types.ts",
+      "sha256": "125e0c6ced39da8028914195f01776d8e14c9e73c7a5abe2480d5cbf1613cf96"
+    },
+    {
+      "path": "candidate/src/dsk/canonicalise.ts",
+      "sha256": "89fcdb36f571ff9265360b3f3b4a1ebc9a4bca16a75c540409604e1d9f830a2e"
+    },
+    {
+      "path": "candidate/src/dsk/hash.ts",
+      "sha256": "00d9b8718883918b4b55f6ba4f300d7e853b413d2cc2d63d78caf6efcb66c6ce"
+    },
+    {
+      "path": "candidate/src/dsk/stage-edge.ts",
+      "sha256": "43bda672bbeb9583c14cde4d01c00ba1890f34ed48bbd57af29499c7fbd71d8b"
+    },
+    {
+      "path": "candidate/src/graph/inert-risk.ts",
+      "sha256": "a3be303959c0c4d23cd9b249c86be86b76138ce3f18188e8c26da2445759676e"
+    },
+    {
+      "path": "candidate/src/graph/limit-sink-branch.ts",
+      "sha256": "e5aa619e931d00d2b32233dcf8275a96a22bf2c361c0f8d4def423306d1a249c"
+    },
+    {
+      "path": "candidate/src/graph/reachability.ts",
+      "sha256": "2c19be073ca8e33087c545e3d2eef0d1f911f66e1d0f06689cd507628f42037f"
+    },
+    {
+      "path": "candidate/src/graph/repair-authored-edge.ts",
+      "sha256": "ea4ea3c5454973f79de9f9c1d189fd70846def212a67d904dd1dad7b61869b87"
+    },
+    {
+      "path": "candidate/src/orchestrator/canonicalise-value-ops.ts",
+      "sha256": "74284f545ee280d6856c884a6162f86d06f4af2731cd0f1c280863b63d5b572e"
+    },
+    {
+      "path": "candidate/src/orchestrator/context/constants.ts",
+      "sha256": "2aaac507613821a896014dbaac591a7e679cbca61a2d1eb0a1a72cf029af3a23"
+    },
+    {
+      "path": "candidate/src/orchestrator/context/constraint-feasibility.ts",
+      "sha256": "5de277a2d1fc34d2651835e73338b4516f08d4d669eb128a0f7408730bc49514"
+    },
+    {
+      "path": "candidate/src/orchestrator/context/option-result-source.ts",
+      "sha256": "b3111c54e7ff8ab0ad965941636766d7755f53ad01902034beb12c9f7b10a97b"
+    },
+    {
+      "path": "candidate/src/orchestrator/context/placeholder-parts.ts",
+      "sha256": "78584755394bceec8fd3417e7674223819c3c1e7ecaa236aa54d94c47843da1b"
+    },
+    {
+      "path": "candidate/src/orchestrator/context/stable-stringify.ts",
+      "sha256": "33e5b5be9ab7128665d10e712a73ee7fe81fffd48d46f154034ea0fde43d74e5"
+    },
+    {
+      "path": "candidate/src/orchestrator/graph-structure-validator.ts",
+      "sha256": "d87cfef6d06cb33756400cf5260aeb5912097f3ed022fb55bafa6ac61da62dba"
+    },
+    {
+      "path": "candidate/src/orchestrator/routing/edit-graph-intent-regex.ts",
+      "sha256": "90d0e2cf6c9f9956ba1813a53426b48333810db2244b4494eb5d8b6eb411b320"
+    },
+    {
+      "path": "candidate/src/orchestrator/shared/encoded-intervention-admissibility.ts",
+      "sha256": "368e8f79ce0a21b11ea861ee5bf44b1ba4b0a2620d61c482b0c8d8579ad3e2d2"
+    },
+    {
+      "path": "candidate/src/orchestrator/shared/entity-id-pattern.ts",
+      "sha256": "56be9e1df8f87690bafa133b2b371b4da262b90613a652c2c0bdc60d28bd8356"
+    },
+    {
+      "path": "candidate/src/orchestrator/shared/forbidden-tokens.ts",
+      "sha256": "409e076de1ca8591ae44cae3d7bf5174cfa9dbb577af19dabe6f4dcf619d21e6"
+    },
+    {
+      "path": "candidate/src/orchestrator/shared/fragile-edge-authority.ts",
+      "sha256": "20a5bf156300c0bf23ed0efd0478560f54fc5b1ee730fed4cbd149346eba2b8a"
+    },
+    {
+      "path": "candidate/src/orchestrator/shared/output-safety.ts",
+      "sha256": "2e1a29c7d6358bdaea8230f8e21264d4173d3db6a0855f439c7dfd6c4f8c38c4"
+    },
+    {
+      "path": "candidate/src/orchestrator/shared/referent-resolver.ts",
+      "sha256": "f31a7bfe3f2aa74ecfacb528fd12badb33ab18a0f3ad4405e359718a156a4c40"
+    },
+    {
+      "path": "candidate/src/orchestrator/tools/analysis-ready-helper.ts",
+      "sha256": "c5610f06a91fd6d053ab3c9128601e9a5c12fca37c8d2d7a6a8f31a24b0fe386"
+    },
+    {
+      "path": "candidate/src/orchestrator/tools/encode-option-interventions.ts",
+      "sha256": "99ccc6864a0cef81b20caca2e7668599ebda790d97c855c079ad87585c1a5e61"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/admission/analysis-admission.ts",
+      "sha256": "7325d927ae966654f0528b910532dd29c00a153c627fc3951c55fce23464e66c"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/admission/target-testability.ts",
+      "sha256": "c2b393f8477e26522b0ddbeb8d40dfbb8b9b5e761cabc5b9cfa9bad1dd39cd6a"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.test.ts",
+      "sha256": "94ca780a61b5d201bd6deeb22d1582e0205b935bf596b58b8aabfc7fb9a8b9af"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/__tests__/tipping-point-interaction.contract.test.ts",
+      "sha256": "da2bfa47b097f236d40204cccafb668628925351e4c7fed95fc9280080be3d38"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/admit-candidate.ts",
+      "sha256": "2f4d024ec95cd865735564204de41e2d8a7e40411fb25ca72ded374380915e28"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/admit-constraint.ts",
+      "sha256": "3cb42c09b46a526a1e0b7e3035b81fbe2547b15349089d78a3e791070bbd6976"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/admit-model.ts",
+      "sha256": "00c9f0cba6e073f9b6bd26122ef30114f211bebd4d46a992afe296e548863368"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/approval-chips.ts",
+      "sha256": "57a28ca5bb3f11d36cf0a773441b778ebabfe1e5393e999d8b03dcb279bca8cc"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/counted-nouns.ts",
+      "sha256": "b89db2aef123b960fda2042f0e896c8939fbcd622b3ccafb3f9c087d245fed05"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/decision-sensitivity.ts",
+      "sha256": "9179542938c06844919fd87a02139cd0656543b801fb6d4fdfb68107a6775a4a"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/goal-certainty.ts",
+      "sha256": "1969938eca5ee13354ce220bfcc5018085b250a9da4ff3aec9de44960f607c8f"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/goal-scope.ts",
+      "sha256": "ef46d33a2d1a53ab24c05cd98c08283739a97a31edfd98b9a478210da3079cc7"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/guidance/index.ts",
+      "sha256": "0c920ee3bda62c7d27616cacf1e3497e89cacc1d6fcd3aac29c5e889423e0049"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/guidance/method-turn-check.ts",
+      "sha256": "f2768e4ff0062e370d08e5cdd85b86dea24c49ff4e1bb145f81d9be3da9b7ff9"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/guidance/plan.ts",
+      "sha256": "031168ab4a944445be44f70743ef223ae9daa8a670d6a21bb0651a5c0f60d8c8"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/guidance/policy.ts",
+      "sha256": "5bfb7a5e28415117f458a9ba6b9ddcb06c6124a7df4ca8b6ed15c2cb5b839c46"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/guidance/reasoning-interventions.json",
+      "sha256": "9d93844e20dfcf7525c3c93d4c9254a4f739fb7a0b302663019c606c8159178a"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/guidance/render.ts",
+      "sha256": "98c185c66a28f5653c1554e1eb72e713f1be09c7e41bad79779a17b6d1775880"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/guidance/select-strengthen-placeholder.ts",
+      "sha256": "b88106ec1e6bba687789d71bef6baacee179a24ad0a315fc686f78344684913c"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/guidance/select.ts",
+      "sha256": "1cf3a9fb5ca1044040b82430e1ded7ffbcabea3e44216fd97a23331ca1dd489c"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/guidance/state-key.ts",
+      "sha256": "34a777fa9ee1966798a5cabe316121392d2c8dad10e7cb2470ebc0e25488b88d"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/history-store.ts",
+      "sha256": "2a6bd665ef23de891113b3215f7b97bb7fda5b759d0af6d44b9bf1812cb56be6"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/horizon-attestation.ts",
+      "sha256": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/identity-card.ts",
+      "sha256": "5305b02ad644e1121a5231024c1092fc6073fb983295727b7c1e66c4ca6f597b"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/limit-frame.ts",
+      "sha256": "ce35d161ba309a1e7a5cb91180337c740262c8e7b987279ef531db8e698c4793"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/limit-operator-words.ts",
+      "sha256": "57a07045ef1f3d41fa7419ebc60604bbb8873017693fc01ae7e98c73468c2114"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/method-turn/method-turn.ts",
+      "sha256": "b1f756687493560f943144673480ab8ed24296c008c47c4d798f04a34dccdf81"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/normalising-goal-frame.ts",
+      "sha256": "3fc955592dc82193154004ae6f48a35771d278e57d1063e54c4228076aea8b1c"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/one-route-per-effect.ts",
+      "sha256": "cb5a7fb7847cabb46ef39b2ebe5667824f82d47c092fcbf2faec2a68924b9bc8"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/product-goal-extra-parent.ts",
+      "sha256": "d3d85d25d35f19eb94de69a48d8b1a435b6531540a38e7765fb48d1922d71afe"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/product-goal-rate-operand.ts",
+      "sha256": "c7b3b6be4fe17896a5f5249eae9c5a5782eb6592529ea303e98565443f397e65"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/reconciling-product.ts",
+      "sha256": "52a6986fdf326cbe7a303974398273a3bf54f7482ade043e42276f0e131bd378"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/refit-frames.ts",
+      "sha256": "20a64016af4fd9255331c558be5296ff928ed3ec4747960dac8ab3f7c02e6d4e"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/rerun-explanation.ts",
+      "sha256": "a80a64ee2b8955e13697b1b932099da8fe3cffae91bf2f7ce0c5e5ea3c8db86b"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/run-explanation.ts",
+      "sha256": "06c0afaf1b0e0876eb8989d135aa8664e47923cd1cb92107c80c01ecad0ad4c1"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/same-unit.ts",
+      "sha256": "012bfaed9c6ca8510eac06095c4be3fd3c557cf8b23151146a55df04c4f666a0"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/say-figure.ts",
+      "sha256": "bc5d86428e7b6cb48aab2ac41a82cebca82fddd2cd0ac5dc25470ab95865c524"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/science/method-science-context.ts",
+      "sha256": "8a3491a82fbb55688e64b7bc0c71f5ccb15e45e7ff7d3a945cbd678aa079beae"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/stated-by-user.ts",
+      "sha256": "274ca95f610178442382249d6715b601afe48df2eb955f229390672717b03153"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/strengthen-press.ts",
+      "sha256": "709d9b7e7d85e171542a26860652d08b915180520cd29f6a5af1c59a6d8dbe70"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/structural-facts.ts",
+      "sha256": "780e973a134fc82ec68a878a26916ba882049ba1e90839ca3c3f93fffe8b4d1b"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "sha256": "3743bf5b812e46e9355b7ff05e4b3960a2d459411fed971aefb02af62140dfa8"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts",
+      "sha256": "89aa9fc8d080c45b75f68bba980e381b57c87f7e1abecd69caf934a343c87521"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/agent-lane/unit-conflict.ts",
+      "sha256": "799f60f6530ee67c93338c8539a0c27aad496a342cf8412fc88f4decf33f6105"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/boundary/request-extensions.ts",
+      "sha256": "947571ee35357e24574d427191401f2b65e16dc756519376a41603d9279ba339"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/clarify-v2/rubric.ts",
+      "sha256": "a0f2e9cfb2cf9063d3ae7e7f1660272b5268d30e9ac0c4f7968c348d5d06cb4d"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/__tests__/fixtures/paul-run-17d1cd3a-next-move.json",
+      "sha256": "99e16bc8e5a26b71b5611821a9143abe55d9179455e9e460aff6fd9876d7bc22"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/assistant-text-defences.ts",
+      "sha256": "028fb4c516ac3209b58e2776a086e6b65901f893773e59db7489bf4cfc043e57"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/coaching-chip-registry.ts",
+      "sha256": "825783a92f76c1ffbb1d09a6dd737230c5bf1aa6f19d9ebde4e4a3e41b4aa76e"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/constraint-gap-copy.ts",
+      "sha256": "5d87d884b957485490e4f8e20472b65939d734a5a51792902589308d70a66d4b"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/fragile-edge-offer-text.ts",
+      "sha256": "f951c4aebcc327e88c37b2a44d4b01e3a9bd11c9c5fd365c6d522a554b72b032"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/grounded-counter-case.ts",
+      "sha256": "2febb9946c18e4f9334a964654528ae1da0e2cda1ea95f1ed57ff63d23ef9ef5"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/grounded-sensitivity-body.ts",
+      "sha256": "2f07d00ccf63914bcb497e046f2f92488ac0454c035aa21403cb60dbaf0d26ab"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/intervention-tiers.ts",
+      "sha256": "dcddfe0d4911610fe5ed8d9458a9c67362de271680cc9c4c1b88a34ff16ed2ad"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/judgement-offer-text.ts",
+      "sha256": "3897ce979929d0688b04dc5cebf9c68c05f3331cadd83ef564a870c17ed2ef83"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/objective-contradiction.ts",
+      "sha256": "c6d7469c93218bd054bef1ec12c0051e39a08de66f698df0b60602ed77526b1d"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/pick-raw-robustness.ts",
+      "sha256": "3167c13eba20cd408ba7940264f4fb1aedd7298971d27b26ae220f3eb4730a67"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/robustness-honesty.ts",
+      "sha256": "e927d638a50e8b807b16ea76003d3219bebe02426a5687e47e7c998ece62d938"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/select-factor-evppi.ts",
+      "sha256": "aa7bf6d694d33af1f8ec7fd0f65abfd86914f8c771f650ae6470dd6964a43dc0"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/select-fragile-edge.ts",
+      "sha256": "5b9c13d7d29d85eb06bd12587d46603007a116872f39c15f8ccf5d521656d13e"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/stated-dissent-offer-text.ts",
+      "sha256": "d4d026842d1a94507cf7f150345ae10d2abb83677b357f2348f61c60c1665380"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/coaching/typed-intent-directive.ts",
+      "sha256": "1f16fb61ecdb307511a2c4b051c4254e038edd521eda01e1011554b5ac7f7615"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/analysis-state-v1.ts",
+      "sha256": "420219da522939e413c84de811b628bd3ee80e327e7abe8065ba4d6d6f20b180"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/block-id.ts",
+      "sha256": "6115ed69aa1488845d756427f8937dc33a4cec85157ef31aa6e87a5fb2e778f7"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/claim-safety-cage.ts",
+      "sha256": "c08e7666482382a85e6182cb52f410c47b1c6a28d9f20ed3142108cf73f570f3"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/confidence-bands.ts",
+      "sha256": "e7f02c3e530dd3526061458b2de5ea69d4b377af2a7f75a3fb4c29356419ddd2"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/dsk-bundle-record.ts",
+      "sha256": "be1a86f126bfc0c60291292bef506d02ccd83208472740921e923724a6b03ede"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/dsk-claim-record.ts",
+      "sha256": "c82c74a36ec422360e6a4f8d600a44c997c19ea1123ac3dd61a2fbf0b5d28545"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/dsk-protocol-record.ts",
+      "sha256": "f125a865730a6cfa790572960ee8e2ea837f275c5839999c513f8b1dd8014f04"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/edge-address.ts",
+      "sha256": "5ed2f55b02a0ebd69e09a47854bf53b0774a61aeb298d2eddbdee81e96fc28e5"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/edit-clarify-response.ts",
+      "sha256": "37150f0e6bf752a1d9f46b4d33cef6f462c233b06c0f400bbef508465f831cb7"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/flip-threshold-card-row.ts",
+      "sha256": "d35b9accdddda0f6934d1b06896c59103faf4ad447229a51b1a386f404528fae"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/forbidden-user-facing-phrases.ts",
+      "sha256": "2eae4ce3c2be4ab1a8d485133051223e9629ab9c4ac12d75671665110cd34533"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/format-factor-value.ts",
+      "sha256": "c944c4d698e019735cbcef60a6bcb33465772bc720fb0967c49559bfc38fd2a6"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/goal-probability-transport.ts",
+      "sha256": "e379fba8f6e344d6f6def187d75613aa5c2ff0dbd1234ee40635a481e66b89c1"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/guidance-signals.ts",
+      "sha256": "44081f6492ba60c723e03ee1b4c912ab4d3d192eb4d5fdc5a4c9a04d1cbc3ded"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/helpers.ts",
+      "sha256": "9d77654c74f87c4e91d1d2005a1c8fcdd2079a01571079c901d85b1391916068"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/judgement-signals.ts",
+      "sha256": "e0bfb371e1c0362bccca44a2a371bb61599ca909f87f98aab8a31dfb98355b34"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/leader-licence.ts",
+      "sha256": "da22daff633408d54cb138f5d18daf10e998b9fcfbf93f2013a67b34f19bee86"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/leading-option-egress-guard.ts",
+      "sha256": "8dd82267de2c34a3c74bd833fc7b007b3e0f2353026156714950567e1ef15636"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/lens-history.ts",
+      "sha256": "3d7ba8e5fa96328fb0f0adfaca7861b5d33ee3850c369cb259900d6e1cb2a54f"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/lens-selector.ts",
+      "sha256": "e722738652a7c0a7661cccc091f05ec19cad00386b11fed0b618c4b657823cc0"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/phase3-blocks.ts",
+      "sha256": "86ec81da01dd4a05865cb4e58c4d3ac40a30f8f2932ab9429d3c001a08d232a9"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/redactable-units.ts",
+      "sha256": "cfdc1c1d68e5c0a45c7d1e62285c5360f9f975a13e1e3db54672a14c8c7f41a9"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/resolve-label.ts",
+      "sha256": "20642a887c5c66b1b7f701030c12eb34301e7e67f42d912dfa3f6f534bcab052"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/sanitise-enrichment.ts",
+      "sha256": "d1584f4506890009990f88e275525681f26ffba87b3621ed0d35a65e8a0995a8"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/terminology-rewrite.ts",
+      "sha256": "d4c5a9422979a06eb5b862e08aaae3d63b361467451f23c80bfe92bdf2e70043"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/tied-option-ordering.ts",
+      "sha256": "e7281a37c38dc37bfab93c7f7cfd9767f7ef31791c460d3fb3a1190096295c01"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/ui-directive.ts",
+      "sha256": "d9bcae77cf52a3c463d164406188fb4a75c7254dc4ef486007589bbb2caa56d4"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/unapplied-edit-reply.ts",
+      "sha256": "3fa6285181d707eb77c2dc9de45751e7d906162a0b7f513e4d7a00a771dd6ed3"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/unrequested-analysis-confinement.ts",
+      "sha256": "969514f5c316841dc938f8f1fd29a8bebb639f111d70dd996670abd9097a8065"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose/withheld-claim-projection.ts",
+      "sha256": "83052f1060a73f493aeda17e989f9acde77d65018c54b429a02d2b7404d08cfb"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/compose.ts",
+      "sha256": "2295339bf1c708b6ecb9abbdfa201db76f98c38b8ad8a410ca9e7fd88d9eb481"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/analysis-interpretation-identity.ts",
+      "sha256": "54ce2ec644c023d1e2b733be0aaa09f96449fe0f8b68ee6f70ee73c5ac4a705d"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/analysis-refusal-continuity.ts",
+      "sha256": "c3ea8f90e6063074d15e984ccf18821d91197b4c86bc20bf329a9d6fe61a73ac"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/analysis-signals.ts",
+      "sha256": "70df882d6be0d2aac26fa21766af7b67a563cdca00c42fdda7587390dabdb90b"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/canonical-analysis-state.ts",
+      "sha256": "1eec0439dd2c76f9874762ccbe712b32d17332bc06f45d447f60ecdb4acfdf77"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/cqe/compromise-backstop.ts",
+      "sha256": "423522b9d73e234f53d3eafd1f7441a086a99f1975359336e11ed5f47d08f63d"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/cqe/extract-quantities.ts",
+      "sha256": "2cc598dfb3170341354233853689ceb40f050ca1ee8982df2efaeb80079d4b80"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/cqe/pattern-trace.ts",
+      "sha256": "07af8681d27a85a2468f06785033eeeab465859c54e58eabdc4541da8e298b55"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/cqe/post-filters.ts",
+      "sha256": "71bfa6e4623b00fb29953ba828f993c254986429ff5416e3150dbf5ab6243052"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/cqe/pre-normalise.ts",
+      "sha256": "8c30678a6c7fd13001cd9447fba7907ff052650fd8a6eaec5c7b9382690cde68"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/cqe/rules.ts",
+      "sha256": "4d6bc41a7d928704e1868efa35a10d1502d3edebc90bc6fb44be146b1d2f4e1e"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/cqe/word-numbers.ts",
+      "sha256": "6b182517b75bf5764503ed28347aa2ed9e256eebd8e3344a6f2be68be6e1949f"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/derive-stage.ts",
+      "sha256": "68929385ccb61177d1c715d523e4c5579657933e3a86cedc7042f992650b2407"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/flip-threshold-rows.ts",
+      "sha256": "291de9d7356280f1b6767d4cf31a366107be75e1c57a540f5d8761e65802c56a"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/freshness.ts",
+      "sha256": "ecaaafdac828a98e469838d9e66da45d31f9fc15127aff3858eda0f5a3de461a"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/graph-hash.ts",
+      "sha256": "16f96d7d8435281c42e7ebca76812f7578fe7b77c7879e4a071af07207e31352"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/intervention-controlled-drivers.ts",
+      "sha256": "5d7d6907365e13d38c4244340d5b39e50fe4e595e48bb40755b2704652ff57d7"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/option-identity.ts",
+      "sha256": "c97c3e05961e9fdb783b7db9d744f71f02125daa2b394c3ff10dba230d1936a4"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/run-goal-unit.ts",
+      "sha256": "154c9a506990d32b656e55b33cf5fda1baf7c69f3d6fec77fb89e6cfde5eebea"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/run-initiator.ts",
+      "sha256": "a8a984fe7fa66bb2adabd9b761c014ca0cd3664019d21f045954ca07e301b059"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/context/turn-referents.ts",
+      "sha256": "0ef9b4b0fcaefe57ad8e44bd5b759a9cc538b5d105ee8e3730088d68303e6c3b"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/format/edge-strength-bands.ts",
+      "sha256": "b8adbe2f83bba287649d02cb415c70aa1f24e7243930aa078737ba92ac40aaa7"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/format/format-analysis-value.ts",
+      "sha256": "93bec2c3fff47d88df20c30fecb354d9cc3f1bb559e4ad4c57d3205f06c55146"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/format/influence-bands.ts",
+      "sha256": "f338d5403f2d86e7439ea143b0e80963950c3edf97050d1deecf6f712615951a"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/goal-target/goal-direction.ts",
+      "sha256": "ed1f2efd98a0dfb5bc46021993221bdb06c98b83086ea7915e14025d081b4941"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/goal-target/goal-level-reading.ts",
+      "sha256": "59c06bda8b5058e09b91bd7e16230c56ceed94a83b5a4032593c4b482f98555c"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/graph-management/adapters/edit-graph-producer.ts",
+      "sha256": "789527675dd318d889de2e7ba9bc49e598184111da666dfd202f6b3f0a3096fb"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/graph-management/field-safety.ts",
+      "sha256": "af14b46ce32b975edff1310463c36d6c0f9074d227c0bf813cfc0aee38ea31c2"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/graph-management/reason-codes.ts",
+      "sha256": "c448f401ed1ad845366a744ed8e686c37d18d506d6ac554fa485d0b4b024e221"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/analytical-intent.ts",
+      "sha256": "c39648cc968d0482545a0d67c96d95283658fcfeed3d4e8649cdc50e3bba94a4"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/analytical-question-guard.ts",
+      "sha256": "3db7ed402c2dc89b9884cba29f254769423cafdf3333036fa15e3007b1538839"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/constraint-mutation-signal.ts",
+      "sha256": "631debec06981b51c2086b9ef630ddc00ea8d8008985aec6916a63e34ffdf45a"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/deterministic-value-update.ts",
+      "sha256": "f72b5ae6cef8016ff9eeb6a50f543fac7a09f5ebda6b308be0637696bb8e0db6"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/edit-part-decomposition.ts",
+      "sha256": "5ab198e1ea1591975c53d8ed96cd587e7f2c7e76ca1ccc0074b8eeba4204804c"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/graph-lookup-adapter.ts",
+      "sha256": "471830eb7f268f0a1e196dc8e8356a2768137fb350f85a4c450b11f47d8bfd32"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/judgement-request.ts",
+      "sha256": "05fd756a83b2539b231ba52dcd6ed24947b38076b6b58e585abb9f88d1a9a5c5"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/mutation-warrant.ts",
+      "sha256": "60ae4ad76d22a9930f4bd6afe20ea9315fd4c24d9b11fd699771786e6779486c"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/option-intervention-guard.ts",
+      "sha256": "fca9663c61551f4bc4399555cb5c3b36c6b17d2fdf09f8bb65d308f4e44428d6"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/ordinary-text-authority.ts",
+      "sha256": "7d4403af0e03a3f601f6fb52b67315ad1a4e92b790aff4483f2b69fe79254cca"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/state-query-guard.ts",
+      "sha256": "559c1610e9f6e09bec78d983795f61589206ca9ae01e23fe434fdaa3ee0aa3e2"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/validator.ts",
+      "sha256": "8963a9533c868e21a5a2c14c01a3c95ce95699d37f3547e8c37792eb3c28d666"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/routing/value-unit-resolution.ts",
+      "sha256": "a4fb1b447fcebd645fff9ec8d0000b85d3b7bfda16929e08531f215e435df9a1"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/session/conversation-as-seen.ts",
+      "sha256": "94a870a25832c14b72a43ad46b58119a57e44c5517b37e66976daaeb6023c896"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/session/pending-action.ts",
+      "sha256": "7aef7295d8a64025ff1e0d0a64380e5a1adb93611ad6ce27eca73d1752c7db6d"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handler-errors.ts",
+      "sha256": "9f8c94806d72680315b55b0fd835ee86c1fe4096771296aa61408945e02b385b"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/add-constraint.ts",
+      "sha256": "92b2df74266c7c394b5d82b75e7e2686ced32a1f9c805509d078e043ea4084b8"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/analysable-option-gate.ts",
+      "sha256": "626ca4d8ab839484b49a56fc649b0ed84ed606429f61471ed7889073c9251d97"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/analysis-ready-core.ts",
+      "sha256": "d3b3251d0c3dfd3bf7084c6118efe1af3e0d614ff49d91e90af8812ba0fdff6c"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts",
+      "sha256": "c450f3105b71eebb7806aa58b96dd6b2ab5a818b3fabc477e39349e148910c76"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/constraint-target-alternative.ts",
+      "sha256": "8d45714946522ea51cf87a073e0484a6c7b3bf83b9b1c8dba6e05e8b8846832b"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/constraint-write-admissibility.ts",
+      "sha256": "a8516b3e354fcbc85d5fa077ce20e347e893a3d43ac341a8f8625bef53d7f45f"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/error-boundary.ts",
+      "sha256": "be4ef51008191cc98285785b398e02c2f9c1d42876b12d966a992b7ff99defa6"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/errors.ts",
+      "sha256": "c29365690d90d8c373eff1a95193833289cb5ff597aa1aba5c58ebd32007d0da"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.ts",
+      "sha256": "47d512e11a69ce26d8bae7500e9e5754a4def51cd7a24f47d66d0e7c872112ef"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/format-confirmation.ts",
+      "sha256": "e1a428317c6c6572cb8b50f14af777cba0a4550dead29b70f464a6579cc4d09f"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.ts",
+      "sha256": "4d1392d1a1f613862fe99e76999b1d93ee276ff60e952eabfe3bd5c8ab3fb727"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/scale-frame.ts",
+      "sha256": "68f6f596a3e1d3c96826d2ab8f110feafc1c8fb774626f4b977c90e76cdc4945"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/d1-shared/user-guidance.ts",
+      "sha256": "233133fa3680f2cd25f964c59e90c4f925ff4ce9dab52517c23d6fba05019c0f"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/option-participation.ts",
+      "sha256": "acee1d10779080e5c63318af7097b466aa4ecbe6be137b3d63e9fdaeb748e268"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/handlers/run-goal-certainty.ts",
+      "sha256": "107514fa353f8a3cde96386031687b140814f63546ec7b699ed750842532071f"
+    },
+    {
+      "path": "candidate/src/orchestrator-v5/tools/plot-intervention-scale.ts",
+      "sha256": "5d9c1fd006bc239b27a3ca2550d70b8cca30976bf4fd1cd816d5b7af41c0fd77"
+    },
+    {
+      "path": "candidate/src/schemas/analysis-ready.ts",
+      "sha256": "ff367c35a4a6b306a92be189209a965873eb19a35ecaa4d9698a9501d91e1471"
+    },
+    {
+      "path": "candidate/src/schemas/assist.ts",
+      "sha256": "fdaff1b627746c72923d834e3a15a6956c1384ed9173e43c5fe53062815242a8"
+    },
+    {
+      "path": "candidate/src/schemas/causal-claims.ts",
+      "sha256": "59c6d655c324f3dd9932fab5a53432e70944b72e34a94ba169810fc3dc78d499"
+    },
+    {
+      "path": "candidate/src/schemas/cee-v3.ts",
+      "sha256": "9aaa66ded50c062d5f35d44c7047c909b8f446e53b50f8f0a5287d1191b1692d"
+    },
+    {
+      "path": "candidate/src/schemas/goal-scope.ts",
+      "sha256": "de7ba844d36977d579ae5aee7d870550420d0c24dd3d2b41ea6ca6cab06942c4"
+    },
+    {
+      "path": "candidate/src/schemas/graph.ts",
+      "sha256": "d8c2974a657586fede58b62b212e326f03357b5160620c76a35b8dc9a43172ee"
+    },
+    {
+      "path": "candidate/src/schemas/llmExtraction.ts",
+      "sha256": "5e3691e6b43765038d4ce19bdb7133a8800f6dfa570c56b1455b2fdf5e1af764"
+    },
+    {
+      "path": "candidate/src/utils/amount-range.ts",
+      "sha256": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d"
+    },
+    {
+      "path": "candidate/src/utils/cardinal-words.ts",
+      "sha256": "198c8ed2e5a678539560b4ff8e91c1f9ccd025319e3bf237d1c7b791cde6b499"
+    },
+    {
+      "path": "candidate/src/utils/currency-alphabet.ts",
+      "sha256": "32b396c15eb04a351e65bcc103981a6d4db202134d1774a2641c3386ca92510d"
+    },
+    {
+      "path": "candidate/src/utils/goal-threshold-cap.ts",
+      "sha256": "02bf56a559b9ee0667ea00bcb38b6f1c40291b06f6122097182c86b4e3624689"
+    },
+    {
+      "path": "candidate/src/utils/goal-threshold-trio.ts",
+      "sha256": "fac3910a537c05cde183007185b0e43a69467787be42e0f7da0d802fa3dad23a"
+    },
+    {
+      "path": "candidate/src/utils/logger-config.ts",
+      "sha256": "459d8ad40858962e785d30b53e6318b1a3a77cca36eef9bfe6040bb40cc775d9"
+    },
+    {
+      "path": "candidate/src/utils/magnitude-alphabet.ts",
+      "sha256": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df"
+    },
+    {
+      "path": "candidate/src/utils/reduction-framing.ts",
+      "sha256": "f65d5fdc450ac9c3fa4b2806f29d4b6b8351424c25af6a41611d27f7bacaa79f"
+    },
+    {
+      "path": "candidate/src/utils/request-id.ts",
+      "sha256": "f08881cf78cfa7e4fe12ff4553c6375602c57ec5f6474f573f24de2d1619bdb1"
+    },
+    {
+      "path": "candidate/src/utils/response-hash.ts",
+      "sha256": "d986bbcc423e2aa63ac1b72af9c8eaa2853276304dfcc8deec5a5fa699d4ae00"
+    },
+    {
+      "path": "candidate/src/utils/telemetry.ts",
+      "sha256": "81270821728983de7503a6114fc6d00a11da3d6a2c7365afb46fd9356a8a2ab2"
+    },
+    {
+      "path": "candidate/src/validators/decision-free-shape.ts",
+      "sha256": "d6dce22552e4b74ce2a2b3d2f09baf7e64ecd6ec6108b7ab819fee96aef99d1d"
+    },
+    {
+      "path": "candidate/src/validators/graph-validator.ts",
+      "sha256": "78e2679459e9cac8bb631d2ccc756f0c6060940f3364217ccc92189aa5a3a632"
+    },
+    {
+      "path": "candidate/src/validators/graph-validator.types.ts",
+      "sha256": "edee920014b4cfcd99af78a62f3c3e60915110791f2f4649177c713d9dd67d0d"
+    },
+    {
+      "path": "candidate/src/validators/numeric-bounds.ts",
+      "sha256": "760abbb3f99801e816d2e15f7ecea8feb0ac1e47feb4846d8520cf5d3c8ed2fa"
+    },
+    {
+      "path": "candidate/src/validators/option-no-op.ts",
+      "sha256": "952aedb4a8d98d77f9b1188f273634c63dfb2c482b3a6070e77e64bd9d4201c4"
+    },
+    {
+      "path": "candidate/src/validators/structural-reconciliation.ts",
+      "sha256": "3c74a915bd2b036bf1671cb46bb57f6ff697980fb3de2602fbffac5b4b7edb43"
+    },
+    {
+      "path": "candidate/src/validators/violation-paths.ts",
+      "sha256": "bac230bffeb328cd75dbd843bb0c707d20399f245e06357e5cabf80829a80e7c"
+    },
+    {
+      "path": "candidate/tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json",
+      "sha256": "36f120f70a075503ba017f15c112e62e52dce21bdf583a4d9bd142bdc619a654"
+    },
+    {
+      "path": "candidate/tsconfig.json",
+      "sha256": "5d956e1bb3f4483580d95e40c06da0f4a99e9ffb36c18ee6a370473c0b8a8b36"
+    },
+    {
+      "path": "candidate/vitest.config.ts",
+      "sha256": "f7bd7b1bee9b1781baa4fcb024a94bf9520e741248537493141fefdbdbe4e529"
+    },
+    {
+      "path": "candidate/vitest.focused.config.mjs",
+      "sha256": "139a77a98c503b59264b751173b7a6adf5dbc3a7c6b85d44acbaed9afa603717"
+    },
+    {
+      "path": "candidate-green.json",
+      "sha256": "5498784a31f8e262adee7229ce7260fe04c44bf70f22355a91f196be0dda5ece"
+    },
+    {
+      "path": "candidate-green.log",
+      "sha256": "ef887b6f58ed5ef9f974b1ac8a04099c2081c0a724166d33a78b187640b822ce"
+    },
+    {
+      "path": "cee2522-current-metadata.json",
+      "sha256": "b8fa73bbe725021d9c8567a9618a4d2a4ad75a591b7bbbfe3d8c59bbe40ddc96"
+    },
+    {
+      "path": "cee2522-prehandoff-metadata.json",
+      "sha256": "9c7de925fe04fbf948240f3a1202c92d83dbcdc61d0fdbca510c4a803d0985f1"
+    },
+    {
+      "path": "complete-imports.py",
+      "sha256": "21d7832173280da1bc59003b42aea535caedbb2c2e6f7d34319c592631693faa"
+    },
+    {
+      "path": "composition-5973046997.json",
+      "sha256": "c541a03a70fb5279af38b931462aea2dfa84cf1a751dd45871f4b4d070321b5a"
+    },
+    {
+      "path": "composition-base/src/orchestrator-v5/agent-lane/__tests__/what-changes-route.test.ts",
+      "sha256": "4a06353197632f4f6cd28339ebda11f49e307c9419c77686656a92a7d718537d"
+    },
+    {
+      "path": "composition-base/src/orchestrator-v5/agent-lane/method-turn/what-changes-turn.ts",
+      "sha256": "a68ee9b2f5a7c1e0fa688d44a5238bd6bbafd88ae5f22dc1f5ec207fd4353df9"
+    },
+    {
+      "path": "composition-base/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "sha256": "13adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca"
+    },
+    {
+      "path": "composition-base/src/routes/agent-v1-turn.ts",
+      "sha256": "62cd6c73ca7c2f6dbb9d1bede8c291dca59ed6f1af62fe2aa7bfbb31108b3246"
+    },
+    {
+      "path": "composition-base-4afa151.json",
+      "sha256": "4ffb2d898b44cd38a58ae1715a42a9acd90eb437436030cb0d2629c2b6ae705d"
+    },
+    {
+      "path": "current-tree.json",
+      "sha256": "770f7c52c463ce1c7b400d01c66b1a4d8d81cfaa388c2ed40b34f5dbd73c544f"
+    },
+    {
+      "path": "fixture-generation.log",
+      "sha256": "d1fef8a5b059fefb30a397a9da5ce784401aca3abf5c4bfb08126fe53b78abf4"
+    },
+    {
+      "path": "import-closure.log",
+      "sha256": "d8cac7c3bd1c5d50e8f3b55c10f36a94c2f49e17d848d2e9b99d86039a3fbc24"
+    },
+    {
+      "path": "initial-imports.json",
+      "sha256": "ff22e21a6e8cbd6fd2fca3790a66ee8189602451492b15f8facc8454749be082"
+    },
+    {
+      "path": "integrator-source/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts",
+      "sha256": "25c8addaf0545c6a61c852a1c4ec24ef81137bf9fc0057bdbd99eeebe128ed12"
+    },
+    {
+      "path": "integrator-source/src/orchestrator-v5/agent-lane/runtime/agent-tools.ts",
+      "sha256": "e4d9de37725df020e602b571d4fc6efe32422ecc9e025490cbefa01f2dc304f5"
+    },
+    {
+      "path": "integrator-source/src/orchestrator-v5/compose/types.ts",
+      "sha256": "3e0c64b537c5d3d3085dce2dda59d1040e871b7dcab23e8e59301045483f5b15"
+    },
+    {
+      "path": "list-runtime-imports.cjs",
+      "sha256": "f81636d3045226085eb655c6215cc06a2bdf88dbc32a7f520c3b07626c14e83e"
+    },
+    {
+      "path": "mutant-label-only-binding.json",
+      "sha256": "c7410da514e54794fae4dc48c1662f785bfd90958e18fc675baac2ae8613e68e"
+    },
+    {
+      "path": "mutant-label-only-binding.log",
+      "sha256": "2816e7d39676622e75f9e6eb3bfa4dff2cb32c6a10da75815fc32c97926ee627"
+    },
+    {
+      "path": "mutant-old-run-reuse.json",
+      "sha256": "66e1c3b9a47817ab8937d06210a13b0bb7ece256306eb9fd2f1ca45bba9cdfe3"
+    },
+    {
+      "path": "mutant-old-run-reuse.log",
+      "sha256": "eaea2ef499c9fd130c95ac98f33ce159463b1a90975456ee7bb8a269c39f034b"
+    },
+    {
+      "path": "mutant-silent-value-payload.json",
+      "sha256": "5e19622ee5335ee16255d3723c0d1cc29da4139125d1b8c1124325b8f223fdb6"
+    },
+    {
+      "path": "mutant-silent-value-payload.log",
+      "sha256": "c02757d40ccffead35c45af09d154b18b5d2056bf36d2830d2325c28795319f2"
+    },
+    {
+      "path": "mutant-wrong-direction.json",
+      "sha256": "26cb26d672677dc2de71a441d7df0b091424b691e859e2619c949732c35150eb"
+    },
+    {
+      "path": "mutant-wrong-direction.log",
+      "sha256": "8d2721969938be05392eaa94b324b697e758b7dc84ad86c8fa783cf590fa465c"
+    },
+    {
+      "path": "mutant-wrong-factor.json",
+      "sha256": "252484f2a6fb3f78f9fdf8c613942fe7cfc33abcf8ee3feddd739ebbf22f32b1"
+    },
+    {
+      "path": "mutant-wrong-factor.log",
+      "sha256": "422ee508ca89442ae32ce47961e14a365518cf7d1d40bd9f6b4a89418efafec6"
+    },
+    {
+      "path": "mutant-wrong-threshold.json",
+      "sha256": "0189966b774bebbcf979e955d9e308c9a659e055154377cec0e489896b953f68"
+    },
+    {
+      "path": "mutant-wrong-threshold.log",
+      "sha256": "575eeef57e23261a63a89f009eee32b38d069d69102eaca2ef550b4156cc3303"
+    },
+    {
+      "path": "run-mutants.py",
+      "sha256": "0f7ae9ae91b36e1be0d28a3dd1ca9d7d741bd17e06b67de9ca57b3ef0721f107"
+    }
+  ],
+  "portable_runtime_included": false,
+  "dependency_note": "Reuses fingerprinted resident runtime/dependencies; no install or external checkout mutation."
+}

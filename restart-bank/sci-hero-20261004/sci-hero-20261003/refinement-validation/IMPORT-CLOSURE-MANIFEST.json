@@ -1,0 +1,1905 @@
+{
+  "head": "11e8fe24ff289fbbb68e074bba22c89055e9661a",
+  "read_at": "2026-10-03T20:02:18.091986+00:00",
+  "files": [
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.test.ts",
+      "blob_sha": "b81225fc7826cc4e2e4565fd1b2f4535e262631d",
+      "sha256": "94ca780a61b5d201bd6deeb22d1582e0205b935bf596b58b8aabfc7fb9a8b9af",
+      "bytes": 7860,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.test.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/approval-chips.ts",
+      "blob_sha": "f92496afd8fb05d1bc438446de5a05f454e793bc",
+      "sha256": "57a28ca5bb3f11d36cf0a773441b778ebabfe1e5393e999d8b03dcb279bca8cc",
+      "bytes": 34665,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/approval-chips.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/guidance/reasoning-interventions.json",
+      "blob_sha": "daa2e6b7c0c9333ad86392d9caa2f813cb0669ba",
+      "sha256": "9d93844e20dfcf7525c3c93d4c9254a4f739fb7a0b302663019c606c8159178a",
+      "bytes": 102991,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/guidance/reasoning-interventions.json"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "blob_sha": "75c40f735dcfd5c16b451c0b1966ff75d0364014",
+      "sha256": "13adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca",
+      "bytes": 2988,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/boundary/request-extensions.ts",
+      "blob_sha": "d6d9ca03e4ba21d87c0003d9f2a7e6e369a070a5",
+      "sha256": "947571ee35357e24574d427191401f2b65e16dc756519376a41603d9279ba339",
+      "bytes": 20605,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/boundary/request-extensions.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/__tests__/fixtures/paul-run-17d1cd3a-next-move.json",
+      "blob_sha": "dc01a54cd42c32b47e0b05d5e3e78badb6aa99d6",
+      "sha256": "99e16bc8e5a26b71b5611821a9143abe55d9179455e9e460aff6fd9876d7bc22",
+      "bytes": 34609,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/__tests__/fixtures/paul-run-17d1cd3a-next-move.json"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/deterministic-value-update.ts",
+      "blob_sha": "5003b14d82a88d20f73e8862e535bf52580a3328",
+      "sha256": "f72b5ae6cef8016ff9eeb6a50f543fac7a09f5ebda6b308be0637696bb8e0db6",
+      "bytes": 96474,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/deterministic-value-update.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/graph-lookup-adapter.ts",
+      "blob_sha": "f3a7e768341850c631aaa211fbf7b021ebc96e45",
+      "sha256": "471830eb7f268f0a1e196dc8e8356a2768137fb350f85a4c450b11f47d8bfd32",
+      "bytes": 12520,
+      "origin": "/private/tmp/dl-seam-cee/src/orchestrator-v5/routing/graph-lookup-adapter.ts"
+    },
+    {
+      "path": "tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json",
+      "blob_sha": "9f1d9d102bb21d67bfaf52c88449fdde7d75d275",
+      "sha256": "36f120f70a075503ba017f15c112e62e52dce21bdf583a4d9bd142bdc619a654",
+      "bytes": 45679,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/decision-sensitivity.ts",
+      "blob_sha": "7ee9255b71b98bc3427a9215eb68d33a3fb6ab61",
+      "sha256": "9179542938c06844919fd87a02139cd0656543b801fb6d4fdfb68107a6775a4a",
+      "bytes": 14565,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/decision-sensitivity.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/goal-scope.ts",
+      "blob_sha": "ed45febc080a09181abe19d57efdaeb2a384e6a4",
+      "sha256": "ef46d33a2d1a53ab24c05cd98c08283739a97a31edfd98b9a478210da3079cc7",
+      "bytes": 14390,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/goal-scope.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/guidance/index.ts",
+      "blob_sha": "f77395f5a442fffdc34d8003ce7dd26956a84695",
+      "sha256": "0c920ee3bda62c7d27616cacf1e3497e89cacc1d6fcd3aac29c5e889423e0049",
+      "bytes": 478,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/guidance/index.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/identity-card.ts",
+      "blob_sha": "4480aa3fb2d66c400a4180337c5f7631d340385a",
+      "sha256": "5305b02ad644e1121a5231024c1092fc6073fb983295727b7c1e66c4ca6f597b",
+      "bytes": 8138,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/identity-card.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/method-turn/method-turn.ts",
+      "blob_sha": "f83622740cc47ffbdd6ca18f42bbccf1d93c09e2",
+      "sha256": "b1f756687493560f943144673480ab8ed24296c008c47c4d798f04a34dccdf81",
+      "bytes": 24077,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/method-turn/method-turn.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/run-explanation.ts",
+      "blob_sha": "514701cf9c90f3d686638f4955d9fc8c29a94b87",
+      "sha256": "06c0afaf1b0e0876eb8989d135aa8664e47923cd1cb92107c80c01ecad0ad4c1",
+      "bytes": 3757,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/run-explanation.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts",
+      "blob_sha": "d2b743921a45d0e0c93eb3cfc7335af3ecccfe58",
+      "sha256": "89aa9fc8d080c45b75f68bba980e381b57c87f7e1abecd69caf934a343c87521",
+      "bytes": 18885,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/turn-context/guidance-signals.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/edit-clarify-response.ts",
+      "blob_sha": "64fc64bba3421895efa4503fb268468816d7a39c",
+      "sha256": "37150f0e6bf752a1d9f46b4d33cef6f462c233b06c0f400bbef508465f831cb7",
+      "bytes": 18315,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/edit-clarify-response.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/format-factor-value.ts",
+      "blob_sha": "660beb8d4b28f4e4c2c70cc3310b75b5aa960207",
+      "sha256": "c944c4d698e019735cbcef60a6bcb33465772bc720fb0967c49559bfc38fd2a6",
+      "bytes": 8474,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/format-factor-value.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/cqe/pre-normalise.ts",
+      "blob_sha": "0b5a8aabf4411b0a022977ff310b5b01cde61a16",
+      "sha256": "8c30678a6c7fd13001cd9447fba7907ff052650fd8a6eaec5c7b9382690cde68",
+      "bytes": 2759,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/cqe/pre-normalise.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/cqe/rules.ts",
+      "blob_sha": "7b7dfa4887911993fd9b45b731f6e0a72c59f7c7",
+      "sha256": "4d6bc41a7d928704e1868efa35a10d1502d3edebc90bc6fb44be146b1d2f4e1e",
+      "bytes": 47326,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/cqe/rules.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/cqe/word-numbers.ts",
+      "blob_sha": "35386967a543a4dccba81ed9afa2a3fa07877e44",
+      "sha256": "6b182517b75bf5764503ed28347aa2ed9e256eebd8e3344a6f2be68be6e1949f",
+      "bytes": 6588,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/cqe/word-numbers.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/format/edge-strength-bands.ts",
+      "blob_sha": "1cbba98f1caa309098f0474226149ef228a657b7",
+      "sha256": "b8adbe2f83bba287649d02cb415c70aa1f24e7243930aa078737ba92ac40aaa7",
+      "bytes": 7536,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/format/edge-strength-bands.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/mutation-warrant.ts",
+      "blob_sha": "1e88200c12de92e827d5aae1f6d5b1a2509720e8",
+      "sha256": "60ae4ad76d22a9930f4bd6afe20ea9315fd4c24d9b11fd699771786e6779486c",
+      "bytes": 69353,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/mutation-warrant.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/option-intervention-guard.ts",
+      "blob_sha": "319c437c64ea4ba8ddc544606b92d1d9df9674da",
+      "sha256": "fca9663c61551f4bc4399555cb5c3b36c6b17d2fdf09f8bb65d308f4e44428d6",
+      "bytes": 18903,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/option-intervention-guard.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/validator.ts",
+      "blob_sha": "6cbd835ead9d5c4b6da9d6ab1d3f4e5a8ae43847",
+      "sha256": "8963a9533c868e21a5a2c14c01a3c95ce95699d37f3547e8c37792eb3c28d666",
+      "bytes": 45714,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/validator.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/add-constraint.ts",
+      "blob_sha": "cfc7806ad16788e1012bff2de409b44e2c603080",
+      "sha256": "92b2df74266c7c394b5d82b75e7e2686ced32a1f9c805509d078e043ea4084b8",
+      "bytes": 101261,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/add-constraint.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/format-confirmation.ts",
+      "blob_sha": "5c5c572b9120aac7710b1c6eb9acd7f83e1c69bc",
+      "sha256": "e1a428317c6c6572cb8b50f14af777cba0a4550dead29b70f464a6579cc4d09f",
+      "bytes": 35767,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/format-confirmation.ts"
+    },
+    {
+      "path": "src/utils/telemetry.ts",
+      "blob_sha": "84dbdc078b00c909c473c1beab6a7af4f98b698d",
+      "sha256": "81270821728983de7503a6114fc6d00a11da3d6a2c7365afb46fd9356a8a2ab2",
+      "bytes": 235595,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/telemetry.ts"
+    },
+    {
+      "path": "src/validators/numeric-bounds.ts",
+      "blob_sha": "6818d58d5a644321bb98fc58369f7d91dbb3a500",
+      "sha256": "760abbb3f99801e816d2e15f7ecea8feb0ac1e47feb4846d8520cf5d3c8ed2fa",
+      "bytes": 20264,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/validators/numeric-bounds.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/index.ts",
+      "blob_sha": "75b4957e8d8b12ffd8d82ad77bec29fd61ed97e8",
+      "sha256": "bbfc8c2ab549afd1d92d2606e21747ca2994a422bd99347f1e11eda4c8a814c5",
+      "bytes": 1612,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/index.ts"
+    },
+    {
+      "path": "src/cee/constants.ts",
+      "blob_sha": "56a875b6ba1043c7440b76b92bb2d55726eeda08",
+      "sha256": "d9313232f61bfc39424764039e966e42e1ec940bfa2bb986f4ca9aa4bd225fd0",
+      "bytes": 6717,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/constants.ts"
+    },
+    {
+      "path": "src/cee/draft/records/unit-scale-class.ts",
+      "blob_sha": "28d70a63287d26ab33b8330f37953459ab45f21f",
+      "sha256": "47c0ac407feb60156941727962eb637a3f6437dca1c2a49a926dae40b98014e0",
+      "bytes": 21730,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/draft/records/unit-scale-class.ts"
+    },
+    {
+      "path": "src/cee/factor-extraction/index.ts",
+      "blob_sha": "a695c9196aee476663e087425eca5c7fae3a2095",
+      "sha256": "e9121200ea5947d91c912a78dddaa732d3a79bf00bdc1b0c8ad9852a342a49b1",
+      "bytes": 134330,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/factor-extraction/index.ts"
+    },
+    {
+      "path": "src/cee/factor-extraction/stated-level.ts",
+      "blob_sha": "9b0a274c456d71d423cda262de4bd9950e141b33",
+      "sha256": "3124550400f48ded3cab38ed73972cb83251f54e91156a02028a5f5f210c3e5b",
+      "bytes": 33165,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/factor-extraction/stated-level.ts"
+    },
+    {
+      "path": "src/cee/graph-readiness/obligation-provenance.ts",
+      "blob_sha": "622ea087e3fe0a64cb47d34adb0103e05023a3a0",
+      "sha256": "ce0c69bb4f280d497cf6cbbdf2fdd06c71299b9c8a4a8720ba421899877e3bc2",
+      "bytes": 33708,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/graph-readiness/obligation-provenance.ts"
+    },
+    {
+      "path": "src/cee/magnitude/link-sizing.ts",
+      "blob_sha": "62d84f488fd66529de7456ee7096aeff0f82da32",
+      "sha256": "32fea196f6b9b4ced633e479a357604e218abd6e96f072a732e6aaf80fbe33e2",
+      "bytes": 6878,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/magnitude/link-sizing.ts"
+    },
+    {
+      "path": "src/cee/structure/index.ts",
+      "blob_sha": "db2f99e030cd19dbe27962f3394dd0ce9859ea98",
+      "sha256": "1e23d104799a226bc66b7e48a1d809a78308e47c2899cd5e1d2d34f08ae523a4",
+      "bytes": 91032,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/structure/index.ts"
+    },
+    {
+      "path": "src/cee/transforms/provenance-display.ts",
+      "blob_sha": "1d2c97b5cca71c2484661032b2a6fd7b77b7df6c",
+      "sha256": "7f814c9a68c25ad74ada54ee3f0bc012fd277e61aa0cade0c07040ecaa109ac0",
+      "bytes": 25135,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/transforms/provenance-display.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/admit-constraint.ts",
+      "blob_sha": "8fecdd232896833232fd6afdef2009790d8135ce",
+      "sha256": "3cb42c09b46a526a1e0b7e3035b81fbe2547b15349089d78a3e791070bbd6976",
+      "bytes": 36760,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/admit-constraint.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/goal-certainty.ts",
+      "blob_sha": "3927f8b42d01e482ef53d668810b3d2f6cc14609",
+      "sha256": "1969938eca5ee13354ce220bfcc5018085b250a9da4ff3aec9de44960f607c8f",
+      "bytes": 31949,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/goal-certainty.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/guidance/method-turn-check.ts",
+      "blob_sha": "431a6178b3d6d754211e811fdd24e26f367526d5",
+      "sha256": "f2768e4ff0062e370d08e5cdd85b86dea24c49ff4e1bb145f81d9be3da9b7ff9",
+      "bytes": 14028,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/guidance/method-turn-check.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/guidance/plan.ts",
+      "blob_sha": "57d64606ad690df7f343fd01b04466633bfe2a7a",
+      "sha256": "031168ab4a944445be44f70743ef223ae9daa8a670d6a21bb0651a5c0f60d8c8",
+      "bytes": 1084,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/guidance/plan.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/guidance/policy.ts",
+      "blob_sha": "807b774961f3184e52562286887e60723b6be78b",
+      "sha256": "5bfb7a5e28415117f458a9ba6b9ddcb06c6124a7df4ca8b6ed15c2cb5b839c46",
+      "bytes": 74291,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/guidance/policy.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/guidance/render.ts",
+      "blob_sha": "1d7aee9d1b69c0491ffb02cba18560acd90cc032",
+      "sha256": "98c185c66a28f5653c1554e1eb72e713f1be09c7e41bad79779a17b6d1775880",
+      "bytes": 4414,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/guidance/render.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/guidance/select-strengthen-placeholder.ts",
+      "blob_sha": "0a8c8d3330d24b082918a12a0f2ea5b6c8b00915",
+      "sha256": "b88106ec1e6bba687789d71bef6baacee179a24ad0a315fc686f78344684913c",
+      "bytes": 5086,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/guidance/select-strengthen-placeholder.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/guidance/select.ts",
+      "blob_sha": "f153b6b394508bba77024b64ba9985b62f7e62d2",
+      "sha256": "1cf3a9fb5ca1044040b82430e1ded7ffbcabea3e44216fd97a23331ca1dd489c",
+      "bytes": 15241,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/guidance/select.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/guidance/state-key.ts",
+      "blob_sha": "1efdf229aca2ff107946aae1b0741663bf07c8b6",
+      "sha256": "34a777fa9ee1966798a5cabe316121392d2c8dad10e7cb2470ebc0e25488b88d",
+      "bytes": 974,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/guidance/state-key.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/history-store.ts",
+      "blob_sha": "9559129716fbbfb99f4a697dca6ef4beaf08e749",
+      "sha256": "2a6bd665ef23de891113b3215f7b97bb7fda5b759d0af6d44b9bf1812cb56be6",
+      "bytes": 24782,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/history-store.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/limit-frame.ts",
+      "blob_sha": "b0cadfa818b2670d8de7f288bc165b2829242401",
+      "sha256": "ce35d161ba309a1e7a5cb91180337c740262c8e7b987279ef531db8e698c4793",
+      "bytes": 5325,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/limit-frame.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/limit-operator-words.ts",
+      "blob_sha": "674d0e593290e0d1254fed7a714133dde6c42755",
+      "sha256": "57a07045ef1f3d41fa7419ebc60604bbb8873017693fc01ae7e98c73468c2114",
+      "bytes": 1558,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/limit-operator-words.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/normalising-goal-frame.ts",
+      "blob_sha": "583af023464f9543436071f9e55de91bf28158cf",
+      "sha256": "3fc955592dc82193154004ae6f48a35771d278e57d1063e54c4228076aea8b1c",
+      "bytes": 5904,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/normalising-goal-frame.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/reconciling-product.ts",
+      "blob_sha": "0b718a034f0e3ecc6388bef4b20031434da8b219",
+      "sha256": "52a6986fdf326cbe7a303974398273a3bf54f7482ade043e42276f0e131bd378",
+      "bytes": 25714,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/reconciling-product.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/refit-frames.ts",
+      "blob_sha": "c5ba50032c874b859cf998ad957d56b48ee97cbc",
+      "sha256": "20a64016af4fd9255331c558be5296ff928ed3ec4747960dac8ab3f7c02e6d4e",
+      "bytes": 17170,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/refit-frames.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/rerun-explanation.ts",
+      "blob_sha": "fac2c9f76aca2aaf9d7cd8dcc0b867eb9f1621d5",
+      "sha256": "a80a64ee2b8955e13697b1b932099da8fe3cffae91bf2f7ce0c5e5ea3c8db86b",
+      "bytes": 16675,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/rerun-explanation.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/say-figure.ts",
+      "blob_sha": "eb5f76279e04a4013d220a5118f596100c3e17d0",
+      "sha256": "bc5d86428e7b6cb48aab2ac41a82cebca82fddd2cd0ac5dc25470ab95865c524",
+      "bytes": 6939,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/say-figure.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/science/method-science-context.ts",
+      "blob_sha": "ee3ca89c4374149bcf63a14571385e59a9ea20c5",
+      "sha256": "8a3491a82fbb55688e64b7bc0c71f5ccb15e45e7ff7d3a945cbd678aa079beae",
+      "bytes": 19352,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/science/method-science-context.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/stated-by-user.ts",
+      "blob_sha": "dfd17fd77a9a40108f1394d00992a3c9bf70baa9",
+      "sha256": "274ca95f610178442382249d6715b601afe48df2eb955f229390672717b03153",
+      "bytes": 78821,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/stated-by-user.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/strengthen-press.ts",
+      "blob_sha": "515debab5b72dd417c21d33d33a71b4dd72302f3",
+      "sha256": "709d9b7e7d85e171542a26860652d08b915180520cd29f6a5af1c59a6d8dbe70",
+      "bytes": 5189,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/strengthen-press.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/structural-facts.ts",
+      "blob_sha": "eb88b3a786b09bff5a10a337570c603168d7e1eb",
+      "sha256": "780e973a134fc82ec68a878a26916ba882049ba1e90839ca3c3f93fffe8b4d1b",
+      "bytes": 11797,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/structural-facts.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/constraint-gap-copy.ts",
+      "blob_sha": "42d79e4b5e815fcfe0a8b98ef63fffd33e14c1b7",
+      "sha256": "5d87d884b957485490e4f8e20472b65939d734a5a51792902589308d70a66d4b",
+      "bytes": 10446,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/constraint-gap-copy.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/select-factor-evppi.ts",
+      "blob_sha": "8d8936e2418bcae2faea7bd7f5c4676630cad256",
+      "sha256": "aa7bf6d694d33af1f8ec7fd0f65abfd86914f8c771f650ae6470dd6964a43dc0",
+      "bytes": 14065,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/select-factor-evppi.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose.ts",
+      "blob_sha": "5780663f98300ebfca339b99f5058e9dbc83d023",
+      "sha256": "2295339bf1c708b6ecb9abbdfa201db76f98c38b8ad8a410ca9e7fd88d9eb481",
+      "bytes": 103446,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/helpers.ts",
+      "blob_sha": "def8bc81a7dd709b4a4b3b310d1e7be1d11c34f5",
+      "sha256": "9d77654c74f87c4e91d1d2005a1c8fcdd2079a01571079c901d85b1391916068",
+      "bytes": 9012,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/helpers.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/leader-licence.ts",
+      "blob_sha": "8c5221adf0860c55717222ce6c8ec24b672460b9",
+      "sha256": "da22daff633408d54cb138f5d18daf10e998b9fcfbf93f2013a67b34f19bee86",
+      "bytes": 5287,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/leader-licence.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/analysis-interpretation-identity.ts",
+      "blob_sha": "885dcf6a14c4d5384a678b270bd0a2ca6427820b",
+      "sha256": "54ce2ec644c023d1e2b733be0aaa09f96449fe0f8b68ee6f70ee73c5ac4a705d",
+      "bytes": 9494,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/analysis-interpretation-identity.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/analysis-signals.ts",
+      "blob_sha": "4221189430adfaa35f70bb599f890368beee781b",
+      "sha256": "70df882d6be0d2aac26fa21766af7b67a563cdca00c42fdda7587390dabdb90b",
+      "bytes": 33498,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/analysis-signals.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/derive-stage.ts",
+      "blob_sha": "d051e9f03ac21fec64d604fb488fdd34913b09e0",
+      "sha256": "68929385ccb61177d1c715d523e4c5579657933e3a86cedc7042f992650b2407",
+      "bytes": 15890,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/derive-stage.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/flip-threshold-rows.ts",
+      "blob_sha": "207905107ad8d4034827db6ba20f0209828c608f",
+      "sha256": "291de9d7356280f1b6767d4cf31a366107be75e1c57a540f5d8761e65802c56a",
+      "bytes": 21960,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/flip-threshold-rows.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/option-identity.ts",
+      "blob_sha": "1682f7164bc4d2f16b8f0e1b159f9cc661baa98a",
+      "sha256": "c97c3e05961e9fdb783b7db9d744f71f02125daa2b394c3ff10dba230d1936a4",
+      "bytes": 8938,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/option-identity.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/turn-referents.ts",
+      "blob_sha": "b2ada91ae93225063c57177c73115a8021521e2b",
+      "sha256": "0ef9b4b0fcaefe57ad8e44bd5b759a9cc538b5d105ee8e3730088d68303e6c3b",
+      "bytes": 20652,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/turn-referents.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/format/influence-bands.ts",
+      "blob_sha": "56b8928f25a62941ba530048fe9d41717ffb56bb",
+      "sha256": "f338d5403f2d86e7439ea143b0e80963950c3edf97050d1deecf6f712615951a",
+      "bytes": 1587,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/format/influence-bands.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/analytical-intent.ts",
+      "blob_sha": "75d4806f9bcfca2c00c500d0c2cf851bea42bd23",
+      "sha256": "c39648cc968d0482545a0d67c96d95283658fcfeed3d4e8649cdc50e3bba94a4",
+      "bytes": 91316,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/analytical-intent.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/analytical-question-guard.ts",
+      "blob_sha": "5858dae6110aa6647638e5974a410c2a55e224ae",
+      "sha256": "3db7ed402c2dc89b9884cba29f254769423cafdf3333036fa15e3007b1538839",
+      "bytes": 10682,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/analytical-question-guard.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/constraint-mutation-signal.ts",
+      "blob_sha": "fc28ba54730e8038568f7f22dbe2815954dde9bc",
+      "sha256": "631debec06981b51c2086b9ef630ddc00ea8d8008985aec6916a63e34ffdf45a",
+      "bytes": 4609,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/constraint-mutation-signal.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/ordinary-text-authority.ts",
+      "blob_sha": "a782fc52476c239c2c15c73ead6cb624233efb7f",
+      "sha256": "7d4403af0e03a3f601f6fb52b67315ad1a4e92b790aff4483f2b69fe79254cca",
+      "bytes": 11715,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/ordinary-text-authority.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/state-query-guard.ts",
+      "blob_sha": "0f7757ac5dd44ec79c0e6b748b835d216aef9030",
+      "sha256": "559c1610e9f6e09bec78d983795f61589206ca9ae01e23fe434fdaa3ee0aa3e2",
+      "bytes": 45663,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/state-query-guard.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/session/pending-action.ts",
+      "blob_sha": "b3bfa06f188f572d7f4947665e9cfeee51a159b6",
+      "sha256": "7aef7295d8a64025ff1e0d0a64380e5a1adb93611ad6ce27eca73d1752c7db6d",
+      "bytes": 89785,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/session/pending-action.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handler-errors.ts",
+      "blob_sha": "103bf114016d9ad5f68d8299afe011305a617c77",
+      "sha256": "9f8c94806d72680315b55b0fd835ee86c1fe4096771296aa61408945e02b385b",
+      "bytes": 11099,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handler-errors.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts",
+      "blob_sha": "6a21ac78d0bdbdcfc618450605f7b1db7c64ca12",
+      "sha256": "c450f3105b71eebb7806aa58b96dd6b2ab5a818b3fabc477e39349e148910c76",
+      "bytes": 12426,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/apply-graph-mutation.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/constraint-target-alternative.ts",
+      "blob_sha": "506a31d279447364132bac327c5d7c272ae93c99",
+      "sha256": "8d45714946522ea51cf87a073e0484a6c7b3bf83b9b1c8dba6e05e8b8846832b",
+      "bytes": 24208,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/constraint-target-alternative.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/constraint-write-admissibility.ts",
+      "blob_sha": "145bbb5f9038c377b5b440dae71237bf42decdca",
+      "sha256": "a8516b3e354fcbc85d5fa077ce20e347e893a3d43ac341a8f8625bef53d7f45f",
+      "bytes": 16534,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/constraint-write-admissibility.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/error-boundary.ts",
+      "blob_sha": "c2d7e65d430113ae511867c94ae2974e7cd54a1e",
+      "sha256": "be4ef51008191cc98285785b398e02c2f9c1d42876b12d966a992b7ff99defa6",
+      "bytes": 1876,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/error-boundary.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/errors.ts",
+      "blob_sha": "cf150a42fc1959a3806a74c1d0e53125170542d5",
+      "sha256": "c29365690d90d8c373eff1a95193833289cb5ff597aa1aba5c58ebd32007d0da",
+      "bytes": 1098,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/errors.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.ts",
+      "blob_sha": "39fe056e9bb34ea1add1165d7b7fdbde3071c07f",
+      "sha256": "47d512e11a69ce26d8bae7500e9e5754a4def51cd7a24f47d66d0e7c872112ef",
+      "bytes": 69472,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/user-guidance.ts",
+      "blob_sha": "bef69e009480dc46270ceddbec2400ac5ccca431",
+      "sha256": "233133fa3680f2cd25f964c59e90c4f925ff4ce9dab52517c23d6fba05019c0f",
+      "bytes": 2839,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/user-guidance.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/option-participation.ts",
+      "blob_sha": "08c051d06e397ada8a5e3a9c4e10c9afdb06f901",
+      "sha256": "acee1d10779080e5c63318af7097b466aa4ecbe6be137b3d63e9fdaeb748e268",
+      "bytes": 1834,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/option-participation.ts"
+    },
+    {
+      "path": "src/orchestrator/context/option-result-source.ts",
+      "blob_sha": "911209e09330cc64a58beb7e31af8e90ed3757ee",
+      "sha256": "b3111c54e7ff8ab0ad965941636766d7755f53ad01902034beb12c9f7b10a97b",
+      "bytes": 15589,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/context/option-result-source.ts"
+    },
+    {
+      "path": "src/orchestrator/context/stable-stringify.ts",
+      "blob_sha": "2364581404bcaf4226b2d5c80bd43cd50de20fe4",
+      "sha256": "33e5b5be9ab7128665d10e712a73ee7fe81fffd48d46f154034ea0fde43d74e5",
+      "bytes": 1792,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/context/stable-stringify.ts"
+    },
+    {
+      "path": "src/orchestrator/routing/edit-graph-intent-regex.ts",
+      "blob_sha": "51581bcddab50ab2353b84e0f2afaf3bdcc06c36",
+      "sha256": "90d0e2cf6c9f9956ba1813a53426b48333810db2244b4494eb5d8b6eb411b320",
+      "bytes": 2706,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/routing/edit-graph-intent-regex.ts"
+    },
+    {
+      "path": "src/orchestrator/tools/analysis-ready-helper.ts",
+      "blob_sha": "02edffb0d51472da139b2d2c31339e70db59d701",
+      "sha256": "c5610f06a91fd6d053ab3c9128601e9a5c12fca37c8d2d7a6a8f31a24b0fe386",
+      "bytes": 115500,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/tools/analysis-ready-helper.ts"
+    },
+    {
+      "path": "src/schemas/assist.ts",
+      "blob_sha": "bdfa22d9daa68f62d31dbe8e8def6141d4bf38cc",
+      "sha256": "fdaff1b627746c72923d834e3a15a6956c1384ed9173e43c5fe53062815242a8",
+      "bytes": 34954,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/schemas/assist.ts"
+    },
+    {
+      "path": "src/schemas/cee-v3.ts",
+      "blob_sha": "9a16ec27d95a3f9dde73831798f3694e414587db",
+      "sha256": "9aaa66ded50c062d5f35d44c7047c909b8f446e53b50f8f0a5287d1191b1692d",
+      "bytes": 78818,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/schemas/cee-v3.ts"
+    },
+    {
+      "path": "src/schemas/goal-scope.ts",
+      "blob_sha": "4add58fd3a4525d047cae534332ceaf1970f8ec3",
+      "sha256": "de7ba844d36977d579ae5aee7d870550420d0c24dd3d2b41ea6ca6cab06942c4",
+      "bytes": 3034,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/schemas/goal-scope.ts"
+    },
+    {
+      "path": "src/utils/currency-alphabet.ts",
+      "blob_sha": "3685ef02c919336d99df7d88c208f103fbb3e88f",
+      "sha256": "32b396c15eb04a351e65bcc103981a6d4db202134d1774a2641c3386ca92510d",
+      "bytes": 4771,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/currency-alphabet.ts"
+    },
+    {
+      "path": "src/utils/goal-threshold-cap.ts",
+      "blob_sha": "61dfb8842196ed86fe32077d0abdce06c432a72a",
+      "sha256": "02bf56a559b9ee0667ea00bcb38b6f1c40291b06f6122097182c86b4e3624689",
+      "bytes": 12371,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/goal-threshold-cap.ts"
+    },
+    {
+      "path": "src/utils/logger-config.ts",
+      "blob_sha": "d2c286178d8dc472169f21a0a8ceca2f7b19a216",
+      "sha256": "459d8ad40858962e785d30b53e6318b1a3a77cca36eef9bfe6040bb40cc775d9",
+      "bytes": 19213,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/logger-config.ts"
+    },
+    {
+      "path": "src/utils/reduction-framing.ts",
+      "blob_sha": "25e7d7cc18e7767c03aa521ec4ef1de98126e39a",
+      "sha256": "f65d5fdc450ac9c3fa4b2806f29d4b6b8351424c25af6a41611d27f7bacaa79f",
+      "bytes": 8637,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/reduction-framing.ts"
+    },
+    {
+      "path": "src/utils/response-hash.ts",
+      "blob_sha": "c6c5751fd8fee13de1d18b8249448a24bcff60b4",
+      "sha256": "d986bbcc423e2aa63ac1b72af9c8eaa2853276304dfcc8deec5a5fa699d4ae00",
+      "bytes": 3745,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/response-hash.ts"
+    },
+    {
+      "path": "src/cee/baseline-identity.ts",
+      "blob_sha": "1c0be64da7c77cd5577517d5bfedda62ee3ab02d",
+      "sha256": "58322df8c553542e4ddd4759f4d694cca164acd1afa2dcbc269ce4311921f4a1",
+      "bytes": 2757,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/baseline-identity.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/constraint-display-name.ts",
+      "blob_sha": "d72ce5b0b4e1966dfed8fd92fbe43c62efbd3402",
+      "sha256": "f8c596fc2eaf38972d80173ccc200c5464fcc2a63e6f43272f956ea8813026eb",
+      "bytes": 9002,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/constraint-display-name.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/constraint-frame-evidence.ts",
+      "blob_sha": "6b6cdc7dc91a4a25ea6d27becc14370bd3a27612",
+      "sha256": "81d1ef65dd2a9b3aa8950ba0f6ac9f021989d85c013eb7d13bfad82b4c9e9a6a",
+      "bytes": 7827,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/constraint-frame-evidence.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/deadline-extractor.ts",
+      "blob_sha": "8427368c28d1cdc7f5a8f34437e3e4504f3efe65",
+      "sha256": "1095326172ce56ed7dc87a519b8ac24bf43a9bdee332e030dc71b4e69520e097",
+      "bytes": 10063,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/deadline-extractor.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/extractor.ts",
+      "blob_sha": "1e807ba77abfef2a34740c27f1e2936d27454ebb",
+      "sha256": "3ea39bf2b8b508086126e17a9767053aacb154b55abb48aa61eee32111ff1b5b",
+      "bytes": 114403,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/extractor.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/node-generator.ts",
+      "blob_sha": "8298614974b3bffabf66553fe52e5387750465ae",
+      "sha256": "3b7c672a0e4473d21017a192a7228f78a945f6761cba5ce609f6a615f35582b5",
+      "bytes": 8518,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/node-generator.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/qualitative-proxy.ts",
+      "blob_sha": "a12b7cb3ec38a72802a294ef3cbb18d43acb0af3",
+      "sha256": "d4ccbd75b83ce54daf2909daea0415450290ac44b0d5eb0165e9f87004281697",
+      "bytes": 11023,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/qualitative-proxy.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/risk-polarity.ts",
+      "blob_sha": "394eb182b26d66f612da3932a9919e15019ed078",
+      "sha256": "f01c37b0164d2537c42414cbb09e82b8ab70d1a7439f6ca7ee03a83a086cc7da",
+      "bytes": 18006,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/risk-polarity.ts"
+    },
+    {
+      "path": "src/cee/context-integrity/brief-audit-answer.ts",
+      "blob_sha": "3546b4e6de4d45ee72c819b14aad2c4491c206d7",
+      "sha256": "c4f6136d1a3b8b8f0944a16fc52e28d55f8f995aee33c70017484ce7bb4a9016",
+      "bytes": 41940,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/context-integrity/brief-audit-answer.ts"
+    },
+    {
+      "path": "src/cee/context-integrity/stated-role-vocabulary.ts",
+      "blob_sha": "1154103acd6572ac49e337359d4103edee826629",
+      "sha256": "795442709d698cda5bf442305d97d508d41b3209d376243f8d73214e93b167e0",
+      "bytes": 3871,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/context-integrity/stated-role-vocabulary.ts"
+    },
+    {
+      "path": "src/cee/context-integrity/structure-origin-answer.ts",
+      "blob_sha": "c14952fde3b43e4d533239c75af52dbade6cb433",
+      "sha256": "a75dd0c3e1105d18b5cebc3759db15a62abf750ef31d9f1f9b542c42b1e30625",
+      "bytes": 40889,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/context-integrity/structure-origin-answer.ts"
+    },
+    {
+      "path": "src/cee/draft/records/objective-label.ts",
+      "blob_sha": "e1ea98ef822e124a406fc5cb5453dfc407ef03f8",
+      "sha256": "c065f2c20c96370d8125b57ac0e56c726fc8f1afd097c49f432b8405618c5dff",
+      "bytes": 72257,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/draft/records/objective-label.ts"
+    },
+    {
+      "path": "src/cee/extraction/numeric-parser.ts",
+      "blob_sha": "9169689193b51630f9f824b4de315ee5480a8126",
+      "sha256": "5e3e9eba40c2b161aae2d0c3374d45f21b93378e906d9874bd86bc2ef8e79d91",
+      "bytes": 38593,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/extraction/numeric-parser.ts"
+    },
+    {
+      "path": "src/cee/factor-extraction/goal-baseline-admissibility.ts",
+      "blob_sha": "c2063df9eb6037ea9bb2c42b2e5d43eb7a810a36",
+      "sha256": "16f3f1629d20a91d05793e222ee949e43f5dd5e73f9a978b408007c91a17021e",
+      "bytes": 5998,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/factor-extraction/goal-baseline-admissibility.ts"
+    },
+    {
+      "path": "src/cee/factor-extraction/llm-extractor.ts",
+      "blob_sha": "0fc8a233c5151716853bb975ff427df7992e7c06",
+      "sha256": "4799953dc1d9139907932d63976878ff4f9a154f8735578361fc1035620b9d28",
+      "bytes": 11729,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/factor-extraction/llm-extractor.ts"
+    },
+    {
+      "path": "src/cee/factor-extraction/merge.ts",
+      "blob_sha": "5365abd0f7b6292c226d3dfd830ac2cfdebcb07f",
+      "sha256": "faf41ae4d486ace738ef1b7e0137c64f0da3bee026618b4ed22a18c8a74ee975",
+      "bytes": 11795,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/factor-extraction/merge.ts"
+    },
+    {
+      "path": "src/cee/graph-readiness/identity-frames.ts",
+      "blob_sha": "bbc6cd09a4c616a9a85286ea6dfde0f5af022289",
+      "sha256": "a84c88d5f6b1dbbfe7297f634a2a48daadb77769482980c3e02193218451de15",
+      "bytes": 3126,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/graph-readiness/identity-frames.ts"
+    },
+    {
+      "path": "src/cee/magnitude/link-effect.ts",
+      "blob_sha": "dc6354b41cb1bf30865c6a8ee23fa884ca065000",
+      "sha256": "6a31443b6f687c8f9c5136f6586cb14397feecf424b46e3f870b527cba3f7f6c",
+      "bytes": 33230,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/magnitude/link-effect.ts"
+    },
+    {
+      "path": "src/cee/provenance/stated-amounts.ts",
+      "blob_sha": "e0a52011b6c6922ca6867a0ad7bea35dfe32b9dd",
+      "sha256": "993ee502fca6b81283d26880df5d899f6b972bbfb9e5fe3a8433906acbb4b77f",
+      "bytes": 33248,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/provenance/stated-amounts.ts"
+    },
+    {
+      "path": "src/cee/structure/compound-goal-label.ts",
+      "blob_sha": "a08bc28e80d528175faf89ee7692ec4a07a494d8",
+      "sha256": "b2d80e035689d25e005bfd0cfdf193b5edb377ec3826704efde0fb49fc5c03c7",
+      "bytes": 7719,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/structure/compound-goal-label.ts"
+    },
+    {
+      "path": "src/cee/structure/goal-inference.ts",
+      "blob_sha": "acf873722fd8c2e5564bd70556d1710afb5e4231",
+      "sha256": "f87960d3edff50ad6f2f1102eb4481ea27b85ad242c2b78db1925c50edae4576",
+      "bytes": 13473,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/structure/goal-inference.ts"
+    },
+    {
+      "path": "src/cee/structure/status-quo-patterns.ts",
+      "blob_sha": "3bb297d83d7d8f50c548c5b98c946d7176cb8913",
+      "sha256": "8f651eb108e23ab2f7ddbb7e55db8ecfa6a02c36f9c201695b4eb94836b3306b",
+      "bytes": 2013,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/structure/status-quo-patterns.ts"
+    },
+    {
+      "path": "src/cee/transforms/analysis-ready.ts",
+      "blob_sha": "0a05f37f3c93b8d7c1d642ac89d066665f6bc77a",
+      "sha256": "571b1dcb6ef7734ab7bcf68fa213e3b021f811e5c32cc29b544e26c8558cc6ad",
+      "bytes": 86373,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/transforms/analysis-ready.ts"
+    },
+    {
+      "path": "src/cee/transforms/option-status.ts",
+      "blob_sha": "ce0d67b8ae2498e1dfc60609130c400cb0234808",
+      "sha256": "2f48a9e12f05d8993269457b20275f59b60a22ed1f82cab330cc36c0d6a565f1",
+      "bytes": 24899,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/transforms/option-status.ts"
+    },
+    {
+      "path": "src/cee/utils/id-normalizer.ts",
+      "blob_sha": "438cc95b80a011272e975f2caaae1b3f12aad0cd",
+      "sha256": "c68fc73f5b58c5495abba14c58566a44d4507a5f1cadb1d203065d13da4e8ac4",
+      "bytes": 5225,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/utils/id-normalizer.ts"
+    },
+    {
+      "path": "src/cee/validation/classifier.ts",
+      "blob_sha": "6a9b77121d4f491e6cdcab6ef70ac92a3f1f79f2",
+      "sha256": "fa342f228be4351b267c5f48603bbca070f732a1161ef949a09ff08d15ae81ad",
+      "bytes": 14818,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/validation/classifier.ts"
+    },
+    {
+      "path": "src/config/graphCaps.ts",
+      "blob_sha": "dac861959c5506adc49b6cf5bf2e961037bd5273",
+      "sha256": "b841da2d3dc91aa736fde44dde79796d950c5c05874d921214e000ff6bace2ad",
+      "bytes": 1826,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/config/graphCaps.ts"
+    },
+    {
+      "path": "src/config/index.ts",
+      "blob_sha": "8d3ffe398cec13088269258a5cfd4d8694f4ded3",
+      "sha256": "7f7dea69615b19b2edb5857aca827ec5ccff3a253ef7407fca2ca3bc6a78bccb",
+      "bytes": 126356,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/config/index.ts"
+    },
+    {
+      "path": "src/context/index.ts",
+      "blob_sha": "a68dff7e6ff117ac39c844a64afaf5f38905e17e",
+      "sha256": "2747c0a79ac4df8110b02b6ef3336d929089aa0b81e2ca62de77652671e290c2",
+      "bytes": 1837,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/context/index.ts"
+    },
+    {
+      "path": "src/dsk/stage-edge.ts",
+      "blob_sha": "6886e0573b7e75fcc35529e607e81aa317886278",
+      "sha256": "43bda672bbeb9583c14cde4d01c00ba1890f34ed48bbd57af29499c7fbd71d8b",
+      "bytes": 1324,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/dsk/stage-edge.ts"
+    },
+    {
+      "path": "src/graph/inert-risk.ts",
+      "blob_sha": "9df96ef9a34175aa91d5f85f1d4fbd52c58736ea",
+      "sha256": "a3be303959c0c4d23cd9b249c86be86b76138ce3f18188e8c26da2445759676e",
+      "bytes": 2979,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/graph/inert-risk.ts"
+    },
+    {
+      "path": "src/graph/limit-sink-branch.ts",
+      "blob_sha": "72aeefdcef4d5817695ca9192f34990e0b2ee48a",
+      "sha256": "e5aa619e931d00d2b32233dcf8275a96a22bf2c361c0f8d4def423306d1a249c",
+      "bytes": 2679,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/graph/limit-sink-branch.ts"
+    },
+    {
+      "path": "src/graph/repair-authored-edge.ts",
+      "blob_sha": "bc5e32d19f2c1b081cd6b659c0e278c4d9cc10b0",
+      "sha256": "ea4ea3c5454973f79de9f9c1d189fd70846def212a67d904dd1dad7b61869b87",
+      "bytes": 4940,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/graph/repair-authored-edge.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/admission/analysis-admission.ts",
+      "blob_sha": "ded408390ecd23bdafdaf69b6f62460bbd6792d5",
+      "sha256": "7325d927ae966654f0528b910532dd29c00a153c627fc3951c55fce23464e66c",
+      "bytes": 70934,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/admission/analysis-admission.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/admit-model.ts",
+      "blob_sha": "56a946af491ccded3ee20b38a4473f4c26221b64",
+      "sha256": "00c9f0cba6e073f9b6bd26122ef30114f211bebd4d46a992afe296e548863368",
+      "bytes": 274289,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/admit-model.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/counted-nouns.ts",
+      "blob_sha": "8bd161be9fc9049a43d4b7143be85552eb1b5328",
+      "sha256": "b89db2aef123b960fda2042f0e896c8939fbcd622b3ccafb3f9c087d245fed05",
+      "bytes": 1032,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/counted-nouns.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/horizon-attestation.ts",
+      "blob_sha": "7859698871cdac2660d12e5ec0c4e87200853d1c",
+      "sha256": "67516618651803f0791cf0fb6993dea948614cb679ce0ca271742220b7bfd90f",
+      "bytes": 5690,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/horizon-attestation.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/same-unit.ts",
+      "blob_sha": "db68ebee62bdf1418b360ffc1f01460aaa1a0065",
+      "sha256": "012bfaed9c6ca8510eac06095c4be3fd3c557cf8b23151146a55df04c4f666a0",
+      "bytes": 6967,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/same-unit.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/unit-conflict.ts",
+      "blob_sha": "32b47e5b0b9db27999223458b26e5db5db4027e5",
+      "sha256": "799f60f6530ee67c93338c8539a0c27aad496a342cf8412fc88f4decf33f6105",
+      "bytes": 3355,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/unit-conflict.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/clarify-v2/rubric.ts",
+      "blob_sha": "9317db87880396d8730154dc9aecafc350b27cb9",
+      "sha256": "a0f2e9cfb2cf9063d3ae7e7f1660272b5268d30e9ac0c4f7968c348d5d06cb4d",
+      "bytes": 41920,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/clarify-v2/rubric.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/objective-contradiction.ts",
+      "blob_sha": "03f6b92e217796ddd369df840d7927b9c0be31c7",
+      "sha256": "c6d7469c93218bd054bef1ec12c0051e39a08de66f698df0b60602ed77526b1d",
+      "bytes": 64247,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/objective-contradiction.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/typed-intent-directive.ts",
+      "blob_sha": "30b7c435758b7f90f52998e447fb457b9b5be878",
+      "sha256": "1f16fb61ecdb307511a2c4b051c4254e038edd521eda01e1011554b5ac7f7615",
+      "bytes": 34635,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/typed-intent-directive.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/analysis-state-v1.ts",
+      "blob_sha": "13502d91c80c919788ee57f9f8a6eb2d51b5414f",
+      "sha256": "420219da522939e413c84de811b628bd3ee80e327e7abe8065ba4d6d6f20b180",
+      "bytes": 65119,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/analysis-state-v1.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/dsk-bundle-record.ts",
+      "blob_sha": "75f90cef2d79088fb43f0d66afb2a5f088992ca4",
+      "sha256": "be1a86f126bfc0c60291292bef506d02ccd83208472740921e923724a6b03ede",
+      "bytes": 4462,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/dsk-bundle-record.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/flip-threshold-card-row.ts",
+      "blob_sha": "e952a88416026d55eadcf5f924625e4b2c026d1a",
+      "sha256": "d35b9accdddda0f6934d1b06896c59103faf4ad447229a51b1a386f404528fae",
+      "bytes": 9827,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/flip-threshold-card-row.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/forbidden-user-facing-phrases.ts",
+      "blob_sha": "7087ea40c987d4abe7a64cabb7c9401b1d9235d0",
+      "sha256": "2eae4ce3c2be4ab1a8d485133051223e9629ab9c4ac12d75671665110cd34533",
+      "bytes": 35598,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/forbidden-user-facing-phrases.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/goal-probability-transport.ts",
+      "blob_sha": "b3da251f0f92b482ea5ac7f4314008edee3b9a43",
+      "sha256": "e379fba8f6e344d6f6def187d75613aa5c2ff0dbd1234ee40635a481e66b89c1",
+      "bytes": 2954,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/goal-probability-transport.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/judgement-signals.ts",
+      "blob_sha": "81a2be1e9e5cacb0f02d3b1481b0a9487bbb7c58",
+      "sha256": "e0bfb371e1c0362bccca44a2a371bb61599ca909f87f98aab8a31dfb98355b34",
+      "bytes": 18826,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/judgement-signals.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/leading-option-egress-guard.ts",
+      "blob_sha": "c447718976599740687caf0b133c1f8e19d22ef2",
+      "sha256": "8dd82267de2c34a3c74bd833fc7b007b3e0f2353026156714950567e1ef15636",
+      "bytes": 75071,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/leading-option-egress-guard.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/lens-history.ts",
+      "blob_sha": "99c39565abeaf3ba3477665bc81a99e22b99f93e",
+      "sha256": "3d7ba8e5fa96328fb0f0adfaca7861b5d33ee3850c369cb259900d6e1cb2a54f",
+      "bytes": 11296,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/lens-history.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/phase3-blocks.ts",
+      "blob_sha": "82d9780dd3aee55bedeeb74a043a09a9149d3cf0",
+      "sha256": "86ec81da01dd4a05865cb4e58c4d3ac40a30f8f2932ab9429d3c001a08d232a9",
+      "bytes": 171700,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/phase3-blocks.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/resolve-label.ts",
+      "blob_sha": "01704f228dcef73f7cf0d6700c3feeeb11493fa2",
+      "sha256": "20642a887c5c66b1b7f701030c12eb34301e7e67f42d912dfa3f6f534bcab052",
+      "bytes": 8438,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/resolve-label.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/sanitise-enrichment.ts",
+      "blob_sha": "8e3c275c8e6ac4ead4d506736276dcaa623d7fcb",
+      "sha256": "d1584f4506890009990f88e275525681f26ffba87b3621ed0d35a65e8a0995a8",
+      "bytes": 43040,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/sanitise-enrichment.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/tied-option-ordering.ts",
+      "blob_sha": "adde2ef2cd29fbd3381e4431d00f28a311703889",
+      "sha256": "e7281a37c38dc37bfab93c7f7cfd9767f7ef31791c460d3fb3a1190096295c01",
+      "bytes": 20954,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/tied-option-ordering.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/ui-directive.ts",
+      "blob_sha": "91171f3817aef8f2997e4a6ced86b60504483637",
+      "sha256": "d9bcae77cf52a3c463d164406188fb4a75c7254dc4ef486007589bbb2caa56d4",
+      "bytes": 73339,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/ui-directive.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/unapplied-edit-reply.ts",
+      "blob_sha": "802575e41a3629d0d499f5c3d084927d3b9c4035",
+      "sha256": "3fa6285181d707eb77c2dc9de45751e7d906162a0b7f513e4d7a00a771dd6ed3",
+      "bytes": 35622,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/unapplied-edit-reply.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/unrequested-analysis-confinement.ts",
+      "blob_sha": "95684db1d9d163236d35fcc8940a1077f98dc82b",
+      "sha256": "969514f5c316841dc938f8f1fd29a8bebb639f111d70dd996670abd9097a8065",
+      "bytes": 42704,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/unrequested-analysis-confinement.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/withheld-claim-projection.ts",
+      "blob_sha": "783aef9b3003291afa7b82447bdd9963eabb5cdd",
+      "sha256": "83052f1060a73f493aeda17e989f9acde77d65018c54b429a02d2b7404d08cfb",
+      "bytes": 55589,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/withheld-claim-projection.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/canonical-analysis-state.ts",
+      "blob_sha": "98d2098bc2177bc0d5db426780b4de4f8b79c119",
+      "sha256": "1eec0439dd2c76f9874762ccbe712b32d17332bc06f45d447f60ecdb4acfdf77",
+      "bytes": 33180,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/canonical-analysis-state.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/freshness.ts",
+      "blob_sha": "2746133ed27cf2ed7fdaf17f85b1ae2001c563e7",
+      "sha256": "ecaaafdac828a98e469838d9e66da45d31f9fc15127aff3858eda0f5a3de461a",
+      "bytes": 45780,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/freshness.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/intervention-controlled-drivers.ts",
+      "blob_sha": "23e84853c4bc642041a13b568a89dfa0417543a6",
+      "sha256": "5d7d6907365e13d38c4244340d5b39e50fe4e595e48bb40755b2704652ff57d7",
+      "bytes": 8515,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/intervention-controlled-drivers.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/edit-part-decomposition.ts",
+      "blob_sha": "ca2b5d2d917ed04ca0f0e7f0cb22b97e2d2bfaec",
+      "sha256": "5ab198e1ea1591975c53d8ed96cd587e7f2c7e76ca1ccc0074b8eeba4204804c",
+      "bytes": 50568,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/edit-part-decomposition.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/judgement-request.ts",
+      "blob_sha": "8f5d18d78ba7ecbb9d9c08c7eb0a1c0a5128d625",
+      "sha256": "05fd756a83b2539b231ba52dcd6ed24947b38076b6b58e585abb9f88d1a9a5c5",
+      "bytes": 11106,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/judgement-request.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/routing/value-unit-resolution.ts",
+      "blob_sha": "bda9ea7011baa5e6ad0bccc578208cc634a53c26",
+      "sha256": "a4fb1b447fcebd645fff9ec8d0000b85d3b7bfda16929e08531f215e435df9a1",
+      "bytes": 14845,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/routing/value-unit-resolution.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/session/conversation-as-seen.ts",
+      "blob_sha": "3ff33d0c5d5d792b8f3ca1b2b640f1312eec7a30",
+      "sha256": "94a870a25832c14b72a43ad46b58119a57e44c5517b37e66976daaeb6023c896",
+      "bytes": 4071,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/session/conversation-as-seen.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/analysis-ready-core.ts",
+      "blob_sha": "b8f565d6cb68846afcdf350228b073471fa6e2e1",
+      "sha256": "d3b3251d0c3dfd3bf7084c6118efe1af3e0d614ff49d91e90af8812ba0fdff6c",
+      "bytes": 56545,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/analysis-ready-core.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/scale-frame.ts",
+      "blob_sha": "69af00d891e43c9342f6a9153feb39552245775e",
+      "sha256": "68f6f596a3e1d3c96826d2ab8f110feafc1c8fb774626f4b977c90e76cdc4945",
+      "bytes": 14937,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/scale-frame.ts"
+    },
+    {
+      "path": "src/orchestrator/context/constraint-feasibility.ts",
+      "blob_sha": "b644a98b80819a864e19a4da0c62a6b7acae6e2a",
+      "sha256": "5de277a2d1fc34d2651835e73338b4516f08d4d669eb128a0f7408730bc49514",
+      "bytes": 134369,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/context/constraint-feasibility.ts"
+    },
+    {
+      "path": "src/orchestrator/context/placeholder-parts.ts",
+      "blob_sha": "9f8dc08f1b3f87d562db914eba00bd22e7c85596",
+      "sha256": "78584755394bceec8fd3417e7674223819c3c1e7ecaa236aa54d94c47843da1b",
+      "bytes": 24825,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/context/placeholder-parts.ts"
+    },
+    {
+      "path": "src/orchestrator/graph-structure-validator.ts",
+      "blob_sha": "6d4038f307981d1d7b0466a57e57f9bc5c7075ee",
+      "sha256": "d87cfef6d06cb33756400cf5260aeb5912097f3ed022fb55bafa6ac61da62dba",
+      "bytes": 35228,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/graph-structure-validator.ts"
+    },
+    {
+      "path": "src/orchestrator/shared/entity-id-pattern.ts",
+      "blob_sha": "1b4573db10af4f8aafe3a92797564b9c59e68abe",
+      "sha256": "56be9e1df8f87690bafa133b2b371b4da262b90613a652c2c0bdc60d28bd8356",
+      "bytes": 2006,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/shared/entity-id-pattern.ts"
+    },
+    {
+      "path": "src/orchestrator/shared/forbidden-tokens.ts",
+      "blob_sha": "c2cb3ffd55468b3bab0debbcd68af35cbe961fb1",
+      "sha256": "409e076de1ca8591ae44cae3d7bf5174cfa9dbb577af19dabe6f4dcf619d21e6",
+      "bytes": 9358,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/shared/forbidden-tokens.ts"
+    },
+    {
+      "path": "src/orchestrator/shared/output-safety.ts",
+      "blob_sha": "0efc106d508332f56e30a033f4ccdbebb08fdfc8",
+      "sha256": "2e1a29c7d6358bdaea8230f8e21264d4173d3db6a0855f439c7dfd6c4f8c38c4",
+      "bytes": 17713,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/shared/output-safety.ts"
+    },
+    {
+      "path": "src/orchestrator/tools/encode-option-interventions.ts",
+      "blob_sha": "05ee1f97c749037fc1120070b826619f62e7c108",
+      "sha256": "99ccc6864a0cef81b20caca2e7668599ebda790d97c855c079ad87585c1a5e61",
+      "bytes": 38062,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/tools/encode-option-interventions.ts"
+    },
+    {
+      "path": "src/schemas/analysis-ready.ts",
+      "blob_sha": "e395b00a4dfbd9bebec7822e62c266fa2b9fbde1",
+      "sha256": "ff367c35a4a6b306a92be189209a965873eb19a35ecaa4d9698a9501d91e1471",
+      "bytes": 31521,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/schemas/analysis-ready.ts"
+    },
+    {
+      "path": "src/schemas/causal-claims.ts",
+      "blob_sha": "24ebe215783ce1d080a8f724b9c337ad6687ca97",
+      "sha256": "59c6d655c324f3dd9932fab5a53432e70944b72e34a94ba169810fc3dc78d499",
+      "bytes": 1833,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/schemas/causal-claims.ts"
+    },
+    {
+      "path": "src/schemas/graph.ts",
+      "blob_sha": "7972e7979d5b6f5e3c053e77b20bd0d0fb3690fa",
+      "sha256": "d8c2974a657586fede58b62b212e326f03357b5160620c76a35b8dc9a43172ee",
+      "bytes": 32962,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/schemas/graph.ts"
+    },
+    {
+      "path": "src/utils/amount-range.ts",
+      "blob_sha": "10fa42eeef7111f4e4534b879937f1fa1a1bfe9d",
+      "sha256": "36b7478b6e1d408a19f0671b0e2ecb1bb7c2690317cb817c55f90d9dfd29d53d",
+      "bytes": 53668,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/amount-range.ts"
+    },
+    {
+      "path": "src/utils/cardinal-words.ts",
+      "blob_sha": "e484410c999ce9a36a453f234c074ec83c0451ff",
+      "sha256": "198c8ed2e5a678539560b4ff8e91c1f9ccd025319e3bf237d1c7b791cde6b499",
+      "bytes": 10179,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/cardinal-words.ts"
+    },
+    {
+      "path": "src/utils/goal-threshold-trio.ts",
+      "blob_sha": "726a67b06a94e55299959270a31d6776b715dff4",
+      "sha256": "fac3910a537c05cde183007185b0e43a69467787be42e0f7da0d802fa3dad23a",
+      "bytes": 5988,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/goal-threshold-trio.ts"
+    },
+    {
+      "path": "src/utils/magnitude-alphabet.ts",
+      "blob_sha": "afc1f0eb66199afdae1d3a161d13de4f0be388a7",
+      "sha256": "0437cd028fe5536838f9e15431335a267a4e2ab77d52cf4b9ab465a87e4262df",
+      "bytes": 29391,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/magnitude-alphabet.ts"
+    },
+    {
+      "path": "src/adapters/llm/extraction.ts",
+      "blob_sha": "a5034101a8e0e8d744f5d7292eeac34e1fb5ebb2",
+      "sha256": "210ec02a63ce981d95c1b3db9bfd772be94a63b6374ff6480daa93811f2043d5",
+      "bytes": 15861,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/adapters/llm/extraction.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/motion-grammar.ts",
+      "blob_sha": "5c7b0ae6d8aad8b241588cbcd4fc3bda2fbf0fc8",
+      "sha256": "b2a5451f217ba7d4fc49b3e29aa612a28ab15994402287e5bce7b7165ebc6861",
+      "bytes": 1996,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/motion-grammar.ts"
+    },
+    {
+      "path": "src/cee/context-integrity/not-modelled-manifest.ts",
+      "blob_sha": "84c98a8e1eabfe13a313b4ea898439c2f14d5477",
+      "sha256": "57ba4d934e3ba21fa9b415ccbf3ab962ebc5246c904dbd86b7a1737019b3c24e",
+      "bytes": 104824,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/context-integrity/not-modelled-manifest.ts"
+    },
+    {
+      "path": "src/cee/corrections.ts",
+      "blob_sha": "2fc3ef37773df189cb35eb107a707d84b4043de2",
+      "sha256": "8c8d6770fba67af2db7e601c699f22671c6509a6049f7de6113d0541a364ea29",
+      "bytes": 7172,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/corrections.ts"
+    },
+    {
+      "path": "src/cee/draft/records/projector.ts",
+      "blob_sha": "efc414e92f5d27a8d446216e9944b1cd5a0cd2d1",
+      "sha256": "c96c9673d5c5c568e97c421b666fb266e7f2cc49212ce6d096abb39837a976f5",
+      "bytes": 281128,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/draft/records/projector.ts"
+    },
+    {
+      "path": "src/cee/factor-extraction/display-value.ts",
+      "blob_sha": "00cccb3a33d0339cf986fda2a1f3a15f07802f38",
+      "sha256": "f5d88c71c54371d903cbe193f2aa8d62ffd67ccbe25ae0af2ee0e66f207da480",
+      "bytes": 50131,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/factor-extraction/display-value.ts"
+    },
+    {
+      "path": "src/cee/magnitude/frame-defaulted-links.ts",
+      "blob_sha": "d6100a030ca7111a40c64dcaa4d6280882a11320",
+      "sha256": "567a0c7084c9011b97376becbd9b84610c3b5f8fc7f58e5bc3e908a814f8a812",
+      "bytes": 10622,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/magnitude/frame-defaulted-links.ts"
+    },
+    {
+      "path": "src/cee/provenance/brief-binding.ts",
+      "blob_sha": "0eaf6237225f589b9d81da8daa805934352afe7c",
+      "sha256": "6595e389348744c2cfd788267175f6222eedca7554113136bfc39b45043ebb80",
+      "bytes": 14311,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/provenance/brief-binding.ts"
+    },
+    {
+      "path": "src/cee/transforms/label-echo.ts",
+      "blob_sha": "6c6480e44ce68b94e1ecd8249debb722d25e9867",
+      "sha256": "2fedb5cfd6c6199f896cb4067b23d4f845dbbe21598e09a4eadbaf472d91b95c",
+      "bytes": 2347,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/transforms/label-echo.ts"
+    },
+    {
+      "path": "src/cee/unified-pipeline/stages/repair/status-quo-fix.ts",
+      "blob_sha": "8583404b169563c0b7b934493de18e7801d191fa",
+      "sha256": "120ee5d7da2f9f04c976f3880dd8f690649ed0973d20e9740f213a5955d22ff5",
+      "bytes": 12665,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/unified-pipeline/stages/repair/status-quo-fix.ts"
+    },
+    {
+      "path": "src/config/env-resolver.ts",
+      "blob_sha": "1aaf1e9d0f52113bd5c5c41fe561323626e351ff",
+      "sha256": "a2aabb012b800443238542b33b2b821be66cfd45ac29533e03868bd85bc11534",
+      "bytes": 4964,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/config/env-resolver.ts"
+    },
+    {
+      "path": "src/config/timeouts.ts",
+      "blob_sha": "df6dfca6756cff39b6a0907ff839f20fd4692287",
+      "sha256": "7e15ae064040f726027afa4c101598d9bb2628b3fdcab628f1fa5a99345e4758",
+      "bytes": 87377,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/config/timeouts.ts"
+    },
+    {
+      "path": "src/context/caller.ts",
+      "blob_sha": "fc4287f8dd975f7e8a185c8a394ca93ea4fdfa17",
+      "sha256": "bad6269cc329b5ec1e6f4dda2777790f2b39c42d2cda1ddedfe99121602b9971",
+      "bytes": 4630,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/context/caller.ts"
+    },
+    {
+      "path": "src/context/context-pack.ts",
+      "blob_sha": "8914cd504f94b53c14a612b22b93d99544e82043",
+      "sha256": "2b70fa783be747c82a75d8008677be8b8750a48b10de3cff6efa7ccc84ca76f2",
+      "bytes": 10299,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/context/context-pack.ts"
+    },
+    {
+      "path": "src/context/resolver.ts",
+      "blob_sha": "c32e30e7e35ee9615fe69ea4fb8d344c9a3c39ee",
+      "sha256": "aaf1a4d04546614a79cef1cad48d473f7dfc248a1c71daa8a1618895bcf637cb",
+      "bytes": 14650,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/context/resolver.ts"
+    },
+    {
+      "path": "src/context/types.ts",
+      "blob_sha": "75ad532c4842b429ce132a23d4bf97ac5e8732cf",
+      "sha256": "125e0c6ced39da8028914195f01776d8e14c9e73c7a5abe2480d5cbf1613cf96",
+      "bytes": 5103,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/context/types.ts"
+    },
+    {
+      "path": "src/dsk/hash.ts",
+      "blob_sha": "19e7abb4834bfc02a020dad0b8f4150539a83b13",
+      "sha256": "00d9b8718883918b4b55f6ba4f300d7e853b413d2cc2d63d78caf6efcb66c6ce",
+      "bytes": 637,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/dsk/hash.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/admission/target-testability.ts",
+      "blob_sha": "78756acdd5e867b84eeb7b79f7d13099e0aaaf69",
+      "sha256": "c2b393f8477e26522b0ddbeb8d40dfbb8b9b5e761cabc5b9cfa9bad1dd39cd6a",
+      "bytes": 16317,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/admission/target-testability.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/admit-candidate.ts",
+      "blob_sha": "ad1ccce1a15a00c825210f918e42848554f8121e",
+      "sha256": "2f4d024ec95cd865735564204de41e2d8a7e40411fb25ca72ded374380915e28",
+      "bytes": 23266,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/admit-candidate.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/one-route-per-effect.ts",
+      "blob_sha": "9f3d07fd647642db6c232447d361fea3e9b1fd2a",
+      "sha256": "cb5a7fb7847cabb46ef39b2ebe5667824f82d47c092fcbf2faec2a68924b9bc8",
+      "bytes": 3901,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/one-route-per-effect.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/product-goal-extra-parent.ts",
+      "blob_sha": "e70db8133522717761af1d235421fb02e77241f5",
+      "sha256": "d3d85d25d35f19eb94de69a48d8b1a435b6531540a38e7765fb48d1922d71afe",
+      "bytes": 14677,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/product-goal-extra-parent.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/product-goal-rate-operand.ts",
+      "blob_sha": "4a8ea5f36b2a5adccdfb77a41c1bd5272b4a9cf2",
+      "sha256": "c7b3b6be4fe17896a5f5249eae9c5a5782eb6592529ea303e98565443f397e65",
+      "bytes": 6465,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/agent-lane/product-goal-rate-operand.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/assistant-text-defences.ts",
+      "blob_sha": "3c89e04ba7a3ef49f4329280c3e9e480db802d97",
+      "sha256": "028fb4c516ac3209b58e2776a086e6b65901f893773e59db7489bf4cfc043e57",
+      "bytes": 2339,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/assistant-text-defences.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/coaching-chip-registry.ts",
+      "blob_sha": "1ee715faa2523ae86aeae22cac43acd8f70c6dd5",
+      "sha256": "825783a92f76c1ffbb1d09a6dd737230c5bf1aa6f19d9ebde4e4a3e41b4aa76e",
+      "bytes": 8290,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/coaching-chip-registry.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/fragile-edge-offer-text.ts",
+      "blob_sha": "8a85a7e15bdc2080b85d911af97db9baebbdca2c",
+      "sha256": "f951c4aebcc327e88c37b2a44d4b01e3a9bd11c9c5fd365c6d522a554b72b032",
+      "bytes": 11156,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/fragile-edge-offer-text.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/grounded-counter-case.ts",
+      "blob_sha": "1402f0e6f8b69eeab2fa18b191062c01777b1750",
+      "sha256": "2febb9946c18e4f9334a964654528ae1da0e2cda1ea95f1ed57ff63d23ef9ef5",
+      "bytes": 16661,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/grounded-counter-case.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/grounded-sensitivity-body.ts",
+      "blob_sha": "ee096502b3dcedfab53b74d5e40be707cb826dc9",
+      "sha256": "2f07d00ccf63914bcb497e046f2f92488ac0454c035aa21403cb60dbaf0d26ab",
+      "bytes": 20781,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/grounded-sensitivity-body.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/judgement-offer-text.ts",
+      "blob_sha": "bb4bae590759ade34fe8ce41ab81375458e5e35a",
+      "sha256": "3897ce979929d0688b04dc5cebf9c68c05f3331cadd83ef564a870c17ed2ef83",
+      "bytes": 12834,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/judgement-offer-text.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/pick-raw-robustness.ts",
+      "blob_sha": "5b86b8fd3caad19f78caaaadb1a3663a90c8a0cb",
+      "sha256": "3167c13eba20cd408ba7940264f4fb1aedd7298971d27b26ae220f3eb4730a67",
+      "bytes": 4273,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/pick-raw-robustness.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/select-fragile-edge.ts",
+      "blob_sha": "526c8e2c4b33ba887bdb1cf76682678b212bee87",
+      "sha256": "5b9c13d7d29d85eb06bd12587d46603007a116872f39c15f8ccf5d521656d13e",
+      "bytes": 17632,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/select-fragile-edge.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/stated-dissent-offer-text.ts",
+      "blob_sha": "1c43ccb7f9e5a7139ef7e3ffe1d86e87328a7642",
+      "sha256": "d4d026842d1a94507cf7f150345ae10d2abb83677b357f2348f61c60c1665380",
+      "bytes": 6932,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/stated-dissent-offer-text.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/block-id.ts",
+      "blob_sha": "d1dd3a23b2ed6d0a4ca35406697277bd553922bb",
+      "sha256": "6115ed69aa1488845d756427f8937dc33a4cec85157ef31aa6e87a5fb2e778f7",
+      "bytes": 3887,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/block-id.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/claim-safety-cage.ts",
+      "blob_sha": "84d754c6e65cfa3357725ac01cd61cc9270ff368",
+      "sha256": "c08e7666482382a85e6182cb52f410c47b1c6a28d9f20ed3142108cf73f570f3",
+      "bytes": 24937,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/claim-safety-cage.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/confidence-bands.ts",
+      "blob_sha": "c3e535f2ac5f251d1df4f5b5ae05c352835b8b2d",
+      "sha256": "e7f02c3e530dd3526061458b2de5ea69d4b377af2a7f75a3fb4c29356419ddd2",
+      "bytes": 6692,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/confidence-bands.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/dsk-claim-record.ts",
+      "blob_sha": "5bcb48e26496375289269426cef46a08cf6cbf7c",
+      "sha256": "c82c74a36ec422360e6a4f8d600a44c997c19ea1123ac3dd61a2fbf0b5d28545",
+      "bytes": 7674,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/dsk-claim-record.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/dsk-protocol-record.ts",
+      "blob_sha": "34d71ff5f699c22a82fb9ecf83f1bc64bde935a6",
+      "sha256": "f125a865730a6cfa790572960ee8e2ea837f275c5839999c513f8b1dd8014f04",
+      "bytes": 6361,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/dsk-protocol-record.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/edge-address.ts",
+      "blob_sha": "e387b97b41d9f7c9ac1af558b840d50fc462a196",
+      "sha256": "5ed2f55b02a0ebd69e09a47854bf53b0774a61aeb298d2eddbdee81e96fc28e5",
+      "bytes": 5135,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/edge-address.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/guidance-signals.ts",
+      "blob_sha": "696b7d89a18ba540998d6c1e40c710d24be1dcb2",
+      "sha256": "44081f6492ba60c723e03ee1b4c912ab4d3d192eb4d5fdc5a4c9a04d1cbc3ded",
+      "bytes": 20850,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/guidance-signals.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/lens-selector.ts",
+      "blob_sha": "e822db0b841bab212eab150f851758bdf293de90",
+      "sha256": "e722738652a7c0a7661cccc091f05ec19cad00386b11fed0b618c4b657823cc0",
+      "bytes": 120132,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/lens-selector.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/redactable-units.ts",
+      "blob_sha": "f758ac594d57a536daf67fa4edca0d167d45388b",
+      "sha256": "cfdc1c1d68e5c0a45c7d1e62285c5360f9f975a13e1e3db54672a14c8c7f41a9",
+      "bytes": 10384,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/redactable-units.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/compose/terminology-rewrite.ts",
+      "blob_sha": "5950a95edadf8ad352ca9424d7a0fc82b5c75a02",
+      "sha256": "d4c5a9422979a06eb5b862e08aaae3d63b361467451f23c80bfe92bdf2e70043",
+      "bytes": 11514,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/compose/terminology-rewrite.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/analysis-refusal-continuity.ts",
+      "blob_sha": "3dca918fcc78301e5f9af00e42b9f11cbc1b1daf",
+      "sha256": "c3ea8f90e6063074d15e984ccf18821d91197b4c86bc20bf329a9d6fe61a73ac",
+      "bytes": 2732,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/analysis-refusal-continuity.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/graph-hash.ts",
+      "blob_sha": "a681efcf4aa09a012eb690a1439902bf3a017c5f",
+      "sha256": "16f96d7d8435281c42e7ebca76812f7578fe7b77c7879e4a071af07207e31352",
+      "bytes": 17757,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/graph-hash.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/run-goal-unit.ts",
+      "blob_sha": "261bf09471971545f6b6c0e4e1a8f72bf0316ca7",
+      "sha256": "154c9a506990d32b656e55b33cf5fda1baf7c69f3d6fec77fb89e6cfde5eebea",
+      "bytes": 261,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/run-goal-unit.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/run-initiator.ts",
+      "blob_sha": "dbc11a810de47ff1052e9c25fd1cd76e04aa427b",
+      "sha256": "a8a984fe7fa66bb2adabd9b761c014ca0cd3664019d21f045954ca07e301b059",
+      "bytes": 23580,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/run-initiator.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/goal-target/goal-direction.ts",
+      "blob_sha": "d8a47d3ad79fa454c5d2fdfcda4e3429c290e50e",
+      "sha256": "ed1f2efd98a0dfb5bc46021993221bdb06c98b83086ea7915e14025d081b4941",
+      "bytes": 19990,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/goal-target/goal-direction.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/goal-target/goal-level-reading.ts",
+      "blob_sha": "296122a9a87a2b852b2f1cd5dafb1ce5c06b78b7",
+      "sha256": "59c06bda8b5058e09b91bd7e16230c56ceed94a83b5a4032593c4b482f98555c",
+      "bytes": 4189,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/goal-target/goal-level-reading.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/analysable-option-gate.ts",
+      "blob_sha": "bfc4c41044dd541dace93addf2b66f7087ca80ed",
+      "sha256": "626ca4d8ab839484b49a56fc649b0ed84ed606429f61471ed7889073c9251d97",
+      "bytes": 26435,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/analysable-option-gate.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.ts",
+      "blob_sha": "7539f7248acd14fd3f9cc895b762fd41ac835161",
+      "sha256": "4d1392d1a1f613862fe99e76999b1d93ee276ff60e952eabfe3bd5c8ab3fb727",
+      "bytes": 18136,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/handlers/run-goal-certainty.ts",
+      "blob_sha": "e5d1a6eb20fbd33b104bffe864890576842a5ef2",
+      "sha256": "107514fa353f8a3cde96386031687b140814f63546ec7b699ed750842532071f",
+      "bytes": 3283,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/handlers/run-goal-certainty.ts"
+    },
+    {
+      "path": "src/orchestrator/canonicalise-value-ops.ts",
+      "blob_sha": "4156ad88edf71a835661d86a4c846caec1b2e26b",
+      "sha256": "74284f545ee280d6856c884a6162f86d06f4af2731cd0f1c280863b63d5b572e",
+      "bytes": 97668,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/canonicalise-value-ops.ts"
+    },
+    {
+      "path": "src/orchestrator/context/constants.ts",
+      "blob_sha": "e38df68fa3e046d6e57829266335841376eba36a",
+      "sha256": "2aaac507613821a896014dbaac591a7e679cbca61a2d1eb0a1a72cf029af3a23",
+      "bytes": 1051,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/context/constants.ts"
+    },
+    {
+      "path": "src/orchestrator/shared/encoded-intervention-admissibility.ts",
+      "blob_sha": "5931d9941ab4312d22d5da0d53f6565cc7be467a",
+      "sha256": "368e8f79ce0a21b11ea861ee5bf44b1ba4b0a2620d61c482b0c8d8579ad3e2d2",
+      "bytes": 2564,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/shared/encoded-intervention-admissibility.ts"
+    },
+    {
+      "path": "src/orchestrator/shared/referent-resolver.ts",
+      "blob_sha": "094ea63c1680f569917a6b7789c2d283332a8356",
+      "sha256": "f31a7bfe3f2aa74ecfacb528fd12badb33ab18a0f3ad4405e359718a156a4c40",
+      "bytes": 33113,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/shared/referent-resolver.ts"
+    },
+    {
+      "path": "src/schemas/llmExtraction.ts",
+      "blob_sha": "4a955712161278cfcc37487485b3cde7db1edec3",
+      "sha256": "5e3691e6b43765038d4ce19bdb7133a8800f6dfa570c56b1455b2fdf5e1af764",
+      "bytes": 5007,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/schemas/llmExtraction.ts"
+    },
+    {
+      "path": "src/validators/decision-free-shape.ts",
+      "blob_sha": "e8f164a1d55461d6c9ca2f6fa3ba03cd2c9e6fce",
+      "sha256": "d6dce22552e4b74ce2a2b3d2f09baf7e64ecd6ec6108b7ab819fee96aef99d1d",
+      "bytes": 4678,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/validators/decision-free-shape.ts"
+    },
+    {
+      "path": "src/validators/graph-validator.types.ts",
+      "blob_sha": "4e301488254b7f02a4c80e3519c8954707540788",
+      "sha256": "edee920014b4cfcd99af78a62f3c3e60915110791f2f4649177c713d9dd67d0d",
+      "bytes": 11289,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/validators/graph-validator.types.ts"
+    },
+    {
+      "path": "src/validators/structural-reconciliation.ts",
+      "blob_sha": "6b8ec01200814fadb4cf0ec4dd13977f606760bd",
+      "sha256": "3c74a915bd2b036bf1671cb46bb57f6ff697980fb3de2602fbffac5b4b7edb43",
+      "bytes": 44605,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/validators/structural-reconciliation.ts"
+    },
+    {
+      "path": "src/adapters/llm/provider-policy.ts",
+      "blob_sha": "684f98c916535ed77ed36ea4896baef0742afbf5",
+      "sha256": "5b7a4890b1ff97a6ee02521bc8e976c899bb4618832e9a1c6d07332e29024da0",
+      "bytes": 16745,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/adapters/llm/provider-policy.ts"
+    },
+    {
+      "path": "src/cee/compound-goal/mintable-target-kinds.ts",
+      "blob_sha": "154afe85a1f892bfab11b8308b1687986fdaa265",
+      "sha256": "f705d4a2dfe7ea42b1ee67aa00b8d5786d6859f1ce2decda0a5ed94ec50e6dfe",
+      "bytes": 1773,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/compound-goal/mintable-target-kinds.ts"
+    },
+    {
+      "path": "src/cee/draft/records/claim-label-shape.ts",
+      "blob_sha": "317ad300457e00f2d5b68da5d29ffdd2cf8beb7c",
+      "sha256": "43cf6079cc2f05fd50e5d4cdac78f376e51345f4418db5dab1a39fe729808c99",
+      "bytes": 6194,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/draft/records/claim-label-shape.ts"
+    },
+    {
+      "path": "src/cee/draft/records/label-bound.ts",
+      "blob_sha": "2857a0ce9c2b499564fa3955e6797693bee81296",
+      "sha256": "edbf16018b9e23b7312599bc407814503b2499642a4906ce1c8707e1621665f6",
+      "bytes": 7999,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/draft/records/label-bound.ts"
+    },
+    {
+      "path": "src/cee/factor-extraction/goal-label-target.ts",
+      "blob_sha": "2b50a7c8cedb96a1c0b5ccf657e7983f1073b785",
+      "sha256": "d8466b52e18eb6b630aa7d38e947d5b899b91d99572a0efa31e5e3d440027720",
+      "bytes": 69658,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/factor-extraction/goal-label-target.ts"
+    },
+    {
+      "path": "src/cee/unified-pipeline/stages/repair/no-op-target-repair.ts",
+      "blob_sha": "ce372adc5fd949fc5229cfc4dae9ee947d430e4f",
+      "sha256": "39d4587dd597083af53ea6b047711d5d450bcb3abd5f9d3a32e96f3b6b70f26f",
+      "bytes": 28280,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/unified-pipeline/stages/repair/no-op-target-repair.ts"
+    },
+    {
+      "path": "src/cee/unified-pipeline/utils/edge-format.ts",
+      "blob_sha": "86255b577cbd3230b9e8663df9100836748dccd2",
+      "sha256": "cf4dc39456dd070b7d6a4d9d95de0df7bdf302a7f117ae1d5cebb9f246ea3462",
+      "bytes": 8182,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/unified-pipeline/utils/edge-format.ts"
+    },
+    {
+      "path": "src/cee/unified-pipeline/utils/field-deletion-audit.ts",
+      "blob_sha": "3ea7b74dae389f350b4e417f1ef9b5b6e61e9839",
+      "sha256": "4d8a8d5324b2b170c83df8e61e1ba1e8b5adaea64b32254b35f3c1070234a038",
+      "bytes": 9160,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/unified-pipeline/utils/field-deletion-audit.ts"
+    },
+    {
+      "path": "src/config/model-assignment.ts",
+      "blob_sha": "8eb32938fc459e357555ebdf08f0516477bbd354",
+      "sha256": "bd4dfd35babf097fe9394c7ad25fd9a3c234bfc5de626ae4d7533ec0989918fe",
+      "bytes": 4563,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/config/model-assignment.ts"
+    },
+    {
+      "path": "src/config/model-routing.ts",
+      "blob_sha": "a3278bb7219bc9c247128eb2f5444559d68d3b73",
+      "sha256": "9b3e1ec08e4fdec1f184442375abfc4161bb164244d5a6257d00d2b2d87531fb",
+      "bytes": 43999,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/config/model-routing.ts"
+    },
+    {
+      "path": "src/config/models.ts",
+      "blob_sha": "3acb03c96fcd8d51720a18f953f9db001509275f",
+      "sha256": "0dc9b89081acd647b5382d56a6dbc7079cbd13a45470b1472a1db7c5cba92445",
+      "bytes": 33749,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/config/models.ts"
+    },
+    {
+      "path": "src/dsk/canonicalise.ts",
+      "blob_sha": "0d4dcae00da836531e082078b974c59dd8360682",
+      "sha256": "89fcdb36f571ff9265360b3f3b4a1ebc9a4bca16a75c540409604e1d9f830a2e",
+      "bytes": 3004,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/dsk/canonicalise.ts"
+    },
+    {
+      "path": "src/graph/reachability.ts",
+      "blob_sha": "3118587bf63cba0bb179795e2eb784cb49a286d5",
+      "sha256": "2c19be073ca8e33087c545e3d2eef0d1f911f66e1d0f06689cd507628f42037f",
+      "bytes": 7300,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/graph/reachability.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/intervention-tiers.ts",
+      "blob_sha": "a678a154e57ecfa892f66199061b85ee002b8d49",
+      "sha256": "dcddfe0d4911610fe5ed8d9458a9c67362de271680cc9c4c1b88a34ff16ed2ad",
+      "bytes": 13808,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/intervention-tiers.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/coaching/robustness-honesty.ts",
+      "blob_sha": "947083cb5b587f4505f540787fbb1fea38577b6d",
+      "sha256": "e927d638a50e8b807b16ea76003d3219bebe02426a5687e47e7c998ece62d938",
+      "bytes": 7619,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/coaching/robustness-honesty.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/graph-management/adapters/edit-graph-producer.ts",
+      "blob_sha": "5822937e45c62facedf6d3a4469703f1703eb5e3",
+      "sha256": "789527675dd318d889de2e7ba9bc49e598184111da666dfd202f6b3f0a3096fb",
+      "bytes": 8482,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/graph-management/adapters/edit-graph-producer.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/graph-management/field-safety.ts",
+      "blob_sha": "5336ad04f80e471cb32e76576404d90fc178ee9a",
+      "sha256": "af14b46ce32b975edff1310463c36d6c0f9074d227c0bf813cfc0aee38ea31c2",
+      "bytes": 49533,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/graph-management/field-safety.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/tools/plot-intervention-scale.ts",
+      "blob_sha": "b1eda7c9250cbf49a9d9b36859b9fb65416f8e2e",
+      "sha256": "5d9c1fd006bc239b27a3ca2550d70b8cca30976bf4fd1cd816d5b7af41c0fd77",
+      "bytes": 50600,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/tools/plot-intervention-scale.ts"
+    },
+    {
+      "path": "src/orchestrator/shared/fragile-edge-authority.ts",
+      "blob_sha": "ea98231bca06b0c15e0bc70a4682c36d771a49e0",
+      "sha256": "20a5bf156300c0bf23ed0efd0478560f54fc5b1ee730fed4cbd149346eba2b8a",
+      "bytes": 2620,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator/shared/fragile-edge-authority.ts"
+    },
+    {
+      "path": "src/utils/request-id.ts",
+      "blob_sha": "bf915ad40b6fd28a71ce0babb282185a7f6b891e",
+      "sha256": "f08881cf78cfa7e4fe12ff4553c6375602c57ec5f6474f573f24de2d1619bdb1",
+      "bytes": 2778,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/utils/request-id.ts"
+    },
+    {
+      "path": "src/validators/graph-validator.ts",
+      "blob_sha": "44033ddd13d2ace76a59ca5254438796f591428b",
+      "sha256": "78e2679459e9cac8bb631d2ccc756f0c6060940f3364217ccc92189aa5a3a632",
+      "bytes": 63688,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/validators/graph-validator.ts"
+    },
+    {
+      "path": "src/cee/provenance/unquantified-factor.ts",
+      "blob_sha": "41ef40d73d0d81691a232b2776cdeff0a02f5f2e",
+      "sha256": "ccf05c281fe13282ad021d226a6df779e2cfd3ac0129f7cb946e3e61c090c2fd",
+      "bytes": 13602,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/provenance/unquantified-factor.ts"
+    },
+    {
+      "path": "src/cee/signals/brief-signals.ts",
+      "blob_sha": "c5f0cf6843d8513563d410627161647db5db756d",
+      "sha256": "1f180f069674bf28e051b3093bd4e8b50969acf0b532c85e207e48fd7a616187",
+      "bytes": 22928,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/cee/signals/brief-signals.ts"
+    },
+    {
+      "path": "src/config/model-aliases.ts",
+      "blob_sha": "c5eab581b384a93e7b145423d21c4c2843cd12dc",
+      "sha256": "be2e3aa81ffc67613ad4b8c0515c07b1cd525e3d2d25b2c0a1ebe9799e7cd7f3",
+      "bytes": 325,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/config/model-aliases.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/cqe/extract-quantities.ts",
+      "blob_sha": "fe4416ec75c0287c7f6460a3b4d56077dc520e3a",
+      "sha256": "2cc598dfb3170341354233853689ceb40f050ca1ee8982df2efaeb80079d4b80",
+      "bytes": 21828,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/cqe/extract-quantities.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/format/format-analysis-value.ts",
+      "blob_sha": "e58f778dbb1b62d30bcac7d61965a07bf6f3fb05",
+      "sha256": "93bec2c3fff47d88df20c30fecb354d9cc3f1bb559e4ad4c57d3205f06c55146",
+      "bytes": 9595,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/format/format-analysis-value.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/graph-management/reason-codes.ts",
+      "blob_sha": "f838821ea0e5f48388a7072125bdd2971e4f65a1",
+      "sha256": "c448f401ed1ad845366a744ed8e686c37d18d506d6ac554fa485d0b4b024e221",
+      "bytes": 8446,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/graph-management/reason-codes.ts"
+    },
+    {
+      "path": "src/validators/option-no-op.ts",
+      "blob_sha": "ad0d7819e65c0a8b0c8959542332360ac3085bd6",
+      "sha256": "952aedb4a8d98d77f9b1188f273634c63dfb2c482b3a6070e77e64bd9d4201c4",
+      "bytes": 15128,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/validators/option-no-op.ts"
+    },
+    {
+      "path": "src/validators/violation-paths.ts",
+      "blob_sha": "64016db216cbca96e1b39e747296776ebc2d42b4",
+      "sha256": "bac230bffeb328cd75dbd843bb0c707d20399f245e06357e5cabf80829a80e7c",
+      "bytes": 3843,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/validators/violation-paths.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/cqe/compromise-backstop.ts",
+      "blob_sha": "8c40337269848b4d11d9b62b7c762bc3f4a2dec6",
+      "sha256": "423522b9d73e234f53d3eafd1f7441a086a99f1975359336e11ed5f47d08f63d",
+      "bytes": 9068,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/cqe/compromise-backstop.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/cqe/pattern-trace.ts",
+      "blob_sha": "087b3b7769e36823e4db69533f291406437dd534",
+      "sha256": "07af8681d27a85a2468f06785033eeeab465859c54e58eabdc4541da8e298b55",
+      "bytes": 1554,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/cqe/pattern-trace.ts"
+    },
+    {
+      "path": "src/orchestrator-v5/context/cqe/post-filters.ts",
+      "blob_sha": "e9a239c3b4ee5867ad51d64f5848b7de0fc31abe",
+      "sha256": "71bfa6e4623b00fb29953ba828f993c254986429ff5416e3150dbf5ab6243052",
+      "bytes": 3482,
+      "origin": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/refinement-validation/baseline/src/orchestrator-v5/context/cqe/post-filters.ts"
+    }
+  ],
+  "external_imports": [
+    "@anthropic-ai/sdk",
+    "@talchain/schemas",
+    "@talchain/schemas/boundary",
+    "@talchain/schemas/orchestrator",
+    "compromise",
+    "compromise-numbers",
+    "crypto",
+    "fs",
+    "hot-shots",
+    "openai",
+    "path",
+    "pino",
+    "vitest",
+    "zod"
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "verified_at": "2026-10-03T12:17:59.404746+00:00",
+  "files": [
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/.DS_Store",
+      "bytes": 6148,
+      "sha256": "23480b55a7f5420b1854bb79a4b5f4ef79203af004fb83b5a3c8c404ce8e12c8"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-ACK-POSTED.json",
+      "bytes": 158,
+      "sha256": "a29e7d10b4eb3ad4d69abce3806772bed577da6ff893e717657b0a0485d9aff5"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-ACK.md",
+      "bytes": 1601,
+      "sha256": "433282d870759c210fc59210e2cf1cdd5d1b76de794124fb1f4ea6f092dda923"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-CONTRACT-PACKET.md",
+      "bytes": 7555,
+      "sha256": "13133537d167cbdb135b54b1b582bfe39ecdfe3f01d3f31d16844846330a13ce"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-DEPENDENCY-POSTED.json",
+      "bytes": 158,
+      "sha256": "33677a9a87e351e8b679c073c0358d37c0cc0ef86d89eef062169a68a6e41b6f"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-DEPENDENCY-RECEIPT-85.md",
+      "bytes": 1083,
+      "sha256": "b14940674157fd9070c18a706127ee0bdbd32b230468abe44bba0c6f142fd2c1"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-FOCUSED-DEPENDENCY-STOP.json",
+      "bytes": 1607,
+      "sha256": "2e644aad0cc7c1bf5678762d93534285393463d2004695740482fc744c4d3744"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-FOCUSED-DEPENDENCY-STOP.log",
+      "bytes": 251,
+      "sha256": "23e6cdf00accaf37663d73282ef72a6e155389729372163f5fe6a2975e9273f9"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-INTEGRATOR-SITES.json",
+      "bytes": 1023,
+      "sha256": "d3dd982c4d7b4618382db886f82f6023f9542fc99c07c9bc817f9ffd4ea787b0"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-LEAF-AND-CONTROL.patch",
+      "bytes": 10715,
+      "sha256": "c0ad5e7e5a0c70353687bdacbc3870daca378b559c26d0b075cfd61d0038b688"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-PACKET-MANIFEST.json",
+      "bytes": 1188,
+      "sha256": "329fa151f785cfceb16589fde228fdb5230f1509d3061b7cea8fa009b93ebbee"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-PACKET-POSTED.json",
+      "bytes": 158,
+      "sha256": "627124bf902d098d73c0fd19c989caee781157442c320451e4c34b3f382ba768"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/C-PACKET-RECEIPT-85.md",
+      "bytes": 1240,
+      "sha256": "d039b488d74f3e490add72522e44b7ce2e51d967c0716b1e138b972b8d887b12"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/board85-1110.json",
+      "bytes": 14279,
+      "sha256": "e54a59be01884dce8cfefe1abe2c144fcd540b0ba9ce92ac8f3ab675ad9a89ae"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/board85-resumption.json",
+      "bytes": 122890,
+      "sha256": "6a3bd8e6ce6e4062a401d9f39d35f214066f246f12b5c98ed8f4b6171d9bcbd8"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/board87-1110.json",
+      "bytes": 11127,
+      "sha256": "1e2bdeed7e014de6e9c758d3bc46099aff1152e0f915f6ba8c4ea59ac37ea0af"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/board87-resumption.json",
+      "bytes": 48178,
+      "sha256": "fb0e40389fb4ed57a509a557ffb602632540b3d07a08ab26e995ebd04a4f124b"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-cee-tree.json",
+      "bytes": 1935533,
+      "sha256": "87eef9f53571ab7df43f5787299d0e3b8bb42b2e3263cc78cf0208624262e08b"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/manifest.json",
+      "bytes": 2637,
+      "sha256": "91b204efd784c57c1241b68d70397f71fc1d52a5cb7970d5ba01052b67bd6575"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.route.test.ts",
+      "bytes": 7498,
+      "sha256": "a91820e315536bd31c719ca06ea2aa72167ccd8022bdf9982e15da198f6c39ae"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/__tests__/tipping-point-coaching.test.ts",
+      "bytes": 7860,
+      "sha256": "94ca780a61b5d201bd6deeb22d1582e0205b935bf596b58b8aabfc7fb9a8b9af"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/decision-sensitivity.ts",
+      "bytes": 14565,
+      "sha256": "9179542938c06844919fd87a02139cd0656543b801fb6d4fdfb68107a6775a4a"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/run-explanation.ts",
+      "bytes": 3757,
+      "sha256": "06c0afaf1b0e0876eb8989d135aa8664e47923cd1cb92107c80c01ecad0ad4c1"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "bytes": 2988,
+      "sha256": "13adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/boundary/request-extensions.ts",
+      "bytes": 20605,
+      "sha256": "947571ee35357e24574d427191401f2b65e16dc756519376a41603d9279ba339"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/compose/flip-proposal.ts",
+      "bytes": 25181,
+      "sha256": "15df74ef5bd4e5e94a136d7a0d361c691116de476ae52bbabd9334c311882dd9"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/compose/types.ts",
+      "bytes": 2507,
+      "sha256": "3e0c64b537c5d3d3085dce2dda59d1040e871b7dcab23e8e59301045483f5b15"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/context/analysis-interpretation-identity.ts",
+      "bytes": 9494,
+      "sha256": "54ce2ec644c023d1e2b733be0aaa09f96449fe0f8b68ee6f70ee73c5ac4a705d"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/current-source/src/orchestrator-v5/context/flip-threshold-rows.ts",
+      "bytes": 21960,
+      "sha256": "291de9d7356280f1b6767d4cf31a366107be75e1c57a540f5d8761e65802c56a"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/packet/src/orchestrator-v5/agent-lane/__tests__/tipping-point-interaction.contract.test.ts",
+      "bytes": 6917,
+      "sha256": "a7cc0ce966821be41ef06469eca943cab83d189fca5352c831d6705c938c732a"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/packet/src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "bytes": 4809,
+      "sha256": "3743bf5b812e46e9355b7ff05e4b3960a2d459411fed971aefb02af62140dfa8"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/ptl-85-allocation.json",
+      "bytes": 8383,
+      "sha256": "b132a69b820e401a2fffe2922072f368b7e658eb36ac70f487d08cfbbd4da26c"
+    },
+    {
+      "path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/postrestart-contract/ptl-87-allocation.json",
+      "bytes": 6055,
+      "sha256": "c632542f8ed24d34bf3c34f70b4cc19d501c04b541d9d61f44a083ad2ca0dd74"
+    }
+  ]
+}

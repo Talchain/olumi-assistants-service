@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-03T21:39:00.516582+00:00",
+  "source_head": "2d7d312da9de04560bec74990de3bee6a4c9eb3c",
+  "hashes": {
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "60c3ad4cf7c3f4a70d5de471e645f0e76988e3b04020038b517a674c4239f3e8",
+    "src/orchestrator-v5/intervention-range.ts": "bfdc0d9a3dd93936248d0a97bd4d546187e5fb4546e4483a7e81b2c775d46526",
+    "src/orchestrator-v5/system-events/dispatch.ts": "0122b651dff071742f8da10c69b6ba23e2f5a612fccfaf61cf0c9ecb339d9b27",
+    "src/orchestrator-v5/system-events/option-intervention-edit.ts": "3a42566fb3d218e3cdc5e65acfdae1f1668549f6276b9aebdb5d3060ec917abd",
+    "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts": "d12a8c0e2b6fea8c9ef9faee2a0e6e7d0ae870980cc99ae2f15d44fb0730c794",
+    "src/orchestrator/tools/encode-option-interventions.ts": "69006208ba308751669011009446b612c303ba33852907782637f6623b49c26d",
+    "tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts": "3b0b296df32b030439211cfd8b6fc1e565cd9a22aa6e1b1a42bc928c10936f71"
+  }
+}

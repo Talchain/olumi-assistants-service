@@ -1,0 +1,9 @@
+User-stated option ranges could disappear after explicit approval or canonical reload, while generic graph edits could create user-authored ranges without a dedicated range approval. This preserves the approved range and native figure through the existing proposal, atomic writer and persistence paths, and refuses range writes through generic editing.
+
+The combined repair closes the five findings from review5973998055: typed admission accepts equivalent digit/word readings; capless single/compound approvals retain raw value and unit without inventing a cap; approved ranges bind to the exact target postimage; inherited range/quote checks reuse native quantity and effective-unit resolution; legacy nested/slash carriers retain ranges for the existing persistence validator. Ordinary non-range admission and permission/currentness authorities remain in place.
+
+Integration baseline: served staging `3ede57eb27d525d7492866792861120ffb2ccaa2`, schemas0.75. One normal merge, with authored repair bytes verified unchanged across it. Manifest/lock/vendor changes are inherited from staging.
+
+Validation at final head `2677b3d9496d9d0c6bd7744f0c8131d37b3f1ac6`: **454 affected-path tests PASS** on schemas0.75, six discriminating mutants detected with passing contrasts and byte-exact restoration, source `pnpm typecheck` PASS, scoped lint PASS and the project-bound schema guard PASS. The repair delta is15 files; full existing PR25 files against3ede remains subject to independent review. Local evidence is banked under output/sci-temporal-20261003/round3. Current Required/Drift and DL's final independent exact-head review are release conditions; prior green on5d2 does not transfer.
+
+No provider/browser/science rerun or served journey is claimed. Enter range → explicit approval → storage → unit edit → canonical reload remains a served acceptance boundary. SCI-HERO's separate factor-ID refinement journey remains with its existing integration owner.

@@ -1,0 +1,24 @@
+{
+  "head": "2677b3d9496d9d0c6bd7744f0c8131d37b3f1ac6",
+  "command": [
+    "/Users/paulslee/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "node_modules/vitest/vitest.mjs",
+    "run",
+    "tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts",
+    "src/orchestrator/tools/__tests__/encode-option-interventions.test.ts",
+    "tests/unit/orchestrator-v5/normalise-option-interventions.test.ts",
+    "src/orchestrator-v5/__tests__/apply-operations.test.ts",
+    "tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts",
+    "src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts",
+    "src/orchestrator-v5/system-events/__tests__/option-intervention-edit.test.ts",
+    "src/orchestrator-v5/graph-management/__tests__/add-path-recursive-screen.test.ts",
+    "src/orchestrator-v5/graph-management/__tests__/field-parity-derivation.test.ts",
+    "src/orchestrator-v5/graph-management/__tests__/option-effect-founder-edit-forms.test.ts",
+    "src/orchestrator-v5/__tests__/intervention-range.test.ts",
+    "src/orchestrator-v5/tools/handlers/__tests__/run-analysis-intervention-range-wire.test.ts",
+    "--maxWorkers=1",
+    "--reporter=json",
+    "--outputFile=/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/round3/EXACT-HEAD-FOCUSED.json"
+  ],
+  "schemas": "0.75.0"
+}

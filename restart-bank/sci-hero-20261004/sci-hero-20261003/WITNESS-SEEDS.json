@@ -1,0 +1,38 @@
+{
+  "rung": "WITNESS-PREPARATION-ONLY",
+  "note": "Unmodified graph values from existing user export fixtures. No historical enrichment, computed result or transcript is injected. These graph objects are not claimed to be an API/import envelope; use the existing validated creation/loading path. A new served Run must establish current science; historical threshold/no-signal expectations are not current evidence.",
+  "sources": [
+    {
+      "source_path": "/private/tmp/scihero-cee-1790984347/tests/fixtures/cross-service/b5-per-limit/0e19bb82.served-turn.json",
+      "source_sha256": "36f120f70a075503ba017f15c112e62e52dce21bdf583a4d9bd142bdc619a654",
+      "source_provenance": "Paul export olumi-debug-08bf9a1f-20260927.json (graph 0e19bb826dd6fde4, CEE 263dbd5, PLoT 1f6ad52, ISL 3717e36): payloads.cee_response.draft_graph and the analysis_result block enrichment AS SERVED TO THE UI (CEE egress projection, not the raw PLoT body)",
+      "source_graph_hash": "0e19bb826dd6fde4",
+      "prepared_path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/positive-model-graph.json",
+      "prepared_sha256": "69cc75e216c1ba6f9ebad45f5280b97b6b98bc161faa09341e70af538f99886f",
+      "nodes": 14,
+      "edges": 24
+    },
+    {
+      "source_path": "/private/tmp/scihero-cee-1790984347/tests/fixtures/cross-service/b5-per-limit/17d1cd3a.graph.json",
+      "source_sha256": "6d72106bee489edbcc409a3a531d702dd158e6303e3425d8ab8f53e17b611f6a",
+      "source_provenance": "export 17d1cd3a payloads.cee_response.draft_graph (nodes, edges, goal_constraints; node_count/edge_count dropped)",
+      "source_graph_hash": "ff862af73b3546e3",
+      "prepared_path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/no-signal-model-graph.json",
+      "prepared_sha256": "8dfd80a4487bf77fbd685f764d8290be2739c93e67b09e113180e434642fb441",
+      "nodes": 11,
+      "edges": 14
+    }
+  ],
+  "target": {
+    "factor_id": "pro_plan_price",
+    "label": "Pro plan price",
+    "unit": "GBP/month",
+    "current_display_value": 49,
+    "positive_observed_state_value": 0.245,
+    "positive_observed_state_cap": 200,
+    "historical_threshold": 55.76,
+    "historical_direction": "increase",
+    "candidate_edit_display_value": 56,
+    "candidate_edit_condition": "Only after a fresh selected Run confirms this factor, GBP/month unit, upward direction and 55.76 display threshold; requires actual UI Review/Confirm. No edit has occurred."
+  }
+}

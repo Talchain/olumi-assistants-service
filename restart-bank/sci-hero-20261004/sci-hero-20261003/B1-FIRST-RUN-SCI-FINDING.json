@@ -1,0 +1,40 @@
+{
+  "kind": "CAPTURED-CANONICAL-READ-ONLY-NOT-JOURNEY",
+  "source_file": "/Users/paulslee/Documents/GitHub/output/semantic-spine-overnight-20261003/pricing-initial-canonical-cold.json",
+  "source_sha256": "50772cbb693478f86778383f2e8f2574933f43d875a031f85e7d084428ddbc08",
+  "scenario_id": "b04becba-4cdd-4d9a-81fd-84d57f0d6517",
+  "current_read": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-10-03T05:38:11.854Z"
+    },
+    "computed_against_hash": "ea216faddaf307da",
+    "current_analysis_hash": "ea216faddaf307da",
+    "figures": []
+  },
+  "leader_claim": {
+    "permitted": false,
+    "withheld_reason": "goal_scope_unresolved"
+  },
+  "enrichment_keys": [
+    "option_comparison",
+    "factor_sensitivity",
+    "robustness",
+    "option_comparison_status",
+    "conditional_probabilities",
+    "edge_e_values",
+    "inference_warnings",
+    "confidence_tier",
+    "decision_brief",
+    "run_provenance"
+  ],
+  "flip_thresholds_present": false,
+  "tipping_point_present": false,
+  "existing_projection_status": "not_evaluated",
+  "projection_source": "decision-sensitivity.ts121-125",
+  "observed_response": null,
+  "sci_paid_calls": 0,
+  "combined_provider_count": "unrecovered; no further paid action",
+  "case_url": "pending actual B1 handoff",
+  "conclusion": "No grounded factor crossing exists in this captured current Run. Neither an attested no-crossing nor served WHAT response is claimed."
+}

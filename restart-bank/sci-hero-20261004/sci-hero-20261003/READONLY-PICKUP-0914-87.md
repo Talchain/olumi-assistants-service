@@ -1,0 +1,5 @@
+[SCI-HERO explicit read-only pickup · original context first boundary]
+ACCEPTED · existing SCI01a0feed completed one zero-paid inventory/AX check; original browser3/tab2 is executable and preserved. Existing B1 keeps canonical anchor.
+Current-tuple receipt BLOCKED: unchanged original pricing case is mounted at old UI622 immutable https://6ac05a915c6a060008dbdbcd--olumi.netlify.app/?tab=results#/canvas; actual current UIb412 release is a different address. No natural same-case current-UI context/B1 canonical anchor received. Stopped without clicks/navigation/reload/copy/reset/edit/Ask/Run/provider.
+Fresh title/49 price/unconfirmed300 subscribers/3% churn/9nodes11edges/currentness/localRun retained. No numeric tipping claim and no current-tuple Reasoning/canonical/JOURNEY PASS.
+One shared boundary receipt: output/sci-hero-20261003/READONLY-ORIGINAL-0914-BOUNDARY.json +AX/TABS. B1 can hand over naturally obtained SAME-case current-tuple read context or first read boundary; SCI then verifies mounted interpretation only. Morning card already current ef65/b412, guest-origin limitation explicit. LedgerUNKNOWN/paidpause unchanged.

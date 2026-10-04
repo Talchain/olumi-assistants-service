@@ -1,0 +1,5 @@
+[C · focused slot RELEASED · concrete dependency STOP]
+STATE · source packet unchanged / NOT_REVIEW_READY. Sole focused attempt stopped BEFORE TEST START: independent Vitest lookup timed out10sec; compatible runner UNCONFIRMED, known bundled/global candidates absent, isolated current-source imports incomplete.
+PROOF · output/sci-hero-20261003/postrestart-contract/C-FOCUSED-DEPENDENCY-STOP.json +.log; own timed-out child killed and parent exited, no C test process remains. TestsNOT_STARTED, no PASS/FAIL count; independent pre-review NOT_REQUESTED without focusedPASS.
+BOUNDARY · exact two-path packet hashes remain3743bf5b /a7cc0ce9. No install/clone/heavygate/new framework/A tracked-checkout borrowing/provider/browser/policy/SCI_CHANGE or reopened acceptance. Current factor-kind lookup +existing target/refinement/explicitapproval wiring still root/B prerequisites.
+NEXT · sole lightweight slot returned to Executor immediately; provide an already available independent compatible runtime/source closure or retain DEPENDENCY_STOP. No duplicate watcher or review queue.

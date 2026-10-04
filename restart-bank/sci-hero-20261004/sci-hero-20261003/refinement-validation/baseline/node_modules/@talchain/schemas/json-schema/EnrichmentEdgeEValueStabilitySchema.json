@@ -1,0 +1,51 @@
+{
+  "$ref": "#/definitions/EnrichmentEdgeEValueStabilitySchema",
+  "definitions": {
+    "EnrichmentEdgeEValueStabilitySchema": {
+      "type": "object",
+      "properties": {
+        "n_seeds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "n_seeds_flipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "band_min": {
+          "type": "number"
+        },
+        "band_median": {
+          "type": "number"
+        },
+        "band_max": {
+          "type": "number"
+        },
+        "band_width": {
+          "type": "number",
+          "minimum": 0
+        },
+        "seed_flip_means": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "n_seeds",
+        "n_seeds_flipped"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

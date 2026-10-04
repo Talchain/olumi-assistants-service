@@ -1,0 +1,2187 @@
+{
+  "version": 2,
+  "timestamp": 1790995211222,
+  "nodes": [
+    {
+      "id": "dec_vp_sales",
+      "type": "decision",
+      "position": {
+        "x": 934,
+        "y": 24
+      },
+      "data": {
+        "provenance": "ai_inferred",
+        "label": "VP of Sales Leadership Decision",
+        "kind": "decision",
+        "type": "decision"
+      },
+      "selected": false
+    },
+    {
+      "id": "fac_coaching",
+      "type": "factor",
+      "position": {
+        "x": 752,
+        "y": 320
+      },
+      "data": {
+        "category": "controllable",
+        "encoding_map": {
+          "0": "No coaching programme",
+          "1": "90-day structured coaching active"
+        },
+        "display_value": "Low (0)",
+        "provenance": "ai_inferred",
+        "label": "Structured VP Coaching Programme",
+        "kind": "factor",
+        "observedState": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        },
+        "type": "factor"
+      },
+      "selected": false
+    },
+    {
+      "id": "fac_cro_hire",
+      "type": "factor",
+      "position": {
+        "x": 1116,
+        "y": 320
+      },
+      "data": {
+        "category": "controllable",
+        "encoding_map": {
+          "0": "No CRO hired",
+          "1": "CRO hired above VP"
+        },
+        "display_value": "Low (0)",
+        "provenance": "ai_inferred",
+        "label": "CRO Hire Above VP",
+        "kind": "factor",
+        "observedState": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        },
+        "type": "factor"
+      },
+      "selected": false
+    },
+    {
+      "id": "fac_product_launch",
+      "type": "factor",
+      "position": {
+        "x": 24,
+        "y": 320
+      },
+      "data": {
+        "category": "external",
+        "prior": {
+          "range_max": 0.8,
+          "range_min": 0.3,
+          "distribution": "uniform"
+        },
+        "display_value": "70%",
+        "provenance": "user_set",
+        "label": "October Product Launch Readiness",
+        "kind": "factor",
+        "observedState": {
+          "cap": 100,
+          "unit": "%",
+          "value": 0.7,
+          "source": "user_override",
+          "raw_value": 70
+        },
+        "type": "factor"
+      },
+      "selected": false
+    },
+    {
+      "id": "fac_replacement",
+      "type": "factor",
+      "position": {
+        "x": 1844,
+        "y": 320
+      },
+      "data": {
+        "category": "controllable",
+        "encoding_map": {
+          "0": "VP retained",
+          "1": "VP replaced with new hire"
+        },
+        "display_value": "Low (0)",
+        "provenance": "ai_inferred",
+        "label": "VP of Sales Replacement",
+        "kind": "factor",
+        "observedState": {
+          "value": 0,
+          "source": "cee_inference",
+          "factor_type": "other",
+          "extractionType": "inferred",
+          "uncertainty_drivers": [
+            "Not provided"
+          ]
+        },
+        "type": "factor"
+      },
+      "selected": false
+    },
+    {
+      "id": "fac_team_morale",
+      "type": "factor",
+      "position": {
+        "x": 1480,
+        "y": 320
+      },
+      "data": {
+        "category": "external",
+        "prior": {
+          "range_max": 0.375,
+          "range_min": 0.125,
+          "distribution": "uniform"
+        },
+        "extractionType": "inferred",
+        "display_value": "0.13 to 0.38",
+        "provenance": "ai_inferred",
+        "label": "AE Team Morale",
+        "kind": "factor",
+        "type": "factor"
+      },
+      "selected": false
+    },
+    {
+      "id": "fac_vp_scalability",
+      "type": "factor",
+      "position": {
+        "x": 388,
+        "y": 320
+      },
+      "data": {
+        "category": "external",
+        "prior": {
+          "range_max": 0.75,
+          "range_min": 0.25,
+          "distribution": "uniform"
+        },
+        "extractionType": "inferred",
+        "display_value": "0.25 to 0.75",
+        "provenance": "ai_inferred",
+        "label": "VP Enterprise Sales Scalability",
+        "kind": "factor",
+        "type": "factor"
+      },
+      "selected": false
+    },
+    {
+      "id": "goal_arr",
+      "type": "goal",
+      "position": {
+        "x": 934,
+        "y": 807
+      },
+      "data": {
+        "provenance": "ai_inferred",
+        "label": "Grow ARR to £6m by June 2027",
+        "kind": "goal",
+        "success_threshold": 6000000,
+        "threshold_source": "user",
+        "threshold_confirmed": false,
+        "type": "goal"
+      },
+      "selected": false
+    },
+    {
+      "id": "opt_coach",
+      "type": "option",
+      "position": {
+        "x": 388,
+        "y": 155
+      },
+      "data": {
+        "interventions": {
+          "fac_coaching": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_coaching",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_cro_hire": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_cro_hire",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_replacement": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_replacement",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        },
+        "is_baseline": false,
+        "provenance": "ai_inferred",
+        "label": "Coach VP for 90 Days",
+        "kind": "option",
+        "interventionKeys": [
+          "fac_coaching",
+          "fac_cro_hire",
+          "fac_replacement"
+        ],
+        "type": "option"
+      },
+      "selected": true
+    },
+    {
+      "id": "opt_cro",
+      "type": "option",
+      "position": {
+        "x": 752,
+        "y": 155
+      },
+      "data": {
+        "interventions": {
+          "fac_coaching": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_coaching",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_cro_hire": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_cro_hire",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_replacement": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_replacement",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        },
+        "is_baseline": false,
+        "provenance": "ai_inferred",
+        "label": "Hire CRO Above VP of Sales",
+        "kind": "option",
+        "interventionKeys": [
+          "fac_coaching",
+          "fac_cro_hire",
+          "fac_replacement"
+        ],
+        "type": "option"
+      },
+      "selected": false
+    },
+    {
+      "id": "opt_replace",
+      "type": "option",
+      "position": {
+        "x": 1480,
+        "y": 155
+      },
+      "data": {
+        "interventions": {
+          "fac_coaching": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_coaching",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_cro_hire": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_cro_hire",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_replacement": {
+            "value": 1,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_replacement",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        },
+        "is_baseline": false,
+        "provenance": "ai_inferred",
+        "label": "Replace VP of Sales Now",
+        "kind": "option",
+        "interventionKeys": [
+          "fac_coaching",
+          "fac_cro_hire",
+          "fac_replacement"
+        ],
+        "type": "option"
+      },
+      "selected": false
+    },
+    {
+      "id": "opt_status_quo",
+      "type": "option",
+      "position": {
+        "x": 1116,
+        "y": 155
+      },
+      "data": {
+        "interventions": {
+          "fac_coaching": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_coaching",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_cro_hire": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_cro_hire",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          },
+          "fac_replacement": {
+            "value": 0,
+            "source": "brief_extraction",
+            "reasoning": "Direct from V4 prompt data.interventions",
+            "target_match": {
+              "node_id": "fac_replacement",
+              "confidence": "high",
+              "match_type": "exact_id"
+            },
+            "value_confidence": "high"
+          }
+        },
+        "is_baseline": true,
+        "provenance": "ai_inferred",
+        "label": "Continue as-is (Status Quo)",
+        "kind": "option",
+        "interventionKeys": [
+          "fac_coaching",
+          "fac_cro_hire",
+          "fac_replacement"
+        ],
+        "type": "option"
+      },
+      "selected": false
+    },
+    {
+      "id": "out_arr_growth",
+      "type": "outcome",
+      "position": {
+        "x": 752,
+        "y": 519
+      },
+      "data": {
+        "provenance": "ai_inferred",
+        "label": "ARR Growth Trajectory",
+        "kind": "outcome",
+        "type": "outcome"
+      },
+      "selected": false
+    },
+    {
+      "id": "out_sales_execution",
+      "type": "outcome",
+      "position": {
+        "x": 1116,
+        "y": 519
+      },
+      "data": {
+        "provenance": "ai_inferred",
+        "label": "Sales Team Execution Quality",
+        "kind": "outcome",
+        "type": "outcome"
+      },
+      "selected": false
+    },
+    {
+      "id": "risk_ae_attrition",
+      "type": "risk",
+      "position": {
+        "x": 934,
+        "y": 663
+      },
+      "data": {
+        "provenance": "ai_inferred",
+        "label": "AE Attrition Risk",
+        "kind": "risk",
+        "observedState": {
+          "cap": 100,
+          "unit": "%",
+          "value": 0.2,
+          "source": "cee_inference",
+          "raw_value": 20,
+          "factor_type": "probability",
+          "extractionType": "inferred"
+        },
+        "type": "risk"
+      },
+      "selected": false
+    },
+    {
+      "id": "risk_board_confidence",
+      "type": "risk",
+      "position": {
+        "x": 570,
+        "y": 663
+      },
+      "data": {
+        "provenance": "ai_inferred",
+        "label": "Board Confidence Erosion",
+        "kind": "risk",
+        "type": "risk"
+      },
+      "selected": false
+    },
+    {
+      "id": "risk_transition_disruption",
+      "type": "risk",
+      "position": {
+        "x": 1298,
+        "y": 663
+      },
+      "data": {
+        "provenance": "ai_inferred",
+        "label": "Leadership Transition Disruption",
+        "kind": "risk",
+        "type": "risk"
+      },
+      "selected": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-0",
+      "source": "dec_vp_sales",
+      "target": "opt_coach",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-1",
+      "source": "dec_vp_sales",
+      "target": "opt_cro",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-2",
+      "source": "dec_vp_sales",
+      "target": "opt_replace",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-3",
+      "source": "dec_vp_sales",
+      "target": "opt_status_quo",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-4",
+      "source": "fac_coaching",
+      "target": "out_sales_execution",
+      "type": "styled",
+      "data": {
+        "weight": 0.16024096385542166,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.72,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.10301204819277106,
+        "exists_probability": 0.72,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": 0.28,
+            "exists_probability": 0.72
+          },
+          "pass2": {
+            "basis": "brief_explicit",
+            "reasoning": "A structured coaching programme usually yields modest improvements in sales execution quality over 90 days in B2B organizations.",
+            "strength_std": 0.1,
+            "strength_mean": 0.15,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.26000000000000006,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": 0.15,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.16024096385542166,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-5",
+      "source": "fac_coaching",
+      "target": "risk_board_confidence",
+      "type": "styled",
+      "data": {
+        "weight": 0.15,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.65,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.12,
+        "exists_probability": 0.65,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.15,
+            "exists_probability": 0.65
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Demonstrating development support for the VP tends to reduce board confidence erosion risk.",
+            "strength_std": 0.1,
+            "strength_mean": -0.2,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": true,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": -0.2,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "sign_flip",
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.15,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-6",
+      "source": "fac_cro_hire",
+      "target": "out_sales_execution",
+      "type": "styled",
+      "data": {
+        "weight": 0.21746987951807226,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.78,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.09156626506024095,
+        "exists_probability": 0.78,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.16,
+            "strength_mean": 0.38,
+            "exists_probability": 0.78
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Elevating to a CRO typically enhances sales execution capabilities relative to status quo.",
+            "strength_std": 0.1,
+            "strength_mean": 0.2,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.36,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": 0.2,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.21746987951807226,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-7",
+      "source": "fac_cro_hire",
+      "target": "risk_ae_attrition",
+      "type": "styled",
+      "data": {
+        "weight": 0.22,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.7,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.14,
+        "exists_probability": 0.7,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": 0.22,
+            "exists_probability": 0.7
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Adding a new CRO layer often increases attrition risk among account executives wary of leadership changes.",
+            "strength_std": 0.15,
+            "strength_mean": 0.25,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.06,
+          "pass2_adjusted": {
+            "strength_std": 0.18,
+            "strength_mean": 0.25,
+            "exists_probability": 0.75
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.22,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-8",
+      "source": "fac_cro_hire",
+      "target": "risk_board_confidence",
+      "type": "styled",
+      "data": {
+        "weight": 0.3,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.8,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "negative",
+        "strengthStd": 0.14,
+        "exists_probability": 0.8,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": -0.3,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Board confidence may erode if a CRO hire is seen as lack of faith in existing leadership.",
+            "strength_std": 0.15,
+            "strength_mean": 0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": true,
+          "max_divergence": 1,
+          "pass2_adjusted": {
+            "strength_std": 0.18,
+            "strength_mean": 0.3,
+            "exists_probability": 0.7000000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "sign_flip"
+          ],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": -0.3,
+          "effect_direction": "negative"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-9",
+      "source": "fac_product_launch",
+      "target": "out_arr_growth",
+      "type": "styled",
+      "data": {
+        "weight": 0.4,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.82,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.18,
+        "exists_probability": 0.82,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": 0.4,
+            "exists_probability": 0.82
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Readiness for the October product launch is a key driver of mid-term ARR growth trajectory.",
+            "strength_std": 0.1,
+            "strength_mean": 0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": 0.4,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.4,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      },
+      "selected": true
+    },
+    {
+      "id": "e-10",
+      "source": "fac_product_launch",
+      "target": "risk_board_confidence",
+      "type": "styled",
+      "data": {
+        "weight": 0.25,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.75,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "negative",
+        "strengthStd": 0.15,
+        "exists_probability": 0.75,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": -0.25,
+            "exists_probability": 0.75
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Successful launch readiness typically reduces board confidence erosion risk ahead of key milestones.",
+            "strength_std": 0.15,
+            "strength_mean": -0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.18,
+            "strength_mean": -0.3,
+            "exists_probability": 0.75
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": -0.25,
+          "effect_direction": "negative"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-11",
+      "source": "fac_replacement",
+      "target": "out_sales_execution",
+      "type": "styled",
+      "data": {
+        "weight": 0.2575301204819277,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.75,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.11445783132530118,
+        "exists_probability": 0.75,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.2,
+            "strength_mean": 0.45,
+            "exists_probability": 0.75
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Replacing the VP can modestly improve sales execution after initial ramp-up.",
+            "strength_std": 0.15,
+            "strength_mean": 0.15,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.8
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6000000000000001,
+          "pass2_adjusted": {
+            "strength_std": 0.18,
+            "strength_mean": 0.15,
+            "exists_probability": 0.7000000000000001
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.2575301204819277,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-12",
+      "source": "fac_replacement",
+      "target": "risk_ae_attrition",
+      "type": "styled",
+      "data": {
+        "weight": 0.38,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.82,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.16,
+        "exists_probability": 0.82,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.16,
+            "strength_mean": 0.38,
+            "exists_probability": 0.82
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "A leadership replacement often drives up attrition risk among sales staff.",
+            "strength_std": 0.15,
+            "strength_mean": 0.3,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.85
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.16000000000000003,
+          "pass2_adjusted": {
+            "strength_std": 0.18,
+            "strength_mean": 0.3,
+            "exists_probability": 0.75
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.38,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-13",
+      "source": "fac_replacement",
+      "target": "risk_transition_disruption",
+      "type": "styled",
+      "data": {
+        "weight": 0.55,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.88,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.15,
+        "exists_probability": 0.88,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.15,
+            "strength_mean": 0.55,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Replacing the VP is likely to cause substantial short-term transition disruption.",
+            "strength_std": 0.1,
+            "strength_mean": 0.5,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.10000000000000009,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": 0.5,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.55,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-14",
+      "source": "fac_team_morale",
+      "target": "out_sales_execution",
+      "type": "styled",
+      "data": {
+        "weight": 0.11445783132530118,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.8,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.0686746987951807,
+        "exists_probability": 0.8,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": 0.2,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Higher AE team morale generally leads to better sales execution quality.",
+            "strength_std": 0.1,
+            "strength_mean": 0.1,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.2,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": 0.1,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.11445783132530118,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-15",
+      "source": "fac_team_morale",
+      "target": "risk_ae_attrition",
+      "type": "styled",
+      "data": {
+        "weight": 0.32,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.85,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "negative",
+        "strengthStd": 0.14,
+        "exists_probability": 0.85,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": -0.32,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "Improved team morale typically reduces attrition risk among account executives.",
+            "strength_std": 0.1,
+            "strength_mean": -0.2,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": -0.2,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": -0.32,
+          "effect_direction": "negative"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-16",
+      "source": "fac_vp_scalability",
+      "target": "out_arr_growth",
+      "type": "styled",
+      "data": {
+        "weight": 0.25,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.8,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.18,
+        "exists_probability": 0.8,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.18,
+            "strength_mean": 0.25,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "The VP’s scalability capability is a strong determinant of future ARR growth.",
+            "strength_std": 0.15,
+            "strength_mean": 0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3333333333333333,
+          "pass2_adjusted": {
+            "strength_std": 0.18,
+            "strength_mean": 0.4,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.25,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-17",
+      "source": "fac_vp_scalability",
+      "target": "out_sales_execution",
+      "type": "styled",
+      "data": {
+        "weight": 0.20030120481927707,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.85,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.1259036144578313,
+        "exists_probability": 0.85,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.22,
+            "strength_mean": 0.35,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "domain_prior",
+            "reasoning": "The inherent scalability of the VP in enterprise sales directly drives execution quality.",
+            "strength_std": 0.1,
+            "strength_mean": 0.4,
+            "lint_corrected": false,
+            "needs_user_input": true,
+            "exists_probability": 0.9
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.10000000000000009,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": 0.4,
+            "exists_probability": 0.8
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 1,
+          "contested_reasons": [
+            "confidence_band_change"
+          ],
+          "validation_lint_log": []
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.20030120481927707,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-18",
+      "source": "opt_coach",
+      "target": "fac_coaching",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-19",
+      "source": "opt_cro",
+      "target": "fac_cro_hire",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-20",
+      "source": "opt_replace",
+      "target": "fac_replacement",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-21",
+      "source": "opt_status_quo",
+      "target": "fac_coaching",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-22",
+      "source": "opt_status_quo",
+      "target": "fac_cro_hire",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-23",
+      "source": "opt_status_quo",
+      "target": "fac_replacement",
+      "type": "styled",
+      "data": {
+        "weight": 1,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 1,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.01,
+        "exists_probability": 1,
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 1,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-24",
+      "source": "out_arr_growth",
+      "target": "goal_arr",
+      "type": "styled",
+      "data": {
+        "weight": 0.7,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.95,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.1,
+        "exists_probability": 0.95,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.1,
+            "strength_mean": 0.7,
+            "exists_probability": 0.95
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "ARR growth trajectory directly determines the likelihood of achieving the £6m ARR goal.",
+            "strength_std": 0.1,
+            "strength_mean": 0.3181818181818182,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.7636363636363636,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": 0.3181818181818182,
+            "exists_probability": 0.89
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change",
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.3181818181818182,
+              "before": 0.7,
+              "edge_key": "out_arr_growth->goal_arr"
+            }
+          ]
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.7,
+          "effect_direction": "positive"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-25",
+      "source": "out_sales_execution",
+      "target": "goal_arr",
+      "type": "styled",
+      "data": {
+        "weight": 0.7,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.9,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "positive",
+        "strengthStd": 0.15,
+        "exists_probability": 0.9,
+        "validation": {
+          "pass1": {
+            "strength_std": 0,
+            "strength_mean": 0,
+            "exists_probability": 0
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Sales execution quality causally feeds into ARR target achievement.",
+            "strength_std": 0.1,
+            "strength_mean": 0.22727272727272727,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.6666666666666666,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": 0.22727272727272727,
+            "exists_probability": 0.89
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change",
+            "confidence_band_change",
+            "existence_boundary_crossing"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": 0.22727272727272727,
+              "before": 0.5,
+              "edge_key": "out_sales_execution->goal_arr"
+            }
+          ]
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": 0.7,
+          "effect_direction": "positive"
+        },
+        "origin": "repair"
+      }
+    },
+    {
+      "id": "e-26",
+      "source": "risk_ae_attrition",
+      "target": "goal_arr",
+      "type": "styled",
+      "data": {
+        "weight": 0.35,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.88,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "negative",
+        "strengthStd": 0.14,
+        "exists_probability": 0.88,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": -0.35,
+            "exists_probability": 0.88
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Higher AE attrition risk reduces the probability of hitting ARR growth targets.",
+            "strength_std": 0.1,
+            "strength_mean": -0.18181818181818182,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "contested",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.3363636363636363,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": -0.18181818181818182,
+            "exists_probability": 0.89
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [
+            "strength_band_change"
+          ],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.18181818181818182,
+              "before": -0.4,
+              "edge_key": "risk_ae_attrition->goal_arr"
+            }
+          ]
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": -0.35,
+          "effect_direction": "negative"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-27",
+      "source": "risk_board_confidence",
+      "target": "goal_arr",
+      "type": "styled",
+      "data": {
+        "weight": 0.2,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.8,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "negative",
+        "strengthStd": 0.12,
+        "exists_probability": 0.8,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.12,
+            "strength_mean": -0.2,
+            "exists_probability": 0.8
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "An erosion in board confidence can stall strategic initiatives needed for ARR growth.",
+            "strength_std": 0.1,
+            "strength_mean": -0.13636363636363635,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.12727272727272732,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": -0.13636363636363635,
+            "exists_probability": 0.89
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.13636363636363635,
+              "before": -0.3,
+              "edge_key": "risk_board_confidence->goal_arr"
+            }
+          ]
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": -0.2,
+          "effect_direction": "negative"
+        },
+        "origin": "ai"
+      }
+    },
+    {
+      "id": "e-28",
+      "source": "risk_transition_disruption",
+      "target": "goal_arr",
+      "type": "styled",
+      "data": {
+        "weight": 0.28,
+        "style": "solid",
+        "curvature": 0.15,
+        "pathType": "bezier",
+        "kind": "decision-probability",
+        "functionType": "linear",
+        "beliefExists": 0.85,
+        "beliefStrength": 0.5,
+        "schemaVersion": 4,
+        "direction": "negative",
+        "strengthStd": 0.14,
+        "exists_probability": 0.85,
+        "validation": {
+          "pass1": {
+            "strength_std": 0.14,
+            "strength_mean": -0.28,
+            "exists_probability": 0.85
+          },
+          "pass2": {
+            "basis": "structural_inference",
+            "reasoning": "Leadership transition disruption risk negatively impacts the ability to achieve growth targets.",
+            "strength_std": 0.1,
+            "strength_mean": -0.13636363636363635,
+            "lint_corrected": true,
+            "needs_user_input": false,
+            "exists_probability": 0.99
+          },
+          "status": "agreed",
+          "evoi_rank": null,
+          "was_shown": false,
+          "evoi_impact": null,
+          "resolved_by": "default",
+          "user_action": "pending",
+          "pass2_missing": false,
+          "sign_unstable": false,
+          "max_divergence": 0.28727272727272735,
+          "pass2_adjusted": {
+            "strength_std": 0.13,
+            "strength_mean": -0.13636363636363635,
+            "exists_probability": 0.89
+          },
+          "resolved_value": null,
+          "bias_correction": {
+            "strength_std_offset": 0.03,
+            "strength_mean_offset": 0,
+            "exists_probability_offset": -0.09999999999999998
+          },
+          "distance_to_goal": 0,
+          "contested_reasons": [],
+          "validation_lint_log": [
+            {
+              "code": "LINT_BUDGET_RESCALE",
+              "after": -0.13636363636363635,
+              "before": -0.3,
+              "edge_key": "risk_transition_disruption->goal_arr"
+            }
+          ]
+        },
+        "beliefExistsSource": "cee",
+        "weightSource": "cee",
+        "strengthStdSource": "cee",
+        "directionSource": "cee",
+        "provenanceDisplay": "ai_inferred",
+        "serverStrength": {
+          "mean": -0.28,
+          "effect_direction": "negative"
+        },
+        "origin": "ai"
+      }
+    }
+  ]
+}

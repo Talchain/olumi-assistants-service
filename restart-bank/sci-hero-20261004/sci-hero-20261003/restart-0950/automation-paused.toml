@@ -1,0 +1,10 @@
+version = 1
+id = "sci-hero-overnight-tipping-point-delivery"
+kind = "heartbeat"
+name = "SCI-HERO overnight tipping-point delivery"
+prompt = "Continue Paul's authorised SCI-HERO tipping-point delivery in this chat until the morning manual-test handoff is ready. Read /Users/paulslee/Documents/GitHub/output/sci-hero-20261003/OVERNIGHT-STATE.md first and refresh #85/#87 incrementally from the saved checkpoint. Stay the existing SCI-HERO writer; another Codex chat owns operational Delivery Executor. Finish and publish the deterministic coaching and only necessary factor-ID refinement integration, respect Context P0 and Shared Data authority, coordinate the route hunk and guarded release with PTL/Delivery, and independently reviewed exact-head Required CI before landing. Prioritise served positive -> explicit approved refinement -> stale -> rerun -> new interpretation -> canonical cold reload plus no-signal control. Do not expand schema/PLoT/keep-list/VOI/ranks or repeat broad science validation. Use the existing checkout and one focused worker; no installs/clones/full gates below20GB. Never self-approve own consequential changes or claim JOURNEY-WITNESSED from component tests. Communicate only meaningful progress, failure or an actionable dependency; stay quiet when unchanged. Update durable state and prepare MORNING-MANUAL-TEST.md with exact URL, decisive steps and any remaining blocker. Drive one bounded high-value delivery action per wake; stop this heartbeat when the authorised delivery and morning handoff are complete."
+status = "PAUSED"
+rrule = "FREQ=MINUTELY;INTERVAL=3"
+target_thread_id = "01a0feed-814f-7160-a3c3-65878f73a415"
+created_at = 1790988251630
+updated_at = 1791021532392

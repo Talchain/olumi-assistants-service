@@ -1,0 +1,18 @@
+[
+  {
+    "mutant": "wrong_factor",
+    "killed": true
+  },
+  {
+    "mutant": "wrong_threshold",
+    "killed": true
+  },
+  {
+    "mutant": "wrong_direction",
+    "killed": true
+  },
+  {
+    "mutant": "reverse_crossings",
+    "killed": true
+  }
+]

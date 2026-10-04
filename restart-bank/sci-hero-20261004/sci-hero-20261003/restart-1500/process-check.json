@@ -1,0 +1,12 @@
+{
+  "checked_at": "2026-10-03T15:00:43.042111+00:00",
+  "pid": 51884,
+  "command_matches": [],
+  "cwd_scan": {
+    "exit_code": 0,
+    "matches": [],
+    "stderr": ""
+  },
+  "worktree_path": "/private/tmp/scihero-cee-1790984347",
+  "worktree_exists": false
+}

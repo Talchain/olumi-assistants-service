@@ -1,0 +1,39 @@
+{
+  "read_at": "2026-10-03T19:36:36.658433+00:00",
+  "repo": "Talchain/olumi-assistants-service",
+  "head": "11e8fe24ff289fbbb68e074bba22c89055e9661a",
+  "files": [
+    {
+      "path": "src/orchestrator-v5/agent-lane/tipping-point-coaching.ts",
+      "head": "11e8fe24ff289fbbb68e074bba22c89055e9661a",
+      "blob_sha": "75c40f735dcfd5c16b451c0b1966ff75d0364014",
+      "sha256": "13adb030b9235c193ae74ae549d5cc2ddc91dfa777ca55d04e22435330e3f6ca",
+      "bytes": 2988
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/decision-sensitivity.ts",
+      "head": "11e8fe24ff289fbbb68e074bba22c89055e9661a",
+      "blob_sha": "7ee9255b71b98bc3427a9215eb68d33a3fb6ab61",
+      "sha256": "9179542938c06844919fd87a02139cd0656543b801fb6d4fdfb68107a6775a4a",
+      "bytes": 14565
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/run-explanation.ts",
+      "head": "11e8fe24ff289fbbb68e074bba22c89055e9661a",
+      "blob_sha": "514701cf9c90f3d686638f4955d9fc8c29a94b87",
+      "sha256": "06c0afaf1b0e0876eb8989d135aa8664e47923cd1cb92107c80c01ecad0ad4c1",
+      "bytes": 3757
+    },
+    {
+      "path": "src/routes/assistants/agent-v1-turn.ts",
+      "error": "gh: Not Found (HTTP 404)\n"
+    },
+    {
+      "path": "src/routes/agent-v1-turn.ts",
+      "head": "11e8fe24ff289fbbb68e074bba22c89055e9661a",
+      "blob_sha": "61a0cb63f8a6810089c756c9c308d00dd56ca5f3",
+      "sha256": "dbf746f781c9da61b18c15a29094fdf0aa638a728d0c4ccde57efcdbab47b9d7",
+      "bytes": 246661
+    }
+  ]
+}

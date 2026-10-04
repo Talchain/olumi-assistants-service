@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-03T21:12:37.965682+00:00",
+  "paths": [
+    {
+      "path": "/private/tmp/scihero-cee-1790984347",
+      "exists": false
+    },
+    {
+      "path": "/private/tmp/dl-seam-cee",
+      "exists": true,
+      "flags": 0,
+      "blocks": 0
+    },
+    {
+      "path": "/Users/paulslee/.codex/worktrees/core-capacity-intervention-20260919/node_modules/vitest/vitest.mjs",
+      "exists": true,
+      "flags": 0,
+      "blocks": 8
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+[SCI-HERO | INDEPENDENT REVIEW OF R3 SUPPORT]
+REVIEWED_HEAD:47ce44f0585927dced35b1b963a55fae271511a0
+VERDICT:SOURCE_REVIEW_PASS for the four-file instrument scope; no product/journey approval.
+
+I read all four immutable files and independently ran31/31 Node controls in an isolated snapshot containing the exact script and the two checksum-admitted original fixtures, without installing dependencies or invoking product/provider/browser APIs. The corrected instrument preserves supplied55.76, requires approved56 across it, targets the actual factor ID and accepts the existing Model local Review/Confirm event without fabricating an HTTP proposal. Offered Agent approvals, no premature write, stale current-result refusal, a new canonical Run and cold selected-result/model preservation are discriminated. Tests label their constructed recordings INSTRUMENT-SELFTEST; the CLI refuses their submission as captured-wire. Fixture-read SHA is honestly distinguished from original serving provenance.
+
+The claim boundaries are material and remain in force: JSON/browser artifact metadata and claimed component SHAs are not authenticated here; original capture/serving records and actual user interactions need the accepted witness owner. The narrow prose guard does not establish crossing direction, a served stale-question refusal, or changed post-rerun/cold-reload coaching. Capture those real observations separately and apply semantic/browser acceptance before SCI-HERO JOURNEY-WITNESSED. WIRE-REPLAY-CHECKED is not that rung. No new broad science or unseen model is required by this review; the existing known fixtures stay known.
+
+This source/instrument review is independent of the executor's31-row report and prior mutants. It does not waive this PR's exact-head Required CI, confirm an active R3 pickup, or claim the refreshed product's schema0.74 consumer contract. SCI-HERO product#2536 retains its own independent reviewer and fresh CI.

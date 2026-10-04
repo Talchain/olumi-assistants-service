@@ -1,0 +1,41 @@
+{
+  "observed_at": "2026-10-03T09:17:12.338497+00:00",
+  "owner": "SCI-HERO01a0feed",
+  "state": "ACCEPTED bounded read-only first-boundary check; BLOCKED current-tuple receipt",
+  "context": {
+    "browser_id": "3",
+    "tab_id": "2",
+    "provider_tab_id": "browser-use:58f6a337-7648-49b1-9c6b-98ea459f7abf",
+    "url": "https://6ac05a915c6a060008dbdbcd--olumi.netlify.app/?tab=results#/canvas",
+    "visible_title": "Pricing scope \u2014 disposable acceptance",
+    "scenario_id_from_prior_B1_canonical_receipt": "b04becba-4cdd-4d9a-81fd-84d57f0d6517",
+    "scenario_id_freshly_read_from_canonical": false
+  },
+  "observation": {
+    "price": "49 GBP per subscriber/month",
+    "subscribers": "300, estimate not confirmed",
+    "churn": "3%, estimate not confirmed",
+    "currentness_text": "Analysis reflects the current model.",
+    "local_run_reference": "v5:8b4f1219ee43c4ed, locally derived, not engine hash",
+    "graph_size": "9 nodes / 11 edges",
+    "numeric_tipping_threshold_visible": false,
+    "analysis_selected": true,
+    "reasoning_selected": false
+  },
+  "boundary": "Preserved original case is mounted on old immutable UI622 origin; no current UIb412 same-case context/canonical anchor has been handed over. Stop without navigation/state copy/new case.",
+  "actions": [
+    "browser3 tab inventory",
+    "AX observation",
+    "local evidence write",
+    "preserve original tab handoff"
+  ],
+  "paid_provider_actions": 0,
+  "product_mutations": 0,
+  "reload": false,
+  "current_tuple_consumer_retention_pass": false,
+  "journey_witnessed": false,
+  "evidence": [
+    "READONLY-ORIGINAL-0914-AX.txt",
+    "READONLY-ORIGINAL-0914-TABS.json"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "base_head": "2d7d312da9de04560bec74990de3bee6a4c9eb3c",
+  "staging_head": "880b6487b381ed0877656ca6a17a385c61a1440f",
+  "source": {
+    "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts": "75e21a35587d47c6b59f593e7ce0fc3c240cde0a3cee1e80f1a1bda7daebe0b1",
+    "src/orchestrator/tools/encode-option-interventions.ts": "3cc224b67438449a4a5bb697403b4a98b43c66232a1352e9adc144fbcf8d0686",
+    "src/orchestrator-v5/system-events/dispatch.ts": "fb0b0d759a36e7fca6d0fe2cd2be6714608d6d5e59b94b35958f9c37217e8abb",
+    "src/orchestrator-v5/system-events/option-intervention-edit.ts": "282cb8e343279bfd47eb8058695e6b02d70c918d780259ed5bc0dd66b2b28df3"
+  }
+}

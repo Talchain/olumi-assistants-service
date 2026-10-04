@@ -1,0 +1,35 @@
+[
+  {
+    "command": [
+      "git",
+      "show-ref",
+      "--verify",
+      "refs/remotes/origin/claude/focused-ritchie-vf0xpz"
+    ],
+    "exit_code": 128,
+    "stdout": "",
+    "stderr": "fatal: 'refs/remotes/origin/claude/focused-ritchie-vf0xpz' - not a valid ref\n"
+  },
+  {
+    "command": [
+      "git",
+      "show-ref",
+      "--verify",
+      "refs/heads/claude/focused-ritchie-vf0xpz"
+    ],
+    "exit_code": 128,
+    "stdout": "",
+    "stderr": "fatal: 'refs/heads/claude/focused-ritchie-vf0xpz' - not a valid ref\n"
+  },
+  {
+    "command": [
+      "git",
+      "cat-file",
+      "-t",
+      "e7f365a6ab4beb048660680578e1c8231736cb46"
+    ],
+    "exit_code": 128,
+    "stdout": "",
+    "stderr": "fatal: git cat-file: could not get object info\n"
+  }
+]

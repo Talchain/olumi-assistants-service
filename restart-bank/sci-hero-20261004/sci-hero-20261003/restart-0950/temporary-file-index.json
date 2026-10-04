@@ -1,0 +1,2246 @@
+[
+  {
+    "original_path": "/private/tmp/sci-hero-ci-fix-notice.md",
+    "archive_member": "temporary/sci-hero-ci-fix-notice.md",
+    "bytes": 1268,
+    "sha256": "199e4abad5a43196a9d4a26b0ee16f8cc20966cdc318468f4e6c32db0c316bb0"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-context-concrete-handoff.md",
+    "archive_member": "temporary/sci-hero-context-concrete-handoff.md",
+    "bytes": 1900,
+    "sha256": "5f38f4fbe6e49b1fae87bcbf07edd069e89b188ccf9704d741f2ee2f561e0c36"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-context-handoff-comment.json",
+    "archive_member": "temporary/sci-hero-context-handoff-comment.json",
+    "bytes": 3740,
+    "sha256": "0f61cda6335491371fc289f68620ec3f52485a9121d85c8ea996a0295943f47d"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-dl-blocker-answer.md",
+    "archive_member": "temporary/sci-hero-dl-blocker-answer.md",
+    "bytes": 1836,
+    "sha256": "4041f672ee36793d4e9d52c27e04cff8dcd8b84bd27d9fd88ace6758e01f2fbd"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-mutant-reverse_crossings.log",
+    "archive_member": "temporary/sci-hero-mutant-reverse_crossings.log",
+    "bytes": 5414,
+    "sha256": "c207e29ae1b6d5efe18642fc9c25fa7b28bff0eff991b15de08901eec4e1a0e8"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-mutant-wrong_direction.log",
+    "archive_member": "temporary/sci-hero-mutant-wrong_direction.log",
+    "bytes": 3627,
+    "sha256": "a6ca7071c64a241f4a688a5501609be6a3659d32efdc8c0e8e0cb0b935155931"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-mutant-wrong_factor.log",
+    "archive_member": "temporary/sci-hero-mutant-wrong_factor.log",
+    "bytes": 4470,
+    "sha256": "7812efd3a98e217cbde5063cb62f10e07707f58ce98bd55b5ba2411b8e6a8f84"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-mutant-wrong_threshold.log",
+    "archive_member": "temporary/sci-hero-mutant-wrong_threshold.log",
+    "bytes": 4361,
+    "sha256": "d88d7432f1f74f1f82789b09b52599647483a75ff0e92e3e6dfe8ad4c13b2939"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-narrowed-lease.md",
+    "archive_member": "temporary/sci-hero-narrowed-lease.md",
+    "bytes": 2807,
+    "sha256": "42c255c51c603bbcb79329ef0d5fdd4176e6236d9fca6ecc85c9c1f3c4b2aa87"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-overnight-goal.md",
+    "archive_member": "temporary/sci-hero-overnight-goal.md",
+    "bytes": 3049,
+    "sha256": "6ecd1359d5ae65c189b65bcf8ad3364269290f4da2e7ace6efa5be91dc7026ed"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr1-05e87551-review.md",
+    "archive_member": "temporary/sci-hero-pr1-05e87551-review.md",
+    "bytes": 1000,
+    "sha256": "5b75d7bf47c458571239be931593e05bafced2bfdd433b0b14566a95d151e4f1"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr1-body.md",
+    "archive_member": "temporary/sci-hero-pr1-body.md",
+    "bytes": 1958,
+    "sha256": "ba71c5d86f62363109724de451d2a03e25cc749ddbdfbd2c77923d8fdd3e074e"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr1-focused.log",
+    "archive_member": "temporary/sci-hero-pr1-focused.log",
+    "bytes": 12157,
+    "sha256": "e6e01e4f4083d7975f09af4e69e2f3a7fb9012257e961eab29278f0421beb0c7"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr1-mutants.json",
+    "archive_member": "temporary/sci-hero-pr1-mutants.json",
+    "bytes": 246,
+    "sha256": "a102209e8903d6c22eeb8a55101c5bb3d198fbf381b289bed85387d6919bde5d"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr1-required3.log",
+    "archive_member": "temporary/sci-hero-pr1-required3.log",
+    "bytes": 21157452,
+    "sha256": "3d3e8ed5cb5fcb07b94c511a7f8caa012208f26c4f9fe0a507bad3d0d368f7b0"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr1-typecheck.log",
+    "archive_member": "temporary/sci-hero-pr1-typecheck.log",
+    "bytes": 1539,
+    "sha256": "d2bff165f25d334a519194c34b33f6db908bfd56185052616ae9e2cb41546cf4"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr1-unit-guard-fix.log",
+    "archive_member": "temporary/sci-hero-pr1-unit-guard-fix.log",
+    "bytes": 488,
+    "sha256": "65900b86eb4b12581a1c391407797de03fc8967590c73f981f07db4725b967d7"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-body.md",
+    "archive_member": "temporary/sci-hero-pr2-body.md",
+    "bytes": 3546,
+    "sha256": "cbee89a08d9e2388658caf1c669b2d7dcf7b9c0684ffdba19fd244be11a6c69b"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-bound-key.log",
+    "archive_member": "temporary/sci-hero-pr2-bound-key.log",
+    "bytes": 489,
+    "sha256": "736f257987e343f9dfb330fb1bc3545e2f4fd2191b09ab52124faec4332f6c5a"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-compat.log",
+    "archive_member": "temporary/sci-hero-pr2-compat.log",
+    "bytes": 1811,
+    "sha256": "45938f7e80badf0cd00aede129ff1c207a427ecb9b7ceec7fd17692d2f5f203c"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-exact-44d90.log",
+    "archive_member": "temporary/sci-hero-pr2-exact-44d90.log",
+    "bytes": 48722,
+    "sha256": "5c48b22ade045ec91aba4cf939bb793996ecb5797c9d379b0bc80f43c3f4e4d0"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-final-focused.log",
+    "archive_member": "temporary/sci-hero-pr2-final-focused.log",
+    "bytes": 48722,
+    "sha256": "1dfe0bf57ff12ec1ee437ebeacc96f24368abce2e83b25c03585709823bdedd2"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-final-lint.log",
+    "archive_member": "temporary/sci-hero-pr2-final-lint.log",
+    "bytes": 264,
+    "sha256": "39932211634b7edadfdfe6f4242017aaec8451aac0642f5038c42aed6543184e"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-focused.log",
+    "archive_member": "temporary/sci-hero-pr2-focused.log",
+    "bytes": 490,
+    "sha256": "fcf917a84aba6ade04e635a1726af06b5e8bee6ce26194bb166d6ae33d0f3629"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-lint.log",
+    "archive_member": "temporary/sci-hero-pr2-lint.log",
+    "bytes": 264,
+    "sha256": "39932211634b7edadfdfe6f4242017aaec8451aac0642f5038c42aed6543184e"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-method-regression.log",
+    "archive_member": "temporary/sci-hero-pr2-method-regression.log",
+    "bytes": 488,
+    "sha256": "056b6d2799b90e0ad8ab1285469a2f18008dd2ed90692ecdff6471937c8e4d35"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-mutant-cached_final_read.log",
+    "archive_member": "temporary/sci-hero-pr2-mutant-cached_final_read.log",
+    "bytes": 9295,
+    "sha256": "d3ad2c5564b37b67fedcff488a7ffd54ac24a1e007978f55c30b4560883e06f0"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-mutant-replay_stored_threshold.log",
+    "archive_member": "temporary/sci-hero-pr2-mutant-replay_stored_threshold.log",
+    "bytes": 10366,
+    "sha256": "73f34fb4cee30cb6114ca2df22b70f6492a9aec5df0a5ba7ea0d5ef714764750"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-mutant-reuse_competing_run.log",
+    "archive_member": "temporary/sci-hero-pr2-mutant-reuse_competing_run.log",
+    "bytes": 9295,
+    "sha256": "f8c879e57cc7ddd93127cfd2732e144c95ea50b6c91b2a6e20e0090499ecebea"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-mutant-stale_consumer.log",
+    "archive_member": "temporary/sci-hero-pr2-mutant-stale_consumer.log",
+    "bytes": 4086,
+    "sha256": "6cc66a1a800c23a935f983a6ba6774df7a2141453ca1b374efc439e6a3878b2d"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-mutant-unchecked_elaboration.log",
+    "archive_member": "temporary/sci-hero-pr2-mutant-unchecked_elaboration.log",
+    "bytes": 9696,
+    "sha256": "266a861b27515832f9310fa07747266898aaefdc03acc0b515f35c5981331404"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-mutants.json",
+    "archive_member": "temporary/sci-hero-pr2-mutants.json",
+    "bytes": 780,
+    "sha256": "efcbeb9cff085e8410ac8c7040937e1bc71ae45d647f9dcf30623503f8e79c0f"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-mutants.py",
+    "archive_member": "temporary/sci-hero-pr2-mutants.py",
+    "bytes": 1900,
+    "sha256": "61151b5e3ed43f04c1ba64c526f875474a97bee0338d2ae3e588fea61fd7e8e3"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-review-ready.md",
+    "archive_member": "temporary/sci-hero-pr2-review-ready.md",
+    "bytes": 2980,
+    "sha256": "dcd7b98dc99426b137260d2168d15f92ed8fef4077e9d28d7bd3cf17a3c52204"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-route-green.log",
+    "archive_member": "temporary/sci-hero-pr2-route-green.log",
+    "bytes": 47515,
+    "sha256": "942cb25ef8e11941a49dc9be786a0f7b6e025a95cda6596f5d93519a1d7dfd84"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-route-red.log",
+    "archive_member": "temporary/sci-hero-pr2-route-red.log",
+    "bytes": 11627,
+    "sha256": "d6187b908e3f37a9a59e92fcfdcc94f7821dc8b8970d7760290ed3d73dea9774"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-route-replay.log",
+    "archive_member": "temporary/sci-hero-pr2-route-replay.log",
+    "bytes": 7936,
+    "sha256": "47c1ffeb1e733eeffbdda6386ab20b1b5fc8b5189303484cfb5af592a57cbe3f"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-pr2-typecheck.log",
+    "archive_member": "temporary/sci-hero-pr2-typecheck.log",
+    "bytes": 1539,
+    "sha256": "339c7b5ef7f86989a7aeb3a52e642a0f64e939e382851250a1f3a25a39991871"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-shared-data-nested-masking.patch",
+    "archive_member": "temporary/sci-hero-shared-data-nested-masking.patch",
+    "bytes": 591,
+    "sha256": "c55321a6d9c8dda488e7a325e69437ebfc20c8d47bbab7ccdc08a229098ad484"
+  },
+  {
+    "original_path": "/private/tmp/sci-hero-ui-scope-correction.md",
+    "archive_member": "temporary/sci-hero-ui-scope-correction.md",
+    "bytes": 1144,
+    "sha256": "1c036c6e362b151df3c6697bb0ad79a2dd0c7cd32c07bee5851aadb3ffa30a30"
+  },
+  {
+    "original_path": "/private/tmp/scihero-0119-lead-receipt.md",
+    "archive_member": "temporary/scihero-0119-lead-receipt.md",
+    "bytes": 1285,
+    "sha256": "82b81c15a39629759d2d2b43b854efc4ea566c2586a658c91ec9623255306b3c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-0124-source-receipt.md",
+    "archive_member": "temporary/scihero-0124-source-receipt.md",
+    "bytes": 1632,
+    "sha256": "00791fc008d911bdb17646e98a901aadb475e58dd7c6ea70e5d755c5859ddff3"
+  },
+  {
+    "original_path": "/private/tmp/scihero-097-all-green.md",
+    "archive_member": "temporary/scihero-097-all-green.md",
+    "bytes": 1541,
+    "sha256": "28ff6df3f5c3d2000ad9aefc7ea044af2380a700f15d68ed6da69e59cefce182"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-0419.json",
+    "archive_member": "temporary/scihero-2533-0419.json",
+    "bytes": 14216,
+    "sha256": "86b4d1b5511b8cf2ee17d8ab278b2a1396fb6116306f01a8c3a72d6a8cd6a83b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-107c-checks-0512.json",
+    "archive_member": "temporary/scihero-2533-107c-checks-0512.json",
+    "bytes": 69728,
+    "sha256": "0f1da9ed9bddc88fd9087a123633bd1b5e179d31545d104246760f79c8042159"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-107c-checks-0515.json",
+    "archive_member": "temporary/scihero-2533-107c-checks-0515.json",
+    "bytes": 69770,
+    "sha256": "b367631ffe65f665334066eb145054b5b538814e559d4549cddf49bb8afe2291"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-107c-checks-0518.json",
+    "archive_member": "temporary/scihero-2533-107c-checks-0518.json",
+    "bytes": 69791,
+    "sha256": "63d5edd6d24f9c59ca8ebbf68138020b728b7648c9d8777788820bc67d3d081f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-107c-checks-0521.json",
+    "archive_member": "temporary/scihero-2533-107c-checks-0521.json",
+    "bytes": 76431,
+    "sha256": "0625d9773216f3c04e34efd56488f89b20edda553a248de1426d4a7857c17d79"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-107c-checks-0524.json",
+    "archive_member": "temporary/scihero-2533-107c-checks-0524.json",
+    "bytes": 83832,
+    "sha256": "1fc4848560a604f89f3498542259de0856181b827925aecc3c4bd49af41908a9"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-107c-delta-0512.json",
+    "archive_member": "temporary/scihero-2533-107c-delta-0512.json",
+    "bytes": 53801,
+    "sha256": "9ff87f050c25c6faf2d49f967c4f84736ac545c655476091640404595ce8ffe6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-2aac-checks.json",
+    "archive_member": "temporary/scihero-2533-2aac-checks.json",
+    "bytes": 158129,
+    "sha256": "86a9259bc199e2a98c0dbe568c470fabbfd11a383625f8c194b77c270b021699"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-2aac-commit.json",
+    "archive_member": "temporary/scihero-2533-2aac-commit.json",
+    "bytes": 482039,
+    "sha256": "d70308598e53a2a95c6abd025e40039de69f3ff0031fe1eb4fd2af11e434838b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-2aac-drift.log",
+    "archive_member": "temporary/scihero-2533-2aac-drift.log",
+    "bytes": 22494,
+    "sha256": "dd03c74953b3553f1aabf12317b4665af236f8aca751d24aa7ac343c4a8d85e1"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-2aac-required.log",
+    "archive_member": "temporary/scihero-2533-2aac-required.log",
+    "bytes": 341961,
+    "sha256": "13af74cb7a3c7e80cd15fec1ac7c6848381a292b60db94906747ed9a274293cb"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-2aac-tests1.log",
+    "archive_member": "temporary/scihero-2533-2aac-tests1.log",
+    "bytes": 23971,
+    "sha256": "d044055aeacab37eab697540ff06c17e07f70310505dd3e141d2d584b0c0d3d7"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-8554-checks-0427.json",
+    "archive_member": "temporary/scihero-2533-8554-checks-0427.json",
+    "bytes": 102983,
+    "sha256": "684c5d42b1c1fd4d0678e8cf90c92414d2d7f10800241ac41abc7078e1d17ea4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-8554-drift.log",
+    "archive_member": "temporary/scihero-2533-8554-drift.log",
+    "bytes": 22064,
+    "sha256": "407b76901e2ee1da34d13133d8bc5e723d58b602e00516e73824eba1f6281c1b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-8554-required.log",
+    "archive_member": "temporary/scihero-2533-8554-required.log",
+    "bytes": 344915,
+    "sha256": "2b9f5a8bb6a4f9317543c1c6c1050ca67acfe9699fc664e6f2edde24e0631746"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-e7-checks-0441.json",
+    "archive_member": "temporary/scihero-2533-e7-checks-0441.json",
+    "bytes": 76431,
+    "sha256": "13352091be9061478b1444383021e7f6a4475f521a9349e6280625f60b72d1c4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-e7-checks-0448.json",
+    "archive_member": "temporary/scihero-2533-e7-checks-0448.json",
+    "bytes": 83832,
+    "sha256": "60285cc6ca9286a950672390955b5bf68eef7566c8458ff26cb2dfba0f50f094"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-e7-failures-summary.json",
+    "archive_member": "temporary/scihero-2533-e7-failures-summary.json",
+    "bytes": 7722,
+    "sha256": "955a685898fb356938ebb1b7d2a4d8338d832046f5121c61c1d2c43cb6ba08c5"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-e7-tests1.log",
+    "archive_member": "temporary/scihero-2533-e7-tests1.log",
+    "bytes": 27725616,
+    "sha256": "78c9dcbf7187b2fd87b1f52200eeeb2fe20a4bde9a044e861a9177c32d61ac1e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-e7-tests2.log",
+    "archive_member": "temporary/scihero-2533-e7-tests2.log",
+    "bytes": 23152708,
+    "sha256": "638547e6ebfc2a9b650d6ebd3004b40c237f3bc2a23a091ee120e0460a5208cc"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-e7-tests3.log",
+    "archive_member": "temporary/scihero-2533-e7-tests3.log",
+    "bytes": 21787260,
+    "sha256": "d28f0514ab3aec6dbf052c084af02e64b4c78d64b4437eb6950a97a10c6b21c7"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-final-high-0530.json",
+    "archive_member": "temporary/scihero-2533-final-high-0530.json",
+    "bytes": 942,
+    "sha256": "f334e518ab2883a3637633c894865bd4c9369ec253b09f1f1f9f97c77e786fe8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-head-0427.json",
+    "archive_member": "temporary/scihero-2533-head-0427.json",
+    "bytes": 58,
+    "sha256": "67e3a107cf3c0c8f183f37044ad91ee2d6fa58904bcc0a37adb27d5f84c49de4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-meta-0512.json",
+    "archive_member": "temporary/scihero-2533-meta-0512.json",
+    "bytes": 196,
+    "sha256": "49bba32fd15fd1411d20ca827e048a1af267855e920cfd4ed6c9370391ffe0dc"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-meta-0527.json",
+    "archive_member": "temporary/scihero-2533-meta-0527.json",
+    "bytes": 182,
+    "sha256": "97dd917f05fcdfc157c970c7f76f1fcf396fe7ded0e55284a8f91d00448ff6ba"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2533-meta-0530.json",
+    "archive_member": "temporary/scihero-2533-meta-0530.json",
+    "bytes": 202,
+    "sha256": "1986b8fc2049703c8bff9978c4e7e8ca133f6f76108af94fadfe17830daa37e3"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2535-current-diff.json",
+    "archive_member": "temporary/scihero-2535-current-diff.json",
+    "bytes": 60975,
+    "sha256": "1749638589589616c7ae66b92602da409e55c4cf877011d4b1b45ffc5bf27bf6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2535-ef-review.txt",
+    "archive_member": "temporary/scihero-2535-ef-review.txt",
+    "bytes": 1861,
+    "sha256": "e343cf8f0b51ae3ab66fdab8f503bb186140ee431ad2b61faad96e55e4fc665f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2535-rename-delta.json",
+    "archive_member": "temporary/scihero-2535-rename-delta.json",
+    "bytes": 132349,
+    "sha256": "b701f98ca47457b026e9f6a0bf1bf7543697d366b4faae0aefcbab33f7f1d10f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2536-baseline-proof.txt",
+    "archive_member": "temporary/scihero-2536-baseline-proof.txt",
+    "bytes": 299,
+    "sha256": "f3d875b1e9310ab37c5cb3b6a37a5219534c01375403016a2dbfe41cbb87db3e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-2536-green-slot.md",
+    "archive_member": "temporary/scihero-2536-green-slot.md",
+    "bytes": 1409,
+    "sha256": "5a280f7b8e48415b3094c1c7400f969be32609759c295e700b6c2e720256db9c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-architecture-0211.md",
+    "archive_member": "temporary/scihero-architecture-0211.md",
+    "bytes": 1394,
+    "sha256": "1e34b6ec12750cd71ebc087e04507f94e74930a7cf89acee1ec1f32e53d947bf"
+  },
+  {
+    "original_path": "/private/tmp/scihero-auth-boundary-receipt.txt",
+    "archive_member": "temporary/scihero-auth-boundary-receipt.txt",
+    "bytes": 1892,
+    "sha256": "6a0fcbdec3ebe59baaaec1a2a988e1259258ee82afc1977a93d99fa9caf3886f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0157.json",
+    "archive_member": "temporary/scihero-board85-0157.json",
+    "bytes": 13129,
+    "sha256": "19ebe2301ae474eb0f43ecd3a892174322d42fc1274a2c1c9af224c45e12db52"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0211.json",
+    "archive_member": "temporary/scihero-board85-0211.json",
+    "bytes": 8526,
+    "sha256": "ba11d885e5f74fe878059f8cb3fd5e16709be47ff4d6e855e5081385602f55f0"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0217.json",
+    "archive_member": "temporary/scihero-board85-0217.json",
+    "bytes": 5397,
+    "sha256": "d34d0b7f5dc029857ff4e520f7d508220c875407f568f63413b17f6e358e6cdb"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0220.json",
+    "archive_member": "temporary/scihero-board85-0220.json",
+    "bytes": 5397,
+    "sha256": "d34d0b7f5dc029857ff4e520f7d508220c875407f568f63413b17f6e358e6cdb"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0223.json",
+    "archive_member": "temporary/scihero-board85-0223.json",
+    "bytes": 9101,
+    "sha256": "f6c33c14ca97d7ed29ad10369e969595249381b034330279268aac89bed6af24"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0226.json",
+    "archive_member": "temporary/scihero-board85-0226.json",
+    "bytes": 6980,
+    "sha256": "1b8081624d1427e93bd0f481f68fc5dcc382f73516bedb88c62bd931c5b7519c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0229.json",
+    "archive_member": "temporary/scihero-board85-0229.json",
+    "bytes": 6001,
+    "sha256": "da6ee5eac1f2a53b83e036dcb7791917d88c4774737e50a21e98a7199e750210"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0232.json",
+    "archive_member": "temporary/scihero-board85-0232.json",
+    "bytes": 6050,
+    "sha256": "9ad70fca0256f2fd2fe0587c82fb4ee5b567082b87ad4661a64c9bd9d1fc6bee"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0235.json",
+    "archive_member": "temporary/scihero-board85-0235.json",
+    "bytes": 3325,
+    "sha256": "70c06d7882bc44aaa968e82dddb21b2be839d4bfbdaaa288710bff5694ef3cc2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0312.json",
+    "archive_member": "temporary/scihero-board85-0312.json",
+    "bytes": 10703,
+    "sha256": "f2dfc9e689e90edb9c5d1cb21c5fe78a990b23003945427bc7cd1a1386ef4a69"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0315.json",
+    "archive_member": "temporary/scihero-board85-0315.json",
+    "bytes": 6395,
+    "sha256": "d6c95963d51f897caa6057e8ed574111c4006287df23c02f3323005f9f2676bb"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0318.json",
+    "archive_member": "temporary/scihero-board85-0318.json",
+    "bytes": 6395,
+    "sha256": "d6c95963d51f897caa6057e8ed574111c4006287df23c02f3323005f9f2676bb"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0321.json",
+    "archive_member": "temporary/scihero-board85-0321.json",
+    "bytes": 6395,
+    "sha256": "d6c95963d51f897caa6057e8ed574111c4006287df23c02f3323005f9f2676bb"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0324.json",
+    "archive_member": "temporary/scihero-board85-0324.json",
+    "bytes": 11054,
+    "sha256": "9781d527ce03f5272a973135b05965f24f0d7ab29dc4431be42756f8cb5469c0"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0327.json",
+    "archive_member": "temporary/scihero-board85-0327.json",
+    "bytes": 4660,
+    "sha256": "37f0f32a9625548bc07eda28c5c8211370f17585ceff47d30cdfe361ce6bbc28"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0330.json",
+    "archive_member": "temporary/scihero-board85-0330.json",
+    "bytes": 7221,
+    "sha256": "5fcb63fd1b3514f7c072b6f663337c00f4e3661dd0cdad347f8008d48682ddfd"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0333.json",
+    "archive_member": "temporary/scihero-board85-0333.json",
+    "bytes": 7531,
+    "sha256": "f879b85271ddc822ca8654df589bd2f4def96a085a8fa741b5e423b6c81b12f6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0336.json",
+    "archive_member": "temporary/scihero-board85-0336.json",
+    "bytes": 14179,
+    "sha256": "a6c96353b3d0b8ce6082818a7e51a1be4fbaf000a884bf89c7d16229544f8db6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0339.json",
+    "archive_member": "temporary/scihero-board85-0339.json",
+    "bytes": 4115,
+    "sha256": "6dd579fe46ae9a3b4b9f2ae2f93a77e42782361fac07da52beb8adeda883e63b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0342.json",
+    "archive_member": "temporary/scihero-board85-0342.json",
+    "bytes": 4115,
+    "sha256": "6dd579fe46ae9a3b4b9f2ae2f93a77e42782361fac07da52beb8adeda883e63b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0345.json",
+    "archive_member": "temporary/scihero-board85-0345.json",
+    "bytes": 4115,
+    "sha256": "6dd579fe46ae9a3b4b9f2ae2f93a77e42782361fac07da52beb8adeda883e63b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0348.json",
+    "archive_member": "temporary/scihero-board85-0348.json",
+    "bytes": 4115,
+    "sha256": "6dd579fe46ae9a3b4b9f2ae2f93a77e42782361fac07da52beb8adeda883e63b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0351.json",
+    "archive_member": "temporary/scihero-board85-0351.json",
+    "bytes": 4115,
+    "sha256": "6dd579fe46ae9a3b4b9f2ae2f93a77e42782361fac07da52beb8adeda883e63b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0354.json",
+    "archive_member": "temporary/scihero-board85-0354.json",
+    "bytes": 8985,
+    "sha256": "474ea795b9009d447da2dcf03d807745a678767858c1b0d3d7879376746cbd44"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0357.json",
+    "archive_member": "temporary/scihero-board85-0357.json",
+    "bytes": 4871,
+    "sha256": "d7633ed8354fec3be95002a9f7e225d15e562cf6f4f50bca2b8d08c368c06293"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0401.json",
+    "archive_member": "temporary/scihero-board85-0401.json",
+    "bytes": 7511,
+    "sha256": "f3c86546603cf36c0a1193c9c6d80edea096653c7a44e31c3e74d0fa56c1d424"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0404.json",
+    "archive_member": "temporary/scihero-board85-0404.json",
+    "bytes": 2641,
+    "sha256": "e7beed5e03597cd62367182625fc4c76901f82f634a1418529c10f759e48c717"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0407.json",
+    "archive_member": "temporary/scihero-board85-0407.json",
+    "bytes": 2641,
+    "sha256": "e7beed5e03597cd62367182625fc4c76901f82f634a1418529c10f759e48c717"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0410.json",
+    "archive_member": "temporary/scihero-board85-0410.json",
+    "bytes": 2641,
+    "sha256": "e7beed5e03597cd62367182625fc4c76901f82f634a1418529c10f759e48c717"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0413.json",
+    "archive_member": "temporary/scihero-board85-0413.json",
+    "bytes": 2641,
+    "sha256": "e7beed5e03597cd62367182625fc4c76901f82f634a1418529c10f759e48c717"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0416.json",
+    "archive_member": "temporary/scihero-board85-0416.json",
+    "bytes": 7792,
+    "sha256": "7d3ac73e2f916f1bfed616ec523266005a442b84e55b7d74ab22a63f516c0487"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0419.json",
+    "archive_member": "temporary/scihero-board85-0419.json",
+    "bytes": 7719,
+    "sha256": "81d3bffe9f834d0c522eb771589f77172390f3f3c338375c723134cf2b18d924"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0424.json",
+    "archive_member": "temporary/scihero-board85-0424.json",
+    "bytes": 9873,
+    "sha256": "9d6881c29298b335c54b65a93c571d953064d0e4d3a90f6d8104c5ef826c16f6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0427.json",
+    "archive_member": "temporary/scihero-board85-0427.json",
+    "bytes": 16459,
+    "sha256": "71db7fc1e7f27de6543e2a4ce1d6968c04ea1361a4dd72592fbbee3c42ed58cf"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0435.json",
+    "archive_member": "temporary/scihero-board85-0435.json",
+    "bytes": 11906,
+    "sha256": "c1b6cd1b9b3a9e1e7d480bc4e5b97e637b327cdca6e4def4131f9d6a10e04855"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0438.json",
+    "archive_member": "temporary/scihero-board85-0438.json",
+    "bytes": 2753,
+    "sha256": "fba84fb3d204bdd57c58df25686a6e685168132f806ca0283b992edf1f80dc85"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0441.json",
+    "archive_member": "temporary/scihero-board85-0441.json",
+    "bytes": 17794,
+    "sha256": "bdddbad0dd56045ef178b89200672c47ac03304aa05e9c1d75460c04fcf968b5"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0447.json",
+    "archive_member": "temporary/scihero-board85-0447.json",
+    "bytes": 18191,
+    "sha256": "dcf5bba267984f4810cff988d8baf14530904ed9c23f87df788b1f4ffbf1c01e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0448.json",
+    "archive_member": "temporary/scihero-board85-0448.json",
+    "bytes": 11377,
+    "sha256": "4812c0ff1c9517b58342d1321948b254b3440bbaca50c593465ada64887a787c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0451.json",
+    "archive_member": "temporary/scihero-board85-0451.json",
+    "bytes": 5346,
+    "sha256": "0d0e6019e1944bbb9564a381ed9b6aa77f08f077887574607e7efcd4a452bf34"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0454.json",
+    "archive_member": "temporary/scihero-board85-0454.json",
+    "bytes": 16818,
+    "sha256": "689590e4d0d50f245886defc431ebcbe81c1d63c8dc9a251a41a9c8b94d48bbd"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0457.json",
+    "archive_member": "temporary/scihero-board85-0457.json",
+    "bytes": 9062,
+    "sha256": "ecbfcb1aa9273c7c5a9fba26a101c778b214cb59cd672ad7b7e6e2ce5838d07d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0500.json",
+    "archive_member": "temporary/scihero-board85-0500.json",
+    "bytes": 2602,
+    "sha256": "aabf96391c96cdc58927ea450c03b8c1bf391269b14ef7e4e73e093a8076649e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0503.json",
+    "archive_member": "temporary/scihero-board85-0503.json",
+    "bytes": 5595,
+    "sha256": "43b3b43a75d3eece5b2188092df291f6e9dcd2c880cbbca0f1eccc01ecd9553d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0506.json",
+    "archive_member": "temporary/scihero-board85-0506.json",
+    "bytes": 9085,
+    "sha256": "5df0d1bb6f7fa9387811cd1a732ff1187b6ec30d9fdeaeb3816fd3efbd9c7ac8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0509.json",
+    "archive_member": "temporary/scihero-board85-0509.json",
+    "bytes": 6092,
+    "sha256": "dec056e01ae237750d552d86dbbff9f413c3b8ac2838dfee0888707c35315aa6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0512.json",
+    "archive_member": "temporary/scihero-board85-0512.json",
+    "bytes": 13087,
+    "sha256": "4395c4a3bc642a573fd3eabc1baa39cd3914d54cdddbcc6b84b9b95c739b63ff"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0515.json",
+    "archive_member": "temporary/scihero-board85-0515.json",
+    "bytes": 8626,
+    "sha256": "71c4741f957e0a019096b97fd0ad48659026109d2e5c3d90927e9c4da876b3ae"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0518.json",
+    "archive_member": "temporary/scihero-board85-0518.json",
+    "bytes": 8809,
+    "sha256": "bbecc33e0df52f8e89bdcecb2599150c7f7f44091d9f974a36d283150a793111"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0521.json",
+    "archive_member": "temporary/scihero-board85-0521.json",
+    "bytes": 4779,
+    "sha256": "7f2eac195c2fb01ab7909b0894d682188787333206a346145a5f447da4b9b22a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0524.json",
+    "archive_member": "temporary/scihero-board85-0524.json",
+    "bytes": 4779,
+    "sha256": "7f2eac195c2fb01ab7909b0894d682188787333206a346145a5f447da4b9b22a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0527.json",
+    "archive_member": "temporary/scihero-board85-0527.json",
+    "bytes": 4779,
+    "sha256": "7f2eac195c2fb01ab7909b0894d682188787333206a346145a5f447da4b9b22a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0530.json",
+    "archive_member": "temporary/scihero-board85-0530.json",
+    "bytes": 20705,
+    "sha256": "64a70af63c61f2226989d553f21a1120c7d14233fa0d337002c187fd64784228"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0533.json",
+    "archive_member": "temporary/scihero-board85-0533.json",
+    "bytes": 8972,
+    "sha256": "b0e8a6572213268698d232c5bd3edafbac1a57a31b093ec709dc983d44955cb4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0535.json",
+    "archive_member": "temporary/scihero-board85-0535.json",
+    "bytes": 3359,
+    "sha256": "c1f6a3f6d941d316da1bcb04b742201b1dfbd67dea5e0151676e45c7f5748e43"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0538.json",
+    "archive_member": "temporary/scihero-board85-0538.json",
+    "bytes": 7270,
+    "sha256": "8154057a1ff9fd48fa3ec3d5657e25a4acca2586a81d72ca3ca3ccb8b7cde613"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0542.json",
+    "archive_member": "temporary/scihero-board85-0542.json",
+    "bytes": 8387,
+    "sha256": "327730706aecbf7f59d052f374b72033c64ff2eaaf8e7127800371448e3372f7"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0546.json",
+    "archive_member": "temporary/scihero-board85-0546.json",
+    "bytes": 4476,
+    "sha256": "150618ca2eac85c2e744327addd70025bc4f9ee73f772af73e46c850308f2df9"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0554.json",
+    "archive_member": "temporary/scihero-board85-0554.json",
+    "bytes": 4476,
+    "sha256": "150618ca2eac85c2e744327addd70025bc4f9ee73f772af73e46c850308f2df9"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0605.json",
+    "archive_member": "temporary/scihero-board85-0605.json",
+    "bytes": 19782,
+    "sha256": "7574b8ddfec3e0e472078ce05ea4328cdfa69a1668d783ec31f023ff33d1027e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0608.json",
+    "archive_member": "temporary/scihero-board85-0608.json",
+    "bytes": 13982,
+    "sha256": "8061e3dc1b39ead78c12585546b39dbae2feea44fdb7ecb719f61f18f662671b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0611.json",
+    "archive_member": "temporary/scihero-board85-0611.json",
+    "bytes": 3058,
+    "sha256": "be80eab65b49b668a560b47d04598b40c3654a8709dbfda129ba4d8673b39f40"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0614.json",
+    "archive_member": "temporary/scihero-board85-0614.json",
+    "bytes": 11438,
+    "sha256": "ce6f1da1249ec80e06094c47c67263b389b4d45612dbf38e781d6f3cf90d80f4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0617.json",
+    "archive_member": "temporary/scihero-board85-0617.json",
+    "bytes": 2984,
+    "sha256": "5a40c5ab7c471060279d65bc0e0601f3cb6c564e996100bc49bd1a7c424dcd75"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0620.json",
+    "archive_member": "temporary/scihero-board85-0620.json",
+    "bytes": 7452,
+    "sha256": "71a95d83d49967b374b0fcb4f1887104122c83445519c151008379b7b3f498fd"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0623.json",
+    "archive_member": "temporary/scihero-board85-0623.json",
+    "bytes": 4470,
+    "sha256": "cd36a19ca70cd33342084519b908cf91dee34463993094b1e3805311e647c2be"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0626.json",
+    "archive_member": "temporary/scihero-board85-0626.json",
+    "bytes": 12831,
+    "sha256": "90acb2060307a5a0b436a41db2afdaaa159b17fb3c23c951b2573a1a9386b806"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0629.json",
+    "archive_member": "temporary/scihero-board85-0629.json",
+    "bytes": 2772,
+    "sha256": "7ce7f9194a2b7448d13584ab786d524ea66e896830b0faad70607d01b07179cc"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0632.json",
+    "archive_member": "temporary/scihero-board85-0632.json",
+    "bytes": 2772,
+    "sha256": "7ce7f9194a2b7448d13584ab786d524ea66e896830b0faad70607d01b07179cc"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0635.json",
+    "archive_member": "temporary/scihero-board85-0635.json",
+    "bytes": 14695,
+    "sha256": "e240a0d4244d46ac75709a84abe172f7cb566709379a16039eb017e82a774fce"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0638.json",
+    "archive_member": "temporary/scihero-board85-0638.json",
+    "bytes": 11847,
+    "sha256": "185829ff7505b442f50cc8931ef714b3f7a5c87a959bcbd8b48c2cad689a3b97"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0641.json",
+    "archive_member": "temporary/scihero-board85-0641.json",
+    "bytes": 9425,
+    "sha256": "94485498da795569579d8b01b762b4154978e6c0b7e4d794baff3510fa2c0269"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0644.json",
+    "archive_member": "temporary/scihero-board85-0644.json",
+    "bytes": 18759,
+    "sha256": "241dcf51c490ac4c205443a40f6502494b59a1a9efa182c3fd1b0dbbff50b92b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0647.json",
+    "archive_member": "temporary/scihero-board85-0647.json",
+    "bytes": 5417,
+    "sha256": "4bddc456e7ba9db578f24f606b71edc8d8a9c96db84c1f5adf08aaa7a6c6ada5"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0650.json",
+    "archive_member": "temporary/scihero-board85-0650.json",
+    "bytes": 5417,
+    "sha256": "4bddc456e7ba9db578f24f606b71edc8d8a9c96db84c1f5adf08aaa7a6c6ada5"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0653.json",
+    "archive_member": "temporary/scihero-board85-0653.json",
+    "bytes": 9393,
+    "sha256": "0327d1604435c2bbce9f8a57a2ff29acd06df2af8b390c4959b0b531e8e454b8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0656.json",
+    "archive_member": "temporary/scihero-board85-0656.json",
+    "bytes": 3978,
+    "sha256": "2dbd5b4337a511463544c8ca77d577b05c85235c2109995aba8b44a1b6d5bf41"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0659.json",
+    "archive_member": "temporary/scihero-board85-0659.json",
+    "bytes": 8019,
+    "sha256": "a89ee077e857b2a225d40ee8eba0a31fbf29ddbf6dce64ffb615f496a1b3c942"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0702.json",
+    "archive_member": "temporary/scihero-board85-0702.json",
+    "bytes": 4043,
+    "sha256": "c1441e25b89359d0834143245425af601b5a3b5c2c7a3e022484f26c504ae8ed"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0705.json",
+    "archive_member": "temporary/scihero-board85-0705.json",
+    "bytes": 7757,
+    "sha256": "9899606748a8c58d85722ddcd7e8e217b4e20734267706f44541ce711e91df9f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0708.json",
+    "archive_member": "temporary/scihero-board85-0708.json",
+    "bytes": 3716,
+    "sha256": "1585ae40319999dbcb906d70b9d82d68536e111536342766ca8db3f87fd9bd61"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0711.json",
+    "archive_member": "temporary/scihero-board85-0711.json",
+    "bytes": 8433,
+    "sha256": "c24fb96f21f903c34bf69c6f0cb344135cf64441ce0d5ee678bed2a8f3286e96"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0714.json",
+    "archive_member": "temporary/scihero-board85-0714.json",
+    "bytes": 4858,
+    "sha256": "198886d37949f9b2802e54f0d0d11876f9f10588d030ac85bb5a7dfe143b73f8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0717.json",
+    "archive_member": "temporary/scihero-board85-0717.json",
+    "bytes": 4858,
+    "sha256": "198886d37949f9b2802e54f0d0d11876f9f10588d030ac85bb5a7dfe143b73f8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0720.json",
+    "archive_member": "temporary/scihero-board85-0720.json",
+    "bytes": 4858,
+    "sha256": "198886d37949f9b2802e54f0d0d11876f9f10588d030ac85bb5a7dfe143b73f8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0723.json",
+    "archive_member": "temporary/scihero-board85-0723.json",
+    "bytes": 4858,
+    "sha256": "198886d37949f9b2802e54f0d0d11876f9f10588d030ac85bb5a7dfe143b73f8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0726.json",
+    "archive_member": "temporary/scihero-board85-0726.json",
+    "bytes": 4858,
+    "sha256": "198886d37949f9b2802e54f0d0d11876f9f10588d030ac85bb5a7dfe143b73f8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0729.json",
+    "archive_member": "temporary/scihero-board85-0729.json",
+    "bytes": 4858,
+    "sha256": "198886d37949f9b2802e54f0d0d11876f9f10588d030ac85bb5a7dfe143b73f8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0732.json",
+    "archive_member": "temporary/scihero-board85-0732.json",
+    "bytes": 7652,
+    "sha256": "9f2739b02aa647e3c81b97d37aa082dee280da994c309047d9c365ca4ad41380"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0735.json",
+    "archive_member": "temporary/scihero-board85-0735.json",
+    "bytes": 17528,
+    "sha256": "ea86053f86aa335d16ab6b459f8e7422ca84203078c31a82ea99ae520c89a99d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0738.json",
+    "archive_member": "temporary/scihero-board85-0738.json",
+    "bytes": 6545,
+    "sha256": "0c0dbbc5ac7fd6800eb1c5cb853556f83493ba2a308ab73073c3f3b8d2cd6f82"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0741.json",
+    "archive_member": "temporary/scihero-board85-0741.json",
+    "bytes": 2947,
+    "sha256": "0f598483f9ff0aaf7b7ef97afaef3f52dc812cd1b2bf1d58f08613fbd53756da"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0744.json",
+    "archive_member": "temporary/scihero-board85-0744.json",
+    "bytes": 2947,
+    "sha256": "0f598483f9ff0aaf7b7ef97afaef3f52dc812cd1b2bf1d58f08613fbd53756da"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0747.json",
+    "archive_member": "temporary/scihero-board85-0747.json",
+    "bytes": 2947,
+    "sha256": "0f598483f9ff0aaf7b7ef97afaef3f52dc812cd1b2bf1d58f08613fbd53756da"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0750.json",
+    "archive_member": "temporary/scihero-board85-0750.json",
+    "bytes": 6663,
+    "sha256": "eece7942a1f4f13271f04546812abf5e796e16232c8d15a1409d70a72d591adc"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0753.json",
+    "archive_member": "temporary/scihero-board85-0753.json",
+    "bytes": 9413,
+    "sha256": "55a2ce798aed4bfeaade30e95c6b9ae5db2c2c5b14e487fd5bb2bc5a780d9d53"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0756.json",
+    "archive_member": "temporary/scihero-board85-0756.json",
+    "bytes": 5697,
+    "sha256": "653ee43bad2fd85e27bf6371deaafdefbc9b779af04433aecfb82ec93b492d85"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0759.json",
+    "archive_member": "temporary/scihero-board85-0759.json",
+    "bytes": 5697,
+    "sha256": "653ee43bad2fd85e27bf6371deaafdefbc9b779af04433aecfb82ec93b492d85"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0802.json",
+    "archive_member": "temporary/scihero-board85-0802.json",
+    "bytes": 9897,
+    "sha256": "855adf4868c6311d327fd986379caf1d628d09221bb7d1980df583d2a7ab495b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0805.json",
+    "archive_member": "temporary/scihero-board85-0805.json",
+    "bytes": 4202,
+    "sha256": "0d9f8a6d086b7cb35d3383b745d57d7d0af15aad480b4c7236f790dd9f8942ec"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0808.json",
+    "archive_member": "temporary/scihero-board85-0808.json",
+    "bytes": 4202,
+    "sha256": "0d9f8a6d086b7cb35d3383b745d57d7d0af15aad480b4c7236f790dd9f8942ec"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0811.json",
+    "archive_member": "temporary/scihero-board85-0811.json",
+    "bytes": 4202,
+    "sha256": "0d9f8a6d086b7cb35d3383b745d57d7d0af15aad480b4c7236f790dd9f8942ec"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0814.json",
+    "archive_member": "temporary/scihero-board85-0814.json",
+    "bytes": 8340,
+    "sha256": "939932d5bf4255f04e1f1e328f9da3f7174e245a2b22a62e1ea4137825d0cc9b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0817.json",
+    "archive_member": "temporary/scihero-board85-0817.json",
+    "bytes": 13388,
+    "sha256": "295008a3df10fb3198e3ea44a14414ef2bbc34caef8cc0cb6020771ead1d0bf6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0820.json",
+    "archive_member": "temporary/scihero-board85-0820.json",
+    "bytes": 9192,
+    "sha256": "4d9c937af21ef991d89be28ed0d0f2df15598c5d20226aeafd43f283ad42d425"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0823.json",
+    "archive_member": "temporary/scihero-board85-0823.json",
+    "bytes": 6131,
+    "sha256": "1db966c3b86394b5ed46bd15f3a75e1b0bf17ba3e1f45f3c9a79285836bb386e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0826.json",
+    "archive_member": "temporary/scihero-board85-0826.json",
+    "bytes": 10345,
+    "sha256": "05e3ac456ea2ce7c59df553c27c2505f983ab86fea719fc3ed481ef723d7468d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0830.json",
+    "archive_member": "temporary/scihero-board85-0830.json",
+    "bytes": 17401,
+    "sha256": "2d68fab8c0fd72359874c07612dafd77643d90a509fa2cd794fe029231ff41e6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0835.json",
+    "archive_member": "temporary/scihero-board85-0835.json",
+    "bytes": 9337,
+    "sha256": "a8529ef5872d606a1309b50c6aca7c80ef8c6b70df9d2117861be8603176a03b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0838.json",
+    "archive_member": "temporary/scihero-board85-0838.json",
+    "bytes": 3239,
+    "sha256": "45be2377755226b8c4a7d3cb213251236672ec4442ce3c76d018e501677296e1"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0841.json",
+    "archive_member": "temporary/scihero-board85-0841.json",
+    "bytes": 7444,
+    "sha256": "97cbf54db962ff7fae6ad8408565fa30c6aea1929e73c8b4c30653d20f8eee8d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0844.json",
+    "archive_member": "temporary/scihero-board85-0844.json",
+    "bytes": 4207,
+    "sha256": "b6c7ee70284bb22570c8f08353b1162865ada2a82a3802595dedfbfece7cd511"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0847.json",
+    "archive_member": "temporary/scihero-board85-0847.json",
+    "bytes": 4207,
+    "sha256": "b6c7ee70284bb22570c8f08353b1162865ada2a82a3802595dedfbfece7cd511"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0850.json",
+    "archive_member": "temporary/scihero-board85-0850.json",
+    "bytes": 13873,
+    "sha256": "ca9ca43d910c0f0f0fc26f74822d78c42b394c3c08dda657dd0a863cf3d93785"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0853.json",
+    "archive_member": "temporary/scihero-board85-0853.json",
+    "bytes": 12845,
+    "sha256": "0fa2a6a2ec6c56d518f2d3a3f8b04ce343c9deab19b233d8d5d5fc42908f6512"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0859.json",
+    "archive_member": "temporary/scihero-board85-0859.json",
+    "bytes": 7086,
+    "sha256": "d7fd4dc230b62f3f737039eaa1fd77ac4aec258efc3519a4013144a0b903d247"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0902.json",
+    "archive_member": "temporary/scihero-board85-0902.json",
+    "bytes": 10133,
+    "sha256": "031f5d5710f2d9a72bf4e9ec4c8f97c97aefd0ab907c6ad1bd75c0c2baadad32"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0905.json",
+    "archive_member": "temporary/scihero-board85-0905.json",
+    "bytes": 3404,
+    "sha256": "66f44ea4ab80fb5495dbde1e8298efb6b42162f6f85c4dabeaf102db39869193"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0908.json",
+    "archive_member": "temporary/scihero-board85-0908.json",
+    "bytes": 3404,
+    "sha256": "66f44ea4ab80fb5495dbde1e8298efb6b42162f6f85c4dabeaf102db39869193"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0911.json",
+    "archive_member": "temporary/scihero-board85-0911.json",
+    "bytes": 23271,
+    "sha256": "3a583f616f55c710fcc3dce5c43edd5608888a6f6e7b0a901a70f8277d88e37d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0914.json",
+    "archive_member": "temporary/scihero-board85-0914.json",
+    "bytes": 12330,
+    "sha256": "c9970533b5750228b4cf79a7d439f14b2cf3db12a2273d5e899e8ae0e6dac6bd"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0918.json",
+    "archive_member": "temporary/scihero-board85-0918.json",
+    "bytes": 10137,
+    "sha256": "8983c6796a4ca6df053e71c5f42a0c9959d0e73fcbf87c38da62d03f4a0bcc7d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0921.json",
+    "archive_member": "temporary/scihero-board85-0921.json",
+    "bytes": 10137,
+    "sha256": "8983c6796a4ca6df053e71c5f42a0c9959d0e73fcbf87c38da62d03f4a0bcc7d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0926.json",
+    "archive_member": "temporary/scihero-board85-0926.json",
+    "bytes": 13234,
+    "sha256": "5baa7a6770c14b0dbd9d71b177414e3dab5ed4e166ea37315a7aec4aa9fa02ea"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0929.json",
+    "archive_member": "temporary/scihero-board85-0929.json",
+    "bytes": 14003,
+    "sha256": "fc1d3446de6922ad2812320b5913e6474684a5ea79b7f0398f67746cc6ae6ecc"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0932.json",
+    "archive_member": "temporary/scihero-board85-0932.json",
+    "bytes": 6572,
+    "sha256": "9f3d84d5e73b82ff0aead1573eb2d71db284df308605d63a7750997abe693129"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0935.json",
+    "archive_member": "temporary/scihero-board85-0935.json",
+    "bytes": 12716,
+    "sha256": "355fd3191622bda6bade5d2bc465a08a95f08e0c12df8244e297631f6a0d81aa"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0939.json",
+    "archive_member": "temporary/scihero-board85-0939.json",
+    "bytes": 6146,
+    "sha256": "462ad1ed5545f63394e17caf7c132fb2a6e1fe73124fcc90233ea54f00c0eeed"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0942.json",
+    "archive_member": "temporary/scihero-board85-0942.json",
+    "bytes": 6146,
+    "sha256": "462ad1ed5545f63394e17caf7c132fb2a6e1fe73124fcc90233ea54f00c0eeed"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0945.json",
+    "archive_member": "temporary/scihero-board85-0945.json",
+    "bytes": 6146,
+    "sha256": "462ad1ed5545f63394e17caf7c132fb2a6e1fe73124fcc90233ea54f00c0eeed"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-0948.json",
+    "archive_member": "temporary/scihero-board85-0948.json",
+    "bytes": 12887,
+    "sha256": "f7c1a854fedb6362c93ff99ac0d9449e0c4f7988ff14af26b85059628efd3ff7"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board85-next.json",
+    "archive_member": "temporary/scihero-board85-next.json",
+    "bytes": 53538,
+    "sha256": "2d90c89a69e6060373bde2b49109cfdc8d79e408fc0e2a054bd76b8dbe17d027"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0157.json",
+    "archive_member": "temporary/scihero-board87-0157.json",
+    "bytes": 16677,
+    "sha256": "093e02672d1a77b6e4e5c0e6e23128cd4cb849c8d51609bcea813318b1813891"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0211.json",
+    "archive_member": "temporary/scihero-board87-0211.json",
+    "bytes": 12515,
+    "sha256": "e346273b261fbdb9c71a718056c7acc5d6abc12986e4849549fd9ca6b5ef8a90"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0217.json",
+    "archive_member": "temporary/scihero-board87-0217.json",
+    "bytes": 9117,
+    "sha256": "ba955c5ef8974790824f7f2b71599616b0591998b0e5651ff7655bbe6371ae22"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0220.json",
+    "archive_member": "temporary/scihero-board87-0220.json",
+    "bytes": 2804,
+    "sha256": "ca6766790b0d90d73fa0124ceacb4640c630bdc9f1f5c1c743d405f74500e304"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0223.json",
+    "archive_member": "temporary/scihero-board87-0223.json",
+    "bytes": 6508,
+    "sha256": "f0b0b81ac5098d8a8fadc084d8fd5827d08df5879f3d2323b413a2dcebe36f00"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0226.json",
+    "archive_member": "temporary/scihero-board87-0226.json",
+    "bytes": 6980,
+    "sha256": "2aac3a8135325d171d1390c27319c997d818f5f3062c8797f0fd0ef226577a40"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0229.json",
+    "archive_member": "temporary/scihero-board87-0229.json",
+    "bytes": 6216,
+    "sha256": "e6b47ef1e1158569fabfbd24e2ad976bdb4e7acdbf2edd6ca8db94c012c30e77"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0232.json",
+    "archive_member": "temporary/scihero-board87-0232.json",
+    "bytes": 6265,
+    "sha256": "c94c885279a6d211135e32b6e65e843caa251faaac631b3548cff9afd2ea7a30"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0235.json",
+    "archive_member": "temporary/scihero-board87-0235.json",
+    "bytes": 3325,
+    "sha256": "0b93b66c31d25538ef30a475bc06e65f22a421a1dbae61d70c97f28b0155fd1d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0312.json",
+    "archive_member": "temporary/scihero-board87-0312.json",
+    "bytes": 7388,
+    "sha256": "7622f385b4808ad25ffe0d8d690670a7a1a30637bf02d3d0bde24e7cb2f70d1d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0315.json",
+    "archive_member": "temporary/scihero-board87-0315.json",
+    "bytes": 3515,
+    "sha256": "7ba75c701b60098799a683d316b409205f3bd8def89be2731ffa39442a0b172f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0318.json",
+    "archive_member": "temporary/scihero-board87-0318.json",
+    "bytes": 3515,
+    "sha256": "7ba75c701b60098799a683d316b409205f3bd8def89be2731ffa39442a0b172f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0321.json",
+    "archive_member": "temporary/scihero-board87-0321.json",
+    "bytes": 3515,
+    "sha256": "7ba75c701b60098799a683d316b409205f3bd8def89be2731ffa39442a0b172f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0324.json",
+    "archive_member": "temporary/scihero-board87-0324.json",
+    "bytes": 7600,
+    "sha256": "99842893d582c2e5796f07617029f07bb1bbd614a2d3a1b1ee10064b8ba403ae"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0327.json",
+    "archive_member": "temporary/scihero-board87-0327.json",
+    "bytes": 4086,
+    "sha256": "766d627f4643ca0d2fe3a89cacc92d00adfd88ffaf91e521d4819d80b7616c4c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0330.json",
+    "archive_member": "temporary/scihero-board87-0330.json",
+    "bytes": 4086,
+    "sha256": "766d627f4643ca0d2fe3a89cacc92d00adfd88ffaf91e521d4819d80b7616c4c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0333.json",
+    "archive_member": "temporary/scihero-board87-0333.json",
+    "bytes": 8118,
+    "sha256": "8b6385ea9b9f4e9b1d7ecea03d21f882fc958e53b1217f112fcb6a39c772f831"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0336.json",
+    "archive_member": "temporary/scihero-board87-0336.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0339.json",
+    "archive_member": "temporary/scihero-board87-0339.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0342.json",
+    "archive_member": "temporary/scihero-board87-0342.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0345.json",
+    "archive_member": "temporary/scihero-board87-0345.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0348.json",
+    "archive_member": "temporary/scihero-board87-0348.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0351.json",
+    "archive_member": "temporary/scihero-board87-0351.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0354.json",
+    "archive_member": "temporary/scihero-board87-0354.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0357.json",
+    "archive_member": "temporary/scihero-board87-0357.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0401.json",
+    "archive_member": "temporary/scihero-board87-0401.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0404.json",
+    "archive_member": "temporary/scihero-board87-0404.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0407.json",
+    "archive_member": "temporary/scihero-board87-0407.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0410.json",
+    "archive_member": "temporary/scihero-board87-0410.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0413.json",
+    "archive_member": "temporary/scihero-board87-0413.json",
+    "bytes": 4033,
+    "sha256": "d039646f22d2ae3cf132ea591617e5eb6969b76d7122f1db6cf66eab87d39b0a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0416.json",
+    "archive_member": "temporary/scihero-board87-0416.json",
+    "bytes": 8424,
+    "sha256": "ed913086c9173cb2eee420550db1523ced5a4ee79026fae3a5a35e1a34b7ce8f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0419.json",
+    "archive_member": "temporary/scihero-board87-0419.json",
+    "bytes": 4392,
+    "sha256": "139778833c012bf09b743748ef679aa2e9db25d1b8a59482563c1b2399a4731c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0424.json",
+    "archive_member": "temporary/scihero-board87-0424.json",
+    "bytes": 7306,
+    "sha256": "9566e447a7c147813c7d30261f9ab0e2a7016d9440350ce75174219d294306d0"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0427.json",
+    "archive_member": "temporary/scihero-board87-0427.json",
+    "bytes": 11500,
+    "sha256": "9427095a8c5e941029bb45e284f2f15689cc3a97e39398d26bf87ca40987f253"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0435.json",
+    "archive_member": "temporary/scihero-board87-0435.json",
+    "bytes": 4195,
+    "sha256": "9e46b7c007db995466d3332e4c3fb8d0e9be89f4ed87a4300fa29de60fa90081"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0438.json",
+    "archive_member": "temporary/scihero-board87-0438.json",
+    "bytes": 4195,
+    "sha256": "9e46b7c007db995466d3332e4c3fb8d0e9be89f4ed87a4300fa29de60fa90081"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0441.json",
+    "archive_member": "temporary/scihero-board87-0441.json",
+    "bytes": 13136,
+    "sha256": "211919668c96157a5e32b149fcdc55522c947439b37d2f6b73921dcbf27d579b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0447.json",
+    "archive_member": "temporary/scihero-board87-0447.json",
+    "bytes": 12091,
+    "sha256": "1a27254b73c653a9d0cec0e20ec7fa59e172b61fce85cf2fcd44cd94009dfd38"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0448.json",
+    "archive_member": "temporary/scihero-board87-0448.json",
+    "bytes": 13568,
+    "sha256": "2417d45a8d7ed79b99215239e5c1fa0903a2ef528bc537271504f9c1ac8ce052"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0451.json",
+    "archive_member": "temporary/scihero-board87-0451.json",
+    "bytes": 11720,
+    "sha256": "d6ba27c331172c77017dc952222b2d776ab26fef33b2ed104078d450ad4a0289"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0454.json",
+    "archive_member": "temporary/scihero-board87-0454.json",
+    "bytes": 12002,
+    "sha256": "c24b798e3e50bfcec0e8385d7eac9337e1ead8c1620c6ddd407f933c103a51d9"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0457.json",
+    "archive_member": "temporary/scihero-board87-0457.json",
+    "bytes": 3673,
+    "sha256": "cc3d3a382e582eac0516c945c140fbfe1f8f39234666da77a491378b7b07cac4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0500.json",
+    "archive_member": "temporary/scihero-board87-0500.json",
+    "bytes": 3673,
+    "sha256": "cc3d3a382e582eac0516c945c140fbfe1f8f39234666da77a491378b7b07cac4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0503.json",
+    "archive_member": "temporary/scihero-board87-0503.json",
+    "bytes": 3673,
+    "sha256": "cc3d3a382e582eac0516c945c140fbfe1f8f39234666da77a491378b7b07cac4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0506.json",
+    "archive_member": "temporary/scihero-board87-0506.json",
+    "bytes": 8299,
+    "sha256": "dd3dfa10434840fd98a7ac2b4233a1a2e50ee759957185eed4f823fb3877968b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0509.json",
+    "archive_member": "temporary/scihero-board87-0509.json",
+    "bytes": 4627,
+    "sha256": "8b496a6c02534c975f0e1724fb9338419d82229627e20263c14ee140814060e9"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0512.json",
+    "archive_member": "temporary/scihero-board87-0512.json",
+    "bytes": 8553,
+    "sha256": "2fe4a115a296c0021d1975306bc7a0720862d07fd88e6d030a286d98c908ba5d"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0515.json",
+    "archive_member": "temporary/scihero-board87-0515.json",
+    "bytes": 7957,
+    "sha256": "94f32aaabad8fd5d241aee4d18e99c78a4249360a2b4f91a16d3ac42112ced9c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0518.json",
+    "archive_member": "temporary/scihero-board87-0518.json",
+    "bytes": 8004,
+    "sha256": "5e4fd9292a8fb4b81f11a47b1e2a12e1c3cd9c8c9805d5c6ea38ed95a210ff9a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0521.json",
+    "archive_member": "temporary/scihero-board87-0521.json",
+    "bytes": 3974,
+    "sha256": "519f46409916b11a5d9d781c67f204d5e5ddfb66521ed7c8307ed3f22cb012cd"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0524.json",
+    "archive_member": "temporary/scihero-board87-0524.json",
+    "bytes": 3974,
+    "sha256": "519f46409916b11a5d9d781c67f204d5e5ddfb66521ed7c8307ed3f22cb012cd"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0527.json",
+    "archive_member": "temporary/scihero-board87-0527.json",
+    "bytes": 3974,
+    "sha256": "519f46409916b11a5d9d781c67f204d5e5ddfb66521ed7c8307ed3f22cb012cd"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0530.json",
+    "archive_member": "temporary/scihero-board87-0530.json",
+    "bytes": 15635,
+    "sha256": "fe3bdf8cb08332c4c22297ab770862dad347d4965449a9ca28cdc1c594ee2f98"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0533.json",
+    "archive_member": "temporary/scihero-board87-0533.json",
+    "bytes": 7679,
+    "sha256": "8f4e984228a15446a56d5969768795958245a17fff8142329b5a86635849d744"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0535.json",
+    "archive_member": "temporary/scihero-board87-0535.json",
+    "bytes": 3359,
+    "sha256": "b0353e45ac0a1e3bc06623fc301da699b08f59d7bc11f37204f89a612cdf2bd9"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0538.json",
+    "archive_member": "temporary/scihero-board87-0538.json",
+    "bytes": 7270,
+    "sha256": "a0a6c70251101a8167e9e2b7f3770b97bdadf6b44986b982a514f9a0a74ea4ca"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0542.json",
+    "archive_member": "temporary/scihero-board87-0542.json",
+    "bytes": 7964,
+    "sha256": "5727165747f2e5b412fa576a235f00380055d61d05bdba7147d80982fb8d17ae"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0546.json",
+    "archive_member": "temporary/scihero-board87-0546.json",
+    "bytes": 4053,
+    "sha256": "4a8673da93b2bc975012ee7e596cb2757a4784b6d8ed9ce6fc39626e9198058b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0554.json",
+    "archive_member": "temporary/scihero-board87-0554.json",
+    "bytes": 4053,
+    "sha256": "4a8673da93b2bc975012ee7e596cb2757a4784b6d8ed9ce6fc39626e9198058b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0605.json",
+    "archive_member": "temporary/scihero-board87-0605.json",
+    "bytes": 18506,
+    "sha256": "640868ce59114dcae86a02e6c65c5b9b2146c3130525b682d87d301c40469e17"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0608.json",
+    "archive_member": "temporary/scihero-board87-0608.json",
+    "bytes": 10144,
+    "sha256": "150a0b5d09983b96c78962331edc15faf647698ea0f8349053bbe971462c8108"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0611.json",
+    "archive_member": "temporary/scihero-board87-0611.json",
+    "bytes": 4921,
+    "sha256": "1d4e0c8bcd2a641c003af065127bb1ff0c2438884f2e2a70783f8ae47d6992b2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0614.json",
+    "archive_member": "temporary/scihero-board87-0614.json",
+    "bytes": 9663,
+    "sha256": "b1cc4d7315a1a3e4e8696a561a450876aa2bddbd460b2c2e12dabaa2770e21da"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0617.json",
+    "archive_member": "temporary/scihero-board87-0617.json",
+    "bytes": 4744,
+    "sha256": "9300ac7a3079a778aff15f804fbb4e128e3678ef94e6fe1c1ec40516c1571577"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0620.json",
+    "archive_member": "temporary/scihero-board87-0620.json",
+    "bytes": 9212,
+    "sha256": "2b848e8ab6d8dca4359284e6b2130daae118cf9fdfc36af8139b3f27b5d9183c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0623.json",
+    "archive_member": "temporary/scihero-board87-0623.json",
+    "bytes": 4470,
+    "sha256": "652640799ecb51180d78fd7a9df4a6b973ddce42ab591f2d3554ba1874398bbb"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0626.json",
+    "archive_member": "temporary/scihero-board87-0626.json",
+    "bytes": 12628,
+    "sha256": "fc756f482682124e6bb1b4e84794d3933929e0d40236c6a3bbf71577f0281737"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0629.json",
+    "archive_member": "temporary/scihero-board87-0629.json",
+    "bytes": 3354,
+    "sha256": "f33a15297944c46dabac371888d1ee89170f75aed5da7a8ecea4ce5baf5e02e6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0632.json",
+    "archive_member": "temporary/scihero-board87-0632.json",
+    "bytes": 3354,
+    "sha256": "f33a15297944c46dabac371888d1ee89170f75aed5da7a8ecea4ce5baf5e02e6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0635.json",
+    "archive_member": "temporary/scihero-board87-0635.json",
+    "bytes": 14609,
+    "sha256": "d9c3e9644c22f36dcdad6dc8c4ee66b498af1138598e2eee44095fe1d185e97b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0638.json",
+    "archive_member": "temporary/scihero-board87-0638.json",
+    "bytes": 11262,
+    "sha256": "926fa8dd54167e7d3521f76f2d36f584d305e7a33db643f8c3d4760f5170a9ac"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0641.json",
+    "archive_member": "temporary/scihero-board87-0641.json",
+    "bytes": 8651,
+    "sha256": "104339d2585e0242797d67b8f328cf61d65684926b78fd4121e9a520ab889d2a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0644.json",
+    "archive_member": "temporary/scihero-board87-0644.json",
+    "bytes": 17254,
+    "sha256": "020c4853bf5e09a87390758193d5afbb58d6553050e3e93388b0341dcad9b047"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0647.json",
+    "archive_member": "temporary/scihero-board87-0647.json",
+    "bytes": 4760,
+    "sha256": "d801e921c675879879d41ccfb4eeb36498f639dd01f113a029c95f5abc80d9b3"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0650.json",
+    "archive_member": "temporary/scihero-board87-0650.json",
+    "bytes": 4760,
+    "sha256": "d801e921c675879879d41ccfb4eeb36498f639dd01f113a029c95f5abc80d9b3"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0653.json",
+    "archive_member": "temporary/scihero-board87-0653.json",
+    "bytes": 4760,
+    "sha256": "d801e921c675879879d41ccfb4eeb36498f639dd01f113a029c95f5abc80d9b3"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0656.json",
+    "archive_member": "temporary/scihero-board87-0656.json",
+    "bytes": 4760,
+    "sha256": "d801e921c675879879d41ccfb4eeb36498f639dd01f113a029c95f5abc80d9b3"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0659.json",
+    "archive_member": "temporary/scihero-board87-0659.json",
+    "bytes": 8801,
+    "sha256": "578e39ed5f3b9813dcc76d565eba922c93e24e2b88472c25498209372cd582b7"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0702.json",
+    "archive_member": "temporary/scihero-board87-0702.json",
+    "bytes": 4043,
+    "sha256": "1277511983d53a08bd81b4dfa4f91f88094d13f84c1ccfdadbdd1f28be5c261a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0705.json",
+    "archive_member": "temporary/scihero-board87-0705.json",
+    "bytes": 7757,
+    "sha256": "62085fec99cf35cf8f8c782bfce4c5cd714b09312e4e847aa944201b9dec161f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0708.json",
+    "archive_member": "temporary/scihero-board87-0708.json",
+    "bytes": 3716,
+    "sha256": "51918a210ab553e2906430a419f9cf7b1e1a519c01a6b4abc7899eca5cf2d8c2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0711.json",
+    "archive_member": "temporary/scihero-board87-0711.json",
+    "bytes": 3716,
+    "sha256": "51918a210ab553e2906430a419f9cf7b1e1a519c01a6b4abc7899eca5cf2d8c2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0714.json",
+    "archive_member": "temporary/scihero-board87-0714.json",
+    "bytes": 3716,
+    "sha256": "51918a210ab553e2906430a419f9cf7b1e1a519c01a6b4abc7899eca5cf2d8c2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0717.json",
+    "archive_member": "temporary/scihero-board87-0717.json",
+    "bytes": 3716,
+    "sha256": "51918a210ab553e2906430a419f9cf7b1e1a519c01a6b4abc7899eca5cf2d8c2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0720.json",
+    "archive_member": "temporary/scihero-board87-0720.json",
+    "bytes": 3716,
+    "sha256": "51918a210ab553e2906430a419f9cf7b1e1a519c01a6b4abc7899eca5cf2d8c2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0723.json",
+    "archive_member": "temporary/scihero-board87-0723.json",
+    "bytes": 3716,
+    "sha256": "51918a210ab553e2906430a419f9cf7b1e1a519c01a6b4abc7899eca5cf2d8c2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0726.json",
+    "archive_member": "temporary/scihero-board87-0726.json",
+    "bytes": 3716,
+    "sha256": "51918a210ab553e2906430a419f9cf7b1e1a519c01a6b4abc7899eca5cf2d8c2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0729.json",
+    "archive_member": "temporary/scihero-board87-0729.json",
+    "bytes": 3716,
+    "sha256": "51918a210ab553e2906430a419f9cf7b1e1a519c01a6b4abc7899eca5cf2d8c2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0732.json",
+    "archive_member": "temporary/scihero-board87-0732.json",
+    "bytes": 3716,
+    "sha256": "51918a210ab553e2906430a419f9cf7b1e1a519c01a6b4abc7899eca5cf2d8c2"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0735.json",
+    "archive_member": "temporary/scihero-board87-0735.json",
+    "bytes": 22490,
+    "sha256": "1d8fc0d1dd4906568a8060c5385771e93558f309164d4943b320d02ae2b8a8e6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0738.json",
+    "archive_member": "temporary/scihero-board87-0738.json",
+    "bytes": 3600,
+    "sha256": "1f6857d289087405985fe4fbef33a28240c1b05c5b119caac07b63dfb3998d79"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0741.json",
+    "archive_member": "temporary/scihero-board87-0741.json",
+    "bytes": 6983,
+    "sha256": "52f6534f19e4dfc4c37976429c481b1c465557d99e2f84150ee57a0634854373"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0744.json",
+    "archive_member": "temporary/scihero-board87-0744.json",
+    "bytes": 3385,
+    "sha256": "80a82c9b18c0c5256605b9fa5079b124a9dd6e8473e97a4ae357dd0aecd0d79c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0747.json",
+    "archive_member": "temporary/scihero-board87-0747.json",
+    "bytes": 3385,
+    "sha256": "80a82c9b18c0c5256605b9fa5079b124a9dd6e8473e97a4ae357dd0aecd0d79c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0750.json",
+    "archive_member": "temporary/scihero-board87-0750.json",
+    "bytes": 3385,
+    "sha256": "80a82c9b18c0c5256605b9fa5079b124a9dd6e8473e97a4ae357dd0aecd0d79c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0753.json",
+    "archive_member": "temporary/scihero-board87-0753.json",
+    "bytes": 12021,
+    "sha256": "1f0ae5c8274c31b74a654aa2a3288805562a128ea1fdf8486320b7621a3ab7db"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0756.json",
+    "archive_member": "temporary/scihero-board87-0756.json",
+    "bytes": 4980,
+    "sha256": "6f34c5397c57b9904342cf10208c76b30a8a498a1b7677fcf8955bb68bebf0c9"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0759.json",
+    "archive_member": "temporary/scihero-board87-0759.json",
+    "bytes": 4980,
+    "sha256": "6f34c5397c57b9904342cf10208c76b30a8a498a1b7677fcf8955bb68bebf0c9"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0802.json",
+    "archive_member": "temporary/scihero-board87-0802.json",
+    "bytes": 9180,
+    "sha256": "fb6ed04520ee4e757d0bb1e7bd69f374c80f7ddb625bce5912fbeeb1e86af659"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0805.json",
+    "archive_member": "temporary/scihero-board87-0805.json",
+    "bytes": 4202,
+    "sha256": "6929d4385b5c64984e43eb69c1089dd66c854b209e7fd6bfeb7035876109eae4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0808.json",
+    "archive_member": "temporary/scihero-board87-0808.json",
+    "bytes": 4202,
+    "sha256": "6929d4385b5c64984e43eb69c1089dd66c854b209e7fd6bfeb7035876109eae4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0811.json",
+    "archive_member": "temporary/scihero-board87-0811.json",
+    "bytes": 4202,
+    "sha256": "6929d4385b5c64984e43eb69c1089dd66c854b209e7fd6bfeb7035876109eae4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0814.json",
+    "archive_member": "temporary/scihero-board87-0814.json",
+    "bytes": 8340,
+    "sha256": "52930faabcb19415b02d74c49de9f69cbfb9bd08be4522c5c2d23c952b589a62"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0817.json",
+    "archive_member": "temporary/scihero-board87-0817.json",
+    "bytes": 9220,
+    "sha256": "ea290d3ab733959a3f01c58e73f6d08edba3a01a69fb49395b32efdb030d974a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0820.json",
+    "archive_member": "temporary/scihero-board87-0820.json",
+    "bytes": 10089,
+    "sha256": "5ee0c541108ba5f51939fadf5aace2e9fd555ab484546b86943ac1db6feaca3b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0823.json",
+    "archive_member": "temporary/scihero-board87-0823.json",
+    "bytes": 5009,
+    "sha256": "c9c9c913086186d0f653e992d0bf389505c61d54ea9ffe2244d18f31f241b46a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0826.json",
+    "archive_member": "temporary/scihero-board87-0826.json",
+    "bytes": 9223,
+    "sha256": "86ac0eadbe881846fae9c7a93ed40d2b1676783c7d619a75534d01d82ac95025"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0830.json",
+    "archive_member": "temporary/scihero-board87-0830.json",
+    "bytes": 13217,
+    "sha256": "0ed469c74395b9d7a031056235e33c0ae41d9fcf1f1cdaeaa56ba359c463c236"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0835.json",
+    "archive_member": "temporary/scihero-board87-0835.json",
+    "bytes": 4984,
+    "sha256": "f8fdd8bfdbac7c88229da4b97a8f207be9cceb911d7139bf0554fce09c1aaa4f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0838.json",
+    "archive_member": "temporary/scihero-board87-0838.json",
+    "bytes": 4984,
+    "sha256": "f8fdd8bfdbac7c88229da4b97a8f207be9cceb911d7139bf0554fce09c1aaa4f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0841.json",
+    "archive_member": "temporary/scihero-board87-0841.json",
+    "bytes": 9189,
+    "sha256": "72f8b3e00d165bef998b5bc42d89bfb37eb4452e8f6772b69629fe2ae85401e5"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0844.json",
+    "archive_member": "temporary/scihero-board87-0844.json",
+    "bytes": 4207,
+    "sha256": "59ca1362e198296d154316269a715efc698da1edb4e985be4de355977de2e187"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0847.json",
+    "archive_member": "temporary/scihero-board87-0847.json",
+    "bytes": 4207,
+    "sha256": "59ca1362e198296d154316269a715efc698da1edb4e985be4de355977de2e187"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0850.json",
+    "archive_member": "temporary/scihero-board87-0850.json",
+    "bytes": 9135,
+    "sha256": "8a068d02816aca59c96fe2898987a41b03b2446206ddfbc270fd65686b95c2cd"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0853.json",
+    "archive_member": "temporary/scihero-board87-0853.json",
+    "bytes": 19788,
+    "sha256": "ac74fc12a958e286623bfbe3c7c622ab274a440c7cf8cda1805d2d176ed7cd5e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0859.json",
+    "archive_member": "temporary/scihero-board87-0859.json",
+    "bytes": 7086,
+    "sha256": "dbc784d9b5f79c2ed004e7688dd85fb11025255d3322727497233baeba24d1e8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0902.json",
+    "archive_member": "temporary/scihero-board87-0902.json",
+    "bytes": 10133,
+    "sha256": "181bceb31ec604c49dee9a3f5150ccfdd0acc9b54f89d28fee9b60235cf654a5"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0905.json",
+    "archive_member": "temporary/scihero-board87-0905.json",
+    "bytes": 3404,
+    "sha256": "9493808bac83457c17b25d75c4abc23c8dc7db6d5225627576134ca16fd11fa3"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0908.json",
+    "archive_member": "temporary/scihero-board87-0908.json",
+    "bytes": 3404,
+    "sha256": "9493808bac83457c17b25d75c4abc23c8dc7db6d5225627576134ca16fd11fa3"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0911.json",
+    "archive_member": "temporary/scihero-board87-0911.json",
+    "bytes": 17997,
+    "sha256": "811de78950de33fa5be752ea8f48944bf42c67d1ca0de45bfeae9e5f3cc3bbcc"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0914.json",
+    "archive_member": "temporary/scihero-board87-0914.json",
+    "bytes": 10256,
+    "sha256": "ccc777dc3be3a3077a324debec4c969e601b63cf160c79d301d5055f3f599758"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0918.json",
+    "archive_member": "temporary/scihero-board87-0918.json",
+    "bytes": 15134,
+    "sha256": "76614c21ab2f8ecd4d1512a16f419f0c8fc99a1cd4f6f4b9ec3d86b096c930c6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0921.json",
+    "archive_member": "temporary/scihero-board87-0921.json",
+    "bytes": 3493,
+    "sha256": "8b3936a2d3070a1b6ac6b57dcdc71a3b8eae4e4daa141074d8a98bbd1ed80f99"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0926.json",
+    "archive_member": "temporary/scihero-board87-0926.json",
+    "bytes": 10505,
+    "sha256": "68d6554504b29ceda746a04a815127383e2d9e5ba31a56f32fb91b3221e1eb75"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0929.json",
+    "archive_member": "temporary/scihero-board87-0929.json",
+    "bytes": 12304,
+    "sha256": "b38e3048210027727038e58c34d3fa958629303c9398a648da42e6d419954cc4"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0932.json",
+    "archive_member": "temporary/scihero-board87-0932.json",
+    "bytes": 9289,
+    "sha256": "3976993c6d606d123a29e93ecac6c615a768c0f0c69a629bfb44ce533d77b62e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0935.json",
+    "archive_member": "temporary/scihero-board87-0935.json",
+    "bytes": 12816,
+    "sha256": "ef9045dee4dba2f0c12cc9f8d58b8a79f935067b8697e4397738497d6130d0e1"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0939.json",
+    "archive_member": "temporary/scihero-board87-0939.json",
+    "bytes": 5079,
+    "sha256": "9a6c1f507cfe4a729cdfc1586dbf462035578d3d28a9d5723841147bf5c8b56f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0942.json",
+    "archive_member": "temporary/scihero-board87-0942.json",
+    "bytes": 5079,
+    "sha256": "9a6c1f507cfe4a729cdfc1586dbf462035578d3d28a9d5723841147bf5c8b56f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0945.json",
+    "archive_member": "temporary/scihero-board87-0945.json",
+    "bytes": 5079,
+    "sha256": "9a6c1f507cfe4a729cdfc1586dbf462035578d3d28a9d5723841147bf5c8b56f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-0948.json",
+    "archive_member": "temporary/scihero-board87-0948.json",
+    "bytes": 5079,
+    "sha256": "9a6c1f507cfe4a729cdfc1586dbf462035578d3d28a9d5723841147bf5c8b56f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-board87-next.json",
+    "archive_member": "temporary/scihero-board87-next.json",
+    "bytes": 37846,
+    "sha256": "869c41be595389e56b537ba36f861c0212725a31f27570f11d24a6e505d5b09e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-bootstrap-pin-release.txt",
+    "archive_member": "temporary/scihero-bootstrap-pin-release.txt",
+    "bytes": 1837,
+    "sha256": "7ecbfc375cb73a64c2902380c549b400c453a6a8354d6a716c7fe2beacbcb52e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-cee-health-0223.json",
+    "archive_member": "temporary/scihero-cee-health-0223.json",
+    "bytes": 508,
+    "sha256": "9ae89104cc90ad2dfb9c8079101179241126eaba8f120898d6e11370b387b527"
+  },
+  {
+    "original_path": "/private/tmp/scihero-cee-health-0226.json",
+    "archive_member": "temporary/scihero-cee-health-0226.json",
+    "bytes": 508,
+    "sha256": "13245514b789c70e164cd36917b99048a29610eab682c84fdb368e3e8199eefe"
+  },
+  {
+    "original_path": "/private/tmp/scihero-cee-health-0533.json",
+    "archive_member": "temporary/scihero-cee-health-0533.json",
+    "bytes": 508,
+    "sha256": "121f8f70e97b18f346ca7f50867f491a0bb8717586791bc2de0bb684bdb07157"
+  },
+  {
+    "original_path": "/private/tmp/scihero-coaching-serving-receipt.txt",
+    "archive_member": "temporary/scihero-coaching-serving-receipt.txt",
+    "bytes": 1282,
+    "sha256": "9472470509eee94dc05a5bc3ca4b36cfd03b8baeae0d264dbb1326bbc7f8ee53"
+  },
+  {
+    "original_path": "/private/tmp/scihero-concrete-route-seam.md",
+    "archive_member": "temporary/scihero-concrete-route-seam.md",
+    "bytes": 2399,
+    "sha256": "ae22590a1e4da145d790cee1e4f993bc68f2dbac6db8d8679f9c68cab9830b4c"
+  },
+  {
+    "original_path": "/private/tmp/scihero-context-68454-capabilities.ts",
+    "archive_member": "temporary/scihero-context-68454-capabilities.ts",
+    "bytes": 547562,
+    "sha256": "0dc659114bb49cc7dac8f7ed9465ebda5eaf4f0afd9c373a1fcdecd62834d897"
+  },
+  {
+    "original_path": "/private/tmp/scihero-handover-correction-0138.md",
+    "archive_member": "temporary/scihero-handover-correction-0138.md",
+    "bytes": 1335,
+    "sha256": "d7ea26b34c778523c0892516de82fd74c861452a6d7086b58538b6a6acba3a3e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-policy-board-correction.txt",
+    "archive_member": "temporary/scihero-policy-board-correction.txt",
+    "bytes": 1143,
+    "sha256": "38c89547936e83568299012d2835857305b84bd8fda12c0b3c55fd6007b77686"
+  },
+  {
+    "original_path": "/private/tmp/scihero-policy-hold-correction.txt",
+    "archive_member": "temporary/scihero-policy-hold-correction.txt",
+    "bytes": 1581,
+    "sha256": "ceee7f06c3b8d7b635fa2d86b97e5b4d1ea7c3c5f98df3d558e76f0b21701539"
+  },
+  {
+    "original_path": "/private/tmp/scihero-pr2-ci-repair-lint.log",
+    "archive_member": "temporary/scihero-pr2-ci-repair-lint.log",
+    "bytes": 264,
+    "sha256": "39932211634b7edadfdfe6f4242017aaec8451aac0642f5038c42aed6543184e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-pr2-ci-repair.log",
+    "archive_member": "temporary/scihero-pr2-ci-repair.log",
+    "bytes": 47265,
+    "sha256": "ad10a9cfa5043227e1c14a9a4e5e64ce547e3b3cd510a5d2f45f96b10e6b1de8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-pr2-ci-shard1.log",
+    "archive_member": "temporary/scihero-pr2-ci-shard1.log",
+    "bytes": 27953312,
+    "sha256": "8295e87539f40e59dc5ba362527e2e9c119385426b4b3d22b6e16b6fe91a468f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-pr2-exact-a7fd116.log",
+    "archive_member": "temporary/scihero-pr2-exact-a7fd116.log",
+    "bytes": 88622,
+    "sha256": "9261800dffd17b25107f90f6546bd353713917f0b2dfd7520ad053bafaf54eef"
+  },
+  {
+    "original_path": "/private/tmp/scihero-pr2-refreshed-focused.log",
+    "archive_member": "temporary/scihero-pr2-refreshed-focused.log",
+    "bytes": 88325,
+    "sha256": "c1e246b45e91ec0147c75b7a66ee41f17e3c0efa1564b470d348391715dcd2a8"
+  },
+  {
+    "original_path": "/private/tmp/scihero-pr2-refreshed-lint.log",
+    "archive_member": "temporary/scihero-pr2-refreshed-lint.log",
+    "bytes": 264,
+    "sha256": "39932211634b7edadfdfe6f4242017aaec8451aac0642f5038c42aed6543184e"
+  },
+  {
+    "original_path": "/private/tmp/scihero-pr2-refreshed-typecheck.log",
+    "archive_member": "temporary/scihero-pr2-refreshed-typecheck.log",
+    "bytes": 1895,
+    "sha256": "abd57212578606760f4cf19b3913084cce4c879c213379d4db6c46b0548bb40a"
+  },
+  {
+    "original_path": "/private/tmp/scihero-r3-independent-review.md",
+    "archive_member": "temporary/scihero-r3-independent-review.md",
+    "bytes": 1945,
+    "sha256": "61a3758ec9dc9486320fe74fcab5a4c1e453c55c276902773c1ff84160369aa3"
+  },
+  {
+    "original_path": "/private/tmp/scihero-refreshed-097-receipt.md",
+    "archive_member": "temporary/scihero-refreshed-097-receipt.md",
+    "bytes": 1635,
+    "sha256": "218b36e46c70c0a2b3fbec37314ea8034698f3d8771cc2f7c3f132248945a0cc"
+  },
+  {
+    "original_path": "/private/tmp/scihero-sci-change-what-turn.ts",
+    "archive_member": "temporary/scihero-sci-change-what-turn.ts",
+    "bytes": 10498,
+    "sha256": "066e4740510a3b2621d8b4b09325a6e4c9fc8d56a965b1e15cbb088246e14390"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ssot-v2-0211.md",
+    "archive_member": "temporary/scihero-ssot-v2-0211.md",
+    "bytes": 54319,
+    "sha256": "2dff0a5809071339d99ad7e9c0db23e267d47607c2258048bbc1f4e1684ca67f"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui-2457-review.md",
+    "archive_member": "temporary/scihero-ui-2457-review.md",
+    "bytes": 1265,
+    "sha256": "7dcd1c700f7cb66249cccf8a98449df440820c995fa02684f2c502769c8bd3dd"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui-622-TopBar.tsx",
+    "archive_member": "temporary/scihero-ui-622-TopBar.tsx",
+    "bytes": 22122,
+    "sha256": "357074381e7b5916ceac23db3668b4bba4a521920722325297a7e5fbc6f8abcf"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui-current-GuidanceRows.tsx",
+    "archive_member": "temporary/scihero-ui-current-GuidanceRows.tsx",
+    "bytes": 6338,
+    "sha256": "45841bf5c24c97da2613c7d28cff5d7ff2cc32a99d4316bc67f258f400976334"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui-current-guidanceRows.ts",
+    "archive_member": "temporary/scihero-ui-current-guidanceRows.ts",
+    "bytes": 4584,
+    "sha256": "ba8d0b41559edcc4ffcf587cabf89c4f6132165fd8915cbf5a7b305ffb87f1cb"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui-current-reasoningSignals.ts",
+    "archive_member": "temporary/scihero-ui-current-reasoningSignals.ts",
+    "bytes": 9909,
+    "sha256": "c366a258ef1b9c66a1393eab7b9addc5530d0bb29110710340a7a9276895b835"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui-served-0141.md",
+    "archive_member": "temporary/scihero-ui-served-0141.md",
+    "bytes": 1186,
+    "sha256": "da10861fe56cca4f869528a1d035dee96657a0cb76cb1cf44d224374434ee97b"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui-version-0226.json",
+    "archive_member": "temporary/scihero-ui-version-0226.json",
+    "bytes": 230,
+    "sha256": "0a6061363e242cf51bdd60b4a8ee2150d956eebf452cb340a965563e551e08e6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui-version-0533.json",
+    "archive_member": "temporary/scihero-ui-version-0533.json",
+    "bytes": 230,
+    "sha256": "0a6061363e242cf51bdd60b4a8ee2150d956eebf452cb340a965563e551e08e6"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui622-normalise.json",
+    "archive_member": "temporary/scihero-ui622-normalise.json",
+    "bytes": 25724,
+    "sha256": "12e3ac91746fb51e2d86e46afa874df7545a1e996f93aeac5dcc08cf773bfc22"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui622-normalise.ts",
+    "archive_member": "temporary/scihero-ui622-normalise.ts",
+    "bytes": 17789,
+    "sha256": "61bb57efb9904a001e4f4ef2764f03111c1b0415c0c2c9226380441f2a025979"
+  },
+  {
+    "original_path": "/private/tmp/scihero-ui622-tree.json",
+    "archive_member": "temporary/scihero-ui622-tree.json",
+    "bytes": 1978791,
+    "sha256": "80726d711e5b59bc01f68295de9b7f0a2c8bb7d7c0baef9e747cf245e3a4a498"
+  },
+  {
+    "original_path": "/private/tmp/scihero-wc-policy-concurrence.md",
+    "archive_member": "temporary/scihero-wc-policy-concurrence.md",
+    "bytes": 1721,
+    "sha256": "1abbff8ab9b99bfcec5a886a05078f7b75be18644948f70f97576066761e0691"
+  },
+  {
+    "original_path": "/private/tmp/scihero-witness-accepted.txt",
+    "archive_member": "temporary/scihero-witness-accepted.txt",
+    "bytes": 1555,
+    "sha256": "25df876b3c5962e69d4e7636667070538ddb924dcd419ea2a2f3bbbf320b2eec"
+  }
+]

@@ -1,0 +1,5 @@
+[SCI-HERO shared-bank interpretation COMPLETE / STOP]
+SCI01a0feed independently interpreted the ONE B1 bank, no new browser/provider actions. Reasoning retains provisional withholding/49/unconfirmed300+3%/2of3/missing MRR mechanism, no threshold.14 named raw fields match original GET;4 digests verified.
+Qualifier: analysis_admission core unchanged but derived semantic_signals adds monthly_churn awaiting human confirmation. Entire response is not identical; no approved edit/newRun inferred.
+OldUI622 original-case context +auto-POST registration/readiness (not canonical GET) preserve currentUIb412/pure-read-only BLOCKED. Storage revision/full provider ledger UNKNOWN; no zero-write/JOURNEY claim.
+Evidence output/sci-hero-20261003/SCI-B1-READONLY-INTERPRETATION-0921.json/.md. Morning card current tuple and both boundaries corrected. PTL/Delivery sequence next accepted action; no repeat journey/repair/provider/newcontext/copy/reset/auth lane. SCI allocated interpretation is complete; overall morning remains PARTIAL.

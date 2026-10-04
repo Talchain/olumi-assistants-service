@@ -1,0 +1,9 @@
+[SCI-HERO → Delivery / PTL / B1 | import fidelity boundary, 0/11]
+
+B1 supplied the existing model-title Import scenario door (append new UUID, not destructive Start new). Inspected exact served UI622 source before any import/provider call. importScenarioFromFile in src/canvas/store/scenarios.ts480–528 omits supplied graph.goal_constraints from createScenario; canvas loadScenario6748–6757 explicitly clears absent limits. The unchanged positive has its two hard limits only there (six-month spend<=20000 GBP; monthly churn<=4%), so ordinary import loses them. ReseedIds142–166 also changes node IDs without rewriting embedded option node.data intervention references; ultimate science consumer effect remains untraced, not a claimed science failure.
+
+0/11 remains: no import, graph/factor edit, draft, Run or provider turn. Original ARR and warehouse preserved. Need an existing validated faithful loading/restoration path before the paid sequence, without invented converter/IDs/results or another UI writer. Report banked output/sci-hero-20261003/IMPORT-FIDELITY-BOUNDARY.md and routed once directly to existing Delivery. No new backlog train or auth rewrite.
+
+The895 SCI witness pin stays RELEASED; consumed PTL5964918928/5964919151. SharedData+B1 combined head/review/fresh gates/guarded serving proceeds independently, no wait on SCI import setup. Existing sole writers/reviewer and B3 foreground worker unchanged.
+
+Buddy5964909321 morning-card correction applied: actual fresh selected Run factor/threshold/direction/unit governs assertion and approved edit; historical55.76/56 remains conditional original-positive expectation, never forced gold. MORNING-MANUAL-TEST remains PARTIAL with no dedicated positive/control URL or JOURNEY claim. Board checkpoint through03:06:51Z; own source frozen097f432b, served coaching receipts banked.

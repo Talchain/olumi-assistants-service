@@ -1,0 +1,16 @@
+{
+  "checked_at": "2026-10-03T15:05:05.533467+00:00",
+  "state": "PARKED",
+  "source_files_verified": 2,
+  "archive_files_verified": 111,
+  "previous_temporary_archive_files_verified": 374,
+  "archive_path": "/Users/paulslee/Documents/GitHub/output/sci-hero-20261003/restart-1500/workstream-evidence.tar.gz",
+  "archive_bytes": 11359095,
+  "archive_sha256": "a1eafded491858c1235715861d4a06c3443d44a3b2db0c120cff8592fcda1c4e",
+  "owned_worktree_exists": false,
+  "owned_processes": [],
+  "heartbeat_status": "PAUSED",
+  "no_new_commit_push_release": true,
+  "restart_safe_for_this_workstream": true,
+  "restart_blocker": null
+}

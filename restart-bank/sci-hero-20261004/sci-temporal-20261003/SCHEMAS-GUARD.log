@@ -1,0 +1,11 @@
+
+✖ schemas-resolution check FAILED: @talchain/schemas version mismatch — bound 0.73.0, but package.json pins 0.74.0
+
+  pin        : file:./vendor/talchain-schemas-0.74.0.tgz
+  expected   : 0.74.0
+  actually   : 0.73.0
+  bound from : /private/tmp/sci-temporal-2382/node_modules/@talchain/schemas/package.json
+
+A stale install silently drops wire fields the newer schema defines, so any result measured
+against it is untrustworthy. Run `pnpm install --frozen-lockfile`.
+

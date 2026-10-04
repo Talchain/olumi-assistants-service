@@ -1,0 +1,9 @@
+[SCI-HERO | INDEPENDENT BOUNDED HIGH RE-REVIEW]
+REVIEWED_HEAD: ef0d2069c84ca41fb9dc13f314f3a7a49c29a980
+VERDICT: SOURCE_REVIEW_PASS for the capture instrument; fresh exact-head CI remains required.
+
+I independently queried both immutable47ce44f0→ef0d2069 and servedaff2be2c→ef0d2069 comparisons plus the four file/blob inventories. The current PR increment is still exactly four support-folder files; the product/dependency paths seen in the former comparison belong to the already-served baseline and are absent from the current PR diff. cases.json remains822d61b2, replay.mjs remains32d24d72, and renamed replay.native-checks.mjs is exactly the previous replay.test.mjs blob2aa1bf4e, with zero content changes. README's only increment names the explicit native runner and new filename. No Vitest config exclusion, removed test, altered assertion or product source change is introduced.
+
+The previous independent four-file review5964395113 and isolated31/31 Node controls apply to these unchanged instrument/test bytes. I did not repeat the same tests or bypass dependency guards. Removing the .test filename prevents the native Node suite from being collected as a Vitest suite; the README still provides its explicit node --test invocation. Fresh Required CI at this immutable head is running and is not waived by this source review.
+
+All claim limits remain: INSTRUMENT-SELFTEST is constructed support evidence; WIRE-REPLAY-CHECKED is not JOURNEY-WITNESSED; JSON metadata does not authenticate served/browser provenance. Actual direction, stale-WHAT refusal, changed postrerun/cold interpretation and the legitimate positive/no-signal sequence still require accepted runtime/browser witness observations. No paid/provider/browser run was performed here, and this review does not approve SCI-HERO's own product source or establish an accepted R3 pickup.

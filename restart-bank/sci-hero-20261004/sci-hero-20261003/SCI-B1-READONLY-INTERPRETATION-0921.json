@@ -1,0 +1,136 @@
+{
+  "checked_at": "2026-10-03T09:24:47.499877+00:00",
+  "role": "SCI independent interpretation of existing B1 shared bank; no browser actions",
+  "source_receipt": "/Users/paulslee/Documents/GitHub/output/semantic-spine-overnight-20261003/READONLY-CONTEXT-RECEIPT.md",
+  "checks": {
+    "schema": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "scenario_id": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "graph": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "brief_text": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "graph_hash": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "graph_identity_hash": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "analysis_state": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "analysis_result": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "current_read": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "goal_scope_reconciliation": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "goal_scope_claim_permissions": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "analysis_option_participation": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "analysis_identity_run_use": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    },
+    "conversation_turns": {
+      "before_present": true,
+      "after_present": true,
+      "equal": true
+    }
+  },
+  "admission_annotation_delta": {
+    "core_equal": true,
+    "before_semantic_signals": null,
+    "after_semantic_signals": {
+      "material_parameters_awaiting_user_node_ids": [
+        "monthly_churn"
+      ]
+    },
+    "interpretation": "new derived admission annotation awaits human monthly_churn value; no approved value or new analysis inferred"
+  },
+  "verified_artifact_sha256": {
+    "pricing-readonly-natural-registration.json": "2fe6989dae86608ec8598fd9036557c26fcde26a5b30c9dd22c011da6a59dc10",
+    "pricing-readonly-readiness.json": "4b680045096fc4964d2dec380fedb2abeb8f236ad3a45ca88d82fa46592af066",
+    "pricing-readonly-actual-frontend-version.json": "0a6061363e242cf51bdd60b4a8ee2150d956eebf452cb340a965563e551e08e6",
+    "pricing-readonly-reasoning-20261003.jpg": "65cb1ddbebe55b1a91e24e52ec1ec0bd896824b92ea55222f947701ff62e04a3"
+  },
+  "requests_observed": [
+    {
+      "request_id": "3096.609",
+      "method": "GET",
+      "url": "https://6ac05a915c6a060008dbdbcd--olumi.netlify.app/version.json"
+    },
+    {
+      "request_id": "3096.610",
+      "method": "POST",
+      "url": "https://6ac05a915c6a060008dbdbcd--olumi.netlify.app/bff/cee/prompts/warm"
+    },
+    {
+      "request_id": "3096.712",
+      "method": "POST",
+      "url": "https://6ac05a915c6a060008dbdbcd--olumi.netlify.app/bff/cee/scenarios/b04becba-4cdd-4d9a-81fd-84d57f0d6517/graph"
+    },
+    {
+      "request_id": "3096.713",
+      "method": "POST",
+      "url": "https://6ac05a915c6a060008dbdbcd--olumi.netlify.app/bff/cee/graph-readiness"
+    }
+  ],
+  "network_truncated": true,
+  "visible_interpretation": {
+    "mounted_reasoning": true,
+    "human_brief_retained": true,
+    "two_of_three_options_compared": true,
+    "winner_order_withheld": true,
+    "missing_current_MRR_and_price_to_MRR_mechanism_disclosed": true,
+    "provisional_evidence_robustness_disclosed": true,
+    "numeric_tipping_point_claim": false
+  },
+  "science": "analysis_result/current_read equal original05:38 computation; existing no-typed-threshold/not_evaluated inference retained, not attested no-crossing",
+  "limits": {
+    "actual_frontend": "622ac23570690d0056a45bbc152c49e44d2b262d",
+    "current_UIb412_observed": false,
+    "pure_read_only_acceptance": false,
+    "storage_revision_absence_attested": false,
+    "full_provider_ledger_complete": false,
+    "SCI_new_browser_or_provider_actions": 0,
+    "joined_journey": false
+  },
+  "verdict": "Observed interpretation consistent with banked provisional response; current-tuple/pure-read-only consumer acceptance BLOCKED"
+}

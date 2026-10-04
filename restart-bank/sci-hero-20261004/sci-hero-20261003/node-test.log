@@ -1,0 +1,196 @@
+TAP version 13
+# Subtest: original immutable served fixtures admit exact 49 → 55.76 and attested no-signal
+ok 1 - original immutable served fixtures admit exact 49 → 55.76 and attested no-signal
+  ---
+  duration_ms: 0.719708
+  type: 'test'
+  ...
+# Subtest: positive chain checks only an INSTRUMENT-SELFTEST rung
+ok 2 - positive chain checks only an INSTRUMENT-SELFTEST rung
+  ---
+  duration_ms: 3.986916
+  type: 'test'
+  ...
+# Subtest: honest no-signal chain allows ordinary discussion without a measured offer
+ok 3 - honest no-signal chain allows ordinary discussion without a measured offer
+  ---
+  duration_ms: 1.389
+  type: 'test'
+  ...
+# Subtest: existing Model editor: local review, explicit Confirm, real factor_value_edit, across-threshold56
+ok 4 - existing Model editor: local review, explicit Confirm, real factor_value_edit, across-threshold56
+  ---
+  duration_ms: 1.503917
+  type: 'test'
+  ...
+# Subtest: rejects wrong Model-editor target
+ok 5 - rejects wrong Model-editor target
+  ---
+  duration_ms: 1.821583
+  type: 'test'
+  ...
+# Subtest: rejects edit exactly to the boundary
+ok 6 - rejects edit exactly to the boundary
+  ---
+  duration_ms: 1.118125
+  type: 'test'
+  ...
+# Subtest: rejects missing explicit Confirm witness
+ok 7 - rejects missing explicit Confirm witness
+  ---
+  duration_ms: 0.970583
+  type: 'test'
+  ...
+# Subtest: rejects local review disguised as a server proposal
+ok 8 - rejects local review disguised as a server proposal
+  ---
+  duration_ms: 1.188833
+  type: 'test'
+  ...
+# Subtest: rejects missing explicit rerun witness
+ok 9 - rejects missing explicit rerun witness
+  ---
+  duration_ms: 1.33
+  type: 'test'
+  ...
+# Subtest: rejects rounded threshold
+ok 10 - rejects rounded threshold
+  ---
+  duration_ms: 1.591167
+  type: 'test'
+  ...
+# Subtest: rejects invented VOI
+ok 11 - rejects invented VOI
+  ---
+  duration_ms: 0.959041
+  type: 'test'
+  ...
+# Subtest: rejects wrong action factor
+ok 12 - rejects wrong action factor
+  ---
+  duration_ms: 1.081625
+  type: 'test'
+  ...
+# Subtest: rejects pointer to a figure instead of factor identity
+ok 13 - rejects pointer to a figure instead of factor identity
+  ---
+  duration_ms: 1.201458
+  type: 'test'
+  ...
+# Subtest: rejects write before explicit approval
+ok 14 - rejects write before explicit approval
+  ---
+  duration_ms: 2.910791
+  type: 'test'
+  ...
+# Subtest: rejects approval never offered
+ok 15 - rejects approval never offered
+  ---
+  duration_ms: 0.798416
+  type: 'test'
+  ...
+# Subtest: rejects unbound approval
+ok 16 - rejects unbound approval
+  ---
+  duration_ms: 1.045042
+  type: 'test'
+  ...
+# Subtest: rejects approval failed
+ok 17 - rejects approval failed
+  ---
+  duration_ms: 0.776584
+  type: 'test'
+  ...
+# Subtest: rejects old result promoted as current
+ok 18 - rejects old result promoted as current
+  ---
+  duration_ms: 0.971791
+  type: 'test'
+  ...
+# Subtest: rejects rerun not offered
+ok 19 - rejects rerun not offered
+  ---
+  duration_ms: 5.28975
+  type: 'test'
+  ...
+# Subtest: rejects old Run reused
+ok 20 - rejects old Run reused
+  ---
+  duration_ms: 3.09775
+  type: 'test'
+  ...
+# Subtest: rejects rerun stale
+ok 21 - rejects rerun stale
+  ---
+  duration_ms: 1.075084
+  type: 'test'
+  ...
+# Subtest: rejects cold reload loses unit or provenance
+ok 22 - rejects cold reload loses unit or provenance
+  ---
+  duration_ms: 1.825
+  type: 'test'
+  ...
+# Subtest: rejects cold reload changes selected result
+ok 23 - rejects cold reload changes selected result
+  ---
+  duration_ms: 15.130041
+  type: 'test'
+  ...
+# Subtest: rejects missing cold read
+ok 24 - rejects missing cold read
+  ---
+  duration_ms: 0.965709
+  type: 'test'
+  ...
+# Subtest: rejects cross-scenario capture
+ok 25 - rejects cross-scenario capture
+  ---
+  duration_ms: 1.495375
+  type: 'test'
+  ...
+# Subtest: rejects missing immutable component build
+ok 26 - rejects missing immutable component build
+  ---
+  duration_ms: 0.801042
+  type: 'test'
+  ...
+# Subtest: rejects historical source masquerading as current science
+ok 27 - rejects historical source masquerading as current science
+  ---
+  duration_ms: 0.797583
+  type: 'test'
+  ...
+# Subtest: rejects current verdict without selected result
+ok 28 - rejects current verdict without selected result
+  ---
+  duration_ms: 0.750167
+  type: 'test'
+  ...
+# Subtest: rejects rerun loses approval provenance
+ok 29 - rejects rerun loses approval provenance
+  ---
+  duration_ms: 1.298875
+  type: 'test'
+  ...
+# Subtest: rejects fabricated no-signal science offer
+ok 30 - rejects fabricated no-signal science offer
+  ---
+  duration_ms: 0.52425
+  type: 'test'
+  ...
+# Subtest: rejects universal no-change claim
+ok 31 - rejects universal no-change claim
+  ---
+  duration_ms: 0.352417
+  type: 'test'
+  ...
+1..31
+# tests 31
+# suites 0
+# pass 31
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 140.169541

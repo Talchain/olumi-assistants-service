@@ -1,0 +1,31 @@
+M  src/orchestrator-v5/__tests__/apply-operations.test.ts
+M  src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
+M  src/orchestrator-v5/apply-operations.ts
+M  src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts
+M  src/orchestrator-v5/graph-management/field-safety.ts
+M  src/orchestrator-v5/normalise-option-interventions.ts
+M  src/orchestrator-v5/system-events/__tests__/option-intervention-edit.test.ts
+M  src/orchestrator-v5/system-events/dispatch.ts
+M  src/orchestrator-v5/system-events/option-intervention-edit.ts
+M  src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
+M  src/orchestrator/tools/edit-graph.ts
+M  src/orchestrator/tools/encode-option-interventions.ts
+M  tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
+M  tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts
+M  tests/unit/orchestrator-v5/normalise-option-interventions.test.ts
+ .../__tests__/apply-operations.test.ts             | 13 ++++++
+ .../agent-lane/runtime/agent-capabilities.ts       | 11 ++++-
+ src/orchestrator-v5/apply-operations.ts            |  8 ++++
+ .../__tests__/field-safety-corpus.test.ts          | 15 +++++++
+ .../graph-management/field-safety.ts               | 19 ++++++++-
+ .../normalise-option-interventions.ts              |  6 ++-
+ .../__tests__/option-intervention-edit.test.ts     | 15 +++++++
+ src/orchestrator-v5/system-events/dispatch.ts      |  4 +-
+ .../system-events/option-intervention-edit.ts      | 28 +++++++++----
+ .../__tests__/encode-option-interventions.test.ts  | 17 ++++++++
+ src/orchestrator/tools/edit-graph.ts               | 12 +++++-
+ .../tools/encode-option-interventions.ts           | 49 ++++++++++++++++++----
+ ...gent-level-keeps-the-users-likely-range.test.ts | 40 ++++++++++++++----
+ ...-edit-persist-withdraws-extraction-type.test.ts | 21 ++++++++++
+ .../normalise-option-interventions.test.ts         | 14 +++++++
+ 15 files changed, 241 insertions(+), 31 deletions(-)

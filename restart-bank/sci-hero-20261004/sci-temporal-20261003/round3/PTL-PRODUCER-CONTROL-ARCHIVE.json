@@ -1,0 +1,20 @@
+{
+  "archive": "/Users/paulslee/Documents/GitHub/output/sci-temporal-20261003/PTL-PRODUCER-CONTROL-HANDOFF-EVIDENCE.tgz",
+  "bytes": 30144,
+  "sha256": "a4854f5f200dbd2100fc8993c145d42079ba3ed26de63ddcd1007d71d584e1af",
+  "files": [
+    "PTL-SHARED-HUNK-HANDOFF.md",
+    "P2-FALSE-FLAG-VALIDATION.json",
+    "P2-FALSE-FLAG-CONTROLS.patch",
+    "P2-FALSE-FLAG-CONTROLS.test.ts",
+    "P2-FALSE-FLAG-RUNTIME-UNAPPLIED.patch",
+    "P2-FALSE-FLAG-RED.json",
+    "P2-FALSE-FLAG-RED.log",
+    "P2-FALSE-FLAG-STARTUP-FAILED.log",
+    "PTL-HANDOFF-CURRENT-CI.json",
+    "PTL-OWNERSHIP85.json",
+    "PTL-OWNERSHIP87.json",
+    "OWNERSHIP-REFRESH85.json",
+    "OWNERSHIP-REFRESH87.json"
+  ]
+}

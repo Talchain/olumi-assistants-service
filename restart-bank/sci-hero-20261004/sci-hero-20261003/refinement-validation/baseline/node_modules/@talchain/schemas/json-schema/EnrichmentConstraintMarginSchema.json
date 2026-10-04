@@ -1,0 +1,37 @@
+{
+  "$ref": "#/definitions/EnrichmentConstraintMarginSchema",
+  "definitions": {
+    "EnrichmentConstraintMarginSchema": {
+      "type": "object",
+      "properties": {
+        "constraint_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "failure_margin_median": {
+          "type": "number",
+          "minimum": 0
+        },
+        "near_miss_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "margin_precision": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "lower_bound"
+          ],
+          "description": "Absent means precision is unknown; consumers MUST NOT assume exactness."
+        }
+      },
+      "required": [
+        "constraint_id"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "GENERATED from src/boundary/enrichment.ts by scripts/generate-json-schema.mjs — do not edit by hand; run `npm run generate:json-schema` to regenerate."
+}

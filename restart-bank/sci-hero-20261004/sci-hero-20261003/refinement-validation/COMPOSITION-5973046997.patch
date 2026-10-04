@@ -1,0 +1,246 @@
+diff --git a/src/orchestrator-v5/agent-lane/__tests__/what-changes-route.test.ts b/src/orchestrator-v5/agent-lane/__tests__/what-changes-route.test.ts
+index 8a5fcfc..b574371 100644
+--- a/src/orchestrator-v5/agent-lane/__tests__/what-changes-route.test.ts
++++ b/src/orchestrator-v5/agent-lane/__tests__/what-changes-route.test.ts
+@@ -16,12 +16,14 @@ const D3 = SERVED.cases.find((c) => c.id === 'A-WHAT-CHANGES-NONE-MEASURABLE-SIL
+ const ISL_D3_BLOCK = {"method":"affine_crn_replicates_v1","leader_option_id":"switch_to_gcp","replicates":4,"bound_abs":0.01,"bound_rel":0.15,"grid_step":0.0025,"links":[{"from_id":"monthly_cloud_savings","to_id":"monthly_spend","status":"quoted","reason":null,"current_mean":-0.3555555555555555,"threshold":-0.09324009324009322,"replicate_thresholds":[-0.09324009324009322,-0.09572649572649569,-0.08578088578088575,-0.09324009324009322],"replicate_range":0.009945609945609946,"to_option_id":"stay_on_aws"},{"from_id":"monthly_cloud_overspend_during_migration","to_id":"monthly_spend","status":"no_change","reason":null,"current_mean":0.17777777777777776,"threshold":null,"replicate_thresholds":[null,null,null,null],"replicate_range":null,"to_option_id":null}]};
+ const PRESS = NEXT_STEP_CHIPS.find((c) => c.id === 'agent-next-what-would-change')!;
+ 
+-const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' }));
++const dispatch = vi.hoisted(() => ({ calls: [] as Rec[], answer: 'measured' as 'measured' | 'stale' | 'unavailable', during: null as null | (() => void) }));
+ vi.mock('../../handlers/decision-flip-dispatch.js', async (importOriginal) => ({
+   ...(await importOriginal<Record<string, unknown>>()),
+   dispatchDecisionFlip: vi.fn(async (params: Rec) => {
+     dispatch.calls.push(params);
++    dispatch.during?.();
+     return dispatch.answer === 'stale' ? { status: 'stale' }
++      : dispatch.answer === 'unavailable' ? { status: 'unavailable', reason: 'client_without_decision_flip' }
+       : { status: 'measured', block: ISL_D3_BLOCK, links: params.candidateLinks.slice(0, 2) };
+   }),
+ }));
+@@ -45,6 +47,10 @@ vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => ({
+   ...(await importOriginal<Record<string, unknown>>()), resolveUserIdentity: async () => ({ mode: 'off' }),
+ }));
+ 
++// What the product's graph read serves; rows change it to model an edit or a Run the Explain control cannot bind.
++const served: { state: Rec; result: Rec } = { state: D3.body.analysis_state, result: D3.body.analysis_result };
++const RUN_NOT_CURRENT = 'I can’t explain that result as current. Check the current results before asking again.';
++
+ describe('the real route: "What would change the result?" → measured tipping points, 0 model calls', () => {
+   let app: FastifyInstance;
+   let modelCalls = 0;
+@@ -59,15 +65,19 @@ describe('the real route: "What would change the result?" → measured tipping p
+     const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+     app = Fastify({ logger: false });
+     app.post('/assist/v1/scenarios/:id/graph', async () => ({
+-      graph: D3.body.draft_graph, graph_hash: 'h-d3', analysis_state: D3.body.analysis_state,
+-      analysis_result: D3.body.analysis_result, analysis_option_participation: D3.body.option_participation,
++      graph: D3.body.draft_graph, graph_hash: 'h-d3', analysis_state: served.state,
++      analysis_result: served.result, analysis_option_participation: D3.body.option_participation,
+     }));
+     app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'ok', blocks: [] }));
+     await app.register(agentV1TurnRoute);
+     await app.ready();
+   }, 120_000);
+   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+-  beforeEach(() => { modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; n += 1; SCENARIO = `${SCENARIO_BASE}${String(n).padStart(2, '0')}`; });
++  beforeEach(() => {
++    modelCalls = 0; dispatch.calls.length = 0; dispatch.answer = 'measured'; dispatch.during = null;
++    served.state = D3.body.analysis_state; served.result = D3.body.analysis_result;
++    n += 1; SCENARIO = `${SCENARIO_BASE}${String(n).padStart(2, '0')}`;
++  });
+ 
+   const post = async (chipId: string, message: string) => {
+     const r = await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { kind: 'message', scenario_id: SCENARIO, message, source: 'chip', chip: { id: chipId } } });
+@@ -90,26 +100,64 @@ describe('the real route: "What would change the result?" → measured tipping p
+     expect(body.suggested_actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
+   });
+ 
+-  it('W2: a model changed since its Run is said as such, with no model call', async () => {
+-    dispatch.answer = 'stale';
+-    const body = await post(PRESS.id, PRESS.message);
+-    expect(modelCalls).toBe(0);
+-    expect(body.assistant_text).toMatch(/(^|\n\n)Your model has changed since its last analysis, so I can’t say what would change that result\. Run the analysis again, then ask\.$/);
+-  });
+-
+-  it('W3: the kill switch (CEE_WHAT_CHANGES_MEASURED_ENABLED=false) leaves the press to the ordinary Agent turn', async () => {
++  // One chip, two grounded answers (#2536 SCI-HERO coaching shares `agent-next-what-would-change`): anything the
++  // measurement does not answer is the Run's own tipping-point coaching, exactly as served before this branch.
++  const coaching = async () => {
++    dispatch.answer = 'measured';
+     const { _resetConfigCache } = await import('../../../config/index.js');
+     process.env.CEE_WHAT_CHANGES_MEASURED_ENABLED = 'false';
+     _resetConfigCache();
+-    try {
+-      const body = await post(PRESS.id, PRESS.message);
+-      expect(dispatch.calls).toHaveLength(0);
+-      expect(modelCalls).toBeGreaterThan(0);
+-      expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead/);
+-    } finally {
++    try { return (await post(PRESS.id, PRESS.message)).assistant_text; } finally {
+       delete process.env.CEE_WHAT_CHANGES_MEASURED_ENABLED;
+       _resetConfigCache();
+     }
++  };
++
++  it('W3: the kill switch (CEE_WHAT_CHANGES_MEASURED_ENABLED=false) leaves the press to the Run\'s tipping-point coaching', async () => {
++    const text = await coaching();
++    expect(dispatch.calls).toHaveLength(0);
++    expect(modelCalls).toBe(0);
++    // D3's Run quotes no factor threshold (#2536 `no_flip_in_range`); the wire gate's caveat leads, as in W1.
++    const coached = 'This analysis has no factor threshold to quote within the ranges it checked.';
++    expect(text === coached || text.endsWith(`\n\n${coached}`), text).toBe(true);
++    expect(text).not.toMatch(/would come out ahead|would still lead|Your model has changed since/);
++  });
++
++  it('W4: a measurement that is not an answer (unavailable) falls back to the same coaching, never RC\'s honest limit', async () => {
++    dispatch.answer = 'unavailable';
++    const body = await post(PRESS.id, PRESS.message);
++    expect(dispatch.calls).toHaveLength(1);
++    expect(modelCalls).toBe(0);
++    expect(body.assistant_text).toBe(await coaching());
++    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead|can't yet measure what would change/);
++    expect(body.suggested_actions.map((a) => a.id)).toEqual(['agent-talk-it-through']);
++  });
++
++  it('W2: #2522\'s digest disagreeing with a canonically current Run (stale) is the coaching, never "your model has changed"', async () => {
++    dispatch.answer = 'stale';
++    const body = await post(PRESS.id, PRESS.message);
++    expect(dispatch.calls).toHaveLength(1);
++    expect(modelCalls).toBe(0);
++    expect(body.assistant_text).toBe(await coaching());
++    expect(body.assistant_text).not.toMatch(/Your model has changed since|would come out ahead|would still lead/);
++  });
++
++  it('W5: an edit while ISL measures (the bound Run is no longer current at the final read) is never answered', async () => {
++    dispatch.during = () => { served.state = { ...D3.body.analysis_state, run_state: { ...D3.body.analysis_state.run_state, kind: 'complete_stale' } }; };
++    const body = await post(PRESS.id, PRESS.message);
++    expect(dispatch.calls).toHaveLength(1);
++    expect(modelCalls).toBe(0);
++    expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
++    expect(body.assistant_text).not.toMatch(/would come out ahead|would still lead/);
++  });
++
++  it('W6: a Run the Explain control cannot bind (no computed_against_hash) is never measured', async () => {
++    const { computed_against_hash: _unbound, ...result } = D3.body.analysis_result;
++    served.result = result;
++    const body = await post(PRESS.id, PRESS.message);
++    expect(dispatch.calls).toHaveLength(0);
++    expect(modelCalls).toBe(0);
++    expect(body.assistant_text.endsWith(RUN_NOT_CURRENT), body.assistant_text).toBe(true);
+   });
+ 
+   it('CONTROL: another next step never reaches the decision-flip dispatch', async () => {
+diff --git a/src/routes/agent-v1-turn.ts b/src/routes/agent-v1-turn.ts
+index a7da7a7..706643d 100644
+--- a/src/routes/agent-v1-turn.ts
++++ b/src/routes/agent-v1-turn.ts
+@@ -2425,11 +2425,46 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
+     let tippingTurn: TippingPointCoaching | null = null;
+     let methodGraph: unknown;
+     const pressedChipId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
++    /**
++     * ⭐ "WHAT WOULD CHANGE THIS?" — ONE CHIP, TWO GROUNDED ANSWERS, MEASURED FIRST. SCI-CHANGE (#2522,
++     * `method-turn/what-changes-turn.ts`) and SCI-HERO (#2536, `tipping-point-coaching.ts`) answer the same press. The
++     * measured link tipping points of the Run the user saw answer only when ISL measured them. ONE currentness authority
++     * governs both answers: the Explain control's canonical binding (`runExplanationChip`). No measurement is asked for a
++     * Run it cannot bind, and the fresh final read re-checks the bound Run, as for the coaching. #2522's own digest
++     * disagreeing with a canonically current Run (`stale`) never says "your model has changed". Any other outcome (no
++     * Run, nothing measurable, stale, a timeout, an error, kill switch CEE_WHAT_CHANGES_MEASURED_ENABLED=false) is the
++     * Run's own tipping-point coaching, exactly as before. Terminal and with NO model call either way; the measured
++     * fetch persists nothing.
++     */
++    let whatChangesTurn: WhatChangesTurn | null = null;
++    let measuredRunKey: string | null = null;
+     if (result === undefined && approvedProposal === undefined && pressedChipId === TIPPING_POINT_PRESS_ID) {
+-      tippingTurn = tippingPointCoachingFor(scenarioId, await readBackState(readingDispatch, scenarioId));
++      const rb = await readBackState(readingDispatch, scenarioId);
++      const boundRun = runExplanationChip(scenarioId, rb);
++      if (boundRun !== null && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)) {
++        const measured = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
++          payload: {
++            kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
++            source: 'chip_click', message,
++          },
++          requestId: `${String(req.id)}:decision-flip`,
++          candidateLinks,
++        }));
++        if (measured?.outcome === 'measured') {
++          whatChangesTurn = measured;
++          measuredRunKey = boundRun.id;
++        }
++        log.info({ scenario_id: scenarioId, what_changes: measured?.outcome ?? null, answered: whatChangesTurn !== null }, 'agent-lane: what-would-change measured attempt');
++      }
+       fastPath = 'method';
+-      const text = tippingTurn.kind === 'found'
+-        ? settleTippingPointCoaching(tippingTurn, tippingTurn.reply).reply : tippingTurn.reply;
++      let text: string;
++      if (whatChangesTurn !== null) {
++        text = whatChangesTurn.reply;
++      } else {
++        tippingTurn = tippingPointCoachingFor(scenarioId, rb);
++        text = tippingTurn.kind === 'found'
++          ? settleTippingPointCoaching(tippingTurn, tippingTurn.reply).reply : tippingTurn.reply;
++      }
+       result = { assistant_text: text, items: [], tool_calls: [], tool_results: [], mutated: false,
+         hops: 0, stopped_reason: 'answered',
+         timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+@@ -2486,39 +2521,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
+       }
+     }
+     const widenRun = widenTurn?.kind === 'run' ? widenTurn : undefined;
+-    /**
+-     * ⭐ "WHAT WOULD CHANGE THIS?" (SCIENCE ROBUSTNESS, EXPERIMENT; #85 lease 5950283606, hunk leased by HARNESS 5950400056;
+-     * `method-turn/what-changes-turn.ts`). A recognised press is TERMINAL and answered with NO model call: the measured
+-     * tipping points of the Run the user saw, in RC's link copy, or RC's honest limit. The fetch persists nothing.
+-     * Kill switch: CEE_WHAT_CHANGES_MEASURED_ENABLED=false (default ON) leaves the press to the ordinary Agent turn.
+-     */
+-    let whatChangesTurn: WhatChangesTurn | null = null;
+-    if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null
+-      && config.features.whatChangesMeasuredEnabled && isWhatChangesPress(pressedChipId)) {
+-      const rb = await readBackState(readingDispatch, scenarioId);
+-      whatChangesTurn = await whatChangesTurnFor(pressedChipId, rb, (candidateLinks) => dispatchDecisionFlip({
+-        payload: {
+-          kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
+-          source: 'chip_click', message,
+-        },
+-        requestId: `${String(req.id)}:decision-flip`,
+-        candidateLinks,
+-      }));
+-      if (whatChangesTurn !== null) {
+-        fastPath = 'method';
+-        result = {
+-          assistant_text: whatChangesTurn.reply,
+-          items: [],
+-          tool_calls: [],
+-          tool_results: [],
+-          mutated: false,
+-          hops: 0,
+-          stopped_reason: 'answered',
+-          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 },
+-        };
+-        log.info({ scenario_id: scenarioId, what_changes: whatChangesTurn.outcome }, 'agent-lane: what-would-change answered without a model call');
+-      }
+-    }
+     /**
+      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
+      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
+@@ -2798,13 +2800,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
+     // A successful bound check reuses the exact read that supplied the narration. A mismatch/failure
+     // reads current wire state, but never restores the old explanation's licence.
+     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
+-      : await readBackState(fastPath === 'explain' || tippingTurn !== null
++      : await readBackState(fastPath === 'explain' || tippingTurn !== null || measuredRunKey !== null
+         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
+     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
+     const { graphHash, analysisReady, draftGraph, analysisState, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
+     if (tippingTurn?.kind === 'found' && !runExplanationMatches(tippingTurn.run_key, scenarioId, finalRead)) {
+       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
+     }
++    // The measured answer waited on ISL (up to the 70 s cap): the same re-check, so an edit meanwhile is never answered.
++    if (measuredRunKey !== null && !runExplanationMatches(measuredRunKey, scenarioId, finalRead)) {
++      text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
++    }
+     if (fastPath === 'run' && result.tool_results.some((r) => r.ran === true)
+       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) === null) {
+       text = RUN_RESULT_UNVERIFIED_TEXT;

@@ -1,0 +1,622 @@
+diff --git a/src/orchestrator-v5/__tests__/apply-operations.test.ts b/src/orchestrator-v5/__tests__/apply-operations.test.ts
+index ecae14f97..e3e6b7b6d 100644
+--- a/src/orchestrator-v5/__tests__/apply-operations.test.ts
++++ b/src/orchestrator-v5/__tests__/apply-operations.test.ts
+@@ -234,6 +234,19 @@ beforeEach(() => {
+ // ─────────────────────────────────────────────────────────────────────────────
+ 
+ describe('applyOperations — the accept path writes what was consented to', () => {
++  it.each(['whole', 'nested', 'leaf'])('generic approved operation cannot smuggle a range: %s', async (variant) => {
++    const before = baseGraph();
++    const range = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
++    const cell = { value: 0.4, range };
++    const operation = variant === 'whole'
++      ? { op: 'update_node', path: OPTION_ID, value: { interventions: { [QUALITY_ID]: cell } } }
++      : { op: 'update_node', path: `/nodes/${OPTION_ID}/data/interventions/${QUALITY_ID}${variant === 'leaf' ? '/range' : ''}`, value: variant === 'leaf' ? range : cell };
++    const h = harness({ initial: before });
++    const outcome = await port(h)(input({ modelRevision: modelRevisionOf(before)!, operations: proposalOperations([operation]) }));
++    expect(outcome.ok, JSON.stringify(outcome)).toBe(false);
++    expect(commitDirectAnswer).not.toHaveBeenCalled();
++    expect(await h.store.loadGraph(SCENARIO)).toEqual(before);
++  });
+   it('a same-figure data-path rewrite keeps its valid quote through commit and cold read', async () => {
+     const before = baseGraph();
+     const option = before.nodes.find((node) => node.id === OPTION_ID)!;
+diff --git a/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts b/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
+index 6deb9196f..47d30a226 100644
+--- a/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
++++ b/src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts
+@@ -863,7 +863,9 @@ function levelFigureOf(op: ProposalOperation): { raw_value?: number; cap?: numbe
+   const likely = r !== undefined && typeof r.low === 'number' && typeof r.high === 'number' ? { low: r.low, high: r.high } : undefined;
+   if (typeof v.normalised !== 'number' || typeof v.raw !== 'number' || !Number.isFinite(v.raw)) return {};
+   // An unscaled level needs no cap. Carry its approved range without inventing a scale frame.
+-  if (v.cap == null && v.raw === v.normalised) return likely !== undefined ? { likely_range: likely } : {};
++  if (v.cap == null && v.raw === v.normalised) return { raw_value: v.raw,
++    ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
++    ...(likely !== undefined ? { likely_range: likely } : {}) };
+   if (typeof v.cap !== 'number' || !(v.cap > 0) || Math.abs(v.raw / v.cap - v.normalised) > 1e-9) return {};
+   return { raw_value: v.raw, cap: v.cap, ...(typeof v.unit === 'string' && v.unit.trim() !== '' ? { unit: v.unit.trim() } : {}),
+     ...(likely !== undefined ? { likely_range: likely } : {}) };
+@@ -4255,7 +4257,12 @@ export function createAgentCapabilities(
+         // ground it: a model-supplied unit ("% monthly churn rate") would name away the entity the guard reads
+         // (Canonical #2025 B1). Grounding reads only the factor's DECLARED unit; the rate after the figure is skipped anyway.
+         const statedUnit = typeof i?.unit === 'string' && i.unit.trim() !== '' ? i.unit.trim() : undefined;
+-        const userWrote = claimedByUser && figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label));
++        // A typed range and its level are shown together for explicit approval. Equivalent wording must not
++        // change that reading; the existing literal-figure guard remains for ordinary, non-range levels.
++        const rangeRequested = i?.likely_low !== undefined || i?.likely_high !== undefined
++          || i?.range_meaning !== undefined || i?.range_user_stated !== undefined;
++        const userWrote = claimedByUser && (rangeRequested
++          || figureTheUserWroteFor(Number(i?.value), factorUnitOf(g.raw, factor), ctx.user_text, scopeIn(g, factor.label, option.label)));
+         if (claimedByUser && !userWrote) notWrittenByUser.push({ option: option.label, factor: factor.label, value: i?.value });
+         if (held.has(`${option.id}::${factor.id}`) && !userWrote) {
+           notAccepted.push({
+diff --git a/src/orchestrator-v5/apply-operations.ts b/src/orchestrator-v5/apply-operations.ts
+index 10d0ed77e..ca2df4b6c 100644
+--- a/src/orchestrator-v5/apply-operations.ts
++++ b/src/orchestrator-v5/apply-operations.ts
+@@ -107,8 +107,10 @@ import { assertIngressGraphNumericBounds, floorGraphSigmaForCompute } from '../v
+ import { applyPatchOperations } from '../orchestrator/patch-applier.js';
+ import { validatePatchOperations } from '../orchestrator/patch-validation.js';
+ import { buildAppliedChanges, parseEditGraphResponse } from '../orchestrator/tools/edit-graph.js';
++import { hasInterventionRangeWrite } from './graph-management/field-safety.js';
+ import {
+   clearInheritedInterventionSourceQuotes,
++  hasNewInterventionRanges,
+   encodeOptionInterventionsForEdit,
+   optionIdsAddedWithInterventionIntent,
+   optionIdsTouchedByOperations,
+@@ -579,6 +581,9 @@ export function createApplyOperations(
+       return refuse('that change is not valid against the model as it stands');
+     }
+     const operations = validated.operations;
++    if (hasInterventionRangeWrite(operations)) {
++      return refuse('A likely range needs its dedicated range proposal and approval; nothing was saved');
++    }
+ 
+     let applied: GraphV3T;
+     try {
+@@ -602,6 +607,9 @@ export function createApplyOperations(
+     if (encoded.unresolvedOptionIds.length > 0) {
+       return refuse('I could not work out what that change means for the options, so I have not saved it');
+     }
++    if (hasNewInterventionRanges(before, encoded.graph)) {
++      return refuse('A new or changed likely range needs its dedicated range proposal and approval; nothing was saved');
++    }
+ 
+     const graph = projectGraphForPersistence(
+       mergeAppliedGraphForPersistence({
+diff --git a/src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts b/src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts
+index f8fa4fe4b..f8785da16 100644
+--- a/src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts
++++ b/src/orchestrator-v5/graph-management/__tests__/field-safety-corpus.test.ts
+@@ -344,3 +344,18 @@ describe('corpus D — hand-written attack spellings, every one refused', () =>
+     expect(code).toBe(FIELD_NOT_ALLOWED);
+   });
+ });
++
++
++describe('range consent belongs to the dedicated approval, not the generic field screen', () => {
++  const range = { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' };
++  it.each([
++    ['interventions', { 'f-spend': { value: 0.25, range } }],
++    ['data/interventions/f-spend', { value: 0.25, range }],
++    ['data/interventions/f-spend/range', range],
++  ])('a generic field write cannot introduce a range: %s', (field, payload) => {
++    expect(nodeUpdate(field, payload).blocker?.code).toBe(FIELD_NOT_ALLOWED);
++  });
++  it('a generic node add cannot smuggle a range', () => {
++    expect(addNode({ interventions: { 'f-spend': { value: 0.25, range } } }).blocker?.code).toBe(FIELD_NOT_ALLOWED);
++  });
++});
+diff --git a/src/orchestrator-v5/graph-management/field-safety.ts b/src/orchestrator-v5/graph-management/field-safety.ts
+index 5336ad04f..bd9bf798c 100644
+--- a/src/orchestrator-v5/graph-management/field-safety.ts
++++ b/src/orchestrator-v5/graph-management/field-safety.ts
+@@ -345,7 +345,7 @@ function ownKeysLower(value: unknown): string[] {
+  * unchanged.
+  */
+ export const INTERVENTION_CONTRACT_KEYS: ReadonlySet<string> = new Set([
+-  ...Object.keys(InterventionV3.shape).map((k) => k.toLowerCase()),
++  ...Object.keys(InterventionV3.shape).filter((k) => k !== 'range').map((k) => k.toLowerCase()),
+   'cap',
+ ]);
+ 
+@@ -385,6 +385,8 @@ export const INTERVENTION_CONTRACT_KEYS: ReadonlySet<string> = new Set([
+  */
+ const InterventionSpecScreen = z
+   .object(InterventionV3.shape)
++  // A valid shape is not consent. Only the dedicated server-bound approval writes a range.
++  .omit({ range: true })
+   .partial()
+   .extend({ cap: z.unknown().optional() })
+   .strict();
+@@ -414,6 +416,21 @@ const InterventionSpecScreen = z
+  */
+ type PayloadContext = 'outside' | 'factor_map' | 'spec';
+ 
++/** Generic writers never supply range consent, including when the referee is off or shadowing. */
++export function hasInterventionRangeWrite(operations: readonly { readonly value?: unknown }[]): boolean {
++  const contains = (value: unknown, path: readonly string[]): boolean => {
++    const i = path.indexOf('interventions');
++    if (i !== -1 && path[i + 2] === 'range') return true;
++    // A spec's other members (including arbitrary category labels) are data, not range writes.
++    if (i !== -1 && path.length > i + 2) return false;
++    if (Array.isArray(value)) return value.some(v => contains(v, path));
++    if (value === null || typeof value !== 'object') return false;
++    return Object.entries(value).some(([key, child]) =>
++      contains(child, [...path, ...key.toLowerCase().split(/[./]/).filter(Boolean)]));
++  };
++  return operations.some(op => contains(op.value, []));
++}
++
+ /**
+  * The key whose VALUE is the factor map — the one boundary where the screen
+  * stops treating keys as vocabulary. Named once so the screen above and the
+diff --git a/src/orchestrator-v5/normalise-option-interventions.ts b/src/orchestrator-v5/normalise-option-interventions.ts
+index cd68f3dd6..773f44c6d 100644
+--- a/src/orchestrator-v5/normalise-option-interventions.ts
++++ b/src/orchestrator-v5/normalise-option-interventions.ts
+@@ -108,6 +108,8 @@ interface RecoveredIntervention {
+   readonly value: number;
+   readonly unit?: string;
+   readonly raw_value?: number | string | boolean;
++  /** Transport verbatim, then validate at the existing persist range gate. */
++  readonly range?: unknown;
+ }
+ 
+ function isPlainObject(v: unknown): v is Dict {
+@@ -140,12 +142,13 @@ function hasInvalidInterventionsShape(node: Dict): boolean {
+ 
+ function carriedUnitRaw(value: number, src: unknown): RecoveredIntervention {
+   if (!isPlainObject(src)) return { value };
+-  const out: { value: number; unit?: string; raw_value?: number | string | boolean } = { value };
++  const out: { value: number; unit?: string; raw_value?: number | string | boolean; range?: unknown } = { value };
+   if (typeof src.unit === 'string') out.unit = src.unit;
+   const rawValue = src.raw_value;
+   if (typeof rawValue === 'number' || typeof rawValue === 'string' || typeof rawValue === 'boolean') {
+     out.raw_value = rawValue;
+   }
++  if (src.range !== undefined) out.range = src.range;
+   return out;
+ }
+ 
+@@ -193,6 +196,7 @@ function freshInterventionV3(fac: string, rec: RecoveredIntervention): Dict {
+   };
+   if (rec.unit !== undefined) iv.unit = rec.unit;
+   if (rec.raw_value !== undefined) iv.raw_value = rec.raw_value;
++  if (rec.range !== undefined) iv.range = rec.range;
+   return iv;
+ }
+ 
+diff --git a/src/orchestrator-v5/system-events/__tests__/option-intervention-edit.test.ts b/src/orchestrator-v5/system-events/__tests__/option-intervention-edit.test.ts
+index f3621cc34..a3978bc2f 100644
+--- a/src/orchestrator-v5/system-events/__tests__/option-intervention-edit.test.ts
++++ b/src/orchestrator-v5/system-events/__tests__/option-intervention-edit.test.ts
+@@ -254,3 +254,18 @@ describe('option-intervention candidate — target-only final persisted postimag
+       expect(optionInterventionPostimageIsScoped(before, result.graph, target)).toBe(true);
+     });
+ });
++
++
++describe('approved capless figures preserve their actual frame', () => {
++  it('rejects a raw-only partial frame when the factor has a proven normalization cap', () => {
++    const g = graph();
++    Object.assign(g.nodes.find(n => n.id === 'factor')!.observed_state!, { value: 0.5, raw_value: 20, cap: 40, unit: 'days' });
++    expect(prepare(g, { modelValue: 0.3, figure: { raw_value: 0.3, unit: 'days', likely_range: { low: 0.1, high: 0.5 } } }))
++      .toEqual({ kind: 'refused', reason: 'level_frame_mismatch' });
++  });
++  it.each([
++    { cap: 40 }, { raw_value: 10 }, { raw_value: 10, cap: 0 }, { raw_value: 10, cap: 40 },
++  ])('still refuses an inconsistent/partial normalization figure: %j', (figure) => {
++    expect(prepare(graph(), { modelValue: 0.3, figure })).toEqual({ kind: 'refused', reason: 'level_frame_mismatch' });
++  });
++});
+diff --git a/src/orchestrator-v5/system-events/dispatch.ts b/src/orchestrator-v5/system-events/dispatch.ts
+index b0c2c41a3..dd38184be 100644
+--- a/src/orchestrator-v5/system-events/dispatch.ts
++++ b/src/orchestrator-v5/system-events/dispatch.ts
+@@ -3244,8 +3244,8 @@ export type CommitOptionLevelsResult =
+ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> {
+   const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
+     ...(l.raw_value !== undefined || l.cap !== undefined || l.likely_range !== undefined
+-      ? { figure: { ...(l.raw_value !== undefined || l.cap !== undefined
+-        ? { raw_value: Number(l.raw_value), cap: Number(l.cap) } : {}), ...(l.unit !== undefined ? { unit: l.unit } : {}),
++      ? { figure: { ...(l.raw_value !== undefined ? { raw_value: Number(l.raw_value) } : {}),
++        ...(l.cap !== undefined ? { cap: Number(l.cap) } : {}), ...(l.unit !== undefined ? { unit: l.unit } : {}),
+         ...(l.likely_range !== undefined ? { likely_range: l.likely_range } : {}) } } : {}) }));
+   // Olumi's levels are stamped by the SAME server-side authority the single write uses — one adoption per level.
+   const adoptions = input.levels.filter(l => l.author === 'model_proposed').map(l => ({
+diff --git a/src/orchestrator-v5/system-events/option-intervention-edit.ts b/src/orchestrator-v5/system-events/option-intervention-edit.ts
+index beae12240..bf6410872 100644
+--- a/src/orchestrator-v5/system-events/option-intervention-edit.ts
++++ b/src/orchestrator-v5/system-events/option-intervention-edit.ts
+@@ -174,6 +174,9 @@ export function optionInterventionBatchPostimageIsScoped(
+     const entry = InterventionV3.safeParse(newNode.interventions?.[target.factorId]);
+     if (!entry.success || entry.data.value !== target.modelValue
+       || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId) return false;
++    const approved = target.figure?.likely_range;
++    if (approved !== undefined && !isDeepStrictEqual(entry.data.range,
++      { low: approved.low, high: approved.high, meaning: 'likely_range', source: 'user_specified' })) return false;
+     const restoredNode = restored.nodes.find(node => node.id === target.optionId)!;
+     if (oldNode.interventions === undefined) {
+       // A new container may hold only this batch's cells, never unrelated invented cells (checked once all are removed).
+@@ -303,8 +306,14 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
+       const t = linkOps[i]!.target;
+       if (operations[i]?.op !== 'add_edge' || operations[i]?.path !== `${t.optionId}::${t.factorId}`) return refuse('operation_invalid');
+     }
+-    const levelOperations = operations.slice(linkOps.length);
+-    const decision = evaluateEditGraphMutations({ mode: 'live', operations: levelOperations,
++    // Range is not a generic tunable field. Its authority is THIS dedicated approved target, constructed by
++    // prepareOptionInterventionEdit and checked in the postimage; referee the ordinary level fields only.
++    const refereeLevels = parseEditGraphResponse(JSON.stringify({ operations: levelOps.map(op => {
++      const value = { ...(op.value as Record<string, unknown>) };
++      delete value.range;
++      return { ...op, value };
++    }), removed_edges: [], warnings: [], coaching: null })).operations;
++    const decision = evaluateEditGraphMutations({ mode: 'live', operations: refereeLevels,
+       currentGraph: before, currentGraphHash: input.expectedGraphHash,
+       baseGraphHash: input.expectedGraphHash, freshness: input.freshness,
+       scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
+@@ -1020,8 +1029,9 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
+   if (figure !== undefined && (
+     ((figure.raw_value !== undefined || figure.cap !== undefined)
+       && (typeof figure.raw_value !== 'number' || !Number.isFinite(figure.raw_value)
+-        || typeof figure.cap !== 'number' || !Number.isFinite(figure.cap) || !(figure.cap > 0)
+-        || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9))
++        || (figure.cap === undefined ? figure.raw_value !== input.modelValue
++          : typeof figure.cap !== 'number' || !Number.isFinite(figure.cap) || !(figure.cap > 0)
++            || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9)))
+     || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === '')))) {
+     return refuse('level_frame_mismatch');
+   }
+@@ -1147,8 +1157,12 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
+   // ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (DL #75 5902916137 (3); P0 partner 5902892060; served W4 run2 on `f074916`):
+   // the card sends the level on the model scale and shows it on the factor's own range ("£57" = 0.285 of 200). Written
+   // bare, the £57 left the model and the reply said "an effect value of 0.285". That same reading is kept on the cell.
+-  const levelFigure = figure !== undefined && typeof figure.raw_value === 'number' && typeof figure.cap === 'number'
+-    ? { raw_value: figure.raw_value, cap: figure.cap, ...(figure.unit !== undefined ? { unit: figure.unit } : {}) }
++  if (figure?.raw_value !== undefined && figure.cap === undefined
++    && figureOnFactorRange(graph, factor, existing, input.modelValue) !== undefined) {
++    return refuse('level_frame_mismatch');
++  }
++  const levelFigure = figure !== undefined && typeof figure.raw_value === 'number'
++    ? { raw_value: figure.raw_value, ...(figure.cap !== undefined ? { cap: figure.cap } : {}), ...(figure.unit !== undefined ? { unit: figure.unit } : {}) }
+     : figureOnFactorRange(graph, factor, existing, input.modelValue);
+   // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell
+   // (`cap` only when it reproduces the level, which the check above has already required).
+@@ -1156,7 +1170,7 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
+   // theirs with the one meaning its wording licenses (R3 #75 5914230653).
+   const likely = figure?.likely_range;
+   const operation = levelFigure === undefined && likely === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
+-    ...(levelFigure !== undefined ? { raw_value: levelFigure.raw_value, cap: levelFigure.cap,
++    ...(levelFigure !== undefined ? { raw_value: levelFigure.raw_value, ...(levelFigure.cap !== undefined ? { cap: levelFigure.cap } : {}),
+       ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } : {}),
+     ...(likely !== undefined ? { range: { low: likely.low, high: likely.high, meaning: 'likely_range', source: 'user_specified' } } : {}) } };
+   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
+diff --git a/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts b/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
+index b2b87be49..78cd5857a 100644
+--- a/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
++++ b/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
+@@ -433,4 +433,21 @@ describe('a stated range stays with ITS quantity across a replacement figure', (
+     const fresh = { ...RANGE, low: 2, high: 30 };
+     expect(numericMapAfter({ unit: 'weeks', range: fresh }).range).toEqual(fresh);
+   });
++
++  it('native quantity unchanged by cap/value renormalization keeps its range', () => {
++    expect(numericMapAfter({ value: 0.125, cap: 80 }).range).toEqual(RANGE);
++  });
++  it('removing the only effective unit drops the inherited range', () => {
++    expect(numericMapAfter({ unit: undefined })).not.toHaveProperty('range');
++  });
++  it.each(['days', 'weeks'])('adding a cell unit compares the inherited factor unit: %s', (unit) => {
++    const before = withReplacement({});
++    const opt = optionOf(before, 'opt_l');
++    delete iv(opt, 'fac_dt').unit;
++    (before.nodes.find(n => n.id === 'fac_dt')!.observed_state as Dict).unit = 'days';
++    const after = structuredClone(before);
++    iv(optionOf(after, 'opt_l'), 'fac_dt').unit = unit;
++    const saved = clearInheritedInterventionSourceQuotes(before, after);
++    expect(iv(optionOf(saved, 'opt_l'), 'fac_dt').range).toEqual(unit === 'days' ? RANGE : undefined);
++  });
+ });
+diff --git a/src/orchestrator/tools/edit-graph.ts b/src/orchestrator/tools/edit-graph.ts
+index 7d3e41844..a348d22bb 100644
+--- a/src/orchestrator/tools/edit-graph.ts
++++ b/src/orchestrator/tools/edit-graph.ts
+@@ -88,7 +88,7 @@ import {
+ import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
+ import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
+ import { userTypedStoredFigure } from "../../orchestrator-v5/agent-lane/figure-scope.js";
+-import { stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
++import { hasInterventionRangeWrite, stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
+ import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
+ import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
+ import {
+@@ -98,7 +98,7 @@ import {
+ import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
+ import { shouldHandOffProposeToLlmLane, resolveClauseLabel } from "./propose-handoff.js";
+ import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
+-import { clearInheritedInterventionSourceQuotes, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
++import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
+ import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
+ import { buildPatchSummary } from "../patch-summary.js";
+ import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
+@@ -3031,6 +3031,10 @@ export async function handleEditGraph(
+ 
+     // Sanitise: remove legacy fields
+     let operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
++    if (hasInterventionRangeWrite(operations)) {
++      return buildRejectionResult('A likely range needs its dedicated range proposal and approval.',
++        operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
++    }
+ 
+     // ⭐ STRIP PIPELINE-OWNED KEYS FROM `add_node` VALUES, RATHER THAN LET THE
+     // REFEREE REFUSE THE WHOLE BATCH. Witnessed on a real user session: an
+@@ -3971,6 +3975,10 @@ export async function handleEditGraph(
+           diagnostics(),
+         );
+       }
++      if (hasNewInterventionRanges(context.graph, encoded.graph)) {
++        return buildRejectionResult('A new or changed likely range needs its dedicated range proposal and approval.',
++          operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
++      }
+       const truthfullyQuoted = clearInheritedInterventionSourceQuotes(context.graph, encoded.graph);
+       if (truthfullyQuoted !== appliedGraph) {
+         appliedGraph = truthfullyQuoted as GraphV3T;
+diff --git a/src/orchestrator/tools/encode-option-interventions.ts b/src/orchestrator/tools/encode-option-interventions.ts
+index 0cdb4f6a4..d3910d517 100644
+--- a/src/orchestrator/tools/encode-option-interventions.ts
++++ b/src/orchestrator/tools/encode-option-interventions.ts
+@@ -33,6 +33,8 @@ import { normaliseFactorValue } from '../../orchestrator-v5/tools/handlers/d1-sh
+ import { isDeepStrictEqual } from 'node:util';
+ import { OBSERVED_ROOT_SPELLINGS } from '../canonicalise-value-ops.js';
+ import { log } from '../../utils/telemetry.js';
++import { buildFactorScaleMap, resolveRawInterventionValue, type FactorScaleInfo } from '../../orchestrator-v5/tools/plot-intervention-scale.js';
++import { unitComparisonKey } from '../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+ 
+ type Dict = Record<string, unknown>;
+ /**
+@@ -416,7 +418,20 @@ const QUOTED_FIGURE_KEYS = ['value', 'raw_value', 'unit', 'cap', 'value_type', '
+  * evidence of preservation, which is why the controls assert the committed
+  * object directly.
+  */
+-function buildInterventionV3(fac: string, value: number, rec: RawIntervention, existing: unknown): Dict {
++function sameNativeQuantity(before: Dict, after: Dict, oldFrame?: FactorScaleInfo, newFrame?: FactorScaleInfo): boolean {
++  if (!isDeepStrictEqual(before.value_type, after.value_type) || !isDeepStrictEqual(before.encoding_map, after.encoding_map)) return false;
++  const oldPoint = resolveRawInterventionValue(before, oldFrame);
++  const newPoint = resolveRawInterventionValue(after, newFrame);
++  const unit = (cell: Dict, frame?: FactorScaleInfo) => unitComparisonKey(typeof cell.unit === 'string' && cell.unit.trim() !== '' ? cell.unit : frame?.unit);
++  if (unit(before, oldFrame) !== unit(after, newFrame)) return false;
++  if (oldPoint.rule === 'ambiguous_no_evidence' || newPoint.rule === 'ambiguous_no_evidence') {
++    return QUOTED_FIGURE_KEYS.every(key => isDeepStrictEqual(before[key], after[key]))
++      && isDeepStrictEqual(oldFrame, newFrame);
++  }
++  return oldPoint.value !== null && oldPoint.value === newPoint.value;
++}
++
++function buildInterventionV3(fac: string, value: number, rec: RawIntervention, existing: unknown, frame?: FactorScaleInfo): Dict {
+   const carried: Dict = {};
+   if (isPlainObject(existing)) {
+     for (const [key, entryValue] of Object.entries(existing)) {
+@@ -457,7 +472,7 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
+   // range is kept ONLY while the quantity is unchanged (Codex CR 5963331228 P1): a new figure, or the same digits in
+   // another unit (10 days → 10 weeks), is a different quantity, and containment cannot tell, so its range is dropped.
+   if (rec.range !== undefined) iv.range = rec.range;
+-  else if ('range' in iv && !(isPlainObject(existing) && QUOTED_FIGURE_KEYS.every((key) => isDeepStrictEqual(existing[key], iv[key])))) {
++  else if ('range' in iv && !(isPlainObject(existing) && sameNativeQuantity(existing, iv, frame, frame))) {
+     delete iv.range;
+   }
+   if (isPlainObject(existing) && typeof existing.source_quote === 'string'
+@@ -477,6 +492,8 @@ export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after
+   if (!isPlainObject(before) || !Array.isArray(before.nodes)
+     || !isPlainObject(after) || !Array.isArray(after.nodes)) return after;
+   const priorOptions = new Map<string, Dict>();
++  const oldFrames = buildFactorScaleMap(before.nodes);
++  const newFrames = buildFactorScaleMap(after.nodes);
+   for (const node of before.nodes) {
+     if (isPlainObject(node) && node.kind === 'option' && typeof node.id === 'string') priorOptions.set(node.id, node);
+   }
+@@ -492,12 +509,7 @@ export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after
+     for (const [factorId, cell] of Object.entries(node.interventions)) {
+       const oldCell = prior.interventions[factorId];
+       if (!isPlainObject(cell) || !isPlainObject(oldCell)) continue;
+-      const figureChanged = cell.value !== oldCell.value
+-        || (cell.raw_value !== undefined && oldCell.raw_value !== undefined && !isDeepStrictEqual(cell.raw_value, oldCell.raw_value))
+-        || (cell.unit !== undefined && oldCell.unit !== undefined && cell.unit !== oldCell.unit)
+-        || (cell.cap !== undefined && oldCell.cap !== undefined && cell.cap !== oldCell.cap)
+-        || (cell.value_type !== undefined && oldCell.value_type !== undefined && cell.value_type !== oldCell.value_type)
+-        || (cell.encoding_map !== undefined && oldCell.encoding_map !== undefined && !isDeepStrictEqual(cell.encoding_map, oldCell.encoding_map));
++      const figureChanged = !sameNativeQuantity(oldCell, cell, oldFrames.get(factorId), newFrames.get(factorId));
+       if (!figureChanged) continue;
+       const staleQuote = typeof cell.source_quote === 'string' && cell.source_quote === oldCell.source_quote;
+       const staleRange = cell.range !== undefined && oldCell.range !== undefined && isDeepStrictEqual(cell.range, oldCell.range);
+@@ -516,6 +528,24 @@ export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after
+   return updatedNodes === undefined ? after : { ...after, nodes: updatedNodes } as T;
+ }
+ 
++/** Generic edit ports cannot grant range consent, even when their whole operation is approved. */
++export function hasNewInterventionRanges(before: unknown, after: unknown): boolean {
++  if (!isPlainObject(after) || !Array.isArray(after.nodes)) return false;
++  const prior = new Map<string, Dict>();
++  if (isPlainObject(before) && Array.isArray(before.nodes)) {
++    for (const node of before.nodes) if (isPlainObject(node) && typeof node.id === 'string' && isPlainObject(node.interventions)) prior.set(node.id, node.interventions);
++  }
++  for (const node of after.nodes) {
++    if (!isPlainObject(node) || !isPlainObject(node.interventions)) continue;
++    for (const [factorId, cell] of Object.entries(node.interventions)) {
++      if (!isPlainObject(cell) || cell.range === undefined) continue;
++      const old = prior.get(String(node.id))?.[factorId];
++      if (!isPlainObject(old) || !isDeepStrictEqual(old.range, cell.range)) return true;
++    }
++  }
++  return false;
++}
++
+ /**
+  * Encode option interventions to the canonical top-level contract, or report
+  * which (touched) options cannot be safely encoded.
+@@ -547,6 +577,7 @@ export function encodeOptionInterventionsForEdit<T>(
+ 
+   try {
+     const nodes = (graph as Dict).nodes as unknown[];
++    const frames = buildFactorScaleMap(nodes);
+     const edges = Array.isArray((graph as Dict).edges) ? ((graph as Dict).edges as unknown[]) : [];
+ 
+     const factorById = new Map<string, Dict>();
+@@ -626,7 +657,7 @@ export function encodeOptionInterventionsForEdit<T>(
+           optionUnresolved = true;
+           break;
+         }
+-        bundle[fac] = buildInterventionV3(fac, value, rec, base[fac]);
++        bundle[fac] = buildInterventionV3(fac, value, rec, base[fac], frames.get(fac));
+       }
+ 
+       if (optionUnresolved) {
+diff --git a/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts b/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
+index 8e640e59b..946d7a031 100644
+--- a/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
++++ b/tests/integration/orchestrator/agent-level-keeps-the-users-likely-range.test.ts
+@@ -112,15 +112,20 @@ describe('the user\'s likely range for an option\'s level survives propose → a
+     rows.clear();
+   });
+ 
+-  async function proposeAndApprove(level: Record<string, unknown>, text = TEXT) {
++  async function proposeAndApprove(level: Record<string, unknown>, text = TEXT, compound = false) {
+     const read = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash() } });
+     const caps = createAgentCapabilities(read as never, new ProposalStore(), undefined, 'full', undefined, {
+       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
+     });
+     const ctx = { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: text };
+-    const proposed = await caps.proposeOptionInterventions(ctx, { interventions: [
+-      { option_label: LIFT, factor_label: 'Migration downtime', unit: 'days', basis: 'the user', user_stated: true, ...level },
+-    ] } as never);
++    const levels = [{ option_label: LIFT, factor_label: 'Migration downtime', unit: 'days', basis: 'the user', user_stated: true, ...level }];
++    const before = JSON.stringify(persisted);
++    const count = rows.size;
++    const proposed = compound
++      ? await caps.proposeStartingPoint(ctx, { assumptions: [{ factor_label: 'Training time', value: 8, unit: 'days', basis: 'planning assumption' }], option_levels: levels } as never)
++      : await caps.proposeOptionInterventions(ctx, { interventions: levels } as never);
++    expect(JSON.stringify(persisted)).toBe(before);
++    expect(rows.size).toBe(count);
+     if (proposed.ok !== true) return { proposed, out: undefined };
+     const out = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+     return { proposed, out };
+@@ -152,22 +157,43 @@ describe('the user\'s likely range for an option\'s level survives propose → a
+     expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
+   });
+ 
+-  it('capless opt_lift/fac_downtime preserves the range the user approved through the real writer', async () => {
++  it.each([[false, true], [false, false], [true, true], [true, false]])('capless opt_lift/fac_downtime retains raw/unit/range: compound=%s declaredUnit=%s', async (compound, declaredUnit) => {
+     const factor = (persisted as { nodes: { id: string; observed_state?: Record<string, unknown> }[] })
+       .nodes.find(n => n.id === 'fac_downtime')!;
+     delete factor.observed_state!.cap;
++    if (!declaredUnit) delete factor.observed_state!.unit;
+     const { proposed, out } = await proposeAndApprove({ value: 0.5, likely_low: 0.2, likely_high: 0.8, ...TYPED },
+-      'For Lift-and-shift, migration downtime is likely between 0.2 and 0.8 days, most likely 0.5 days.');
++      'For Lift-and-shift, migration downtime is likely between 0.2 and 0.8 days, most likely 0.5 days.', compound);
+     expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+     expect(out?.ok, JSON.stringify(out)).toBe(true);
+     expect(rows.size).toBe(1);
+-    expect(liftCell()).toMatchObject({ value: 0.5, source: 'user_specified',
++    expect(liftCell()).toMatchObject({ value: 0.5, raw_value: 0.5, unit: 'days', source: 'user_specified',
+       range: { low: 0.2, high: 0.8, meaning: 'likely_range', source: 'user_specified' } });
++    expect(liftCell()).not.toHaveProperty('cap');
++    const cold = GraphV3.parse(JSON.parse(JSON.stringify(persisted)));
++    expect(cold.nodes.find(n => n.id === 'opt_lift')?.interventions?.fac_downtime).toEqual(liftCell());
+     const other = (persisted as { nodes: { id: string; interventions?: Record<string, unknown> }[] })
+       .nodes.find(n => n.id === 'opt_replatform')!;
+     expect(other.interventions?.fac_downtime).toBeUndefined();
+   });
+ 
++  it.each(['10', 'ten'])('equivalent typed likely range is admitted and explicitly approved with most likely %s days', async (point) => {
++    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED },
++      `For Lift-and-shift, migration downtime is likely between five and twenty days, most likely ${point} days.`);
++    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
++    expect(out?.ok, JSON.stringify(out)).toBe(true);
++    expect(liftCell()).toMatchObject({ raw_value: 10, unit: 'days', range: { low: 5, high: 20, source: 'user_specified' } });
++  });
++
++  it('the dedicated approval preserves an identical stated range on a changed native quantity', async () => {
++    await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED });
++    const { proposed, out } = await proposeAndApprove({ value: 12, likely_low: 5, likely_high: 20, ...TYPED },
++      'For Lift-and-shift, migration downtime is likely between 5 and 20 days, most likely 12 days.');
++    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
++    expect(out?.ok, JSON.stringify(out)).toBe(true);
++    expect(liftCell()).toMatchObject({ value: 0.3, raw_value: 12, range: { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' } });
++  });
++
+   // Codex CR 5963331228 P1: the range is decided from TYPED arguments only (its meaning, that the user gave it, beside a
+   // level they gave, the level inside it), never by parsing the user's words; the user then approves range AND reading.
+   it.each([
+diff --git a/tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts b/tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts
+index d89b43cc2..62ab634a5 100644
+--- a/tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts
++++ b/tests/integration/orchestrator/edit-graph-value-edit-persist-withdraws-extraction-type.test.ts
+@@ -74,6 +74,8 @@ import { dispatchEditGraph } from '../../../src/orchestrator-v5/handlers/edit-gr
+ import type { GraphStateIngress } from '../../../src/orchestrator-v5/boundary/request-extensions.js';
+ import { makeMessagePayload } from '../../../src/orchestrator-v5/__tests__/fixtures.js';
+ 
++import { config } from '../../../src/config/index.js';
++
+ const SCENARIO_ID = '17401740-1740-4740-8740-174017401740';
+ const TARGET = 'fac_monthly_cashflow';
+ const SIBLING = 'fac_churn';
+@@ -151,6 +153,25 @@ beforeEach(() => {
+ });
+ 
+ describe('#1740 R5 — the graph handed to store.append, after the edit-path persistence merge', () => {
++  it.each(['off', 'shadow', 'live'].flatMap(mode => ['whole', 'nested', 'leaf'].map(variant => ({ mode, variant }))))('generic edit_graph cannot smuggle a user range: $mode/$variant', async ({ mode, variant }) => {
++    const oldMode = config.features.graphManagementMode;
++    config.features.graphManagementMode = mode as typeof oldMode;
++    try {
++    const graph = buildPersistedGraph();
++    const opt = nodeOf(graph, 'opt_buy');
++    opt.interventions = { [TARGET]: { value: 0.2, source: 'cee_hypothesis', target_match: { node_id: TARGET, match_type: 'exact_id', confidence: 'high' } } };
++    persistedRef.current = graph;
++    const range = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
++    const cell = { value: 0.4, range };
++    const op = variant === 'whole' ? { op: 'update_node', path: 'opt_buy', value: { interventions: { [TARGET]: cell } } }
++      : { op: 'update_node', path: `/nodes/opt_buy/data/interventions/${TARGET}${variant === 'leaf' ? '/range' : ''}`, value: variant === 'leaf' ? range : cell };
++    llmChatMock.mockResolvedValue(editResponse([op]));
++    await dispatchEditGraph({ payload: makeMessagePayload({ scenario_id: SCENARIO_ID, turn_id: '17401740-aaaa-4aaa-8aaa-000000000001', stage: 'analyse', message: 'Set this option level to 0.4' }),
++      requestId: 'req-range-smuggle', request: {} as FastifyRequest, graphState: graph as unknown as GraphStateIngress, analysisState: null });
++    expect(appendMock.mock.calls.map(c => (c[0] as { graph?: unknown }).graph).filter(g => g !== undefined)).toHaveLength(0);
++    expect(persistedRef.current).toEqual(graph);
++    } finally { config.features.graphManagementMode = oldMode; }
++  });
+   it.each([
+     ['single value leaf', [{ op: 'update_node', path: `/nodes/${TARGET}/data/value`, value: 0.42 }]],
+     [
+diff --git a/tests/unit/orchestrator-v5/normalise-option-interventions.test.ts b/tests/unit/orchestrator-v5/normalise-option-interventions.test.ts
+index ce98ebee6..53935481f 100644
+--- a/tests/unit/orchestrator-v5/normalise-option-interventions.test.ts
++++ b/tests/unit/orchestrator-v5/normalise-option-interventions.test.ts
+@@ -14,6 +14,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
+ import { normaliseOptionInterventionContract } from '../../../src/orchestrator-v5/normalise-option-interventions.js';
+ import { GraphV3 } from '../../../src/schemas/cee-v3.js';
+ import { log } from '../../../src/utils/telemetry.js';
++import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
+ 
+ type AnyNode = Record<string, unknown> & { id: string };
+ type AnyGraph = { nodes: AnyNode[]; edges: Array<Record<string, unknown>>; [k: string]: unknown };
+@@ -62,6 +63,19 @@ afterEach(() => {
+ });
+ 
+ describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
++  it.each(['nested', 'slash'].flatMap(carrier => [false, true].flatMap(overlay => ['valid', 'malformed', 'absent'].map(range => ({ carrier, overlay, range })))))(
++    'legacy opt_range/fac_days cold read: $carrier overlay=$overlay range=$range', ({ carrier, overlay, range }) => {
++    const stated = { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' };
++    const entry = { value: 0.25, raw_value: 10, unit: 'days', ...(range === 'absent' ? {} : { range: range === 'valid' ? stated : { ...stated, low: 30 } }) };
++    const graph = { nodes: [{ id: 'fac_days', kind: 'factor', label: 'Days' }, { id: 'opt_range', kind: 'option', label: 'Range',
++      ...(overlay ? { interventions: { fac_days: { value: 0.1, source: 'cee_hypothesis', target_match: { node_id: 'fac_days', match_type: 'exact_id', confidence: 'high' } } } } : {}),
++      ...(carrier === 'nested' ? { data: { interventions: { fac_days: entry } } } : { 'data/interventions/fac_days': entry }) }], edges: [] };
++    const stored = projectGraphForPersistence(graph);
++    const cold = GraphV3.parse(JSON.parse(JSON.stringify(stored)));
++    const cell = cold.nodes.find(n => n.id === 'opt_range')?.interventions?.fac_days;
++    expect(cell).toMatchObject({ value: 0.25, raw_value: 10, unit: 'days', target_match: { node_id: 'fac_days' } });
++    expect(cell?.range).toEqual(range === 'valid' ? stated : undefined);
++  });
+   it('promotes object-form data.interventions to the canonical top-level InterventionV3 contract', () => {
+     const info = vi.spyOn(log, 'info').mockImplementation(() => log as never);
+     const g: AnyGraph = { nodes: [editAddedOption()], edges: [] };

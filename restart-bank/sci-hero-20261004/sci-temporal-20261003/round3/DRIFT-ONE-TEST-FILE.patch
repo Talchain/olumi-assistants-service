@@ -1,0 +1,13 @@
+diff --git a/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts b/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
+index 78cd5857a..bb0661529 100644
+--- a/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
++++ b/src/orchestrator/tools/__tests__/encode-option-interventions.test.ts
+@@ -378,7 +378,7 @@ describe('a stated range stays with ITS quantity across a replacement figure', (
+   const RANGE = { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' };
+   // The factor declares no unit of its own, so the encoder accepts the replacement's unit as written.
+   const factor = () => ({ id: 'fac_dt', kind: 'factor', label: 'Migration downtime', observed_state: { value: 0, cap: 40 } });
+-  const withReplacement = (replacement: Dict) => ({
++  const withReplacement = (replacement: Dict): { nodes: Dict[]; edges: Dict[] } => ({
+     nodes: [goal(), factor(), {
+       id: 'opt_l', kind: 'option', label: 'Lift',
+       interventions: { fac_dt: { value: 0.25, raw_value: 10, unit: 'days', source: 'user_specified', target_match: { node_id: 'fac_dt', match_type: 'exact_id', confidence: 'high' }, range: RANGE } },
