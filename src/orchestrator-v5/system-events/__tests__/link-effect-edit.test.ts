@@ -10,7 +10,7 @@ import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, linkEffectTargetOf, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
 
 type Rec = Record<string, any>;
 
@@ -207,6 +207,38 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
     expect(e.provenance.natural_effect.amount_unit).toBe('percentage points');
   });
 
+  it('a % LEVEL SOURCE answered in points is sized, and says the same strength as "%" (served 074de08, #2283 witness)', () => {
+    // The served link: "A 1 percentage-point increase in Monthly churn rate reduces Pro paying subscribers by about 30".
+    const g: Rec = {
+      goal_node_id: 'mrr',
+      nodes: [
+        { id: 'mrr', kind: 'goal', label: 'MRR' },
+        { id: 'churn', kind: 'factor', label: 'Monthly churn rate', observed_state: { value: 0.03, raw_value: 3, unit: '%', source: 'user_override' } },
+        { id: 'subs', kind: 'factor', label: 'Pro paying subscribers', observed_state: { value: 0.09, raw_value: 900, cap: 10000, unit: 'subscribers', source: 'cee_inference' } },
+      ],
+      edges: [{ from: 'churn', to: 'subs', strength: { mean: -0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'negative',
+        provenance: { source: 'cee_hypothesis', magnitude: 'olumi_placeholder' } }],
+    };
+    const write = (unit: string) => applyLinkEffectEdit(approved({ persistedGraph: g, from: 'churn', to: 'subs',
+      quote: 'A 1 percentage-point increase in Monthly churn rate reduces Pro paying subscribers by about 30 subscribers.',
+      effect: { amount: -30, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: unit },
+      expected: revisionOf(g, 'churn', 'subs') }));
+    const points = write('percentage points');
+    expect(points.kind, JSON.stringify(points)).toBe('mutated');
+    const percent = write('%');
+    expect(percent.kind, JSON.stringify(percent)).toBe('mutated');
+    if (points.kind !== 'mutated' || percent.kind !== 'mutated') return;
+    const ep = (points.mutatedGraph as Rec).edges[0];
+    // One point is one raw unit of a % level: the two words size the link identically.
+    expect(ep.strength.mean).toBe((percent.mutatedGraph as Rec).edges[0].strength.mean);
+    expect(ep.provenance.magnitude).toBe('user_stated');
+    // The stored natural effect keeps the sizer's own unit for the source; the user's words live in the quote.
+    expect(ep.provenance.natural_effect).toMatchObject({ amount: -30, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '%' });
+    // A unit that is not the source's own, nor its change words, is still refused.
+    const wrong = write('subscribers');
+    expect(wrong).toEqual({ kind: 'refused', reason: 'unit_mismatch' });
+  });
+
   it('unit_mismatch: the stated units must be the two ends\' own (folded), never converted by guess', () => {
     refused(params({ effect: { ...STATED, amount_unit: 'customers' } }), 'unit_mismatch');
     refused(params({ effect: { ...STATED, per_source_change_unit: '$' } }), 'unit_mismatch');
@@ -266,5 +298,60 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
     const before = JSON.stringify(base);
     applyLinkEffectEdit(params({}, base));
     expect(JSON.stringify(base)).toBe(before);
+  });
+});
+
+/**
+ * ⛔ EXACTLY ONE LINK AND ONE NODE PER END (DL #2561 round 2, P1 "nonunique persisted targets"; the edge-strength writer's
+ * own `target_ambiguous`). A parallel copy of the pair, or two nodes under one end's id, is never resolved by array order.
+ */
+describe('link effect writer — a non-unique target writes nothing, in either array order', () => {
+  const withParallel = (copyFirst: boolean): Rec => {
+    const g = storedGraph();
+    const copy = { ...structuredClone(edgeOf(g)), provenance: { source: 'cee_hypothesis', reasoning: 'a parallel copy' } };
+    g.edges = copyFirst ? [copy, ...g.edges] : [...g.edges, copy];
+    return g;
+  };
+  const withDuplicateNode = (id: 'price' | 'subs', copyFirst: boolean): Rec => {
+    const g = storedGraph();
+    const copy = { ...structuredClone(g.nodes.find((n: Rec) => n.id === id)), label: 'Another node, same id' };
+    g.nodes = copyFirst ? [copy, ...g.nodes] : [...g.nodes, copy];
+    return g;
+  };
+
+  it('control: the one stored pair is written (the rows below differ only by the duplicate)', () => {
+    expect(linkEffectTargetOf(storedGraph(), 'price', 'subs').kind).toBe('one');
+    expect(applyLinkEffectEdit(params()).kind).toBe('mutated');
+  });
+
+  it.each([false, true])('RED: a parallel copy of the pair → no token, target_ambiguous, nothing written (copy first=%s)', (copyFirst) => {
+    const g = withParallel(copyFirst);
+    const pristine = structuredClone(g);
+    expect(linkEffectEdgeToken(g, 'price', 'subs')).toBeNull();
+    expect(linkEffectTargetOf(g, 'price', 'subs')).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
+    // Prepared on the one link BEFORE the copy appeared: the write still refuses, by the pair, before any revision check.
+    const prepared = revisionOf(storedGraph());
+    const r = applyLinkEffectEdit(params({ expected: prepared }, g));
+    expect(r).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
+    expect(g).toEqual(pristine);
+  });
+
+  it.each([
+    ['price', false], ['price', true], ['subs', false], ['subs', true],
+  ] as const)('RED: two nodes under one end\'s id (%s, copy first=%s) → target_ambiguous, nothing written', (id, copyFirst) => {
+    const g = withDuplicateNode(id, copyFirst);
+    const pristine = structuredClone(g);
+    expect(linkEffectTargetOf(g, 'price', 'subs')).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
+    // No token either (Codex round 3, P2): nothing can be prepared against an end that names two nodes.
+    expect(linkEffectEdgeToken(g, 'price', 'subs')).toBeNull();
+    const r = applyLinkEffectEdit(params({ expected: revisionOf(storedGraph()) }, g));
+    expect(r).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
+    expect(g).toEqual(pristine);
+  });
+
+  it('a pair that is not stored stays edge_not_found (no token)', () => {
+    const g = storedGraph();
+    expect(linkEffectTargetOf(g, 'subs', 'price')).toEqual({ kind: 'refused', reason: 'edge_not_found' });
+    expect(linkEffectEdgeToken(g, 'subs', 'price')).toBeNull();
   });
 });
