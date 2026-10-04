@@ -788,8 +788,8 @@ const PREREGISTERED_V22_SHAPE_SHA256 =
   "8fc0646a79586581a0c8faeb7ad54f627a76bfd63807db784ba511fc33c96d7d";
 const PREREGISTERED_V22_SHAPE_BYTES = 15992;
 const PREREGISTERED_V22_CONNECT_SHA256 =
-  "656f282ca14dfa882b5f46958895b8ef1bfd3874f42fc9c6fdf20e90eef57ef3";
-const PREREGISTERED_V22_CONNECT_BYTES = 5843;
+  "1e2ba3c6992c9525f268d8621b2c37f9f9aac687f1edb0e3867360fba4e8274e";
+const PREREGISTERED_V22_CONNECT_BYTES = 5115;
 /**
  * v23 stated-scale reconciliation, 2026-09-21. UNMEASURED on model output.
  *
@@ -821,11 +821,48 @@ const PREREGISTERED_V22_CONNECT_BYTES = 5843;
  * not a rate. v22 above remains immutable.
  */
 const PREREGISTERED_V23_INSTRUCTION_SHA256 =
-  "0c2086442386a319852da8c3e88d1f012fc6676f79b9209d3a3a285bb404c362";
-const PREREGISTERED_V23_INSTRUCTION_BYTES = 23257;
+  "f7f58464da94413fedd8bd81ab91695220e2138c26b98ef2f04a316cb93ad786";
+const PREREGISTERED_V23_INSTRUCTION_BYTES = 22312;
 const PREREGISTERED_V23_SHAPE_SHA256 =
+  "2a0915802c27c6051ae80e3ef041812bf370a082a950e697cef84f6d1a1d02a1";
+const PREREGISTERED_V23_SHAPE_BYTES = 17197;
+/**
+ * ⛔ CONTAMINATED — the bytes #2558 (`24e9b102`, 4 Oct) served. That change added a
+ * baseline sentence (shape half) and a natural-effect paragraph (connect half)
+ * whose worked examples were the SEALED evaluation brief's own figures ("each 1%
+ * price rise adds £1,200 a month to MRR", "£6 a month", "£12,000 from £120,000
+ * and 10%"; `stated-natural-effects.test.ts`). It also RE-POINTED the v22 connect
+ * and v23 literals in place, so these bytes read as "v23". They are restored above
+ * and these bytes are registered here as their own artefact. ANY measurement of the
+ * sealed brief drafted under them on the records route is contaminated: the model
+ * was shown the answers. Kept and asserted DISTINCT so such a measurement can never
+ * read as one about v24.
+ */
+const CONTAMINATED_2558_INSTRUCTION_SHA256 =
+  "0c2086442386a319852da8c3e88d1f012fc6676f79b9209d3a3a285bb404c362";
+const CONTAMINATED_2558_INSTRUCTION_BYTES = 23257;
+const CONTAMINATED_2558_CONNECT_SHA256 =
+  "656f282ca14dfa882b5f46958895b8ef1bfd3874f42fc9c6fdf20e90eef57ef3";
+const CONTAMINATED_2558_CONNECT_BYTES = 5843;
+/**
+ * v24, 4 Oct 2026. UNMEASURED on model output. #2558's bytes with the sealed
+ * brief's figures in the natural-effect paragraph replaced by generic examples
+ * that belong to no evaluation brief ("each extra delivery van cuts the average
+ * delivery time by 12 minutes", "each extra seat costs $4 a week", "$8,000 from
+ * $80,000 and 10%").
+ * ⭐ THE SHAPE HALF IS BYTE-IDENTICAL to #2558's, so v24 differs from the
+ * contaminated bytes in the connect half alone. Guarded repo-wide by
+ * `tests/meta/eval-briefs-absent-from-prompts.test.ts`.
+ */
+const PREREGISTERED_V24_INSTRUCTION_SHA256 =
+  "c14eac0ee9d0753dd3211b70aa56e998d9ead39f717c72f77278b02f4e8b6192";
+const PREREGISTERED_V24_INSTRUCTION_BYTES = 23273;
+const PREREGISTERED_V24_SHAPE_SHA256 =
   "75148b86dbd510a6e2df99bdc63bb0a69f327b3715a2ceb7872f3b66283148a1";
-const PREREGISTERED_V23_SHAPE_BYTES = 17414;
+const PREREGISTERED_V24_SHAPE_BYTES = 17414;
+const PREREGISTERED_V24_CONNECT_SHA256 =
+  "e783f7080d2575f42acc704f255877a3a55eb815d077e5c70cedf7d5cba987f3";
+const PREREGISTERED_V24_CONNECT_BYTES = 5859;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
@@ -899,11 +936,39 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the registered artefact", () => {
-  it("hashes to the unmeasured v23 source registration at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V23_INSTRUCTION_SHA256);
+  it("hashes to the unmeasured v24 source registration at the pinned byte length, halves pinned apart", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V24_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V23_INSTRUCTION_BYTES,
+      PREREGISTERED_V24_INSTRUCTION_BYTES,
     );
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      PREREGISTERED_V24_SHAPE_SHA256,
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V24_SHAPE_BYTES);
+    expect(createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex")).toBe(
+      PREREGISTERED_V24_CONNECT_SHA256,
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V24_CONNECT_BYTES);
+  });
+
+  it("keeps the contaminated #2558 bytes identifiable: v24 differs in the connect half alone", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(CONTAMINATED_2558_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(CONTAMINATED_2558_INSTRUCTION_BYTES);
+    expect(createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      CONTAMINATED_2558_CONNECT_SHA256,
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).not.toBe(CONTAMINATED_2558_CONNECT_BYTES);
+    // The sealed brief's figures are gone from the bytes a model reads (the repo-wide guard is in tests/meta).
+    for (const sealedFigure of ["£1,200", "£120,000", "£6 a month"]) expect(DRAFT_RECORDS_INSTRUCTION).not.toContain(sealedFigure);
+  });
+
+  it("keeps v23 (21 Sep) identifiable: its literal is restored after #2558 re-pointed it in place", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(PREREGISTERED_V23_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V23_INSTRUCTION_BYTES);
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      PREREGISTERED_V23_SHAPE_SHA256,
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V23_SHAPE_BYTES);
   });
 
   it("keeps v22 identifiable separately from the stated-scale reconciliation", () => {
@@ -921,11 +986,13 @@ describe("the draft records instruction is the registered artefact", () => {
     expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(
       PREREGISTERED_V22_SHAPE_BYTES,
     );
-    // ⭐ THE CONNECT HALF IS UNCHANGED, and that is the point of pinning the
-    // halves apart: v23 is attributable to the shape half alone.
+    // v23 left the connect half byte-identical to v22 (that is what made v23
+    // attributable to the shape half alone). #2558 then changed it (the
+    // natural-effect paragraph) and v24 keeps that paragraph with generic
+    // examples, so the CURRENT connect half is no longer v22's.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe(PREREGISTERED_V22_CONNECT_SHA256);
+    ).not.toBe(PREREGISTERED_V22_CONNECT_SHA256);
   });
 
   it("keeps v21 identifiable separately from the authored-meaning correction", () => {
@@ -1183,18 +1250,20 @@ describe("the draft records instruction is the registered artefact", () => {
     // so v19 is shape-half in its entirety and the connect half is byte-identical
     // to v18 (asserted in the next test). The edit is legible as "the model must
     // say which convention its number is in" without reading a diff.
+    // ⚠⚠ #2558 (4 Oct) changed this half (the explicit-baseline sentence) and
+    // re-pointed the v23 literal in place; v23 is restored and the current
+    // half is v24's, byte-identical to #2558's (v24 moves the connect half only).
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
-      // v22 changes both halves; model generation remains unmeasured.
-      PREREGISTERED_V23_SHAPE_SHA256,
+      PREREGISTERED_V24_SHAPE_SHA256,
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V23_SHAPE_BYTES);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V24_SHAPE_BYTES);
     expect(
       Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8") +
         1 +
         Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8") -
         1,
       "the three pins no longer add up — one of them was updated without the others",
-    ).toBe(PREREGISTERED_V23_INSTRUCTION_BYTES);
+    ).toBe(PREREGISTERED_V24_INSTRUCTION_BYTES);
     // WITHDRAWN — v20.0's shape half, the value this pin USED to name, kept
     // beside the live one exactly as every entry below it is. Asserted DISTINCT
     // for a DIFFERENT reason from those, and the difference is worth stating:
@@ -1312,10 +1381,17 @@ describe("the draft records instruction is the registered artefact", () => {
     // for: this edit is legible as "the option-effect-value section changed"
     // without reading the diff. See the v10 block above for why the sentence it
     // replaced was false at `f18d941b`.
+    // ⚠⚠ #2558 changed this half (the natural-effect paragraph, with the sealed
+    // brief's figures as its examples) and re-pointed the v22 literal in place;
+    // v22 is restored, and v24 is that paragraph with generic examples.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe(PREREGISTERED_V22_CONNECT_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V22_CONNECT_BYTES);
+    ).toBe(PREREGISTERED_V24_CONNECT_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V24_CONNECT_BYTES);
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).not.toBe(PREREGISTERED_V22_CONNECT_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V22_CONNECT_BYTES);
     // v18-v21's connect half remains separately identifiable. v22 adds the
     // ordinal-evidence guard without changing the option or connectivity rules.
     expect(
