@@ -355,6 +355,11 @@ function splitFirstSentence(text: string): { headline: string; remainder: string
 }
 
 const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
+/** The text of one synthesiser bullet line (`- point`), or null when the line is not a bullet. Same rule as synthesis. */
+export function synthBulletLineText(line: string): string | null {
+  const m = SYNTH_BULLET_LINE.exec(line);
+  return m === null ? null : m[1];
+}
 
 /**
  * A bullet belongs to the SECTION HEADING immediately above it, and hoisting

@@ -157,7 +157,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { ANSWER_SHAPE_MAX_BULLETS, AnswerShapeSchema, deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure } from '../orchestrator-v5/routing/answer-shape.js';
+import { ANSWER_SHAPE_MAX_BULLETS, AnswerShapeSchema, deriveAnswerTextFromShape, synthBulletLineText, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /**
@@ -810,8 +810,11 @@ export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; bl
   // The caveat must not manufacture eligibility: remove exact copies before synthesis and the floor.
   // Normalise spacing while retaining the line breaks that identify narrator bullets.
   const narratorWords = turn.narratorWords ?? text;
-  const wordsWithoutCaveat = turn.faceCaveat === undefined ? narratorWords
-    : narratorWords.split(turn.faceCaveat).join(' ').replace(/[^\S\n]+/g, ' ').trim();
+  // A narrator bullet that IS the caveat leaves with its marker (the synthesiser's own bullet rule), never as an empty "- ".
+  const caveat = turn.faceCaveat;
+  const wordsWithoutCaveat = caveat === undefined ? narratorWords
+    : narratorWords.split('\n').filter((line) => synthBulletLineText(line)?.trim() !== caveat)
+      .map((line) => line.split(caveat).join(' ').replace(/[^\S\n]+/g, ' ').trimEnd()).join('\n').trim();
   let shape = synthesiseAnswerShapeFromText(wordsWithoutCaveat);
   if (shape === null) return body;
   const derived = deriveAnswerTextFromShape(shape);
