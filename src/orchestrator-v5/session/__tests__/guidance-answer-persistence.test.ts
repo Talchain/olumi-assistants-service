@@ -65,7 +65,8 @@ describe('content-free guidance on the existing answer', () => {
 
   it('rejects attaching metadata to graph or internal claim writes before any RPC', async () => {
     const { fresh, rpc } = setup();
-    for (const change of [{ graph: {} }, { turn_id: 'answer:claim' }, { request_hash: 'not-agent' }, { handler_id: 'run_analysis' }]) {
+    const changes: Partial<SessionTurnWrite>[] = [{ graph: {} }, { turn_id: 'answer:claim' }, { request_hash: 'not-agent' }, { handler_id: 'run_analysis' }];
+    for (const change of changes) {
       await expect(fresh().append({ ...write(), ...change })).rejects.toThrow(/final Agent answer/);
     }
     expect(rpc).not.toHaveBeenCalled();

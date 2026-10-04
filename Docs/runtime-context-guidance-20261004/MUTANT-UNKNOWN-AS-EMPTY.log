@@ -1,0 +1,58 @@
+ WARN  Issue while reading "/Users/paulslee/.codex/workspaces/runtime-context-restart-20261004/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+ WARN  Issue while reading "/Users/paulslee/.codex/workspaces/runtime-context-restart-20261004/.npmrc". Failed to replace env in config: ${NPM_PACKAGES_TOKEN}
+
+ RUN  v4.1.10 /Users/paulslee/.codex/workspaces/runtime-context-restart-20261004
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts (6 tests | 1 failed) 20ms
+     × does not treat an unreadable history as an empty one 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts > Context guidance history consumer > does not treat an unreadable history as an empty one
+AssertionError: expected { slot1: { …(8) } } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "slot1": {
+    "copy": {
+      "question": "How much does sprint capacity for AI reporting really change AI reporting module availability? The comparison turns on it.",
+      "title": "The comparison rests on a link nobody has sized yet.",
+      "why": "Until it is sized, Olumi can't compare the options on your goal.",
+    },
+    "item": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+    "item_ref": {
+      "from_id": "sprint_capacity_for_ai_reporting",
+      "kind": "link",
+      "to_id": "ai_reporting_module_availability",
+    },
+    "policy_id": "RC-STRENGTHEN-ITEM",
+    "primary_action": {
+      "action_kind": "edit_inline",
+      "label": "Give your estimate",
+      "target": "sprint_capacity_for_ai_reporting->ai_reporting_module_availability",
+    },
+    "priority": "P1",
+    "state_key_hash": "d4e5d6b64180",
+    "variant": "S1",
+  },
+}
+
+ ❯ src/orchestrator-v5/agent-lane/__tests__/guidance-history-consumer.test.ts:44:48
+     42|
+     43|   it('does not treat an unreadable history as an empty one', () => {
+     44|     expect(turnGuidanceFor(withHistory(null))).toBeUndefined();
+       |                                                ^
+     45|   });
+     46| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  15:43:33
+   Duration  1.71s (transform 1.09s, setup 120ms, import 1.46s, tests 20ms, environment 0ms)
+

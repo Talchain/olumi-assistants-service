@@ -1,0 +1,19 @@
+# Context guidance history — 4 October 2026
+
+Lease: DL decision [5980885342](https://github.com/Talchain/olumi-programme-docs/issues/87#issuecomment-5980885342). Guidance first; Run permission evidence/schema0.77 follows as a separate change. DL owns schema publication, database application, merge sequencing and serving/witness checks.
+
+Source base: CEE staging `5a60b234126ff54052abcc21473dae95d5b3787d`. Branch `runtime/context-run-permissions-guidance-20261004`. One optional content-free `agent_guidance` JSON field on the existing final answer row; one service-role-only invoker wrapper delegates to the existing v2 append. It serialises the exact-id check with v2 callers, preserves first-answer-wins and returns the atomic replay/conflict receipt. No graph, fence, version, pre-dispatch coaching or licence authority changes.
+
+The ordinary route reads up to20 recent metadata-bearing answers without using the conversation cache. Invalid/read-failed/absent capability is unknown and suppresses guidance, not an empty history. The existing selector still owns cooldown: offered repeats; pressed/dismissed/completed suppress only the same state. Metadata carries only policy keys, item digests, status and state hashes. The actual final surviving row is recorded after egress; unnamed turns carrying metadata now save an answer too.
+
+Producer coverage: actual handled Widen, pre-mortem, What-changes presses and the successful S1 card's exact target can record a press of a prior offer. There is no inferred completion, prose-based intent or new dismissal endpoint. Independent inline editors' interactions are not manufactured as guidance events. A replay carries no live guidance row, as before; the UI transcript owns its displayed row.
+
+Validation:175 focused tests pass across real HTTP route, store dispatch/uncached-reader, old append/replay/history controls; dropped-answer-producer and unknown-as-empty mutants are killed. Full typecheck ratchet100files/290errors vs frozen103/291, no baseline edits. Required CI is the heavy gate under Paul's speed-mode ruling. Logs accompany the PR.
+
+**Before serving:** DL applies `supabase/migrations/20261004142707_agent_guidance_answer_history.sql`, runs `VERIFY-GUIDANCE.sql` against the shared database, checks advisories as applicable, and retains the result. That script rolls back its test answers. New RPC/column absence is a visible persistence/read failure, never lossy legacy fallback. Local store/JSON/HTTP tests are not proof of live database or browser persistence. One independent HIGH review and current Required CI are required. Release owner then retains actual same-case cold-reader evidence; no additional paid root journey.
+
+Adjacent reported chat/proposal reload failure: read-only shared DB evidence on scenario `a4dc8a3d-3e42-42aa-9505-1fdf44ce2587` finds24Agent answer rows, all24 with both texts and6 with pending actions. UI useConversation blob `44b7a289f2a68dd67c42c1ee2e525bb5f88690e9` matches the reported journey head1fa06dca and current884f7f3a. Its cold-server restore takes only an empty panel with NO local transcript and reconstructs text only, no cards/chips. Thus content-free guidance JSON cannot close full chat/card restoration. Exact UI loadTranscript/server-turn offering/held-proposal reconstruction is the next consumer boundary for the existing owner; no second UI writer was started.
+
+Next slice: optional typed Run evidence in schemas0.77, CEE producer/vendor/consumer; keep `boundRunLeaderLicence` sole derivation and old Runs' bounded fallback. DL reviews/publishes schema, then CEE. Coordinate run-analysis/route hunks with the newly active DL goal-unit sizing writer before editing those hunks.
+
+No merge/deploy/provider call by root. No running job after publication. Original overnight automation remains paused; do not rearm.

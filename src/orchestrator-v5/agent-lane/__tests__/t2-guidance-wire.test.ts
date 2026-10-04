@@ -242,4 +242,24 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     expect(b.assistant_text.trim()).not.toBe('');
     expect(b.guidance).toBeUndefined();
   });
+  it('a new route instance consumes the same persisted settled entry, without reconstructing conversation history', async () => {
+    const first = await turn({ message: 'Where does this leave me?' });
+    const key = entryKey('RC-STRENGTHEN-ITEM', `${AI.from}->${AI.to}`);
+    // A recorded event fixture; this verifies the real HTTP consumer, not a live DB/browser persistence claim.
+    const saved = [...rows.entries()].find(([k]) => k.startsWith(`${SCENARIO}:`))![1];
+    saved.agent_guidance = { version: 1, entries: { [key]: { status: 'dismissed',
+      state_key_hash: (first.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash } } };
+    await app.close();
+    vi.resetModules();
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    app = Fastify({ logger: false });
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph, graph_hash: 'h-d1',
+      analysis_ready: { status: 'ready', may_run: true }, analysis_state: analysisState, analysis_option_participation: PARTICIPATION }));
+    app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'ok', blocks: [] }));
+    await app.register(agentV1TurnRoute);
+    await app.ready();
+    const next = await turn({ message: 'What next?' });
+    expect((next.guidance as { slot1?: { item?: string } } | undefined)?.slot1?.item).not.toBe(`${AI.from}->${AI.to}`);
+    expect(store.readGuidanceHistory).toHaveBeenCalledWith(SCENARIO);
+  });
 });
