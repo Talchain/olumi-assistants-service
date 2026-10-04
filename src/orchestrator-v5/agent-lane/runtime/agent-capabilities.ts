@@ -2675,13 +2675,14 @@ export function createAgentCapabilities(
     // PR Review on #2275: the read-back proves THIS figure — the user's source, both numbers, and both units — on the ONE
     // stored link of each pair, against the writer's own postimage of it (above), never against the stated words.
     const holds = check !== null && postimages.every((post) => {
-      const matches = check.edges.filter((x) => x.from === post.from && x.to === post.to) as { provenance?: unknown }[];
-      const prov = (matches[0]?.provenance ?? {}) as { source?: unknown; magnitude?: unknown;
+      // The ONE stored link the writer resolves (directed, exactly one per pair): a confounder beside it is not read back.
+      const stored = linkEffectTargetOf(check.raw, post.from, post.to);
+      const prov = (stored.kind === 'one' && isPlainRecord(stored.edge.provenance) ? stored.edge.provenance : {}) as { source?: unknown; magnitude?: unknown;
         natural_effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown } };
       const want = post.natural_effect;
       const unitKey = (u: unknown): string | undefined => (typeof u === 'string' ? unitComparisonKey(u) : undefined);
       const sameUnit = (storedUnit: unknown, written: unknown): boolean => unitKey(storedUnit) !== undefined && unitKey(storedUnit) === unitKey(written);
-      return matches.length === 1 && want !== undefined && prov.source === 'user_specified' && prov.magnitude === 'user_stated'
+      return stored.kind === 'one' && want !== undefined && prov.source === 'user_specified' && prov.magnitude === 'user_stated'
         && typeof want.amount === 'number' && prov.natural_effect?.amount === want.amount
         && typeof want.per_source_change === 'number' && prov.natural_effect?.per_source_change === want.per_source_change
         && sameUnit(prov.natural_effect?.amount_unit, want.amount_unit) && sameUnit(prov.natural_effect?.per_source_change_unit, want.per_source_change_unit);
