@@ -23,18 +23,14 @@
  * whose only parents are options is already a root.
  */
 
+import { STRUCTURAL_CHALLENGE_REASONS } from '@talchain/schemas';
+
 export interface ChallengeLink {
   readonly from_id: string;
   readonly to_id: string;
 }
 
-export type StructuralChallengeIneligibleReason =
-  | 'link_not_found'
-  | 'option_wiring_link'
-  | 'bidirected_link'
-  | 'identity_participant_link'
-  | 'anchored_identity_target'
-  | 'target_becomes_root';
+export type StructuralChallengeIneligibleReason = Exclude<(typeof STRUCTURAL_CHALLENGE_REASONS.unsupported)[number], 'candidate_rejected'>;
 
 export type StructuralChallengeEligibility =
   | {

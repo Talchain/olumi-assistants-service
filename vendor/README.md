@@ -7,7 +7,30 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.75.0.tgz` ← **THE CURRENT PIN** (SCIENCE/DSK fa13b6a1, the decision-flip block)
+### `talchain-schemas-0.76.0.tgz` ← **THE CURRENT PIN** (SCI-DEEP v1, “Test without this link”)
+
+The approved published `@talchain/schemas@0.76.0` archive supplied for CEE #2544,
+verified against the approved SHA-256 and the installed package version. The supplied
+archive and vendored copy are byte-identical; this checkout did not repack it or fetch the registry.
+
+```
+sha256 594fcedb65b385fe701ea9dcac98cce2b73e85c7e3c9e10ba1ceddd82999268d
+```
+
+0.76.0 adds `StructuralChallengeResultV1Schema` and its claim, baseline and alternative
+contracts. CEE imports those published types and validates every dispatched result with
+that schema, including the evidence rules for constraint boundaries, leader holds, equal
+seed/sample budget/engine builds, absence and non-completed provenance. Missing evidence
+withholds the comparison or yields values without a structural verdict; it is never invented.
+The route integration and UI adoption remain separate steps.
+
+The 0.75.0 → 0.76.0 edge-strength reader check was re-derived from these tarballs:
+all four `dist/boundary/enums.{js,d.ts}` and `dist/boundary/turn-payload.{js,d.ts}` files
+are byte-identical; the fixture registry changes, but its `edge_strength_edit` lines do not.
+Only 0.76.0 is retained in `vendor/`, per the update procedure; 0.74.0 and 0.75.0 and
+their checksum manifests are removed. Git history retains the rollback copies.
+
+### `talchain-schemas-0.75.0.tgz` (historical — no longer vendored) (SCIENCE/DSK fa13b6a1, the decision-flip block)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by the DL from `olumi-schemas` `main`
 > **`55a72e62`** (schemas #85 merge; publish run 36995247489), 2026-10-02. Fetched with `npm pack
@@ -23,7 +46,7 @@ identically from a normal clone, a CI checkout, and any worktree.
 > versions); 0.75.0 `DecisionFlipBlockV1Schema` — the recommendation's tipping point per link (ISL #220 → PLoT #431),
 > with the licence structural (R1–R10). CEE is its validating boundary (`plot-client.ts` `parseDecisionFlipResponse`).
 
-### `talchain-schemas-0.74.0.tgz` (superseded by 0.75.0, a superset) (CODEX BUILDER, opt-in saved-version result comparison)
+### `talchain-schemas-0.74.0.tgz` (historical — no longer vendored) (CODEX BUILDER, opt-in saved-version result comparison)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.** Published by DL from `olumi-schemas` `main`
 > **`c47767f9690c49d092145cbd90247fd0da22da34`** (schemas #84 merge; publish run 36988699914), 2026-10-02. Registry download:

@@ -18,83 +18,13 @@
  * with the numerical frame even when headlines do not (bank 2, F1), so they are listed and never compared.
  */
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
-import type { RunDeltaNoiseVerdictLiteral, RunDeltaBuildsEqualityLiteral } from '@talchain/schemas/boundary';
+import type { StructuralChallengeClaimV1, StructuralChallengeResultV1 } from '@talchain/schemas';
+import type { RunDeltaNoiseVerdictLiteral } from '@talchain/schemas/boundary';
 
 import { runWithheldGoalFigures, winnerOptionResultSource } from '../../orchestrator/context/option-result-source.js';
 import { mayPresentComparedRunLeader } from './compared-run-leader.js';
 import { deriveBuildsEquality, readRunEchoes, type RunEchoes } from './build-run-delta.js';
 import { leadNoise, meanChangeNoise, proportionChangeNoise } from './structural-challenge-noise.js';
-
-// ── The 0.76.0 contract, as CEE produces it. ────────────────────────────────────────────────────────────────────────
-// ⚠ TEMPORARY MIRROR: CEE vendors only PUBLISHED schema tarballs; when @talchain/schemas 0.76.0 is published these
-// types are replaced by `StructuralChallengeResultV1` and the dispatch strict-parses with its schema (the validating
-// boundary). Field-for-field identical to src/boundary/structural-challenge.ts on olumi-schemas#86 @71da209 (APPROVED).
-export type StructuralChallengeVerdict = 'holds' | 'changes' | 'delta_only' | 'not_comparable';
-export type StructuralChallengeBasis =
-  | 'leader_changed' | 'certainty_boundary_crossed' | 'target_crossed' | 'constraint_side_changed'
-  | 'leader_same' | 'certainty_kept' | 'same_side_of_target' | 'constraint_side_same' | 'unaffected_by_construction'
-  | 'within_noise' | 'no_licensed_boundary' | 'not_noise_qualified'
-  | 'frame_changed' | 'unit_changed' | 'identity_status_changed' | 'ranking_status_changed'
-  | 'withheld_on_one_side' | 'missing_on_one_side';
-export interface StructuralChallengeLeaderClaim {
-  readonly kind: 'leader';
-  readonly baseline_option_id: string | null;
-  readonly alternative_option_id: string | null;
-  readonly noise_verdict: RunDeltaNoiseVerdictLiteral;
-  readonly verdict: StructuralChallengeVerdict;
-  readonly basis: StructuralChallengeBasis;
-  readonly invariant_by_construction: boolean;
-}
-export interface StructuralChallengeQuantityClaim {
-  readonly kind: 'goal_probability' | 'outcome_level' | 'constraint_probability';
-  readonly option_id: string;
-  readonly constraint_id: string | null;
-  readonly baseline: number | null;
-  readonly alternative: number | null;
-  readonly target: number | null;
-  /** Only on constraint_probability, and only with a declared probability boundary; CEE declares none in v1. */
-  readonly constraint_boundary: { readonly probability_threshold: number; readonly operator: '>=' | '<=' | '>' | '<' } | null;
-  readonly noise_verdict: RunDeltaNoiseVerdictLiteral;
-  readonly verdict: StructuralChallengeVerdict;
-  readonly basis: StructuralChallengeBasis;
-  readonly invariant_by_construction: boolean;
-}
-export type StructuralChallengeClaim = StructuralChallengeLeaderClaim | StructuralChallengeQuantityClaim;
-export type StructuralChallengeStatus = 'completed' | 'unsupported' | 'failed' | 'timed_out' | 'stale' | 'withheld';
-export interface StructuralChallengeBaseline {
-  readonly scenario_id: string;
-  readonly run_id: string;
-  readonly graph_hash_at_run: string;
-  readonly seed_used: string | number;
-  readonly n_samples: number;
-  readonly sent_digest: string;
-}
-export interface StructuralChallengeAlternative {
-  readonly op: 'remove_link';
-  readonly from_id: string;
-  readonly to_id: string;
-  readonly origin: 'user_selected' | 'olumi_suggested';
-  readonly sizing: 'user' | 'placeholder' | 'olumi_estimate' | 'olumi_accepted' | 'unmarked';
-}
-export interface StructuralChallengeResult {
-  readonly method: 'full_recompute_unpaired_v1';
-  readonly perturbation_class: 'topology';
-  readonly status: StructuralChallengeStatus;
-  readonly reason: string | null;
-  readonly baseline: StructuralChallengeBaseline;
-  readonly alternative: StructuralChallengeAlternative;
-  readonly attribution_case: 'C2_unpaired';
-  readonly pair_provenance: {
-    readonly seed_equal: boolean;
-    readonly hash_equal: boolean;
-    readonly builds_equal: RunDeltaBuildsEqualityLiteral;
-    readonly n_equal: boolean;
-  } | null;
-  readonly claims: readonly StructuralChallengeClaim[];
-  readonly not_compared: readonly string[];
-  readonly retention: 'not_retained';
-  readonly recompute_key: string;
-}
 
 /**
  * Listed on every completed result (contract S2), plus the other diagnostics this method does not compare. Flip
@@ -194,12 +124,12 @@ export interface CompareStructuralChallengeInput {
 export type CompareStructuralChallengeOutput =
   | {
       readonly ok: true;
-      readonly pair_provenance: NonNullable<StructuralChallengeResult['pair_provenance']>;
-      readonly claims: readonly StructuralChallengeClaim[];
+      readonly pair_provenance: NonNullable<StructuralChallengeResultV1['pair_provenance']>;
+      readonly claims: readonly StructuralChallengeClaimV1[];
     }
   | { readonly ok: false; readonly reason: 'baseline_unreadable' | 'candidate_unparseable' };
 
-function deltaOnlyBasis(noise: RunDeltaNoiseVerdictLiteral): StructuralChallengeBasis {
+function deltaOnlyBasis(noise: RunDeltaNoiseVerdictLiteral): StructuralChallengeClaimV1['basis'] {
   return noise === 'within_noise' ? 'within_noise' : noise === 'not_noise_qualified' ? 'not_noise_qualified' : 'no_licensed_boundary';
 }
 
@@ -220,7 +150,7 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   const rowsB = optionRows(b.enrichment);
   const goalReached = input.reachable.has(input.goalNodeId);
   const identityChanged = identityStatus(a.enrichment) !== identityStatus(b.enrichment);
-  const claims: StructuralChallengeClaim[] = [];
+  const claims: StructuralChallengeClaimV1[] = [];
 
   // ── Leader ─────────────────────────────────────────────────────────────────────────────────────────────────────
   {
@@ -234,8 +164,15 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     } else if (rankingStatus(a.enrichment) !== rankingStatus(b.enrichment)) {
       claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'ranking_status_changed', invariant_by_construction: false });
     } else {
-      const shares = [...rowsB.values()].map((r) => r.win ?? 0).sort((x, y) => y - x);
-      const noise = leadNoise(rowsB.get(idB)?.win ?? 0, idB === idA ? (shares[1] ?? 0) : (rowsB.get(idA)?.win ?? 0), b.nSamples);
+      // Missing win shares cannot supply evidence for a clear lead. In particular, never substitute 0 for an
+      // absent runner-up and thereby manufacture a signal-qualified HOLDS verdict.
+      const leaderShare = rowsB.get(idB)?.win ?? null;
+      const others = [...rowsB.entries()].filter(([id]) => id !== idB).map(([, r]) => r.win);
+      const runnerUp = idB === idA
+        ? (others.length > 0 && others.every((p) => p !== null) ? Math.max(...others as number[]) : null)
+        : rowsB.get(idA)?.win ?? null;
+      const noise = leaderShare !== null && runnerUp !== null
+        ? leadNoise(leaderShare, runnerUp, b.nSamples) : 'not_noise_qualified';
       if (noise !== 'signal') {
         // Every leader HOLDS needs a signal-qualified lead (contract C2), the unaffected one included.
         claims.push({ ...base, noise_verdict: noise, verdict: 'delta_only', basis: deltaOnlyBasis(noise), invariant_by_construction: false });
@@ -268,7 +205,7 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
       continue;
     }
     const noise = proportionChangeNoise(pA, pB, a.nSamples, b.nSamples);
-    if (!goalReached && noise !== 'signal') {
+    if (!goalReached && noise === 'within_noise') {
       claims.push({ ...base, noise_verdict: noise, verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true });
       continue;
     }
@@ -305,7 +242,7 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     const noise = rA.sd !== null && rB.sd !== null && rA.n !== null && rB.n !== null
       ? meanChangeNoise({ mean: rA.mean, sd: rA.sd, n: rA.n }, { mean: rB.mean, sd: rB.sd, n: rB.n })
       : 'not_noise_qualified';
-    if (!goalReached && noise !== 'signal') {
+    if (!goalReached && noise === 'within_noise') {
       claims.push({ ...base, noise_verdict: noise, verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true });
       continue;
     }
@@ -331,7 +268,7 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
       const noise = proportionChangeNoise(pA, pB, a.nSamples, b.nSamples);
       const node = nodesA.get(constraintId);
       const base = { kind: 'constraint_probability' as const, option_id: optionId, constraint_id: constraintId, baseline: pA, alternative: pB, target: null, constraint_boundary: null };
-      if (node !== undefined && !input.reachable.has(node) && noise !== 'signal') {
+      if (node !== undefined && !input.reachable.has(node) && noise === 'within_noise') {
         claims.push({ ...base, noise_verdict: noise, verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true });
       } else {
         claims.push({ ...base, noise_verdict: noise, verdict: 'delta_only', basis: noise === 'signal' ? 'no_licensed_boundary' : deltaOnlyBasis(noise), invariant_by_construction: false });

@@ -7,10 +7,9 @@
  * permission, goal certainty, goal-figure withholds). Its fact is compared and DISCARDED — this module never calls
  * `commitDirectAnswer`: no turn row, no Run fact, no scenario write, no new selected Run, no version.
  *
- * WHY NO SEED IS LENT. Removing a link changes the draw structure, so the two Runs cannot be paired; CEE's seed authority
- * (`seed-reuse.ts`) already refuses to lend a seed across a structure change and this module does not override it. The
- * comparison is the independent-run form throughout (`C2_unpaired`), and PLoT's seed derived from the edited graph keeps
- * the recompute deterministic.
+ * PINNED BUT UNPAIRED. The baseline's seed is sent explicitly through the existing seed authority. Removing a link
+ * changes the draw structure, so equal seeds do not make the Runs a common-random-number pair: every comparison uses
+ * the independent-run form (`C2_unpaired`). A completed result also proves equal sample budgets and engine builds.
  *
  * BOUND TO THE SELECTED RUN, BY EXISTING AUTHORITIES ONLY:
  *   currentness — the snapshot's analysis-affecting hash (`computeAnalysisAffectingGraphHash` over the raw persisted
@@ -30,6 +29,14 @@
  * Each refusal is a typed contract status; none is turned into a figure.
  */
 import { createHash } from 'node:crypto';
+
+import {
+  StructuralChallengeBaselineV1Schema,
+  StructuralChallengeResultV1Schema,
+  type StructuralChallengeAlternativeV1,
+  type StructuralChallengeBaselineV1,
+  type StructuralChallengeResultV1,
+} from '@talchain/schemas';
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import { RunInputSnapshotSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
@@ -52,9 +59,6 @@ import { diffRunInputs } from '../coaching/run-input-changes.js';
 import {
   NOT_COMPARED,
   compareStructuralChallenge,
-  type StructuralChallengeAlternative,
-  type StructuralChallengeBaseline,
-  type StructuralChallengeResult,
 } from '../coaching/structural-challenge-compare.js';
 import { graphWithoutLink, structuralChallengeEligibility, type ChallengeLink } from '../coaching/structural-challenge-eligibility.js';
 import { isTheRunsPayload } from './decision-flip-dispatch.js';
@@ -69,7 +73,7 @@ export interface DispatchStructuralChallengeParams {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
   readonly link: ChallengeLink;
-  readonly origin: StructuralChallengeAlternative['origin'];
+  readonly origin: StructuralChallengeAlternativeV1['origin'];
   /** The turn's existing leader permission (Shared Data's authority); per-Run verdicts narrow it further. */
   readonly turnMayNameLeader: boolean;
   /** The turn's existing exploratory-work permission; false withholds the challenge. */
@@ -82,7 +86,7 @@ export interface DispatchStructuralChallengeParams {
 
 export type StructuralChallengeDispatchResult =
   | { readonly kind: 'no_run' }
-  | { readonly kind: 'result'; readonly result: StructuralChallengeResult; readonly labels: ReadonlyMap<string, string> };
+  | { readonly kind: 'result'; readonly result: StructuralChallengeResultV1; readonly labels: ReadonlyMap<string, string> };
 
 /**
  * The contract's `recompute_key` (0.76.0 RETENTION): sha256 of the UTF-8 JSON tuple
@@ -90,7 +94,7 @@ export type StructuralChallengeDispatchResult =
  * the seed's string/number type preserved.
  */
 export function structuralChallengeRecomputeKey(
-  sentDigest: string, alternative: StructuralChallengeAlternative, seedUsed: string | number, nSamples: number,
+  sentDigest: string, alternative: StructuralChallengeAlternativeV1, seedUsed: string | number, nSamples: number,
 ): string {
   const { from_id, op, origin, sizing, to_id } = alternative;
   const canonical = JSON.stringify([sentDigest, { from_id, op, origin, sizing, to_id }, seedUsed, nSamples]);
@@ -159,7 +163,7 @@ export function isExactlyThisRemoval(baseline: HandlerFact, candidate: HandlerFa
   return stable(expected) === stable(restB);
 }
 
-function linkSizing(baseline: HandlerFact, link: ChallengeLink): StructuralChallengeAlternative['sizing'] {
+function linkSizing(baseline: HandlerFact, link: ChallengeLink): StructuralChallengeAlternativeV1['sizing'] {
   const parsed = RunInputSnapshotSchema.safeParse(runResult(baseline).input_snapshot);
   const row = parsed.success ? parsed.data.links.find((l) => l.from === link.from_id && l.to === link.to_id) : undefined;
   return row?.sizing ?? 'unmarked';
@@ -181,7 +185,7 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   if (typeof run.run_id !== 'string' || typeof run.graph_hash_at_run !== 'string' || !input.success) return { kind: 'no_run' };
   const seedUsed = typeof meta.seed_used === 'string' || typeof meta.seed_used === 'number' ? meta.seed_used : '';
   const nSamples = typeof meta.n_samples === 'number' ? meta.n_samples : 0;
-  const baseline: StructuralChallengeBaseline = {
+  const baseline: StructuralChallengeBaselineV1 = {
     scenario_id: context.session_id,
     run_id: run.run_id,
     graph_hash_at_run: run.graph_hash_at_run,
@@ -189,7 +193,9 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
     n_samples: nSamples,
     sent_digest: input.data.sent_digest,
   };
-  const alternative: StructuralChallengeAlternative = {
+  // A selected Run without the published baseline evidence cannot support any challenge result.
+  if (!StructuralChallengeBaselineV1Schema.safeParse(baseline).success) return { kind: 'no_run' };
+  const alternative: StructuralChallengeAlternativeV1 = {
     op: 'remove_link', from_id: link.from_id, to_id: link.to_id, origin: params.origin, sizing: linkSizing(selected, link),
   };
   const shell = {
@@ -197,9 +203,9 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
     attribution_case: 'C2_unpaired', retention: 'not_retained',
     recompute_key: structuralChallengeRecomputeKey(baseline.sent_digest, alternative, seedUsed, nSamples),
   } as const;
-  const refuse = (status: Exclude<StructuralChallengeResult['status'], 'completed'>, reason: string, labels = new Map<string, string>()): StructuralChallengeDispatchResult => {
+  const refuse = (status: Exclude<StructuralChallengeResultV1['status'], 'completed'>, reason: NonNullable<StructuralChallengeResultV1['reason']>, labels = new Map<string, string>()): StructuralChallengeDispatchResult => {
     log.info({ event: 'structural_challenge.result', request_id: requestId, status, reason }, 'structural challenge');
-    return { kind: 'result', labels, result: { ...shell, status, reason, pair_provenance: null, claims: [], not_compared: [] } };
+    return { kind: 'result', labels, result: StructuralChallengeResultV1Schema.parse({ ...shell, status, reason, pair_provenance: null, claims: [], not_compared: [] }) };
   };
 
   if (!params.exploratoryWorkAllowed) return refuse('withheld', 'exploratory_work_not_permitted');
@@ -289,11 +295,14 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   // Contract S3: a verdict needs the same seed, the same sample budget and engine builds PROVEN equal (RunDelta's
   // `deriveBuildsEquality`). Otherwise the difference could be the engine or the budget, not the link — no verdict.
   const pair = compared.pair_provenance;
-  if (!pair.seed_equal || !pair.n_equal || pair.builds_equal !== 'equal') return refuse('failed', 'baseline_payload_mismatch', labels);
-  log.info({ event: 'structural_challenge.result', request_id: requestId, status: 'completed', claims: compared.claims.length }, 'structural challenge');
-  return {
-    kind: 'result',
-    labels,
-    result: { ...shell, status: 'completed', reason: null, pair_provenance: compared.pair_provenance, claims: compared.claims, not_compared: NOT_COMPARED },
-  };
+  if (pair.hash_equal || !pair.seed_equal || !pair.n_equal || pair.builds_equal !== 'equal') return refuse('failed', 'baseline_payload_mismatch', labels);
+  // The published Zod contract is the validating boundary, including its evidence/verdict licences. Invalid
+  // candidate evidence yields an honest failure with no claims, rather than a success that a consumer cannot parse.
+  const parsed = StructuralChallengeResultV1Schema.safeParse({
+    ...shell, status: 'completed', reason: null, pair_provenance: pair,
+    claims: compared.claims, not_compared: NOT_COMPARED,
+  });
+  if (!parsed.success) return refuse('failed', 'candidate_unparseable', labels);
+  log.info({ event: 'structural_challenge.result', request_id: requestId, status: 'completed', claims: parsed.data.claims.length }, 'structural challenge');
+  return { kind: 'result', labels, result: parsed.data };
 }

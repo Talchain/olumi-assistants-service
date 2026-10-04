@@ -5,7 +5,7 @@
  * Real `run_analysis` handler, real snapshot loader, the served c96fc4bb graph (Paul's MRR journey) — the harness of
  * `decision-flip-dispatch.test.ts` / `run-analysis-c1-seed-reuse.test.ts`. Run A is produced by the production registry;
  * the dispatch then challenges one link and must:
- *   S1 send PLoT Run A's request with exactly that link removed (no brief, no lent seed) and compare claim by claim;
+ *   S1 send PLoT Run A's request with exactly that link removed (no brief, baseline seed pinned) and compare claim by claim;
  *   S2 refuse a model edited since Run A as `stale` without asking PLoT;
  *   S3 refuse an ineligible link (a root-making removal, option wiring, an identity operand) without asking PLoT;
  *   S4 map a PLoT timeout to `timed_out`; S5 withhold when exploratory work is not permitted;
@@ -17,6 +17,7 @@
  * (coaching/__tests__/structural-challenge-compare.test.ts); a synthetic envelope cannot reach licensed figures here.
  */
 import { createHash } from 'node:crypto';
+import { StructuralChallengeResultV1Schema } from '@talchain/schemas';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { PLoTTimeoutError, type PLoTClient } from '../../../orchestrator/plot-client.js';
@@ -87,7 +88,7 @@ function rowsFor(graph: Rec, options: Rec[]): Rec[] {
   });
 }
 
-function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean; candidateIslBuild?: string } = {}) {
+function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean; candidateIslBuild?: string; candidateMutation?: (response: Rec) => void } = {}) {
   const runBodies: Rec[] = [];
   const client = {
     validatePatch: vi.fn().mockResolvedValue({}),
@@ -110,6 +111,7 @@ function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean; candid
           for (const c of (response.constraint_results ?? []) as Rec[]) c.probability = P4_A_MINUS_CHURN[c.option_id]?.churn ?? c.probability;
         }
         response.meta = { ...(response.meta as Rec), seed_used: seedUsed };
+        if (runBodies.length > 1) opts.candidateMutation?.(response);
         return response as V2RunResponseEnvelope;
       }
       const response = structuredClone(happy) as Rec;
@@ -124,16 +126,17 @@ function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean; candid
       response.identity_evaluations = ((body.graph as Rec).nodes as Rec[])
         .filter((n) => n.nonlinear_identity)
         .map((n) => ({ node_id: n.id, operation: n.nonlinear_identity.operation, factor_ids: n.nonlinear_identity.factor_ids, addends: [], evaluated: true }));
+      if (runBodies.length > 1) opts.candidateMutation?.(response);
       return response as V2RunResponseEnvelope;
     }),
   } as unknown as PLoTClient;
   return { client, runBodies };
 }
 
-async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?: boolean; candidateIslBuild?: string } = {}) {
+async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?: boolean; candidateIslBuild?: string; candidateMutation?: (response: Rec) => void } = {}) {
   const graph = structuredClone(opts.graph ?? served.graph);
   const reader = () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: structuredClone(graph) }));
-  const plot = plotDouble({ timeoutOnCandidate: opts.timeoutOnCandidate, real: opts.real, candidateIslBuild: opts.candidateIslBuild });
+  const plot = plotDouble({ timeoutOnCandidate: opts.timeoutOnCandidate, real: opts.real, candidateIslBuild: opts.candidateIslBuild, candidateMutation: opts.candidateMutation });
   const handler = resolveHandler(createRegistry({ plotClient: plot.client, scenarioReader: reader, counterfactualClient: null }), 'run_analysis')!;
   const a = await runWithBoundAnalysisSnapshot({ scenarioId: SCENARIO, analysisGraphHash: NO_CLAIM, priorRunSeed: priorRunForSeed([]) },
     () => handler({ context: context('turn-a', []), payload: payloadOf('turn-a'), requestId: 'turn-a', signal: new AbortController().signal, orientationText: '' } as unknown as HandlerInvocation));
@@ -152,6 +155,7 @@ async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?:
 
 const resultOf = (r: Awaited<ReturnType<typeof dispatchStructuralChallenge>>) => {
   if (r.kind !== 'result') throw new Error(`expected a result, got ${r.kind}`);
+  expect(StructuralChallengeResultV1Schema.parse(r.result)).toEqual(r.result);
   return r.result;
 };
 
@@ -257,6 +261,41 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     const h = await harness({ candidateIslBuild: 'i2' });
     expect(resultOf(await h.ask())).toMatchObject({ status: 'failed', reason: 'baseline_payload_mismatch', claims: [], pair_provenance: null });
     expect(h.plot.runBodies).toHaveLength(2); // the candidate ran; its pair could not be proven
+  });
+
+  it.each([
+    ['different seed', (r: Rec) => { r.meta.seed_used = '999999'; }],
+    ['different sample budget', (r: Rec) => { r.meta.n_samples = 5000; }],
+    ['unrecorded engine builds', (r: Rec) => { delete r._meta; }],
+    ['only one engine build recorded', (r: Rec) => { r._meta = { builds: { plot: 'p1' } }; }],
+  ])('S3: %s withholds all structural verdicts and clears pair provenance', async (_label, candidateMutation) => {
+    const h = await harness({ candidateMutation });
+    const result = resultOf(await h.ask());
+    expect(result).toMatchObject({ status: 'failed', reason: 'baseline_payload_mismatch', claims: [], pair_provenance: null });
+    expect(h.plot.runBodies).toHaveLength(2);
+  });
+
+  it.each(['unsupported', 'failed', 'timed_out', 'stale', 'withheld'] as const)(
+    'every non-completed status (%s) has null pair provenance and parses', async (status) => {
+      const h = await harness({ timeoutOnCandidate: status === 'timed_out', candidateIslBuild: status === 'failed' ? 'i2' : undefined });
+      const edited = structuredClone(h.graph);
+      (edited.edges as Rec[])[7].strength = { mean: 0.9, std: 0.1 };
+      const reader = () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: structuredClone(edited) }));
+      const result = resultOf(await h.ask(
+        status === 'unsupported' ? { from_id: 'pro_plan_price', to_id: 'monthly_churn' } : CHURN_LINK,
+        { exploratory: status !== 'withheld', ...(status === 'stale' ? { reader } : {}) },
+      ));
+      expect(result).toMatchObject({ status, claims: [], pair_provenance: null });
+    },
+  );
+
+  it.each([
+    ['served MRR', served.graph, false], ['bank-2 A and live link-removal numbers', confirmed.graph, true],
+  ])('every dispatched output on the existing %s fixture parses with the published result schema', async (_label, graph, real) => {
+    const h = await harness({ graph: graph as Rec, real: real as boolean });
+    const result = resultOf(await h.ask());
+    expect(result.status).toBe('completed');
+    expect(StructuralChallengeResultV1Schema.parse(result)).toEqual(result);
   });
 
   it('S9: the one-edit guard — exactly this link\'s presence, and nothing else the Runs recorded', async () => {

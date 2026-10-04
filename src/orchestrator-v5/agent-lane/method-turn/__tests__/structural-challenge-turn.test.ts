@@ -12,7 +12,7 @@ import {
   structuralChallengeTurnFor,
   structuralChallengeTurnUnderLicence,
 } from '../structural-challenge-turn.js';
-import type { StructuralChallengeClaim, StructuralChallengeResult } from '../../../coaching/structural-challenge-compare.js';
+import type { StructuralChallengeClaimV1, StructuralChallengeResultV1 } from '@talchain/schemas';
 
 const LABELS = new Map([
   ['monthly_churn', 'Monthly churn'], ['paying_subscribers', 'Paying subscribers'], ['pro_plan_price', 'Pro plan price'],
@@ -21,12 +21,12 @@ const LABELS = new Map([
 const BASE = {
   method: 'full_recompute_unpaired_v1', perturbation_class: 'topology', attribution_case: 'C2_unpaired', retention: 'not_retained',
   recompute_key: '0'.repeat(64),
-  baseline: { scenario_id: 's', run_id: 'r', graph_hash_at_run: 'h', seed_used: '1', n_samples: 10_000, sent_digest: 'd' },
+  baseline: { scenario_id: 's', run_id: 'r', graph_hash_at_run: 'h', seed_used: '1', n_samples: 10_000, sent_digest: 'd'.repeat(64) },
   alternative: { op: 'remove_link', from_id: 'monthly_churn', to_id: 'paying_subscribers', origin: 'olumi_suggested', sizing: 'olumi_estimate' },
 } as const;
-const NOT_COMPARED = ['structural_influence', 'e_values', 'driver_rank', 'robustness_label', 'fragile_edges'];
+const NOT_COMPARED: StructuralChallengeResultV1['not_compared'] = ['structural_influence', 'e_values', 'driver_rank', 'robustness_label', 'fragile_edges'];
 
-const changed: StructuralChallengeResult = {
+const changed: StructuralChallengeResultV1 = {
   ...BASE, status: 'completed', reason: null, not_compared: NOT_COMPARED,
   pair_provenance: { seed_equal: true, hash_equal: false, builds_equal: 'equal', n_equal: true },
   claims: [
@@ -50,7 +50,7 @@ describe('SCI-DEEP reply', () => {
   });
 
   it('never names a withheld leader', () => {
-    const withheld: StructuralChallengeResult = {
+    const withheld: StructuralChallengeResultV1 = {
       ...changed,
       claims: [{ kind: 'leader', baseline_option_id: null, alternative_option_id: null, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side', invariant_by_construction: false }, ...changed.claims.slice(1)],
     };
@@ -61,7 +61,7 @@ describe('SCI-DEEP reply', () => {
   });
 
   it('the honest no-effect case: the conclusion does not depend on the link', () => {
-    const held: StructuralChallengeResult = { ...changed, claims: [changed.claims[0], changed.claims[3]] };
+    const held: StructuralChallengeResultV1 = { ...changed, claims: [changed.claims[0], changed.claims[3]] };
     const reply = composeStructuralChallengeReply({ result: held, labels: LABELS });
     expect(reply.split('\n')[0]).toBe('Without the link from Monthly churn to Paying subscribers, the conclusions I tested still hold.');
     expect(reply).toContain('isn\'t evidence either way');
@@ -69,20 +69,20 @@ describe('SCI-DEEP reply', () => {
   });
 
   it('refusals are plain, typed, and say nothing changed', () => {
-    const root: StructuralChallengeResult = { ...BASE, alternative: { ...BASE.alternative, from_id: 'pro_plan_price', to_id: 'monthly_churn' }, status: 'unsupported', reason: 'target_becomes_root', pair_provenance: null, claims: [], not_compared: [] };
+    const root: StructuralChallengeResultV1 = { ...BASE, alternative: { ...BASE.alternative, from_id: 'pro_plan_price', to_id: 'monthly_churn' }, status: 'unsupported', reason: 'target_becomes_root', pair_provenance: null, claims: [], not_compared: [] };
     expect(composeStructuralChallengeReply({ result: root, labels: LABELS }))
       .toBe('I can\'t test the link from Pro plan price to Monthly churn. Removing that link would leave its target with nothing driving it, which changes how its starting level is read — the comparison would measure that change of meaning, not the link. Nothing in your model changed.');
-    const stale: StructuralChallengeResult = { ...root, status: 'stale', reason: 'run_not_current' };
+    const stale: StructuralChallengeResultV1 = { ...root, status: 'stale', reason: 'run_not_current' };
     expect(composeStructuralChallengeReply({ result: stale, labels: LABELS })).toContain('Run the analysis again');
-    const mismatch: StructuralChallengeResult = { ...root, status: 'failed', reason: 'baseline_payload_mismatch' };
+    const mismatch: StructuralChallengeResultV1 = { ...root, status: 'failed', reason: 'baseline_payload_mismatch' };
     expect(composeStructuralChallengeReply({ result: mismatch, labels: LABELS }))
       .toBe('I couldn\'t line this test up exactly with the analysis you ran, so there\'s no fair comparison to show. Run the analysis again, then try this test. Nothing in your model changed.');
-    const failed: StructuralChallengeResult = { ...root, status: 'failed', reason: 'candidate_run_failed' };
+    const failed: StructuralChallengeResultV1 = { ...root, status: 'failed', reason: 'candidate_run_failed' };
     expect(composeStructuralChallengeReply({ result: failed, labels: LABELS })).toContain('I couldn\'t complete the test of the link from Pro plan price to Monthly churn');
   });
 
   it('a lead that is not clear is never stated as a lead', () => {
-    const close: StructuralChallengeResult = { ...changed, claims: [{ ...changed.claims[0], noise_verdict: 'within_noise', verdict: 'delta_only', basis: 'within_noise' } as StructuralChallengeClaim, ...changed.claims.slice(1)] };
+    const close: StructuralChallengeResultV1 = { ...changed, claims: [{ ...changed.claims[0], noise_verdict: 'within_noise', verdict: 'delta_only', basis: 'within_noise' } as StructuralChallengeClaimV1, ...changed.claims.slice(1)] };
     const reply = composeStructuralChallengeReply({ result: close, labels: LABELS });
     expect(reply).toContain('Which option leads is too close to call in at least one version.');
     expect(reply).not.toContain('leads in both versions');
@@ -90,7 +90,7 @@ describe('SCI-DEEP reply', () => {
   });
 
   it('a chance is never rounded to certain', () => {
-    const near = { ...changed, claims: [{ ...changed.claims[1], baseline: 0.996, alternative: 0.004, verdict: 'delta_only', basis: 'no_licensed_boundary' } as const] } as StructuralChallengeResult;
+    const near = { ...changed, claims: [{ ...changed.claims[1], baseline: 0.996, alternative: 0.004, verdict: 'delta_only', basis: 'no_licensed_boundary' } as const] } as StructuralChallengeResultV1;
     const reply = composeStructuralChallengeReply({ result: near, labels: LABELS });
     expect(reply).toContain('over 99% of model runs now, and in under 1% without the link');
   });

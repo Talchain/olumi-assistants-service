@@ -12,7 +12,8 @@
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import { compareStructuralChallenge, type StructuralChallengeClaim } from '../structural-challenge-compare.js';
+import { StructuralChallengeClaimV1Schema, type StructuralChallengeClaimV1 } from '@talchain/schemas';
+import { compareStructuralChallenge } from '../structural-challenge-compare.js';
 import { reachableFrom } from '../structural-challenge-eligibility.js';
 import { goalCertaintyOfStoredResult } from '../../agent-lane/goal-certainty.js';
 import { GOAL_FIGURES_WITHHELD_CODES } from '../../../orchestrator/context/option-result-source.js';
@@ -58,9 +59,11 @@ const ALL = reachableFrom(A_GRAPH.graph, 'new_paying_subscribers_per_month'); //
 const compare = (b: HandlerFact, reachable: ReadonlySet<string> = ALL, a: HandlerFact = runFact(A_BODY, A_GRAPH, 'hash-a')) => {
   const out = compareStructuralChallenge({ baselineFact: a, candidateFact: b, turnMayNameLeader: true, reachable, goalNodeId: GOAL, goalLevelTarget: TARGET });
   if (!out.ok) throw new Error(out.reason);
+  // All historical fixtures and every evidence variant below exercise the published claim licences.
+  for (const c of out.claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
   return out;
 };
-const claim = (claims: readonly StructuralChallengeClaim[], kind: StructuralChallengeClaim['kind'], option?: string, constraint?: string) =>
+const claim = (claims: readonly StructuralChallengeClaimV1[], kind: StructuralChallengeClaimV1['kind'], option?: string, constraint?: string) =>
   claims.find((c) => c.kind === kind && (kind === 'leader' || ((c as { option_id: string }).option_id === option
     && (constraint === undefined || (c as { constraint_id: string | null }).constraint_id === constraint))));
 
@@ -166,5 +169,73 @@ describe('SCI-DEEP comparator · licences, absence and construction', () => {
       turnMayNameLeader: true, reachable: ALL, goalNodeId: GOAL, goalLevelTarget: TARGET,
     });
     expect(out).toEqual({ ok: false, reason: 'candidate_unparseable' });
+  });
+});
+
+
+describe('SCI-DEEP producer · published 0.76.0 evidence rules', () => {
+  it.each([
+    ['different probabilities', 0.1, 0.9],
+    ['same probabilities', 0.8746, 0.8746],
+  ])('constraint %s without a declared probability boundary never earn a side verdict', (_label, prior, current) => {
+    const a = clone(A_BODY) as Rec & { option_comparison: Rec[] };
+    const b = clone(B_BODY) as Rec & { option_comparison: Rec[] };
+    const id = 'agent-lane:monthly_churn:<=';
+    (a.option_comparison.find((o) => o.option_id === P59)!.constraint_probabilities as Rec)[id] = prior;
+    (b.option_comparison.find((o) => o.option_id === P59)!.constraint_probabilities as Rec)[id] = current;
+    const { claims } = compare(runFact(b, B_GRAPH, 'hash-b'), reachableFrom(A_GRAPH.graph, 'monthly_churn'), runFact(a, A_GRAPH, 'hash-a'));
+    expect(claim(claims, 'constraint_probability', P59, id)).toMatchObject({
+      baseline: prior, alternative: current, constraint_boundary: null, verdict: 'delta_only',
+      basis: prior === current ? 'within_noise' : 'no_licensed_boundary',
+    });
+    expect(claims.some((c) => c.basis === 'constraint_side_same' || c.basis === 'constraint_side_changed')).toBe(false);
+  });
+
+  it('missing win-share evidence cannot earn leader HOLDS by substituting zero', () => {
+    const body = clone(A2_BODY) as Rec & { option_comparison: Rec[] };
+    delete body.option_comparison.find((o) => o.option_id === SQ)!.win_probability;
+    const { claims } = compare(runFact(body, A2_GRAPH, 'hash-a2'), new Set(['an_unrelated_leaf']));
+    expect(claim(claims, 'leader')).toMatchObject({
+      baseline_option_id: P59, alternative_option_id: P59,
+      verdict: 'delta_only', noise_verdict: 'not_noise_qualified', basis: 'not_noise_qualified', invariant_by_construction: false,
+    });
+  });
+
+  it('an unaffected outcome without variance evidence has values only, never unqualified HOLDS', () => {
+    const body = clone(A2_BODY) as Rec & { option_comparison: Rec[] };
+    delete (body.option_comparison.find((o) => o.option_id === P59)!.outcome as Rec).std;
+    const { claims } = compare(runFact(body, A2_GRAPH, 'hash-a2'), new Set(['an_unrelated_leaf']));
+    expect(claim(claims, 'outcome_level', P59)).toMatchObject({
+      verdict: 'delta_only', noise_verdict: 'not_noise_qualified', basis: 'not_noise_qualified', invariant_by_construction: false,
+    });
+  });
+
+  it('missing sides are null and not comparable; delta_only always carries both sides', () => {
+    const body = clone(B_BODY) as Rec & { option_comparison: Rec[] };
+    const row = body.option_comparison.find((o) => o.option_id === P59)!;
+    delete row.probability_of_goal;
+    delete (row.outcome as Rec).mean;
+    const { claims } = compare(runFact(body, B_GRAPH, 'hash-b'));
+    expect(claim(claims, 'goal_probability', P59)).toMatchObject({ alternative: null, verdict: 'not_comparable', basis: 'missing_on_one_side' });
+    expect(claim(claims, 'outcome_level', P59)).toMatchObject({ alternative: null, verdict: 'not_comparable', basis: 'missing_on_one_side' });
+    for (const c of claims) {
+      if (c.verdict === 'delta_only') {
+        if (c.kind === 'leader') {
+          expect(c.baseline_option_id).not.toBeNull();
+          expect(c.alternative_option_id).not.toBeNull();
+        } else {
+          expect(c.baseline).not.toBeNull();
+          expect(c.alternative).not.toBeNull();
+        }
+      }
+    }
+  });
+
+  it.each([
+    ['A', A_BODY, A_GRAPH], ['A2', A2_BODY, A2_GRAPH], ['B', B_BODY, B_GRAPH], ['C', C_BODY, C_GRAPH],
+  ])('every producer claim on existing bank-2 fixture %s parses against the published schema', (_label, body, graph) => {
+    const { claims } = compare(runFact(body, graph, 'hash-alternative'));
+    expect(claims.length).toBeGreaterThan(0);
+    for (const c of claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
   });
 });

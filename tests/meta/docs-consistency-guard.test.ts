@@ -2,7 +2,7 @@
  * `scripts/validate-docs-consistency.sh` rule 3 — the pinned `@talchain/schemas` archive.
  *
  * The rule once compared EVERY vendored archive filename to the one pin, so a deliberately kept rollback archive
- * (staging tracks 0.73.0 beside the pinned 0.74.0) failed every native push (programme-docs #87 5972191802). It now
+ * (for a separate rollout) failed every native push (programme-docs #87 5972191802). It now
  * checks the PINNED archive: present, and matching its committed `.sha256`. These rows run the real script against a
  * throwaway repo root, so each one is the guard's own exit code, not a re-implementation of it.
  */
@@ -38,35 +38,35 @@ afterEach(() => {
 });
 
 describe('docs-consistency guard, rule 3: the pinned schemas archive', () => {
-  const PIN = 'file:./vendor/talchain-schemas-0.74.0.tgz';
+  const PIN = 'file:./vendor/talchain-schemas-0.76.0.tgz';
 
   it('passes with the pinned archive AND a kept rollback archive beside it', () => {
     const r = run(repo(PIN, {
-      'talchain-schemas-0.73.0.tgz': { bytes: 'old', sha256: sha('old') },
-      'talchain-schemas-0.74.0.tgz': { bytes: 'new', sha256: sha('new') },
+      'talchain-schemas-0.75.0.tgz': { bytes: 'old', sha256: sha('old') },
+      'talchain-schemas-0.76.0.tgz': { bytes: 'new', sha256: sha('new') },
     }));
     expect(r.stdout).toContain('Docs consistency check OK');
     expect(r.status).toBe(0);
   });
 
   it('fails when the pinned archive is missing, even with another version vendored', () => {
-    const r = run(repo(PIN, { 'talchain-schemas-0.73.0.tgz': { bytes: 'old', sha256: sha('old') } }));
-    expect(r.stdout).toContain('pin (0.74.0) has no vendored tarball');
+    const r = run(repo(PIN, { 'talchain-schemas-0.75.0.tgz': { bytes: 'old', sha256: sha('old') } }));
+    expect(r.stdout).toContain('pin (0.76.0) has no vendored tarball');
     expect(r.status).toBe(1);
   });
 
   it('fails when the pinned archive does not match its committed checksum', () => {
-    const r = run(repo(PIN, { 'talchain-schemas-0.74.0.tgz': { bytes: 'new', sha256: sha('tampered') } }));
+    const r = run(repo(PIN, { 'talchain-schemas-0.76.0.tgz': { bytes: 'new', sha256: sha('tampered') } }));
     expect(r.stdout).toContain('does not match its committed .sha256');
     expect(r.status).toBe(1);
   });
 
   it.each([
-    ['a four-component version', 'file:./vendor/talchain-schemas-0.74.0.1.tgz'],
-    ['a trailing dot', 'file:./vendor/talchain-schemas-0.74.0..tgz'],
-    ['a registry range', '^0.74.0'],
+    ['a four-component version', 'file:./vendor/talchain-schemas-0.76.0.1.tgz'],
+    ['a trailing dot', 'file:./vendor/talchain-schemas-0.76.0..tgz'],
+    ['a registry range', '^0.76.0'],
   ])('a NEIGHBOURING archive cannot satisfy a different pin: %s', (_label, pin) => {
-    const r = run(repo(pin, { 'talchain-schemas-0.74.0.tgz': { bytes: 'new', sha256: sha('new') } }));
+    const r = run(repo(pin, { 'talchain-schemas-0.76.0.tgz': { bytes: 'new', sha256: sha('new') } }));
     expect(r.stdout).toContain('pin does not match file:./vendor/... shape');
     expect(r.status).toBe(1);
   });

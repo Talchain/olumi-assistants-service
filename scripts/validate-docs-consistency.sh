@@ -70,14 +70,15 @@ fi
 # / `npm ci` fail: the pin and the vendoring drifted apart.
 #
 # OTHER versions may sit beside the pinned one on purpose (the previous
-# archive is kept for rollback: staging tracks 0.73.0 and 0.74.0). The old
+# archive can be kept for a separate rollout). This bump retains only 0.76.0
+# per vendor/README.md; the guard still permits deliberate rollback copies. The old
 # rule compared EVERY vendored filename to the one pin, so a kept rollback
 # archive failed the pre-push hook on every push (Executor, programme-docs
 # #87 5972191802). What must hold is: the PINNED archive is present, and its
 # bytes match its committed .sha256 when one is committed.
 # ---------------------------------------------------------------------------
-# EXACTLY three numeric components, anchored on both sides: "0.74.0.1" or "0.74.0." must not be read as
-# "0.74.0" and be satisfied by the neighbouring archive (Codex CR on #2540 @2e317faf).
+# EXACTLY three numeric components, anchored on both sides: "0.76.0.1" or "0.76.0." must not be read as
+# "0.76.0" and be satisfied by the neighbouring archive (Codex CR on #2540 @2e317faf).
 pin_version="$(sed -nE 's/.*"@talchain\/schemas": "file:\.\/vendor\/talchain-schemas-([0-9]+\.[0-9]+\.[0-9]+)\.tgz".*/\1/p' "${REPO_ROOT}/package.json" | head -1 || true)"
 vendored_files="$(ls "${REPO_ROOT}/vendor/" | grep -oE 'talchain-schemas-[0-9.]+\.tgz$' | sort -u | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | tr '\n' ' ' | sed 's/ $//' || true)"
 if [ -z "$pin_version" ]; then

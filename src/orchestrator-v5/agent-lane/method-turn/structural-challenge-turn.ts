@@ -1,6 +1,6 @@
 /**
  * SCI-DEEP v1 — the deterministic reply to "Test without this link". NO MODEL CALL: every sentence is rendered from the
- * typed result (`StructuralChallengeResult`), so if narration ever fails the facts still read the same.
+ * typed result (`StructuralChallengeResultV1`), so if narration ever fails the facts still read the same.
  *
  * Copy rules (existing licences, not new ones):
  *   - a chance of reaching the target is said as how often it does so IN MODEL RUNS ("in about 53% of model runs"),
@@ -12,16 +12,16 @@
  */
 import type { SuggestedAction } from '../../compose/types.js';
 import type {
-  StructuralChallengeClaim,
-  StructuralChallengeQuantityClaim,
-  StructuralChallengeResult,
-} from '../../coaching/structural-challenge-compare.js';
+  StructuralChallengeClaimV1,
+  StructuralChallengeQuantityClaimV1,
+  StructuralChallengeResultV1,
+} from '@talchain/schemas';
 import type { ChallengeLink } from '../../coaching/structural-challenge-eligibility.js';
 import type { StructuralChallengeDispatchResult } from '../../handlers/structural-challenge-dispatch.js';
 import { TALK_IT_THROUGH_CHIP } from './method-turn.js';
 
 export interface StructuralChallengeReplyInput {
-  readonly result: StructuralChallengeResult;
+  readonly result: StructuralChallengeResultV1;
   /** Node id → the user's label (factors, goal and options are all nodes of the canonical graph). */
   readonly labels: ReadonlyMap<string, string>;
 }
@@ -47,11 +47,11 @@ const UNSUPPORTED: Record<string, string> = {
   candidate_rejected: 'Without that link the model can\'t be analysed (for example, an option no longer reaches your goal), so there is no fair comparison to show.',
 };
 
-function linkPhrase(result: StructuralChallengeResult, label: (id: string) => string): string {
+function linkPhrase(result: StructuralChallengeResultV1, label: (id: string) => string): string {
   return `the link from ${label(result.alternative.from_id)} to ${label(result.alternative.to_id)}`;
 }
 
-function claimLine(c: StructuralChallengeClaim, label: (id: string) => string): string | null {
+function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string): string | null {
   if (c.kind === 'leader') {
     if (c.baseline_option_id === null || c.alternative_option_id === null) return null;
     // A lead that is not clear in the model runs is never stated as a lead (contract C2/C3).
@@ -60,7 +60,7 @@ function claimLine(c: StructuralChallengeClaim, label: (id: string) => string): 
       ? `${label(c.baseline_option_id)} leads in both versions.`
       : `${label(c.alternative_option_id)} would lead instead of ${label(c.baseline_option_id)}.`;
   }
-  const q = c as StructuralChallengeQuantityClaim;
+  const q = c as StructuralChallengeQuantityClaimV1;
   if (q.baseline === null || q.alternative === null) return null;
   const who = label(q.option_id);
   if (q.kind === 'goal_probability') {
@@ -120,7 +120,7 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
 
   const lines: string[] = [headline, ''];
   lines.push('What I tested: the same model and inputs, recomputed with only this link removed. It shows what depends on this link; it doesn\'t say which version of the model is right.');
-  const bullet = (cs: readonly StructuralChallengeClaim[]) => cs.map((c) => claimLine(c, label)).filter((l): l is string => l !== null).map((l) => `- ${l}`);
+  const bullet = (cs: readonly StructuralChallengeClaimV1[]) => cs.map((c) => claimLine(c, label)).filter((l): l is string => l !== null).map((l) => `- ${l}`);
   if (changes.length > 0) lines.push('', 'What changes:', ...bullet(changes));
   if (held.length > 0) lines.push('', 'What holds:', ...bullet(held));
   const uncertain = bullet(open);
@@ -161,8 +161,8 @@ export function parseStructuralChallengePress(chipId: unknown): ChallengeLink | 
 
 export interface StructuralChallengeTurn {
   readonly reply: string;
-  readonly outcome: StructuralChallengeResult['status'] | 'no_run';
-  readonly result: StructuralChallengeResult | null;
+  readonly outcome: StructuralChallengeResultV1['status'] | 'no_run';
+  readonly result: StructuralChallengeResultV1 | null;
   readonly labels: ReadonlyMap<string, string>;
   readonly actions: readonly SuggestedAction[];
 }
@@ -176,7 +176,7 @@ export interface StructuralChallengeTurn {
  */
 export function structuralChallengeTurnUnderLicence(turn: StructuralChallengeTurn, leaderMayBeNamed: boolean): StructuralChallengeTurn {
   if (leaderMayBeNamed || turn.result === null || turn.result.status !== 'completed') return turn;
-  const result: StructuralChallengeResult = {
+  const result: StructuralChallengeResultV1 = {
     ...turn.result,
     claims: turn.result.claims.map((c) => (c.kind === 'leader'
       ? { kind: 'leader', baseline_option_id: null, alternative_option_id: null, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side', invariant_by_construction: false }
