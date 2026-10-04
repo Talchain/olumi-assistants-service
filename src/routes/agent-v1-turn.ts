@@ -119,6 +119,9 @@ import {
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
+import { dispatchStructuralChallenge } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
+import { parseStructuralChallengePress, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
+import type { StructuralChallengeFinalRead } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
@@ -2618,6 +2621,34 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       }
     }
     const widenRun = widenTurn?.kind === 'run' ? widenTurn : undefined;
+    /** SCI-DEEP: terminal, deterministic "Test without this link" press. */
+    let structuralChallengeTurn: StructuralChallengeTurn | null = null;
+    let structuralChallengeFinalRead: StructuralChallengeFinalRead | undefined;
+    if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null
+      && parseStructuralChallengePress(pressedChipId) !== null) {
+      const rb = await readBackState(readingDispatch, scenarioId);
+      const permissions = claimPermissionsFrom(rb.analysisState, rb.analysisReady, { requested: true });
+      structuralChallengeTurn = await structuralChallengeTurnFor(pressedChipId, async (link) => {
+        const dispatched = await dispatchStructuralChallenge({
+        payload: {
+          kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
+          source: 'chip_click', message,
+        },
+        requestId: `${String(req.id)}:structural-challenge`, link, origin: 'user_selected',
+        turnMayNameLeader: permissions.leader_may_be_named,
+        exploratoryWorkAllowed: permissions.permitted_analysis_mode !== null,
+        });
+        if (dispatched.kind === 'result') structuralChallengeFinalRead = dispatched.finalRead;
+        return dispatched;
+      });
+      if (structuralChallengeTurn !== null) {
+        fastPath = 'method';
+        result = { assistant_text: structuralChallengeTurn.reply, items: [], tool_calls: [], tool_results: [], mutated: false,
+          hops: 0, stopped_reason: 'answered',
+          timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
+        log.info({ scenario_id: scenarioId, structural_challenge: structuralChallengeTurn.outcome }, 'agent-lane: structural challenge answered without a model call');
+      }
+    }
     /**
      * ⭐ C6-2: open while the Agent turn runs, closed in the `finally` below — BEFORE this handler returns, so the
      * reading can never write a frame after the turn's terminal frame. See the start point after the state read.
@@ -2946,6 +2977,13 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       measuredRunKey = answer.measured?.runKey ?? null;
       if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
     }
+    // The dispatch has already supplied the identity-bound final receipt; its deterministic adapter has
+    // applied the full licence and only ever narrows a completed result.
+    if (structuralChallengeTurn !== null) {
+      structuralChallengeTurn = structuralChallengeTurnUnderLicence(structuralChallengeTurn, structuralChallengeFinalRead);
+      text = structuralChallengeTurn.reply;
+      result = { ...result, assistant_text: text };
+    }
     // Every bound coaching answer, a "no threshold" one included, is about ITS Run: re-checked on the fresh read (Codex P1 #2542).
     if ((tippingTurn?.kind === 'found' || tippingTurn?.kind === 'no_signal') && !runExplanationMatches(tippingTurn.run_key, scenarioId, composedRead)) {
       text = RUN_EXPLANATION_UNAVAILABLE_TEXT;
@@ -3093,6 +3131,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // What would change, terminal: the turn's own follow-up only.
       : fastPath === 'method' && whatChangesTurn !== null
       ? firstOfEachId([...approvals, ...whatChangesTurn.actions])
+      : fastPath === 'method' && structuralChallengeTurn !== null
+      ? firstOfEachId([...approvals, ...structuralChallengeTurn.actions])
       : firstOfEachId([
       ...approvals,
       ...carriedApproval,
