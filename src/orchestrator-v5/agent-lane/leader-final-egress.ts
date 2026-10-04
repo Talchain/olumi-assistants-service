@@ -244,7 +244,7 @@ export function knownSafeEnvelope(response: Record<string, unknown>): Record<str
   try {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(response)) {
-      if (MODEL_MEMBERS.has(k)) continue;
+      if (MODEL_MEMBERS.has(k) || k === 'analysis_ready') continue; // readiness without its required `options` is malformed: omit it whole
       if (ENVELOPE_DROPPED.has(k)) continue;
       if (k === 'blocks') { out.blocks = envelopeBlocks(v); continue; }
       if (k === '_agent') {

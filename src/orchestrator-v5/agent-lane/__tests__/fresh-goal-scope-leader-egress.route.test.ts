@@ -233,7 +233,7 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
       const original = JSON.stringify(input);
       const out = enforceLeaderLicenceAtFinalEgress(input, { requestId: TID, exitPath: 'test', licence: 'withheld', mayNameLeadingOption: false,
         graph: { get nodes() { throw new Error('roster read failed'); } } }).response;
-      expect(carrier === 'analysis_ready' ? out[carrier]!.options : out[carrier]).toBeUndefined();
+      expect(out[carrier]).toBeUndefined();
       expect(JSON.stringify(input)).toBe(original);
     });
     it(`P1-1 shared final egress: ${carrier} model bytes survive a healthy withheld read`, () => {
@@ -337,7 +337,11 @@ describe('fresh goal scope reaches the canonical leader claim at every route egr
         expect(body.run_delta).toBeUndefined();
         expect(body.graph).toBeUndefined();
         expect(body.draft_graph).toBeUndefined();
-        expect(body.analysis_ready?.options).toBeUndefined();
+        expect(body.analysis_ready).toBeUndefined(); 
+        // Every surviving member the boundary schema declares is individually schema-valid (no half-emptied wrapper).
+        for (const [k, member] of Object.entries(OlumiResponseSchema.shape)) {
+          if (k in body) { const parsed = member.safeParse(body[k]); expect(parsed.success, `${k}: ${JSON.stringify(parsed.error?.issues)}`).toBe(true); }
+        }
         expect(JSON.stringify(body)).not.toContain('Hire leads: user-authored description');
         if (exit === 'main') expect(scripted.rows.find(row => row.turn_id === TID)?.assistantMessage).toBe(body.assistant_text);
         else expect(body._agent.replayed).toBe(true);

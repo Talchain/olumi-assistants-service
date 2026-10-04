@@ -239,7 +239,7 @@ describe('the Agent lane fail-closed final egress', () => {
     expect(AnalysisResultBlockSchema.safeParse(body.blocks[0]).success).toBe(true);
     expect(body.draft_graph).toBeUndefined();
     expect(body.graph).toBeUndefined();
-    expect(body.analysis_ready.options).toBeUndefined();
+    expect(body.analysis_ready).toBeUndefined();
     expect(JSON.stringify(input)).toBe(original);
     expect(body.run_delta).toBeUndefined();
     expect(body.suggested_actions).toEqual([]);
