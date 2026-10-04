@@ -106,7 +106,7 @@ import { classifyUnitScaleClass } from "./unit-scale-class.js";
 import { soleStatedQuantityInSpan } from "../../factor-extraction/goal-label-target.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { extractStatedLikelyRange } from "../../context-integrity/not-modelled-manifest.js";
-import { statedEffectQuoteMatches, type StatedEffectDetail } from "../../provenance/stated-effect.js";
+import { statedEffectQuoteMatches } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
 import { sizeLink, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
 import type { GoalConstraintT } from "../../../schemas/assist.js";
@@ -1629,7 +1629,7 @@ function rangeForEffect(amount: number, quote: string): StatedRangeEnd | undefin
   return { low: range.low, high: range.high, text: range.text, end: absolute === range.low ? "low" : "high" };
 }
 
-function effectForEdge(args: {
+function quotedEffectForEdge(args: {
   readonly edge: ProjectedEdge;
   readonly claim: DraftInferenceClaim | undefined;
   readonly nodes: readonly ProjectedNode[];
@@ -1642,20 +1642,41 @@ function effectForEdge(args: {
   if (source === undefined || target === undefined) return undefined;
   const detail = claim?.effect_detail;
   if (claim?.claim_kind !== "causal_link" || detail === undefined) return undefined;
-  const basis = [...new Set(claim.basis ?? [])].filter((index) => Number.isInteger(index));
-  const quotes = basis
-    .map((index) => statedItems[index]?.source_quote)
-    .filter((quote): quote is string => typeof quote === "string" && quote.length > 0 && brief.includes(quote));
-  if (quotes.length !== 1) return undefined;
-  const quote = quotes[0]!;
-  // Endpoint identity comes from the causal_link references. Where the quote
-  // names the endpoints, require an exact, uniquely named label as a second
-  // check; no token overlap, alias invention, or unit-only target fallback.
-  if (!endpointLabelIsNamedUniquely(quote, source, nodes) || !endpointLabelIsNamedUniquely(quote, target, nodes)) return undefined;
-  if (!statedEffectQuoteMatches(quote, detail as StatedEffectDetail)) return undefined;
-  const direction = Math.sign(detail.amount) * Math.sign(detail.per_source_change) < 0 ? "negative" : "positive";
-  if (claim?.effect !== undefined && claim.effect !== direction) return undefined;
+  const basis = [...new Set(claim.basis ?? [])];
+  if (basis.length !== 1 || !Number.isInteger(basis[0])) return undefined;
+  const quote = statedItems[basis[0]!]?.source_quote;
+  if (typeof quote !== "string" || quote.length === 0 || !brief.includes(quote)) return undefined;
   return { ...detail, quote, ...(rangeForEffect(detail.amount, quote) !== undefined ? { stated_range: rangeForEffect(detail.amount, quote) } : {}) };
+}
+
+interface StatedEdgeEffectCandidate {
+  readonly edge: ProjectedEdge;
+  readonly claim: DraftInferenceClaim;
+  readonly effect: NonNullable<ReturnType<typeof quotedEffectForEdge>>;
+}
+
+function effectForEdge(
+  candidate: StatedEdgeEffectCandidate,
+  group: readonly StatedEdgeEffectCandidate[],
+  nodes: readonly ProjectedNode[],
+): StatedEdgeEffectCandidate["effect"] | undefined {
+  const { claim, effect } = candidate;
+  // References on the typed record own endpoint identity. Labels only resolve
+  // competing edges claiming the same quoted four-field effect.
+  if (group.length > 1) {
+    const named = group.filter((member) => {
+      const source = nodes.find((node) => node.id === member.edge.from);
+      const target = nodes.find((node) => node.id === member.edge.to);
+      return source !== undefined && target !== undefined
+        && endpointLabelIsNamedUniquely(effect.quote, source, nodes)
+        && endpointLabelIsNamedUniquely(effect.quote, target, nodes);
+    });
+    if (named.length !== 1 || named[0] !== candidate) return undefined;
+  }
+  if (!statedEffectQuoteMatches(effect.quote, effect)) return undefined;
+  const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? "negative" : "positive";
+  if (claim.effect !== direction) return undefined;
+  return effect;
 }
 
 /**
@@ -4447,11 +4468,21 @@ function projectOnce(
       }
     }
     const view = magnitudeNodes(nodes.map((node) => Object.fromEntries(Object.entries(node))), percentLevelIds({ goal_constraints: goalConstraints }));
+    const groups = new Map<string, StatedEdgeEffectCandidate[]>();
     for (const edge of edges) {
       if (edge.origin !== "ai") continue;
       const origin = claimOriginByEdgeId.get(edge.id);
       const claim = origin === undefined ? undefined : claims[origin.index];
-      const effect = effectForEdge({ edge, claim, nodes, statedItems, brief });
+      const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief });
+      if (claim === undefined || effect === undefined) continue;
+      const key = JSON.stringify([effect.quote, effect.amount, effect.amount_unit, effect.per_source_change, effect.per_source_change_unit]);
+      const group = groups.get(key) ?? [];
+      group.push({ edge, claim, effect });
+      groups.set(key, group);
+    }
+    for (const group of groups.values()) for (const candidate of group) {
+      const { edge } = candidate;
+      const effect = effectForEdge(candidate, group, nodes);
       if (effect === undefined) continue;
       const source = view.get(edge.from);
       const target = view.get(edge.to);
