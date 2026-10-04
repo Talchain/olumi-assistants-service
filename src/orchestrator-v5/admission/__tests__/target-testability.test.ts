@@ -50,7 +50,7 @@ describe('the verdict (0 LLM)', () => {
 
   it('Paul: AIQ\'s words — the target in his terms, EVERY failing reason, then the first question there is', () => {
     expect(notTargetTestableSentence(FIX.paul, targetTestabilityOf(FIX.paul))).toBe(
-      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and the model doesn't yet say how Investment firm meetings turns into securing funding. What is securing funding today?");
+      "Olumi can compare your options, but can't yet test them against your target (at least £1,200,000), because it needs today's level of securing funding and the model doesn't yet say how Investment firm meetings turns into securing funding in £. What is securing funding today?");
   });
 
   it('RED (MODEL GENERATION 5913996539): after G6 writes his £0, the target is STILL not testable — the £ path is missing', () => {

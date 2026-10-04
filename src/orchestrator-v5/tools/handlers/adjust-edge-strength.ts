@@ -44,8 +44,25 @@ import {
   formatEdgeStrengthUnchanged,
 } from './d1-shared/format-confirmation.js';
 import { ADJUST_EDGE_STRENGTH_USER_GUIDANCE } from './d1-shared/user-guidance.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 
 export const AdjustEdgeStrengthSchema = z.number().min(-1).max(1);
+
+function unsizedGoalPathNote(graph: GraphV3T, from: string, to: string): string | undefined {
+  const verdict = targetTestabilityOf(graph);
+  if (verdict.kind !== 'not_testable') return undefined;
+  const goal = graph.nodes.find((node) => node.id === verdict.goal_id);
+  const failure = verdict.failures.find((item) => item.code === 'goal_path_unsized' || item.code === 'goal_path_placeholder');
+  if (goal === undefined || failure?.lever === undefined) return undefined;
+  const source = graph.nodes.find((node) => node.id === from);
+  const target = graph.nodes.find((node) => node.id === to);
+  if (typeof source?.label !== 'string' || source.label !== failure.lever || target?.id !== goal.id) return undefined;
+  const goalUnit = typeof goal.goal_threshold_unit === 'string' ? goal.goal_threshold_unit : 'the goal unit';
+  const sourceLabel = source.label;
+  const targetLabel = typeof target.label === 'string' ? target.label : 'the goal';
+  const goalLabel = typeof goal.label === 'string' ? goal.label : 'your goal';
+  return ` That sets how strongly ${sourceLabel} moves ${goalLabel}, but to test your goal Olumi still needs the size in ${goalUnit}: how much does ${targetLabel} change when ${sourceLabel} changes by its unit?`;
+}
 // V5 D1 (P1-6 follow-up): EdgeStrengthV3.std requires `.positive()`,
 // so a value of 0 would pass parameter validation but fail the
 // post-mutation `GraphV3.parse`, surfacing as a misleading
@@ -578,9 +595,10 @@ export function createAdjustEdgeStrengthHandler(): HandlerFn {
             beforeDirection: beforeSnapshot.effect_direction,
             afterDirection: afterSnapshot.effect_direction,
           });
+      const truthfulSizeNote = unsizedGoalPathNote(graph, parsed.from, parsed.to);
 
       return {
-        assistant_text: assistantText,
+        assistant_text: `${assistantText}${truthfulSizeNote ?? ''}`,
         handler_facts: [factCheck.data],
         llm_calls_used: 0,
         mutated_graph: result.mutatedGraph,
