@@ -74,6 +74,35 @@ describe('canonical reread: cancellation at supported production dependencies', 
     expect(fake.signals[0]!.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
+  for (const supportsAbort of [false, true]) {
+    it(`a hot-window read that SUCCEEDS after its deadline never overwrites the session cache (abort support=${supportsAbort}; review 2ed9906b)`, async () => {
+      // The dependency ignores cancellation and resolves late with an OLD, empty history.
+      let resolveLate!: (value: { data: unknown[]; error: null }) => void;
+      const pending = new Promise<{ data: unknown[]; error: null }>(resolve => { resolveLate = resolve; });
+      const query: Record<string, unknown> = { then: pending.then.bind(pending) };
+      for (const method of ['select', 'eq', 'not', 'in', 'order', 'limit', 'maybeSingle']) query[method] = () => query;
+      if (supportsAbort) query.abortSignal = () => query;
+      const client = { from: () => query } as unknown as SupabaseClient;
+      const cache = new SessionLRUCache({ maxScenarios: 2, maxTurnsPerScenario: 20 });
+      const store = new SupabaseSessionStore(client, cache, { defaultReadLimit: 20 });
+      let verdict: unknown;
+      const bounded = withAnalysisReadDeadline(() => store.readRecent(SCENARIO)).catch(error => { verdict = error; });
+      await vi.advanceTimersByTimeAsync(ANALYSIS_REREAD_TIMEOUT_MS);
+      await bounded;
+      expect(verdict).toBeInstanceOf(AnalysisReadDeadlineError);
+      // A commit lands and repopulates the cache with the committed row's history.
+      const committed = [{ id: ROW }] as never;
+      cache.populate(SCENARIO, committed, { complete: true });
+      // The old read now resolves successfully with empty history.
+      resolveLate({ data: [], error: null });
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      const after = cache.getScenario(SCENARIO);
+      expect(after?.complete).toBe(true);
+      expect(after?.turns).toHaveLength(1);
+      expect((after?.turns[0] as { id?: string }).id).toBe(ROW);
+    });
+  }
   it('healthy reads keep the exact result object/bytes and do not retain timers or a cancellation scope', async () => {
     const value = { result: 'healthy', identity: SCENARIO };
     expect(await withAnalysisReadDeadline(async () => value)).toBe(value);

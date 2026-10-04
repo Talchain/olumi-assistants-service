@@ -39,6 +39,11 @@ export async function withAnalysisReadDeadline<T>(read: (signal: AbortSignal) =>
   }
 }
 
+/** True once the enclosing reread's deadline has passed: a late result must not populate shared caches. */
+export function analysisReadExpired(): boolean {
+  return readSignal.getStore()?.aborted === true;
+}
+
 /** Attach the shared cancellation signal only to readers whose client supports it. */
 export function abortableAnalysisRead<T>(query: T): T {
   const signal = readSignal.getStore();

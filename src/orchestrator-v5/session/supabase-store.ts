@@ -37,7 +37,7 @@ import {
 } from '@talchain/schemas/orchestrator';
 
 import type { SessionLRUCache } from './cache.js';
-import { ANALYSIS_REREAD_TIMEOUT_MS, abortableAnalysisRead, withAnalysisReadDeadline } from './analysis-read-deadline.js';
+import { ANALYSIS_REREAD_TIMEOUT_MS, AnalysisReadDeadlineError, abortableAnalysisRead, analysisReadExpired, withAnalysisReadDeadline } from './analysis-read-deadline.js';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import {
   GraphStaleWriteError,
@@ -1873,6 +1873,9 @@ export class SupabaseSessionStore implements SessionStore {
     }
     // Complete iff DB returned fewer rows than the caller's limit — more
     // rows would have been returned if they existed.
+    // A read that outlived its reread deadline must not write the shared session cache: a commit may have
+    // invalidated and repopulated it since, and this older history would overwrite the committed row.
+    if (analysisReadExpired()) throw new AnalysisReadDeadlineError();
     this.cache.populate(scenarioId, turns, { complete: turns.length < limit });
     return turns;
   }
