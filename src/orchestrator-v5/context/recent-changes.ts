@@ -239,14 +239,12 @@ export const MUTATION_DISPATCH_SKIP: ReadonlyMap<HandlerFact['fact_type'], strin
     ['explain_from_structure', 'Read-only explanation — no state change.'],
     ['compare_options', 'Read-only comparison — no state change.'],
     ['what_would_flip', 'Read-only sensitivity answer — no state change.'],
-    // 0.34.0 — P4 transport judgement receipts. All three PERSIST a human
-    // judgement without touching the graph (carry the signal; compute
-    // consequence is a separate design decision), so there is no graph
-    // mutation to report in "what just changed". Surfacing them in coaching
-    // context is a deliberate FUTURE consumption decision, not a default.
+    // Judgement receipts persist a human signal without changing the graph.
+    // Range now mutates canonically, but its existing fact carries no labels or
+    // before/status snapshot suitable for this graph-free context projection.
     ['feedback', 'Judgement receipt (thumbs rating) — no graph state change.'],
     ['edge_adjudication', 'Judgement receipt (contested-edge verdict) — no graph state change.'],
-    ['prior_range_edit', 'Judgement receipt (user-set prior range) — no graph state change.'],
+    ['prior_range_edit', 'Canonical factor-range edit; receipt lacks labels/status for this projection.'],
     // 0.55.0 — `finding_dissent`, the FOURTH judgement receipt. Classified SKIP
     // on 2026-09-11. DERIVED rather than assumed, because the conformance test
     // forces the question and a silent answer is the thing it exists to stop:
