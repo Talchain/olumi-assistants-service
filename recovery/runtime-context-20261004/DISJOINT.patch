@@ -1,0 +1,189 @@
+diff --git a/src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts b/src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts
+index 36b6109..c32f45e 100644
+--- a/src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts
++++ b/src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts
+@@ -24,6 +24,7 @@ import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysi
+ import { leaderLicenceFromState } from '../../compose/leader-licence.js';
+ import { explanationContext } from './fixtures/run-explanation-follow-up.js';
+ import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
++import { selectedRunContextDelta } from './fixtures/selected-run-context-delta.js';
+ 
+ type Json = Record<string, any>;
+ const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url), 'utf8')) as Json;
+@@ -43,7 +44,7 @@ let read: Json = {};
+ const fresh = (): Json => JSON.parse(JSON.stringify(SERVED)) as Json;
+ /** The Run turn's own `analysis_ready`: the same admission the read carries (the turn and the read agree). */
+ const readyOf = (r: Json): Json => ({ status: 'ready', analysis_admission: r.analysis_admission });
+-const graphBody = (): Json => ({ ...read, analysis_ready: readyOf(read), current_read: {} });
++const graphBody = (): Json => ({ ...read, analysis_ready: readyOf(read), current_read: read.current_read ?? {} });
+ const turnBody = (): Json => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
+   graph_hash: read.graph_hash, blocks: [read.analysis_result], analysis_state: read.analysis_state, analysis_ready: readyOf(read) });
+ 
+@@ -135,6 +136,66 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
+     return states[0]!;
+   };
+ 
++  it('ordinary model input and transcript-free get_canonical_state retain the reader delta and prior qualitative bytes', async () => {
++    const dispatch: InternalDispatch = async () => ({ status: 200, json: graphBody() });
++    const coldCaps = createAgentCapabilities(dispatch, new ProposalStore());
++    const baseline = await coldCaps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
++    const delta = selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at, true);
++    read.current_read = { run_delta: delta };
++    const state = await followUpState();
++    const cold = await coldCaps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
++    expect(state.analysis.run_delta).toEqual(delta);
++    expect(cold.analysis.run_delta).toEqual(delta);
++    const { run_delta: _delta, ...analysis } = cold.analysis;
++    expect({ ...cold, analysis }).toEqual(baseline);
++    expect(JSON.stringify({ ...cold, analysis })).toBe(JSON.stringify(baseline));
++    expect(state.entities).toEqual(baseline.entities);
++    expect(state.links).toEqual(baseline.links);
++    expect(state.limits).toEqual(baseline.limits);
++    expect(state.analysis.claim_permissions).toEqual(baseline.analysis.claim_permissions);
++  });
++
++  it('Explain and ordinary model input consume the same selected reader delta', async () => {
++    const delta = selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at);
++    read.current_read = { run_delta: delta };
++    const explained = await explainPayload();
++    modelBodies = [];
++    const ordinary = await followUpState();
++    expect(explained.canonical_state.run_delta).toEqual(delta);
++    expect(ordinary.analysis.run_delta).toEqual(explained.canonical_state.run_delta);
++  });
++
++  it('withheld context carries only the reader’s neutral delta and gains no leader permission', async () => {
++    read.analysis_state.leader_claim = WITHHELD_CLAIM;
++    const delta = selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at, false);
++    read.current_read = { run_delta: delta };
++    const state = await followUpState();
++    expect(state.analysis.run_delta).toEqual(delta);
++    expect(state.analysis.claim_permissions.leader_may_be_named).toBe(false);
++    expect(state.analysis.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
++    expect(state.analysis.run_delta.leader).not.toHaveProperty('current_leading_option_id');
++  });
++
++  it('an absent first-Run comparison does not become a fabricated no-change delta', async () => {
++    expect((await followUpState()).analysis).not.toHaveProperty('run_delta');
++  });
++
++  it('goal-free canonical context keeps its qualitative carriers and does not fabricate a goal', async () => {
++    read.graph.nodes = read.graph.nodes.filter((node: Json) => node.kind !== 'goal');
++    delete read.graph.goal_node_id;
++    read.graph.edges = read.graph.edges.filter((edge: Json) => edge.to !== 'mrr' && edge.from !== 'mrr');
++    const dispatch: InternalDispatch = async () => ({ status: 200, json: graphBody() });
++    const caps = createAgentCapabilities(dispatch, new ProposalStore());
++    const baseline = await caps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
++    read.current_read = { run_delta: selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at) };
++    const cold = await caps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
++    expect(cold.analysis.run_delta).toEqual(read.current_read.run_delta);
++    expect(cold).not.toHaveProperty('goal');
++    expect(cold).not.toHaveProperty('goals');
++    const { run_delta: _delta, ...analysis } = cold.analysis;
++    expect(JSON.stringify({ ...cold, analysis })).toBe(JSON.stringify(baseline));
++  });
++
+   it('D3-a: Explain on a current Run with an UNEARNED P(goal)=0 carries that option’s goal_certainty sentence', async () => {
+     // Fixture control: the published contract accepts the stored decisions (else every reader says `unchecked`).
+     expect(readStoredGoalCertainty(UNEARNED)).toHaveLength(2);
+diff --git a/src/orchestrator-v5/agent-lane/__tests__/fixtures/selected-run-context-delta.ts b/src/orchestrator-v5/agent-lane/__tests__/fixtures/selected-run-context-delta.ts
+new file mode 100644
+index 0000000..2f74d12
+--- /dev/null
++++ b/src/orchestrator-v5/agent-lane/__tests__/fixtures/selected-run-context-delta.ts
+@@ -0,0 +1,15 @@
++/** A recorded comparison from the existing producer/fixture grammar, never a second delta calculation. */
++import { RunDeltaSchema } from '@talchain/schemas/boundary';
++import { buildRunDelta } from '../../../coaching/build-run-delta.js';
++import { runAnalysisFact } from '../../../context/__tests__/run-delta-fixtures.js';
++
++export function selectedRunContextDelta(hash: string, at: string, mayName = false) {
++  const priorAt = new Date(Date.parse(at) - 30 * 60_000).toISOString();
++  const facts = [
++    runAnalysisFact([{ id: 'opt-a', win: 0.45 }, { id: 'opt-b', win: 0.55 }], '4242', hash, at),
++    runAnalysisFact([{ id: 'opt-a', win: 0.62 }, { id: 'opt-b', win: 0.38 }], '4242', 'aaaaaaaaaaaaaaaa', priorAt),
++  ];
++  const built = buildRunDelta({ priorFacts: facts, mayNameLeadingOption: mayName });
++  if (built.kind !== 'ok') throw new Error(`fixture: recorded delta refused (${built.reason})`);
++  return RunDeltaSchema.parse(built.delta);
++}
+diff --git a/src/orchestrator-v5/agent-lane/__tests__/saved-run-context-facts.shared-data.test.ts b/src/orchestrator-v5/agent-lane/__tests__/saved-run-context-facts.shared-data.test.ts
+index 4b3fe0c..108984f 100644
+--- a/src/orchestrator-v5/agent-lane/__tests__/saved-run-context-facts.shared-data.test.ts
++++ b/src/orchestrator-v5/agent-lane/__tests__/saved-run-context-facts.shared-data.test.ts
+@@ -7,6 +7,7 @@ import { modelFacingToolResult } from '../licensed-run-view.js';
+ import { runExplanationChip } from '../run-explanation.js';
+ import { claimPermissionsFrom } from '../first-analysis.js';
+ import { readLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
++import { selectedRunContextDelta } from './fixtures/selected-run-context-delta.js';
+ 
+ type Rec = Record<string, any>;
+ const corpus = (path: string): Rec => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as Rec;
+@@ -24,6 +25,41 @@ const withheld = { leader_may_be_named: false };
+ const project = (read = current): Rec => savedRunContextFacts(SID, read, withheld);
+ 
+ describe('same selected current Run supplies context facts without another authority', () => {
++  it('carries the same already-licensed delta by reference, preserving every prior fact', () => {
++    const delta = selectedRunContextDelta(POSITIVE.graph_hash, AT);
++    const baseline = project();
++    const facts = project({ ...current, run_delta: delta } as SavedRunContextFactsRead);
++    expect(facts.run_delta).toBe(delta);
++    const { run_delta: _delta, ...unchanged } = facts;
++    expect(unchanged).toEqual(baseline);
++    expect(project()).not.toHaveProperty('run_delta');
++  });
++
++  it.each(['never_run', 'complete_stale', 'unknown_degraded'])('%s cannot revive an earlier delta', (kind) => {
++    const delta = selectedRunContextDelta(POSITIVE.graph_hash, AT);
++    expect(project({ ...current, run_delta: delta,
++      analysis_state: { run_state: { kind, computed_at: AT } },
++    } as SavedRunContextFactsRead)).toEqual({});
++  });
++
++  it('a newer degraded read with no selected result cannot borrow a prior delta', () => {
++    const delta = selectedRunContextDelta(POSITIVE.graph_hash, AT);
++    expect(project({ ...current, run_delta: delta, analysis_result: undefined,
++      analysis_state: { run_state: { kind: 'complete_current', computed_at: AT },
++        contradictions: ['fact_status_success_but_degraded_newer'] },
++    } as SavedRunContextFactsRead)).toEqual({});
++  });
++
++  it('a newer Run on the same graph uses only its own selected delta and reference', () => {
++    const nextAt = '2026-10-03T00:05:00.000Z';
++    const delta = selectedRunContextDelta(POSITIVE.graph_hash, nextAt);
++    const facts = project({ ...current, run_delta: delta,
++      analysis_state: { run_state: { kind: 'complete_current', computed_at: nextAt } },
++    } as SavedRunContextFactsRead);
++    expect(facts.run_delta).toBe(delta);
++    expect(facts.selected_run_reference).not.toBe(project().selected_run_reference);
++  });
++
+   it('uses the existing science projection exactly, retaining the recorded factor and 55.76 threshold', () => {
+     const immediate = modelFacingToolResult('run_analysis', { result: analysisResultForAgent(result), claim_permissions: withheld }) as Rec;
+     const facts = project();
+diff --git a/src/orchestrator-v5/agent-lane/saved-run-context-facts.ts b/src/orchestrator-v5/agent-lane/saved-run-context-facts.ts
+index 419897a..6bbe56c 100644
+--- a/src/orchestrator-v5/agent-lane/saved-run-context-facts.ts
++++ b/src/orchestrator-v5/agent-lane/saved-run-context-facts.ts
+@@ -1,4 +1,5 @@
+ /** Selected canonical Run facts for follow-up/Explain context. No freshness or permission authority. */
++import type { RunDelta } from '@talchain/schemas/boundary';
+ import { asVerdictState, type StoredLimitVerdicts } from '../../orchestrator/context/constraint-feasibility.js';
+ import { analysisResultForAgent } from './decision-sensitivity.js';
+ import { limitChecksForAgent, LIMIT_CHECKS_NOTE } from './limit-checks.js';
+@@ -13,6 +14,7 @@ export interface SavedRunContextFactsRead {
+   readonly limit_verdicts?: StoredLimitVerdicts;
+   readonly constraint_verdict_state?: unknown;
+   readonly leader_limit_risks?: readonly unknown[] | null;
++  readonly run_delta?: RunDelta;
+ }
+ 
+ /** The existing Explain reference binds the full selected fact tuple; it is not a Run execution id. */
+@@ -31,6 +33,7 @@ export function savedRunContextFacts(
+     ? limitChecksForAgent(read.raw, read.limit_verdicts) : undefined;
+   return {
+     selected_run_reference: selected.id,
++    ...(read.run_delta !== undefined ? { run_delta: read.run_delta } : {}),
+     leader_limit_risks_note: 'Each probability is the chance that its recorded option meets the named limit, not its chance of breaching it. '
+       + 'Missing means unrecorded; null means no result body; [] means read with no recorded risk. These facts grant no permission to name a leader.',
+     ...(projected.tipping_point !== undefined ? {

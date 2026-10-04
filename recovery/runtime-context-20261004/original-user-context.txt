@@ -1,0 +1,65 @@
+ADDITIONAL CONTEXT FOR CODEX: OLUMI MODEL-UPGRADE DELIVERY
+
+Your role
+You are the implementation agent, not another auditor. Deliver the bounded delta in the attached OLUMI-MODEL-UPGRADE-DELTA-AND-HANDOVER-2026-10-02.md, through the existing B3 model-fidelity/admission workstream.
+
+Paul’s priorities are speed, user-experienced reasoning value and investor impact. Build and check together. Reuse working components, avoid architectural expansion and keep the existing PoC protected.
+
+This is the first useful increment of the wider model improvement, not the entire redesign.
+
+1. Establish continuity before changing code
+
+Read the revised handover in full, §0 first. Its corrections supersede the earlier CC assessment, particularly the rejected blanket-confirmation gate and incorrect claim that claim controls do not exist.
+
+Refresh programme-docs #85 using the handover’s since= timestamp, following pagination. Verify the current B3 owner, branch, pushed work, leases and release windows. Match the model-fidelity/admission brief, not merely the label “B3”.
+
+If a B3 builder exists, coordinate this contribution under its lease. Do not replace its work or become a competing writer. If none exists, obtain the DL’s assignment.
+
+Treat cited commits, line numbers, schedules and owner availability as historical until checked. Send the three §5.4 policy choices together, with recommended defaults. Do not silently decide them.
+
+While awaiting decisions, continue disjoint code tracing and isolated test preparation; block only the affected work.
+
+2. Preserve the actual product improvement
+
+B3-7: An AI-inferred objective should be offered, not presupposed.
+Use the existing question/display path without adding a Run blocker. Verify the actual provenance and user-ownership signals with MG. Do not invent a confirmation field. Prefer the question-only approach, subject to RC/Panel approval.
+
+B3-8: A permitted leading option should disclose the relevant Olumi estimates supporting the comparison.
+Reuse the existing dependency signal and claim permissions. Verify what the list actually covers and where it is consumed before editing. Do not present it as exhaustive without evidence, infer missing dependencies from labels, or treat unavailable data as an empty list. Prefer existing-carrier inline wording, subject to owner approval.
+
+User approval does not turn an AI estimate into measured evidence. Do not change semanticQualitySufficient, obligation-provenance.ts or introduce an “all parameters confirmed” gate.
+
+Constraint retention: replay existing captures first. Only then perform the handover’s bounded serving-route measurement, with the required budget and slot. Route any demonstrated drafter defect to MG; do not broaden your own patch.
+
+3. Join the existing positive capability
+
+B3-5 is the demonstration dependency, not additional work to duplicate:
+an option with a missing mechanism is retained honestly, the user supplies the missing information, and the option becomes genuinely analysable.
+
+Verify that the resolution changes the actual model and analysis inputs, not just a “ready” label. After the authorised edit and rerun, explain the supported consequence. Do not force a winner change.
+
+B3-7/B3-8 alone improve framing and disclosure; they do not establish that the underlying model is now scientifically validated.
+
+4. Keep the implementation narrow
+
+Reuse the canonical mutation, persistence, context and claim-control paths. Check each intended change reaches its real consumer and survives reload.
+
+Do not introduce a new model store, universal compiler, agent framework, default second critic, general dynamics or historical migration.
+
+Measure hash behaviour on the real fixtures; do not assume “display-only” means unchanged. Preserve analysis inputs and permissions for these disclosure changes.
+
+A branch or feature flag does not isolate shared data. Use isolated test storage and follow the owner’s release/isolation ruling. Do not repurpose the native-context trial or write to shared live scenarios.
+
+Mac-only scripts and scratch cleanup are not cloud prerequisites. Report unavailable tooling and use approved equivalents; never delete another session’s files.
+
+5. Finish with evidence, not another report
+
+Follow §6: reproduce the relevant failure, retain a passing control, implement, run the required gates and obtain independent review through MG, the assigned code reviewer and DL. Being Codex does not make your self-review independent.
+
+Avoid duplicate tests, reviews and unchanged-status polling. Do not skip required gates because branch protection is unenforced.
+
+Keep source-tested, pushed, merged, deployed and journey-witnessed distinct. Coordinate the served witness with R3; Paul owns his signed-in test.
+
+First update: at most five bullets covering ownership/branch, smallest proposed diff, policy decisions, first executable check and target/blocker.
+
+Then proceed to implementation as authorised, reporting material progress or concrete blockers only. Preserve the wider backlog in the handover rather than expanding this increment.

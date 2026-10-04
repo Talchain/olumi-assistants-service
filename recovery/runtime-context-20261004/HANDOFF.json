@@ -1,0 +1,66 @@
+{
+  "at": "2026-10-04T02:03:23.033940+00:00",
+  "state": "COMPOSED_FOCUSED_GREEN_HANDOFF_READY",
+  "base": "3ddcea18fe54ec14fa9085171f1e4b3c08d53baa",
+  "branch": "runtime/selected-run-delta-context-20261004",
+  "disjoint_head": "22362b543ad39bebfcdcfa5da3a69cfe7690ad5f",
+  "disjoint_tree": "496d01dec64c97d3b79c10adb080d734362db1e8",
+  "composed_tree": "746a38dc855bf7c87cee22f18734d59a0b4e92f0",
+  "composed_patch_sha256": "6f409123ba8ca1cd10032c470cde57e85ad710da4108def7d4877515d56a4b39",
+  "shared_product_file_unchanged": true,
+  "shared_patch_lines": 24,
+  "shared_patch_sha256": "aa6f6ef46fb221a67e249c80f28b50dfd2a7cc9be973ddee47ce19a99bf23641",
+  "files": [
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/explain-guards-one-leader-spelling.route.test.ts",
+      "blob": "c32f45e84400607968e377f5ef355c2b8aae7ad1"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/fixtures/selected-run-context-delta.ts",
+      "blob": "2f74d128a08bdf1424a96a56b2c7f3df34150c4f"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/__tests__/saved-run-context-facts.shared-data.test.ts",
+      "blob": "108984f785b3e40d6a0d2561ee57bc2141db6781"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/runtime/agent-capabilities.ts",
+      "blob": "4e6b1efefef09908a17bf23351e2d6992f699c73"
+    },
+    {
+      "path": "src/orchestrator-v5/agent-lane/saved-run-context-facts.ts",
+      "blob": "6bbe56cab90cb6c4a957f24384ba9e93051cb1c9"
+    }
+  ],
+  "RED": "5 FAIL / 42 PASS, initial CLI setup failure excluded",
+  "composed_GREEN": "71 PASS / 0 FAIL, four offline specs, one worker; exact banked shared carrier supplied by Vite load overlay",
+  "mutants": {
+    "drop_carrier": "4 FAIL / 44 PASS",
+    "carry_stale_delta": "4 FAIL / 44 PASS"
+  },
+  "lint": "PASS four changed files",
+  "runtime_paid_calls": 0,
+  "browser_runs": 0,
+  "shared_writer": "DL/B3 retains shared-file slot; Runtime made no shared product-file edits",
+  "independent_review": "DL to arrange current exact-risk review; none inferred",
+  "source_head_alone": "Disjoint helper/tests only; must integrate shared patch before ordinary route is green. Do not publish as complete fix.",
+  "PR_state": "Prepared, not created/pushed; needs DL integration or explicit release and full/current publisher gates",
+  "proof_hashes": {
+    "RED.log": "ff79a3c38f44e06f38b42fa04a00de0271de9f9343db673f0dc92fdd0ee3a606",
+    "COMPOSED-GREEN.log": "c348b1364294b3a3d18b0a63e6294b73c47ada1903f166db553e6fd8bfdaeba0",
+    "LINT.log": "2c56f3adb4601c7a9dccb2d35d1271456aa52e64ae305b58dff25e3c9ef2076c",
+    "MUTANT-MISSING-CARRIER.log": "6b866e3bd607424fbbe987308d9005e182a151da77abc8f7d89d7d2a8302e6b6",
+    "MUTANT-STALE-CARRY.log": "ccca96dc83756e9b4ea2258dd7b92e2fd5592399e386a51a1e3e3c48f62174d9",
+    "DL-agent-capabilities.patch": "aa6f6ef46fb221a67e249c80f28b50dfd2a7cc9be973ddee47ce19a99bf23641",
+    "DISJOINT.patch": "42f7dd6b5e686e892ab04424c136bfdc4ffdf9c54d459e84cb1d4ce22a2fcee4",
+    "COMPOSED.patch": "6f409123ba8ca1cd10032c470cde57e85ad710da4108def7d4877515d56a4b39"
+  },
+  "report_sha256": "e661370118330d201ad539fd53ebf7ed286e91972b5ba10f901764235743ecac",
+  "control87": {
+    "at": "2026-10-04T02:04:24.168180+00:00",
+    "id": 5975622354,
+    "url": "https://github.com/Talchain/olumi-programme-docs/issues/87#issuecomment-5975622354",
+    "exact_readback": true,
+    "body_sha256": "9fcbb4fd46c07afd0c1c1fff7056dc1041f4921dc92a1afeddc305b6225c2c22"
+  }
+}
