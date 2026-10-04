@@ -155,7 +155,13 @@ describe('approved Olumi option joins Run, stored fact and cold read', () => {
       computed_against_hash: second.result.graph_hash_at_run,
       leading_option_id: null,
       enrichment: {
-        inference_warnings: [{ code: 'GOAL_FIGURES_PRODUCT_NOT_READ' }],
+        // The goal holds the brief's 12 months and no limit is a duration, so the Run also carries A7 as its typed
+        // warning (`decision-input-ask.ts` `untestedHorizonLine`), and the COLD READ returns it: the stored fact keeps it.
+        inference_warnings: [
+          { code: 'GOAL_FIGURES_PRODUCT_NOT_READ' },
+          { code: 'GOAL_HORIZON_NOT_TESTED', severity: 'info',
+            message: 'This model doesn\'t yet say whether any option gets there within 12 months.' },
+        ],
       },
     });
     expect((reopened.analysis_result as Rec).win_probabilities).toBeUndefined();
