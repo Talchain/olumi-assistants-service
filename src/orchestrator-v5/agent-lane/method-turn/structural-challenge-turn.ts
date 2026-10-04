@@ -206,8 +206,9 @@ export type StructuralChallengePress = ChallengeLink | { readonly legacyCandidat
 export function parseStructuralChallengePress(chipId: unknown): StructuralChallengePress | null {
   if (typeof chipId !== 'string' || !chipId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) return null;
   const suffix = chipId.slice(STRUCTURAL_CHALLENGE_PRESS_PREFIX.length);
-  // Bounds by grammar: canonical JSON of two 200-char ids is 407 chars; legacy `from::to` is 402.
-  if (suffix.length > 407) return null;
+  // Bounds: JSON.parse is linear, so the canonical form keeps base compatibility (whitespace, \u escapes: two
+  // fully escaped 200-char ids are ~2,410 chars) under a 4,096 sanity cap; legacy `from::to` enumeration is 402.
+  if (suffix.length > 4096) return null;
   const linkOf = (from: unknown, to: unknown): ChallengeLink | null => {
     if (!NodeV3.shape.id.safeParse(from).success || !NodeV3.shape.id.safeParse(to).success || from === to) return null;
     const parsed = StructuralChallengeAlternativeV1Schema.safeParse({ op: 'remove_link', from_id: from, to_id: to, origin: 'user_selected', sizing: 'unmarked' });

@@ -198,12 +198,16 @@ describe('SCI-DEEP reply', () => {
     expect(parseStructuralChallengePress(`agent-test-without-link:${maximum}b`)).toBeNull();
   });
 
-  it('canonical maximum: two 200-char ids in JSON (407 chars) still parse exactly as on base; one more char is refused', () => {
+  it('canonical JSON keeps base compatibility: 200-char ids, whitespace and \\u escapes parse; only an oversize suffix is refused', () => {
     const link = { from_id: 'a'.repeat(200), to_id: 'b'.repeat(200) };
     const press = structuralChallengePressId(link);
     expect(press.length - 'agent-test-without-link:'.length).toBe(407);
     expect(parseStructuralChallengePress(press)).toEqual(link);
-    expect(parseStructuralChallengePress(`${press} `)).toBeNull();
+    expect(parseStructuralChallengePress(`${press} `)).toEqual(link);
+    const escaped = (id: string) => [...id].map((c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`).join('');
+    expect(parseStructuralChallengePress(`agent-test-without-link:["${escaped(link.from_id)}","${escaped(link.to_id)}"]`)).toEqual(link);
+    expect(parseStructuralChallengePress(`agent-test-without-link:[ "monthly_churn" , "mrr" ]`)).toEqual({ from_id: 'monthly_churn', to_id: 'mrr' });
+    expect(parseStructuralChallengePress(`agent-test-without-link:${' '.repeat(4097)}`)).toBeNull();
   });
 
   it('the final licence only narrows: a leader withheld at the final read is withheld in the result and the reply', async () => {

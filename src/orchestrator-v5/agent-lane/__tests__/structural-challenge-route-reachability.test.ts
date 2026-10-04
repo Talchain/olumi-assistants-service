@@ -138,8 +138,8 @@ describe('agent route: real structural challenge press reachability', () => {
   }
 
   beforeEach(async () => { plotCalls = []; graphReadFailed = false; turnId = randomUUID(); await licensedRun(); });
-  const post = (chip: string) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-    kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: 'normal', source: 'chip', chip: { id: chip },
+  const post = (chip: string, extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: 'normal', source: 'chip', chip: { id: chip, ...extra },
   } });
 
   function noModelCallsOrGraphWrites(body: Rec) {
@@ -165,8 +165,8 @@ describe('agent route: real structural challenge press reachability', () => {
     expect(transport.plot!.validatePatch).not.toHaveBeenCalled();
   }
 
-  async function accepted(chip: string) {
-    const response = await post(chip);
+  async function accepted(chip: string, extra: Rec = {}) {
+    const response = await post(chip, extra);
     const body = response.json();
     expect(response.statusCode).toBe(200);
     expect(body._diagnostic_trace.fast_path).toBe('method');
@@ -194,6 +194,27 @@ describe('agent route: real structural challenge press reachability', () => {
 
   it('canonical JSON pair still reaches real dispatch', async () => {
     await accepted(structuralChallengePressId(LINK));
+  });
+
+  // A chip that ALSO says action_type run_analysis must not be taken by the earlier ordinary-Run branch.
+  const RUN_TYPED = { action_type: 'run_analysis' };
+  it('served legacy press carrying action_type run_analysis is still SCI-DEEP, never an ordinary Run', async () => {
+    await accepted('agent-test-without-link:driver_retention::goal_value', RUN_TYPED);
+  });
+  it('canonical press carrying action_type run_analysis is still SCI-DEEP, never an ordinary Run', async () => {
+    await accepted(structuralChallengePressId(LINK), RUN_TYPED);
+  });
+  it.each([
+    ['malformed', 'agent-test-without-link:', REFUSAL],
+    ['unknown legacy link', 'agent-test-without-link:a:::b',
+      "That link isn't in your current model. Open a link from the canvas and try again. Nothing in your model changed."],
+  ])('%s press carrying action_type run_analysis refuses as SCI-DEEP with zero provider calls and no Run', async (_name, chip, reply) => {
+    const response = await post(chip, RUN_TYPED);
+    const body = response.json();
+    expect(response.statusCode).toBe(200);
+    expect(body.assistant_text).toBe(reply);
+    expect(body._diagnostic_trace.fast_path).toBe('method');
+    expect(plotCalls).toHaveLength(0); noModelCallsOrGraphWrites(body);
   });
 
   it.each(['two matching edges', 'no matching edges'] as const)('ambiguous legacy press refuses with zero provider calls: %s', async (kind) => {
