@@ -322,6 +322,22 @@ describe('card names never collide with a literal label elsewhere in the graph',
     expect(await press(w, copy, `Yes — ${reading(literal)}`)).toEqual(expect.objectContaining({ ok: false, reason: 'reading_not_confirmed' }));
     expect(w.sent).toEqual([]);
   });
+  // Codex round 3 (P1): what a reader cannot tell apart — case, spaces, a trailing ellipsis — never separates two names.
+  const visual = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim().replace(/\s*(?:…|\.\.\.)+$/, '').trim();
+  const VARIANTS = [['ellipsis then space', (l: string) => `${l}… `], ['space then ellipsis', (l: string) => `${l} …`],
+    ['three dots', (l: string) => `${l}...`], ['padded and doubled spaces', (l: string) => `  ${l.replace(' ', '  ')}  `],
+    ['other case', (l: string) => l.toUpperCase()]] as const;
+  it.each(tiers.flatMap(([tier, literal, setup, copyName, kind]) => VARIANTS.map(([variant, dress]) =>
+    [tier, variant, dress(literal), setup, copyName, kind] as const)))('RED (%s tier, literal with %s): the shared-label node\'s name never reads as the literal, bound to its id', async (_tier, _variant, literal, setup, copyName, kind) => {
+    const w = world(withLiteral(literal, setup, kind));
+    const copy = await w.caps.proposeLinkEffect!(ctx(), { ...ARGS, from_label: COPY }) as Json;
+    expect(copy.ok, JSON.stringify(copy)).toBe(true);
+    expect(w.store.get(String(copy.proposal_id))?.operations).toEqual([operation(w.graph, COPY)]);
+    expect(copy.link.from).toBe(copyName);
+    expect(visual(copy.link.from)).not.toBe(visual(literal));
+    expect(await press(w, copy, `Yes — ${reading(literal)}`)).toEqual(expect.objectContaining({ ok: false, reason: 'reading_not_confirmed' }));
+    expect(w.sent).toEqual([]);
+  });
 });
 
 /**

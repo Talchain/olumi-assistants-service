@@ -342,7 +342,9 @@ describe('link effect writer — a non-unique target writes nothing, in either a
     const g = withDuplicateNode(id, copyFirst);
     const pristine = structuredClone(g);
     expect(linkEffectTargetOf(g, 'price', 'subs')).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
-    const r = applyLinkEffectEdit(params({}, g));
+    // No token either (Codex round 3, P2): nothing can be prepared against an end that names two nodes.
+    expect(linkEffectEdgeToken(g, 'price', 'subs')).toBeNull();
+    const r = applyLinkEffectEdit(params({ expected: revisionOf(storedGraph()) }, g));
     expect(r).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
     expect(g).toEqual(pristine);
   });

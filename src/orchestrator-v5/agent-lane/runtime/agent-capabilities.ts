@@ -1672,9 +1672,13 @@ function describeAmbiguity(g: Pick<GraphRead, 'nodes' | 'edges'>, requested: str
  * id, and an id name that is itself taken gains a counter, so no two entities ever read the same on a card.
  */
 function cardNamesOf(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlyMap<string, string> {
+  // What a reader cannot tell apart on a card: case, surrounding and repeated spaces, and a trailing ellipsis (with any
+  // spaces around it). Coarser than `norm` on purpose (Codex round 3: "Price (Pilot)… " read as "Price (Pilot)").
+  const key = (s: unknown): string => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
+    .replace(/\s*(?:…|\.\.\.)+$/, '').trim();
   const names = new Map<string, string>();
   const groups = new Map<string, GraphRead['nodes'][number][]>();
-  for (const n of g.nodes) groups.set(norm(n.label), [...(groups.get(norm(n.label)) ?? []), n]);
+  for (const n of g.nodes) groups.set(key(n.label), [...(groups.get(key(n.label)) ?? []), n]);
   const shared: { id: string; label: string; name: string }[] = [];
   for (const group of groups.values()) {
     if (group.length === 1) { names.set(group[0]!.id, group[0]!.label); continue; }
@@ -1685,28 +1689,28 @@ function cardNamesOf(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlyMap<string,
     for (const n of group) {
       const description = n.description?.trim();
       const connected = connections.find((c) => c.id === n.id)!.words;
-      const suffix = description && group.every((r) => r.id === n.id || norm(r.description) !== norm(description))
+      const suffix = description && group.every((r) => r.id === n.id || key(r.description) !== key(description))
         ? description
         : connected !== '' && connections.every((c) => c.id === n.id || c.words !== connected)
           ? `linked to ${connected}` : n.id;
       shared.push({ id: n.id, label: n.label, name: `${n.label} (${suffix})` });
     }
   }
-  const taken = new Set(g.nodes.map((n) => norm(n.label)));
+  const taken = new Set(g.nodes.map((n) => key(n.label)));
   const idName = (n: { id: string; label: string }): string => `${n.label} (${n.id})`;
   const fallback: typeof shared = [];
   for (const n of shared) {
-    const clash = taken.has(norm(n.name))
-      || shared.some((o) => o.id !== n.id && (norm(o.name) === norm(n.name) || norm(idName(o)) === norm(n.name)));
+    const clash = taken.has(key(n.name))
+      || shared.some((o) => o.id !== n.id && (key(o.name) === key(n.name) || key(idName(o)) === key(n.name)));
     if (clash) fallback.push(n);
     else names.set(n.id, n.name);
   }
-  for (const name of names.values()) taken.add(norm(name));
+  for (const name of names.values()) taken.add(key(name));
   for (const n of [...fallback].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     let name = idName(n);
-    for (let k = 2; taken.has(norm(name)); k += 1) name = `${n.label} (${n.id}, ${k})`;
+    for (let k = 2; taken.has(key(name)); k += 1) name = `${n.label} (${n.id}, ${k})`;
     names.set(n.id, name);
-    taken.add(norm(name));
+    taken.add(key(name));
   }
   return names;
 }

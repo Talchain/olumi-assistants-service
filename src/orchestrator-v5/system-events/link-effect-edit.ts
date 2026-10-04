@@ -107,9 +107,9 @@ const QUOTE_MAX = 400;
  * `null` when there is no such link. The Agent computes it on the read it proposes from and stores it on the proposal.
  */
 export function linkEffectEdgeToken(graph: unknown, from: string, to: string): string | null {
-  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter((e): e is Rec => isRec(e) && e.from === from && e.to === to) : [];
-  // A parallel copy of the pair has no ONE link to bind: no token, so nothing is prepared or written against it.
-  return edges.length !== 1 ? null : `edge:${createHash('sha256').update(stableStringify(edges[0])).digest('hex')}`;
+  // No ONE link (a parallel copy of the pair, or an end's id on two nodes): no token, so nothing is prepared or written.
+  const found = linkEffectTargetOf(graph, from, to);
+  return found.kind !== 'one' ? null : `edge:${createHash('sha256').update(stableStringify(found.edge)).digest('hex')}`;
 }
 
 /**
