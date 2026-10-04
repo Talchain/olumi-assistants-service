@@ -154,6 +154,9 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     // (`tests/integration/orchestrator/route-v2-goal-target-edit.test.ts`).
     expect(mutating).toEqual([
       'factor_value_edit',
+      // Manual range now reaches the same checked writer; the shared spine contract
+      // proves one canonical append and the hash/freshness/reload transition.
+      'prior_range_edit',
       'edge_strength_edit',
       'structural_delete',
       'structural_add',

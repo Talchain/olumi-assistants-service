@@ -84,6 +84,7 @@ import {
   type EdgeStrengthEditAuthorityConflict,
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
+import { applyPriorRangeEdit } from './prior-range-edit.js';
 import { applyGoalTargetEdit, type GoalTargetEditResult } from './goal-target-edit.js';
 import { applyLimitEdit, type LimitEditRequest } from './limit-edit.js';
 import { dispatchAddRiskTransaction } from '../handlers/add-risk-dispatch.js';
@@ -751,10 +752,9 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // ack and DISCARDED the rating after hashing it into request_hash; the UI
   // has emitted the typed event since 0.22.0 and the server threw it away).
   feedback: 'fact_and_commit',
-  // 0.34.0 — the two judgement kinds that previously terminated in the
-  // browser (no wire shape existed at all).
+  // Judgement remains fact-only; a manual factor range is a canonical edit.
   edge_adjudication: 'fact_and_commit',
-  prior_range_edit: 'fact_and_commit',
+  prior_range_edit: 'mutating',
   // 0.42.0 Train C — canonical writer. Reverting THIS writer commit lands on
   // Train B's deployed explicit no-write refusal and its integrity-strict
   // pending carry-forward; reader and writer rollback remain independent.
@@ -1177,10 +1177,10 @@ export async function dispatchSystemEvent(
   // ── VALUE-CARRYING writers ────────────────────────────────────────────────
   // Value-less events retain their byte-identical acknowledgement. Each
   // writer below owns only its structured adapter + commit transaction; the
-  // canonical D1 handlers remain the sole graph mutators.
+  // existing D1 handlers and graph-management candidate applier own mutations.
   if (
     handling === 'mutating' &&
-    payload.event.kind === 'factor_value_edit'
+    (payload.event.kind === 'factor_value_edit' || payload.event.kind === 'prior_range_edit')
   ) {
     return await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
   }
@@ -2339,7 +2339,7 @@ async function dispatchStructuralDelete(
 }
 
 /**
- * `factor_value_edit` — run the real mutation, commit it, and stamp readiness.
+ * Manual factor value/range edits share the checked commit and reply authority.
  *
  * The shape mirrors the turn-executor's own write chokepoint, and the ORDER is
  * the part that matters:
@@ -2355,7 +2355,7 @@ async function dispatchStructuralDelete(
  */
 async function dispatchFactorValueEdit(
   payload: SystemEventTurnPayload,
-  event: Extract<SystemEventTurnPayload['event'], { kind: 'factor_value_edit' }>,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'factor_value_edit' | 'prior_range_edit' }>,
   requestId: string,
   startedAt: number,
 ): Promise<DispatchSystemEventResult> {
@@ -2403,13 +2403,36 @@ async function dispatchFactorValueEdit(
   const { hotWindow: priorFactsRead } = analysisInputs;
   const priorFacts = priorFactsRead.facts;
 
-  const result = await applyFactorValueEdit({
-    payload,
-    event,
-    requestId,
-    persistedGraph,
-    priorFacts,
-  });
+  const cas = computeExpectedGraphCasHashes(persistedGraph);
+  const rangeFact = event.kind === 'prior_range_edit' ? buildJudgementFact(event) : null;
+  const rangeFactParse = rangeFact === null ? null : HandlerFactSchema.safeParse(rangeFact);
+  const result = event.kind === 'prior_range_edit'
+    ? applyPriorRangeEdit({
+        payload, event, persistedGraph, baseGraphHash: cas.expectedGraphAnalysisHash,
+        handlerFacts: rangeFactParse?.success === true ? [rangeFactParse.data] : [],
+      })
+    : await applyFactorValueEdit({ payload, event, requestId, persistedGraph, priorFacts });
+
+  if (result.kind === 'unchanged') {
+    const graphHash = cas.expectedGraphAnalysisHash;
+    return {
+      response: {
+        ...buildAcknowledgementResponse(payload),
+        ...(graphHash !== null ? { graph_hash: graphHash } : {}),
+        draft_graph: buildAppliedGraphWireField(result.graph),
+      },
+      commitPerformed: false,
+      commitSkippedReason: 'verified_no_op', graph: result.baseGraph as GraphV3T,
+      freshness: deriveWriteReplyFreshness(analysisInputs, graphHash, result.baseGraph),
+    };
+  }
+  if (event.kind === 'prior_range_edit' && (result.kind === 'refused' || rangeFactParse?.success !== true)) {
+    return {
+      response: result.response, commitPerformed: false, graph: null,
+      commitSkippedReason: 'refused_no_write',
+      refusal: { reason: result.kind === 'refused' ? result.reason : 'invalid_range_fact' },
+    };
+  }
 
   // ── the refusal path ─────────────────────────────────────────────────────
   // An above-cap value, an unknown target, an inconsistent scale: all land
@@ -2475,7 +2498,6 @@ async function dispatchFactorValueEdit(
   let persistedGraphBytes: unknown = null;
   let committedResponse: OlumiResponse = result.response;
   try {
-    const cas = computeExpectedGraphCasHashes(result.baseGraph);
     const mutationPriorPendings = factorPriorPendings;
     const holds = threadHoldsThroughSystemEventMutation({
       priorPendingActions: mutationPriorPendings,
@@ -2488,11 +2510,10 @@ async function dispatchFactorValueEdit(
     const commitResult = await commitDirectAnswer(withHoldNotice(result.response, holds.notice), {
       scenario_id: payload.scenario_id,
       turn_id: payload.turn_id,
-      // A handler ran and produced facts. Claiming `direct_answer` with a
-      // populated `handler_facts` would misreport the turn to every consumer
-      // that keys off turn_class.
-      turn_class: 'handler',
-      handler_id: 'set_factor_value',
+      // Value has a registered D1 handler. Range retains its existing
+      // system-event classification and fact; no new handler is introduced.
+      turn_class: event.kind === 'factor_value_edit' ? 'handler' : 'direct_answer',
+      handler_id: event.kind === 'factor_value_edit' ? 'set_factor_value' : null,
       request_hash: computeRequestHash(payload),
       llm_calls_used: 0,
       duration_ms: Date.now() - startedAt,
@@ -2621,7 +2642,7 @@ async function dispatchFactorValueEdit(
   // reconciles that authoritative postimage from the top-level `draft_graph`.
   // Without it the edit persists server-side but appears reverted until reload.
   const committedParse = GraphV3.safeParse(persistedGraphBytes);
-  const graphForReadiness = committedParse.success ? committedParse.data : result.graph;
+  const graphForReadiness = committedParse.success ? persistedGraphBytes as GraphV3T : result.graph;
 
   const response: OlumiResponse = {
     ...committedResponse,
@@ -2681,7 +2702,7 @@ async function dispatchFactorValueEdit(
     {
       request_id: requestId,
       scenario_id: payload.scenario_id,
-      dispatch_path: 'system_event.factor_value_edit',
+      dispatch_path: `system_event.${event.kind}`,
     },
   );
   return {
