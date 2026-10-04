@@ -108,6 +108,8 @@ interface RecoveredIntervention {
   readonly value: number;
   readonly unit?: string;
   readonly raw_value?: number | string | boolean;
+  /** Transport verbatim, then validate at the existing persist range gate. */
+  readonly range?: unknown;
 }
 
 function isPlainObject(v: unknown): v is Dict {
@@ -140,12 +142,13 @@ function hasInvalidInterventionsShape(node: Dict): boolean {
 
 function carriedUnitRaw(value: number, src: unknown): RecoveredIntervention {
   if (!isPlainObject(src)) return { value };
-  const out: { value: number; unit?: string; raw_value?: number | string | boolean } = { value };
+  const out: { value: number; unit?: string; raw_value?: number | string | boolean; range?: unknown } = { value };
   if (typeof src.unit === 'string') out.unit = src.unit;
   const rawValue = src.raw_value;
   if (typeof rawValue === 'number' || typeof rawValue === 'string' || typeof rawValue === 'boolean') {
     out.raw_value = rawValue;
   }
+  if (src.range !== undefined) out.range = src.range;
   return out;
 }
 
@@ -193,6 +196,7 @@ function freshInterventionV3(fac: string, rec: RecoveredIntervention): Dict {
   };
   if (rec.unit !== undefined) iv.unit = rec.unit;
   if (rec.raw_value !== undefined) iv.raw_value = rec.raw_value;
+  if (rec.range !== undefined) iv.range = rec.range;
   return iv;
 }
 

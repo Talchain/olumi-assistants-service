@@ -33,6 +33,8 @@ import { normaliseFactorValue } from '../../orchestrator-v5/tools/handlers/d1-sh
 import { isDeepStrictEqual } from 'node:util';
 import { OBSERVED_ROOT_SPELLINGS } from '../canonicalise-value-ops.js';
 import { log } from '../../utils/telemetry.js';
+import { buildFactorScaleMap, resolveRawInterventionValue, type FactorScaleInfo } from '../../orchestrator-v5/tools/plot-intervention-scale.js';
+import { unitComparisonKey } from '../../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
 type Dict = Record<string, unknown>;
 /**
@@ -189,6 +191,8 @@ interface RawIntervention {
   readonly source?: string;
   readonly value_confidence?: string;
   readonly reasoning?: string;
+  /** TEMPORAL: a stated range the writer supplied with THIS figure (validated at persist, `intervention-range.ts`). */
+  readonly range?: Dict;
 }
 
 export interface EncodeOptionInterventionsResult<T> {
@@ -223,6 +227,7 @@ function toRawIntervention(src: unknown): RawIntervention {
     source?: string;
     value_confidence?: string;
     reasoning?: string;
+    range?: Dict;
   } = {};
   const v = finiteNum(src.value);
   if (v !== undefined) out.value = v;
@@ -231,6 +236,7 @@ function toRawIntervention(src: unknown): RawIntervention {
   if (typeof src.unit === 'string') out.unit = src.unit;
   const cap = finiteNum(src.cap);
   if (cap !== undefined) out.cap = cap;
+  if (isPlainObject(src.range)) out.range = { ...src.range };
   // Carried ONLY when explicitly stated and recognised; anything else falls
   // through to the unchanged default in `buildInterventionV3`.
   if (typeof src.source === 'string' && PRESERVED_INTERVENTION_SOURCES.has(src.source)) {
@@ -412,7 +418,20 @@ const QUOTED_FIGURE_KEYS = ['value', 'raw_value', 'unit', 'cap', 'value_type', '
  * evidence of preservation, which is why the controls assert the committed
  * object directly.
  */
-function buildInterventionV3(fac: string, value: number, rec: RawIntervention, existing: unknown): Dict {
+function sameNativeQuantity(before: Dict, after: Dict, oldFrame?: FactorScaleInfo, newFrame?: FactorScaleInfo): boolean {
+  if (!isDeepStrictEqual(before.value_type, after.value_type) || !isDeepStrictEqual(before.encoding_map, after.encoding_map)) return false;
+  const oldPoint = resolveRawInterventionValue(before, oldFrame);
+  const newPoint = resolveRawInterventionValue(after, newFrame);
+  const unit = (cell: Dict, frame?: FactorScaleInfo) => unitComparisonKey(typeof cell.unit === 'string' && cell.unit.trim() !== '' ? cell.unit : frame?.unit);
+  if (unit(before, oldFrame) !== unit(after, newFrame)) return false;
+  if (oldPoint.rule === 'ambiguous_no_evidence' || newPoint.rule === 'ambiguous_no_evidence') {
+    return QUOTED_FIGURE_KEYS.every(key => isDeepStrictEqual(before[key], after[key]))
+      && isDeepStrictEqual(oldFrame, newFrame);
+  }
+  return oldPoint.value !== null && oldPoint.value === newPoint.value;
+}
+
+function buildInterventionV3(fac: string, value: number, rec: RawIntervention, existing: unknown, frame?: FactorScaleInfo): Dict {
   const carried: Dict = {};
   if (isPlainObject(existing)) {
     for (const [key, entryValue] of Object.entries(existing)) {
@@ -449,6 +468,13 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   // copies of both, so these are re-supplied from the NEW record or not at all.
   if (rec.value_confidence !== undefined) iv.value_confidence = rec.value_confidence;
   if (rec.reasoning !== undefined) iv.reasoning = rec.reasoning;
+  // TEMPORAL: a range supplied with this figure replaces the one carried from the old entry. With none supplied, the old
+  // range is kept ONLY while the quantity is unchanged (Codex CR 5963331228 P1): a new figure, or the same digits in
+  // another unit (10 days → 10 weeks), is a different quantity, and containment cannot tell, so its range is dropped.
+  if (rec.range !== undefined) iv.range = rec.range;
+  else if ('range' in iv && !(isPlainObject(existing) && sameNativeQuantity(existing, iv, frame, frame))) {
+    delete iv.range;
+  }
   if (isPlainObject(existing) && typeof existing.source_quote === 'string'
     && QUOTED_FIGURE_KEYS.every((key) => isDeepStrictEqual(existing[key], iv[key]))) {
     iv.source_quote = existing.source_quote;
@@ -458,47 +484,120 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
 
 /**
  * A whole-map `update_node` can replace an already numeric intervention without
- * entering `buildInterventionV3`. Clear only a quote copied from the persisted
- * OLD cell when the figure changed; a newly supplied quote remains the user's
- * evidence, and a same-value repeat leaves the original quote alone.
+ * entering `buildInterventionV3`. Clear a quote or range copied from the persisted
+ * OLD cell when the quantity changed; a fresh replacement remains, and an unchanged
+ * quantity carries the stored range even when a whole-map replacement omitted it.
  */
 export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after: T): T {
   if (!isPlainObject(before) || !Array.isArray(before.nodes)
     || !isPlainObject(after) || !Array.isArray(after.nodes)) return after;
-  const priorOptions = new Map<string, Dict>();
-  for (const node of before.nodes) {
-    if (isPlainObject(node) && node.kind === 'option' && typeof node.id === 'string') priorOptions.set(node.id, node);
+  const oldFrames = buildFactorScaleMap(before.nodes);
+  const newFrames = buildFactorScaleMap(after.nodes);
+  const rewrite = (entries: unknown[], oldEntries: unknown[], mirrors: boolean): unknown[] => {
+    const priorOptions = new Map<string, Dict>();
+    for (const node of oldEntries) {
+      if (isPlainObject(node) && (mirrors || node.kind === 'option') && typeof node.id === 'string') priorOptions.set(node.id, node);
+    }
+    let updated: unknown[] | undefined;
+    for (let index = 0; index < entries.length; index += 1) {
+      const node = entries[index];
+      if (!isPlainObject(node) || (!mirrors && node.kind !== 'option') || typeof node.id !== 'string'
+        || !isPlainObject(node.interventions)) continue;
+      const prior = priorOptions.get(node.id);
+      if (!prior || !isPlainObject(prior.interventions)) continue;
+      let cells: Dict | undefined;
+      for (const [factorId, cell] of Object.entries(node.interventions)) {
+        const oldCell = prior.interventions[factorId];
+        if (!isPlainObject(cell) || !isPlainObject(oldCell)) continue;
+        const figureChanged = !sameNativeQuantity(oldCell, cell, oldFrames.get(factorId), newFrames.get(factorId));
+        if (!figureChanged) {
+          if (cell.range === undefined && oldCell.range !== undefined) {
+            cells ??= { ...node.interventions };
+            cells[factorId] = { ...cell, range: structuredClone(oldCell.range) };
+          }
+          continue;
+        }
+        const staleQuote = typeof cell.source_quote === 'string' && cell.source_quote === oldCell.source_quote;
+        const staleRange = cell.range !== undefined && oldCell.range !== undefined && isDeepStrictEqual(cell.range, oldCell.range);
+        if (!staleQuote && !staleRange) continue;
+        const withoutStaleMetadata = { ...cell };
+        if (staleQuote) delete withoutStaleMetadata.source_quote;
+        if (staleRange) delete withoutStaleMetadata.range;
+        cells ??= { ...node.interventions };
+        cells[factorId] = withoutStaleMetadata;
+      }
+      if (cells !== undefined) {
+        updated ??= [...entries];
+        updated[index] = { ...node, interventions: cells };
+      }
+    }
+    return updated ?? entries;
+  };
+  const nodes = rewrite(after.nodes, before.nodes, false);
+  const options = Array.isArray(after.options)
+    ? rewrite(after.options, Array.isArray(before.options) ? before.options : before.nodes, true) : after.options;
+  return nodes === after.nodes && options === after.options ? after
+    : { ...after, nodes, ...(Array.isArray(options) ? { options } : {}) } as T;
+}
+
+/** An identical stored range in a replacement is inheritance, never a new consent operation.
+ * Remove only that metadata from generic update payloads before the existing field screen.
+ * The postimage helper above carries it from the stored base when the quantity still agrees. */
+export function omitInheritedInterventionRanges<T extends { readonly op: string; readonly path: string; readonly value?: unknown }>(
+  operations: readonly T[], stored: unknown,
+): T[] {
+  const nodes = isPlainObject(stored) && Array.isArray(stored.nodes) ? stored.nodes : [];
+  return operations.map(op => {
+    if (op.op !== 'update_node') return op;
+    const matches = nodes.filter(node => isPlainObject(node) && node.kind === 'option' && node.id === op.path);
+    if (matches.length !== 1 || !isPlainObject(matches[0]) || !isPlainObject(matches[0].interventions)) return op;
+    const prior = matches[0].interventions;
+    const omit = (value: unknown, path: readonly string[]): unknown => {
+      if (!isPlainObject(value)) return value;
+      const next: Dict = {};
+      for (const [key, child] of Object.entries(value)) {
+        const segments = [...path, ...key.split(/[/.]/).filter(Boolean)];
+        const root = segments.indexOf('interventions');
+        const old = root >= 0 ? prior[segments[root + 1]!] : undefined;
+        if (key === 'range' && root >= 0 && segments.length === root + 3 && segments[root + 2] === 'range'
+          && isPlainObject(old) && old.range !== undefined && isDeepStrictEqual(old.range, child)) continue;
+        next[key] = omit(child, segments);
+      }
+      return next;
+    };
+    return { ...op, value: omit(op.value, []) };
+  });
+}
+
+/** Generic edit ports cannot grant range consent, even when their whole operation is approved. */
+export function hasNewInterventionRanges(before: unknown, after: unknown): boolean {
+  if (!isPlainObject(after) || !Array.isArray(after.nodes)) return false;
+  const prior = new Map<string, Dict>();
+  if (isPlainObject(before) && Array.isArray(before.nodes)) {
+    for (const node of before.nodes) if (isPlainObject(node) && typeof node.id === 'string' && isPlainObject(node.interventions)) prior.set(node.id, node.interventions);
   }
-  let updatedNodes: Dict[] | undefined;
-  const afterNodes = after.nodes as Dict[];
-  for (let index = 0; index < afterNodes.length; index += 1) {
-    const node = afterNodes[index];
-    if (!isPlainObject(node) || node.kind !== 'option' || typeof node.id !== 'string'
-      || !isPlainObject(node.interventions)) continue;
-    const prior = priorOptions.get(node.id);
-    if (!prior || !isPlainObject(prior.interventions)) continue;
-    let updatedInterventions: Dict | undefined;
+  for (const node of after.nodes) {
+    if (!isPlainObject(node) || !isPlainObject(node.interventions)) continue;
     for (const [factorId, cell] of Object.entries(node.interventions)) {
-      const oldCell = prior.interventions[factorId];
-      if (!isPlainObject(cell) || !isPlainObject(oldCell)
-        || typeof cell.source_quote !== 'string' || cell.source_quote !== oldCell.source_quote) continue;
-      const figureChanged = cell.value !== oldCell.value
-        || (cell.raw_value !== undefined && oldCell.raw_value !== undefined && !isDeepStrictEqual(cell.raw_value, oldCell.raw_value))
-        || (cell.unit !== undefined && oldCell.unit !== undefined && cell.unit !== oldCell.unit)
-        || (cell.cap !== undefined && oldCell.cap !== undefined && cell.cap !== oldCell.cap)
-        || (cell.value_type !== undefined && oldCell.value_type !== undefined && cell.value_type !== oldCell.value_type)
-        || (cell.encoding_map !== undefined && oldCell.encoding_map !== undefined && !isDeepStrictEqual(cell.encoding_map, oldCell.encoding_map));
-      if (!figureChanged) continue;
-      const { source_quote: _staleQuote, ...withoutStaleQuote } = cell;
-      updatedInterventions ??= { ...node.interventions };
-      updatedInterventions[factorId] = withoutStaleQuote;
-    }
-    if (updatedInterventions !== undefined) {
-      updatedNodes ??= [...afterNodes];
-      updatedNodes[index] = { ...node, interventions: updatedInterventions };
+      if (!isPlainObject(cell) || cell.range === undefined) continue;
+      const old = prior.get(String(node.id))?.[factorId];
+      if (!isPlainObject(old) || !isDeepStrictEqual(old.range, cell.range)) return true;
     }
   }
-  return updatedNodes === undefined ? after : { ...after, nodes: updatedNodes } as T;
+  if (Array.isArray(after.options)) {
+    const oldOptions = isPlainObject(before) && Array.isArray(before.options) ? before.options : [];
+    for (const option of after.options) {
+      if (!isPlainObject(option) || !isPlainObject(option.interventions)) continue;
+      const oldOption = oldOptions.find(row => isPlainObject(row) && row.id === option.id);
+      const oldCells = isPlainObject(oldOption) && isPlainObject(oldOption.interventions) ? oldOption.interventions : prior.get(String(option.id));
+      for (const [factorId, cell] of Object.entries(option.interventions)) {
+        if (!isPlainObject(cell) || cell.range === undefined) continue;
+        const old = oldCells?.[factorId];
+        if (!isPlainObject(old) || !isDeepStrictEqual(old.range, cell.range)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -532,6 +631,7 @@ export function encodeOptionInterventionsForEdit<T>(
 
   try {
     const nodes = (graph as Dict).nodes as unknown[];
+    const frames = buildFactorScaleMap(nodes);
     const edges = Array.isArray((graph as Dict).edges) ? ((graph as Dict).edges as unknown[]) : [];
 
     const factorById = new Map<string, Dict>();
@@ -611,7 +711,7 @@ export function encodeOptionInterventionsForEdit<T>(
           optionUnresolved = true;
           break;
         }
-        bundle[fac] = buildInterventionV3(fac, value, rec, base[fac]);
+        bundle[fac] = buildInterventionV3(fac, value, rec, base[fac], frames.get(fac));
       }
 
       if (optionUnresolved) {

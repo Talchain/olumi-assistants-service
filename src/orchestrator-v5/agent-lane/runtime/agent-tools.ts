@@ -577,6 +577,26 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
               'at all (the user said carrying on changes this factor), and never to restate the factor\u2019s ' +
               'starting value: carrying on as now already keeps that, so such a level is not recorded.',
           },
+          likely_low: {
+            type: 'number',
+            description:
+              'Only with user_stated, and only when the user gave a range for this level: its low end, in the same ' +
+              'units as value. Never a range you made up. Send it with likely_high, range_meaning and range_user_stated.',
+          },
+          likely_high: { type: 'number', description: 'The high end of that same range. Send it with likely_low.' },
+          range_meaning: {
+            type: 'string',
+            enum: ['likely_range', 'min_max', 'at_most', 'at_least', 'other'],
+            description:
+              'How the user meant that range. likely_range ONLY for a plain likely range (\u201clikely between 5 and 20 ' +
+              'days\u201d), which Olumi reads as the middle half of what\u2019s likely. min_max for the lowest and highest ' +
+              'possible; at_most / at_least for a bound; other for anything else (e.g. a 95% confidence interval). ' +
+              'Only likely_range is recorded; for the rest, tell the user and ask for their likely range.',
+          },
+          range_user_stated: {
+            type: 'boolean',
+            description: 'Set true ONLY when the USER gave this range (both ends) for this option and factor.',
+          },
         }, ['option_label', 'factor_label', 'value', 'basis']),
       },
       whole_request: WHOLE_REQUEST,

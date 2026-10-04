@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { approvalChipsFor } from '../approval-chips.js';
+import { createProposal } from '../proposal.js';
 
 describe('approval chips', () => {
   it('one proposal offered, nothing authorised → an approve chip and an amend chip', () => {
@@ -15,6 +16,20 @@ describe('approval chips', () => {
     ]);
     // A chip without an action_type is plain text on the Agent route.
     for (const c of chips) expect((c as { action_type?: unknown }).action_type).toBeUndefined();
+  });
+
+  it('the temporal card uses B3 exact stored detail and refuses a substituted reading', () => {
+    const proposal = createProposal({ scenario_id: 'scenario-range', user_id: 'user-range', base_graph_identity_hash: 'base-range',
+      operations: [{ op: 'set_option_intervention', path: 'opt_lift::fac_downtime', value: {
+        raw: 10, normalised: 0.25, likely_range: { low: 5, high: 20 },
+      } }], provenance: { authored_by: 'model_proposed' }, validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: 'Lift-and-shift sets Migration downtime to 10 days, likely between 5 and 20 days (middle half)',
+    });
+    const calls = [{ name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: proposal.proposal_id }];
+    const result = { ok: true, mutated: false, proposal_id: proposal.proposal_id, public_label: proposal.public_label };
+    const [chip] = approvalChipsFor(calls, () => ({ proposal, result }));
+    expect(chip).toMatchObject({ id: `agent-approve-proposal:${proposal.proposal_id}`, detail: proposal.public_label });
+    expect(approvalChipsFor(calls, () => ({ proposal, result: { ...result, public_label: 'different range' } }))).toEqual([]);
   });
 
   /**

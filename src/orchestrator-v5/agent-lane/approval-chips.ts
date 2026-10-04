@@ -18,7 +18,7 @@
  */
 import type { SuggestedAction } from '../compose/types.js';
 import { formatFactorValueApprox } from '../compose/format-factor-value.js';
-import type { StructuredProposal } from './proposal.js';
+import { hasCardOnlyOperations, type StructuredProposal } from './proposal.js';
 import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
@@ -171,9 +171,7 @@ export function approvalChipsFor(
   // cannot prove that its omitted operations were gap-free. Offer no approval.
   if (labelSourceFor !== undefined && stored === undefined
     && (tool === 'propose_option_interventions' || tool === 'propose_starting_point')) return [];
-  const hasGapOperation = stored?.operations.some(op => op.op === 'set_option_intervention'
-    && Object.hasOwn((op.value ?? {}) as object, 'unmodelled_mechanisms')) ?? false;
-  if (hasGapOperation) {
+  if (stored !== undefined && hasCardOnlyOperations(stored.operations)) {
     // This must precede every generic/special chip path: the exact stored gap
     // card and its operands are the subject of the existing typed approval.
     if (stored!.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId

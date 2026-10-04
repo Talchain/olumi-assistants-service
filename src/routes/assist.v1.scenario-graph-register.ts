@@ -151,6 +151,7 @@ import {
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../orchestrator-v5/context/graph-cas-conflict.js";
 import { projectGraphForPersistence } from "../orchestrator-v5/persisted-graph-projection.js";
+import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from "../orchestrator/tools/encode-option-interventions.js";
 import { assignEntityRefs } from "../orchestrator-v5/graph/entity-refs.js";
 import { appendCheckedGraphWrite, assertNoIntroducedGraphViolations } from "../orchestrator-v5/persist-graph-write.js";
 import { buildAtomicCommittedModelVersion } from "../orchestrator-v5/commit.js";
@@ -1081,11 +1082,20 @@ export default async function route(app: FastifyInstance) {
         log.warn({ event: 'v5.scenario_graph_register.pending_wipe_risk', request_id: requestId, scenario_id: scenarioId }, 'Graph registration refused because the authoritative reconciliation read failed');
         return unavailable();
       }
-      const graphForStore = withEntityRefs(projectGraphForPersistence(graphToRegister, {
+      const projected = projectGraphForPersistence(graphToRegister, {
         scenarioId,
         turnClass: "direct_answer",
         source: "graph_registration",
-      }));
+      });
+      if (hasNewInterventionRanges(baseGraphForInvariants, projected)) {
+        return reply.code(409).send(buildErrorV1('BAD_INPUT',
+          'A new or changed likely range needs approval on its stored change card. Nothing was written.',
+          { code: 'INTERVENTION_RANGE_APPROVAL_REQUIRED' }, requestId));
+      }
+      const graphForStore = withEntityRefs(projectGraphForPersistence(
+        clearInheritedInterventionSourceQuotes(baseGraphForInvariants, projected), {
+          scenarioId, turnClass: "direct_answer", source: "graph_registration",
+        }));
 
       const turnId = registrationTurnId(scenarioId, operationId);
       const requestHash = registrationRequestHash(graphForStore, brief.value);

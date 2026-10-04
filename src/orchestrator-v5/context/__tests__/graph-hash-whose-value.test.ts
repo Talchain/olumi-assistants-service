@@ -132,7 +132,7 @@ describe('every field the published hash vocabulary names moves the analysis has
   const hashOf = (g: unknown) => computeAnalysisAffectingGraphHash(g as GraphV3T);
   const base = hashOf(baseGraph());
 
-  it('POSITIVE CONTROL: the vendored vocabulary is v5 (v4 + intervention `range`, 0.66.0) — node/edge lists read from it; `projectIntervention` hand-lists its fields, so `range` is hashed only once TEMPORAL #2382 lands', () => {
+  it('POSITIVE CONTROL: the vendored vocabulary is v5 (v4 + intervention `range`, 0.66.0) — node/edge/intervention lists read from it (TEMPORAL #2382 hashes `range` through it)', () => {
     expect(CANONICAL_GRAPH_HASH_PROJECTION_VERSION).toBe(5);
     expect(V.node.fields.length).toBeGreaterThan(10);
   });

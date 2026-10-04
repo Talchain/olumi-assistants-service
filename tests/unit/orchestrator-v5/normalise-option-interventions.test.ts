@@ -14,6 +14,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { normaliseOptionInterventionContract } from '../../../src/orchestrator-v5/normalise-option-interventions.js';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { log } from '../../../src/utils/telemetry.js';
+import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 
 type AnyNode = Record<string, unknown> & { id: string };
 type AnyGraph = { nodes: AnyNode[]; edges: Array<Record<string, unknown>>; [k: string]: unknown };
@@ -62,6 +63,19 @@ afterEach(() => {
 });
 
 describe('normaliseOptionInterventionContract (V5 edit_graph P0)', () => {
+  it.each(['nested', 'slash'].flatMap(carrier => [false, true].flatMap(overlay => ['valid', 'malformed', 'absent'].map(range => ({ carrier, overlay, range })))))(
+    'legacy opt_range/fac_days cold read: $carrier overlay=$overlay range=$range', ({ carrier, overlay, range }) => {
+    const stated = { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' };
+    const entry = { value: 0.25, raw_value: 10, unit: 'days', ...(range === 'absent' ? {} : { range: range === 'valid' ? stated : { ...stated, low: 30 } }) };
+    const graph = { nodes: [{ id: 'fac_days', kind: 'factor', label: 'Days' }, { id: 'opt_range', kind: 'option', label: 'Range',
+      ...(overlay ? { interventions: { fac_days: { value: 0.1, source: 'cee_hypothesis', target_match: { node_id: 'fac_days', match_type: 'exact_id', confidence: 'high' } } } } : {}),
+      ...(carrier === 'nested' ? { data: { interventions: { fac_days: entry } } } : { 'data/interventions/fac_days': entry }) }], edges: [] };
+    const stored = projectGraphForPersistence(graph);
+    const cold = GraphV3.parse(JSON.parse(JSON.stringify(stored)));
+    const cell = cold.nodes.find(n => n.id === 'opt_range')?.interventions?.fac_days;
+    expect(cell).toMatchObject({ value: 0.25, raw_value: 10, unit: 'days', target_match: { node_id: 'fac_days' } });
+    expect(cell?.range).toEqual(range === 'valid' ? stated : undefined);
+  });
   it('promotes object-form data.interventions to the canonical top-level InterventionV3 contract', () => {
     const info = vi.spyOn(log, 'info').mockImplementation(() => log as never);
     const g: AnyGraph = { nodes: [editAddedOption()], edges: [] };

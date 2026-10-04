@@ -198,6 +198,7 @@ import {
   hasLiveHeldProposal,
   type EditGmDecision,
 } from './edit-graph-referee-gate.js';
+import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from '../../orchestrator/tools/encode-option-interventions.js';
 // ROADMAP 2.474 — the coach's structural editing tool: contract, entry
 // decision, transport. Three modules on purpose (see their headers): the
 // rules are provable without an LLM, the transport without a graph.
@@ -3272,6 +3273,15 @@ export async function dispatchEditGraph(
         turnClass: payload.turn_class,
         source: 'edit_graph',
       },
+    );
+    // This is the exact stored CAS base used by the write. Recheck after merge:
+    // it may have moved since the tool's earlier read, even with the referee off.
+    if (hasNewInterventionRanges(strictBase, persistedPostEditGraph)) {
+      throw new Error('A new or changed likely range needs approval on its stored change card. Nothing was written.');
+    }
+    persistedPostEditGraph = projectGraphForPersistence(
+      clearInheritedInterventionSourceQuotes(strictBase, persistedPostEditGraph),
+      { scenarioId: payload.scenario_id, turnId: payload.turn_id, turnClass: payload.turn_class, source: 'edit_graph' },
     );
   }
 

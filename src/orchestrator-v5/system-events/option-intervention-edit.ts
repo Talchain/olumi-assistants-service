@@ -110,7 +110,9 @@ export interface OptionInterventionEditInput {
    * was normalised on. Without it a level on a factor with no range of its own (a NEW, value-less factor) is stored as a
    * bare model number and the figure is unrecoverable. It must normalise to `modelValue` exactly, or nothing is written.
    */
-  readonly figure?: { readonly raw_value: number; readonly unit?: string; readonly cap: number };
+  readonly figure?: { readonly raw_value?: number; readonly unit?: string; readonly cap?: number;
+    /** TEMPORAL: the user's likely range for this level, raw units (`intervention-range.ts` gates it at persist). */
+    readonly likely_range?: { readonly low: number; readonly high: number } };
 }
 
 /** Internal server invocation only: no member is added to the .50 wire union. */
@@ -175,6 +177,9 @@ export function optionInterventionBatchPostimageIsScoped(
     const entry = InterventionV3.safeParse(newNode.interventions?.[target.factorId]);
     if (!entry.success || entry.data.value !== target.modelValue
       || entry.data.source !== (target.source ?? 'user_specified') || entry.data.target_match.node_id !== target.factorId) return false;
+    const approved = target.figure?.likely_range;
+    if (approved !== undefined && !isDeepStrictEqual(entry.data.range,
+      { low: approved.low, high: approved.high, meaning: 'likely_range', source: 'user_specified' })) return false;
     const restoredNode = restored.nodes.find(node => node.id === target.optionId)!;
     if (oldNode.interventions === undefined) {
       // A new container may hold only this batch's cells, never unrelated invented cells (checked once all are removed).
@@ -304,8 +309,14 @@ export function applyOptionInterventionBatch(input: OptionInterventionBatchTrans
       const t = linkOps[i]!.target;
       if (operations[i]?.op !== 'add_edge' || operations[i]?.path !== `${t.optionId}::${t.factorId}`) return refuse('operation_invalid');
     }
-    const levelOperations = operations.slice(linkOps.length);
-    const decision = evaluateEditGraphMutations({ mode: 'live', operations: levelOperations,
+    // Range is not a generic tunable field. Its authority is THIS dedicated approved target, constructed by
+    // prepareOptionInterventionEdit and checked in the postimage; referee the ordinary level fields only.
+    const refereeLevels = parseEditGraphResponse(JSON.stringify({ operations: levelOps.map(op => {
+      const value = { ...(op.value as Record<string, unknown>) };
+      delete value.range;
+      return { ...op, value };
+    }), removed_edges: [], warnings: [], coaching: null })).operations;
+    const decision = evaluateEditGraphMutations({ mode: 'live', operations: refereeLevels,
       currentGraph: before, currentGraphHash: input.expectedGraphHash,
       baseGraphHash: input.expectedGraphHash, freshness: input.freshness,
       scenarioId: input.scenarioId, turnId: input.turnId, requestId: input.requestId });
@@ -1074,9 +1085,13 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     return refuse('invalid_identity');
   }
   const figure = input.figure;
-  if (figure !== undefined && (!Number.isFinite(figure.raw_value) || !Number.isFinite(figure.cap) || !(figure.cap > 0)
-    || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === ''))
-    || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9)) {
+  if (figure !== undefined && (
+    ((figure.raw_value !== undefined || figure.cap !== undefined)
+      && (typeof figure.raw_value !== 'number' || !Number.isFinite(figure.raw_value)
+        || (figure.cap === undefined ? figure.raw_value !== input.modelValue
+          : typeof figure.cap !== 'number' || !Number.isFinite(figure.cap) || !(figure.cap > 0)
+            || Math.abs(figure.raw_value / figure.cap - input.modelValue) > 1e-9)))
+    || (figure.unit !== undefined && (typeof figure.unit !== 'string' || figure.unit.trim() === '')))) {
     return refuse('level_frame_mismatch');
   }
 
@@ -1184,7 +1199,15 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     }
     // This adapter records changed values, not adoption/confirmation. A repeat
     // must not turn the old AI estimate into a new user-authored measurement.
-    if (entry.data.value === input.modelValue) return { kind: 'unchanged' };
+    // TEMPORAL: a likely range the user just gave for the SAME level is a change (the range is theirs, the level already
+    // was), so it is written; an identical range is still a repeat.
+    // The COMPLETE range this write stores (Codex CR 5963331228 P2): equal bounds stored as `min_max`, or with another
+    // author, are a change, never a repeat.
+    const storedRange = (existing as { range?: Record<string, unknown> } | undefined)?.range;
+    const likelyMoves = figure?.likely_range !== undefined
+      && !(storedRange?.low === figure.likely_range.low && storedRange?.high === figure.likely_range.high
+        && storedRange?.meaning === 'likely_range' && storedRange?.source === 'user_specified');
+    if (entry.data.value === input.modelValue && !likelyMoves) return { kind: 'unchanged' };
   }
   const built = buildOptionEffectRawOperation({
     optionId: option.id, optionLabel: option.label,
@@ -1193,11 +1216,22 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
   // ⛔ THE CANVAS EDIT KEEPS THE USER'S FIGURE (DL #75 5902916137 (3); P0 partner 5902892060; served W4 run2 on `f074916`):
   // the card sends the level on the model scale and shows it on the factor's own range ("£57" = 0.285 of 200). Written
   // bare, the £57 left the model and the reply said "an effect value of 0.285". That same reading is kept on the cell.
-  const levelFigure = figure ?? figureOnFactorRange(graph, factor, existing, input.modelValue);
+  if (figure?.raw_value !== undefined && figure.cap === undefined
+    && figureOnFactorRange(graph, factor, existing, input.modelValue) !== undefined) {
+    return refuse('level_frame_mismatch');
+  }
+  const levelFigure = figure !== undefined && typeof figure.raw_value === 'number'
+    ? { raw_value: figure.raw_value, ...(figure.cap !== undefined ? { cap: figure.cap } : {}), ...(figure.unit !== undefined ? { unit: figure.unit } : {}) }
+    : figureOnFactorRange(graph, factor, existing, input.modelValue);
   // The user's figure rides on the SAME cell write: the encoder carries `raw_value` / `unit` / `cap` onto the cell
   // (`cap` only when it reproduces the level, which the check above has already required).
-  const operation = levelFigure === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
-    raw_value: levelFigure.raw_value, cap: levelFigure.cap, ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } };
+  // TEMPORAL: the user's likely range, only from THIS approval's figure (never read back from another cell), recorded as
+  // theirs with the one meaning its wording licenses (R3 #75 5914230653).
+  const likely = figure?.likely_range;
+  const operation = levelFigure === undefined && likely === undefined ? built : { ...built, value: { ...(built.value as Record<string, unknown>),
+    ...(levelFigure !== undefined ? { raw_value: levelFigure.raw_value, ...(levelFigure.cap !== undefined ? { cap: levelFigure.cap } : {}),
+      ...(levelFigure.unit !== undefined ? { unit: levelFigure.unit.trim() } : {}) } : {}),
+    ...(likely !== undefined ? { range: { low: likely.low, high: likely.high, meaning: 'likely_range', source: 'user_specified' } } : {}) } };
   if (input.source === undefined) return { kind: 'prepared', operation, ...withLink };
   // An adopted Olumi level: the encoder PRESERVES this member (`PRESERVED_INTERVENTION_SOURCES`)
   // instead of defaulting the cell to `user_specified`, and the rationale says whose it is.

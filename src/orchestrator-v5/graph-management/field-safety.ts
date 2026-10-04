@@ -345,7 +345,7 @@ function ownKeysLower(value: unknown): string[] {
  * unchanged.
  */
 export const INTERVENTION_CONTRACT_KEYS: ReadonlySet<string> = new Set([
-  ...Object.keys(InterventionV3.shape).map((k) => k.toLowerCase()),
+  ...Object.keys(InterventionV3.shape).filter((k) => k !== 'range').map((k) => k.toLowerCase()),
   'cap',
 ]);
 
@@ -385,6 +385,8 @@ export const INTERVENTION_CONTRACT_KEYS: ReadonlySet<string> = new Set([
  */
 const InterventionSpecScreen = z
   .object(InterventionV3.shape)
+  // A valid shape is not consent. Only the dedicated server-bound approval writes a range.
+  .omit({ range: true })
   .partial()
   .extend({ cap: z.unknown().optional() })
   .strict();
@@ -413,6 +415,21 @@ const InterventionSpecScreen = z
  * from the schema's own `.shape`, never mirrored.
  */
 type PayloadContext = 'outside' | 'factor_map' | 'spec';
+
+/** Generic writers never supply range consent, including when the referee is off or shadowing. */
+export function hasInterventionRangeWrite(operations: readonly { readonly value?: unknown }[]): boolean {
+  const contains = (value: unknown, path: readonly string[]): boolean => {
+    const i = path.indexOf('interventions');
+    if (i !== -1 && path[i + 2] === 'range') return true;
+    // A spec's other members (including arbitrary category labels) are data, not range writes.
+    if (i !== -1 && path.length > i + 2) return false;
+    if (Array.isArray(value)) return value.some(v => contains(v, path));
+    if (value === null || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, child]) =>
+      contains(child, [...path, ...key.toLowerCase().split(/[./]/).filter(Boolean)]));
+  };
+  return operations.some(op => contains(op.value, []));
+}
 
 /**
  * The key whose VALUE is the factor map — the one boundary where the screen

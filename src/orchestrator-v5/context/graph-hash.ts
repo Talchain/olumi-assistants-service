@@ -266,9 +266,17 @@ function projectIntervention(raw: unknown): Record<string, unknown> | undefined 
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   const out: Record<string, unknown> = {};
-  if (r.value !== undefined) out.value = r.value;
-  if (r.value_type !== undefined) out.value_type = r.value_type;
-  if (r.encoding_map !== undefined) out.encoding_map = r.encoding_map;
+  // ⭐ THE PUBLISHED INTERVENTION VOCABULARY, IMPORTED (schemas 0.66.0, projection v5): `value`, `value_type`,
+  // `encoding_map` and TEMPORAL's `range` (DL #75 5914755517). An option's stated range decides its chance of meeting
+  // a limit on that value, so "5–20 days" → "5–30 days" moves the revision, and so does who stated it. `range` is
+  // hashed as stored (its declared members); absent on every intervention without one, so no other graph's hash moves.
+  for (const key of VOCABULARY.intervention.fields) {
+    const v = r[key];
+    if (v === undefined) continue;
+    out[key] = key === 'range' && v !== null && typeof v === 'object'
+      ? pickDefined(v as Record<string, unknown>, ['low', 'high', 'meaning', 'source', 'source_quote'])
+      : v;
+  }
   // ⭐ THE NATIVE QUANTITY AND ITS UNIT — in the identity because a consumer
   // reads them for a DISPLAYED verdict.
   //

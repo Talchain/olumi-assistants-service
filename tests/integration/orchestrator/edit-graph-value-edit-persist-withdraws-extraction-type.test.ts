@@ -26,8 +26,9 @@ import type { FastifyRequest } from 'fastify';
 
 // ── the store: the persisted base the merge reads, and the write it receives ──
 
-const { appendMock, persistedRef } = vi.hoisted(() => ({
+const { appendMock, loadGraphMock, persistedRef } = vi.hoisted(() => ({
   appendMock: vi.fn(),
+  loadGraphMock: vi.fn(),
   persistedRef: { current: null as unknown },
 }));
 
@@ -37,7 +38,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     readRecent: async () => [],
     readFactsFor: async () => [],
     readMostRecentPendingActions: async () => [],
-    loadGraph: async () => JSON.parse(JSON.stringify(persistedRef.current)),
+    loadGraph: loadGraphMock,
     loadGraphAndBriefText: async () => ({
       graph: JSON.parse(JSON.stringify(persistedRef.current)),
       briefText: null,
@@ -73,6 +74,8 @@ vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
 import { dispatchEditGraph } from '../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js';
 import type { GraphStateIngress } from '../../../src/orchestrator-v5/boundary/request-extensions.js';
 import { makeMessagePayload } from '../../../src/orchestrator-v5/__tests__/fixtures.js';
+
+import { config } from '../../../src/config/index.js';
 
 const SCENARIO_ID = '17401740-1740-4740-8740-174017401740';
 const TARGET = 'fac_monthly_cashflow';
@@ -148,9 +151,110 @@ beforeEach(() => {
   appendMock.mockResolvedValue({ id: 'row-1740', persisted: true });
   llmChatMock.mockReset();
   persistedRef.current = buildPersistedGraph();
+  loadGraphMock.mockReset();
+  loadGraphMock.mockImplementation(async () => structuredClone(persistedRef.current));
 });
 
 describe('#1740 R5 — the graph handed to store.append, after the edit-path persistence merge', () => {
+  it.each(['off', 'shadow', 'live'].flatMap(mode => ['whole', 'nested', 'leaf'].map(variant => ({ mode, variant }))))('generic edit_graph cannot smuggle a user range: $mode/$variant', async ({ mode, variant }) => {
+    const oldMode = config.features.graphManagementMode;
+    config.features.graphManagementMode = mode as typeof oldMode;
+    try {
+    const graph = buildPersistedGraph();
+    const opt = nodeOf(graph, 'opt_buy');
+    opt.interventions = { [TARGET]: { value: 0.2, source: 'cee_hypothesis', target_match: { node_id: TARGET, match_type: 'exact_id', confidence: 'high' } } };
+    persistedRef.current = graph;
+    const range = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
+    const cell = { value: 0.4, range };
+    const op = variant === 'whole' ? { op: 'update_node', path: 'opt_buy', value: { interventions: { [TARGET]: cell } } }
+      : { op: 'update_node', path: `/nodes/opt_buy/data/interventions/${TARGET}${variant === 'leaf' ? '/range' : ''}`, value: variant === 'leaf' ? range : cell };
+    llmChatMock.mockResolvedValue(editResponse([op]));
+    await dispatchEditGraph({ payload: makeMessagePayload({ scenario_id: SCENARIO_ID, turn_id: '17401740-aaaa-4aaa-8aaa-000000000001', stage: 'analyse', message: 'Set this option level to 0.4' }),
+      requestId: 'req-range-smuggle', request: {} as FastifyRequest, graphState: graph as unknown as GraphStateIngress, analysisState: null });
+    expect(appendMock.mock.calls.map(c => (c[0] as { graph?: unknown }).graph).filter(g => g !== undefined)).toHaveLength(0);
+    expect(persistedRef.current).toEqual(graph);
+    } finally { config.features.graphManagementMode = oldMode; }
+  });
+  const RANGE = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
+  const rangedGraph = (range: unknown = RANGE) => {
+    const graph = buildPersistedGraph();
+    nodeOf(graph, 'opt_buy').interventions = { [TARGET]: { value: 0.2, source: 'user_specified',
+      target_match: { node_id: TARGET, match_type: 'exact_id', confidence: 'high' },
+      ...(range !== undefined ? { range } : {}),
+    } };
+    return graph;
+  };
+  const optionCell = (graph: unknown) => (nodeOf(graph, 'opt_buy').interventions as Record<string, Record<string, unknown>>)[TARGET]!;
+  const runRangeEdit = async (echo: unknown, operations: unknown[], message = 'Change customer churn to 0.3') => {
+    llmChatMock.mockResolvedValue(editResponse(operations));
+    await dispatchEditGraph({ payload: makeMessagePayload({ scenario_id: SCENARIO_ID,
+      turn_id: '17401740-aaaa-4aaa-8aaa-000000000001', stage: 'analyse', message }),
+      requestId: 'req-stored-range', request: {} as FastifyRequest,
+      graphState: echo as GraphStateIngress, analysisState: null });
+  };
+
+  it.each(['off', 'shadow', 'live'].flatMap(mode => ['added', 'changed', 'stale', 'first-write'].map(echo => ({ mode, echo }))))('an unrelated edit cannot approve the request echo: $mode/$echo', async ({ mode, echo: kind }) => {
+    const oldMode = config.features.graphManagementMode;
+    config.features.graphManagementMode = mode as typeof oldMode;
+    try {
+      const stored = rangedGraph(kind === 'stale' ? { ...RANGE, high: 0.8 } : RANGE);
+      if (kind === 'added') delete optionCell(stored).range;
+      persistedRef.current = kind === 'first-write' ? null : structuredClone(stored);
+      const echo = rangedGraph(kind === 'changed' ? { ...RANGE, high: 0.8 } : RANGE);
+      await runRangeEdit(echo, [{ op: 'update_node', path: `/nodes/${SIBLING}/data/value`, value: 0.3 }]);
+      expect(appendMock.mock.calls.map(c => (c[0] as { graph?: unknown }).graph).filter(g => g !== undefined)).toHaveLength(0);
+      expect(persistedRef.current).toEqual(kind === 'first-write' ? null : stored);
+    } finally { config.features.graphManagementMode = oldMode; }
+  });
+
+  it.each(['off', 'shadow', 'live'].flatMap(mode => [true, false].map(includeRange => ({ mode, includeRange }))))('an approved whole-map replacement round-trips opt_buy/$TARGET: $mode include=$includeRange', async ({ mode, includeRange }) => {
+    const oldMode = config.features.graphManagementMode;
+    config.features.graphManagementMode = mode as typeof oldMode;
+    try {
+      const stored = rangedGraph();
+      persistedRef.current = structuredClone(stored);
+      const cell = { ...optionCell(stored) };
+      if (!includeRange) delete cell.range;
+      await runRangeEdit(stored, [{ op: 'update_node', path: 'opt_buy', value: { interventions: { [TARGET]: cell } } }],
+        'Set Buy Asset monthly cashflow level to 0.2');
+      expect(optionCell(storedGraph()).range).toEqual(RANGE);
+      expect(optionCell(storedGraph()).value).toBe(0.2);
+    } finally { config.features.graphManagementMode = oldMode; }
+  });
+
+  it.each(['off', 'shadow'])('the final stored-base read refuses a range changed between tool and commit: %s', async mode => {
+    const oldMode = config.features.graphManagementMode;
+    config.features.graphManagementMode = mode as typeof oldMode;
+    try {
+      const earlier = rangedGraph();
+      const current = rangedGraph({ ...RANGE, high: 0.8 });
+      persistedRef.current = structuredClone(current);
+      loadGraphMock.mockImplementationOnce(async () => structuredClone(earlier));
+      await expect(runRangeEdit(earlier, [{ op: 'update_node', path: `/nodes/${SIBLING}/data/value`, value: 0.3 }]))
+        .rejects.toThrow('needs approval on its stored change card');
+      expect(loadGraphMock).toHaveBeenCalledTimes(2);
+      expect(appendMock).not.toHaveBeenCalled();
+      expect(persistedRef.current).toEqual(current);
+    } finally { config.features.graphManagementMode = oldMode; }
+  });
+
+  it.each(['off', 'shadow', 'live'])('an omitted echo never erases the stored range: %s', async mode => {
+    const oldMode = config.features.graphManagementMode;
+    config.features.graphManagementMode = mode as typeof oldMode;
+    try {
+      const stored = rangedGraph();
+      persistedRef.current = structuredClone(stored);
+      const echo = structuredClone(stored);
+      delete optionCell(echo).range;
+      await runRangeEdit(echo, [{ op: 'update_node', path: `/nodes/${SIBLING}/data/value`, value: 0.3 }]);
+      if (mode === 'live') {
+        // The existing stale-base gate still refuses an echo with a different analysis identity.
+        expect(appendMock.mock.calls.map(c => (c[0] as { graph?: unknown }).graph).filter(g => g !== undefined)).toHaveLength(0);
+        expect(persistedRef.current).toEqual(stored);
+      } else expect(optionCell(storedGraph()).range).toEqual(RANGE);
+    } finally { config.features.graphManagementMode = oldMode; }
+  });
+
   it.each([
     ['single value leaf', [{ op: 'update_node', path: `/nodes/${TARGET}/data/value`, value: 0.42 }]],
     [

@@ -346,6 +346,20 @@ describe('corpus D — hand-written attack spellings, every one refused', () => 
 });
 
 
+describe('range consent belongs to the dedicated approval, not the generic field screen', () => {
+  const range = { low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' };
+  it.each([
+    ['interventions', { 'f-spend': { value: 0.25, range } }],
+    ['data/interventions/f-spend', { value: 0.25, range }],
+    ['data/interventions/f-spend/range', range],
+  ])('a generic field write cannot introduce a range: %s', (field, payload) => {
+    expect(nodeUpdate(field, payload).blocker?.code).toBe(FIELD_NOT_ALLOWED);
+  });
+  it('a generic node add cannot smuggle a range', () => {
+    expect(addNode({ interventions: { 'f-spend': { value: 0.25, range } } }).blocker?.code).toBe(FIELD_NOT_ALLOWED);
+  });
+});
+
 describe('B3 gap fields stay outside generic mutation permission', () => {
   for (const field of ['unresolved_targets', 'user_questions']) {
     it(`${field}: a generic field write is refused`, () => {

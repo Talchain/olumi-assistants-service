@@ -177,6 +177,8 @@ import {
   findScaleIncoherentBaselineFactorIds,
   decideAnalysisScaleBlock,
 } from '../plot-intervention-scale.js';
+import { wireInterventionRangePlan } from '../../intervention-range.js';
+import { optionIdOf } from '../../../orchestrator/context/placeholder-parts.js';
 import { isRecommendableOption } from './recommendable-option.js';
 import {
   buildAnalysisSubmissionDisclosure,
@@ -991,10 +993,18 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // shape. We only forward fields PLoT accepts. The options carry the
     // request-projected wire numbers; NOTHING may transform them between here
     // and `plotClient.run` (that gap was the round-3 defect).
-    const finalWireOptions = submittedOptions.map((opt, index) => ({
-      ...opt,
-      interventions: requestProjection.perOption[index] ?? {},
-    }));
+    // TEMPORAL (PLoT #424 / ISL #216): an option's stated range rides beside its wire number, ONLY where that number is
+    // the raw point the range brackets (`intervention-range.ts`). No range stated → no key (byte-identical wire).
+    // A stated range that cannot ride the wire (its number was projected off the raw point) is not dropped silently:
+    // that option's result on every limit over that factor is withheld below (Codex CR 5963331228 P1, fail closed).
+    const rangeNotForwarded: { optionId: string; factorIds: string[] }[] = [];
+    const finalWireOptions = submittedOptions.map((opt, index) => {
+      const interventions = requestProjection.perOption[index] ?? {};
+      const { ranges: intervention_ranges, notForwarded } = wireInterventionRangePlan(rawObjectsPerOption[index] ?? {}, interventions);
+      const optionId = optionIdOf(opt as Record<string, unknown>);
+      if (notForwarded.length > 0 && optionId !== undefined) rangeNotForwarded.push({ optionId, factorIds: notForwarded });
+      return { ...opt, interventions, ...(intervention_ranges !== undefined ? { intervention_ranges } : {}) };
+    });
     // A level limit on a node the options move is checked against that node's CURRENT level: carried on this wire
     // copy only, never persisted, so a later edit of the level can never leave a stale copy behind
     // (`level-limit-baseline.ts`).
@@ -1234,7 +1244,9 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         : [];
     });
     const inputSnapshot = buildRunInputSnapshot({
-      submittedOptions: submittedOptions as ReadonlyArray<Record<string, unknown>>,
+      // The options AS DISPATCHED (CODEX CEE BUDDY 5921095058): `finalWireOptions` is what PLoT receives, stated
+      // ranges included, so a range-only edit is a recorded input change. Same order and ids as `submittedOptions`.
+      submittedOptions: finalWireOptions as ReadonlyArray<Record<string, unknown>>,
       rawObjectsPerOption,
       wirePerOption: requestProjection.perOption as ReadonlyArray<Readonly<Record<string, number>>>,
       heldFactorIdsByOptionId: scaffoldedFactorIdsByOptionId,
@@ -1896,6 +1908,31 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           withheld: [...placeholderMovedByLimit].map(([constraint_id, ids]) => ({ constraint_id, option_ids: [...ids] })),
         },
         'run_analysis: a limit\'s P is withheld for the options that move its target through an unsized Olumi link',
+      );
+    }
+
+    const rangeLostByLimit = new Map<string, Set<string>>();
+    if (rangeNotForwarded.length > 0) {
+      for (const c of readRatifiedConstraints(snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph)) {
+        for (const r of rangeNotForwarded) {
+          const nodeId = c.node_id;
+          if (typeof nodeId !== 'string' || !r.factorIds.includes(nodeId)) continue;
+          const ids = rangeLostByLimit.get(c.constraint_id) ?? new Set<string>();
+          ids.add(r.optionId);
+          rangeLostByLimit.set(c.constraint_id, ids);
+        }
+      }
+      if (rangeLostByLimit.size > 0) response = withholdOptionLimitScores(response, rangeLostByLimit);
+      log.info(
+        {
+          event: 'run_analysis.limit_p_withheld_for_unforwarded_range',
+          request_id: invocation.requestId,
+          scenario_id: args.scenario_id,
+          // Redacted: ids only.
+          not_forwarded: rangeNotForwarded.map((r) => ({ option_id: r.optionId, factor_ids: r.factorIds })),
+          withheld: [...rangeLostByLimit].map(([constraint_id, ids]) => ({ constraint_id, option_ids: [...ids] })),
+        },
+        'run_analysis: a stated range could not ride the wire; that option\'s P for limits on its factor is withheld',
       );
     }
 
