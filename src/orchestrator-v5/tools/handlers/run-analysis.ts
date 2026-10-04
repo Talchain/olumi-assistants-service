@@ -149,6 +149,7 @@ import {
 import { AnalysisSnapshotDivergedError, currentBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
 import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { decideSeedReuse } from '../../coaching/seed-reuse.js';
+import { groupedGoalPathLinks } from '../../compose/grouped-link-sizing.js';
 // The 2026-08-28 disclosure defect: the run proceeds past unset option effects
 // (the compute-discard waiver) and the analyse turn says nothing about them.
 import {
@@ -486,6 +487,14 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // (which would read as an infra 500). No PLoT call, no run_analysis fact.
       if (readError instanceof AnalysisNotReadyError) {
         const verdict = readError.verdict;
+        const groupedQuestions = readError.graph === undefined ? [] : groupedGoalPathLinks(readError.graph).map((link) =>
+          `${link.source_label} → ${link.target_label}: ${link.question}`);
+        const readinessQuestionSet = new Set<string>();
+        const withheldQuestions = [...groupedQuestions, ...readinessQuestions(verdict)].filter((question) => {
+          if (readinessQuestionSet.has(question)) return false;
+          readinessQuestionSet.add(question);
+          return true;
+        });
         throw new HandlerInvocationFailedError(
           `Persisted graph is not analysis-ready for ${args.scenario_id}`,
           {
@@ -503,8 +512,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
               // questions held here while the user was told to "ask in the chat
               // what they need"). Omitted when empty so a verdict with no
               // enumerable inputs (NO_GRAPH, SCHEMA_INVALID) is unchanged.
-              ...(readinessQuestions(verdict).length > 0
-                ? { readiness_questions: [...readinessQuestions(verdict)] }
+              ...(withheldQuestions.length > 0
+                ? { readiness_questions: withheldQuestions }
                 : {}),
             },
             cause: readError,

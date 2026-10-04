@@ -82,7 +82,7 @@ import { structuralEdgeValue } from '../routing/add-option-transaction.js';
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 import { applyFactorValueEdit, type FactorValueEditResult } from './factor-value-edit.js';
 import { applyEdgeStrengthEdit } from './edge-strength-edit.js';
-import { applyLinkEffectEdit, type LinkEffectStatement } from './link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, type LinkEffectStatement } from './link-effect-edit.js';
 import { applyIdentityConfirmEdit, identityConfirmPostimageIsScoped } from './identity-confirm-edit.js';
 import { frameDefaultedLinks, groupResizedLinks, resizedLinksSentence } from '../../cee/magnitude/frame-defaulted-links.js';
 
@@ -666,6 +666,44 @@ async function applyApprovedLinkStrengths(
   return { kind: 'applied', graph, handlerFacts, confirmations };
 }
 
+/** The grouped natural-effect writer: sequential postimages, one final scoped commit, one fact per link. */
+async function applyApprovedLinkEffects(
+  before: EditableGraph,
+  links: readonly ApprovedLinkEffect[],
+  ctx: { readonly lastRunIdentityUse: IdentityRunUse | null },
+): Promise<
+  | { readonly kind: 'applied'; readonly graph: EditableGraph; readonly handlerFacts: readonly unknown[]; readonly confirmations: readonly string[] }
+  | { readonly kind: 'refused'; readonly reason: string; readonly linkIndex: number }
+> {
+  let working: unknown = structuredClone(before);
+  const handlerFacts: unknown[] = [];
+  const confirmations: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < links.length; i += 1) {
+    const link = links[i]!;
+    const key = `${link.from}::${link.to}`;
+    if (seen.has(key)) return { kind: 'refused', reason: 'duplicate_link', linkIndex: i };
+    seen.add(key);
+    // The proposal's token is the edge as it stood when this link was prepared. The hash is recomputed for the
+    // sequential working graph, so the next operation is checked against the postimage of every preceding one.
+    if (linkEffectEdgeToken(working, link.from, link.to) !== link.edge_token) return { kind: 'refused', reason: 'link_superseded', linkIndex: i };
+    const graphHash = computeAnalysisAffectingGraphHash(working as never);
+    if (!graphHash) return { kind: 'refused', reason: 'canonical_graph_unavailable', linkIndex: i };
+    const written = applyLinkEffectEdit({ persistedGraph: working, from: link.from, to: link.to, effect: link.effect,
+      expected: { graph_hash: graphHash, edge_token: link.edge_token }, quote: link.quote, reading_token: link.reading_token,
+      lastRunIdentityUse: ctx.lastRunIdentityUse });
+    if (written.kind === 'refused') return { kind: 'refused', reason: `link_${written.reason}`, linkIndex: i };
+    working = written.mutatedGraph;
+    handlerFacts.push(...written.handlerFacts);
+    if (written.statement !== undefined) confirmations.push(written.statement);
+  }
+  const graph = projectGraphForPersistence(working);
+  if (!isEditableGraph(graph) || !linkStrengthsPostimageIsScoped(before, graph, links)) {
+    return { kind: 'refused', reason: 'link_scope_mismatch', linkIndex: -1 };
+  }
+  return { kind: 'applied', graph, handlerFacts, confirmations };
+}
+
 export type OptionInterventionExecutionInput = Omit<OptionInterventionTransactionInput, 'persistedGraph' | 'source'> & {
   readonly stage: OlumiResponse['stage_indicator'];
   /** Existing caller request digest: informational, NOT the idempotency key. */
@@ -716,6 +754,8 @@ export type OptionInterventionBatchExecutionInput =
     readonly linkStrengths?: readonly ApprovedLinkStrength[];
     /** ⭐ One approved user-stated link effect: ONE append, alone (never with a strength set, levels, values or ranges). */
     readonly linkEffect?: ApprovedLinkEffect;
+    /** ⭐ Several approved user-stated effects: one sequential in-memory postimage, one append, one receipt. */
+    readonly linkEffects?: readonly ApprovedLinkEffect[];
     /** ⭐ One approved product confirmation: ONE append, alone (never with anything else). */
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** The last Run's use of each declared identity (`identityRunUseFromFacts`); null = no Run, a definition refuses. */
@@ -744,7 +784,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   if (optionGaps.some(d => !input.targets.some(t => t.optionId === d.optionId))) {
     return { kind: 'refused', reason: 'option_gap_without_level_anchor' };
   }
-  if (optionGaps.length > 0 && ((input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined || input.identityConfirm !== undefined)) {
+  if (optionGaps.length > 0 && ((input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined || (input.linkEffects?.length ?? 0) > 0 || input.identityConfirm !== undefined)) {
     return { kind: 'refused', reason: 'option_gaps_not_alone_with_identity_or_links' };
   }
   let before: unknown;
@@ -773,7 +813,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
   const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
-    linkEffect: _callerEffect, identityConfirm: _callerIdentity, lastRunIdentityUse: _callerRunUse, ...common } = input;
+    linkEffect: _callerEffect, linkEffects: _callerEffects, identityConfirm: _callerIdentity, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
   // levels are prepared on the post-value graph, so their own stale check can no longer see the caller's base.
@@ -835,9 +875,31 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
    * writer in memory, scoped to that one link, then the ONE append and read-back below. One per approval: a second
    * effect prepared on the same base would read `superseded` once the first moved the analysis revision.
    */
+  /** The grouped natural-effect form: every link is written on the prior postimage, then the shared commit below appends once. */
+  const linkEffects = input.linkEffects ?? [];
+  if (linkEffects.length > 0) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || input.linkEffect !== undefined
+      || (expectedLinks?.length ?? 0) > 0) {
+      return { kind: 'refused', reason: 'link_effects_not_alone' };
+    }
+    if (!isEditableGraph(before)
+      || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    const applied = await applyApprovedLinkEffects(before, linkEffects, { lastRunIdentityUse: input.lastRunIdentityUse ?? null });
+    if (applied.kind === 'refused') return { kind: 'refused', reason: applied.reason, linkIndex: applied.linkIndex };
+    const appliedHash = computeAnalysisAffectingGraphHash(applied.graph);
+    if (!appliedHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    levelBase = applied.graph;
+    levelBaseHash = appliedHash;
+    valueFacts = applied.handlerFacts;
+    const labelOfBefore = (id: string): string => String(before.nodes.find(node => node.id === id)?.label ?? id);
+    valueConfirmations = linkEffects.map((link) => `"${labelOfBefore(link.from)}" → "${labelOfBefore(link.to)}" now carries the size you stated.`);
+  }
   const linkEffect = input.linkEffect;
   if (linkEffect !== undefined) {
-    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || (expectedLinks?.length ?? 0) > 0) {
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffects.length > 0 || (expectedLinks?.length ?? 0) > 0) {
       return { kind: 'refused', reason: 'link_effect_not_alone' };
     }
     if (!isEditableGraph(before)
@@ -869,7 +931,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
    */
   const identityConfirm = input.identityConfirm;
   if (identityConfirm !== undefined) {
-    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined
+    if (targets.length + values.length + frames.length + linkStrengths.length > 0 || linkEffect !== undefined || linkEffects.length > 0
       || (expectedLinks?.length ?? 0) > 0) {
       return { kind: 'refused', reason: 'identity_confirm_not_alone' };
     }
@@ -897,7 +959,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       identityConfirm.factor_ids.map(id => `"${labelOfBefore(id)}"`).join(' times ')}, as you confirmed on the card: “${
       identityConfirm.words.trim()}”`];
   }
-  const effectCount = (linkEffect !== undefined ? 1 : 0) + (identityConfirm !== undefined ? 1 : 0);
+  const effectCount = (linkEffect !== undefined ? 1 : 0) + linkEffects.length + (identityConfirm !== undefined ? 1 : 0);
   const valuesChanged = values.length + frames.length + linkStrengths.length + effectCount > 0 && !isDeepStrictEqual(levelBase, before);
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)

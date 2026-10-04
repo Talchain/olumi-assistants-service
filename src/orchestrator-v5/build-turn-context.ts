@@ -3091,6 +3091,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new AnalysisNotReadyError(
       refusedVerdict(admission),
       canonicalAnalysisReadyFrom(admission, sigmaFloor.graph),
+      sigmaFloor.graph,
     );
   }
   const verdict = admittedVerdict(admission);

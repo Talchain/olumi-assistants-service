@@ -1077,13 +1077,17 @@ export class AnalysisNotReadyError extends Error {
    * decides which refusals keep it, from the `may_run` verdict it carries.
    */
   readonly structuralReadiness?: NonNullable<GraphPatchBlockData['analysis_ready']>;
+  /** The graph already read by the readiness authority, for withheld copy that must name missing goal-path links. */
+  readonly graph?: unknown;
   constructor(
     verdict: ReadinessResult,
     structuralReadiness?: NonNullable<GraphPatchBlockData['analysis_ready']>,
+    graph?: unknown,
   ) {
     super(`Persisted graph is not analysis-ready: ${verdict.reasonCodes.join(',') || 'unknown'}`);
     this.name = 'AnalysisNotReadyError';
     this.verdict = verdict;
     if (structuralReadiness !== undefined) this.structuralReadiness = structuralReadiness;
+    if (graph !== undefined) this.graph = graph;
   }
 }

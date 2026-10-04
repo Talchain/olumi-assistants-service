@@ -2878,6 +2878,8 @@ export async function dispatchOptionLevelsBatch(
     readonly linkStrengths?: readonly ApprovedLinkStrength[];
     /** ⭐ One approved user-stated link effect (Canonical #72 5882780438): ONE commit, alone. */
     readonly linkEffect?: ApprovedLinkEffect;
+    /** ⭐ Several approved user-stated link effects: one in-memory postimage and one commit. */
+    readonly linkEffects?: readonly ApprovedLinkEffect[];
     /** ⭐ One approved product confirmation (DL #72 5887510885; Canonical 5887564539): ONE commit, alone. */
     readonly identityConfirm?: ApprovedIdentityConfirm;
     /** B8 (DL CR 5934735711): a turn-fence refusal reaches the caller (the in-process door only); see the writer's catch. */
@@ -2887,7 +2889,7 @@ export async function dispatchOptionLevelsBatch(
 ): Promise<DispatchSystemEventResult> {
   const linkStrengths = batch.linkStrengths ?? [];
   const eventKind = batch.identityConfirm !== undefined ? 'identity_confirm_edit'
-    : batch.linkEffect !== undefined ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
+    : batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0 ? 'link_effect_edit' : linkStrengths.length > 0 ? 'link_strengths_batch'
     : batch.targets.length === 1 ? 'option_intervention_edit' : 'option_levels_batch';
   let analysisInputs: WriteReplyAnalysisInputs;
   try {
@@ -2920,7 +2922,7 @@ export async function dispatchOptionLevelsBatch(
    * link the canvas refuses is refused in a set too. A failed read writes nothing.
    */
   let lastRunIdentityUse: IdentityRunUse | null = null;
-  if (linkStrengths.length > 0 || batch.linkEffect !== undefined) {
+  if (linkStrengths.length > 0 || batch.linkEffect !== undefined || (batch.linkEffects?.length ?? 0) > 0) {
     try {
       lastRunIdentityUse = identityRunUseFromFacts(priorFacts);
     } catch {
@@ -2945,6 +2947,7 @@ export async function dispatchOptionLevelsBatch(
   // level whose approved links are declared — goes through the batch entry.
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
+    && (batch.linkEffects?.length ?? 0) === 0
     && batch.identityConfirm === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
@@ -2957,6 +2960,7 @@ export async function dispatchOptionLevelsBatch(
       ...(batch.frames !== undefined && batch.frames.length > 0 ? { frames: batch.frames } : {}),
       ...(linkStrengths.length > 0 ? { linkStrengths, lastRunIdentityUse } : {}),
       ...(batch.linkEffect !== undefined ? { linkEffect: batch.linkEffect, lastRunIdentityUse } : {}),
+      ...(batch.linkEffects !== undefined && batch.linkEffects.length > 0 ? { linkEffects: batch.linkEffects, lastRunIdentityUse } : {}),
       ...(batch.identityConfirm !== undefined ? { identityConfirm: batch.identityConfirm } : {}) }, getSessionStore());
 
   if (outcome.kind === 'committed') {
@@ -3242,6 +3246,15 @@ export type CommitOptionLevelsInput = {
      */
     readonly reading_token: string;
   };
+  /** Several approved natural-effect edits, held together by one approval and one commit. */
+  readonly link_effects?: readonly {
+    readonly from: string;
+    readonly to: string;
+    readonly effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string };
+    readonly edge_token: string;
+    readonly quote: string;
+    readonly reading_token: string;
+  }[];
   /**
    * ⭐ ONE PRODUCT CONFIRMATION (DL #72 5887510885; Canonical 5887564539): "MRR = price × subscribers" recorded as the
    * user's own `nonlinear_identity` on `outcome_id` by the canonical writer (`applyIdentityConfirmEdit`), in ONE commit,
@@ -3311,6 +3324,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames } : {}),
       ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { link_strengths: input.link_strengths } : {}),
       ...(input.link_effect !== undefined ? { link_effect: input.link_effect } : {}),
+      ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { link_effects: input.link_effects } : {}),
       ...(input.identity_confirm !== undefined ? { identity_confirm: input.identity_confirm } : {}),
       base_graph_hash: input.base_graph_hash } }))
     .digest('hex').slice(0, 32)}`;
@@ -3331,6 +3345,8 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
       ...(l.author === 'model_proposed' && l.intent === 'confirm_current' ? { review: true } : {}) })) } : {}),
     ...(input.link_effect !== undefined ? { linkEffect: { from: input.link_effect.from, to: input.link_effect.to, effect: input.link_effect.effect,
       edge_token: input.link_effect.edge_token, quote: input.link_effect.quote, reading_token: input.link_effect.reading_token } } : {}),
+    ...(input.link_effects !== undefined && input.link_effects.length > 0 ? { linkEffects: input.link_effects.map((effect) => ({ from: effect.from, to: effect.to, effect: effect.effect,
+      edge_token: effect.edge_token, quote: effect.quote, reading_token: effect.reading_token })) } : {}),
     ...(input.identity_confirm !== undefined ? { identityConfirm: { outcome_id: input.identity_confirm.outcome_id,
       factor_ids: [...input.identity_confirm.factor_ids], words: input.identity_confirm.words,
       reading_token: input.identity_confirm.reading_token } } : {}),
@@ -3341,7 +3357,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
     const value = r.refusal?.valueIndex !== undefined ? input.values?.[r.refusal.valueIndex] : undefined;
     const frame = r.refusal?.frameIndex !== undefined ? input.frames?.[r.refusal.frameIndex] : undefined;
     const link = r.refusal?.linkIndex === undefined ? undefined
-      : input.link_effect !== undefined ? input.link_effect : input.link_strengths?.[r.refusal.linkIndex];
+      : input.link_effect !== undefined ? input.link_effect : input.link_effects?.[r.refusal.linkIndex] ?? input.link_strengths?.[r.refusal.linkIndex];
     return { status: 'refused', reason: r.refusal?.reason ?? 'refused',
       ...(at !== undefined ? { pair: { option_id: at.option_id, factor_id: at.factor_id } } : {}),
       ...(value !== undefined ? { value: { factor_id: value.factor_id } } : {}),
