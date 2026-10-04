@@ -7,6 +7,7 @@ import { modelFacingToolResult } from '../licensed-run-view.js';
 import { runExplanationChip } from '../run-explanation.js';
 import { claimPermissionsFrom } from '../first-analysis.js';
 import { readLimitVerdicts } from '../../../orchestrator/context/constraint-feasibility.js';
+import { selectedRunContextDelta } from './fixtures/selected-run-context-delta.js';
 
 type Rec = Record<string, any>;
 const corpus = (path: string): Rec => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as Rec;
@@ -24,6 +25,41 @@ const withheld = { leader_may_be_named: false };
 const project = (read = current): Rec => savedRunContextFacts(SID, read, withheld);
 
 describe('same selected current Run supplies context facts without another authority', () => {
+  it('carries the same already-licensed delta by reference, preserving every prior fact', () => {
+    const delta = selectedRunContextDelta(POSITIVE.graph_hash, AT);
+    const baseline = project();
+    const facts = project({ ...current, run_delta: delta } as SavedRunContextFactsRead);
+    expect(facts.run_delta).toBe(delta);
+    const { run_delta: _delta, ...unchanged } = facts;
+    expect(unchanged).toEqual(baseline);
+    expect(project()).not.toHaveProperty('run_delta');
+  });
+
+  it.each(['never_run', 'complete_stale', 'unknown_degraded'])('%s cannot revive an earlier delta', (kind) => {
+    const delta = selectedRunContextDelta(POSITIVE.graph_hash, AT);
+    expect(project({ ...current, run_delta: delta,
+      analysis_state: { run_state: { kind, computed_at: AT } },
+    } as SavedRunContextFactsRead)).toEqual({});
+  });
+
+  it('a newer degraded read with no selected result cannot borrow a prior delta', () => {
+    const delta = selectedRunContextDelta(POSITIVE.graph_hash, AT);
+    expect(project({ ...current, run_delta: delta, analysis_result: undefined,
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: AT },
+        contradictions: ['fact_status_success_but_degraded_newer'] },
+    } as SavedRunContextFactsRead)).toEqual({});
+  });
+
+  it('a newer Run on the same graph uses only its own selected delta and reference', () => {
+    const nextAt = '2026-10-03T00:05:00.000Z';
+    const delta = selectedRunContextDelta(POSITIVE.graph_hash, nextAt);
+    const facts = project({ ...current, run_delta: delta,
+      analysis_state: { run_state: { kind: 'complete_current', computed_at: nextAt } },
+    } as SavedRunContextFactsRead);
+    expect(facts.run_delta).toBe(delta);
+    expect(facts.selected_run_reference).not.toBe(project().selected_run_reference);
+  });
+
   it('uses the existing science projection exactly, retaining the recorded factor and 55.76 threshold', () => {
     const immediate = modelFacingToolResult('run_analysis', { result: analysisResultForAgent(result), claim_permissions: withheld }) as Rec;
     const facts = project();
