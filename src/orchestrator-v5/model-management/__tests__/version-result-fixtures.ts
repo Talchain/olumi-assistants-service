@@ -1,3 +1,4 @@
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { RunInputSnapshotSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { computeAnalysisAffectingHashRecord } from '../../context/graph-identity.js';
@@ -41,7 +42,14 @@ export function savedRun(version: ModelVersionRecord, id: string, at: string, wi
       robustness: { level: 'high', near_tie: { is_tie: false } } },
     input_snapshot: RunInputSnapshotSchema.parse({ snapshot_version: 1, sent_digest: 'a'.repeat(64),
       residual_digest: 'b'.repeat(64), goal: { node_id: 'n_revenue', unit: goal.goal_threshold_unit },
-      options: [], options_not_sent: [], factors: [], constraints: [], links: [] }),
+      options: buildCanonicalAnalysisReadyFromGraph(value)!.options.filter(o => o.status === 'ready').map(o => ({
+        option_id: o.option_id, settings: Object.entries(o.interventions ?? {}).map(([factor_id, intervention]) => ({
+          factor_id, encoded: typeof intervention === 'number' ? intervention : (intervention as { value: number }).value,
+        })),
+      })),
+      options_not_sent: buildCanonicalAnalysisReadyFromGraph(value)!.options.filter(o => o.status !== 'ready')
+        .map(o => ({ option_id: o.option_id, reason: 'not_analysable' })),
+      factors: [], constraints: [], links: [] }),
   } } as unknown as HandlerFact;
 }
 export const PRIOR = savedRun(FROM, 'bound-prior', '2026-10-02T00:00:00.000Z');

@@ -26,6 +26,8 @@
  * the raw result. PURE. Never throws (a projection failure returns a run with NO enrichment, never the raw one).
  */
 import { keyDesignatesLeadingOption } from '../compose/leading-option-egress-guard.js';
+import { projectModelFacingRunDelta } from '../context/model-facing-run-delta.js';
+import type { ContextPackRunDelta } from '../context/context-pack-schema.js';
 import {
   projectAnalysisSummaryForWithheldClaim,
   projectTransportEnrichmentForWithheldClaim,
@@ -154,10 +156,20 @@ export function licensedRunBlockForModel(block: unknown): unknown {
 }
 
 /**
- * What the model reads for one tool call. Only `run_analysis` carries a run; every other tool's result is returned by
- * reference. A run the model may name a leader on is returned by reference too.
+ * What the model reads for one tool call. Canonical-state recovery applies the same delta projection as host context;
+ * `run_analysis` applies the licensed run view. Other results are returned by reference.
  */
 export function modelFacingToolResult<T>(toolName: string, result: T): T {
+  if (toolName === 'get_canonical_state') {
+    const rec = record(result);
+    const analysis = record(rec?.analysis);
+    if (rec === undefined || analysis === undefined || !('run_delta' in analysis)) return result;
+    const { run_delta: delta, ...rest } = analysis;
+    return { ...rec, analysis: { ...rest,
+      ...(runToolOutputLicensesLeader(analysis) && record(delta) !== undefined
+        ? { run_delta: projectModelFacingRunDelta(delta as ContextPackRunDelta) } : {}),
+    } } as T;
+  }
   if (toolName !== RUN_TOOL || runToolOutputLicensesLeader(result)) return result;
   const rec = record(result);
   if (rec === undefined || !('result' in rec)) return result;

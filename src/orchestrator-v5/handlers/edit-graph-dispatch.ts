@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 /**
  * V5 pre-Sonnet dispatch for edit_graph turns.
  *
@@ -163,6 +164,7 @@ import {
   emitFreshnessTelemetry,
   isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
+  type DeriveAnalysisFreshnessOptions,
 } from '../context/freshness.js';
 import { projectEditSelectionFocus } from './edit-selection-focus.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -196,6 +198,7 @@ import {
   hasLiveHeldProposal,
   type EditGmDecision,
 } from './edit-graph-referee-gate.js';
+import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges } from '../../orchestrator/tools/encode-option-interventions.js';
 // ROADMAP 2.474 — the coach's structural editing tool: contract, entry
 // decision, transport. Three modules on purpose (see their headers): the
 // rules are provable without an LLM, the transport without a graph.
@@ -3271,26 +3274,21 @@ export async function dispatchEditGraph(
         source: 'edit_graph',
       },
     );
+    // This is the exact stored CAS base used by the write. Recheck after merge:
+    // it may have moved since the tool's earlier read, even with the referee off.
+    if (hasNewInterventionRanges(strictBase, persistedPostEditGraph)) {
+      throw new Error('A new or changed likely range needs approval on its stored change card. Nothing was written.');
+    }
+    persistedPostEditGraph = projectGraphForPersistence(
+      clearInheritedInterventionSourceQuotes(strictBase, persistedPostEditGraph),
+      { scenarioId: payload.scenario_id, turnId: payload.turn_id, turnClass: payload.turn_class, source: 'edit_graph' },
+    );
   }
 
   let freshness: FreshnessDerivation;
   let priorFactsForRecovery: readonly HandlerFact[] = [];
-  // CONTEXT/MEMORY V5 defect 4 — the read state for `priorFactsForRecovery`,
-  // surfaced out of the try for exactly the reason `currentGraphHashForRecovery`
-  // below is: the recovery derivations at the bottom of this function re-derive
-  // freshness from `priorFactsForRecovery` after `turnContext` has left scope.
-  //
-  // ⚠ THE `derivation_failed` GUARDS ON THOSE SITES DO NOT COVER THIS.
-  // `fetchPriorFacts` CATCHES a store throw and returns `readOk: false` rather
-  // than rethrowing, so `buildTurnContext` SUCCEEDS, the try below completes
-  // normally, and the catch branch never runs. Without this flag every one of
-  // those re-derivations reads the resulting `[]` as a positive
-  // `'none' / no_successful_run_analysis_fact` claim.
-  //
-  // `undefined` when the try never reached the assignment (the catch branch
-  // fired) — which is pre-fix behaviour and correct: that path has no read
-  // state to describe.
-  let priorFactsReadOkForRecovery: boolean | undefined;
+  // Keep the complete read evidence when unchanged/refused/recovery branches reproject the base.
+  let freshnessReadOptionsForRecovery: DeriveAnalysisFreshnessOptions = {};
   // V5 P0 — captured proposed concept from the prior turn's pending
   // actions, used by the no-op recovery layer to drive the deterministic
   // Stage 1 / Stage 2 clarifier. Null when no prior proposal exists, when
@@ -3316,7 +3314,12 @@ export async function dispatchEditGraph(
   try {
     const turnContext = await buildTurnContext(payload, requestId);
     priorFactsForRecovery = turnContext.prior_facts;
-    priorFactsReadOkForRecovery = turnContext.prior_facts_read_ok;
+    freshnessReadOptionsForRecovery = {
+      priorFactsReadOk: turnContext.prior_facts_read_ok,
+      analysisInvalidatedAt: turnContext.analysis_invalidated_at,
+      priorFactsWithTurn: turnContext.prior_facts_with_turn,
+      legacyEditFacts: legacyEditFactsForFreshness(turnContext.scenario_analysis_fact_set),
+    };
     // V5-PERSIST-FIX-01: the merge base was already resolved above via the
     // strict persisted read (so a degraded read fails closed). buildTurnContext
     // is used here only for prior_facts / pending actions — NOT for the base.
@@ -3383,10 +3386,8 @@ export async function dispatchEditGraph(
       // `[]`. Untreated, this is the derivation that seeds the `'none'` verdict
       // the recovery re-derivations below then repeat.
       {
+        ...freshnessReadOptionsForRecovery,
         currentGraph: persistedPostEditGraph,
-        ...(turnContext.prior_facts_read_ok === undefined
-          ? {}
-          : { priorFactsReadOk: turnContext.prior_facts_read_ok }),
       },
     );
     emitFreshnessTelemetry(
@@ -3631,10 +3632,8 @@ export async function dispatchEditGraph(
             // cover a degraded read (that path returns `readOk: false` without
             // throwing, so `freshness.reason` is `no_successful_run_analysis_fact`).
             {
+              ...freshnessReadOptionsForRecovery,
               currentGraph: gmFrameBase,
-              ...(priorFactsReadOkForRecovery === undefined
-                ? {}
-                : { priorFactsReadOk: priorFactsReadOkForRecovery }),
             },
           ).freshness;
     // ROADMAP 2.474 / A3 — DOES THIS SCENARIO ALREADY CARRY AN ANALYSIS?
@@ -4021,10 +4020,8 @@ export async function dispatchEditGraph(
           ? extractGraphOptionIds(gmFrameBase)
           : undefined,
         {
+          ...freshnessReadOptionsForRecovery,
           currentGraph: gmFrameBase,
-          ...(priorFactsReadOkForRecovery === undefined
-            ? {}
-            : { priorFactsReadOk: priorFactsReadOkForRecovery }),
         },
       );
     }
@@ -4070,13 +4067,11 @@ export async function dispatchEditGraph(
         config.cee.optionIdentityFreshnessGuard
           ? extractGraphOptionIds(gmFrameBase)
           : undefined,
-        // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above screens
+        // Defect 4 — see `freshnessReadOptionsForRecovery`. The guard above screens
         // `derivation_failed`, which a degraded read does NOT produce.
         {
+          ...freshnessReadOptionsForRecovery,
           currentGraph: gmFrameBase,
-          ...(priorFactsReadOkForRecovery === undefined
-            ? {}
-            : { priorFactsReadOk: priorFactsReadOkForRecovery }),
         },
       );
     }
@@ -4164,13 +4159,11 @@ export async function dispatchEditGraph(
         config.cee.optionIdentityFreshnessGuard
           ? extractGraphOptionIds(gmFrameBase)
           : undefined,
-        // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above screens
+        // Defect 4 — see `freshnessReadOptionsForRecovery`. The guard above screens
         // `derivation_failed`, which a degraded read does NOT produce.
         {
+          ...freshnessReadOptionsForRecovery,
           currentGraph: gmFrameBase,
-          ...(priorFactsReadOkForRecovery === undefined
-            ? {}
-            : { priorFactsReadOk: priorFactsReadOkForRecovery }),
         },
       );
     }
@@ -5560,13 +5553,11 @@ export async function dispatchEditGraph(
             config.cee.optionIdentityFreshnessGuard
               ? extractGraphOptionIds(gmFrameBase)
               : undefined,
-            // Defect 4 — see `priorFactsReadOkForRecovery`. The guard above
+            // Defect 4 — see `freshnessReadOptionsForRecovery`. The guard above
             // screens `derivation_failed`, which a degraded read does NOT produce.
             {
+              ...freshnessReadOptionsForRecovery,
               currentGraph: gmFrameBase,
-              ...(priorFactsReadOkForRecovery === undefined
-                ? {}
-                : { priorFactsReadOk: priorFactsReadOkForRecovery }),
             },
           );
         }

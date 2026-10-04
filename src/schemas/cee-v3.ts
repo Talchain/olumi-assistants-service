@@ -499,6 +499,9 @@ export const NodeV3 = z.object({
    *  options[] remains the canonical source for analysis; graph nodes carry this for ConnRow rendering.
    *  Typed as z.any() per-value to avoid forward reference to InterventionV3; canonical shape lives on OptionV3. */
   interventions: z.record(z.string(), z.any()).optional(),
+  /** Existing option-gap carriers, retained on canonical option nodes. */
+  unresolved_targets: z.array(z.string()).optional(),
+  user_questions: z.array(z.string()).optional(),
   /** Marks the status-quo / baseline option node (option-kind nodes only, v191+). */
   is_baseline: z.boolean().optional(),
   /** ⭐ An option OLUMI added rather than the user (option-kind nodes only; MG `olumi-option-marker.ts`, DL #72

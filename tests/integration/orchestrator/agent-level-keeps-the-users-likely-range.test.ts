@@ -112,7 +112,7 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     rows.clear();
   });
 
-  async function proposeAndApprove(level: Record<string, unknown>, text = TEXT, compound = false) {
+  async function proposeAndApprove(level: Record<string, unknown>, text = TEXT, compound = false, typedApproval = true) {
     const read = async () => ({ status: 200, json: { graph: persisted, graph_hash: currentHash() } });
     const caps = createAgentCapabilities(read as never, new ProposalStore(), undefined, 'full', undefined, {
       commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
@@ -127,9 +127,19 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(JSON.stringify(persisted)).toBe(before);
     expect(rows.size).toBe(count);
     if (proposed.ok !== true) return { proposed, out: undefined };
-    const out = await caps.authoriseChange(ctx, { proposal_id: String(proposed.proposal_id) });
+    const out = await caps.authoriseChange({ ...ctx, ...(typedApproval ? { typed_approval_of: String(proposed.proposal_id) } : {}) },
+      { proposal_id: String(proposed.proposal_id) });
     return { proposed, out };
   }
+
+  it.each([false, true])('a range cannot use ordinary approval; its exact typed card is required, compound=%s', async compound => {
+    const before = structuredClone(persisted);
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED }, TEXT, compound, false);
+    expect(proposed.ok).toBe(true);
+    expect(out).toMatchObject({ ok: false, refusal: 'approval_required' });
+    expect(rows.size).toBe(0);
+    expect(persisted).toEqual(before);
+  });
 
   it('RED: the persisted cell holds the user\'s 10 days AND their likely range 5–20, as theirs; ONE commit; the hash moves', async () => {
     const before = currentHash();
@@ -143,6 +153,20 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     expect(cell, JSON.stringify(cell)).toMatchObject({ raw_value: 10, source: 'user_specified' });
     expect(cell.range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
     expect(currentHash()).not.toBe(before);
+  });
+
+  it('the merged B3 gap declaration and temporal reading use one stored approval and one write', async () => {
+    const { proposed, out } = await proposeAndApprove({ value: 10, likely_low: 5, likely_high: 20, ...TYPED,
+      unmodelled_mechanisms: ['supplier learning'] });
+    expect(proposed.ok, JSON.stringify(proposed)).toBe(true);
+    expect(proposed.public_label).toContain('supplier learning');
+    expect(proposed.public_label).toContain('likely between 5 days and 20 days');
+    expect(out?.ok, JSON.stringify(out)).toBe(true);
+    expect(rows.size).toBe(1);
+    expect(liftCell().range).toEqual({ low: 5, high: 20, meaning: 'likely_range', source: 'user_specified' });
+    const option = (persisted as { nodes: Cell[] }).nodes.find(n => n.id === 'opt_lift')!;
+    expect(option.unresolved_targets).toEqual(['supplier learning']);
+    expect(option.user_questions).toEqual([expect.stringContaining('supplier learning')]);
   });
 
   it('RED: the range alone changes (same 10 days, a range added) → it is written, never "already set"', async () => {
@@ -248,5 +272,50 @@ describe('the user\'s likely range for an option\'s level survives propose → a
     const { out } = await proposeAndApprove({ value: 10 });
     expect(out?.ok, JSON.stringify(out)).toBe(true);
     expect(Object.hasOwn(liftCell(), 'range')).toBe(false);
+  });
+
+  it.each([false, true])('ordinary level: explicit false range flag equals omitted, compound=%s', async (compound) => {
+    const text = 'For Lift-and-shift, migration downtime is 10 days.';
+    const omitted = await proposeAndApprove({ value: 10 }, text, compound);
+    expect(omitted.proposed.ok, JSON.stringify(omitted.proposed)).toBe(true);
+    expect(omitted.out?.ok, JSON.stringify(omitted.out)).toBe(true);
+    const expectedCell = JSON.parse(JSON.stringify(liftCell()));
+    const expectedHash = currentHash();
+    expect(Object.hasOwn(expectedCell, 'range')).toBe(false);
+    expect(rows.size).toBe(1);
+
+    persisted = servedGraph();
+    rows.clear();
+    const explicitFalse = await proposeAndApprove({ value: 10, range_user_stated: false }, text, compound);
+    expect(explicitFalse.proposed.ok, JSON.stringify(explicitFalse.proposed)).toBe(true);
+    expect(explicitFalse.out?.ok, JSON.stringify(explicitFalse.out)).toBe(true);
+    expect(liftCell()).toEqual(expectedCell);
+    expect(currentHash()).toBe(expectedHash);
+    expect(rows.size).toBe(1);
+  });
+
+  it.each([
+    [false, { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'likely_range', range_user_stated: false }],
+    [true, { value: 10, likely_low: 5, likely_high: 20, range_meaning: 'likely_range', range_user_stated: false }],
+    [false, { value: 10, range_user_stated: true }],
+    [true, { value: 10, range_user_stated: true }],
+  ])('incomplete or unclaimed actual range stays refused, compound=%s level=%j', async (compound, level) => {
+    const { proposed } = await proposeAndApprove(level, TEXT, compound);
+    expect(proposed.ok).toBe(false);
+    expect(JSON.stringify(proposed)).toMatch(/likely range/i);
+    expect(rows.size).toBe(0);
+  });
+
+  it.each([false, true])('false range flag retains ordinary user-figure grounding, compound=%s', async (compound) => {
+    const text = 'For Lift-and-shift, migration downtime is 10 days.';
+    const omitted = await proposeAndApprove({ value: 30 }, text, compound);
+    expect(omitted.out?.ok, JSON.stringify(omitted)).toBe(true);
+    const expected = structuredClone(liftCell());
+    expect(expected.source).not.toBe('user_specified');
+    persisted = servedGraph();
+    rows.clear();
+    const explicitFalse = await proposeAndApprove({ value: 30, range_user_stated: false }, text, compound);
+    expect(explicitFalse.out?.ok, JSON.stringify(explicitFalse)).toBe(true);
+    expect(liftCell()).toEqual(expected);
   });
 });

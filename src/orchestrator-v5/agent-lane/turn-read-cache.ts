@@ -13,6 +13,7 @@
  * A reused read is a deep copy, so no caller can alter what another caller is given.
  */
 import type { InternalDispatch } from './runtime/agent-capabilities.js';
+import { withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 
 export interface TurnReadCache {
   /** The dispatch every reader and tool of the turn uses: graph reads are reused within an epoch; all else ends it. */
@@ -58,22 +59,25 @@ export function turnReadCache(inner: InternalDispatch, graphReadPath: string, re
   const dispatch: InternalDispatch = async (path, body) => {
     if (readOnlyPaths.includes(path)) return inner(path, body);
     if (path !== graphReadPath) return around(() => inner(path, body));
-    // ⛔ A read that must SEE OTHER WRITERS asks for it: `{ fresh: true }` bypasses the kept read (and refreshes it).
-    // The epoch only moves for THIS turn's writes, so a model another tab created during a long construction is
-    // invisible to a reused read — the construction's own concurrency guard (`build-model.ts`, `stillEmpty`) went
-    // blind that way under C1c and would stay blind under the epoch rule. The marker never reaches the route.
-    const fresh = isFreshRead(body);
-    if (!fresh && kept !== undefined && kept.epoch === epoch) return copy(kept.read);
-    // The prefetched read of THIS epoch, still in flight: join it rather than read again. A failed one is never the
-    // answer — the reader falls through and reads for itself.
-    if (!fresh && inflight !== undefined && inflight.epoch === epoch) {
-      const joined = await inflight.promise.catch(() => undefined);
-      if (joined !== undefined && joined.status === 200) return copy(joined);
-    }
-    const startedAt = epoch;
-    const read = await inner(path, fresh ? withoutFresh(body) : body);
-    kept = read.status === 200 ? { read: copy(read), epoch: startedAt } : undefined;
-    return read;
+    return withAnalysisReadDeadline(async (signal) => {
+      // ⛔ A read that must SEE OTHER WRITERS asks for it: `{ fresh: true }` bypasses the kept read (and refreshes it).
+      // The epoch only moves for THIS turn's writes, so a model another tab created during a long construction is
+      // invisible to a reused read — the construction's own concurrency guard (`build-model.ts`, `stillEmpty`) went
+      // blind that way under C1c and would stay blind under the epoch rule. The marker never reaches the route.
+      const fresh = isFreshRead(body);
+      if (!fresh && kept !== undefined && kept.epoch === epoch) return copy(kept.read);
+      // The prefetched read of THIS epoch, still in flight: join it rather than read again. A failed one is never the
+      // answer — the reader falls through and reads for itself.
+      if (!fresh && inflight !== undefined && inflight.epoch === epoch) {
+        const joined = await inflight.promise.catch(() => undefined);
+        if (joined !== undefined && joined.status === 200) return copy(joined);
+      }
+      const startedAt = epoch;
+      const read = await inner(path, fresh ? withoutFresh(body) : body);
+      signal.throwIfAborted(); // A late success must never populate the cache after its deadline.
+      kept = read.status === 200 ? { read: copy(read), epoch: startedAt } : undefined;
+      return read;
+    });
   };
 
   /**
@@ -85,7 +89,7 @@ export function turnReadCache(inner: InternalDispatch, graphReadPath: string, re
   const prefetch = (): void => {
     if (kept !== undefined || inflight !== undefined) return;
     const startedAt = epoch;
-    const promise = inner(graphReadPath, {});
+    const promise = withAnalysisReadDeadline(() => inner(graphReadPath, {}));
     const entry = { promise, epoch: startedAt };
     inflight = entry;
     promise.then(

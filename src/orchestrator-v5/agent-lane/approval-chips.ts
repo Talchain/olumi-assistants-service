@@ -18,7 +18,7 @@
  */
 import type { SuggestedAction } from '../compose/types.js';
 import { formatFactorValueApprox } from '../compose/format-factor-value.js';
-import type { StructuredProposal } from './proposal.js';
+import { hasCardOnlyOperations, type StructuredProposal } from './proposal.js';
 import { CANVAS_BAND_WORD } from '../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
@@ -151,7 +151,8 @@ export function approvalChipsFor(
    * the hold was minted with — so if the click ever reaches the product's route directly, the exact copy still
    * resolves the hold instead of reading as new words for the edit model.
    */
-  const held = labelSourceFor?.(proposalId)?.result;
+  const source = labelSourceFor?.(proposalId);
+  const held = source?.result;
   if (HELD_ON_THE_PRODUCT_SEAM.has(tool) && /^gmh_/.test(proposalId) && held !== undefined) {
     const label = typeof held.public_label === 'string' && held.public_label.trim() !== '' ? held.public_label : approve.label;
     const message = typeof held.held_message === 'string' && held.held_message.trim() !== '' ? held.held_message : approve.message;
@@ -165,7 +166,20 @@ export function approvalChipsFor(
   }
   // Adoption is a proposal about an EXISTING Olumi option. The card, including every displayed
   // level, is derived from the stored proposal; only its exact pressed words authorise the write.
-  const stored = labelSourceFor?.(proposalId)?.proposal;
+  const stored = source?.proposal;
+  // A real label-source lookup that cannot recover the stored levels card
+  // cannot prove that its omitted operations were gap-free. Offer no approval.
+  if (labelSourceFor !== undefined && stored === undefined
+    && (tool === 'propose_option_interventions' || tool === 'propose_starting_point')) return [];
+  if (stored !== undefined && hasCardOnlyOperations(stored.operations)) {
+    // This must precede every generic/special chip path: the exact stored gap
+    // card and its operands are the subject of the existing typed approval.
+    if (stored!.proposal_id !== proposalId || held?.ok !== true || held.proposal_id !== proposalId
+      || typeof stored!.public_label !== 'string' || stored!.public_label.trim() === ''
+      || held.public_label !== stored!.public_label) return [];
+    return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, source),
+      message: approve.message, detail: stored!.public_label }, AMEND_CHIP];
+  }
   if (stored?.operations.some(op => (op.value as { goal_scope?: unknown } | undefined)?.goal_scope !== undefined)) {
     return [{ id: approvalChipIdFor(proposalId), label: 'Record this goal reading', message: SCOPE_APPROVE_PREFIX + stored.public_label, detail: stored.public_label }, AMEND_CHIP];
   }

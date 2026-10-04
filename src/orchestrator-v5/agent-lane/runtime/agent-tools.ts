@@ -122,6 +122,12 @@ const obj = (props: Record<string, unknown>, required: string[]): Record<string,
   type: 'object', additionalProperties: false, properties: props, required,
 });
 
+const UNMODELLED_MECHANISMS = {
+  type: 'array', maxItems: 5, items: { type: 'string', minLength: 1, maxLength: 80 },
+  description: 'Unresolved effects this option does not yet model. Omit to preserve its existing gaps; [] explicitly requests clearing them. '
+    + 'The user must approve the complete named gap statement, including the current gaps and questions it replaces.',
+};
+
 
 /**
  * PJ-C1 latency (#70 5859918872): the model's own typed word that this ONE call is everything the user asked for in
@@ -561,6 +567,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           value: { type: 'number', description: 'In the factor\u2019s own units \u2014 the number a user would say.' },
           unit: { type: 'string', description: 'The unit the user wrote this figure in, if any (\u00a3 per month for \u201c\u00a310 per month\u201d).' },
           basis: { type: 'string' },
+          unmodelled_mechanisms: UNMODELLED_MECHANISMS,
           user_stated: {
             type: 'boolean',
             description:
@@ -625,6 +632,7 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
           factor_label: { type: 'string' },
           value: { type: 'number' },
           basis: { type: 'string' },
+          unmodelled_mechanisms: UNMODELLED_MECHANISMS,
           user_stated: {
             type: 'boolean',
             description:
@@ -865,10 +873,10 @@ export interface AgentCapabilities {
     }[];
   }): Promise<ToolResult>;
   proposeOptionInterventions(ctx: AgentToolContext, args: {
-    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean }[];
+    interventions: readonly { option_label: string; factor_label: string; value: number; basis: string; unit?: string; user_stated?: boolean; unmodelled_mechanisms?: readonly string[] }[];
   }, internal?: ProposeLevelsInternal): Promise<ToolResult>;  proposeStartingPoint(ctx: AgentToolContext, args: {
     assumptions: readonly { factor_label: string; value: number; unit: string; basis: string }[];
-    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean }[];
+    option_levels: readonly { option_label: string; factor_label: string; value: number; basis: string; user_stated?: boolean; unmodelled_mechanisms?: readonly string[] }[];
   }): Promise<ToolResult>;
   /** The goal's current level as the user stated it — held for approval (`../goal-current-level.ts`). */
   reconcileGoalScope?(ctx: AgentToolContext, args: ReconcileGoalScopeArgs): Promise<ToolResult>;

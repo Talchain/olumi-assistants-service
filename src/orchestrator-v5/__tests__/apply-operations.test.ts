@@ -247,6 +247,37 @@ describe('applyOperations — the accept path writes what was consented to', () 
     expect(commitDirectAnswer).not.toHaveBeenCalled();
     expect(await h.store.loadGraph(SCENARIO)).toEqual(before);
   });
+  it.each([true, false])('an approved range round-trips a whole-map replacement, included=%s', async includeRange => {
+    const before = baseGraph();
+    const option = before.nodes.find(n => n.id === OPTION_ID)!;
+    const range = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' } as const;
+    option.interventions![QUALITY_ID]!.range = range;
+    const cell = { ...option.interventions![QUALITY_ID]! };
+    if (!includeRange) delete cell.range;
+    const h = harness({ initial: before });
+    const outcome = await port(h)(input({ modelRevision: modelRevisionOf(before)!,
+      operations: proposalOperations([{ op: 'update_node', path: OPTION_ID, value: { interventions: { [QUALITY_ID]: cell } } }]),
+    }));
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    const cold = GraphV3.parse(await h.store.loadGraph(SCENARIO));
+    expect(cold.nodes.find(n => n.id === OPTION_ID)!.interventions![QUALITY_ID]!.range).toEqual(range);
+  });
+
+  it('a whole-map replacement changes quantity and drops its inherited range', async () => {
+    const before = baseGraph();
+    const option = before.nodes.find(n => n.id === OPTION_ID)!;
+    option.interventions![QUALITY_ID]!.range = { low: 0.1, high: 0.6, meaning: 'likely_range', source: 'user_specified' };
+    const cell = { ...option.interventions![QUALITY_ID]!, value: 0.3 };
+    const h = harness({ initial: before });
+    const outcome = await port(h)(input({ modelRevision: modelRevisionOf(before)!,
+      operations: proposalOperations([{ op: 'update_node', path: OPTION_ID, value: { interventions: { [QUALITY_ID]: cell } } }]),
+    }));
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    const cold = GraphV3.parse(await h.store.loadGraph(SCENARIO));
+    expect(cold.nodes.find(n => n.id === OPTION_ID)!.interventions![QUALITY_ID]!.range).toBeUndefined();
+    expect(cold.nodes.find(n => n.id === OPTION_ID)!.interventions![QUALITY_ID]!.value).toBe(0.3);
+  });
+
   it('a same-figure data-path rewrite keeps its valid quote through commit and cold read', async () => {
     const before = baseGraph();
     const option = before.nodes.find((node) => node.id === OPTION_ID)!;

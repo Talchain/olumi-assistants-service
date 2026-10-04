@@ -89,6 +89,7 @@ import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
 import { userTypedStoredFigure } from "../../orchestrator-v5/agent-lane/figure-scope.js";
 import { hasInterventionRangeWrite, stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
+import { getSessionStore } from "../../orchestrator-v5/session/index.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -98,7 +99,7 @@ import {
 import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
 import { shouldHandOffProposeToLlmLane, resolveClauseLabel } from "./propose-handoff.js";
 import { buildCanonicalAnalysisReadyFromGraph } from "./analysis-ready-helper.js";
-import { clearInheritedInterventionSourceQuotes, hasNewInterventionRanges, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
+import { clearInheritedInterventionSourceQuotes, omitInheritedInterventionRanges, hasNewInterventionRanges, encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
@@ -3030,7 +3031,16 @@ export async function handleEditGraph(
     }
 
     // Sanitise: remove legacy fields
-    let operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
+    let storedRangeBase: unknown;
+    try {
+      storedRangeBase = await getSessionStore().loadGraph(context.scenario_id);
+    } catch {
+      return buildRejectionResult('The stored model could not be read. Nothing was changed.',
+        validationResult.operations as PatchOperation[], baseGraphHash, turnId, startTime,
+        'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+    }
+    let operations = omitInheritedInterventionRanges(
+      sanitiseOperations(validationResult.operations as PatchOperation[]), storedRangeBase);
     if (hasInterventionRangeWrite(operations)) {
       return buildRejectionResult('A likely range needs its dedicated range proposal and approval.',
         operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
@@ -3975,11 +3985,11 @@ export async function handleEditGraph(
           diagnostics(),
         );
       }
-      if (hasNewInterventionRanges(context.graph, encoded.graph)) {
+      if (hasNewInterventionRanges(storedRangeBase, encoded.graph)) {
         return buildRejectionResult('A new or changed likely range needs its dedicated range proposal and approval.',
           operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
       }
-      const truthfullyQuoted = clearInheritedInterventionSourceQuotes(context.graph, encoded.graph);
+      const truthfullyQuoted = clearInheritedInterventionSourceQuotes(storedRangeBase, encoded.graph);
       if (truthfullyQuoted !== appliedGraph) {
         appliedGraph = truthfullyQuoted as GraphV3T;
         appliedGraphHash = computeGraphHash(appliedGraph);

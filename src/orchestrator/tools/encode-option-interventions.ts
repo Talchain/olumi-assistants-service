@@ -486,46 +486,87 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
  * A whole-map `update_node` can replace an already numeric intervention without
  * entering `buildInterventionV3`. Clear a quote or range copied from the persisted
  * OLD cell when the quantity changed; a fresh replacement remains, and an unchanged
- * quantity keeps its original metadata.
+ * quantity carries the stored range even when a whole-map replacement omitted it.
  */
 export function clearInheritedInterventionSourceQuotes<T>(before: unknown, after: T): T {
   if (!isPlainObject(before) || !Array.isArray(before.nodes)
     || !isPlainObject(after) || !Array.isArray(after.nodes)) return after;
-  const priorOptions = new Map<string, Dict>();
   const oldFrames = buildFactorScaleMap(before.nodes);
   const newFrames = buildFactorScaleMap(after.nodes);
-  for (const node of before.nodes) {
-    if (isPlainObject(node) && node.kind === 'option' && typeof node.id === 'string') priorOptions.set(node.id, node);
-  }
-  let updatedNodes: Dict[] | undefined;
-  const afterNodes = after.nodes as Dict[];
-  for (let index = 0; index < afterNodes.length; index += 1) {
-    const node = afterNodes[index];
-    if (!isPlainObject(node) || node.kind !== 'option' || typeof node.id !== 'string'
-      || !isPlainObject(node.interventions)) continue;
-    const prior = priorOptions.get(node.id);
-    if (!prior || !isPlainObject(prior.interventions)) continue;
-    let updatedInterventions: Dict | undefined;
-    for (const [factorId, cell] of Object.entries(node.interventions)) {
-      const oldCell = prior.interventions[factorId];
-      if (!isPlainObject(cell) || !isPlainObject(oldCell)) continue;
-      const figureChanged = !sameNativeQuantity(oldCell, cell, oldFrames.get(factorId), newFrames.get(factorId));
-      if (!figureChanged) continue;
-      const staleQuote = typeof cell.source_quote === 'string' && cell.source_quote === oldCell.source_quote;
-      const staleRange = cell.range !== undefined && oldCell.range !== undefined && isDeepStrictEqual(cell.range, oldCell.range);
-      if (!staleQuote && !staleRange) continue;
-      const withoutStaleMetadata = { ...cell };
-      if (staleQuote) delete withoutStaleMetadata.source_quote;
-      if (staleRange) delete withoutStaleMetadata.range;
-      updatedInterventions ??= { ...node.interventions };
-      updatedInterventions[factorId] = withoutStaleMetadata;
+  const rewrite = (entries: unknown[], oldEntries: unknown[], mirrors: boolean): unknown[] => {
+    const priorOptions = new Map<string, Dict>();
+    for (const node of oldEntries) {
+      if (isPlainObject(node) && (mirrors || node.kind === 'option') && typeof node.id === 'string') priorOptions.set(node.id, node);
     }
-    if (updatedInterventions !== undefined) {
-      updatedNodes ??= [...afterNodes];
-      updatedNodes[index] = { ...node, interventions: updatedInterventions };
+    let updated: unknown[] | undefined;
+    for (let index = 0; index < entries.length; index += 1) {
+      const node = entries[index];
+      if (!isPlainObject(node) || (!mirrors && node.kind !== 'option') || typeof node.id !== 'string'
+        || !isPlainObject(node.interventions)) continue;
+      const prior = priorOptions.get(node.id);
+      if (!prior || !isPlainObject(prior.interventions)) continue;
+      let cells: Dict | undefined;
+      for (const [factorId, cell] of Object.entries(node.interventions)) {
+        const oldCell = prior.interventions[factorId];
+        if (!isPlainObject(cell) || !isPlainObject(oldCell)) continue;
+        const figureChanged = !sameNativeQuantity(oldCell, cell, oldFrames.get(factorId), newFrames.get(factorId));
+        if (!figureChanged) {
+          if (cell.range === undefined && oldCell.range !== undefined) {
+            cells ??= { ...node.interventions };
+            cells[factorId] = { ...cell, range: structuredClone(oldCell.range) };
+          }
+          continue;
+        }
+        const staleQuote = typeof cell.source_quote === 'string' && cell.source_quote === oldCell.source_quote;
+        const staleRange = cell.range !== undefined && oldCell.range !== undefined && isDeepStrictEqual(cell.range, oldCell.range);
+        if (!staleQuote && !staleRange) continue;
+        const withoutStaleMetadata = { ...cell };
+        if (staleQuote) delete withoutStaleMetadata.source_quote;
+        if (staleRange) delete withoutStaleMetadata.range;
+        cells ??= { ...node.interventions };
+        cells[factorId] = withoutStaleMetadata;
+      }
+      if (cells !== undefined) {
+        updated ??= [...entries];
+        updated[index] = { ...node, interventions: cells };
+      }
     }
-  }
-  return updatedNodes === undefined ? after : { ...after, nodes: updatedNodes } as T;
+    return updated ?? entries;
+  };
+  const nodes = rewrite(after.nodes, before.nodes, false);
+  const options = Array.isArray(after.options)
+    ? rewrite(after.options, Array.isArray(before.options) ? before.options : before.nodes, true) : after.options;
+  return nodes === after.nodes && options === after.options ? after
+    : { ...after, nodes, ...(Array.isArray(options) ? { options } : {}) } as T;
+}
+
+/** An identical stored range in a replacement is inheritance, never a new consent operation.
+ * Remove only that metadata from generic update payloads before the existing field screen.
+ * The postimage helper above carries it from the stored base when the quantity still agrees. */
+export function omitInheritedInterventionRanges<T extends { readonly op: string; readonly path: string; readonly value?: unknown }>(
+  operations: readonly T[], stored: unknown,
+): T[] {
+  const nodes = isPlainObject(stored) && Array.isArray(stored.nodes) ? stored.nodes : [];
+  return operations.map(op => {
+    if (op.op !== 'update_node') return op;
+    const matches = nodes.filter(node => isPlainObject(node) && node.kind === 'option' && node.id === op.path);
+    if (matches.length !== 1 || !isPlainObject(matches[0]) || !isPlainObject(matches[0].interventions)) return op;
+    const prior = matches[0].interventions;
+    const omit = (value: unknown, path: readonly string[]): unknown => {
+      if (!isPlainObject(value)) return value;
+      const next: Dict = {};
+      for (const [key, child] of Object.entries(value)) {
+        const segments = [...path, ...key.split(/[/.]/).filter(Boolean)];
+        const root = segments.indexOf('interventions');
+        const old = root >= 0 ? prior[segments[root + 1]!] : undefined;
+        if (key === 'range' && root >= 0 && segments.length === root + 3 && segments[root + 2] === 'range'
+          && isPlainObject(old) && old.range !== undefined && isDeepStrictEqual(old.range, child)) continue;
+        next[key] = omit(child, segments);
+      }
+      return next;
+    };
+    return { ...op, value: omit(op.value, []) };
+  });
 }
 
 /** Generic edit ports cannot grant range consent, even when their whole operation is approved. */
@@ -541,6 +582,19 @@ export function hasNewInterventionRanges(before: unknown, after: unknown): boole
       if (!isPlainObject(cell) || cell.range === undefined) continue;
       const old = prior.get(String(node.id))?.[factorId];
       if (!isPlainObject(old) || !isDeepStrictEqual(old.range, cell.range)) return true;
+    }
+  }
+  if (Array.isArray(after.options)) {
+    const oldOptions = isPlainObject(before) && Array.isArray(before.options) ? before.options : [];
+    for (const option of after.options) {
+      if (!isPlainObject(option) || !isPlainObject(option.interventions)) continue;
+      const oldOption = oldOptions.find(row => isPlainObject(row) && row.id === option.id);
+      const oldCells = isPlainObject(oldOption) && isPlainObject(oldOption.interventions) ? oldOption.interventions : prior.get(String(option.id));
+      for (const [factorId, cell] of Object.entries(option.interventions)) {
+        if (!isPlainObject(cell) || cell.range === undefined) continue;
+        const old = oldCells?.[factorId];
+        if (!isPlainObject(old) || !isDeepStrictEqual(old.range, cell.range)) return true;
+      }
     }
   }
   return false;

@@ -152,6 +152,15 @@ describe('buildTurnContext — CEE derives the stage from its own model state', 
     expect(ctx.stage).toBe('decide');
   });
 
+  it('existing restore marker demotes a legacy Run even when its clean hash returns', async () => {
+    const { store, fact, expectedHash } = freshStoreFor(GRAPH_2_OPTIONS);
+    expect(deriveAnalysisFreshness([fact], expectedHash).freshness).toBe('fresh');
+    store.readAnalysisInvalidatedAt = async () => '2026-10-04T01:00:00.000Z';
+    const ctx = await buildTurnContext({ ...BASE, stage: 'decide' }, 'req-stage-last-gap', { sessionStore: store });
+    expect(ctx.analysis_invalidated_at).toBe('2026-10-04T01:00:00.000Z');
+    expect(ctx.stage).toBe('analyse');
+  });
+
   it('TWIN — a fresh analysis over a ONE-option model is not a choice: the requested stage passes through untouched', async () => {
     const { store, fact, expectedHash } = freshStoreFor(GRAPH_1_OPTION);
 

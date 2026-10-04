@@ -5,11 +5,12 @@
  * "5–20 days" to "5–30 days" moves the hash — otherwise the old chance reads as CURRENT. R3 5914230653 (2): the writer
  * refuses a range that does not contain the option's value. AIQ 5914222384: the range carries its own author.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { log } from '../../utils/telemetry.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
-import { admitInterventionRange, wireInterventionRanges } from '../intervention-range.js';
+import { StoredInterventionRange, admitInterventionRange, wireInterventionRanges } from '../intervention-range.js';
 
 type Rec = Record<string, unknown>;
 const hashOf = (g: unknown) => computeAnalysisAffectingGraphHash(g as GraphV3T);
@@ -93,6 +94,29 @@ describe('S1 writer — the persisted form refuses a range that contradicts its 
     expect(liftOptionRange(projected)).toBeUndefined();
     const nodeIv = ((((projected.nodes as Rec[]).find((n) => n.id === 'lift') as Rec).interventions) as Rec).downtime as Rec;
     expect(nodeIv.raw_value).toBe(10);
+  });
+
+  it('a throwing logger cannot restore lift/downtime range; the approved sibling stays intact', () => {
+    const graph = downtime({ low: 12, high: 20, meaning: 'likely_range', ...USER });
+    const valid = { low: 5, high: 20, meaning: 'likely_range', ...USER };
+    const stay = (graph.nodes as Rec[]).find(n => n.id === 'stay')!;
+    stay.interventions = { downtime: { value: 10, raw_value: 10, unit: 'days', range: valid } };
+    const logger = vi.spyOn(log, 'info').mockImplementation(() => { throw new Error('logger unavailable'); });
+    try {
+      const projected = projectGraphForPersistence(graph);
+      expect(liftNodeRange(projected)).toBeUndefined();
+      expect(liftOptionRange(projected)).toBeUndefined();
+      expect(((projected.nodes as Rec[]).find(n => n.id === 'stay')!.interventions as Rec).downtime)
+        .toMatchObject({ raw_value: 10, range: valid });
+    } finally { logger.mockRestore(); }
+  });
+
+  it('validator failure stops projection rather than returning an unvalidated lift/downtime range', () => {
+    const validator = vi.spyOn(StoredInterventionRange, 'safeParse').mockImplementation(() => { throw new Error('validator unavailable'); });
+    try {
+      expect(() => projectGraphForPersistence(downtime({ low: 12, high: 20, meaning: 'likely_range', ...USER })))
+        .toThrow('validator unavailable');
+    } finally { validator.mockRestore(); }
   });
 
   // Codex CR 5963331228 P1: a cell with no finite numeric LEVEL sets nothing, so a `raw_value` beside it brackets nothing.

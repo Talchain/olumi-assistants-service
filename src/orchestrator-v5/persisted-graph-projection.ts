@@ -68,9 +68,9 @@ export interface PersistedGraphProjectionContext {
 /**
  * Return the graph in the exact form it will be written to `scenarios.graph`.
  *
- * Each pass is individually fail-open (a throw inside one returns its input
- * unchanged), so this composition cannot fail a commit on its own. A graph that
- * needs no repair is returned as the ORIGINAL reference.
+ * Repair passes retain their existing fallback behaviour. Range validation fails
+ * closed; a logging failure retains the sanitised result. A graph that needs no
+ * repair is returned as the ORIGINAL reference.
  */
 /**
  * ⭐ THE BASE A STORED-BYTES GUARD COMPARES AGAINST: the stored graph with only ABSENCE-EQUIVALENT drift removed
@@ -88,12 +88,12 @@ export function normaliseAbsenceOnly<T>(graph: T): T {
  * TEMPORAL writer rule (R3 #75 5914230653 (2)): a stated range that is malformed or does not contain its option's value
  * is REFUSED at the persisted form, so no lane can store one (`intervention-range.ts`). Runs after the intervention
  * promotion (so a lifted `data.interventions` cell is covered) and before the options mirror (so a mirrored entry
- * copies the admitted bundle). Fail-open like its siblings; logs ids and reasons only, never magnitudes.
+ * copies the admitted bundle). Validation fails closed; logging is best-effort and never restores refused ranges.
  */
 function admitInterventionRanges<T>(graph: T, ctx: PersistedGraphProjectionContext): T {
-  try {
-    const { graph: admitted, refused } = refuseInadmissibleInterventionRanges(graph);
-    if (refused.length > 0) {
+  const { graph: admitted, refused } = refuseInadmissibleInterventionRanges(graph);
+  if (refused.length > 0) {
+    try {
       log.info(
         {
           event: 'v5.graph_persist.intervention_range_refused',
@@ -104,11 +104,11 @@ function admitInterventionRanges<T>(graph: T, ctx: PersistedGraphProjectionConte
         },
         '[persist] refused a stated range that is malformed or does not contain its option\'s value (ids + reasons only)',
       );
+    } catch {
+      // Observability cannot undo validation of the bytes about to be stored.
     }
-    return admitted;
-  } catch {
-    return graph;
   }
+  return admitted;
 }
 
 export function projectGraphForPersistence<T>(

@@ -110,6 +110,7 @@ import { buildAppliedChanges, parseEditGraphResponse } from '../orchestrator/too
 import { hasInterventionRangeWrite } from './graph-management/field-safety.js';
 import {
   clearInheritedInterventionSourceQuotes,
+  omitInheritedInterventionRanges,
   hasNewInterventionRanges,
   encodeOptionInterventionsForEdit,
   optionIdsAddedWithInterventionIntent,
@@ -580,7 +581,7 @@ export function createApplyOperations(
     if (!validated.valid || validated.operations.length !== normalised.length) {
       return refuse('that change is not valid against the model as it stands');
     }
-    const operations = validated.operations;
+    const operations = omitInheritedInterventionRanges(validated.operations, before);
     if (hasInterventionRangeWrite(operations)) {
       return refuse('A likely range needs its dedicated range proposal and approval; nothing was saved');
     }

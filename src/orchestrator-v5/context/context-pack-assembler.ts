@@ -39,6 +39,7 @@ import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js
 import type { ContextPackGoalTarget } from './goal-target-record.js';
 import type { ContextPackFactorValues } from './factor-value-record.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
+import { projectModelFacingRunDelta } from './model-facing-run-delta.js';
 import { eligibleInvestigationPriority, type InvestigationPriorityLicence } from '../coaching/investigation-priority.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
@@ -125,6 +126,7 @@ import {
   type AnalysisStateSummary,
   type CanonicalAnalysisState,
   type CoachingStatePack,
+  type SelectCanonicalAnalysisStateInput,
 } from './canonical-analysis-state.js';
 
 // Recent turns cap for the conversation projection — the verbatim memory window.
@@ -863,6 +865,10 @@ export interface AssembleContextPackInput {
    * mirrors `prior_facts_read_ok` rather than inventing a second vocabulary.
    */
   readonly priorFactsReadOk?: boolean;
+  /** Existing durable invalidation marker from the same context read. */
+  readonly analysisInvalidatedAt?: string | null;
+  readonly priorFactsWithTurn?: SelectCanonicalAnalysisStateInput['priorFactsWithTurn'];
+  readonly legacyEditFacts?: SelectCanonicalAnalysisStateInput['legacyEditFacts'];
   /**
    * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
    * scenario, threaded by the turn-executor from
@@ -1696,6 +1702,9 @@ function deriveContextPackAnalysisState(
     priorFacts: input.priorFacts,
     currentGraphHash,
     currentGraph: rawGraph,
+    analysisInvalidatedAt: input.analysisInvalidatedAt,
+    priorFactsWithTurn: input.priorFactsWithTurn,
+    legacyEditFacts: input.legacyEditFacts,
     // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): keep the
     // diagnostic / coaching-pack canonical state consistent with the wire
     // verdict. Same raw graph the hash is derived from. undefined when off.
@@ -1863,14 +1872,7 @@ export function assembleContextPackWithSummary(
     if (runDeltaBuild === null || runDeltaBuild.kind !== 'ok') return null;
     // SC-24's pair members stay OFF the prompt too (see `ContextPackRunDeltaSchema`): an input row has no author.
     // 0.70.0: the typed reason for empty win shares stays off the prompt too (RC's bound UI sentence; parity guard).
-    const {
-      flip_thresholds: _flipThresholdsNotComputed,
-      endpoints: _endpoints, input_coverage: _inputCoverage, input_changes: _inputChanges,
-      win_probabilities_unavailable: _winProbabilitiesUnavailable,
-      ...rest
-    } = runDeltaBuild.delta;
-    void _flipThresholdsNotComputed; void _endpoints; void _inputCoverage; void _inputChanges; void _winProbabilitiesUnavailable;
-    return rest;
+    return projectModelFacingRunDelta(runDeltaBuild.delta);
   })();
   // Plain/direct arrays predate the durable carrier. They may still provide a
   // useful bounded projection, but cannot establish that scenario history is

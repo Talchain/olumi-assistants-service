@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { readGoalScopeClaimInput, type GoalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { loadMostRecentPendingActionsIntegrityStrict } from '../orchestrator-v5/build-turn-context.js';
 /**
@@ -308,7 +309,7 @@ export async function readScenarioAnalysis(
     const currentGraphHash = deriveDecisionContextGraphHash(params.graph);
 
     const store = getSessionStore();
-    const [{ hotWindow, factSet }, analysisInvalidatedAt] = await Promise.all([
+    const [{ hotWindow, factSet, priorFactsWithTurn }, analysisInvalidatedAt] = await Promise.all([
       loadScenarioAnalysisFactsForRead(params.scenarioId, params.requestId),
       params.analysisInvalidatedAt !== undefined
         ? Promise.resolve(params.analysisInvalidatedAt)
@@ -349,6 +350,8 @@ export async function readScenarioAnalysis(
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
       analysisInvalidatedAt,
+      priorFactsWithTurn,
+      legacyEditFacts: legacyEditFactsForFreshness(factSet),
       currentGraph: params.graph,
     });
 
@@ -417,6 +420,8 @@ export async function readScenarioAnalysis(
           ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
           priorFactsReadOk: factsReadOk,
           analysisInvalidatedAt,
+          priorFactsWithTurn,
+          legacyEditFacts: legacyEditFactsForFreshness(factSet),
         }),
         freshness: derivation,
         ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
