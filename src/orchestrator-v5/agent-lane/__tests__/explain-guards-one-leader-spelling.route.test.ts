@@ -24,6 +24,7 @@ import { WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN } from '../../compose/analysi
 import { leaderLicenceFromState } from '../../compose/leader-licence.js';
 import { explanationContext } from './fixtures/run-explanation-follow-up.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
+import { selectedRunContextDelta } from './fixtures/selected-run-context-delta.js';
 
 type Json = Record<string, any>;
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url), 'utf8')) as Json;
@@ -43,7 +44,7 @@ let read: Json = {};
 const fresh = (): Json => JSON.parse(JSON.stringify(SERVED)) as Json;
 /** The Run turn's own `analysis_ready`: the same admission the read carries (the turn and the read agree). */
 const readyOf = (r: Json): Json => ({ status: 'ready', analysis_admission: r.analysis_admission });
-const graphBody = (): Json => ({ ...read, analysis_ready: readyOf(read), current_read: {} });
+const graphBody = (): Json => ({ ...read, analysis_ready: readyOf(read), current_read: read.current_read ?? {} });
 const turnBody = (): Json => ({ response_version: 2, assistant_text: 'ran', suggested_actions: [], insights: [],
   graph_hash: read.graph_hash, blocks: [read.analysis_result], analysis_state: read.analysis_state, analysis_ready: readyOf(read) });
 
@@ -134,6 +135,66 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     expect(states.length, 'control: the follow-up model call carries CURRENT MODEL STATE').toBeGreaterThan(0);
     return states[0]!;
   };
+
+  it('ordinary model input and transcript-free get_canonical_state retain the reader delta and prior qualitative bytes', async () => {
+    const dispatch: InternalDispatch = async () => ({ status: 200, json: graphBody() });
+    const coldCaps = createAgentCapabilities(dispatch, new ProposalStore());
+    const baseline = await coldCaps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
+    const delta = selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at, true);
+    read.current_read = { run_delta: delta };
+    const state = await followUpState();
+    const cold = await coldCaps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
+    expect(state.analysis.run_delta).toEqual(delta);
+    expect(cold.analysis.run_delta).toEqual(delta);
+    const { run_delta: _delta, ...analysis } = cold.analysis;
+    expect({ ...cold, analysis }).toEqual(baseline);
+    expect(JSON.stringify({ ...cold, analysis })).toBe(JSON.stringify(baseline));
+    expect(state.entities).toEqual(baseline.entities);
+    expect(state.links).toEqual(baseline.links);
+    expect(state.limits).toEqual(baseline.limits);
+    expect(state.analysis.claim_permissions).toEqual(baseline.analysis.claim_permissions);
+  });
+
+  it('Explain and ordinary model input consume the same selected reader delta', async () => {
+    const delta = selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at);
+    read.current_read = { run_delta: delta };
+    const explained = await explainPayload();
+    modelBodies = [];
+    const ordinary = await followUpState();
+    expect(explained.canonical_state.run_delta).toEqual(delta);
+    expect(ordinary.analysis.run_delta).toEqual(explained.canonical_state.run_delta);
+  });
+
+  it('withheld context carries only the reader’s neutral delta and gains no leader permission', async () => {
+    read.analysis_state.leader_claim = WITHHELD_CLAIM;
+    const delta = selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at, false);
+    read.current_read = { run_delta: delta };
+    const state = await followUpState();
+    expect(state.analysis.run_delta).toEqual(delta);
+    expect(state.analysis.claim_permissions.leader_may_be_named).toBe(false);
+    expect(state.analysis.run_delta.leader).not.toHaveProperty('prior_leading_option_id');
+    expect(state.analysis.run_delta.leader).not.toHaveProperty('current_leading_option_id');
+  });
+
+  it('an absent first-Run comparison does not become a fabricated no-change delta', async () => {
+    expect((await followUpState()).analysis).not.toHaveProperty('run_delta');
+  });
+
+  it('goal-free canonical context keeps its qualitative carriers and does not fabricate a goal', async () => {
+    read.graph.nodes = read.graph.nodes.filter((node: Json) => node.kind !== 'goal');
+    delete read.graph.goal_node_id;
+    read.graph.edges = read.graph.edges.filter((edge: Json) => edge.to !== 'mrr' && edge.from !== 'mrr');
+    const dispatch: InternalDispatch = async () => ({ status: 200, json: graphBody() });
+    const caps = createAgentCapabilities(dispatch, new ProposalStore());
+    const baseline = await caps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
+    read.current_read = { run_delta: selectedRunContextDelta(read.graph_hash, read.analysis_state.run_state.computed_at) };
+    const cold = await caps.getCanonicalState({ scenario_id: SCENARIO } as never) as Json;
+    expect(cold.analysis.run_delta).toEqual(read.current_read.run_delta);
+    expect(cold).not.toHaveProperty('goal');
+    expect(cold).not.toHaveProperty('goals');
+    const { run_delta: _delta, ...analysis } = cold.analysis;
+    expect(JSON.stringify({ ...cold, analysis })).toBe(JSON.stringify(baseline));
+  });
 
   it('D3-a: Explain on a current Run with an UNEARNED P(goal)=0 carries that option’s goal_certainty sentence', async () => {
     // Fixture control: the published contract accepts the stored decisions (else every reader says `unchecked`).

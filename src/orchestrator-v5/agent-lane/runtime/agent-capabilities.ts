@@ -177,7 +177,7 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { savedRunContextFacts } from '../saved-run-context-facts.js';
+import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-run-context-facts.js';
 import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
@@ -969,6 +969,7 @@ interface GraphRead {
   readonly leader_limit_risks?: readonly unknown[] | null;
   /** The read's `analysis_result` block — the selected Run, present only when the route delivers it (`goal-certainty-for-agent.ts`). */
   readonly analysis_result?: unknown;
+  readonly run_delta?: SavedRunContextFactsRead['run_delta'];
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
   /** The selected Run's recorded participation via the canonical reader; absent = not recorded. */
@@ -1889,6 +1890,10 @@ export function createAgentCapabilities(
       ...(() => {
         const readiness = (r.json.current_read as { analysis_ready?: unknown } | undefined)?.analysis_ready;
         return readiness === undefined ? {} : { analysis_ready: readiness };
+      })(),
+      ...(() => {
+        const delta = (r.json.current_read as Pick<SavedRunContextFactsRead, 'run_delta'> | undefined)?.run_delta;
+        return delta === undefined ? {} : { run_delta: delta };
       })(),
       ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
       ...(Array.isArray(r.json.goal_scope_reconciliation) ? { goal_scope_reconciliation: r.json.goal_scope_reconciliation as GoalScopeReconciliation[] } : {}),
