@@ -1659,6 +1659,32 @@ function describeAmbiguity(g: Pick<GraphRead, 'nodes' | 'edges'>, requested: str
   };
 }
 
+/** Consent names an identity: keep unique labels verbatim, otherwise use the read's distinguishing context. */
+function cardNameOf(g: Pick<GraphRead, 'nodes' | 'edges'>, nodeId: string): string {
+  const node = g.nodes.find((n) => n.id === nodeId);
+  if (node === undefined) return nodeId;
+  const sameLabel = g.nodes.filter((n) => norm(n.label) === norm(node.label));
+  if (sameLabel.length === 1) return node.label;
+  // Reuse the ambiguity response's deduplicated, sorted connected_to labels, comparing the rendered words.
+  const connections = describeAmbiguity(g, node.label, sameLabel).candidates.map((n) => ({
+    id: n.id, words: (n.connected_to as string[]).join(', '),
+  }));
+  const names = sameLabel.map((n) => {
+    const description = n.description?.trim();
+    const connected = connections.find((c) => c.id === n.id)!.words;
+    const suffix = description && sameLabel.every((r) => r.id === n.id || norm(r.description) !== norm(description))
+      ? description
+      : connected !== '' && connections.every((c) => c.id === n.id || c.words !== connected)
+        ? `linked to ${connected}` : n.id;
+    return { id: n.id, name: `${n.label} (${suffix})`, fallback: `${n.label} (${n.id})` };
+  });
+  const named = names.find((n) => n.id === nodeId)!;
+  // A description can itself read "linked to …" or be another node's id. Reserve id names as well, so even
+  // cross-tier collisions fall back deterministically to distinct identities.
+  return names.some((n) => n.id !== nodeId && (n.name === named.name || n.fallback === named.name))
+    ? named.fallback : named.name;
+}
+
 /** What the Agent is told to do about a name that matched more than one entity. */
 const AMBIGUOUS_NOTE =
   'More than one entity in the model carries each name in ambiguous_targets, so NOTHING was proposed for it and no ' +
@@ -2534,7 +2560,7 @@ export function createAgentCapabilities(
     }
     // ⛔ …and only when that button carried the EXACT reading this approval records (AIQ 5885290014): recomputed here from
     // the stored proposal and the labels on the read, never taken from the request.
-    const labelOf = (id: string): unknown => approvedRead.nodes.find((n) => n.id === id)?.label;
+    const labelOf = (id: string): string => cardNameOf(approvedRead, id);
     const reading = values.length === 1
       ? linkEffectReadingOf(parent, { from: labelOf(values[0]!.from as string), to: labelOf(values[0]!.to as string) })
       : linkEffectReadingsOf(parent, values.map((v) => ({ from: labelOf(v.from as string), to: labelOf(v.to as string) })));
@@ -3214,7 +3240,8 @@ export function createAgentCapabilities(
               : linkEffectRefusalWords(dry.reason, working, from, to));
             continue;
           }
-          prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said, from_label: from.label, to_label: to.label });
+          prepared.push({ from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken, said,
+            from_label: cardNameOf(g, from.id), to_label: cardNameOf(g, to.id) });
           working = dry.mutatedGraph;
         }
         if (prepared.length === 0) {
@@ -3308,7 +3335,7 @@ export function createAgentCapabilities(
           value: { from: from.id, to: to.id, effect, quote: said, edge_token: edgeToken } }],
         provenance: { authored_by: 'user_stated', basis: said },
         validation: { admitted: true, loss_count: 0, refusals: [] },
-        public_label: `Record your figure for how "${from.label}" moves "${to.label}": "${said}"`,
+        public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${said}"`,
       });
       proposals.put(proposal);
       return {
@@ -3316,7 +3343,7 @@ export function createAgentCapabilities(
         proposal_id: proposal.proposal_id,
         public_label: proposal.public_label,
         base_revision: g.graph_hash,
-        link: { from: from.label, to: to.label, effect, your_words: said },
+        link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: said },
         note: 'Nothing has changed yet. Tell the user it will be recorded as THEIR figure for this link, in their words, never the id, '
           + 'and call authorise_change with this proposal_id once they agree.',
       };
