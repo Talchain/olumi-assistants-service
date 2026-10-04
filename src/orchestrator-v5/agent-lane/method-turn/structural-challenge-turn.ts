@@ -191,7 +191,7 @@ export function composeStructuralChallengeReply(input: StructuralChallengeReplyI
 // ── The press and the route adapter (the Executor's hot-seam hunk calls only these) ─────────────────────────────────
 
 /**
- * The press id the existing Challenge surface sends for "Test without this link" on one link. Typed ids, never labels:
+ * The canonical press id for "Test without this link" on one link. Typed ids, never labels:
  * A JSON tuple encodes both endpoints without reserving any characters in canonical node ids.
  */
 export const STRUCTURAL_CHALLENGE_PRESS_PREFIX = 'agent-test-without-link:';
@@ -200,14 +200,32 @@ export function structuralChallengePressId(link: ChallengeLink): string {
   return `${STRUCTURAL_CHALLENGE_PRESS_PREFIX}${JSON.stringify([link.from_id, link.to_id])}`;
 }
 
-export function parseStructuralChallengePress(chipId: unknown): ChallengeLink | null {
+export type StructuralChallengePress = ChallengeLink | { readonly legacyCandidates: readonly ChallengeLink[] };
+
+/** Pure grammar reader. Legacy delimiters may overlap: the graph, never a split heuristic, resolves them. */
+export function parseStructuralChallengePress(chipId: unknown): StructuralChallengePress | null {
   if (typeof chipId !== 'string' || !chipId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) return null;
+  const suffix = chipId.slice(STRUCTURAL_CHALLENGE_PRESS_PREFIX.length);
+  // Bounds: JSON.parse is linear, so the canonical form keeps base compatibility (whitespace, \u escapes: two
+  // fully escaped 200-char ids are ~2,410 chars) under a 4,096 sanity cap; legacy `from::to` enumeration is 402.
+  if (suffix.length > 4096) return null;
+  const linkOf = (from: unknown, to: unknown): ChallengeLink | null => {
+    if (!NodeV3.shape.id.safeParse(from).success || !NodeV3.shape.id.safeParse(to).success || from === to) return null;
+    const parsed = StructuralChallengeAlternativeV1Schema.safeParse({ op: 'remove_link', from_id: from, to_id: to, origin: 'user_selected', sizing: 'unmarked' });
+    return parsed.success ? { from_id: parsed.data.from_id, to_id: parsed.data.to_id } : null;
+  };
   let parts: unknown;
-  try { parts = JSON.parse(chipId.slice(STRUCTURAL_CHALLENGE_PRESS_PREFIX.length)); } catch { return null; }
+  try { parts = JSON.parse(suffix); } catch {
+    if (suffix.length > 402) return null;
+    const legacyCandidates: ChallengeLink[] = [];
+    for (let split = suffix.indexOf('::'); split !== -1; split = suffix.indexOf('::', split + 1)) {
+      const link = linkOf(suffix.slice(0, split), suffix.slice(split + 2));
+      if (link !== null) legacyCandidates.push(link);
+    }
+    return legacyCandidates.length > 0 ? { legacyCandidates } : null;
+  }
   if (!Array.isArray(parts) || parts.length !== 2) return null;
-  if (!parts.every((id) => NodeV3.shape.id.safeParse(id).success)) return null;
-  const parsed = StructuralChallengeAlternativeV1Schema.safeParse({ op: 'remove_link', from_id: parts[0], to_id: parts[1], origin: 'user_selected', sizing: 'unmarked' });
-  return parsed.success ? { from_id: parsed.data.from_id, to_id: parsed.data.to_id } : null;
+  return linkOf(parts[0], parts[1]);
 }
 
 export interface StructuralChallengeTurn {
@@ -250,6 +268,27 @@ export function structuralChallengeTurnUnderLicence(
 export const STRUCTURAL_CHALLENGE_NO_RUN_REPLY =
   'There is no analysis to test yet. Run the analysis first, then try "Test without this link".';
 
+export type StructuralChallengePressRefusal = 'malformed' | 'ambiguous' | 'not_found' | 'graph_unavailable' | 'failed';
+
+export function structuralChallengeRefusal(cause: StructuralChallengePressRefusal): StructuralChallengeTurn {
+  const replies: Record<StructuralChallengePressRefusal, string> = {
+    malformed: "I can't tell which link this is, so I can't test it.",
+    ambiguous: "More than one link in your model matches this one, so I can't tell which to test.",
+    not_found: "That link isn't in your current model. Open a link from the canvas and try again.",
+    graph_unavailable: "I couldn't read a model to test this link against.",
+    failed: "I couldn't finish this link test just now. Please try again.",
+  };
+  return { reply: `${replies[cause]} Nothing in your model changed.`, outcome: cause === 'failed' ? 'failed' : 'unsupported',
+    result: null, labels: new Map(), actions: [TALK_IT_THROUGH_CHIP] };
+}
+
+export interface StructuralChallengePressResolution {
+  /** Already parsed by the route, including a malformed result; never parsed twice. */
+  readonly press: StructuralChallengePress | null;
+  readonly resolvedLink?: ChallengeLink | null;
+  readonly refusal?: StructuralChallengePressRefusal;
+}
+
 /**
  * A valid press → one dispatch → the deterministic reply. A malformed press for this method refuses before dispatch;
  * null is reserved for another method's press (the turn proceeds as usual).
@@ -258,12 +297,22 @@ export const STRUCTURAL_CHALLENGE_NO_RUN_REPLY =
 export async function structuralChallengeTurnFor(
   chipId: unknown,
   ask: (link: ChallengeLink) => Promise<StructuralChallengeDispatchResult>,
+  resolution?: StructuralChallengePressResolution,
 ): Promise<StructuralChallengeTurn | null> {
-  const link = parseStructuralChallengePress(chipId);
+  const press = resolution === undefined ? parseStructuralChallengePress(chipId) : resolution.press;
+  if (press === null) return typeof chipId === 'string' && chipId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)
+    ? structuralChallengeRefusal('malformed') : null;
+  const candidates = 'legacyCandidates' in press ? press.legacyCandidates : [press];
+  const resolved = resolution?.resolvedLink;
+  // A caller's resolution may select only the identity encoded by this press.
+  if (resolved != null && !candidates.some((candidate) => candidate.from_id === resolved.from_id && candidate.to_id === resolved.to_id)) {
+    return structuralChallengeRefusal('malformed');
+  }
+  if (resolution?.refusal !== undefined) return structuralChallengeRefusal(resolution.refusal);
+  // Canonical JSON identities go directly to dispatch; only legacy grammar needs graph resolution.
+  const link = 'legacyCandidates' in press ? resolved : press;
+  if (link == null) return structuralChallengeRefusal('malformed');
   const actions = [TALK_IT_THROUGH_CHIP];
-  if (link === null) return typeof chipId === 'string' && chipId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)
-    ? { reply: 'This test needs a link between two distinct nodes with valid recorded identities. Nothing in your model changed.', outcome: 'unsupported', result: null, labels: new Map(), actions }
-    : null;
   const dispatched = await ask(link);
   if (dispatched.kind === 'no_run') return { reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, outcome: 'no_run', result: null, labels: new Map(), actions };
   const turn: StructuralChallengeTurn = {

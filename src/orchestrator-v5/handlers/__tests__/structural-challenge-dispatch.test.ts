@@ -264,6 +264,15 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     expect(h.plot.runBodies).toHaveLength(1);
   });
 
+  it('canonical absent-link press preserves the real dispatcher link_not_found reply without recomputing', async () => {
+    const h = await harness();
+    const link = { from_id: 'absent', to_id: 'paying_subscribers' };
+    const turn = await structuralChallengeTurnFor(structuralChallengePressId(link), (selected) => h.ask(selected));
+    expect(turn).toMatchObject({ outcome: 'unsupported', result: { status: 'unsupported', reason: 'link_not_found', claims: [] } });
+    expect(turn?.reply).toBe("I can't test the link from absent to Paying subscribers. That link isn't in the model this analysis ran on, so there is nothing to test. Nothing in your model changed.");
+    expect(h.plot.runBodies).toHaveLength(1); // The baseline only; no candidate transport call.
+  });
+
   it('S4: a PLoT timeout on the candidate is timed_out, never a figure', async () => {
     const h = await harness({ timeoutOnCandidate: true });
     expect(resultOf(await h.ask())).toMatchObject({ status: 'timed_out', reason: 'candidate_run_timeout', claims: [] });

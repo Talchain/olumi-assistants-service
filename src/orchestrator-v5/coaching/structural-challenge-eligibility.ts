@@ -58,6 +58,14 @@ function endpoint(edge: Rec, a: 'from' | 'to'): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
+/** The common edge reader for canonical (`from`/`to`) and recorded (`from_id`/`to_id`) shapes. */
+export function readStructuralChallengeEdge(edge: unknown): ChallengeLink | null {
+  if (!isRec(edge)) return null;
+  const from = endpoint(edge, 'from');
+  const to = endpoint(edge, 'to');
+  return from === null || to === null ? null : { from_id: from, to_id: to };
+}
+
 function viewOf(graph: unknown): GraphView {
   const g = isRec(graph) ? graph : {};
   const nodes = Array.isArray(g.nodes) ? g.nodes.filter(isRec) : [];
@@ -82,10 +90,9 @@ function viewOf(graph: unknown): GraphView {
   const directed: ChallengeLink[] = [];
   const bidirected: ChallengeLink[] = [];
   for (const e of edges) {
-    const from = endpoint(e, 'from');
-    const to = endpoint(e, 'to');
-    if (from === null || to === null) continue;
-    (e.edge_type === 'bidirected' ? bidirected : directed).push({ from_id: from, to_id: to });
+    const link = readStructuralChallengeEdge(e);
+    if (link === null) continue;
+    (e.edge_type === 'bidirected' ? bidirected : directed).push(link);
   }
   return { kinds, identities, directed, bidirected };
 }

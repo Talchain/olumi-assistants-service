@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { graphWithoutLink, reachableFrom, structuralChallengeEligibility } from '../structural-challenge-eligibility.js';
+import { graphWithoutLink, readStructuralChallengeEdge, reachableFrom, structuralChallengeEligibility } from '../structural-challenge-eligibility.js';
 import { leadNoise, meanChangeNoise, proportionChangeNoise, wilsonInterval } from '../structural-challenge-noise.js';
 import A_GRAPH from './fixtures/sci-deep-bank2/A-graph.json';
 
@@ -13,6 +13,31 @@ const G = A_GRAPH.graph;
 const link = (from_id: string, to_id: string) => ({ from_id, to_id });
 
 describe('SCI-DEEP eligibility (graph facts only)', () => {
+  it.each([
+    [{ from: 'a', to: 'b' }, link('a', 'b')],
+    [{ from_id: 'a', to_id: 'b' }, link('a', 'b')],
+    [{ from: 'a', to_id: 'b' }, link('a', 'b')],
+    [{ from: null, from_id: 'a', to: 'b' }, link('a', 'b')],
+    [{ from: 'a', from_id: 'other', to: 'b' }, link('a', 'b')],
+    [{ from: '', from_id: 'a', to: 'b' }, null],
+    [{ from: 7, from_id: 'a', to: 'b' }, null],
+    [null, null],
+    [[], null],
+  ])('the shared route and eligibility edge reader honours endpoint precedence: %j', (edge, expected) => {
+    expect(readStructuralChallengeEdge(edge)).toEqual(expected);
+  });
+
+  it('recorded endpoint shapes retain eligibility, reachability and bidirected refusal', () => {
+    const graph = { ...G, edges: G.edges.map(({ from, to, ...edge }) => ({ ...edge, from_id: from, to_id: to })) };
+    const selected = link('monthly_churn', 'paying_subscribers');
+    const recorded = structuralChallengeEligibility(graph, selected);
+    expect(recorded).toEqual(structuralChallengeEligibility(G, selected));
+    expect(recorded.eligible).toBe(true);
+    if (recorded.eligible) expect([...recorded.reachable].sort()).toEqual(['mrr', 'paying_subscribers']);
+    const bi = { ...graph, edges: [{ from_id: 'a', to_id: 'b', edge_type: 'bidirected' }] };
+    expect(structuralChallengeEligibility(bi, link('a', 'b'))).toEqual({ eligible: false, reason: 'bidirected_link' });
+  });
+
   it('admits a causal link whose target keeps another parent, and returns what it can reach', () => {
     const e = structuralChallengeEligibility(G, link('monthly_churn', 'paying_subscribers'));
     expect(e.eligible).toBe(true);

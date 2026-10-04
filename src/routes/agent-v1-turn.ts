@@ -120,7 +120,8 @@ import {
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
 import { dispatchStructuralChallenge } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
-import { parseStructuralChallengePress, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
+import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengeRefusal, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
+import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
 import type { StructuralChallengeFinalRead } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
@@ -886,6 +887,8 @@ export function unfinishedAnswerText(result: {
 
 export function typedRunOf(body: Record<string, unknown>): boolean {
   const chip = body['chip'] as { action_type?: unknown; id?: unknown } | null | undefined;
+  // A "Test without this link" press is terminal SCI-DEEP whatever else the chip carries: never an ordinary Run.
+  if (typeof chip?.id === 'string' && chip.id.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) return false;
   // The Agent's own Run offer is recognised by its id too, in case a client echoes only the id.
   return (body['kind'] === undefined || body['kind'] === 'message') && (chip?.action_type === 'run_analysis' || chip?.id === RUN_OFFER_CHIP.id);
 }
@@ -2047,6 +2050,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Counts every call that could WRITE, so a failed turn knows whether it is
     // safe to release its claim (nothing sent) or must leave it (outcome unknown).
     let writesDispatched = 0;
+    const releaseUnwrittenTurnClaim = async (): Promise<boolean> => {
+      if (turnId === undefined || claimHash === undefined || writesDispatched !== 0 || typeof store.releaseTurnClaim !== 'function') return false;
+      try { await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash); return true; }
+      catch (err) { log.warn({ err: String(err), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: claim release failed'); return false; }
+    };
     /**
      * ⭐ ONE READ OF THE MODEL PER WRITE EPOCH (C6; widens slice C1c, which reused a read only before the first
      * write). See `turnReadCache`: a graph read is reused while nothing else has been dispatched or written since
@@ -2628,22 +2636,44 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     let structuralChallengeTurn: StructuralChallengeTurn | null = null;
     let structuralChallengeFinalRead: StructuralChallengeFinalRead | undefined;
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null
-      && parseStructuralChallengePress(pressedChipId) !== null) {
-      const rb = await readBackState(readingDispatch, scenarioId);
-      const permissions = claimPermissionsFrom(rb.analysisState, rb.analysisReady, { requested: true });
-      structuralChallengeTurn = await structuralChallengeTurnFor(pressedChipId, async (link) => {
-        const dispatched = await dispatchStructuralChallenge({
-        payload: {
-          kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
-          source: 'chip_click', message,
-        },
-        requestId: `${String(req.id)}:structural-challenge`, link, origin: 'user_selected',
-        turnMayNameLeader: permissions.leader_may_be_named,
-        exploratoryWorkAllowed: permissions.permitted_analysis_mode !== null,
-        });
-        if (dispatched.kind === 'result') structuralChallengeFinalRead = dispatched.finalRead;
-        return dispatched;
-      });
+      && typeof pressedChipId === 'string' && pressedChipId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) {
+      // A failure here is still an ANSWERED turn: its typed reply is recorded under turn_id, so the claim is kept
+      // (releasing it would let a chipless same-turn_id retry win a fresh claim and run the ordinary model turn).
+      try {
+        const press = parseStructuralChallengePress(pressedChipId);
+        const resolution: StructuralChallengePressResolution = { press };
+        const rb = press === null ? undefined : await readBackState(readingDispatch, scenarioId);
+        let selected: StructuralChallengePressResolution = resolution;
+        // Read-back resolution belongs only to legacy grammar. Canonical identities retain every dispatcher outcome.
+        if (press !== null && 'legacyCandidates' in press) {
+          if (rb?.graph == null) selected = { press, refusal: 'graph_unavailable' };
+          else {
+            const graph = rb.graph as { edges?: unknown };
+            const links = Array.isArray(graph.edges) ? graph.edges.map(readStructuralChallengeEdge) : [];
+            const matches = press.legacyCandidates.filter((candidate) => links.some((link) => link !== null
+              && link.from_id === candidate.from_id && link.to_id === candidate.to_id));
+            selected = matches.length === 1 ? { press, resolvedLink: matches[0] }
+              : { press, refusal: matches.length > 1 ? 'ambiguous' : 'not_found' };
+          }
+        }
+        const permissions = claimPermissionsFrom(rb?.analysisState, rb?.analysisReady, { requested: true });
+        structuralChallengeTurn = await structuralChallengeTurnFor(pressedChipId, async (link) => {
+          const dispatched = await dispatchStructuralChallenge({
+            payload: {
+              kind: 'message', scenario_id: scenarioId, turn_id: randomUUID(), stage: 'analyse', turn_class: 'decide',
+              source: 'chip_click', message,
+            },
+            requestId: `${String(req.id)}:structural-challenge`, link, origin: 'user_selected',
+            turnMayNameLeader: permissions.leader_may_be_named,
+            exploratoryWorkAllowed: permissions.permitted_analysis_mode !== null,
+          });
+          if (dispatched.kind === 'result') structuralChallengeFinalRead = dispatched.finalRead;
+          return dispatched;
+        }, selected);
+      } catch (err) {
+        structuralChallengeTurn = structuralChallengeRefusal('failed');
+        log.warn({ err: String(err), scenario_id: scenarioId }, 'agent-lane: structural challenge failed without a model call');
+      }
       if (structuralChallengeTurn !== null) {
         fastPath = 'method';
         result = { assistant_text: structuralChallengeTurn.reply, items: [], tool_calls: [], tool_results: [], mutated: false,
@@ -2792,11 +2822,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       // Nothing was sent that could write: release the claim, so a retry of the
       // SAME turn_id can run. If anything was sent, the claim stands — the
       // outcome is unknown and the turn is never run twice.
-      let released = false;
-      if (turnId !== undefined && claimHash !== undefined && writesDispatched === 0 && typeof store.releaseTurnClaim === 'function') {
-        try { await store.releaseTurnClaim(scenarioId, claimTurnIdOf(turnId), claimHash); released = true; }
-        catch (e) { log.warn({ err: String(e), scenario_id: scenarioId, turn_id: turnId }, 'agent-lane: claim release failed'); }
-      }
+      const released = await releaseUnwrittenTurnClaim();
       return reply.code(502).send({
         error: 'UPSTREAM_ERROR', detail: String(err).slice(0, 300),
         ...(turnId !== undefined ? { retry_safe: released } : {}),
