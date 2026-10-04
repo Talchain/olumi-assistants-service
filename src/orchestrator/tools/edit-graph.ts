@@ -3054,8 +3054,13 @@ export async function handleEditGraph(
           'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
       }
       operations = omitInheritedInterventionRanges(operations, storedRangeBase);
-      return buildRejectionResult('A likely range needs its dedicated range proposal and approval.',
-        operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+      // An approved range may be repeated by a whole-map replacement.  Once
+      // the identical range metadata has been removed, only a genuinely new
+      // or changed range remains a consent-bearing write.
+      if (hasInterventionRangeWrite(operations)) {
+        return buildRejectionResult('A likely range needs its dedicated range proposal and approval.',
+          operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+      }
     }
 
     // ⭐ STRIP PIPELINE-OWNED KEYS FROM `add_node` VALUES, RATHER THAN LET THE
@@ -3997,11 +4002,11 @@ export async function handleEditGraph(
           diagnostics(),
         );
       }
-      // Echo-only ranges are not consent: if the store is unreadable, an edit
-      // that does not touch a range may still land, but it must not launder an
-      // echoed range into the new graph. Range-changing postimages therefore
-      // fail closed here; ordinary postimages never read the store.
-      if (hasNewInterventionRanges(context.graph, encoded.graph)) {
+      // Echo-only ranges are not consent. Whenever the postimage CARRIES a likely
+      // range (rare), the stored graph is its authority: an unrelated edit must not
+      // launder an echoed range, or a stale echo of one, over the stored range. A
+      // postimage with no range at all never reads the store, as on staging.
+      if (hasNewInterventionRanges(undefined, encoded.graph)) {
         if (!(await loadStoredRangeBase())) {
           return buildRejectionResult('The stored model could not be read. Nothing was changed.',
             operations, baseGraphHash, turnId, startTime,
