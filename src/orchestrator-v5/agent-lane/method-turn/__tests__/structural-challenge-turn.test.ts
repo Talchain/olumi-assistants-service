@@ -150,6 +150,62 @@ describe('SCI-DEEP reply', () => {
     expect(none).toMatchObject({ outcome: 'no_run', reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, result: null });
   });
 
+  it.each([
+    ['driver_retention::goal_value', [{ from_id: 'driver_retention', to_id: 'goal_value' }]],
+    ['a:::b', [{ from_id: 'a', to_id: ':b' }, { from_id: 'a:', to_id: 'b' }]],
+    ['a::b::c', [{ from_id: 'a', to_id: 'b::c' }, { from_id: 'a::b', to_id: 'c' }]],
+    ['a::::b', [{ from_id: 'a', to_id: '::b' }, { from_id: 'a:', to_id: ':b' }, { from_id: 'a::', to_id: 'b' }]],
+    [':::b', [{ from_id: ':', to_id: 'b' }]],
+  ])('legacy grammar enumerates every valid split, including overlaps: %s', (suffix, legacyCandidates) => {
+    expect(parseStructuralChallengePress(`agent-test-without-link:${suffix}`)).toEqual({ legacyCandidates });
+  });
+
+  it.each(['a::a', 'A::b', 'a?::b', 'a::', 'a'.repeat(201) + '::b', 'a|b', '["a"]', '{"from_id":"a","to_id":"b"}'])('legacy grammar rejects invalid or third-format suffixes: %s', (suffix) => {
+    expect(parseStructuralChallengePress(`agent-test-without-link:${suffix}`)).toBeNull();
+  });
+
+  it('legacy grammar cannot dispatch before graph resolution', async () => {
+    const ask = vi.fn(async () => ({ kind: 'no_run' as const }));
+    expect(await structuralChallengeTurnFor('agent-test-without-link:a:::b', ask)).toMatchObject({ outcome: 'unsupported', result: null });
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['legacy', 'agent-test-without-link:a:::b'],
+    ['canonical', structuralChallengePressId({ from_id: 'a', to_id: 'b' })],
+  ])('a resolved link outside the %s press candidates refuses without dispatch', async (_grammar, chip) => {
+    const ask = vi.fn(async () => ({ kind: 'no_run' as const }));
+    const press = parseStructuralChallengePress(chip);
+    const turn = await structuralChallengeTurnFor(chip, ask, { press, resolvedLink: { from_id: 'other', to_id: 'b' } });
+    expect(turn).toMatchObject({ outcome: 'unsupported', result: null });
+    expect(turn?.reply).toContain('Nothing in your model changed.');
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it('a supplied parse result is consumed without parsing the chip again', async () => {
+    const ask = vi.fn(async () => ({ kind: 'no_run' as const }));
+    const chip = { toString: () => { throw new Error('must not parse'); } };
+    const link = { from_id: 'a', to_id: 'b' };
+    expect(await structuralChallengeTurnFor(chip, ask, { press: link })).toMatchObject({ outcome: 'no_run' });
+    expect(ask).toHaveBeenCalledExactlyOnceWith(link);
+  });
+
+  it('legacy maximum suffix is bounded before enumeration and canonical JSON parsing', () => {
+    const maximum = `${'a'.repeat(200)}::${'b'.repeat(200)}`;
+    expect(parseStructuralChallengePress(`agent-test-without-link:${maximum}`)).toEqual({ legacyCandidates: [
+      { from_id: 'a'.repeat(200), to_id: 'b'.repeat(200) },
+    ] });
+    expect(parseStructuralChallengePress(`agent-test-without-link:${maximum}b`)).toBeNull();
+  });
+
+  it('canonical maximum: two 200-char ids in JSON (407 chars) still parse exactly as on base; one more char is refused', () => {
+    const link = { from_id: 'a'.repeat(200), to_id: 'b'.repeat(200) };
+    const press = structuralChallengePressId(link);
+    expect(press.length - 'agent-test-without-link:'.length).toBe(407);
+    expect(parseStructuralChallengePress(press)).toEqual(link);
+    expect(parseStructuralChallengePress(`${press} `)).toBeNull();
+  });
+
   it('the final licence only narrows: a leader withheld at the final read is withheld in the result and the reply', async () => {
     const turn = await structuralChallengeTurnFor(structuralChallengePressId({ from_id: 'monthly_churn', to_id: 'paying_subscribers' }), async () => ({ kind: 'result', result: changed, labels: LABELS, finalRead: finalRead(), baselineRunIdentity: BASELINE_IDENTITY, candidateLeaderLicence: 'permitted' as const }));
     if (turn === null) throw new Error('expected a turn');
@@ -280,7 +336,7 @@ describe('independent-review reply and press regressions', () => {
     for (const endpoints of [['a', 'a'], ['', 'b'], ['a', ''], ['a'.repeat(201), 'b'], [7, 'b'], [' a', 'b'], ['a?', 'b'], ['a', null], ['a'], ['a', 'b', 'c']]) {
       const press = `agent-test-without-link:${JSON.stringify(endpoints)}`;
       expect(parseStructuralChallengePress(press)).toBeNull();
-      expect(await structuralChallengeTurnFor(press, ask)).toMatchObject({ outcome: 'unsupported', result: null, reply: 'This test needs a link between two distinct nodes with valid recorded identities. Nothing in your model changed.' });
+      expect(await structuralChallengeTurnFor(press, ask)).toMatchObject({ outcome: 'unsupported', result: null, reply: "I can't tell which link this is, so I can't test it. Nothing in your model changed." });
     }
     expect(parseStructuralChallengePress('agent-test-without-link:a::a')).toBeNull();
     expect(ask).not.toHaveBeenCalled();
