@@ -90,7 +90,7 @@ describe('the next-step chips (live route, real loop, model stubbed)', () => {
     expect(b._agent.tool_calls, 'vacuity: the answer used no tool, so no other control exists').toEqual([]);
     expect(b.suggested_actions).toEqual([
       { id: 'agent-next-pre-mortem', label: 'Run a pre-mortem', message: 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?' },
-      { id: 'agent-next-what-would-change', label: 'What would change the result?', message: 'What would most likely change this result?' },
+      { id: 'agent-next-what-would-change', label: 'What would change this?', message: 'What would most likely change this result?' },
       { id: 'agent-next-strengthen', label: 'Strengthen the model', message: 'What would most strengthen this model?' },
     ]);
     for (const c of b.suggested_actions) expect(c.action_type, `${c.id} is plain text, never a typed action`).toBeUndefined();
