@@ -4549,6 +4549,10 @@ export function createAgentCapabilities(
           detail: 'This unresolved reading belongs to the user. It is retained until they explicitly withdraw it with the displayed words.' };
         withdrawnHolds.add(id);
       } else if (/^gmh_[0-9a-f]{12}$/.test(id)) {
+        // Only a hold this scenario is actually offering can be withdrawn: a spoofed, stale or other-scenario id is not found.
+        const held = (await opts.readPendingActions?.(ctx.scenario_id) ?? [])
+          .find(p => p.chip_id === id && !isPendingActionExpired(p, Date.now()));
+        if (held === undefined) return notFound;
         withdrawnHolds.add(id);
       } else {
         const p = proposals.get(id);
