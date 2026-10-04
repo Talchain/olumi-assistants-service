@@ -105,7 +105,8 @@ import { generateConstraintId } from "../../compound-goal/extractor.js";
 import { classifyUnitScaleClass } from "./unit-scale-class.js";
 import { soleStatedQuantityInSpan } from "../../factor-extraction/goal-label-target.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
-import { extractStatedLikelyRange, extractStatedPerUnitEffects, type StatedPerUnitEffect } from "../../context-integrity/not-modelled-manifest.js";
+import { extractStatedLikelyRange } from "../../context-integrity/not-modelled-manifest.js";
+import { statedEffectQuoteMatches, type StatedEffectDetail } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
 import { sizeLink, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
 import type { GoalConstraintT } from "../../../schemas/assist.js";
@@ -1608,33 +1609,16 @@ function briefRange(quote: string): { min: number; max: number; text: string } |
   return range === undefined ? undefined : { min: range.low, max: range.high, text: range.text };
 }
 
-function singularToken(token: string): string {
-  const t = token.toLowerCase();
-  return t.endsWith("ies") ? `${t.slice(0, -3)}y` : t.endsWith("s") && t.length > 3 ? t.slice(0, -1) : t;
-}
-
-function substantiveTokens(text: string): string[] {
-  return text.toLowerCase().replace(/[^\p{L}\p{N}%]+/gu, " ").split(/\s+/u)
-    .filter((t) => t.length > 2 && !["the", "a", "an", "to", "of", "in", "for", "new", "tier", "monthly"].includes(t))
-    .map(singularToken);
-}
-
-function resolvePhraseNode(phrase: string, nodes: readonly ProjectedNode[]): ProjectedNode | undefined {
-  const phraseTokens = new Set(substantiveTokens(phrase));
-  if (phraseTokens.size === 0) return undefined;
-  const scored = nodes
-    .filter((node) => node.kind !== "option" && node.kind !== "decision")
-    .map((node) => {
-      const labelTokens = new Set(substantiveTokens(node.label));
-      const score = [...phraseTokens].filter((token) => labelTokens.has(token)).length;
-      return { node, score };
-    })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score || substantiveTokens(a.node.label).length - substantiveTokens(b.node.label).length);
-  if (scored.length === 0) return undefined;
-  if (scored[0]!.score > 0 && (scored[0]!.score !== scored[1]?.score
-    || substantiveTokens(scored[0]!.node.label).length !== substantiveTokens(scored[1]!.node.label).length)) return scored[0]!.node;
-  return undefined;
+function endpointLabelIsNamedUniquely(
+  quote: string,
+  endpoint: ProjectedNode,
+  nodes: readonly ProjectedNode[],
+): boolean {
+  const label = endpoint.label.toLowerCase().replace(/\s+/gu, " ").trim();
+  if (label.length === 0) return false;
+  const quoted = quote.toLowerCase().replace(/\s+/gu, " ").trim();
+  if (!quoted.includes(label)) return false;
+  return nodes.filter((node) => node.label.toLowerCase().replace(/\s+/gu, " ").trim() === label).length === 1;
 }
 
 function rangeForEffect(amount: number, quote: string): StatedRangeEnd | undefined {
@@ -1649,31 +1633,29 @@ function effectForEdge(args: {
   readonly edge: ProjectedEdge;
   readonly claim: DraftInferenceClaim | undefined;
   readonly nodes: readonly ProjectedNode[];
-  readonly relations: readonly StatedPerUnitEffect[];
+  readonly statedItems: readonly DraftStatedItem[];
+  readonly brief: string;
 }): { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; stated_range?: StatedRangeEnd } | undefined {
-  const { edge, claim, nodes, relations } = args;
+  const { edge, claim, nodes, statedItems, brief } = args;
   const source = nodes.find((node) => node.id === edge.from);
   const target = nodes.find((node) => node.id === edge.to);
   if (source === undefined || target === undefined) return undefined;
-  const endpointMatches = relations.filter((relation) => resolvePhraseNode(relation.source_phrase, nodes)?.id === source.id
-    && (resolvePhraseNode(relation.target_phrase, nodes)?.id === target.id
-      || (target.kind === "goal" && target.goal_threshold_unit === relation.amount_unit)));
   const detail = claim?.effect_detail;
-  const matching = detail === undefined ? endpointMatches : endpointMatches.filter((relation) =>
-    relation.amount === detail.amount && relation.per_source_change === detail.per_source_change);
-  if (matching.length !== 1) return undefined;
-  const relation = matching[0]!;
-  const effect = detail === undefined ? relation : {
-    amount: detail.amount,
-    amount_unit: detail.amount_unit,
-    per_source_change: detail.per_source_change,
-    per_source_change_unit: detail.per_source_change_unit,
-  };
-  if (![effect.amount, effect.per_source_change].every((value) => Number.isFinite(value)) || effect.amount === 0 || effect.per_source_change === 0) return undefined;
-  if (detail !== undefined && (detail.amount !== relation.amount || detail.per_source_change !== relation.per_source_change)) return undefined;
-  const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? "negative" : "positive";
+  if (claim?.claim_kind !== "causal_link" || detail === undefined) return undefined;
+  const basis = [...new Set(claim.basis ?? [])].filter((index) => Number.isInteger(index));
+  const quotes = basis
+    .map((index) => statedItems[index]?.source_quote)
+    .filter((quote): quote is string => typeof quote === "string" && quote.length > 0 && brief.includes(quote));
+  if (quotes.length !== 1) return undefined;
+  const quote = quotes[0]!;
+  // Endpoint identity comes from the causal_link references. Where the quote
+  // names the endpoints, require an exact, uniquely named label as a second
+  // check; no token overlap, alias invention, or unit-only target fallback.
+  if (!endpointLabelIsNamedUniquely(quote, source, nodes) || !endpointLabelIsNamedUniquely(quote, target, nodes)) return undefined;
+  if (!statedEffectQuoteMatches(quote, detail as StatedEffectDetail)) return undefined;
+  const direction = Math.sign(detail.amount) * Math.sign(detail.per_source_change) < 0 ? "negative" : "positive";
   if (claim?.effect !== undefined && claim.effect !== direction) return undefined;
-  return { ...effect, quote: relation.quote, ...(rangeForEffect(effect.amount, relation.quote) !== undefined ? { stated_range: rangeForEffect(effect.amount, relation.quote) } : {}) };
+  return { ...detail, quote, ...(rangeForEffect(detail.amount, quote) !== undefined ? { stated_range: rangeForEffect(detail.amount, quote) } : {}) };
 }
 
 /**
@@ -4453,7 +4435,6 @@ function projectOnce(
   // single frame pass above: `sizeLink` must read the same persisted frames the
   // later writer reads, never a second draft-only conversion.
   if (typeof brief === "string" && brief.trim() !== "") {
-    const relations = extractStatedPerUnitEffects(brief);
     // The goal threshold is the existing frame authority for the same metric.
     // Carry it to an outcome that names that metric so a stated natural effect
     // is convertible at the seam; no new scale is derived here.
@@ -4465,12 +4446,12 @@ function projectOnce(
         if (unit === goal.goal_threshold_unit) node.scale_frame = goal.goal_threshold_cap;
       }
     }
-    const view = magnitudeNodes(nodes as unknown as Record<string, unknown>[], percentLevelIds({ goal_constraints: goalConstraints }));
+    const view = magnitudeNodes(nodes.map((node) => Object.fromEntries(Object.entries(node))), percentLevelIds({ goal_constraints: goalConstraints }));
     for (const edge of edges) {
       if (edge.origin !== "ai") continue;
       const origin = claimOriginByEdgeId.get(edge.id);
       const claim = origin === undefined ? undefined : claims[origin.index];
-      const effect = effectForEdge({ edge, claim, nodes, relations });
+      const effect = effectForEdge({ edge, claim, nodes, statedItems, brief });
       if (effect === undefined) continue;
       const source = view.get(edge.from);
       const target = view.get(edge.to);

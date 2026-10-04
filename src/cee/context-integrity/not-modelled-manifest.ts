@@ -49,6 +49,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
+import { statedEffectQuoteMatches } from "../provenance/stated-effect.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -449,24 +450,11 @@ export function extractStatedQuantities(text: string): Quantity[] {
   return out;
 }
 
-/** A brief-provided natural effect, kept separate from the quantity manifest. */
-export interface StatedPerUnitEffect {
-  readonly quote: string;
-  readonly source_phrase: string;
-  readonly target_phrase: string;
-  readonly amount: number;
-  readonly amount_unit: string;
-  readonly per_source_change: number;
-  readonly per_source_change_unit: string;
-}
-
 export interface StatedLikelyRange {
   readonly low: number;
   readonly high: number;
   readonly text: string;
 }
-
-const RELATION_NUMBER_RE = /£\s?\d[\d,]*(?:\.\d+)?(?:\s*[kmb])?|\d[\d,]*(?:\.\d+)?\s*%|\d[\d,]*(?:\.\d+)?\s+(?:customers?|subscribers?|users?|people|persons?|employees?|months?|years?|weeks?|days?)/giu;
 
 function relationNumber(raw: string): { value: number; unit: string } | undefined {
   const money = raw.match(/£\s?([\d,]+(?:\.\d+)?)([kmb])?/i);
@@ -480,48 +468,6 @@ function relationNumber(raw: string): { value: number; unit: string } | undefine
   if (count) return { value: Number(count[1]!.replace(/,/g, "")), unit: count[2]!.toLowerCase() };
   const bare = raw.match(/^[\d,]+(?:\.\d+)?$/);
   return bare ? { value: Number(bare[0].replace(/,/g, "")), unit: "" } : undefined;
-}
-
-/** Extract only explicit "each A ... B" statements; ambiguity returns nothing. */
-export function extractStatedPerUnitEffects(text: string): StatedPerUnitEffect[] {
-  const out: StatedPerUnitEffect[] = [];
-  for (const sentence of text.split(/(?<=[.!?])\s+/u)) {
-    const verb = /\b(adds?|loses?|removes?|costs?)\b/iu.exec(sentence);
-    if (verb?.index === undefined) continue;
-    const each = /\beach\s+/iu.exec(sentence);
-    if (each?.index === undefined || each.index > verb.index) continue;
-    const numbers = [...sentence.matchAll(RELATION_NUMBER_RE)].map((m) => ({
-      at: m.index ?? 0,
-      end: (m.index ?? 0) + m[0].length,
-      parsed: relationNumber(m[0]),
-    })).filter((x): x is typeof x & { parsed: { value: number; unit: string } } => x.parsed !== undefined);
-    const afterEach = numbers.find((n) => n.at >= each.index! + each[0].length && n.at < verb.index!);
-    const amount = numbers.find((n) => n.at >= verb.index! + verb[0].length);
-    if (amount === undefined) continue;
-    const per = afterEach ?? { at: each.index! + each[0].length, end: each.index! + each[0].length, parsed: { value: 1, unit: "one" } };
-    const sourcePhrase = sentence.slice(per.end, verb.index).replace(/^[\s,]+|[\s,]+$/g, "");
-    if (sourcePhrase.length === 0) continue;
-    const tail = sentence.slice(amount.end);
-    const targetMatch = /(?:\bto\b|\bof\b|\bin\b)\s+(.+?)(?:\s+before\b|,\s*between\b|\s+between\b|\.|$)/iu.exec(tail);
-    const fallbackTarget = tail.replace(/^[,\s]+/u, "").split(/,|\./u, 1)[0] ?? "";
-    let targetPhrase = (targetMatch?.[1] ?? fallbackTarget).trim();
-    if (!targetMatch && /\b(?:loses?|removes?)\b/iu.test(verb[0])) targetPhrase = `${targetPhrase} lost`;
-    if (targetPhrase.length === 0) continue;
-    const month = /\b(?:a|per)\s+month\b/iu.test(tail) ? "/month" : "";
-    const sourceUnit = per.parsed.unit === "one" ? sourcePhrase.split(/\s+/u).at(-1) ?? "unit" : per.parsed.unit;
-    const targetUnit = per.parsed.unit === "one" && amount.parsed.unit !== "£" ? amount.parsed.unit : `${amount.parsed.unit}${month}`;
-    const amountSign = /\b(?:loses?|removes?|costs?)\b/iu.test(verb[0]) ? -1 : 1;
-    out.push({
-      quote: sentence.trim(),
-      source_phrase: sourcePhrase,
-      target_phrase: targetPhrase,
-      amount: amountSign * amount.parsed.value,
-      amount_unit: targetUnit,
-      per_source_change: per.parsed.value,
-      per_source_change_unit: sourceUnit,
-    });
-  }
-  return out;
 }
 
 /** Read a plain likely range from a quoted statement, without interpreting bounds. */
@@ -1448,7 +1394,7 @@ function collectSourceBoundInterventionCandidates(
   return out;
 }
 
-function collectCandidates(graph: Record<string, unknown>): Candidate[] {
+function collectCandidates(graph: Record<string, unknown>, briefText: string): Candidate[] {
   const out: Candidate[] = [];
   const factorLabels = new Map<string, string>();
   if (Array.isArray(graph.nodes)) {
@@ -1493,7 +1439,7 @@ function collectCandidates(graph: Record<string, unknown>): Candidate[] {
     }
   }
   out.push(...collectLimitCandidates(graph));
-  out.push(...collectBriefNaturalEffectCandidates(graph));
+  out.push(...collectBriefNaturalEffectCandidates(graph, briefText));
   return out;
 }
 
@@ -1505,6 +1451,7 @@ function collectCandidates(graph: Record<string, unknown>): Candidate[] {
  */
 function collectBriefNaturalEffectCandidates(
   graph: Record<string, unknown>,
+  briefText: string,
 ): Candidate[] {
   if (!Array.isArray(graph.edges)) return [];
   const labels = new Map<string, string>();
@@ -1512,12 +1459,9 @@ function collectBriefNaturalEffectCandidates(
     for (const raw of graph.nodes) {
       if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
       const node = raw as Record<string, unknown>;
-      if (typeof node.id === "string" && typeof node.label === "string") {
-        labels.set(node.id, node.label);
-      }
+      if (typeof node.id === "string" && typeof node.label === "string") labels.set(node.id, node.label);
     }
   }
-
   const out: Candidate[] = [];
   for (const raw of graph.edges) {
     if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
@@ -1535,23 +1479,43 @@ function collectBriefNaturalEffectCandidates(
     const sourceLabel = labels.get(from);
     const targetLabel = labels.get(to);
     if (sourceLabel === undefined || targetLabel === undefined) continue;
+    const quote = p.quote;
+    if (typeof quote !== "string" || quote.length === 0 || !briefText.includes(quote)) continue;
 
     const amount = natural.amount;
     const amountUnit = natural.amount_unit;
+    const perSourceChange = natural.per_source_change;
+    const perSourceChangeUnit = natural.per_source_change_unit;
+    if (
+      typeof amount !== "number" ||
+      typeof amountUnit !== "string" ||
+      typeof perSourceChange !== "number" ||
+      typeof perSourceChangeUnit !== "string" ||
+      !statedEffectQuoteMatches(quote, {
+        amount,
+        amount_unit: amountUnit,
+        per_source_change: perSourceChange,
+        per_source_change_unit: perSourceChangeUnit,
+      })
+    ) continue;
+    const effectDirection = edge.effect_direction;
+    const signedEffect = Math.sign(amount) * Math.sign(perSourceChange);
+    if (
+      (effectDirection === "positive" && signedEffect < 0) ||
+      (effectDirection === "negative" && signedEffect >= 0)
+    ) continue;
     if (typeof amount === "number" && Number.isFinite(amount) && typeof amountUnit === "string" && amountUnit.trim().length > 0) {
       const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(amountUnit);
       out.push({
         nodeId: to,
         label: targetLabel,
-        value: Math.abs(amount) * multiplier,
+        value: amount * multiplier,
         unitKind: kind,
         currencyCode: currencyCode ?? null,
         declaredUnit: amountUnit,
       });
     }
 
-    const perSourceChange = natural.per_source_change;
-    const perSourceChangeUnit = natural.per_source_change_unit;
     if (
       typeof perSourceChange === "number" && Number.isFinite(perSourceChange) &&
       typeof perSourceChangeUnit === "string" && perSourceChangeUnit.trim().length > 0
@@ -1560,7 +1524,7 @@ function collectBriefNaturalEffectCandidates(
       out.push({
         nodeId: from,
         label: sourceLabel,
-        value: Math.abs(perSourceChange) * multiplier,
+        value: perSourceChange * multiplier,
         unitKind: kind,
         currencyCode: currencyCode ?? null,
         declaredUnit: perSourceChangeUnit,
@@ -1649,7 +1613,7 @@ interface Surfaces {
  * The transform is idempotent (see `canonicaliseMonths`), so canonical strings
  * stored here read identically to the per-call form they replace.
  */
-function splitSurfaces(graph: Record<string, unknown>): Surfaces {
+function splitSurfaces(graph: Record<string, unknown>, briefText: string): Surfaces {
   const modelStrings: string[] = [];
   const proseStrings: string[] = [];
 
@@ -1664,8 +1628,18 @@ function splitSurfaces(graph: Record<string, unknown>): Surfaces {
       return;
     }
     if (typeof node === "object") {
-      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      const object = node as Record<string, unknown>;
+      const naturalEffectProvenance = object.source === "brief_extraction"
+        && object.magnitude === "user_stated"
+        && object.natural_effect !== null
+        && typeof object.natural_effect === "object";
+      for (const [k, v] of Object.entries(object)) {
         if (k === "widening_log") continue;
+        // A natural-effect quote is evidence for the signed, unit-validated
+        // candidate route below, never an unanchored label match. Otherwise a
+        // wrong-sign or wrong-unit stored effect would still make its literal
+        // appear `in_model` merely because the provenance repeated the brief.
+        if (naturalEffectProvenance && k === "quote") continue;
         walkText(v, inProse || PROSE_KEYS.has(k));
       }
     }
@@ -1679,7 +1653,7 @@ function splitSurfaces(graph: Record<string, unknown>): Surfaces {
     else if (cls === "prose") walkText(v, true);
   }
 
-  return { candidates: collectCandidates(graph), modelStrings, proseStrings };
+  return { candidates: collectCandidates(graph, briefText), modelStrings, proseStrings };
 }
 
 // ── matching ────────────────────────────────────────────────────────────────
@@ -1912,7 +1886,7 @@ const SCOPE = {
   // statement this whole module exists to prevent, so the noun list is now
   // generated from the constant that decides it and cannot drift again.
   model_surface: [
-    `${CANDIDATE_COLLECTIONS.map((c) => c.replace(/s$/, "")).join(" and ")} values, caps, units, labels and encoding maps, plus verified brief natural link effects`,
+    `${CANDIDATE_COLLECTIONS.map((c) => c.replace(/s$/, "")).join(" and ")} values, caps, units, labels and encoding maps`,
   ],
   prose_surface: ["coaching cards", "draft warnings", "validation warnings"],
   excluded_from_search: [
@@ -1970,7 +1944,7 @@ export function deriveNotModelledManifest(
     return UNAVAILABLE("no_graph");
   }
 
-  const surfaces = splitSurfaces(graph as Record<string, unknown>);
+  const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
   const quantities = extractStatedQuantities(briefText);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 
