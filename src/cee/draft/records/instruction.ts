@@ -536,9 +536,8 @@ TYPED QUANTITY EVIDENCE
 One stated item per quantitative clause, with its exact source_quote. Quantities
 are identified by a stated_items index, not by a label or by their unit. Put
 quantity on each node claim and on the stated goal; use the same index ONLY for
-the same quantity. Revenue and support cost remain different quantities even
-when both use £/month. A "customers lost" change is different from today's
-customer count.
+the same quantity. Two quantities stay different even when they share a unit,
+and a change in a count is a different quantity from today's level of it.
 
 For a stated numeric value, value_span and unit_span locate its own number and
 unit wording within source_quote. Every span is {start,end}, zero-based UTF-16,
@@ -564,12 +563,12 @@ low_span,high_span,meaning}, owned by the stated value it accompanies. Declare
 meaning="min_max" for literal bounds; "likely_range" only when explicitly likely.
 No declared meaning means no persisted intervention range. On effect_detail
 it belongs to amount; on an option-to-factor link it belongs to sets_to. Locate
-the exact two bound literals in that value's cited source_quote. Keep 150 starter
-subscribers with range 80–250 on the starter option's sets_to link, not as today's
-subscriber baseline. Keep 2 customers lost per 1% with range 1–4 on that effect,
-not as the level of the customers-lost node. Absence of bounds means no range.
-Preserve out-of-goal figures as evidence; never invent a causal connection to
-make a support cost into revenue. The compiler discloses what it cannot carry.
+the exact two bound literals in that value's cited source_quote. A range stated
+with what an option would achieve stays on that option's sets_to link, never on
+today's baseline; a range stated with an effect stays on that effect, never on
+the level of its target. Absence of bounds means no range. Preserve out-of-goal
+figures as evidence; never invent a causal connection to bring an out-of-goal
+figure into the goal. The compiler discloses what it cannot carry.
 `;
 
 export const DRAFT_RECORDS_INSTRUCTION =
