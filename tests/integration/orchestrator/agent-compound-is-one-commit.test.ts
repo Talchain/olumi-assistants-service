@@ -400,12 +400,20 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     expect(await caps.authoriseChange(ctx, { proposal_id: proposal.proposal_id })).toMatchObject({ refusal: 'approval_required' });
   });
 
-  it('conflicting duplicate levels refuse instead of discarding a later gap declaration', async () => {
-    withGap(); const { caps, store, ctx } = agent(); const plain = clearLevel();
-    const { unmodelled_mechanisms: _omitted, ...level } = plain;
-    const offered = await caps.proposeOptionInterventions(ctx, { interventions: [{ ...level, value: 59 }, plain] });
-    expect(offered).toMatchObject({ ok: false, refusal: 'conflicting_option_gap_declarations' });
-    expect(store.outstanding(SCENARIO_ID, 'user-a')).toHaveLength(0); expect(rows.size).toBe(0);
+  it.each(['levels', 'starting point'].flatMap(caller => [49, 59].flatMap(declaredValue =>
+    [false, true].map(reverse => ({ caller, declaredValue, reverse })))))(
+    'duplicate cohort refuses $caller with declaration on $declaredValue, reverse=$reverse', async ({ caller, declaredValue, reverse }) => {
+      withGap(); const { caps, store, ctx } = agent(); const declared = { ...clearLevel(), value: declaredValue };
+      const { unmodelled_mechanisms: _omitted, ...plain } = { ...clearLevel(), value: declaredValue === 49 ? 59 : 49 };
+      const levels = reverse ? [plain, declared] : [declared, plain];
+      const offered = caller === 'levels'
+        ? await caps.proposeOptionInterventions(ctx, { interventions: levels })
+        : await caps.proposeStartingPoint(ctx, {
+          assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+          option_levels: levels,
+        });
+      expect(offered, JSON.stringify({ caller, declaredValue, reverse })).toMatchObject({ ok: false, refusal: 'conflicting_option_gap_declarations' });
+      expect(store.outstanding(SCENARIO_ID, 'user-a')).toHaveLength(0); expect(rows.size).toBe(0);
   });
 
 });

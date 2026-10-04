@@ -52,15 +52,14 @@ describe.each(CARRIERS)('frozen pre-upgrade identity: %s', carrier => {
       undefined, { currentGraph: graph })).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
   });
 
-  it('documents the residual ambiguity when every gap carrier is deleted', () => {
+  it('fails weak when durable clearance chronology is unavailable after every carrier is deleted', () => {
     const graph = legacyGraph(carrier, []);
     for (const row of [...graph.nodes, ...(graph.options as Record<string, unknown>[] ?? [])]) delete row.unresolved_targets;
-    // The same legacy digest is now indistinguishable from the gap-free
-    // control above. This is the explicitly permitted fallback's limit.
+    // Missing admission evidence needs the durable clearance read; a failed read supplies no proof.
     const unrecorded = legacyRun(carrier);
     delete unrecorded.result.input_snapshot;
     expect(deriveAnalysisFreshness([unrecorded], computeAnalysisAffectingGraphHash(graph),
-      undefined, { currentGraph: graph }).freshness).toBe('fresh');
+      undefined, { currentGraph: graph, legacyEditFacts: { since: null, facts: [], readOk: false, total_count: null } }).freshness).toBe('stale');
   });
 
   it('refuses a legacy gapped Run even when a reader derived the current version digest', () => {

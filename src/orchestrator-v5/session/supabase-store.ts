@@ -1,3 +1,6 @@
+import { selectRunAnalysisFact } from '../context/freshness.js';
+import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
+import type { LegacyAnalysisEditFacts } from '../types/handler-fact.js';
 /**
  * Supabase-backed SessionStore implementation (slice B).
  *
@@ -2153,6 +2156,7 @@ export class SupabaseSessionStore implements SessionStore {
   ): Promise<{
     readonly facts: readonly IdentifiedHandlerFact[];
     readonly total_count: number;
+    readonly legacy_edit_facts?: LegacyAnalysisEditFacts;
   }> {
     if (!Number.isSafeInteger(limit) || limit < 1) {
       throw new SessionReadError(
@@ -2198,10 +2202,38 @@ export class SupabaseSessionStore implements SessionStore {
     }
 
     const facts = parseScenarioRunAnalysisRows(data, scenarioId);
-
+    const selected = selectRunAnalysisFact(facts.map(entry => entry.fact));
+    let legacyEdits: LegacyAnalysisEditFacts | undefined;
+    if (selected !== null && selected.fact.fact_type === 'run_analysis'
+      && selected.fact.result.enrichment?.[RUN_ANALYSIS_PROJECTION_KEY] === undefined) {
+      const since = selected.computed_at;
+      legacyEdits = { since, facts: [], readOk: false, total_count: null };
+      if (since !== null && Number.isFinite(Date.parse(since))) {
+        try {
+          const edits = await this.client.from('v5_handler_facts')
+            .select('id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at', { count: 'exact' })
+            .eq('scenario_id', scenarioId).eq('handler_id', 'edit_graph').eq('noop', false)
+            .eq('payload->result->>status', 'applied')
+            .eq('payload->result->>rerun_recommended', 'true')
+            .gt('created_at', since)
+            .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit);
+          if (edits.error || !Array.isArray(edits.data) || !Number.isSafeInteger(edits.count)
+            || edits.count === null || edits.count < 0) throw new Error('Legacy edit read unavailable');
+          const editFacts = parseScenarioRunAnalysisRows(edits.data, scenarioId, 'edit_graph');
+          if (editFacts.some(entry => Date.parse(entry.fact_created_at) <= Date.parse(since))) {
+            throw new Error('Legacy edit chronology invalid');
+          }
+          legacyEdits = { since, facts: Object.freeze(editFacts), total_count: edits.count,
+            readOk: editFacts.length === edits.count && editFacts.length <= limit };
+        } catch {
+          // Preserve the real Run, but never infer a complete empty edit history.
+        }
+      }
+    }
     return Object.freeze({
       facts: Object.freeze(facts),
       total_count: count as number,
+      ...(legacyEdits === undefined ? {} : { legacy_edit_facts: Object.freeze(legacyEdits) }),
     });
   }
 
@@ -2646,7 +2678,7 @@ function serialiseHandlerFacts(
 }
 
 /** Shared strict parser for the durable page and the bounded currentness read. */
-function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string): IdentifiedHandlerFact[] {
+function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string, handler: 'run_analysis' | 'edit_graph' = 'run_analysis'): IdentifiedHandlerFact[] {
   const facts: IdentifiedHandlerFact[] = [];
   for (const row of data as Array<{
     id?: unknown;
@@ -2664,8 +2696,8 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string): Iden
       row.scenario_id !== scenarioId ||
       typeof row.v5_conversation_turn_id !== 'string' ||
       row.v5_conversation_turn_id.length === 0 ||
-      row.handler_id !== 'run_analysis' ||
-      row.action_type !== 'run_analysis' ||
+      row.handler_id !== handler ||
+      row.action_type !== handler ||
       row.noop !== false ||
       typeof row.created_at !== 'string' ||
       !Number.isFinite(Date.parse(row.created_at))
@@ -2693,12 +2725,15 @@ function parseScenarioRunAnalysisRows(data: unknown[], scenarioId: string): Iden
 
     const result = parsed.data.result;
     if (
-      parsed.data.fact_type !== 'run_analysis' ||
+      parsed.data.fact_type !== handler ||
       parsed.data.noop !== false ||
       result === null ||
       typeof result !== 'object' ||
       Array.isArray(result) ||
-      (result as { readonly scenario_id?: unknown }).scenario_id !== scenarioId
+      (handler === 'run_analysis'
+        ? (result as { readonly scenario_id?: unknown }).scenario_id !== scenarioId
+        : parsed.data.fact_type !== 'edit_graph' || parsed.data.result.status !== 'applied'
+          || parsed.data.result.rerun_recommended !== true)
     ) {
       throw new SessionReadError(
         'Scenario analysis-fact payload contradicts its indexed authority',

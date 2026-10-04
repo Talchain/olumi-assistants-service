@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../../../src/orchestrator-v5/context/analysis-projection-policy.js';
 /**
  * Mounted proof for the 0.42 `edge_strength_edit` canonical writer.
  *
@@ -232,7 +233,8 @@ function successfulRunFact(graphHash: string) {
       summary: 'Analysis completed.',
       graph_hash_at_run: graphHash,
       computed_at: '2026-08-15T10:00:00.000Z',
-      enrichment: { analysis_status: 'computed' },
+      // Model a healthy Run produced by the current stamped producer.
+    enrichment: stampRunAnalysisProjection({ analysis_status: 'computed' }),
     },
   };
 }

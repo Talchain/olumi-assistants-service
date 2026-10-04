@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { readGoalScopeClaimInput, type GoalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import { loadMostRecentPendingActionsIntegrityStrict } from '../orchestrator-v5/build-turn-context.js';
 /**
@@ -350,6 +351,7 @@ export async function readScenarioAnalysis(
       priorFactsReadOk: factsReadOk,
       analysisInvalidatedAt,
       priorFactsWithTurn,
+      legacyEditFacts: legacyEditFactsForFreshness(factSet),
       currentGraph: params.graph,
     });
 
@@ -419,6 +421,7 @@ export async function readScenarioAnalysis(
           priorFactsReadOk: factsReadOk,
           analysisInvalidatedAt,
           priorFactsWithTurn,
+          legacyEditFacts: legacyEditFactsForFreshness(factSet),
         }),
         freshness: derivation,
         ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),

@@ -352,6 +352,7 @@ export interface SelectCanonicalAnalysisStateInput {
    */
   readonly analysisInvalidatedAt?: string | null;
   readonly priorFactsWithTurn?: DeriveAnalysisFreshnessOptions['priorFactsWithTurn'];
+  readonly legacyEditFacts?: DeriveAnalysisFreshnessOptions['legacyEditFacts'];
 }
 
 /** Defensive read of a fact's run-time `computed_at`. */
@@ -391,13 +392,14 @@ export function selectCanonicalAnalysisState(
     // could not be read". Absent => pre-fix behaviour, by construction.
     // The restore marker rides the same options object; absent => unchanged.
     input.priorFactsReadOk === undefined && input.analysisInvalidatedAt === undefined
-      && input.currentGraph === undefined && input.priorFactsWithTurn === undefined
+      && input.currentGraph === undefined && input.priorFactsWithTurn === undefined && input.legacyEditFacts === undefined
       ? undefined
       : {
           ...(input.priorFactsReadOk === undefined ? {} : { priorFactsReadOk: input.priorFactsReadOk }),
           ...(input.analysisInvalidatedAt === undefined ? {} : { analysisInvalidatedAt: input.analysisInvalidatedAt }),
           ...(input.currentGraph === undefined ? {} : { currentGraph: input.currentGraph }),
           ...(input.priorFactsWithTurn === undefined ? {} : { priorFactsWithTurn: input.priorFactsWithTurn }),
+          ...(input.legacyEditFacts === undefined ? {} : { legacyEditFacts: input.legacyEditFacts }),
         },
   );
   const selected = selectRunAnalysisFact(unifiedFacts);

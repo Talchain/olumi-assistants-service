@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
 
 /**
@@ -135,7 +136,8 @@ function deriveWriteReplyFreshness(
     persistedAnalysisGraphHash,
     undefined,
     { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt,
-      currentGraph, priorFactsWithTurn: read.priorFactsWithTurn },
+      currentGraph, priorFactsWithTurn: read.priorFactsWithTurn,
+      legacyEditFacts: legacyEditFactsForFreshness(read.factSet) },
   );
   // ⛔ AN UNREAD RESTORE MARKER NEVER BECOMES A POSITIVE `fresh`. The marker can
   // only turn a hash MATCH from fresh to stale, so when it could not be read a

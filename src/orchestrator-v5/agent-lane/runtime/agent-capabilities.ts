@@ -4088,6 +4088,10 @@ export function createAgentCapabilities(
         if (o.op === 'set_factor_value' && typeof v.value === 'number') startingValues.set(o.path, v.value);
       }
       const b = levels.length > 0 ? await caps.proposeOptionInterventions(ctx, { interventions: levels }, { startingValues }) : null;
+      if (b?.refusal === 'conflicting_option_gap_declarations') {
+        if (valueHalf !== undefined) proposals.discard(valueHalf.proposal_id);
+        return b;
+      }
       const refused = {
         ...(a !== null && a.ok !== true ? { assumptions_refused: a } : {}),
         ...(b !== null && b.ok !== true ? { option_levels_refused: b } : {}),
@@ -4389,12 +4393,6 @@ export function createAgentCapabilities(
           }
         }
 
-        const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
-        const currentValue = typeof current === 'number' ? current : (current as { value?: unknown } | undefined)?.value;
-        if ((currentValue === normalised || currentValue === raw) && declaration.kind === 'absent') {
-          unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
-          continue;
-        }
         const key = `${option.id}::${factor.id}`;
         if (seen.has(key)) {
           const prior = set.find(level => `${level.option.id}::${level.factor.id}` === key)!;
@@ -4424,7 +4422,18 @@ export function createAgentCapabilities(
       const declaredGaps = parseOptionGapsOfLevelOps(declaredOps);
       if (declaredGaps.kind === 'invalid') return { ok: false, mutated: false, refusal: declaredGaps.reason, detail: 'Nothing was proposed: repeated option gap declarations must agree.' };
 
-      if (set.length === 0) {
+      // Validate the whole resolved cohort before dropping unchanged, undeclared levels.
+      const changed = set.filter(level => {
+        const option = optionNodes.nodes.find(node => node.id === level.option.id)!;
+        const current = (option.interventions ?? {})[level.factor.id] as { value?: unknown } | number | undefined;
+        const currentValue = typeof current === 'number' ? current : current?.value;
+        if ((currentValue === level.normalised || currentValue === level.raw) && level.mechanisms === undefined) {
+          unchanged.push(`${level.option.label} already sets ${level.factor.label} to ${String(currentValue)}`);
+          return false;
+        }
+        return true;
+      });
+      if (changed.length === 0) {
         return {
           ok: false, mutated: false, refusal: 'nothing_to_set',
           ...(unresolved.length > 0 ? { unresolved } : {}),
@@ -4437,7 +4446,7 @@ export function createAgentCapabilities(
         };
       }
 
-      const ordered = [...set].sort((x, y) =>
+      const ordered = [...changed].sort((x, y) =>
         `${x.option.id}::${x.factor.id}` < `${y.option.id}::${y.factor.id}` ? -1 : 1);
       // The links the levels need come first; each is written before any level (`applyCompound` step 2b).
       const linkOps: ProposalOperation[] = ordered.filter((i) => i.needsLink)

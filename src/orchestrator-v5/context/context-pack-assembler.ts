@@ -867,6 +867,7 @@ export interface AssembleContextPackInput {
   /** Existing durable invalidation marker from the same context read. */
   readonly analysisInvalidatedAt?: string | null;
   readonly priorFactsWithTurn?: SelectCanonicalAnalysisStateInput['priorFactsWithTurn'];
+  readonly legacyEditFacts?: SelectCanonicalAnalysisStateInput['legacyEditFacts'];
   /**
    * Lane 28 — brief pipeline: the persisted `scenarios.brief_text` for this
    * scenario, threaded by the turn-executor from
@@ -1702,6 +1703,7 @@ function deriveContextPackAnalysisState(
     currentGraph: rawGraph,
     analysisInvalidatedAt: input.analysisInvalidatedAt,
     priorFactsWithTurn: input.priorFactsWithTurn,
+    legacyEditFacts: input.legacyEditFacts,
     // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): keep the
     // diagnostic / coaching-pack canonical state consistent with the wire
     // verdict. Same raw graph the hash is derived from. undefined when off.

@@ -68,7 +68,7 @@ const mockState: {
   priorFactsWithTurn: Array<Record<string, unknown>>;
   persistedGraph: unknown | null;
   pendingActions: readonly PendingAction[];
-  durablePage: { total_count: number; facts: Array<Record<string, unknown>> } | null;
+  durablePage: { total_count: number; facts: Array<Record<string, unknown>>; legacy_edit_facts?: import('../types/handler-fact.js').LegacyAnalysisEditFacts } | null;
 } = {
   priorTurns: [],
   priorFacts: [],
@@ -365,5 +365,27 @@ describe('turn-executor — two freshness authorities, two questions, one turn',
     expect(result.scenarioFreshness).toBeUndefined();
     // …and the wire verdict is untouched by the absence.
     expect(result.freshness?.freshness).toBe('none');
+  });
+});
+
+
+describe('legacy clearance durability on the turn path', () => {
+  it.each(['complete', 'failed', 'capped'] as const)('equal numeric hash cannot revive the saved Run (%s edit read)', async state => {
+    mockState.persistedGraph = ANALYSED_GRAPH;
+    const page = durablePageWithSavedAnalysis();
+    const edit = { fact_type: 'edit_graph', fact_version: 1, noop: false, result: {
+      edit_kind: 'option_configuration', status: 'applied', operations_count: 1, affected_entities: [],
+      graph_hash_before: ANALYSED_GRAPH_HASH, graph_hash_after: ANALYSED_GRAPH_HASH,
+      safe_summary: 'Cleared the last option gap', impact: 'moderate', rerun_recommended: true,
+    } };
+    mockState.durablePage = { ...page, legacy_edit_facts: {
+      since: SAVED_COMPUTED_AT, readOk: state === 'complete', total_count: state === 'complete' ? 1 : state === 'capped' ? 22 : null,
+      facts: state === 'complete' ? [{ fact: edit as never, fact_row_id: 'last-gap-clearance', fact_created_at: '2026-09-02T09:00:00.000Z' }] : [],
+    } };
+    const result = await runTurnExecutor(mkPayload('where does the model stand?'), 'req-legacy-clearance-' + state,
+      { routingAdapter: adapterOnce(), graphState: ANALYSED_GRAPH as never });
+    expect(result.scenarioFreshness).toMatchObject({ freshness: 'stale', graph_hash_at_run: ANALYSED_GRAPH_HASH,
+      computed_at: SAVED_COMPUTED_AT, current_graph_hash: ANALYSED_GRAPH_HASH });
+    expect(result.scenarioFreshness?.reason).toBe(state === 'complete' ? 'model_edited_after_analysis' : 'legacy_admission_unverified');
   });
 });

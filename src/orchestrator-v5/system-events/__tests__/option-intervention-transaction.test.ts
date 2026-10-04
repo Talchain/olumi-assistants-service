@@ -16,7 +16,7 @@ import type {
 } from '../../session/store.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import { applyOptionInterventionEdit, executeOptionInterventionBatch, executeOptionInterventionEdit } from '../option-intervention-edit.js';
-import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld } from '../../agent-lane/unmodelled-mechanisms.js';
+import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapPostimageIsScoped } from '../../agent-lane/unmodelled-mechanisms.js';
 import { runWithApprovedLevelAdoption } from '../../agent-lane/approved-adoption-context.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -1072,6 +1072,41 @@ describe('approved option gaps use the existing atomic level door', () => {
   }
   const clear = [{ optionId: 'option', mechanisms: [] }];
 
+  it.each(['addition', 'replacement', 'clearance'] as const)('exact carrier identities hold through %s, one commit and cold read', async action => {
+    const before = action === 'addition' ? canonicalGraph() : withStoredGap();
+    const declarations = [{ optionId: 'option', mechanisms: action === 'clearance' ? [] : ['new effect'] }];
+    const persistence = jsonStore(before);
+    expect((await executeOptionInterventionBatch(request(before, declarations), persistence.fresh())).kind).toBe('committed');
+    expect(persistence.attempts).toHaveLength(1);
+    const cold = await persistence.fresh().loadGraph(SCENARIO_ID) as ReturnType<typeof canonicalGraph>;
+    expect(optionGapsHeld(cold, declarations)).toBe(true);
+    expect(optionGapPostimageIsScoped(before, cold, declarations)).toBe(true);
+    expect(cold.options!.map(row => row.id)).toEqual(before.options!.map(row => row.id));
+    for (const carrier of ['nodes', 'options'] as const) {
+      expect(cold[carrier]!.find(row => row.id === 'other_option')).toStrictEqual(before[carrier]!.find(row => row.id === 'other_option'));
+    }
+  });
+
+  it.each(['addition', 'replacement', 'clearance'] as const)('refuses canonical carrier aliases before %s through the real transaction', async action => {
+    {
+      const before = action === 'addition' ? canonicalGraph() : withStoredGap();
+      const exact = before.options!.find(row => row.id === 'option')!;
+      const alias = { ...clone(exact), id: ' option ', unresolved_targets: ['alias effect'], user_questions: ['Alias question'] };
+      before.options!.push(alias);
+      expect(projectGraphForPersistence(before)).toStrictEqual(before);
+      const declarations = [{ optionId: 'option', mechanisms: action === 'clearance' ? [] : ['new effect'] }];
+      const persistence = jsonStore(before);
+      const result = await executeOptionInterventionBatch(request(before, declarations), persistence.fresh());
+      expect(result).toMatchObject({ kind: 'refused', reason: 'ambiguous_option_gap_target' });
+      expect(optionGapOperands(before, 'option')).toBeNull();
+      expect(optionGapsHeld(before, declarations)).toBe(false);
+      expect(optionGapPostimageIsScoped(before, before, declarations)).toBe(false);
+      expect(persistence.attempts).toHaveLength(0);
+      expect(persistence.durableGraph()).toStrictEqual(before);
+      expect(persistence.durableGraph().options!.map(row => row.id)).toEqual(before.options!.map(row => row.id));
+    }
+  });
+
   it.each([
     { name: '81 characters', value: ['x'.repeat(81)] },
     { name: 'six entries', value: ['a', 'b', 'c', 'd', 'e', 'f'] },
@@ -1186,7 +1221,7 @@ describe('approved option gaps use the existing atomic level door', () => {
   });
 
   it.each(['node', 'mirror', 'both'] as const)(
-    'KNOWN LIMIT without migration: unstamped pre-B3 Run without admission snapshot reads FRESH after last-gap %s clearance when the edit fact leaves the window', async where => {
+    'unstamped pre-B3 Run stays STALE after last-gap %s clearance outside the hot window, including goal-only snapshots', async where => {
     const before = withStoredGap(where); const persistence = jsonStore(before);
     const expectedClear = clone(before);
     for (const row of [...expectedClear.nodes, ...expectedClear.options!]) {
@@ -1222,10 +1257,17 @@ describe('approved option gaps use the existing atomic level door', () => {
       expect(deriveAnalysisFreshness([old], cleanHash, undefined,
         { currentGraph: cold, priorFactsWithTurn: [{ ...visibleEdit, fact: control } as typeof visibleEdit] }).freshness).toBe('fresh');
     }
-    // This is the exact residual: no stamp, no admission snapshot, equal clean
-    // hash, no restore marker, and no clearance fact in the cold read window.
-    expect(deriveAnalysisFreshness([old], cleanHash, undefined,
-      { currentGraph: cold, analysisInvalidatedAt: marker })).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+    // The durable reader returns the applied edit after this Run even when the hot window is empty.
+    const legacyEditFacts = { since: old.result.computed_at!, readOk: true, total_count: 1,
+      facts: [{ fact: edit, fact_row_id: 'clearance-fact', fact_created_at: visibleEdit.fact_created_at }] };
+    for (const input_snapshot of [undefined, { goal: null }]) {
+      const saved = { ...old, result: { ...old.result, input_snapshot } } as typeof old;
+      expect(deriveAnalysisFreshness([saved], cleanHash, undefined,
+        { currentGraph: cold, analysisInvalidatedAt: marker, priorFactsWithTurn: [], legacyEditFacts }))
+        .toMatchObject({ freshness: 'stale', reason: 'model_edited_after_analysis' });
+      expect(deriveAnalysisFreshness([saved], cleanHash, undefined,
+        { currentGraph: cold, legacyEditFacts: { ...legacyEditFacts, facts: [], readOk: false } }).freshness).toBe('stale');
+    }
     const rerun = clone(old); rerun.result.computed_at = '2026-10-04T02:00:00.000Z';
     rerun.result.enrichment = stampRunAnalysisProjection(rerun.result.enrichment!);
     expect(deriveAnalysisFreshness([rerun, edit, old], cleanHash, undefined,
@@ -1266,7 +1308,8 @@ describe('approved option gaps use the existing atomic level door', () => {
   });
 
 
-  it('KNOWN LIMIT without migration: a stamped gap-free Run reads FRESH after approved add-then-clear returns the same hash and both edit facts leave the window', async () => {
+  // Restoring the stamped Run's complete input identity and admission permits reuse of that result.
+  it('ACCEPTED: stamped gap-free Run is FRESH after add-then-clear restores its complete analysis identity and admission', async () => {
     const before = canonicalGraph(); const persistence = jsonStore(before);
     const cleanHash = computeAnalysisAffectingGraphHash(before)!;
     const saved = legacyRun('node', false, true);

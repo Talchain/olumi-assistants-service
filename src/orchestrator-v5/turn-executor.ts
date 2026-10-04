@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * V5 TurnExecutor (Phase 1 — tool-use routing spine).
  *
@@ -2300,6 +2301,7 @@ export async function runTurnExecutor(
               currentGraph: canonicalReadinessGraphForRun,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
+              legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
               // Option-identity guard: read the SAME active graph authority
               // as readiness + the routing-freshness hash. This matters after
               // an atomic repair commit: `context.persistedGraph` is the
@@ -2344,6 +2346,7 @@ export async function runTurnExecutor(
               currentGraph: canonicalReadinessGraphForRun,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
+              legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
               currentGraphOptionIds: config.cee.optionIdentityFreshnessGuard
                 ? extractGraphOptionIds(canonicalReadinessGraphForRun)
                 : undefined,
@@ -2983,6 +2986,7 @@ export async function runTurnExecutor(
           ? {}
           : { analysisInvalidatedAt: context.analysis_invalidated_at }),
         priorFactsWithTurn: context.prior_facts_with_turn,
+        legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
       },
     );
     promptAnalysisFreshness = deriveAnalysisFreshness(
@@ -2997,6 +3001,7 @@ export async function runTurnExecutor(
           ? {}
           : { analysisInvalidatedAt: context.analysis_invalidated_at }),
         priorFactsWithTurn: context.prior_facts_with_turn,
+        legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
       },
     );
     // G3 — surface the SAME derivation on the run result, gated on the SAME
@@ -3425,6 +3430,7 @@ export async function runTurnExecutor(
           : { priorFactsReadOk: context.prior_facts_read_ok }),
         analysisInvalidatedAt: context.analysis_invalidated_at,
         priorFactsWithTurn: context.prior_facts_with_turn,
+        legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
         // Lane 28 — brief pipeline (dossier gap G2): the persisted decision
         // brief (`scenarios.brief_text`, loaded once per turn by
         // buildTurnContext in the same round trip as the graph). Projected
@@ -4778,6 +4784,7 @@ export async function runTurnExecutor(
               currentGraph: outcome.mutatedGraph,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
+              legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
               ...(context.prior_facts_read_ok === undefined
                 ? {}
                 : { priorFactsReadOk: context.prior_facts_read_ok }),
@@ -5058,6 +5065,7 @@ export async function runTurnExecutor(
               currentGraph: lastExecuted.mutatedGraph,
               analysisInvalidatedAt: context.analysis_invalidated_at,
               priorFactsWithTurn: context.prior_facts_with_turn,
+              legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
               ...(context.prior_facts_read_ok === undefined
                 ? {}
                 : { priorFactsReadOk: context.prior_facts_read_ok }),
@@ -13187,6 +13195,7 @@ export async function runTurnExecutor(
           currentGraph: currentGraphForPostHandlerFreshness,
           analysisInvalidatedAt: context.analysis_invalidated_at,
           priorFactsWithTurn: context.prior_facts_with_turn,
+          legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
           ...(context.prior_facts_read_ok === undefined
             ? {}
             : { priorFactsReadOk: context.prior_facts_read_ok }),
@@ -13294,6 +13303,7 @@ export async function runTurnExecutor(
         currentGraph: currentGraphForPostHandlerFreshness,
         analysisInvalidatedAt: context.analysis_invalidated_at,
         priorFactsWithTurn: context.prior_facts_with_turn,
+        legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set),
         currentGraphOptionIds: currentGraphOptionIdsForPostHandler,
         // Defect 4. Threaded here too for consistency, though it is nearly
         // always inert on this path: the execute branch carries this turn's

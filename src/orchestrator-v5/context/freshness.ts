@@ -38,7 +38,7 @@ import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
-import type { HandlerFactWithTurn } from '../types/handler-fact.js';
+import type { LegacyAnalysisEditFacts, HandlerFactWithTurn } from '../types/handler-fact.js';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import {
@@ -135,6 +135,7 @@ export interface DeriveAnalysisFreshnessOptions {
   /** Existing DB-authored fact chronology, for visible edits when the Run is
    * loaded from scenario history rather than the same hot fact window. */
   readonly priorFactsWithTurn?: readonly HandlerFactWithTurn[];
+  readonly legacyEditFacts?: LegacyAnalysisEditFacts;
 }
 
 /**
@@ -800,13 +801,25 @@ export function deriveAnalysisFreshness(
     };
   }
 
-  if (base.freshness === 'fresh' && editedAfterRun) {
+  const legacyEdits = opts?.legacyEditFacts;
+  const legacyRun = selected.fact.fact_type === 'run_analysis'
+    && selected.fact.result.enrichment?.[RUN_ANALYSIS_PROJECTION_KEY] === undefined;
+  const durableEditedAfterRun = legacyRun && legacyEdits?.since === selected.computed_at
+    && legacyEdits.facts.some(({ fact, fact_created_at }) => fact.fact_type === 'edit_graph'
+      && fact.noop === false && fact.result.status === 'applied' && fact.result.rerun_recommended === true
+      && selectedAtMs !== null && Date.parse(fact_created_at) > selectedAtMs);
+  if (base.freshness === 'fresh' && (editedAfterRun || durableEditedAfterRun)) {
     base = { ...base, freshness: 'stale', reason: 'model_edited_after_analysis' };
   }
 
   if (base.freshness === 'fresh' && !runProjectionAllowsFreshness(
     selected.fact, selected.graph_hash_at_run!, opts?.currentGraph,
   )) {
+    base = { ...base, freshness: 'stale', reason: 'legacy_admission_unverified' };
+  }
+
+  if (base.freshness === 'fresh' && legacyRun && legacyEdits !== undefined
+    && (legacyEdits.readOk !== true || legacyEdits.since !== selected.computed_at)) {
     base = { ...base, freshness: 'stale', reason: 'legacy_admission_unverified' };
   }
 
@@ -1028,12 +1041,11 @@ export function emitFreshnessTelemetry(
  * still prove contradictory admission independently of those carriers.
  * The established hash-only API retains its verdict when no Run-input
  * exclusion supplies evidence requiring the graph to be inspected.
- * Deleting every carrier erases this evidence; without contradictory Run-input
- * evidence or a visible edit fact it is indistinguishable from a genuinely
- * gap-free legacy Run. A stamped gap-free Run can also match again after
- * add-then-clear once both edit facts leave the window. The stamp identifies
- * the projection, not an edit chronology; only restore persists that marker. Never infer a
- * version from timestamps, analysed namespaces, or request residual digests.
+ * Durable applied/rerun edit facts preserve clearance chronology outside the
+ * hot window. Failed or incomplete legacy edit reads cannot license freshness.
+ * A stamped gap-free Run may match again after add-then-clear restores its
+ * complete input identity and admission. Never infer a version from timestamps,
+ * analysed namespaces, or request residual digests.
  * Called only after the caller has established matching stored/current
  * hashes; the stored-hash argument is retained for API compatibility.
  */

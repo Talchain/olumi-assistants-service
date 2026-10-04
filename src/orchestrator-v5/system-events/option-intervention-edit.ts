@@ -926,8 +926,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       const operations = [...plan.operations, ...gapOperations];
       // Keep the existing edit_graph rerun signal even when the hot window
       // has lost the Run. Append persists this fact; only the restore RPC sets
-      // analysis_invalidated_at. A legacy Run can lose this edit evidence once
-      // the fact leaves the read window (see the known-limit transaction test).
+      // analysis_invalidated_at. The durable Run-facts reader also reads these
+      // applied rerun facts after a legacy Run, outside the hot window.
       const appliedChanges = buildAppliedChanges(operations, graph, true, levelBase as EditableGraph);
       const fact = buildEditGraphHandlerFact({ editResult: { blocks: [], assistantText: appliedChanges.summary,
         latencyMs: 0, wasRejected: false, operations, appliedGraph: graph, appliedChanges },

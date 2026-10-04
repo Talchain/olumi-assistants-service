@@ -86,17 +86,27 @@ export function optionGapCardWords(label: string, mechanisms: readonly string[])
     ? `${label}: clear its listed unresolved model gaps`
     : `${label}: record unresolved model gaps: ${mechanisms.join('; ')}`;
 }
+/** Readers trim carrier ids. A writer must reject aliases, not choose one of them. */
+function optionCarrierCohort(graph: unknown, optionId: string): { node: Dict; mirrors: Dict[] } | null {
+  if (optionId === '' || optionId !== optionId.trim() || !record(graph)
+    || !Array.isArray(graph.nodes) || !graph.nodes.every(record)) return null;
+  if (Object.hasOwn(graph, 'options') && (!Array.isArray(graph.options) || !graph.options.every(record))) return null;
+  const matches = (row: Dict): boolean => typeof row.id === 'string' && row.id.trim() === optionId;
+  const nodes = (graph.nodes as Dict[]).filter(matches);
+  const mirrors = Array.isArray(graph.options) ? (graph.options as Dict[]).filter(matches) : [];
+  if (nodes.length !== 1 || nodes[0]!.kind !== 'option' || mirrors.length > 1
+    || [...nodes, ...mirrors].some(row => row.id !== optionId)) return null;
+  return { node: nodes[0]!, mirrors };
+}
 /** Exact pre-approval operands from the canonical read, including mirror-only fields.
  * This is a projection of that read, never a separate store or permission authority. */
 export function optionGapOperands(graph: unknown, optionId: string): Dict | null {
-  if (!record(graph) || !Array.isArray(graph.nodes)) return null;
-  if (Object.hasOwn(graph, 'options') && (!Array.isArray(graph.options) || !graph.options.every(record))) return null;
-  const nodes = graph.nodes.filter(n => record(n) && n.id === optionId) as Dict[];
-  const mirrors = Array.isArray(graph.options) ? graph.options.filter(o => record(o) && o.id === optionId) as Dict[] : [];
-  if (nodes.length !== 1 || nodes[0]!.kind !== 'option' || mirrors.length > 1) return null;
+  const cohort = optionCarrierCohort(graph, optionId);
+  if (cohort === null || !record(graph)) return null;
+  const { node, mirrors } = cohort;
   const fields = (row: Dict): Dict => Object.fromEntries(['unresolved_targets', 'user_questions']
     .filter(key => Object.hasOwn(row, key)).map(key => [key, structuredClone(row[key])]));
-  return { node: { label: nodes[0]!.label, ...fields(nodes[0]!) },
+  return { node: { label: node.label, ...fields(node) },
     ...(Object.hasOwn(graph, 'options') ? { options: mirrors.map(fields) } : {}) };
 }
 
@@ -124,22 +134,20 @@ export function applyOptionGapDeclarations(graph: unknown, declarations: readonl
   const validated = parseOptionGapDeclarations(declarations, true);
   if (validated.kind === 'invalid') return { kind: 'refused', reason: validated.reason };
   for (const d of validated.declarations) {
-    const nodes = graph.nodes.filter(n => record(n) && n.id === d.optionId);
-    const mirrors = Array.isArray(graph.options) ? graph.options.filter(o => record(o) && o.id === d.optionId) : [];
-    if (nodes.length !== 1 || (nodes[0] as Dict).kind !== 'option' || mirrors.length > 1) {
+    if (optionCarrierCohort(graph, d.optionId) === null) {
       return { kind: 'refused', reason: 'ambiguous_option_gap_target' };
     }
   }
   const next = structuredClone(graph);
-  const nodes = next.nodes as Dict[];
-  const mirrors = next.options as Dict[] | undefined;
   for (const d of validated.declarations) {
-    const at = nodes.findIndex(n => n.id === d.optionId);
-    const label = typeof nodes[at]!.label === 'string' ? nodes[at]!.label as string : d.optionId;
+    const { node, mirrors } = optionCarrierCohort(next, d.optionId)!;
+    const label = typeof node.label === 'string' ? node.label : d.optionId;
     const fields = optionGapFields(label, d.mechanisms);
-    nodes[at] = replaceFields(nodes[at]!, fields);
-    const mirrorAt = mirrors?.findIndex(o => o.id === d.optionId) ?? -1;
-    if (mirrorAt >= 0) mirrors![mirrorAt] = replaceFields(mirrors![mirrorAt]!, fields);
+    for (const row of [node, ...mirrors]) {
+      const replacement = replaceFields(row, fields);
+      delete row.unresolved_targets; delete row.user_questions;
+      Object.assign(row, replacement);
+    }
   }
   return { kind: 'prepared', graph: next, changed: !isDeepStrictEqual(next, graph) };
 }
@@ -148,13 +156,10 @@ export function applyOptionGapDeclarations(graph: unknown, declarations: readonl
 export function optionGapsHeld(graph: unknown, declarations: readonly ApprovedOptionGap[]): boolean {
   if (!record(graph) || !Array.isArray(graph.nodes)) return false;
   if (Object.hasOwn(graph, 'options') && !Array.isArray(graph.options)) return false;
-  const optionNodes = graph.nodes;
   return declarations.every(d => {
-    const nodes = optionNodes.filter(n => record(n) && n.id === d.optionId);
-    if (nodes.length !== 1 || (nodes[0] as Dict).kind !== 'option') return false;
-    const node = nodes[0] as Dict;
-    const mirrors = Array.isArray(graph.options) ? graph.options.filter(o => record(o) && o.id === d.optionId) as Dict[] : [];
-    if (mirrors.length > 1) return false;
+    const cohort = optionCarrierCohort(graph, d.optionId);
+    if (cohort === null) return false;
+    const { node, mirrors } = cohort;
     const expected = optionGapFields(typeof node.label === 'string' ? node.label : d.optionId, d.mechanisms);
     return [node, ...mirrors].every(row => ['unresolved_targets', 'user_questions'].every(key =>
       Object.hasOwn(row, key) === Object.hasOwn(expected, key) && isDeepStrictEqual(row[key], expected[key])));
@@ -165,18 +170,16 @@ export function optionGapsHeld(graph: unknown, declarations: readonly ApprovedOp
 export function optionGapPostimageIsScoped(before: unknown, after: unknown, declarations: readonly ApprovedOptionGap[]): boolean {
   if (!record(before) || !record(after) || !Array.isArray(before.nodes) || !Array.isArray(after.nodes)) return false;
   const restored = structuredClone(after);
-  for (const carrier of ['nodes', 'options'] as const) {
-    const prior = before[carrier];
-    const rows = restored[carrier];
-    if (!Array.isArray(prior) || !Array.isArray(rows)) continue;
-    for (const d of declarations) {
-      const was = prior.filter(r => record(r) && r.id === d.optionId) as Dict[];
-      const now = rows.filter(r => record(r) && r.id === d.optionId) as Dict[];
-      if (was.length !== now.length || was.length > 1) return false;
-      if (was.length === 0) continue;
+  for (const d of declarations) {
+    const prior = optionCarrierCohort(before, d.optionId);
+    const current = optionCarrierCohort(restored, d.optionId);
+    if (prior === null || current === null || prior.mirrors.length !== current.mirrors.length) return false;
+    const was = [prior.node, ...prior.mirrors];
+    const now = [current.node, ...current.mirrors];
+    for (let i = 0; i < was.length; i += 1) {
       for (const key of ['unresolved_targets', 'user_questions']) {
-        if (Object.hasOwn(was[0]!, key)) now[0]![key] = structuredClone(was[0]![key]);
-        else delete now[0]![key];
+        if (Object.hasOwn(was[i]!, key)) now[i]![key] = structuredClone(was[i]![key]);
+        else delete now[i]![key];
       }
     }
   }

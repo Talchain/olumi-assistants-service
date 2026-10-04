@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * Build a V5 TurnContext from an ingress payload.
  *
@@ -1024,7 +1025,8 @@ export async function buildTurnContext(
     // Threading the read state makes the degraded case `'unknown' /
     // derivation_failed`, which maps to an `unavailable` signal instead.
     { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph,
-      analysisInvalidatedAt: analysisInvalidatedAtRead, priorFactsWithTurn },
+      analysisInvalidatedAt: analysisInvalidatedAtRead, priorFactsWithTurn,
+      legacyEditFacts: legacyEditFactsForFreshness(scenarioAnalysisFactSet) },
   );
   // AUTHORITATIVE STAGE — CEE decides the reasoning stage from the model it
   // holds, rather than echoing the client's guess back at it. See
@@ -2079,6 +2081,7 @@ async function fetchScenarioAnalysisFacts(
       query_limit: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
       total_count: page.total_count,
       facts: page.facts,
+      ...(page.legacy_edit_facts === undefined ? {} : { legacy_edit_facts: page.legacy_edit_facts }),
     };
   } catch (error) {
     const rawCode = error instanceof SessionReadError ? error.code : undefined;
@@ -2109,7 +2112,7 @@ async function fetchScenarioAnalysisFacts(
     });
     return {
       status: 'degraded',
-      reason: contractInvalid ? 'contract_invalid' : 'unavailable',
+      reason: contractInvalid ? 'contract_invalid' : 'read_failed',
     };
   }
 }
