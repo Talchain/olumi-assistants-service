@@ -55,6 +55,7 @@
  * `from_brief` badge for a node that has not earned one.
  */
 
+import { deriveStatedDispositions, type StatedDisposition } from "./stated-dispositions.js";
 import { createHash } from "node:crypto";
 // ⭐ DERIVED, NEVER MIRRORED. The bound the projector honours is the validator's own
 // constant, imported. A hand-copied `6` here would be a second authority for one
@@ -873,6 +874,8 @@ export interface RecordConstraintCandidate {
 }
 
 export interface RecordProjection {
+  /** Typed input-index receipts; not yet a declared persisted GraphV3 field. */
+  readonly stated_dispositions?: readonly StatedDisposition[];
   /** GraphV3, ready for the parse stage's post-LLM seam. */
   readonly graph: ProjectedGraph;
   /** node/edge id → provenance. The authority for every provenance question. */
@@ -1627,14 +1630,14 @@ function applyStatedGoalEvidence(node: ProjectedNode, item: DraftStatedItem, sta
       if (item.direction_span.start >= 0 && item.direction_span.start < item.direction_span.end
         && item.direction_span.end <= item.source_quote.length && LIMIT_OPERATOR_WORDS[operator] === words) node.goal_direction = operator;
     }
-    const horizon = item.horizon_ref === undefined ? undefined : statedItems[item.horizon_ref];
-    if (horizon !== undefined && horizon.value === item.horizon_months && horizon.value !== undefined
-      && Number.isInteger(horizon.value) && horizon.value > 0 && horizon.unit !== undefined
-      && sameUnit(horizon.unit, "months") && statedValueIsBound(horizon, brief)) node.goal_horizon_months = horizon.value;
   }
+  const horizon = item.horizon_ref === undefined ? undefined : statedItems[item.horizon_ref];
+  if (horizon !== undefined && horizon.value === item.horizon_months && horizon.value !== undefined
+    && Number.isInteger(horizon.value) && horizon.value > 0 && horizon.unit !== undefined
+    && sameUnit(horizon.unit, "months") && statedValueIsBound(horizon, brief)) node.goal_horizon_months = horizon.value;
   const baselineItem = item.baseline_ref === undefined ? undefined : statedItems[item.baseline_ref];
-  if (statedValueIsBound(item, brief) && item.quantity !== undefined && baselineItem?.role === "baseline"
-    && (baselineItem.quantity ?? item.baseline_ref) === item.quantity && baselineItem.value !== undefined
+  if (statedValueIsBound(item, brief) && baselineItem?.role === "baseline"
+    && baselineItem.value !== undefined
     && (item.baseline === undefined || item.baseline === baselineItem.value)
     && item.unit !== undefined && baselineItem.unit !== undefined && sameUnit(item.unit, baselineItem.unit)
     && statedValueIsBound(baselineItem, brief)) {
@@ -1760,11 +1763,13 @@ interface DemoteDecision {
 
 /** `projectOnce`'s output plus the binding the demote pass needs. */
 interface OneProjection extends RecordProjection {
+  readonly statedNodeIds: ReadonlyMap<number, string>;
   /** Minted option-node id → the claim index that minted it. Model options only. */
   readonly optionClaimIndexById: ReadonlyMap<string, number>;
 }
 
 interface ProjectedInterventionBinding {
+  readonly stated_index?: number;
   readonly range?: InterventionV3T["range"];
   readonly raw_value: number;
   readonly unit?: string;
@@ -2199,6 +2204,7 @@ function bindDirectStatedMagnitude(args: {
 
   const ownedRange = admittedValueRange(claim.range ?? item.range, item.source_quote, claim.sets_to, item.unit);
   return {
+    stated_index: index,
     raw_value: claim.sets_to,
     ...(item.unit !== undefined ? { unit: item.unit } : {}),
     ...(ownedRange?.meaning !== undefined ? { range: {
@@ -2434,6 +2440,7 @@ function bindFactorCarriedStatedMagnitude(args: {
   return {
     setsTo,
     binding: {
+      stated_index: figure.index,
       raw_value: setsTo,
       unit: figure.item.unit,
       source: "brief_extraction",
@@ -2593,7 +2600,11 @@ function projectOnce(
 
   // ── Pass 1: stated items → nodes. Provenance badge is `stated`, taken from
   // the loop, not from any model-supplied field.
-  statedItems.forEach((item, index) => {
+  statedItems.forEach((originalItem, index) => {
+    // Only the NODE's measurement uses the referenced unit. Keep the input
+    // evidence unchanged: an independent horizon_ref still owns its month unit.
+    const item = originalItem.quantity === undefined ? originalItem
+      : { ...originalItem, unit: statedItems[originalItem.quantity]?.unit };
     const quote = canonicalText(item.source_quote ?? "");
     const kind = STATED_KIND_TO_NODE_KIND[item.kind];
     // An unknown kind cannot occur through the grammar (enum-constrained), but
@@ -3065,9 +3076,10 @@ function projectOnce(
       // (`graph.ts:325-330`). So the cap is never derived separately from the
       // value it divides.
       applyStatedGoalTarget(node, item.value, item.unit);
-      applyStatedGoalEvidence(node, item, statedItems, brief);
       // No unit/label/prose fallback can supply a baseline. Only the typed reference above can earn it.
     }
+
+    if (kind === "goal") applyStatedGoalEvidence(node, item, statedItems, brief);
 
     // ⭐⭐ THE USER'S OWN STATUS QUO, CARRIED. `is_baseline` was structurally
     // inexpressible before the grammar widening (measured: ZERO occurrences in
@@ -3092,6 +3104,7 @@ function projectOnce(
     // Retain the existing unresolved-target channel, including the original
     // quantity when a figure is deliberately withheld from current values.
     const targetValueUnrepresented =
+      kind !== "goal" &&
       item.role === "target" &&
       typeof item.value === "number" &&
       (node.data as { operator?: string } | undefined)?.operator === undefined;
@@ -3197,6 +3210,8 @@ function projectOnce(
       // goes inert. Neither mutant alone shows the binding — the pair does.
       const parentStatedKind = MERGE_PARENT_STATED_KIND[claim.claim_kind];
       if (parentStatedKind === undefined) return;
+      // A typed quantity denotes a separate measurement, not a cause paraphrase.
+      if (claim.claim_kind === "factor" && claim.quantity !== undefined) return;
       // ⭐ A DEMOTED REFINEMENT IS NOT A CANDIDATE, AND THIS IS WHY THE PASS MUST
       // ITERATE. Two refinements naming one parent trip the choice-set guard and
       // NEITHER merges. Withdraw one and the other becomes the parent's only
@@ -3353,6 +3368,7 @@ function projectOnce(
       node.is_baseline = claim.is_baseline;
     }
     if (LEVEL_BEARING_CLAIM_NODE_KINDS.has(nodeKind)) {
+      const unit = claim.quantity === undefined ? claim.unit : statedItems[claim.quantity]?.unit;
       // ⚠ THE MODEL'S DECLARED `category` IS DELIBERATELY NOT PROPAGATED.
       //
       // Derived at the consumer's bytes, and measured live before this line was
@@ -3382,7 +3398,7 @@ function projectOnce(
         // alone does not attest the subject, measurement or current-value role.
         // raw_value is the display magnitude, not a second calculation value.
         // Derive it only from the producer's declared convention, never size.
-        const rawValue = claim.unit === "%" &&
+        const rawValue = unit === "%" &&
           (claim.value_scale === "unit_interval" || claim.value_scale === "ratio")
           ? claim.value * 100
           : claim.value_scale === "raw_count" || claim.value_scale === "ratio"
@@ -3392,7 +3408,7 @@ function projectOnce(
           value: claim.value,
           ...(rawValue !== undefined ? { raw_value: rawValue } : {}),
           extractionType: "inferred",
-          ...(claim.unit !== undefined ? { unit: claim.unit } : {}),
+          ...(unit !== undefined ? { unit } : {}),
         };
         node.observed_state = {
           value: claim.value,
@@ -3401,8 +3417,8 @@ function projectOnce(
         // Keep units even though the legacy Core baseline/elicitation gate
         // currently excludes %. Its consumer correction must accompany release;
         // erasing the unit hides that mismatch and disables unit-mismatch checks.
-      } else if (claim.unit !== undefined) {
-        node.data = { unit: claim.unit };
+      } else if (unit !== undefined) {
+        node.data = { unit };
       }
 
       // ⭐⭐ v10 — THE DECLARED SCALE, STAMPED FROM A DECLARATION AND NEVER FROM
@@ -4888,7 +4904,14 @@ function projectOnce(
   const hasIncoming = new Set(edges.map((e) => e.to));
   const hasOutgoing = new Set(edges.map((e) => e.from));
 
+  // Attach withdrawn stated identities while the mint map is still in scope.
+  const indexedDrops = dropped.flatMap(row => {
+    if (row.stated_index !== undefined || row.node_id === undefined) return [row];
+    const indices = [...statedIdByIndex].filter(([, id]) => id === row.node_id).map(([index]) => index);
+    return indices.length === 0 ? [row] : indices.map(stated_index => ({ ...row, stated_index }));
+  });
   return {
+    statedNodeIds: statedIdByIndex,
     optionClaimIndexById,
     // Reconciled against the final node set — see pass 2c.
     goalConstraints: boundLimits,
@@ -4909,7 +4932,7 @@ function projectOnce(
       },
     },
     provenance,
-    dropped,
+    dropped: indexedDrops,
   };
 }
 
@@ -5165,6 +5188,51 @@ function repairStatedOptionTargets(projection: OneProjection): void {
  * The two stages answer different questions (trap 21), and this one DISCLOSES
  * where the repair stage is deliberately silent.
  */
+/** Canonical quantity identities declared by a goal's baseline_ref. No wording participates. */
+function unifyGoalQuantityReferences(records: DraftRecordSet): DraftRecordSet {
+  const targets = new Map<number, Set<number>>();
+  const addAlias = (from: number, to: number): void => {
+    const set = targets.get(from) ?? new Set<number>();
+    set.add(to);
+    targets.set(from, set);
+  };
+  for (const [index, item] of records.stated_items.entries()) {
+    if (item.kind !== "goal" || item.baseline_ref === undefined) continue;
+    const baseline = records.stated_items[item.baseline_ref];
+    if (baseline?.role !== "baseline") continue;
+    const identity = baseline.quantity ?? item.baseline_ref;
+    addAlias(index, identity);
+    if (item.quantity !== undefined) addAlias(item.quantity, identity);
+  }
+  // Conflicting typed aliases are unresolved, never chosen by emission order.
+  const aliases = new Map([...targets].flatMap(([from, to]) => to.size === 1 ? [[from, [...to][0]!] as const] : []));
+  const canonical = (index: number): number => {
+    const seen = new Set<number>();
+    let next = index;
+    while (aliases.has(next) && aliases.get(next) !== next) {
+      if (seen.has(next)) return index; // Conflicting cycles supply no identity.
+      seen.add(next);
+      next = aliases.get(next)!;
+    }
+    return next;
+  };
+  const statedItems = records.stated_items.map(item => ({
+      ...item,
+      ...(item.quantity === undefined ? {} : { quantity: canonical(item.quantity) }),
+      ...(item.kind === "goal" && item.baseline_ref !== undefined && records.stated_items[item.baseline_ref]?.role === "baseline"
+        ? { quantity: canonical(records.stated_items[item.baseline_ref]!.quantity ?? item.baseline_ref) } : {}),
+      ...(item.relationship === undefined ? {} : { relationship: { ...item.relationship,
+        from_quantity: canonical(item.relationship.from_quantity), to_quantity: canonical(item.relationship.to_quantity),
+      } }),
+    }));
+  return {
+    stated_items: statedItems,
+    claims: records.claims.map(claim => ({ ...claim,
+      ...(claim.quantity === undefined ? {} : { quantity: canonical(claim.quantity) }),
+    })),
+  };
+}
+
 export function projectRecordsToGraph(
   records: DraftRecordSet,
   /**
@@ -5179,6 +5247,8 @@ export function projectRecordsToGraph(
   /** See `projectOnce`. Absent = byte-identical to the previous behaviour. */
   completionBoundary?: number,
 ): RecordProjection {
+  const originalRecords = records;
+  records = unifyGoalQuantityReferences(records);
   const claimCount = (records.claims ?? []).length;
   const demoted = new Map<number, DemoteDecision>();
   let projection = projectOnce(records, demoted, brief, completionBoundary);
@@ -5196,6 +5266,7 @@ export function projectRecordsToGraph(
     discloseNodesNamedWithASentence({
       graph: projection.graph,
       provenance: projection.provenance,
+      stated_dispositions: deriveStatedDispositions(records, projection, projection.statedNodeIds, originalRecords),
       dropped: projection.dropped,
       goalConstraints: projection.goalConstraints,
       constraintCandidates: projection.constraintCandidates,
@@ -5379,5 +5450,6 @@ export function projectionFingerprint(projection: RecordProjection): string {
     graph: projection.graph,
     provenance: projection.provenance,
     dropped: projection.dropped,
+    stated_dispositions: projection.stated_dispositions,
   });
 }

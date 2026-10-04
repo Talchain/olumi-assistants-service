@@ -1,0 +1,936 @@
+{
+  "stated_items": [
+    {
+      "kind": "figure",
+      "source_quote": "£120,000 monthly recurring revenue",
+      "value": 120000,
+      "value_span": {
+        "start": 0,
+        "end": 8
+      },
+      "unit_span": {
+        "start": 0,
+        "end": 34
+      },
+      "baseline": null,
+      "quantity": 0,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": "£/month",
+      "role": "baseline",
+      "value_scale": "raw_count",
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "figure",
+      "source_quote": "400 customers",
+      "value": 400,
+      "value_span": {
+        "start": 0,
+        "end": 3
+      },
+      "unit_span": {
+        "start": 4,
+        "end": 13
+      },
+      "baseline": null,
+      "quantity": 1,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": "customers",
+      "role": "baseline",
+      "value_scale": "raw_count",
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£300 a month",
+      "value": 300,
+      "value_span": {
+        "start": 0,
+        "end": 4
+      },
+      "unit_span": {
+        "start": 5,
+        "end": 12
+      },
+      "baseline": null,
+      "quantity": 2,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": "£/month",
+      "role": "context",
+      "value_scale": "raw_count",
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "option",
+      "source_quote": "raise prices by 10%",
+      "value": 0.1,
+      "value_span": {
+        "start": 16,
+        "end": 19
+      },
+      "unit_span": {
+        "start": 18,
+        "end": 19
+      },
+      "baseline": null,
+      "quantity": 3,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": "%",
+      "role": null,
+      "value_scale": "unit_interval",
+      "direction": null,
+      "is_baseline": false,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "option",
+      "source_quote": "launch a starter tier at £49 a month",
+      "value": 49,
+      "value_span": {
+        "start": 26,
+        "end": 29
+      },
+      "unit_span": {
+        "start": 30,
+        "end": 37
+      },
+      "baseline": null,
+      "quantity": 4,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": "£/month",
+      "role": null,
+      "value_scale": "raw_count",
+      "direction": null,
+      "is_baseline": false,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "option",
+      "source_quote": "keep pricing as it is",
+      "value": null,
+      "value_span": null,
+      "unit_span": null,
+      "baseline": null,
+      "quantity": null,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": null,
+      "role": null,
+      "value_scale": null,
+      "direction": null,
+      "is_baseline": true,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "goal",
+      "source_quote": "reach at least £150,000 monthly recurring revenue within 9 months",
+      "value": 150000,
+      "value_span": {
+        "start": 15,
+        "end": 23
+      },
+      "unit_span": {
+        "start": 24,
+        "end": 49
+      },
+      "baseline": 120000,
+      "quantity": 6,
+      "baseline_ref": 0,
+      "range": null,
+      "relationship": null,
+      "horizon_months": 9,
+      "horizon_ref": 7,
+      "direction_span": {
+        "start": 6,
+        "end": 14
+      },
+      "unit": "£/month",
+      "role": "target",
+      "value_scale": "raw_count",
+      "direction": "floor",
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "figure",
+      "source_quote": "within 9 months",
+      "value": 9,
+      "value_span": {
+        "start": 7,
+        "end": 8
+      },
+      "unit_span": {
+        "start": 9,
+        "end": 15
+      },
+      "baseline": null,
+      "quantity": 7,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": "months",
+      "role": "context",
+      "value_scale": "raw_count",
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "cause",
+      "source_quote": "each 1% price rise adds £1,200 a month to monthly recurring revenue before churn",
+      "value": null,
+      "value_span": null,
+      "unit_span": null,
+      "baseline": null,
+      "quantity": null,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": {
+        "from_quantity": 3,
+        "to_quantity": 6,
+        "amount": 1200,
+        "amount_unit": "£/month",
+        "per_source_change": 1,
+        "per_source_change_unit": "%",
+        "amount_span": {
+          "start": 24,
+          "end": 30
+        },
+        "source_span": {
+          "start": 0,
+          "end": 4
+        }
+      },
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": null,
+      "role": null,
+      "value_scale": null,
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "cause",
+      "source_quote": "Each 1% price rise loses about 2 customers, between 1 and 4",
+      "value": null,
+      "value_span": null,
+      "unit_span": null,
+      "baseline": null,
+      "quantity": 9,
+      "baseline_ref": null,
+      "range": {
+        "low": 1,
+        "high": 4,
+        "unit": "customers",
+        "meaning": "likely_range",
+        "low_span": {
+          "start": 52,
+          "end": 53
+        },
+        "high_span": {
+          "start": 58,
+          "end": 59
+        }
+      },
+      "relationship": {
+        "from_quantity": 3,
+        "to_quantity": 1,
+        "amount": -2,
+        "amount_unit": "customers",
+        "per_source_change": 1,
+        "per_source_change_unit": "%",
+        "amount_span": {
+          "start": 31,
+          "end": 32
+        },
+        "source_span": {
+          "start": 0,
+          "end": 4
+        }
+      },
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": "customers",
+      "role": "context",
+      "value_scale": "raw_count",
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "cause",
+      "source_quote": "Each lost customer removes £300 a month of monthly recurring revenue",
+      "value": null,
+      "value_span": null,
+      "unit_span": null,
+      "baseline": null,
+      "quantity": null,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": {
+        "from_quantity": 9,
+        "to_quantity": 6,
+        "amount": -300,
+        "amount_unit": "£/month",
+        "per_source_change": 1,
+        "per_source_change_unit": "customers",
+        "amount_span": {
+          "start": 27,
+          "end": 31
+        },
+        "source_span": {
+          "start": 0,
+          "end": 4
+        }
+      },
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": null,
+      "role": null,
+      "value_scale": null,
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "cause",
+      "source_quote": "The starter tier would win about 150 new subscribers, between 80 and 250",
+      "value": 150,
+      "value_span": {
+        "start": 33,
+        "end": 36
+      },
+      "unit_span": {
+        "start": 41,
+        "end": 52
+      },
+      "baseline": null,
+      "quantity": 11,
+      "baseline_ref": null,
+      "range": {
+        "low": 80,
+        "high": 250,
+        "unit": "subscribers",
+        "meaning": "likely_range",
+        "low_span": {
+          "start": 62,
+          "end": 64
+        },
+        "high_span": {
+          "start": 70,
+          "end": 73
+        }
+      },
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": "subscribers",
+      "role": "context",
+      "value_scale": "raw_count",
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "cause",
+      "source_quote": "Each starter subscriber adds £49 a month to monthly recurring revenue",
+      "value": null,
+      "value_span": null,
+      "unit_span": null,
+      "baseline": null,
+      "quantity": null,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": {
+        "from_quantity": 11,
+        "to_quantity": 6,
+        "amount": 49,
+        "amount_unit": "£/month",
+        "per_source_change": 1,
+        "per_source_change_unit": "subscribers",
+        "amount_span": {
+          "start": 29,
+          "end": 32
+        },
+        "source_span": {
+          "start": 0,
+          "end": 4
+        }
+      },
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": null,
+      "role": null,
+      "value_scale": null,
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "cause",
+      "source_quote": "Each starter subscriber costs about £6 a month in support",
+      "value": null,
+      "value_span": null,
+      "unit_span": null,
+      "baseline": null,
+      "quantity": null,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": null,
+      "role": null,
+      "value_scale": null,
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    },
+    {
+      "kind": "cause",
+      "source_quote": "Keeping pricing as it is adds nothing",
+      "value": null,
+      "value_span": null,
+      "unit_span": null,
+      "baseline": null,
+      "quantity": null,
+      "baseline_ref": null,
+      "range": null,
+      "relationship": null,
+      "horizon_months": null,
+      "horizon_ref": null,
+      "direction_span": null,
+      "unit": null,
+      "role": null,
+      "value_scale": null,
+      "direction": null,
+      "is_baseline": null,
+      "applies_to_stated": null,
+      "applies_to_claim": null
+    }
+  ],
+  "claims": [
+    {
+      "claim_kind": "factor",
+      "label": "MRR Gain Before Churn",
+      "basis": [
+        8,
+        14
+      ],
+      "from_stated": null,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": null,
+      "quantity": 6,
+      "range": null,
+      "effect": null,
+      "effect_detail": null,
+      "strength": null,
+      "category": "controllable",
+      "value": null,
+      "unit": "£/month",
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "outcome",
+      "label": "Price-Driven MRR Gain",
+      "basis": [
+        8
+      ],
+      "from_stated": null,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": null,
+      "quantity": 6,
+      "range": null,
+      "effect": null,
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": "£/month",
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Customer Losses",
+      "basis": [
+        9
+      ],
+      "from_stated": null,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": null,
+      "quantity": 9,
+      "range": null,
+      "effect": null,
+      "effect_detail": null,
+      "strength": null,
+      "category": "controllable",
+      "value": null,
+      "unit": "customers",
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Lost MRR From Churn",
+      "basis": [
+        10
+      ],
+      "from_stated": null,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": null,
+      "quantity": 6,
+      "range": null,
+      "effect": null,
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": "£/month",
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "factor",
+      "label": "New Starter Subscribers",
+      "basis": [
+        11
+      ],
+      "from_stated": null,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": null,
+      "quantity": 11,
+      "range": null,
+      "effect": null,
+      "effect_detail": null,
+      "strength": null,
+      "category": "controllable",
+      "value": null,
+      "unit": "subscribers",
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "outcome",
+      "label": "Starter-Tier MRR Gain",
+      "basis": [
+        12
+      ],
+      "from_stated": null,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": null,
+      "quantity": 6,
+      "range": null,
+      "effect": null,
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": "£/month",
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Current MRR contributes toward the revenue target",
+      "basis": [
+        0,
+        6
+      ],
+      "from_stated": 0,
+      "from_claim": null,
+      "to_stated": 6,
+      "to_claim": null,
+      "quantity": null,
+      "range": null,
+      "effect": "positive",
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Price increase creates MRR gain before churn",
+      "basis": [
+        3,
+        8
+      ],
+      "from_stated": 3,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": 0,
+      "quantity": null,
+      "range": null,
+      "effect": "positive",
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": 12000,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "MRR gain before churn raises price-driven MRR gain",
+      "basis": [
+        8
+      ],
+      "from_stated": null,
+      "from_claim": 0,
+      "to_stated": null,
+      "to_claim": 1,
+      "quantity": null,
+      "range": null,
+      "effect": "positive",
+      "effect_detail": {
+        "amount": 1200,
+        "amount_unit": "£/month",
+        "per_source_change": 1,
+        "per_source_change_unit": "%",
+        "range": null
+      },
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Price-driven MRR gain advances the revenue target",
+      "basis": [
+        6,
+        8
+      ],
+      "from_stated": null,
+      "from_claim": 1,
+      "to_stated": 6,
+      "to_claim": null,
+      "quantity": null,
+      "range": null,
+      "effect": "positive",
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Price increase causes customer losses",
+      "basis": [
+        3,
+        9
+      ],
+      "from_stated": 3,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": 2,
+      "quantity": null,
+      "range": {
+        "low": 10,
+        "high": 40,
+        "unit": "customers",
+        "meaning": "likely_range",
+        "low_span": {
+          "start": 52,
+          "end": 53
+        },
+        "high_span": {
+          "start": 58,
+          "end": 59
+        }
+      },
+      "effect": "negative",
+      "effect_detail": {
+        "amount": -2,
+        "amount_unit": "customers",
+        "per_source_change": 1,
+        "per_source_change_unit": "%",
+        "range": {
+          "low": 1,
+          "high": 4,
+          "unit": "customers",
+          "meaning": "likely_range",
+          "low_span": {
+            "start": 52,
+            "end": 53
+          },
+          "high_span": {
+            "start": 58,
+            "end": 59
+          }
+        }
+      },
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": 20,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Customer losses create lost MRR from churn",
+      "basis": [
+        10
+      ],
+      "from_stated": null,
+      "from_claim": 2,
+      "to_stated": null,
+      "to_claim": 3,
+      "quantity": null,
+      "range": null,
+      "effect": "negative",
+      "effect_detail": {
+        "amount": -300,
+        "amount_unit": "£/month",
+        "per_source_change": 1,
+        "per_source_change_unit": "customers",
+        "range": null
+      },
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Lost MRR from churn works against the revenue target",
+      "basis": [
+        6,
+        10
+      ],
+      "from_stated": null,
+      "from_claim": 3,
+      "to_stated": 6,
+      "to_claim": null,
+      "quantity": null,
+      "range": null,
+      "effect": "negative",
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Starter-tier launch creates new starter subscribers",
+      "basis": [
+        4,
+        11
+      ],
+      "from_stated": 4,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": 4,
+      "quantity": null,
+      "range": {
+        "low": 80,
+        "high": 250,
+        "unit": "subscribers",
+        "meaning": "likely_range",
+        "low_span": {
+          "start": 62,
+          "end": 64
+        },
+        "high_span": {
+          "start": 70,
+          "end": 73
+        }
+      },
+      "effect": "positive",
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": 150,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "New starter subscribers create starter-tier MRR gain",
+      "basis": [
+        12
+      ],
+      "from_stated": null,
+      "from_claim": 4,
+      "to_stated": null,
+      "to_claim": 5,
+      "quantity": null,
+      "range": null,
+      "effect": "positive",
+      "effect_detail": {
+        "amount": 49,
+        "amount_unit": "£/month",
+        "per_source_change": 1,
+        "per_source_change_unit": "subscribers",
+        "range": null
+      },
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Starter-tier MRR gain advances the revenue target",
+      "basis": [
+        6,
+        12
+      ],
+      "from_stated": null,
+      "from_claim": 5,
+      "to_stated": 6,
+      "to_claim": null,
+      "quantity": null,
+      "range": null,
+      "effect": "positive",
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": null,
+      "is_baseline": null
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Keeping pricing creates no MRR gain before churn",
+      "basis": [
+        5,
+        14
+      ],
+      "from_stated": 5,
+      "from_claim": null,
+      "to_stated": null,
+      "to_claim": 0,
+      "quantity": null,
+      "range": null,
+      "effect": "positive",
+      "effect_detail": null,
+      "strength": null,
+      "category": null,
+      "value": null,
+      "unit": null,
+      "value_scale": null,
+      "likelihood": null,
+      "sets_to": 0,
+      "is_baseline": null
+    }
+  ]
+}

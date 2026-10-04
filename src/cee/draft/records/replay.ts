@@ -293,5 +293,6 @@ export function replayDigest(result: ReplayResult): string {
     semantics: result.semantics,
     ask: result.ask,
     dropped: result.projection.dropped,
+    stated_dispositions: result.projection.stated_dispositions,
   });
 }

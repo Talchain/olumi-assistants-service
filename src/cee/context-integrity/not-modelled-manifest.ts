@@ -73,7 +73,7 @@ export const MAX_ITEMS = 200;
 
 export type QuantityKind = "money" | "percent" | "count" | "date" | "period";
 
-/** in_model = carried as a value, cap, unit or label. prose_only = mentioned in
+/** in_model = carried by a numeric carrier. A label echo is prose_only: mentioned in
  *  commentary/coaching but not parameterising anything. absent = nowhere. */
 export type QuantityVerdict = "in_model" | "prose_only" | "absent";
 
@@ -1771,10 +1771,8 @@ function classify(
 ): { verdict: QuantityVerdict; matched: Candidate | null } {
   const matched = matchCandidate(q, s.candidates);
   if (matched !== null) return { verdict: "in_model", matched };
-  // Text is the second route: a figure written into a label, a unit string or
-  // an encoding-map caption ("45 roles offshored (~40% saving)", "(Jan 2027)")
-  // is genuinely carried by the model even though it is not a numeric field.
-  if (appearsInStrings(q, s.modelStrings)) return { verdict: "in_model", matched: null };
+  // A label echo is disclosure text, never an executable quantity carrier.
+  if (appearsInStrings(q, s.modelStrings)) return { verdict: "prose_only", matched: null };
   if (appearsInStrings(q, s.proseStrings)) return { verdict: "prose_only", matched: null };
   return { verdict: "absent", matched: null };
 }

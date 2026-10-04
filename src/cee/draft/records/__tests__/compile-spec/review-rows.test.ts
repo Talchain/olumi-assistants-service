@@ -94,6 +94,8 @@ describe('P1-2 Endpoint identity', () => {
 describe('P1-3 Endpoint denomination', () => {
   it('does not relabel a stated GBP/month effect with a USD/month endpoint', () => {
     const r = records(); r.claims[1]!.unit = 'USD/month';
+    // The quantity reference owns denomination; a redundant claim unit cannot change it.
+    r.stated_items[4]!.unit = 'USD/month';
     // Give USD its own goal frame, so conversion is reachable on base.
     r.stated_items[0]!.unit = 'USD/month';
     expect(sized(project(r)).provenance?.magnitude).not.toBe('user_stated');
@@ -127,6 +129,10 @@ describe('P1-5 Baseline admission', () => {
     expect(goal.quantity_ref).toBe(4);
     const foreign = structuredClone(r);
     foreign.stated_items[foreign.stated_items.length - 1]!.quantity = 5;
+    // baseline_ref is the identity even when the redundant quantity differs.
+    expect(project(foreign).graph.nodes.find(n => n.kind === 'goal')!.goal_baseline_raw).toBe(120000);
+    foreign.stated_items[foreign.stated_items.length - 1]!.baseline_ref = 5;
+    // A context figure is not a baseline declaration.
     expect(project(foreign).graph.nodes.find(n => n.kind === 'goal')!.goal_baseline_raw).toBeUndefined();
   });
 });

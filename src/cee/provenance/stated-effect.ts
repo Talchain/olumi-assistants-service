@@ -35,7 +35,7 @@ function nounUnitsAt(tail: string): readonly string[] {
     .trim()
     .split(/\s+/u)
     .map((word) => word.toLowerCase()) ?? [];
-  return words.flatMap((_, start) => words.slice(start).map((__, end) => words.slice(start, end + 1).join(" ")));
+  return words.flatMap((_, start) => words.slice(start).map((__, end) => words.slice(start, start + end + 1).join(" ")));
 }
 
 function unitsAt(quote: string, amount: StatedAmount): readonly string[] {
@@ -78,7 +78,7 @@ function oneMatchingAmount(
   unit: string,
   source: boolean,
 ): LocatedAmount | undefined {
-  const matches = amounts.filter((amount) => (amount.implicitSource === true ? source && value === 1 : magnitudeMatches(Math.abs(value), amount))
+  const matches = amounts.filter((amount) => (amount.implicitSource === true ? source && Math.abs(value) === 1 : magnitudeMatches(Math.abs(value), amount))
     && amount.units.some((candidate) => sameUnit(unit, candidate)));
   return matches.length === 1 ? matches[0] : undefined;
 }

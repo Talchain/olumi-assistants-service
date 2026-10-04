@@ -1,6 +1,7 @@
 /** Offline construction spike. Deliberately has no live-route consumer or flag. */
 import { buildDraftRecordsSchema, type DraftRecordSet } from '../../../cee/draft/records/grammar.js';
 import { DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction.js';
+import { reconcileStatedDispositions } from '../../../cee/draft/records/stated-dispositions.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
 import { projectGraphAndOptionsToV3 } from '../../../cee/transforms/schema-v3.js';
 import type { V1Graph } from '../../../cee/transforms/schema-v2.js';
@@ -83,6 +84,8 @@ export async function buildModelFromRecords(
     return { ok: false, mutated: false, refusal: 'model_already_exists' };
   }
   const reg = await dispatch(`/assist/v1/scenarios/${scenarioId}/graph/register`, {
+    // Registration diagnostic only: GraphV3 has no declared persisted receipt carrier.
+    stated_dispositions: reconcileStatedDispositions(compiled.projection.stated_dispositions ?? [], graph),
     graph, brief_text: brief, operation_id: constructionOperationId(scenarioId, brief), expected_graph_identity_hash: null,
   });
   const code = object(reg.json.details) ? reg.json.details.code : undefined;
