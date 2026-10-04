@@ -807,20 +807,23 @@ export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; bl
   if (!carriesResult) return body;
   const text = body.assistant_text;
   if (typeof text !== 'string' || text.trim().length === 0) return body;
-  // The caveat must not manufacture eligibility: synthesise and apply the floor to the narrator alone.
-  let shape = synthesiseAnswerShapeFromText(turn.narratorWords ?? text);
+  // The caveat must not manufacture eligibility: remove exact copies before synthesis and the floor.
+  // Normalise spacing while retaining the line breaks that identify narrator bullets.
+  const narratorWords = turn.narratorWords ?? text;
+  const wordsWithoutCaveat = turn.faceCaveat === undefined ? narratorWords
+    : narratorWords.split(turn.faceCaveat).join(' ').replace(/[^\S\n]+/g, ' ').trim();
+  let shape = synthesiseAnswerShapeFromText(wordsWithoutCaveat);
   if (shape === null) return body;
   const derived = deriveAnswerTextFromShape(shape);
   if (!warrantsProgressiveDisclosure(derived) && shape.bullets.length === 0) return body;
   if (turn.faceCaveat !== undefined) {
     const sentence = turn.faceCaveat;
-    // Exact narrator copies move to the face too, without duplicating the sentence in detail or another bullet.
-    const withoutCaveat = (part: string) => part.split(sentence).join('').trim();
-    const bullets = [sentence, ...shape.bullets.map(withoutCaveat).filter(Boolean)];
+    // Exact narrator copies were removed before synthesis; insert the sole copy on the face.
+    const bullets = [sentence, ...shape.bullets];
     const overflow = bullets.length > ANSWER_SHAPE_MAX_BULLETS ? bullets.pop()! : '';
     const parsed = AnswerShapeSchema.safeParse({
-      headline: withoutCaveat(shape.headline), bullets,
-      detail: [overflow, withoutCaveat(shape.detail)].filter(Boolean).join('\n\n'),
+      headline: shape.headline, bullets,
+      detail: [overflow, shape.detail].filter(Boolean).join('\n\n'),
     });
     if (!parsed.success) return body;
     shape = parsed.data;
@@ -3348,8 +3351,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && leaderLicenceFromState(analysisState, composedRead.analysisReady) !== 'withheld'
       && explainEnrichment != null && isRawFragile(readRawRobustnessSignals(explainEnrichment.robustness))) {
       explainRobustnessCaveat = explainRobustnessSentence(analysisResult, composedRead.graph);
-      // Whole-text exits retain this exact adjacency, before disclosures, status, basis and decision lines.
+      // Whole-text exits keep the caveat after the narrator's at-rest prose, before any folded questions.
       if (!narrationText.includes(explainRobustnessCaveat)) narrationText = `${narrationText.trimEnd()} ${explainRobustnessCaveat}`;
+      narrationText = withB3LinesAtRest(narrationText, [explainRobustnessCaveat]);
     }
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null

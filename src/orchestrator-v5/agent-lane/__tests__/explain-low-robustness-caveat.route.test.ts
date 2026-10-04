@@ -14,6 +14,7 @@ import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answe
 import { robustnessHonestySentence } from '../../coaching/analysis-result-headline.js';
 import { collectFactorIdsSetByEveryOption } from '../../context/intervention-controlled-drivers.js';
 import { analysedOptionIds } from '../conditional-input-basis.js';
+import { textAtRest } from '../decision-input-ask.js';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
@@ -314,6 +315,35 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     if (attested) readbackResult.enrichment.flip_thresholds = FLIP_ROWS;
     expect(analysedOptionIds(readbackResult)).toEqual([]);
     assertCaveat(await press(await run()), attested ? NO_FLIP_SENTENCE : SENTENCE);
+  });
+  // W14: an exact caveat used as the first sentence must not consume the narrator's real headline.
+  it('W14: caveat-first narration retains a shape with the second sentence as headline', async () => {
+    narrator = `${SENTENCE} ${bulletedNarrator(2)}`;
+    const b = await press(await run());
+    expect(b._answer_shape).toBeDefined();
+    expect(b._answer_shape!.bullets[0]).toBe(SENTENCE);
+    expect(b._answer_shape!.headline).toBe(NARRATOR);
+    expect(count(b.assistant_text, SENTENCE)).toBe(1);
+    for (const bullet of NARRATOR_BULLETS.slice(0, 2)) expect(count(b.assistant_text, bullet)).toBe(1);
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(b._answer_shape!));
+  });
+  // W15: reuse the B3 question-tail variants; neither the caveat nor the independent basis may fold away.
+  it.each([[true, true], [false, true], [true, false], [false, false]])('W15: whole-text caveat stays before questions (basis present=%s punctuated=%s)', async (present, punctuated) => {
+    readbackReady = structuredClone(FX.state.analysis_ready);
+    const question = punctuated ? 'What baseline should we use?' : 'The baseline is unknown';
+    const marker = 'Questions this model does not answer yet:';
+    narrator = `${NARRATOR} ${marker} ${question}${present ? `\n\n${BASIS_UNAVAILABLE}` : ''}`;
+    const b = await press(await run());
+    expect(b.narration?.status).toBe('ready');
+    expect(b.analysis_state.leader_claim.permitted).toBe(true);
+    expect(b._answer_shape).toBeUndefined();
+    expect(count(textAtRest(b.assistant_text), SENTENCE)).toBe(1);
+    expect(count(b.assistant_text, SENTENCE)).toBe(1);
+    expect(b.assistant_text).toContain(`${marker} ${question}`);
+    expect(b.assistant_text.indexOf(SENTENCE)).toBeLessThan(b.assistant_text.indexOf(marker));
+    expect(b.assistant_text.slice(b.assistant_text.indexOf(marker))).not.toContain(SENTENCE);
+    expect(b.assistant_text.startsWith(`${NARRATOR}\n\n${SENTENCE}`)).toBe(true);
+    expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
   });
   it('unavailable narration of a licensed fragile Run carries no caveat', async () => {
     emptyNarration = true;
