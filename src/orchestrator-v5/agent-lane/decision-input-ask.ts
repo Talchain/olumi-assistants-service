@@ -144,6 +144,43 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
 /** A7's own opener: the one way A7 is told apart from the other owed lines (CODEX K3 P2: never "the first non-ask line"). */
 const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
 
+/**
+ * ⭐ A7, THE ONE RULE (DL 0df0e1 → Reasoning, 4 Oct; beat 2): the goal holds the brief's deadline (`goal_horizon_months`)
+ * and no duration limit scores it, so the analysis says nothing about meeting it in time. The chat's host line
+ * (`decisionInputLines`) and the Run's typed warning (`withUntestedHorizonWarning`) both say THIS sentence, so the two can
+ * never disagree. `null` when there is no single goal, no held deadline, or a duration limit scores it.
+ */
+export function untestedHorizonLine(graph: unknown): string | null {
+  const goal = goalOf(graph);
+  if (goal === undefined) return null;
+  const within = withinMonths(goal);
+  return within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
+}
+
+/** The code the Run carries A7 under: an `info` inference warning whose `message` a consumer shows verbatim. */
+export const GOAL_HORIZON_NOT_TESTED = 'GOAL_HORIZON_NOT_TESTED';
+
+/**
+ * ⭐ A7 AS A TYPED FACT ON THE RUN (DL 0df0e1, beat 2). The PL's beat-2 wording separates "no option reaches the target"
+ * from "the deadline is untested", and until now the second existed only as chat text, so no surface beside the chat
+ * could say it without re-deriving A7. Appends ONE `info` warning to the envelope's `inference_warnings` (the carrier
+ * every withheld-figure reader already keys on by code) when `untestedHorizonLine` holds: A7's sentence verbatim, and the
+ * goal's id. It withholds nothing and moves no figure. An envelope already carrying the code is returned as is. Pure.
+ */
+export function withUntestedHorizonWarning<E>(envelope: E, graph: unknown): E {
+  const line = untestedHorizonLine(graph);
+  if (line === null || envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return envelope;
+  const env = envelope as Rec;
+  const existing: unknown[] = Array.isArray(env.inference_warnings) ? env.inference_warnings : [];
+  if (existing.some((w) => recordOf(w)?.code === GOAL_HORIZON_NOT_TESTED)) return envelope;
+  const goalId = goalOf(graph)?.id;
+  const warning = {
+    code: GOAL_HORIZON_NOT_TESTED, severity: 'info', message: line,
+    ...(typeof goalId === 'string' ? { node_ids: [goalId] } : {}),
+  };
+  return { ...env, inference_warnings: [...existing, warning] } as E;
+}
+
 /** The one ask writer, before display scrubbing or turn eligibility. */
 function rawDecisionInputAsk(graph: unknown): string | null {
   const goal = goalOf(graph);
@@ -167,8 +204,7 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   // ⭐ K3 (DL on lease 5945974225; CODEX P1; HARNESS CR): the HOST is the one writer — said on the build turn (and its
   // automatic first analysis) and on every Run, never handed to the narrator, so it is said exactly once by construction.
   const leftOut = leftOutLines(graph, label);
-  const within = withinMonths(goal);
-  const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
+  const a7 = untestedHorizonLine(graph);
   const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
   // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
   const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
