@@ -73,6 +73,7 @@ import type { ClaimPermissions } from '../agent-lane/first-analysis.js';
 import { boundRunLeaderLicence } from '../model-management/version-result-binding.js';
 import type { SelectedRunIdentity } from '../coaching/build-run-delta.js';
 import type { LeaderLicence } from '../compose/leader-licence.js';
+import type { GoalScopeClaimInput } from '../compose/goal-scope-claim-input.js';
 import { log } from '../../utils/telemetry.js';
 
 type Rec = Record<string, unknown>;
@@ -106,6 +107,15 @@ function currentFacts(context: Awaited<ReturnType<typeof buildTurnContext>>): re
 export interface StructuralChallengeFinalRead {
   readonly read: ScenarioAnalysisRead;
   readonly currentness: (ScenarioAnalysisClaimSafetyRead & { readonly permissions?: ClaimPermissions }) | undefined;
+}
+
+/** A fresh canonical receipt for presentation: the same sanctioned reader, with the caller's retained scope. */
+export async function readStructuralChallengeReceipt(params: {
+  readonly scenarioId: string; readonly graph: unknown; readonly requestId: string; readonly goalScopeClaimInput: GoalScopeClaimInput;
+}): Promise<StructuralChallengeFinalRead> {
+  let currentness: StructuralChallengeFinalRead['currentness'];
+  const read = await readScenarioAnalysis({ ...params, onCurrentnessRead: (current) => { currentness = current; } });
+  return { read, currentness };
 }
 
 export type StructuralChallengePresentationPermission =

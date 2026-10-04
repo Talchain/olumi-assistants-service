@@ -12,8 +12,10 @@ import type { PLoTClient, PLoTClientRunOpts } from '../../../orchestrator/plot-c
 import type { CommittedTurnRecord, SessionStore } from '../../session/store.js';
 import { createNoopSessionStore } from '../../session/__tests__/fixtures.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
-import { parseStructuralChallengePress, structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
+import { STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY, parseStructuralChallengePress, structuralChallengePressId } from '../method-turn/structural-challenge-turn.js';
+import { reconciliationPending, refreshScopePending } from '../goal-scope.js';
+import type { HandlerFactWithTurn } from '../../types/handler-fact.js';
+import type { SessionTurnWithContent } from '../../session/conversation-content.js';
 
 type Rec = Record<string, any>;
 const transport = vi.hoisted(() => ({ store: undefined as SessionStore | undefined, plot: undefined as PLoTClient | undefined }));
@@ -44,6 +46,10 @@ describe('agent route: real structural challenge press reachability', () => {
   let graph: Rec;
   let graphRead: Rec;
   let graphReadFailed = false;
+  let lateScope = false;
+  let runFacts: HandlerFact[];
+  let runRows: HandlerFactWithTurn[];
+  let runTurns: SessionTurnWithContent[];
   let turnId: string;
   let baselineBody: Rec;
   let link = LINK;
@@ -69,18 +75,55 @@ describe('agent route: real structural challenge press reachability', () => {
       }),
       validatePatch: vi.fn(async () => { throw new Error('Unexpected patch validation'); }),
     };
-    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
-    app = Fastify({ logger: false });
-    app.post('/assist/v1/scenarios/:id/graph', async () => {
-      if (graphReadFailed) throw new Error('offline graph read failure');
-      return graphRead;
-    });
-    app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'normal', blocks: [] }));
-    await app.register(agentV1TurnRoute);
-    await app.ready();
+    app = await buildApp();
   }, 120_000);
 
+  /** Re-importing gives the cold route no remembered turn, while the durable store rows remain the same. */
+  async function buildApp(cold = false): Promise<FastifyInstance> {
+    if (cold) vi.resetModules();
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    const instance = Fastify({ logger: false });
+    instance.post('/assist/v1/scenarios/:id/graph', async () => {
+      if (graphReadFailed) throw new Error('offline graph read failure');
+      /** Only the post-candidate graph read introduces this issue; dispatch has already read its receipt. */
+      if (lateScope && plotCalls.length > 0) {
+        const pending = reconciliationPending(SCENARIO, {
+          kind: 'reconcile_goal_scope', goal_id: 'mrr', goal_label: 'MRR',
+          declared_scope: { modelled: 'all revenue', alternative: 'one stream', stated_in_brief: true },
+          question: 'Which revenue scope should this model represent?', expected: 'scope', operands: [], derivations: [],
+        });
+        expect(refreshScopePending(pending, graph)).toEqual(pending);
+        transport.store!.readMostRecentPendingActions = vi.fn(async () => [pending]);
+      }
+      return graphRead;
+    });
+    instance.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'normal', blocks: [] }));
+    await instance.register(agentV1TurnRoute);
+    await instance.ready();
+    return instance;
+  }
+
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  /** Both baselines use the real Run handler and transport; only the selected durable fact set changes. */
+  async function realRun(requestId: string) {
+    const { buildTurnContext, loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
+    const { createRegistry, resolveHandler } = await import('../../tools/registry.js');
+    const { priorRunForSeed } = await import('../../coaching/seed-reuse.js');
+    const { NO_CLAIM, runWithBoundAnalysisSnapshot } = await import('../../run-analysis-snapshot-binding.js');
+    const payload = makeMessagePayload({ scenario_id: SCENARIO, stage: 'analyse', turn_class: 'decide', message: 'run analysis' });
+    const context = await buildTurnContext(payload, requestId);
+    const handler = resolveHandler(createRegistry({
+      plotClient: transport.plot,
+      scenarioReader: () => loadScenarioSnapshotForRunAnalysis(SCENARIO, requestId),
+      counterfactualClient: null,
+    }), 'run_analysis')!;
+    const output = await runWithBoundAnalysisSnapshot({ scenarioId: SCENARIO, analysisGraphHash: NO_CLAIM, priorRunSeed: priorRunForSeed([]) },
+      () => handler({ context, payload, requestId, signal: new AbortController().signal, orientationText: '' }));
+    const fact = output.handler_facts.find((entry) => entry.fact_type === 'run_analysis')!;
+    expect(fact).toBeDefined();
+    return { fact, payload };
+  }
 
   async function licensedRun(selectedLink = LINK) {
     link = selectedLink;
@@ -88,33 +131,24 @@ describe('agent route: real structural challenge press reachability', () => {
     // The user has stated these sizes before Run A; the current real admission/licence logic stays in force.
     for (const edge of graph.edges as Rec[]) edge.provenance = { ...edge.provenance, source: 'user_specified', magnitude: 'user_stated' };
     transport.store = createNoopSessionStore({ loadGraphResult: graph });
-    const { buildTurnContext, loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
-    const { createRegistry, resolveHandler } = await import('../../tools/registry.js');
-    const { priorRunForSeed } = await import('../../coaching/seed-reuse.js');
-    const payload = makeMessagePayload({ scenario_id: SCENARIO, stage: 'analyse', turn_class: 'decide', message: 'run analysis' });
-    const context = await buildTurnContext(payload, 'baseline');
-    const handler = resolveHandler(createRegistry({
-      plotClient: transport.plot,
-      scenarioReader: () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'baseline'),
-      counterfactualClient: null,
-    }), 'run_analysis')!;
-    const output = await runWithBoundAnalysisSnapshot({ scenarioId: SCENARIO, analysisGraphHash: NO_CLAIM, priorRunSeed: priorRunForSeed([]) },
-      () => handler({ context, payload, requestId: 'baseline', signal: new AbortController().signal, orientationText: '' }));
-    const runA = output.handler_facts.find((fact) => fact.fact_type === 'run_analysis')!;
+    const { fact: runA, payload } = await realRun('baseline');
     expect(runA).toBeDefined();
     expect(plotCalls).toHaveLength(1);
     baselineBody = plotCalls[0].body;
     const computedAt = (runA as Rec).result.computed_at;
+    runFacts = [runA];
+    runRows = [{ fact: runA, fact_row_id: 'run-a-row', fact_created_at: computedAt, turn_id: 'baseline-row' }];
+    runTurns = [{
+      id: 'baseline-row', scenario_id: SCENARIO, user_id: null, turn_id: payload.turn_id,
+      created_at: computedAt, turn_class: 'handler', handler_id: 'run_analysis', request_hash: 'baseline',
+      response_emitted: true, llm_calls_used: 0, duration_ms: 0, user_message: 'run analysis', assistant_message: 'Analysis complete.',
+    }];
     transport.store = createNoopSessionStore({
       loadGraphResult: graph,
-      facts: [runA] as HandlerFact[],
-      factsWithTurn: [{ fact: runA, fact_row_id: 'run-a-row', fact_created_at: computedAt, turn_id: 'baseline-row' }],
-      scenarioAnalysisFacts: [runA] as HandlerFact[],
-      priorTurns: [{
-        id: 'baseline-row', scenario_id: SCENARIO, user_id: null, turn_id: payload.turn_id,
-        created_at: computedAt, turn_class: 'handler', handler_id: 'run_analysis', request_hash: 'baseline',
-        response_emitted: true, llm_calls_used: 0, duration_ms: 0, user_message: 'run analysis', assistant_message: 'Analysis complete.',
-      }],
+      facts: runFacts,
+      factsWithTurn: runRows,
+      scenarioAnalysisFacts: runFacts,
+      priorTurns: runTurns,
     });
     transport.store.readAnalysisInvalidatedAt = vi.fn(async () => null);
     const rows = new Map<string, CommittedTurnRecord>();
@@ -137,9 +171,9 @@ describe('agent route: real structural challenge press reachability', () => {
     provider.mockClear();
   }
 
-  beforeEach(async () => { plotCalls = []; graphReadFailed = false; turnId = randomUUID(); await licensedRun(); });
-  const post = (chip: string, extra: Rec = {}) => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
-    kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: 'normal', source: 'chip', chip: { id: chip, ...extra },
+  beforeEach(async () => { plotCalls = []; graphReadFailed = false; lateScope = false; turnId = randomUUID(); await licensedRun(); });
+  const post = (chip: string, extra: Rec = {}, overrides: Rec = {}, on = app) => on.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
+    kind: 'message', scenario_id: SCENARIO, turn_id: turnId, message: 'normal', source: 'chip', chip: { id: chip, ...extra }, ...overrides,
   } });
 
   function noModelCallsOrGraphWrites(body: Rec) {
@@ -180,6 +214,7 @@ describe('agent route: real structural challenge press reachability', () => {
       .filter((edge: Rec) => !(edge.from === link.from_id && edge.to === link.to_id)) });
     expect(baselineBody.graph.edges).toContainEqual(expect.objectContaining({ from: link.from_id, to: link.to_id }));
     noModelCallsOrGraphWrites(body);
+    return body;
   }
 
   it('literal served UI press reaches real dispatch for driver_retention → goal_value on a licensed current Run', async () => {
@@ -283,5 +318,104 @@ describe('agent route: real structural challenge press reachability', () => {
     expect(body._diagnostic_trace.fast_path).not.toBe('method');
     expect(provider).toHaveBeenCalledTimes(1); expect(body._diagnostic_trace.timing.provider_calls).toBe(1);
     expect(plotCalls).toHaveLength(0);
+  });
+  describe('fresh SCI-DEEP presentation and baseline-bound replay', () => {
+    const PRESS = 'agent-test-without-link:driver_retention::goal_value';
+    const WITHHELD = 'The current analysis permission does not allow this comparison to be shown, so there is no conclusion to report. Nothing in your model changed.';
+
+    /** A second real Run is newest on exactly the same graph; the clock separates executions deterministically. */
+    async function newerRun() {
+      const runA = runFacts[0] as Rec;
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.parse(runA.result.computed_at) + 1_000);
+      let next: Awaited<ReturnType<typeof realRun>>;
+      try { next = await realRun('baseline-b'); } finally { vi.useRealTimers(); }
+      const runB = next.fact;
+      expect((runB as Rec).result.run_id).not.toBe(runA.result.run_id);
+      expect((runB as Rec).result.graph_hash_at_run).toBe(runA.result.graph_hash_at_run);
+      runFacts.unshift(runB);
+      runRows.unshift({ fact: runB, fact_row_id: 'run-b-row', fact_created_at: (runB as Rec).result.computed_at, turn_id: 'baseline-b-row' });
+      runTurns.unshift({ ...runTurns[0], id: 'baseline-b-row', turn_id: next.payload.turn_id,
+        created_at: (runB as Rec).result.computed_at, request_hash: 'baseline-b' });
+      const { readScenarioAnalysis } = await import('../../../routes/scenario-graph-analysis-read.js');
+      let selectedRunId: unknown;
+      const read = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'licensed-read-b',
+        onCurrentnessRead: (current) => { selectedRunId = (current.fact as Rec)?.result?.run_id; } });
+      expect(selectedRunId).toBe((runB as Rec).result.run_id);
+      expect(read.analysis_state?.run_state.kind).toBe('complete_current');
+      expect(read.analysis_state?.run_state).toMatchObject({ kind: 'complete_current', computed_at: (runB as Rec).result.computed_at });
+      expect(read.analysis_result).not.toBeNull();
+      graphRead = { graph, graph_hash: (runB as Rec).result.graph_hash_at_run, ...read };
+    }
+
+    async function retry(form: 'exact' | 'chipless', on = app) {
+      return post(PRESS, {}, form === 'chipless' ? { source: 'retry', chip: undefined } : {}, on);
+    }
+
+    function replayIs(response: Awaited<ReturnType<typeof post>>, expected: string, calls: number) {
+      const body = response.json();
+      expect(response.statusCode).toBe(200);
+      expect(body._agent.replayed).toBe(true);
+      expect(body.assistant_text).toBe(expected);
+      expect(body.blocks).toEqual([]);
+      if (expected === STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY) expect(body.assistant_text).not.toContain('What I tested:');
+      expect(plotCalls).toHaveLength(calls);
+      expect(provider).not.toHaveBeenCalled();
+      expect(body._provider_calls).toEqual([]);
+    }
+
+    it('F1-R1: an issue introduced only after dispatch withholds the final presentation', async () => {
+      const adapter = await import('../method-turn/structural-challenge-turn.js');
+      const presented = vi.spyOn(adapter, 'structuralChallengeTurnUnderLicence');
+      lateScope = true;
+      try {
+        const response = await post(PRESS);
+        const body = response.json();
+        expect(response.statusCode).toBe(200);
+        expect(body._diagnostic_trace.fast_path).toBe('method');
+        expect(body.assistant_text).toBe(WITHHELD);
+        expect(body.assistant_text).not.toContain('What I tested:');
+        expect(presented.mock.results.at(-1)?.value?.result?.status).toBe('withheld');
+        expect(plotCalls).toHaveLength(1);
+        noModelCallsOrGraphWrites(body);
+      } finally { presented.mockRestore(); }
+    });
+
+    it('F1-C1: the same harness without a late issue still presents the full accepted answer', async () => {
+      await accepted(PRESS);
+    });
+
+    for (const form of ['exact', 'chipless'] as const) {
+      it(`F2-${form === 'exact' ? 'R1' : 'R2'}: ${form} retry cannot present Run A beside newer Run B`, async () => {
+        const live = await accepted(PRESS);
+        await newerRun();
+        expect(plotCalls).toHaveLength(2);
+        expect(live.assistant_text).not.toBe(STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY);
+        replayIs(await retry(form), STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY, 2);
+      });
+    }
+
+    it('F2-R3: after a restart both retry forms refuse even while Run A is current', async () => {
+      await accepted(PRESS);
+      const cold = await buildApp(true);
+      try {
+        for (const form of ['exact', 'chipless'] as const) replayIs(await retry(form, cold), STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY, 1);
+      } finally { await cold.close(); }
+    });
+
+    it('F2-C1: both warm retry forms re-present the original live reply byte for byte on Run A', async () => {
+      const live = await accepted(PRESS);
+      for (const form of ['exact', 'chipless'] as const) replayIs(await retry(form), live.assistant_text, 1);
+    });
+
+    it('F2-C2: a chipless ordinary-chip retry keeps exactly its stored words', async () => {
+      const live = await post('not-a-press');
+      expect(live.statusCode).toBe(200);
+      expect(live.json().assistant_text).toBe('normal');
+      expect(provider).toHaveBeenCalledTimes(1);
+      provider.mockClear();
+      const response = await post('not-a-press', {}, { source: 'retry', chip: undefined });
+      replayIs(response, live.json().assistant_text, 0);
+    });
   });
 });

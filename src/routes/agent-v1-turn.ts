@@ -119,10 +119,9 @@ import {
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
 import { dispatchDecisionFlip } from '../orchestrator-v5/handlers/decision-flip-dispatch.js';
-import { dispatchStructuralChallenge } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
-import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengeRefusal, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
+import { dispatchStructuralChallenge, readStructuralChallengeReceipt } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
+import { STRUCTURAL_CHALLENGE_PRESS_PREFIX, parseStructuralChallengePress, structuralChallengeRefusal, structuralChallengeReplay, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengePressResolution, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
 import { readStructuralChallengeEdge } from '../orchestrator-v5/coaching/structural-challenge-eligibility.js';
-import type { StructuralChallengeFinalRead } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
 import { guidanceRequestOf, turnGuidanceFor, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
 import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
@@ -343,6 +342,17 @@ function rememberMeasuredWhatChanges(key: string, measured: MeasuredWhatChanges)
     if (oldest !== undefined) measuredWhatChanges.delete(oldest);
   }
   measuredWhatChanges.set(key, measured);
+}
+/** SCI-DEEP remembers the typed presentation, not stored prose: a replay must bind it to today's selected Run. */
+const PRESENTED_STRUCTURAL_CHALLENGES_MAX = 500;
+const presentedStructuralChallenges = new Map<string, StructuralChallengeTurn>();
+function rememberStructuralChallenge(key: string, turn: StructuralChallengeTurn): void {
+  presentedStructuralChallenges.delete(key);
+  if (presentedStructuralChallenges.size >= PRESENTED_STRUCTURAL_CHALLENGES_MAX) {
+    const oldest = presentedStructuralChallenges.keys().next().value;
+    if (oldest !== undefined) presentedStructuralChallenges.delete(oldest);
+  }
+  presentedStructuralChallenges.set(key, turn);
 }
 function whatWouldChangeAnswer(scenarioId: string, read: Parameters<typeof tippingPointCoachingFor>[1] & { readonly analysisReady?: unknown },
   measured: MeasuredWhatChanges | null, sentText?: string | null): {
@@ -1210,6 +1220,8 @@ export function agentTurnRequestHash(scenarioId: string, userId: string | null, 
  * `source: 'retry'`). `sameAgentTurnRequest` lets exactly that retry replay the recorded press (Codex pre-review P1).
  */
 const CHIP_HASH_SEP = '#chip:';
+/** A durable typed discriminator lets the UI's chipless retry recognise SCI-DEEP without reversing the digest. */
+export const STRUCTURAL_CHALLENGE_HASH_TAG = 'sci-deep:';
 export function chipOperationOf(body: Record<string, unknown>): string | undefined {
   const chip = body['chip'];
   if (chip === null || typeof chip !== 'object') return undefined;
@@ -1217,9 +1229,9 @@ export function chipOperationOf(body: Record<string, unknown>): string | undefin
   return `chip:${JSON.stringify([typeof id === 'string' ? id : null, typeof actionType === 'string' ? actionType : null])}`;
 }
 /** The turn's request hash with its chip bound, when it has one (see `chipOperationOf`). */
-export function withChipOperation(requestHash: string, chipOperation: string | undefined): string {
+export function withChipOperation(requestHash: string, chipOperation: string | undefined, tag = ''): string {
   return chipOperation === undefined ? requestHash
-    : `${requestHash}${CHIP_HASH_SEP}${createHash('sha256').update(chipOperation).digest('hex').slice(0, 32)}`;
+    : `${requestHash}${CHIP_HASH_SEP}${tag}${createHash('sha256').update(chipOperation).digest('hex').slice(0, 32)}`;
 }
 /** A UI retry: `source: 'retry'` and no chip (the UI drops it on a retry). */
 export function isChiplessRetry(body: Record<string, unknown>): boolean {
@@ -1773,10 +1785,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const approvedProposal = typedApprovalOf(body);
     const explanationId = (body['chip'] as { id?: unknown } | null | undefined)?.id;
     const ownOperation = approvedProposal !== undefined ? `approve:${approvedProposal}` : isRunExplanationChip(explanationId) ? explanationId : undefined;
+    const pressedChipIsStructural = typeof explanationId === 'string' && explanationId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX);
     const requestHash = withChipOperation(agentTurnRequestHash(scenarioId, userId, message, ownOperation),
-      ownOperation === undefined ? chipOperationOf(body) : undefined);
+      ownOperation === undefined ? chipOperationOf(body) : undefined, pressedChipIsStructural ? STRUCTURAL_CHALLENGE_HASH_TAG : '');
     const chiplessRetry = isChiplessRetry(body);
-    /** The response a replay returns: the ORIGINAL words, on today's state, with no model call. */
+    /** A replay returns the bound presentation on today's state, with no model call. */
     /** The `gmh_` handles of the product's held add-options still live on the latest answer row (C52). A failed read is none. */
     const liveHeldRefs = async (sid: string): Promise<string[]> => {
       if (typeof store.readMostRecentPendingActions !== 'function') return [];
@@ -1823,6 +1836,17 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         const remembered = turnId !== undefined ? measuredWhatChanges.get(`${scenarioId}:${turnId}`) ?? null : null;
         replayText = whatWouldChangeAnswer(scenarioId, state, remembered, prior.assistant_message).text;
         boundControl.push(TALK_IT_THROUGH_CHIP);
+      } else if (approvedProposal === undefined && (pressedChipIsStructural
+        || (chiplessRetry && prior.request_hash.startsWith(`${requestHash}#chip:${STRUCTURAL_CHALLENGE_HASH_TAG}`)))) {
+        /** The durable tag recognises the method after a restart; only a remembered typed turn can carry conclusions. */
+        const remembered = turnId !== undefined ? presentedStructuralChallenges.get(`${scenarioId}:${turnId}`) : undefined;
+        const receipt = remembered === undefined ? undefined : await readStructuralChallengeReceipt({
+          scenarioId, graph: state.graph ?? null, requestId: String(req.id),
+          goalScopeClaimInput: goalScopeClaimInput([...currentScope, ...scopeIssues].filter(p => p.scenario_id === scenarioId), state.graph),
+        });
+        const presented = structuralChallengeReplay(remembered, receipt);
+        replayText = presented.reply;
+        boundControl.push(...presented.actions);
       } else if (approvedProposal === undefined && isRunExplanationChip(explanationId)) {
         const runKey = explanationId.slice(RUN_EXPLANATION_PREFIX.length);
         if (!runExplanationMatches(explanationId, scenarioId, state)) {
@@ -2634,7 +2658,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const widenRun = widenTurn?.kind === 'run' ? widenTurn : undefined;
     /** SCI-DEEP: terminal, deterministic "Test without this link" press. */
     let structuralChallengeTurn: StructuralChallengeTurn | null = null;
-    let structuralChallengeFinalRead: StructuralChallengeFinalRead | undefined;
     if (result === undefined && approvedProposal === undefined && methodTurn === null && widenTurn === null
       && typeof pressedChipId === 'string' && pressedChipId.startsWith(STRUCTURAL_CHALLENGE_PRESS_PREFIX)) {
       // A failure here is still an ANSWERED turn: its typed reply is recorded under turn_id, so the claim is kept
@@ -2667,7 +2690,6 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
             turnMayNameLeader: permissions.leader_may_be_named,
             exploratoryWorkAllowed: permissions.permitted_analysis_mode !== null,
           });
-          if (dispatched.kind === 'result') structuralChallengeFinalRead = dispatched.finalRead;
           return dispatched;
         }, selected);
       } catch (err) {
@@ -2959,10 +2981,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const runStillCurrent = fastPath === 'explain'
       ? await runExplanationCurrentness(store, scenarioId, userId, explanationId, { graph: explanationRead?.graph, briefText: explanationBriefText }) : undefined;
     if (runStillCurrent !== undefined) dispatchLedger.push({ path: 'store:run-currentness', ms: Date.now() - runCheckStarted, status: runStillCurrent ? 200 : 409 });
-    // A successful bound check reuses the exact read that supplied the narration. A mismatch/failure
-    // reads current wire state, but never restores the old explanation's licence.
+    /** A successful bound narration check reuses its read; recomputed methods must see other writers after the wait. */
     const finalRead = runStillCurrent === true && explanationRead !== undefined ? explanationRead
-      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined
+      : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined || structuralChallengeTurn !== null
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
     const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
@@ -3006,10 +3027,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       measuredRunKey = answer.measured?.runKey ?? null;
       if (answer.measured !== null && turnId !== undefined) rememberMeasuredWhatChanges(`${scenarioId}:${turnId}`, answer.measured);
     }
-    // The dispatch has already supplied the identity-bound final receipt; its deterministic adapter has
-    // applied the full licence and only ever narrows a completed result.
+    /** The final pending read may narrow dispatch's licence: presentation uses this graph and retained scope afresh. */
     if (structuralChallengeTurn !== null) {
-      structuralChallengeTurn = structuralChallengeTurnUnderLicence(structuralChallengeTurn, structuralChallengeFinalRead);
+      const receipt = await readStructuralChallengeReceipt({ scenarioId, graph: readbackGraph ?? null, requestId: String(req.id),
+        goalScopeClaimInput: goalScopeClaimInput(retainedScopeIssues.filter(p => p.scenario_id === scenarioId), readbackGraph) });
+      structuralChallengeTurn = structuralChallengeTurnUnderLicence(structuralChallengeTurn, receipt);
+      if (turnId !== undefined) rememberStructuralChallenge(`${scenarioId}:${turnId}`, structuralChallengeTurn);
       text = structuralChallengeTurn.reply;
       result = { ...result, assistant_text: text };
     }

@@ -6,12 +6,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   STRUCTURAL_CHALLENGE_NO_RUN_REPLY,
+  STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY,
   composeStructuralChallengeReply,
   parseStructuralChallengePress,
   structuralChallengePressId,
   structuralChallengeTurnFor,
   structuralChallengeTurnUnderLicence,
+  structuralChallengeReplay,
+  type StructuralChallengeTurn,
 } from '../structural-challenge-turn.js';
+import { TALK_IT_THROUGH_CHIP } from '../method-turn.js';
 import { claimPermissionsFrom } from '../../first-analysis.js';
 import type { StructuralChallengeFinalRead } from '../../../handlers/structural-challenge-dispatch.js';
 import { StructuralChallengeResultV1Schema } from '@talchain/schemas';
@@ -433,4 +437,55 @@ describe('review closure: final presentation is bound to its baseline execution 
       expect(turn?.reply).not.toMatch(/rests on|depends on|doesn.t depend|independent of/i);
     },
   );
+});
+
+/** Replay must preserve safe refusals and rebind conclusions, rather than infer a result from recorded prose. */
+describe('structural challenge replay under a fresh receipt', () => {
+  const remembered = (): StructuralChallengeTurn => structuralChallengeTurnUnderLicence({
+    reply: composeStructuralChallengeReply({ result: changed, labels: LABELS }), outcome: 'completed', result: changed,
+    labels: LABELS, actions: [TALK_IT_THROUGH_CHIP], baselineRunIdentity: BASELINE_IDENTITY, candidateLeaderLicence: 'permitted',
+  }, finalRead());
+
+  function unbound(turn: StructuralChallengeTurn) {
+    expect(turn.reply).toBe(STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY);
+    expect(turn.reply).not.toContain('What I tested:');
+    expect(turn.outcome).toBe('failed');
+    expect(turn.result).toBeNull();
+    expect(turn.labels).toEqual(new Map());
+    expect(turn.actions).toEqual([TALK_IT_THROUGH_CHIP]);
+  }
+
+  it('has no conclusion without remembered authority or a readable fresh receipt', () => {
+    unbound(structuralChallengeReplay(undefined, undefined));
+    unbound(structuralChallengeReplay(remembered(), undefined));
+  });
+  it('re-presents the same current Run byte for byte', () => {
+    const turn = remembered();
+    expect(structuralChallengeReplay(turn, finalRead()).reply).toBe(turn.reply);
+  });
+  it('replaces a conclusion bound to an older Run with the exact unbound reply', () => {
+    const receipt = finalRead();
+    (receipt.currentness!.fact as unknown as { result: Record<string, unknown> }).result.run_id = 'newer-run';
+    unbound(structuralChallengeReplay(remembered(), receipt));
+  });
+  it('keeps a freshly withheld result rather than restoring the comparison', () => {
+    const read = finalRead();
+    const receipt: StructuralChallengeFinalRead = { ...read, currentness: { ...read.currentness!,
+      permissions: { ...read.currentness!.permissions!, total_goal_claims_allowed: false } } };
+    const turn = structuralChallengeReplay(remembered(), receipt);
+    expect(turn.result?.status).toBe('withheld');
+    expect(turn.reply).toBe('The current analysis permission does not allow this comparison to be shown, so there is no conclusion to report. Nothing in your model changed.');
+    expect(turn.reply).not.toContain('What I tested:');
+  });
+  it.each(['unsupported', 'failed', 'stale', 'timed_out', 'withheld'] as const)('preserves an already %s turn unchanged without a receipt', (status) => {
+    const result = { ...changed, status, reason: null, claims: [], pair_provenance: null, not_compared: [] };
+    const turn: StructuralChallengeTurn = { ...remembered(), outcome: status, result,
+      reply: composeStructuralChallengeReply({ result, labels: LABELS }) };
+    expect(structuralChallengeReplay(turn, undefined)).toBe(turn);
+  });
+  it('preserves a no-Run refusal unchanged without a receipt', () => {
+    const turn: StructuralChallengeTurn = { reply: STRUCTURAL_CHALLENGE_NO_RUN_REPLY, outcome: 'no_run', result: null,
+      labels: new Map(), actions: [] };
+    expect(structuralChallengeReplay(turn, undefined)).toBe(turn);
+  });
 });

@@ -265,6 +265,21 @@ export function structuralChallengeTurnUnderLicence(
     certainty: turn.certainty, leaderLicence: licence, claimPermissions: permission.permissions }) };
 }
 
+export const STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY =
+  'I can\'t show this link test again because it may not match your current analysis. Open the link on the canvas and choose "Test without this link" to test it against the current analysis. Nothing in your model changed.';
+
+/** A replay re-presents a remembered SCI-DEEP turn only under a fresh receipt; never the stored words. */
+export function structuralChallengeReplay(
+  remembered: StructuralChallengeTurn | undefined, receipt: StructuralChallengeFinalRead | undefined,
+): StructuralChallengeTurn {
+  const unbound = (): StructuralChallengeTurn => ({ reply: STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY,
+    outcome: 'failed', result: null, labels: new Map(), actions: [TALK_IT_THROUGH_CHIP] });
+  if (remembered === undefined) return unbound();
+  if (remembered.result?.status !== 'completed') return remembered;
+  const presented = structuralChallengeTurnUnderLicence(remembered, receipt);
+  return presented.result?.status === 'completed' || presented.result?.status === 'withheld' ? presented : unbound();
+}
+
 export const STRUCTURAL_CHALLENGE_NO_RUN_REPLY =
   'There is no analysis to test yet. Run the analysis first, then try "Test without this link".';
 
