@@ -106,6 +106,10 @@ import { readBrief, readingWithin, BRIEF_READING_TIMEOUT_MS, BRIEF_ROUTE_WAIT_MS
 import { enforceAgentLaneLeaderClaimsAtWire } from '../orchestrator-v5/agent-lane/withheld-leader-fail-closed.js';
 import { enforceLeaderLicenceAtFinalEgress } from '../orchestrator-v5/agent-lane/leader-final-egress.js';
 import { modelFacingToolResult, runToolOutputLicensesLeader, withoutLeaderDesignations } from '../orchestrator-v5/agent-lane/licensed-run-view.js';
+import { robustnessHonestySentence } from '../orchestrator-v5/coaching/analysis-result-headline.js';
+import { isRawFragile } from '../orchestrator-v5/coaching/robustness-honesty.js';
+import { readRawRobustnessSignals } from '../orchestrator-v5/coaching/pick-raw-robustness.js';
+import { collectFactorIdsSetByEveryOption } from '../orchestrator-v5/context/intervention-controlled-drivers.js';
 import { leaderLicenceFromState } from '../orchestrator-v5/compose/leader-licence.js';
 import { composeLeaderClaim, composeAnalysisStateV1, NO_ANALYSIS_CONTEXT_DERIVATION, WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
@@ -2428,8 +2432,26 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const ms = Date.now() - fastStartedAt;
       const providerMs = runInterpreted ? Math.min(Date.now() - providerStartedAt, ms) : 0;
       // M2: with no interpretation, a rerun still says Olumi's code line rather than nothing about what changed.
-      const text = interpreted?.answer ?? (matches
+      let text = interpreted?.answer ?? (matches
         ? (rerunPlan?.fallback ?? interpretationUnavailableText({ ok: true, ran: true })) : RUN_EXPLANATION_UNAVAILABLE_TEXT);
+      /**
+       * DL ruling: BUILD, HIGH — permission to name a leader is not robustness, and the prompt-only
+       * fragility guard can leave licensed Explain narration unqualified. Append one server-owned
+       * sentence from this selected Run's typed evidence, before disclosures, asks and basis lines.
+       * Replays return stored words; exact sentence equality prevents a narrator copy being doubled.
+       */
+      const enrichment = (st.analysisResult as { enrichment?: Record<string, unknown> } | null | undefined)?.enrichment;
+      if (fastPath === 'explain' && interpreted !== undefined && narrationStatus === 'ready'
+        && text !== interpretationUnavailableText({ ok: true, ran: true }) && text !== RUN_EXPLANATION_UNAVAILABLE_TEXT
+        && text !== RUN_EXPLANATION_LEGACY_UNAVAILABLE_TEXT && text !== rerunPlan?.fallback
+        && runToolOutputLicensesLeader(selectedRun)
+        && enrichment != null && isRawFragile(readRawRobustnessSignals(enrichment.robustness))) {
+        const sentence = robustnessHonestySentence(enrichment, collectFactorIdsSetByEveryOption(st.graph));
+        if (!text.includes(sentence)) {
+          text = `${text.trimEnd()} ${sentence}`;
+          hostComposed = true;
+        }
+      }
       result = {
         assistant_text: text,
         items: [...priorAndRun, ...(interpreted?.messages ?? [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }])],

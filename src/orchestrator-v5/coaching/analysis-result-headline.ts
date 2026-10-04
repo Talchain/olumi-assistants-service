@@ -2370,6 +2370,21 @@ function isNotRobust(enrichment: Record<string, unknown>): boolean {
 }
 
 /**
+ * One robustness-honesty selection rule for the headline and licensed Explain replies.
+ * A positive no-flip attestation changes the reason only when it is not guaranteed
+ * by every option setting every swept factor. Undefined keeps today's non-vacuous
+ * reading; trimming lets other composers own their spacing without changing either sentence.
+ */
+export function robustnessHonestySentence(
+  enrichment: Record<string, unknown>,
+  factorIdsSetByEveryOption?: ReadonlySet<string>,
+): string {
+  return (readFlipClaimPosture(enrichment) === 'attested_no_flip'
+    && !isNoFlipAttestationVacuous(enrichment, factorIdsSetByEveryOption)
+    ? NOT_ROBUST_NO_FLIP_SENTENCE : NOT_ROBUST_SENTENCE).trim();
+}
+
+/**
  * Build the Mission B narration tail: robustness honesty first, then the
  * eliminated-options clause. Empty string when neither applies — the
  * headline is then byte-identical to the pre-doctrine output.
@@ -2381,19 +2396,7 @@ function buildNarrationTail(
 ): string {
   let tail = '';
   if (isNotRobust(enrichment)) {
-    // 2.278: the run's OWN flip evidence picks the REASON. `permitted` — which
-    // includes every run carrying no flip evidence at all — keeps the original
-    // sentence byte-identical.
-    //
-    // P2: an attestation over factors EVERY option sets is vacuous — the sweep
-    // could not have moved the winner — so it is treated exactly like no flip
-    // evidence (`permitted`) rather than stated as a finding. The VERDICT stays:
-    // dropping the sentence would hide a true caveat (see 2.278 above).
-    tail +=
-      readFlipClaimPosture(enrichment) === 'attested_no_flip' &&
-      !isNoFlipAttestationVacuous(enrichment, factorIdsSetByEveryOption)
-        ? NOT_ROBUST_NO_FLIP_SENTENCE
-        : NOT_ROBUST_SENTENCE;
+    tail += ` ${robustnessHonestySentence(enrichment, factorIdsSetByEveryOption)}`;
   }
   if (winner.eliminatedCount >= ELIMINATED_MIN_COUNT) {
     tail += eliminatedSentence(winner.eliminatedCount);

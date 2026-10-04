@@ -36,7 +36,15 @@ const reply = (id: string): Reply => {
 const SERVED_RUN = JSON.parse(readFileSync(new URL('../../coaching/__tests__/fixtures/c19-8428207-B.run-turns.trimmed.json', import.meta.url), 'utf8')) as {
   turns: { t2: { analysis_result: { type: string; computed_against_hash: string } & Record<string, unknown> } };
 };
-const RESULT_BLOCK = SERVED_RUN.turns.t2.analysis_result;
+/**
+ * Shaping controls require no host robustness sentence. Keep the served block's identity
+ * and other fields, but make this incidental raw signal robust; licensed fragile Explain
+ * replies now ship whole, pinned by explain-low-robustness-caveat.route.test.ts.
+ */
+const SERVED_RESULT_BLOCK = SERVED_RUN.turns.t2.analysis_result;
+const RESULT_BLOCK = { ...SERVED_RESULT_BLOCK, enrichment: {
+  ...(SERVED_RESULT_BLOCK.enrichment as Record<string, unknown>), robustness: { level: 'high', is_robust: true },
+} };
 const GRAPH_HASH = RESULT_BLOCK.computed_against_hash;
 
 const WITHHELD_STATE = { ...FX.state.analysis_state, run_state: { ...(FX.state.analysis_state.run_state as Record<string, unknown>), computed_at: '2026-10-01T12:00:00.000Z' } };
