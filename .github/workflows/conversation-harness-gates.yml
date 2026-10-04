@@ -48,16 +48,7 @@ name: Conversation Harness Gates
 # touches the harness, whatever branch protection says.
 
 on:
-  pull_request:
-    branches: [main, staging]
-    paths:
-      - 'tools/conversation-harness/**'
-      - 'src/orchestrator-v5/**'
-      # Transitively typechecked by the harness tsconfig — see the PATHS note above.
-      - 'tests/utils/**'
-      - '.github/workflows/conversation-harness-gates.yml'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
+  # PoC speed (4 Oct 2026): pull_request trigger removed; runs after merge on push.
   push:
     branches: [staging]
     paths:

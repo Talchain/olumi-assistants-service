@@ -17,8 +17,7 @@ name: Golden Journey Replay
 # or the fail-closed self-test regressed.
 
 on:
-  pull_request:
-    branches: [main, staging]
+  # PoC speed (4 Oct 2026): pull_request trigger removed; runs after merge on push.
   push:
     branches: [staging]
 

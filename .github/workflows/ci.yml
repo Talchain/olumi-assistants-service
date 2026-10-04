@@ -428,6 +428,8 @@ jobs:
   # new test failures or a coverage drop — not a stale aspiration.
   full-test-suite:
     name: Full Test Suite (advisory)
+    # PoC speed (4 Oct 2026): not on the pull-request path. Runs after merge, on push to staging/main.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -469,6 +471,8 @@ jobs:
   # separately from the in-process required gate.
   integration-tests:
     name: Integration Tests (advisory)
+    # PoC speed (4 Oct 2026): not on the pull-request path. Runs after merge, on push to staging/main.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -520,6 +524,8 @@ jobs:
   # Job B: Security audit
   security:
     name: Security Audit
+    # PoC speed (4 Oct 2026): not on the pull-request path. Runs after merge, on push to staging/main.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
