@@ -18,12 +18,14 @@ export function parseAnswerGuidance(value: unknown): AnswerGuidance | null {
   if (!record(value) || Object.keys(value).length !== 2 || value.version !== 1 || !record(value.entries)) return null;
   const pairs = Object.entries(value.entries);
   if (pairs.length > 3) return null;
+  const entries: Record<string, AnswerGuidance['entries'][string]> = {};
   for (const [key, item] of pairs) {
     if (!KEY.test(key) || !record(item) || Object.keys(item).length !== 2
       || typeof item.status !== 'string' || !STATUSES.has(item.status)
       || typeof item.state_key_hash !== 'string' || !HASH.test(item.state_key_hash)) return null;
+    entries[key] = { status: item.status as GuidanceRecord['status'], state_key_hash: item.state_key_hash };
   }
-  return value as unknown as AnswerGuidance;
+  return { version: 1, entries };
 }
 
 /** Newest first; the latest event for each existing selector key wins. No new cooldown policy. */
