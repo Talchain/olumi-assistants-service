@@ -157,7 +157,7 @@ import {
   type FirstAnalysisOutcome,
 } from '../orchestrator-v5/agent-lane/first-analysis.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
-import { ANSWER_SHAPE_MAX_BULLETS, AnswerShapeSchema, deriveAnswerTextFromShape, synthBulletLineText, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure } from '../orchestrator-v5/routing/answer-shape.js';
+import { ANSWER_SHAPE_MAX_BULLETS, AnswerShapeSchema, deriveAnswerTextFromShape, synthesiseAnswerShapeFromText, warrantsProgressiveDisclosure, withoutSentenceCopies } from '../orchestrator-v5/routing/answer-shape.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /**
@@ -807,14 +807,10 @@ export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; bl
   if (!carriesResult) return body;
   const text = body.assistant_text;
   if (typeof text !== 'string' || text.trim().length === 0) return body;
-  // The caveat must not manufacture eligibility: remove exact copies before synthesis and the floor.
-  // Normalise spacing while retaining the line breaks that identify narrator bullets.
+  // The caveat must not manufacture eligibility: remove narrator copies before synthesis and the floor.
   const narratorWords = turn.narratorWords ?? text;
-  // A narrator bullet that IS the caveat leaves with its marker (the synthesiser's own bullet rule), never as an empty "- ".
   const caveat = turn.faceCaveat;
-  const wordsWithoutCaveat = caveat === undefined ? narratorWords
-    : narratorWords.split('\n').filter((line) => synthBulletLineText(line)?.trim() !== caveat)
-      .map((line) => line.split(caveat).join(' ').replace(/[^\S\n]+/g, ' ').trimEnd()).join('\n').trim();
+  const wordsWithoutCaveat = caveat === undefined ? narratorWords : withoutSentenceCopies(narratorWords, caveat);
   let shape = synthesiseAnswerShapeFromText(wordsWithoutCaveat);
   if (shape === null) return body;
   const derived = deriveAnswerTextFromShape(shape);
@@ -3355,7 +3351,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && explainEnrichment != null && isRawFragile(readRawRobustnessSignals(explainEnrichment.robustness))) {
       explainRobustnessCaveat = explainRobustnessSentence(analysisResult, composedRead.graph);
       // Whole-text exits keep the caveat after the narrator's at-rest prose, before any folded questions.
-      if (!narrationText.includes(explainRobustnessCaveat)) narrationText = `${narrationText.trimEnd()} ${explainRobustnessCaveat}`;
+      narrationText = withoutSentenceCopies(narrationText, explainRobustnessCaveat);
+      narrationText = [narrationText.trimEnd(), explainRobustnessCaveat].filter(Boolean).join(' ');
       narrationText = withB3LinesAtRest(narrationText, [explainRobustnessCaveat]);
     }
     const basis = fastPath !== 'method'
@@ -3542,8 +3539,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     }
     const finalText = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
     const narratorWithCaveat = narratorWords === null ? null
-      : explainRobustnessCaveat !== null && !narratorWords.includes(explainRobustnessCaveat)
-        ? `${narratorWords.trimEnd()} ${explainRobustnessCaveat}` : narratorWords;
+      : explainRobustnessCaveat === null ? narratorWords
+        : [withoutSentenceCopies(narratorWords, explainRobustnessCaveat).trimEnd(), explainRobustnessCaveat].filter(Boolean).join(' ');
     if (fastPath !== 'method') wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,

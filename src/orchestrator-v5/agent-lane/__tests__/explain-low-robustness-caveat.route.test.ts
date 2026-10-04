@@ -11,7 +11,7 @@ import { readFlipClaimPosture } from '../../context/flip-threshold-rows.js';
 import { reconciliationPending } from '../goal-scope.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answer-shape.js';
-import { robustnessHonestySentence } from '../../coaching/analysis-result-headline.js';
+import { NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../../coaching/analysis-result-headline.js';
 import { collectFactorIdsSetByEveryOption } from '../../context/intervention-controlled-drivers.js';
 import { analysedOptionIds } from '../conditional-input-basis.js';
 import { textAtRest } from '../decision-input-ask.js';
@@ -36,6 +36,10 @@ const BASIS_UNAVAILABLE = 'The sources of this comparison’s factor starting va
 const SENTENCE = 'The result is not yet robust — small changes could flip it.';
 const NO_FLIP_SENTENCE = 'The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.';
 const count = (text: string, sentence: string) => text.split(sentence).length - 1;
+const countSentenceCopies = (text: string, sentence: string) => {
+  const pattern = sentence.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[^\\S\\n]+');
+  return (text.match(new RegExp(pattern, 'g')) ?? []).length;
+};
 const NO_FLIP = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/cross-service/witness-2267-attested-no-flip.json', import.meta.url), 'utf8')) as {
   runs: Record<string, { flip_thresholds: unknown[] }>;
 };
@@ -344,6 +348,53 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(b.assistant_text.slice(b.assistant_text.indexOf(marker))).not.toContain(SENTENCE);
     expect(b.assistant_text.startsWith(`${NARRATOR}\n\n${SENTENCE}`)).toBe(true);
     expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
+  });
+  it('W16: spaced caveat-first narration retains one caveat and the second sentence as headline', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    narrator = `${sentence.replace('robust —', 'robust  —')} ${bulletedNarrator(2)}`;
+    const b = await press(await run());
+    expect(b._answer_shape).toBeDefined();
+    const shape = b._answer_shape!;
+    expect(shape.bullets[0]).toBe(sentence);
+    expect(shape.headline).toBe(NARRATOR);
+    const shapedText = [shape.headline, ...shape.bullets, shape.detail].join('\n');
+    expect(countSentenceCopies(shapedText, sentence)).toBe(1);
+    expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
+    for (const bullet of NARRATOR_BULLETS.slice(0, 2)) {
+      expect(count(shapedText, bullet)).toBe(1);
+      expect(count(b.assistant_text, bullet)).toBe(1);
+    }
+    expect(b.assistant_text).toBe(deriveAnswerTextFromShape(shape));
+  });
+  it('W17a: unsplittable whole narration keeps one trailing caveat after the narrator', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    narrator = `${NARRATOR} ${sentence} ${sentence}`;
+    const b = await press(await run());
+    expect(b._answer_shape).toBeUndefined();
+    expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
+    expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
+    expect(count(b.assistant_text, NARRATOR)).toBe(1);
+    expect(b.assistant_text.indexOf(NARRATOR)).toBeLessThan(b.assistant_text.indexOf(sentence));
+    expect(b.assistant_text.startsWith(`${NARRATOR} ${sentence}`)).toBe(true);
+  });
+  it('W17b: a caveat at rest and in the questions tail becomes one copy before all questions', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    readbackReady = structuredClone(FX.state.analysis_ready);
+    const marker = 'Questions this model does not answer yet:';
+    const questions = ['What baseline should we use?', 'The baseline is unknown'];
+    narrator = `${NARRATOR} ${sentence} ${marker} ${questions[0]}\n${sentence}\n${questions[1]}`;
+    const b = await press(await run());
+    expect(b.narration?.status).toBe('ready');
+    expect(b.analysis_state.leader_claim.permitted).toBe(true);
+    expect(b._answer_shape).toBeUndefined();
+    expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
+    expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
+    const markerAt = b.assistant_text.indexOf(marker);
+    expect(markerAt).toBeGreaterThan(-1);
+    expect(b.assistant_text.indexOf(sentence)).toBeLessThan(markerAt);
+    const questionsTail = b.assistant_text.slice(markerAt);
+    expect(countSentenceCopies(questionsTail, sentence)).toBe(0);
+    for (const question of questions) expect(questionsTail).toContain(question);
   });
   it('unavailable narration of a licensed fragile Run carries no caveat', async () => {
     emptyNarration = true;
