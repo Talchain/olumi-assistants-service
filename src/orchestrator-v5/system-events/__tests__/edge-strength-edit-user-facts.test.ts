@@ -38,6 +38,8 @@ import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { edgeBandStd } from '../../format/edge-strength-bands.js';
 import type { InfluenceBand } from '../../format/influence-bands.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
+import { linkSizing } from '../../../cee/magnitude/link-sizing.js';
+import { sizedLinkTest } from '../../../orchestrator/context/placeholder-parts.js';
 import type { ProposalAction } from '../../routing/types.js';
 import { buildD1Fixture, buildHandlerInvocation } from '../../tools/handlers/d1-shared/__tests__/fixtures.js';
 import { createAdjustEdgeStrengthHandler } from '../../tools/handlers/adjust-edge-strength.js';
@@ -122,6 +124,21 @@ function persistedEdge(result: Awaited<ReturnType<typeof apply>>): RawEdge {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('(1) Paul’s served edge, recorded "very strong" by the user through the Agent', () => {
   const write = () => applyStated(paulGraph(), eventFor(), 'very strong');
+
+  it('the one sizing reader treats this exact edited edge as user-sized, while untouched and placeholder controls withhold', async () => {
+    const before = paulGraph();
+    const sized = sizedLinkTest(before.nodes);
+    expect(linkSizing(before.edges[0])).toBe('placeholder');
+    expect(sized(before.edges[0])).toBe(false);
+
+    const edge = persistedEdge(await write());
+    expect(linkSizing(edge)).toBe('user');
+    expect(sized(edge)).toBe(true);
+
+    const untouchedEstimate = { ...before.edges[0], provenance: { source: 'cee_hypothesis', magnitude: 'olumi_estimate' } };
+    expect(linkSizing(untouchedEstimate)).toBe('olumi_estimate');
+    expect(sized(untouchedEstimate)).toBe(false);
+  });
 
   it('⭐ RED A6e: std is the very-strong band’s own spread (0.0866), not Olumi’s 0.00375', async () => {
     const edge = persistedEdge(await write());

@@ -26,7 +26,7 @@
  * placeholder. Otherwise the normal fold applies. Pure.
  */
 
-import { isSizedOnlyByOlumi, isAcceptedOlumiSize } from '../../cee/magnitude/link-sizing.js';
+import { isSizedOnlyByOlumi, isAcceptedOlumiSize, linkSizing } from '../../cee/magnitude/link-sizing.js';
 import { naturalAmountUnitsOf } from '../../cee/magnitude/frame-defaulted-links.js';
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { isAcceptedOlumiEstimate } from '../../cee/transforms/provenance-display.js';
@@ -193,6 +193,10 @@ const sizerUnitsOf = (nodes: readonly Rec[], limitUnits: ReadonlyMap<unknown, st
  * natural effect speaks only while the edge's mean is the β it was written for (magnitude contract, R&C 5845818897).
  */
 function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefined>): boolean {
+  // The approved strength writer records authorship as `source: 'user_specified'`.
+  // That is already the canonical sizing authority; do not require a natural
+  // effect that this edit path intentionally does not create.
+  if (linkSizing(edge) === 'user') return true;
   const p = isRec(edge.provenance) ? edge.provenance : undefined;
   if (p === undefined || !SIZED_MAGNITUDES.has(p.magnitude)) return false;
   const effect = isRec(p.natural_effect) ? p.natural_effect : undefined;
