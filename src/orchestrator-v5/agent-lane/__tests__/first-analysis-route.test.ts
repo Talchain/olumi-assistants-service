@@ -16,9 +16,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { readFileSync } from 'node:fs';
 import { READY_GRAPH, BLOCKED_GRAPH } from './fixtures/first-analysis-graphs.js';
 import { asSent } from './helpers/as-sent.js';
+import { RUN_RESULT_READY_TEXT, RUN_EXPLANATION_PREFIX } from '../run-explanation.js';
 
 const CC_SERVED = JSON.parse(readFileSync(new URL('./fixtures/cc-olumi-levels-unset-20260930.json', import.meta.url), 'utf8')) as { graph: unknown };
 
@@ -44,13 +46,20 @@ const st = (sid: string): Scenario => {
   }
   return s;
 };
-const hashOf = (s: Scenario) => `rev-${s.revision}`;
+const hashOf = (s: Scenario): string => {
+  if (!knobs.canonicalHash) return `rev-${s.revision}`;
+  const hash = computeAnalysisAffectingGraphHash({ ...s.graph, edges: [...s.graph.edges, ...s.extraEdges] } as never);
+  if (hash === null) throw new Error('The L3 fixture must have a canonical analysis hash.');
+  return hash;
+};
 
 /** Knobs, reset per test. */
 let knobs: {
   graph: typeof READY_GRAPH;
   coachingHash: 'readback' | 'other';
-  runStateKind: 'complete_current' | 'complete_stale';
+  runStateKind: 'complete_current' | 'complete_stale' | 'unknown_degraded';
+  withholdResult?: boolean;
+  canonicalHash?: boolean;
   leaderClaim: Record<string, unknown>;
   analysisReady?: Record<string, unknown>;
   /** F3: extra fields on the readback's analysis_result (the run's brief). */
@@ -130,9 +139,9 @@ async function buildApp(): Promise<FastifyInstance> {
       graph: { ...s.graph, edges: [...s.graph.edges, ...s.extraEdges] },
       graph_hash: H,
       analysis_state: ran
-        ? { run_state: knobs.runStateKind === 'complete_current' ? { kind: 'complete_current', computed_at: '2026-09-24T18:00:00.000Z' } : { kind: 'complete_stale', computed_at: '2026-09-24T18:00:00.000Z', cause: 'graph_changed' }, leader_claim: knobs.leaderClaim, usable_for_prose: true, usable_for_chips: knobs.runStateKind === 'complete_current' }
+        ? { run_state: knobs.runStateKind === 'complete_current' ? { kind: 'complete_current', computed_at: '2026-09-24T18:00:00.000Z' } : knobs.runStateKind === 'complete_stale' ? { kind: 'complete_stale', computed_at: '2026-09-24T18:00:00.000Z', cause: 'graph_changed' } : { kind: 'unknown_degraded', cause: 'derivation_failed' }, leader_claim: knobs.leaderClaim, usable_for_prose: true, usable_for_chips: knobs.runStateKind === 'complete_current' }
         : { run_state: { kind: 'never_run' }, leader_claim: { permitted: false, withheld_reason: 'no_analysis' } },
-      ...(ran && knobs.runStateKind === 'complete_current' ? { analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.', computed_against_hash: H, ...(knobs.analysisResultExtra ?? {}) } } : {}),
+      ...(ran && knobs.runStateKind === 'complete_current' && !knobs.withholdResult ? { analysis_result: { type: 'analysis_result', summary: 'A provisional first pass.', computed_against_hash: H, ...(knobs.analysisResultExtra ?? {}) } } : {}),
       ...(knobs.analysisReady !== undefined ? { analysis_ready: knobs.analysisReady } : {}),
     };
   });
@@ -238,6 +247,106 @@ const buildTurn = (app: FastifyInstance, extra: Record<string, unknown> = {}) =>
   return turn(app, { message: BRIEF, ...extra });
 };
 const RUN_CHIP_ID = 'agent-run-analysis';
+
+describe('L3: a whole build request delivers its canonical first result before narration', () => {
+  let app: FastifyInstance;
+  const message = 'Build the model for improving delivery reliability.';
+  beforeAll(async () => {
+    installFetch(); installRunStub();
+    process.env.AGENT_LANE_ENABLED = 'true'; process.env.AGENT_LANE_PREVIEW = 'false';
+    app = await buildApp();
+  }, 120_000);
+  afterAll(async () => { await app.close(); vi.unstubAllGlobals(); delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW; });
+  beforeEach(() => {
+    nextScenario(); installRunStub(); modelBodies = []; script = [];
+    knobs = { graph: READY_GRAPH, coachingHash: 'readback', runStateKind: 'complete_current', canonicalHash: true, leaderClaim: { permitted: false, withheld_reason: 'auto_initiated' } };
+  });
+  const build = (args: Record<string, unknown> = { whole_request: true }, words = message) => {
+    script = [callTool('build_model_from_brief', { brief: words, ...args }), say('A later narrating call.')];
+    return turn(app, { message: words });
+  };
+
+  it('returns the bound neutral result and its pending Explain control without a narrator', async () => {
+    const b = await build() as Body & { narration?: { status: string; run_key: string } };
+    expect(st(SID).inProcessRuns, JSON.stringify({ tools: b._agent.tool_calls, trace: b._diagnostic_trace })).toHaveLength(1);
+    expect(modelBodies, 'only the selector; construction uses its existing structured call').toHaveLength(1);
+    expect(b.narration?.status).toBe('pending');
+    expect(b._diagnostic_trace.first_analysis).toMatchObject({ narrator_skipped: true });
+    expect(b.suggested_actions.some(c => c.id === `${RUN_EXPLANATION_PREFIX}${b.narration?.run_key}`)).toBe(true);
+    expect(b.blocks?.find(x => x.type === 'analysis_result')?.summary).toBe('A provisional first pass.');
+    expect(b.assistant_text).not.toContain('A later narrating call.');
+    expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+    expect(b.assistant_text).not.toContain('the strongest');
+  });
+
+  it.each([undefined, false])('keeps narration when whole_request is %s', async marker => {
+    const b = await build(marker === undefined ? {} : { whole_request: marker });
+    expect(modelBodies).toHaveLength(2);
+    expect(b.assistant_text).toContain('A later narrating call.');
+  });
+
+  it.each([
+    'Build the model and tell me what evidence we need',
+    'Build the model. Answer “What evidence should we collect?”',
+    'Construye el modelo y dime qué evidencia necesitamos',
+    'モデルを作り、必要な証拠を教えてください',
+  ])('keeps a typed incomplete request narrated regardless of its wording: %s', async words => {
+    // The selector already carries request coverage. This fixture does not classify the user's language.
+    const b = await build({ whole_request: false }, words);
+    expect(modelBodies).toHaveLength(2);
+    expect(b.assistant_text).toContain('A later narrating call.');
+    expect(b._diagnostic_trace.first_analysis).toMatchObject({ narrator_skipped: false });
+  });
+
+  it('does not let quoted punctuation veto a typed complete build request', async () => {
+    const b = await build({ whole_request: true }, 'Build the model for our “What next?” programme.');
+    expect(modelBodies).toHaveLength(1);
+    expect(b._diagnostic_trace.first_analysis).toMatchObject({ narrator_skipped: true });
+    expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+  });
+
+  it('keeps narration when request coverage is not a boolean', async () => {
+    const b = await build({ whole_request: 'true' });
+    expect(modelBodies).toHaveLength(2);
+    expect(b.assistant_text).toContain('A later narrating call.');
+  });
+
+  it('keeps narration when admission prevents the automatic Run', async () => {
+    knobs.graph = BLOCKED_GRAPH;
+    const b = await build();
+    expect(st(SID).inProcessRuns).toHaveLength(0);
+    expect(modelBodies).toHaveLength(2);
+    expect(b.assistant_text).toContain('A later narrating call.');
+  });
+
+  it('keeps narration when the automatic Run fails', async () => {
+    runStub.impl = async () => { throw new Error('run unavailable'); };
+    const b = await build();
+    expect(modelBodies).toHaveLength(2);
+    expect(b.assistant_text).toContain('A later narrating call.');
+  });
+
+  it('a stale final read never claims a ready result or offers an old explanation', async () => {
+    knobs.runStateKind = 'complete_stale';
+    const b = await build() as Body & { narration?: { status: string } };
+    expect(st(SID).inProcessRuns, JSON.stringify({ tools: b._agent.tool_calls, trace: b._diagnostic_trace })).toHaveLength(1);
+    expect(b.blocks?.some(x => x.type === 'analysis_result')).toBe(false);
+    expect(b.suggested_actions.some(c => c.id.startsWith('agent-explain-run:'))).toBe(false);
+    expect(b.narration?.status).not.toBe('pending');
+    expect(b.assistant_text).not.toContain(RUN_RESULT_READY_TEXT);
+  });
+
+  it.each(['degraded', 'withheld'] as const)('%s final read cannot claim ready or expose an explanation', async kind => {
+    if (kind === 'degraded') knobs.runStateKind = 'unknown_degraded';
+    else knobs.withholdResult = true;
+    const b = await build() as Body & { narration?: { status: string } };
+    expect(st(SID).inProcessRuns, JSON.stringify({ tools: b._agent.tool_calls, trace: b._diagnostic_trace })).toHaveLength(1);
+    expect(b.blocks?.some(x => x.type === 'analysis_result')).toBe(false);
+    expect(b.suggested_actions.some(c => c.id.startsWith(RUN_EXPLANATION_PREFIX))).toBe(false);
+    expect(b.narration?.status).not.toBe('pending');
+    expect(b.assistant_text).not.toContain(RUN_RESULT_READY_TEXT);
+  });
+});
 
 describe('the Agent route runs the first analysis itself, once', () => {
   let app: FastifyInstance;
@@ -695,4 +804,3 @@ describe('F3: the first reply names the goal it could not check', () => {
     expect(b.assistant_text).not.toContain('is not checked yet');
   });
 });
-
