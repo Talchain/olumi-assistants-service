@@ -35,6 +35,7 @@ import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { issueContextPacket } from '../runtime/request-assembly.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
+import { reconcileScenarioAnalysisFacts, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT } from '../../context/reconcile-scenario-analysis-facts.js';
 
 type Json = Record<string, any>;
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url), 'utf8')) as Json;
@@ -53,16 +54,31 @@ const WITHHELD_CLAIM = { permitted: false, withheld_reason: 'constraint_verdict_
 let read: Json = {};
 let selectedFacts: ReturnType<typeof selectedRunContextPair> = [];
 let selectedVersions = [FROM, TO];
+let unreadVersions = new Set<string>();
+let versionPageFailure = false;
+const versionListCalls: (number | undefined)[] = [];
 vi.mock('../../model-management/index.js', async original => ({
   ...await original<Record<string, unknown>>(),
   getModelManagementService: () => ({
-    listVersions: async () => ({ status: 'ok', value: selectedVersions }),
-    getVersion: async (_scenario: string, id: string) => ({ status: 'ok', value: selectedVersions.find(v => v.id === id) }),
+    listVersions: async (_scenario: string, limit = 50, beforeSequence?: number) => {
+      versionListCalls.push(beforeSequence);
+      if (versionPageFailure && beforeSequence !== undefined) return { status: 'disabled' };
+      return { status: 'ok', value: selectedVersions.filter(v => beforeSequence === undefined || v.version_number < beforeSequence)
+        .sort((a, b) => b.version_number - a.version_number).slice(0, limit) };
+    },
+    getVersion: async (_scenario: string, id: string) => unreadVersions.has(id)
+      ? { status: 'error', error: { code: 'store_error', recoverable: true, message: 'Offline unread version fixture.' } }
+      : { status: 'ok', value: selectedVersions.find(v => v.id === id) },
   }),
 }));
 vi.mock('../../build-turn-context.js', async original => ({
   ...await original<Record<string, unknown>>(),
-  loadScenarioAnalysisFactsForRead: async () => ({ factSet: { status: 'complete', source: 'scenario', facts: selectedFacts, total_count: selectedFacts.length }, hotWindow: { status: 'ok', facts: selectedFacts } }),
+  loadScenarioAnalysisFactsForRead: async () => ({ factSet: reconcileScenarioAnalysisFacts({ scenarioId: SCENARIO,
+    hotWindowFacts: [], durableRead: { status: 'ok', scenario_id: SCENARIO,
+      query_limit: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT, total_count: selectedFacts.length,
+      facts: selectedFacts.slice(0, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT).map((fact, i) => ({ fact,
+        fact_row_id: `selected-row-${i}`, fact_created_at: new Date(Date.UTC(2026, 9, 2, 12, 0, 59 - i)).toISOString() })) },
+  }), hotWindow: { status: 'ok', facts: selectedFacts } }),
 }));
 const fresh = (): Json => JSON.parse(JSON.stringify(SERVED)) as Json;
 /** The Run turn's own `analysis_ready`: the same admission the read carries (the turn and the read agree). */
@@ -127,7 +143,8 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { read = fresh(); selectedFacts = selectedRunContextPair(read.graph_hash, read.analysis_state.run_state.computed_at); rows.length = 0; modelBodies = []; });
+  beforeEach(() => { read = fresh(); selectedFacts = selectedRunContextPair(read.graph_hash, read.analysis_state.run_state.computed_at);
+    unreadVersions = new Set(); versionPageFailure = false; versionListCalls.length = 0; rows.length = 0; modelBodies = []; });
 
   type First = { suggested_actions: { id: string }[]; _agent: { session_id: string } };
   const run = async (): Promise<First> => {
@@ -166,7 +183,7 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     fixtures.forEach((f, i) => { f.fact_version = 1; f.result.scenario_id = SCENARIO;
       f.result.leading_option_id = i === 0 ? 'opt-a' : 'opt-b'; f.result.summary = 'Recorded model-relative comparison.'; });
     change?.(fixtures, graphs);
-    selectedVersions = graphs.map((g, i) => versionRecord(GraphStateIngressSchema.parse(g), { id: i === 0 ? FROM.id : TO.id, scenario_id: SCENARIO }));
+    selectedVersions = graphs.map((g, i) => versionRecord(GraphStateIngressSchema.parse(g), { id: i === 0 ? FROM.id : TO.id, scenario_id: SCENARIO, version_number: i + 1 }));
     fixtures.forEach((f, i) => { f.result.graph_hash_at_run = deriveDecisionContextGraphHash(graphs[i]); });
     selectedFacts = fixtures.reverse().map(f => RunAnalysisHandlerFactSchema.parse(f));
     const graph = graphs[1]!;
@@ -197,6 +214,130 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     expect(modelState).toBeDefined();
     return modelState!;
   };
+
+  const modelInput = (consumer: 'ordinary' | 'cold') => consumer === 'ordinary' ? ordinaryLoopState() : coldState();
+  const endpointConsumers = (['prior', 'current'] as const).flatMap(endpoint =>
+    (['ordinary', 'cold'] as const).map(consumer => ({ endpoint, consumer })));
+  const canonicalPairWithEdgeAuthorship = (endpoint: 'prior' | 'current') => canonicalPair((_facts, graphs) => {
+    const graph = graphs[endpoint === 'prior' ? 0 : 1]!;
+    graph.nodes.find((n: Json) => n.id === 'n_price').observed_state.source = 'cee_inference';
+    graph.edges.forEach((e: Json) => { e.provenance.source = 'brief_extraction'; e.defaulted = false; });
+  });
+  const addCappedHistory = async () => {
+    const older = Array.from({ length: 19 }, (_, i) => {
+      const fact = JSON.parse(JSON.stringify(selectedFacts[1])) as Json;
+      fact.result.run_id = `older-${i}`;
+      fact.result.computed_at = new Date(Date.UTC(2026, 9, 1, 0, 0, 59 - i)).toISOString();
+      return RunAnalysisHandlerFactSchema.parse(fact);
+    });
+    selectedFacts.push(...older);
+    const answer = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: read.graph, requestId: 'capped-selected-pair',
+      analysisInvalidatedAt: null, goalScopeClaimInput: { status: 'clear', issues: [] } });
+    read.analysis_state = answer.analysis_state; read.analysis_result = answer.analysis_result; read.current_read = answer.current_read;
+    return answer;
+  };
+
+  it.each(endpointConsumers)(
+    'saved admission evidence: $endpoint / $consumer / defaulted edge cannot borrow today’s permission', async ({ endpoint, consumer }) => {
+      const index = endpoint === 'prior' ? 0 : 1;
+      await canonicalPairWithEdgeAuthorship(endpoint);
+      const permitted = selectedVersions[index]!;
+      expect(buildCanonicalAnalysisReadyFromGraph(permitted.graph)?.analysis_admission?.permitted_analysis_mode).toBe('comparative_leader');
+      const restrictive = JSON.parse(JSON.stringify(permitted.graph)) as Json;
+      restrictive.edges.forEach((e: Json) => { e.defaulted = true; });
+      expect(deriveDecisionContextGraphHash(restrictive)).toBe(deriveDecisionContextGraphHash(permitted.graph));
+      expect(buildCanonicalAnalysisReadyFromGraph(restrictive)?.analysis_admission?.permitted_analysis_mode).toBe('quantified_provisional');
+      // Retain a permissive same-hash match as well: any restrictive candidate must win.
+      selectedVersions.push(versionRecord(GraphStateIngressSchema.parse(restrictive), { id: 'restrictive-version', scenario_id: SCENARIO, version_number: 3 }));
+      const wire = JSON.stringify(read.current_read);
+      expect(read.analysis_state.leader_claim.permitted).toBe(true);
+      expect((await modelInput(consumer)).analysis).not.toHaveProperty('run_delta');
+      expect(JSON.stringify(read.current_read)).toBe(wire);
+    });
+
+  it.each(endpointConsumers)('missing recorded $endpoint evidence omits the delta from $consumer', async ({ endpoint, consumer }) => {
+    await canonicalPair();
+    const delta = read.current_read.run_delta;
+    expect((await modelInput(consumer)).analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
+    const wire = JSON.stringify(read.current_read);
+    selectedVersions.splice(endpoint === 'prior' ? 0 : 1, 1);
+    expect((await modelInput(consumer)).analysis).not.toHaveProperty('run_delta');
+    expect(JSON.stringify(read.current_read)).toBe(wire);
+  });
+
+  it.each(endpointConsumers)('complete version history: hidden restrictive $endpoint evidence reaches $consumer', async ({ endpoint, consumer }) => {
+    const index = endpoint === 'prior' ? 0 : 1;
+    await canonicalPairWithEdgeAuthorship(endpoint);
+    const graph = selectedVersions[index]!.graph;
+    const restrictive = JSON.parse(JSON.stringify(graph)) as Json;
+    restrictive.edges.forEach((e: Json) => { e.defaulted = true; });
+    expect(deriveDecisionContextGraphHash(restrictive)).toBe(deriveDecisionContextGraphHash(graph));
+    selectedVersions = [versionRecord(GraphStateIngressSchema.parse(restrictive), { id: 'hidden-restrictive', scenario_id: SCENARIO, version_number: 1 }),
+      ...Array.from({ length: 50 }, (_, i) => ({ ...selectedVersions[i % 2]!, id: `permissive-${i}`, version_number: i + 2 }))];
+    const wire = JSON.stringify(read.current_read);
+    expect((await modelInput(consumer)).analysis).not.toHaveProperty('run_delta');
+    expect(versionListCalls).toContain(2);
+    expect(JSON.stringify(read.current_read)).toBe(wire);
+  });
+
+  it.each((['ordinary', 'cold'] as const).flatMap(consumer => [false, true].map(failed => ({ consumer, failed }))))(
+    'complete version history: exactly 50 / $consumer / next-page failure=$failed', async ({ consumer, failed }) => {
+      await canonicalPair();
+      selectedVersions = Array.from({ length: 50 }, (_, i) => ({ ...selectedVersions[i % 2]!, id: `version-${i}`, version_number: i + 1 }));
+      versionPageFailure = failed;
+      const delta = read.current_read.run_delta;
+      const state = await modelInput(consumer);
+      expect(versionListCalls).toContain(1);
+      if (failed) expect(state.analysis).not.toHaveProperty('run_delta');
+      else expect(state.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
+    });
+
+  it.each(endpointConsumers.flatMap(row => (['unread', 'unconfirmed', 'incompatible'] as const).flatMap(evidence =>
+    (['newer', 'older'] as const).map(order => ({ ...row, evidence, order }))))) (
+    'unresolved version candidate: $endpoint / $consumer / $evidence / $order cannot be skipped', async ({ endpoint, consumer, evidence, order }) => {
+      await canonicalPairWithEdgeAuthorship(endpoint);
+      const base = selectedVersions[endpoint === 'prior' ? 0 : 1]!;
+      const graph = JSON.parse(JSON.stringify(base.graph)) as Json;
+      if (evidence === 'incompatible') graph.nodes.find((n: Json) => n.id === 'n_revenue').goal_threshold_unit = 'USD/month';
+      else graph.edges.forEach((e: Json) => { e.defaulted = true; });
+      expect(deriveDecisionContextGraphHash(graph)).toBe(deriveDecisionContextGraphHash(base.graph));
+      const candidate = versionRecord(GraphStateIngressSchema.parse(graph), { id: 'unresolved-candidate', scenario_id: SCENARIO,
+        version_number: order === 'newer' ? 3 : 1,
+        ...(evidence === 'unconfirmed' ? { identity_normaliser_version: 'unconfirmed' } : {}) });
+      if (order === 'older') selectedVersions = selectedVersions.map(v => ({ ...v, version_number: v.version_number + 1 }));
+      selectedVersions.push(candidate);
+      if (evidence === 'unread') unreadVersions.add(candidate.id);
+      const wire = JSON.stringify(read.current_read);
+      expect((await modelInput(consumer)).analysis).not.toHaveProperty('run_delta');
+      expect(JSON.stringify(read.current_read)).toBe(wire);
+    });
+
+  it.each(['ordinary', 'cold'] as const)('capped reader → $0 retains the validated newest exact pair', async consumer => {
+    await canonicalPair();
+    const before = read.current_read.run_delta;
+    const answer = await addCappedHistory();
+    expect(selectedFacts).toHaveLength(21);
+    expect(answer.current_read.run_delta).toEqual(before);
+    const wire = JSON.stringify(answer);
+    expect((await modelInput(consumer)).analysis.run_delta).toEqual(projectModelFacingRunDelta(before));
+    expect(JSON.stringify(answer)).toBe(wire);
+  });
+
+  it.each(endpointConsumers.flatMap(row => [false, true].map(capped => ({ ...row, capped }))))(
+    'Run-ID-only substitution: $endpoint / $consumer / capped=$capped omits the stale delta', async ({ endpoint, consumer, capped }) => {
+      await canonicalPair();
+      if (capped) await addCappedHistory();
+      const wire = JSON.stringify(read.current_read);
+      const before = JSON.parse(JSON.stringify(selectedFacts)) as Json[];
+      const index = endpoint === 'current' ? 0 : 1;
+      (selectedFacts[index] as unknown as Json).result.run_id = `substituted-${endpoint}`;
+      // Only execution identity changes; every graph hash, timestamp and result byte is otherwise identical.
+      const after = JSON.parse(JSON.stringify(selectedFacts)) as Json[];
+      after[index]!.result.run_id = before[index]!.result.run_id;
+      expect(after).toEqual(before);
+      expect((await modelInput(consumer)).analysis).not.toHaveProperty('run_delta');
+      expect(JSON.stringify(read.current_read)).toBe(wire);
+    });
 
   it.each(['missing separation', 'near tie', 'withheld admission', 'likely_breaks', 'withheld leaf', 'unresolved scope', 'unavailable scope'])('canonical withheld %s omits the entire delta from ordinary and recovery inputs', async kind => {
     const answer = await canonicalPair((facts, graphs) => {
