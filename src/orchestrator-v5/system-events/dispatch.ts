@@ -54,6 +54,7 @@ import {
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { getSessionStore } from '../session/index.js';
+import { AnalysisReadDeadlineError, withAnalysisReadDeadline } from '../session/analysis-read-deadline.js';
 import { TurnFenceRejectedError } from '../session/turn-fence.js';
 import { createHash } from 'node:crypto';
 import { executeOptionInterventionBatch, executeOptionInterventionEdit, type ApprovedFactorFrame, type ApprovedFactorValue, type ApprovedIdentityConfirm, type ApprovedLinkEffect, type ApprovedLinkStrength } from './option-intervention-edit.js';
@@ -69,7 +70,7 @@ import {
   type FreshnessDerivation,
 } from '../context/freshness.js';
 import { identityRunUseFromFacts, type IdentityRunUse } from '../compose/definitional-links.js';
-import { isScenarioAnalysisReasoningAuthority } from '../context/reconcile-scenario-analysis-facts.js';
+import { isScenarioAnalysisReasoningAuthority, reconcileScenarioAnalysisFacts } from '../context/reconcile-scenario-analysis-facts.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import {
   buildAppliedGraphWireField,
@@ -185,31 +186,48 @@ async function loadWriteReplyAnalysisInputs(
   scenarioId: string,
   requestId: string,
 ): Promise<WriteReplyAnalysisInputs> {
-  // The store lookup sits INSIDE the guarded promise: `getSessionStore()` throws
-  // synchronously when the store is not configured, and a throw outside the
-  // `.catch` would fail the user's write over an observational read. An
-  // unavailable store degrades exactly like a failed read.
-  const markerRead = (async (): Promise<{ readonly value: string | null; readonly ok: boolean }> => ({
-    value: (await getSessionStore()?.readAnalysisInvalidatedAt?.(scenarioId)) ?? null,
-    ok: true,
-  }))();
-  const [read, marker] = await Promise.all([
-    loadScenarioAnalysisFactsForRead(scenarioId, requestId),
-    markerRead.catch((error: unknown) => {
-      log.warn(
-        {
-          event: 'session.read_degraded',
-          read: 'analysis_invalidated_at',
-          request_id: requestId,
-          scenario_id: scenarioId,
-          error_name: error instanceof Error ? error.name : typeof error,
-        },
-        'Restore-invalidation read degraded on a write reply — currency cannot be confirmed',
-      );
-      return { value: null, ok: false };
-    }),
-  ]);
-  return { ...read, analysisInvalidatedAt: marker.value, analysisInvalidatedAtReadOk: marker.ok };
+  try {
+    return await withAnalysisReadDeadline(async () => {
+      // The store lookup sits INSIDE the guarded promise: `getSessionStore()` throws
+      // synchronously when the store is not configured, and a throw outside the
+      // `.catch` would fail the user's write over an observational read. An
+      // unavailable store degrades exactly like a failed read.
+      const markerRead = (async (): Promise<{ readonly value: string | null; readonly ok: boolean }> => ({
+        value: (await getSessionStore()?.readAnalysisInvalidatedAt?.(scenarioId)) ?? null,
+        ok: true,
+      }))();
+      const [read, marker] = await Promise.all([
+        loadScenarioAnalysisFactsForRead(scenarioId, requestId),
+        markerRead.catch((error: unknown) => {
+          log.warn(
+            {
+              event: 'session.read_degraded',
+              read: 'analysis_invalidated_at',
+              request_id: requestId,
+              scenario_id: scenarioId,
+              error_name: error instanceof Error ? error.name : typeof error,
+            },
+            'Restore-invalidation read degraded on a write reply — currency cannot be confirmed',
+          );
+          return { value: null, ok: false };
+        }),
+      ]);
+      return { ...read, analysisInvalidatedAt: marker.value, analysisInvalidatedAtReadOk: marker.ok };
+    });
+  } catch (error) {
+    if (!(error instanceof AnalysisReadDeadlineError)) throw error;
+    log.warn({ event: 'session.read_degraded', read: 'write_reply_analysis_inputs',
+      request_id: requestId, scenario_id: scenarioId, error_name: error.name },
+    'Canonical write-reply reread timed out — currency cannot be confirmed');
+    return {
+      hotWindow: { status: 'degraded', facts: [] },
+      factSet: reconcileScenarioAnalysisFacts({ scenarioId, hotWindowFacts: [],
+        durableRead: { status: 'degraded', reason: 'read_failed' } }),
+      priorFactsWithTurn: [],
+      analysisInvalidatedAt: null,
+      analysisInvalidatedAtReadOk: false,
+    };
+  }
 }
 
 /**

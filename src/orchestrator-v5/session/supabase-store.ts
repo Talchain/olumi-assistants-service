@@ -37,6 +37,7 @@ import {
 } from '@talchain/schemas/orchestrator';
 
 import type { SessionLRUCache } from './cache.js';
+import { ANALYSIS_REREAD_TIMEOUT_MS, abortableAnalysisRead, withAnalysisReadDeadline } from './analysis-read-deadline.js';
 import type { InvalidationResult, InvalidationScope } from './invalidation.js';
 import {
   GraphStaleWriteError,
@@ -83,7 +84,7 @@ import {
  *    caller dispatches the pre-v4 RPC (v2/v3).
  */
 // Optional chronology must not strand turn, reload or post-commit writer replies.
-export const LEGACY_ANALYSIS_EDIT_READ_TIMEOUT_MS = 1_000;
+export const LEGACY_ANALYSIS_EDIT_READ_TIMEOUT_MS = ANALYSIS_REREAD_TIMEOUT_MS;
 
 type TurnFencePlan =
   | { readonly path: 'atomic'; readonly generation: number }
@@ -1825,7 +1826,7 @@ export class SupabaseSessionStore implements SessionStore {
       return cached.turns.slice(0, limit);
     }
 
-    const { data, error } = await this.client
+    const { data, error } = await abortableAnalysisRead(this.client
       .from('v5_conversation_turns')
       .select(V5_CONVERSATION_TURN_COLUMNS)
       .eq('scenario_id', scenarioId)
@@ -1837,7 +1838,7 @@ export class SupabaseSessionStore implements SessionStore {
       // ContextPack projects could flip between reads. `turn_id` is unique
       // per (scenario_id, turn_id), giving a stable total order.
       .order('turn_id', { ascending: false })
-      .limit(limit);
+      .limit(limit));
 
     if (error) {
       throw new SessionReadError(
@@ -1960,7 +1961,7 @@ export class SupabaseSessionStore implements SessionStore {
       query = query.eq('handler_id', handlerId);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await abortableAnalysisRead(query);
 
     if (error) {
       throw new SessionReadError(
@@ -2168,7 +2169,7 @@ export class SupabaseSessionStore implements SessionStore {
       );
     }
 
-    const { data, error, count } = await this.client
+    const { data, error, count } = await abortableAnalysisRead(this.client
       .from('v5_handler_facts')
       .select(
         'id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at',
@@ -2183,7 +2184,7 @@ export class SupabaseSessionStore implements SessionStore {
       .eq('noop', false)
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
-      .limit(limit);
+      .limit(limit));
 
     if (error) {
       throw new SessionReadError('Scenario analysis-fact query failed', {
@@ -2213,7 +2214,6 @@ export class SupabaseSessionStore implements SessionStore {
       legacyEdits = { since, facts: [], readOk: false, total_count: null };
       if (since !== null && Number.isFinite(Date.parse(since))) {
         try {
-          const controller = new AbortController();
           const query = this.client.from('v5_handler_facts')
             .select('id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at', { count: 'exact' })
             .eq('scenario_id', scenarioId).eq('handler_id', 'edit_graph').eq('noop', false)
@@ -2221,18 +2221,8 @@ export class SupabaseSessionStore implements SessionStore {
             .eq('payload->result->>rerun_recommended', 'true')
             .gt('created_at', since)
             .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit);
-          const cancellable = typeof query.abortSignal === 'function' ? query.abortSignal(controller.signal) : query;
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          const edits = await Promise.race([
-            // The race handles late rejection even when the client cannot cancel.
-            Promise.resolve(cancellable),
-            new Promise<never>((_resolve, reject) => {
-              timer = setTimeout(() => {
-                reject(new Error('Legacy edit read timed out'));
-                controller.abort();
-              }, LEGACY_ANALYSIS_EDIT_READ_TIMEOUT_MS);
-            }),
-          ]).finally(() => clearTimeout(timer));
+          // A parent canonical reread keeps its original budget; standalone legacy reads are still bounded.
+          const edits = await withAnalysisReadDeadline(() => Promise.resolve(abortableAnalysisRead(query)));
           if (edits.error || !Array.isArray(edits.data) || !Number.isSafeInteger(edits.count)
             || edits.count === null || edits.count < 0) throw new Error('Legacy edit read unavailable');
           const editFacts = parseScenarioRunAnalysisRows(edits.data, scenarioId, 'edit_graph');
@@ -2354,11 +2344,11 @@ export class SupabaseSessionStore implements SessionStore {
 
   /** Presence, ownership and read contents come from one uncached, readonly row. */
   async readExistingScenario(scenarioId: string) {
-    const { data, error } = await this.client
+    const { data, error } = await abortableAnalysisRead(this.client
       .from('scenarios')
       .select('id, user_id, graph, brief_text, analysis_invalidated_at')
       .eq('id', scenarioId)
-      .maybeSingle();
+      .maybeSingle());
     if (error) throw new SessionReadError('Existing scenario read failed', { cause: error, code: errCode(error) });
     if (data === null) return null;
     return parseExistingScenarioRow(data, scenarioId);
@@ -2366,7 +2356,7 @@ export class SupabaseSessionStore implements SessionStore {
 
   /** Viewer membership (READ grant for the graph-read route only; see the port). Throws on a store failure. */
   async isScenarioMember(scenarioId: string, userId: string): Promise<boolean> {
-    const { data, error } = await this.client.rpc('is_scenario_member', { p_scenario_id: scenarioId, p_user_id: userId });
+    const { data, error } = await abortableAnalysisRead(this.client.rpc('is_scenario_member', { p_scenario_id: scenarioId, p_user_id: userId }));
     if (error) throw new SessionReadError('Scenario membership read failed', { cause: error, code: errCode(error) });
     return data === true;
   }
@@ -2404,11 +2394,11 @@ export class SupabaseSessionStore implements SessionStore {
     // omitted because it is already known to the caller (it's the
     // `scenarioId` parameter) and the return shape does not surface it.
     // Selecting it would be dead bytes on the wire.
-    const { data, error } = await this.client
+    const { data, error } = await abortableAnalysisRead(this.client
       .from('scenarios')
       .select('graph, brief_text')
       .eq('id', scenarioId)
-      .maybeSingle();
+      .maybeSingle());
 
     if (error) {
       throw new SessionReadError(
@@ -2455,11 +2445,11 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   async readAnalysisInvalidatedAt(scenarioId: string): Promise<string | null> {
-    const { data, error } = await this.client
+    const { data, error } = await abortableAnalysisRead(this.client
       .from('scenarios')
       .select('analysis_invalidated_at')
       .eq('id', scenarioId)
-      .maybeSingle();
+      .maybeSingle());
     if (error) {
       throw new SessionReadError(
         `readAnalysisInvalidatedAt failed for scenario ${scenarioId}: ${errMsg(error)}`,
@@ -2484,13 +2474,13 @@ export class SupabaseSessionStore implements SessionStore {
     // Narrow read: only the most recent prior turn. Older orphan pending
     // actions are ignored by design — "yes" resolves against the last
     // assistant turn's explicit offer only. See store.ts JSDoc.
-    const { data, error } = await this.client
+    const { data, error } = await abortableAnalysisRead(this.client
       .from('v5_conversation_turns')
       .select('id, pending_actions')
       .eq('scenario_id', scenarioId)
       .not('turn_id', 'like', NOT_A_CLAIM_PATTERN)
       .order('created_at', { ascending: false })
-      .limit(1);
+      .limit(1));
     if (error) {
       throw new SessionReadError(
         `readMostRecentPendingActions(${scenarioId}) failed: ${errMsg(error)}`,
