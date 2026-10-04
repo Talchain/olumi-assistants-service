@@ -3031,17 +3031,29 @@ export async function handleEditGraph(
     }
 
     // Sanitise: remove legacy fields
+    // The stored graph is an authority only for likely-range consent. Do not
+    // make an ordinary edit depend on a readable store: staging accepted those
+    // edits even when no stored base existed. Load lazily once the request or
+    // postimage actually carries range metadata.
     let storedRangeBase: unknown;
-    try {
-      storedRangeBase = await getSessionStore().loadGraph(context.scenario_id);
-    } catch {
-      return buildRejectionResult('The stored model could not be read. Nothing was changed.',
-        validationResult.operations as PatchOperation[], baseGraphHash, turnId, startTime,
-        'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
-    }
+    const loadStoredRangeBase = async (): Promise<boolean> => {
+      if (storedRangeBase !== undefined) return true;
+      try {
+        storedRangeBase = await getSessionStore().loadGraph(context.scenario_id);
+        return true;
+      } catch {
+        return false;
+      }
+    };
     let operations = omitInheritedInterventionRanges(
-      sanitiseOperations(validationResult.operations as PatchOperation[]), storedRangeBase);
+      sanitiseOperations(validationResult.operations as PatchOperation[]), undefined);
     if (hasInterventionRangeWrite(operations)) {
+      if (!(await loadStoredRangeBase())) {
+        return buildRejectionResult('The stored model could not be read. Nothing was changed.',
+          operations, baseGraphHash, turnId, startTime,
+          'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+      }
+      operations = omitInheritedInterventionRanges(operations, storedRangeBase);
       return buildRejectionResult('A likely range needs its dedicated range proposal and approval.',
         operations, baseGraphHash, turnId, startTime, 'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
     }
@@ -3984,6 +3996,17 @@ export async function handleEditGraph(
           attempt,
           diagnostics(),
         );
+      }
+      // Echo-only ranges are not consent: if the store is unreadable, an edit
+      // that does not touch a range may still land, but it must not launder an
+      // echoed range into the new graph. Range-changing postimages therefore
+      // fail closed here; ordinary postimages never read the store.
+      if (hasNewInterventionRanges(context.graph, encoded.graph)) {
+        if (!(await loadStoredRangeBase())) {
+          return buildRejectionResult('The stored model could not be read. Nothing was changed.',
+            operations, baseGraphHash, turnId, startTime,
+            'STRUCTURAL_VALIDATION_FAILED', undefined, attempt, diagnostics());
+        }
       }
       if (hasNewInterventionRanges(storedRangeBase, encoded.graph)) {
         return buildRejectionResult('A new or changed likely range needs its dedicated range proposal and approval.',
