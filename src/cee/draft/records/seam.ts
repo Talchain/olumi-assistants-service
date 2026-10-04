@@ -55,11 +55,29 @@ import { log } from "../../../utils/telemetry.js";
  * reads. What IS enforced is everything the projector's switch depends on:
  * the two arrays, the discriminators, and the enums.
  */
+// Decode typed offsets; nonempty, located spans earn authority only at the evidence guard.
+const QuoteSpanWire = z.object({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative() });
+const ValueRangeWire = z.object({
+  low: z.number().finite(), high: z.number().finite(), unit: z.string(), meaning: z.enum(["min_max", "likely_range"]).optional(),
+  low_span: QuoteSpanWire, high_span: QuoteSpanWire,
+});
+const StatedRelationshipWire = z.object({
+  from_quantity: z.number().int().nonnegative(), to_quantity: z.number().int().nonnegative(),
+  amount: z.number().finite(), amount_unit: z.string(),
+  per_source_change: z.number().finite(), per_source_change_unit: z.string(),
+  amount_span: QuoteSpanWire, source_span: QuoteSpanWire,
+});
 const StatedItemWire = z.object({
   kind: z.enum(DRAFT_RECORD_STATED_KINDS),
   source_quote: z.string(),
   value: z.number().optional(),
+  value_span: QuoteSpanWire.optional(), unit_span: QuoteSpanWire.optional(),
   baseline: z.number().optional(),
+  quantity: z.number().int().nonnegative().optional(),
+  baseline_ref: z.number().int().nonnegative().optional(),
+  range: ValueRangeWire.optional(), relationship: StatedRelationshipWire.optional(),
+  horizon_months: z.number().positive().optional(),
+  horizon_ref: z.number().int().nonnegative().optional(), direction_span: QuoteSpanWire.optional(),
   unit: z.string().optional(),
   role: z.enum(DRAFT_RECORD_ROLES).optional(),
   // The convention the user's number is written in. Optional and additive,
@@ -139,11 +157,14 @@ const InferenceClaimWire = z.object({
   to_stated: z.number().int().optional(),
   to_claim: z.number().int().optional(),
   effect: z.enum(DRAFT_RECORD_EFFECTS).optional(),
+  quantity: z.number().int().nonnegative().optional(),
+  range: ValueRangeWire.optional(),
   effect_detail: z.object({
     amount: z.number(),
     amount_unit: z.string(),
     per_source_change: z.number(),
     per_source_change_unit: z.string(),
+    range: ValueRangeWire.optional(),
   }).optional(),
   strength: z.number().optional(),
   category: z.enum(DRAFT_RECORD_CATEGORIES).optional(),
@@ -313,7 +334,16 @@ export function projectDraftRecords(
       kind: item.kind,
       source_quote: item.source_quote,
       ...(item.value !== undefined ? { value: item.value } : {}),
+      ...(item.value_span !== undefined ? { value_span: item.value_span } : {}),
+      ...(item.unit_span !== undefined ? { unit_span: item.unit_span } : {}),
       ...(item.baseline !== undefined ? { baseline: item.baseline } : {}),
+      ...(item.quantity !== undefined ? { quantity: item.quantity } : {}),
+      ...(item.baseline_ref !== undefined ? { baseline_ref: item.baseline_ref } : {}),
+      ...(item.range !== undefined ? { range: item.range } : {}),
+      ...(item.relationship !== undefined ? { relationship: item.relationship } : {}),
+      ...(item.horizon_months !== undefined ? { horizon_months: item.horizon_months } : {}),
+      ...(item.horizon_ref !== undefined ? { horizon_ref: item.horizon_ref } : {}),
+      ...(item.direction_span !== undefined ? { direction_span: item.direction_span } : {}),
       ...(item.unit !== undefined ? { unit: item.unit } : {}),
       ...(item.role !== undefined ? { role: item.role } : {}),
       ...(item.value_scale !== undefined ? { value_scale: item.value_scale } : {}),
@@ -332,6 +362,8 @@ export function projectDraftRecords(
       ...(claim.to_claim !== undefined ? { to_claim: claim.to_claim } : {}),
       ...(claim.effect !== undefined ? { effect: claim.effect } : {}),
       ...(claim.effect_detail !== undefined ? { effect_detail: claim.effect_detail } : {}),
+      ...(claim.quantity !== undefined ? { quantity: claim.quantity } : {}),
+      ...(claim.range !== undefined ? { range: claim.range } : {}),
       ...(claim.strength !== undefined ? { strength: claim.strength } : {}),
       ...(claim.category !== undefined ? { category: claim.category } : {}),
       ...(claim.value !== undefined ? { value: claim.value } : {}),

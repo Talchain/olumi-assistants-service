@@ -103,12 +103,15 @@ import { isNameShapedLabel } from "./claim-label-shape.js";
 import { MINTABLE_TARGET_KINDS } from "../../compound-goal/mintable-target-kinds.js";
 import { generateConstraintId } from "../../compound-goal/extractor.js";
 import { classifyUnitScaleClass } from "./unit-scale-class.js";
-import { soleStatedQuantityInSpan } from "../../factor-extraction/goal-label-target.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
-import { extractStatedLikelyRange } from "../../context-integrity/not-modelled-manifest.js";
+import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
+import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
+import { admitGoalBaseline } from "../../factor-extraction/goal-baseline-admissibility.js";
+import { admittedValueRange, statedValueIsBound } from "./quantity-evidence.js";
 import { statedEffectQuoteMatches } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
-import { sizeLink, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
+import { sizeLink, resolveMagnitudeFrame, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
+import type { InterventionV3T } from "../../../schemas/cee-v3.js";
 import type { GoalConstraintT } from "../../../schemas/assist.js";
 import {
   deriveGoalObjectiveLabel,
@@ -266,6 +269,8 @@ export interface RecordProvenance {
   readonly quote?: string;
   readonly magnitude?: MagnitudeAuthor;
   readonly natural_effect?: NaturalEffect;
+  readonly definitional?: true;
+  readonly stated_relationship?: NonNullable<DraftStatedItem["relationship"]> & { from_node: string; to_node: string };
   /** Present iff `stated`. The verbatim quote, canonicalised. */
   readonly source_quote?: string;
   /** Present iff `ai_inferred`. Minted ids of the stated items it builds on. */
@@ -925,6 +930,10 @@ export interface ProjectedNode {
    * 21 says two authorities on one question do not get to drift — so
    * `__tests__/declared-scale-carriage.test.ts` asserts they cannot.
    */
+  quantity_ref?: number;
+  threshold_source?: string;
+  goal_direction?: ">=" | "<=";
+  goal_horizon_months?: number;
   declared_scale?: DraftRecordValueScale;
   goal_threshold?: number;
   goal_threshold_raw?: number;
@@ -981,6 +990,7 @@ export interface ProjectedEdge {
   to: string;
   effect_direction?: "positive" | "negative";
   strength_mean?: number;
+  strength_std?: number;
   origin: "ai" | "default";
   provenance_source: "inferred" | "structural";
   provenance?: RecordProvenance;
@@ -1592,41 +1602,44 @@ function applyStatedGoalTarget(
 }
 
 function applyStatedGoalBaseline(node: ProjectedNode, baseline: number, unit: string | undefined): void {
-  if (!Number.isFinite(baseline)) return;
   const cap = node.goal_threshold_cap;
+  if (node.goal_threshold_raw === undefined || cap === undefined) return;
+  const admission = admitGoalBaseline({ rawTarget: node.goal_threshold_raw, rawBaseline: baseline, cap, ceiling: node.goal_direction === "<=" });
+  if (!admission.admitted) return;
   node.goal_baseline_raw = baseline;
-  node.goal_baseline = typeof cap === "number" && Number.isFinite(cap) && cap !== 0 ? baseline / cap : null;
+  node.goal_baseline = admission.normalised;
   node.observed_state = {
     ...(node.observed_state ?? {}),
-    value: baseline,
-    baseline,
+    value: admission.normalised,
+    raw_value: baseline,
+    baseline: admission.normalised,
     ...(unit !== undefined ? { unit } : {}),
   };
 }
 
-function briefRange(quote: string): { min: number; max: number; text: string } | undefined {
-  const range = extractStatedLikelyRange(quote);
-  return range === undefined ? undefined : { min: range.low, max: range.high, text: range.text };
-}
-
-function endpointLabelIsNamedUniquely(
-  quote: string,
-  endpoint: ProjectedNode,
-  nodes: readonly ProjectedNode[],
-): boolean {
-  const label = endpoint.label.toLowerCase().replace(/\s+/gu, " ").trim();
-  if (label.length === 0) return false;
-  const quoted = quote.toLowerCase().replace(/\s+/gu, " ").trim();
-  if (!quoted.includes(label)) return false;
-  return nodes.filter((node) => node.label.toLowerCase().replace(/\s+/gu, " ").trim() === label).length === 1;
-}
-
-function rangeForEffect(amount: number, quote: string): StatedRangeEnd | undefined {
-  const range = extractStatedLikelyRange(quote);
-  if (range === undefined) return undefined;
-  const absolute = Math.abs(amount);
-  if (absolute !== range.low && absolute !== range.high) return undefined;
-  return { low: range.low, high: range.high, text: range.text, end: absolute === range.low ? "low" : "high" };
+/** Target, direction, horizon and baseline are independently evidence-bound for one typed quantity. */
+function applyStatedGoalEvidence(node: ProjectedNode, item: DraftStatedItem, statedItems: readonly DraftStatedItem[], brief: string | undefined): void {
+  if (statedValueIsBound(item, brief)) {
+    node.threshold_source = "brief_extraction";
+    if (item.direction !== undefined && item.direction_span !== undefined) {
+      const operator = directionToOperator(item.direction);
+      const words = item.source_quote.slice(item.direction_span.start, item.direction_span.end).toLowerCase();
+      if (item.direction_span.start >= 0 && item.direction_span.start < item.direction_span.end
+        && item.direction_span.end <= item.source_quote.length && LIMIT_OPERATOR_WORDS[operator] === words) node.goal_direction = operator;
+    }
+    const horizon = item.horizon_ref === undefined ? undefined : statedItems[item.horizon_ref];
+    if (horizon !== undefined && horizon.value === item.horizon_months && horizon.value !== undefined
+      && Number.isInteger(horizon.value) && horizon.value > 0 && horizon.unit !== undefined
+      && sameUnit(horizon.unit, "months") && statedValueIsBound(horizon, brief)) node.goal_horizon_months = horizon.value;
+  }
+  const baselineItem = item.baseline_ref === undefined ? undefined : statedItems[item.baseline_ref];
+  if (statedValueIsBound(item, brief) && item.quantity !== undefined && baselineItem?.role === "baseline"
+    && (baselineItem.quantity ?? item.baseline_ref) === item.quantity && baselineItem.value !== undefined
+    && (item.baseline === undefined || item.baseline === baselineItem.value)
+    && item.unit !== undefined && baselineItem.unit !== undefined && sameUnit(item.unit, baselineItem.unit)
+    && statedValueIsBound(baselineItem, brief)) {
+    applyStatedGoalBaseline(node, baselineItem.value, baselineItem.unit);
+  }
 }
 
 function quotedEffectForEdge(args: {
@@ -1635,7 +1648,7 @@ function quotedEffectForEdge(args: {
   readonly nodes: readonly ProjectedNode[];
   readonly statedItems: readonly DraftStatedItem[];
   readonly brief: string;
-}): { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; stated_range?: StatedRangeEnd } | undefined {
+}): { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string; authority: NonNullable<DraftStatedItem["relationship"]>; stated_range?: StatedRangeEnd } | undefined {
   const { edge, claim, nodes, statedItems, brief } = args;
   const source = nodes.find((node) => node.id === edge.from);
   const target = nodes.find((node) => node.id === edge.to);
@@ -1644,9 +1657,18 @@ function quotedEffectForEdge(args: {
   if (claim?.claim_kind !== "causal_link" || detail === undefined) return undefined;
   const basis = [...new Set(claim.basis ?? [])];
   if (basis.length !== 1 || !Number.isInteger(basis[0])) return undefined;
-  const quote = statedItems[basis[0]!]?.source_quote;
-  if (typeof quote !== "string" || quote.length === 0 || !brief.includes(quote)) return undefined;
-  return { ...detail, quote, ...(rangeForEffect(detail.amount, quote) !== undefined ? { stated_range: rangeForEffect(detail.amount, quote) } : {}) };
+  const item = statedItems[basis[0]!];
+  const quote = item?.source_quote;
+  const authority = item?.relationship;
+  if (item?.kind !== "cause" || authority === undefined || typeof quote !== "string" || quote.length === 0 || !brief.includes(quote)) return undefined;
+  // Endpoint identity is compulsory even for singleton effects; labels supply nothing.
+  if (source.quantity_ref !== authority.from_quantity || target.quantity_ref !== authority.to_quantity) return undefined;
+  const fromQuantity = statedItems[authority.from_quantity];
+  const toQuantity = statedItems[authority.to_quantity];
+  if (fromQuantity?.unit === undefined || toQuantity?.unit === undefined
+    || !brief.includes(fromQuantity.source_quote) || !brief.includes(toQuantity.source_quote)
+    || !sameUnit(fromQuantity.unit, detail.per_source_change_unit) || !sameUnit(toQuantity.unit, detail.amount_unit)) return undefined;
+  return { ...detail, quote, authority };
 }
 
 interface StatedEdgeEffectCandidate {
@@ -1658,22 +1680,12 @@ interface StatedEdgeEffectCandidate {
 function effectForEdge(
   candidate: StatedEdgeEffectCandidate,
   group: readonly StatedEdgeEffectCandidate[],
-  nodes: readonly ProjectedNode[],
 ): StatedEdgeEffectCandidate["effect"] | undefined {
   const { claim, effect } = candidate;
-  // References on the typed record own endpoint identity. Labels only resolve
-  // competing edges claiming the same quoted four-field effect.
-  if (group.length > 1) {
-    const named = group.filter((member) => {
-      const source = nodes.find((node) => node.id === member.edge.from);
-      const target = nodes.find((node) => node.id === member.edge.to);
-      return source !== undefined && target !== undefined
-        && endpointLabelIsNamedUniquely(effect.quote, source, nodes)
-        && endpointLabelIsNamedUniquely(effect.quote, target, nodes);
-    });
-    if (named.length !== 1 || named[0] !== candidate) return undefined;
-  }
-  if (!statedEffectQuoteMatches(effect.quote, effect)) return undefined;
+  // Aliases cannot create competing writes to different endpoint identities.
+  const pairs = new Set(group.map((member) => JSON.stringify([member.edge.from, member.edge.to])));
+  if (pairs.size > 1) return undefined;
+  if (!statedEffectQuoteMatches(effect.quote, effect, effect.authority)) return undefined;
   const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? "negative" : "positive";
   if (claim.effect !== direction) return undefined;
   return effect;
@@ -1753,6 +1765,7 @@ interface OneProjection extends RecordProjection {
 }
 
 interface ProjectedInterventionBinding {
+  readonly range?: InterventionV3T["range"];
   readonly raw_value: number;
   readonly unit?: string;
   readonly source: "brief_extraction" | "cee_hypothesis";
@@ -2184,9 +2197,14 @@ function bindDirectStatedMagnitude(args: {
     };
   }
 
+  const ownedRange = admittedValueRange(claim.range ?? item.range, item.source_quote, claim.sets_to, item.unit);
   return {
     raw_value: claim.sets_to,
     ...(item.unit !== undefined ? { unit: item.unit } : {}),
+    ...(ownedRange?.meaning !== undefined ? { range: {
+      low: ownedRange.low, high: ownedRange.high, meaning: ownedRange.meaning,
+      source: "brief_extraction", source_quote: item.source_quote,
+    } } : {}),
     source: "brief_extraction",
     reasoning: `Direct causal value bound by edge ${edgeId} to stated_items[${index}]: ${item.source_quote}`,
   };
@@ -2629,33 +2647,26 @@ function projectOnce(
       // duplicate be a problem the user can see rather than one we resolved for
       // them.
       const survivorTarget = survivor?.goal_threshold_raw;
-      const disagrees =
-        survivor !== undefined
-        && survivorTarget !== undefined
-        && duplicateStatesATarget
-        && (survivorTarget !== item.value
-          || (item.unit !== undefined && survivor.goal_threshold_unit !== item.unit));
+      const candidate = survivor === undefined ? undefined : { ...survivor,
+        observed_state: survivor.observed_state === undefined ? undefined : { ...survivor.observed_state } };
+      if (candidate !== undefined) {
+        if (survivorTarget === undefined && duplicateStatesATarget) applyStatedGoalTarget(candidate, item.value as number, item.unit);
+        if (item.quantity !== undefined) candidate.quantity_ref = item.quantity;
+        applyStatedGoalEvidence(candidate, item, statedItems, brief);
+      }
+      const disagrees = survivor !== undefined && (
+        (survivorTarget !== undefined && duplicateStatesATarget
+          && (survivorTarget !== item.value || (item.unit !== undefined && !sameUnit(survivor.goal_threshold_unit ?? "", item.unit))))
+        || (survivor.quantity_ref !== undefined && candidate?.quantity_ref !== survivor.quantity_ref)
+        || (survivor.goal_baseline_raw !== undefined && candidate?.goal_baseline_raw !== survivor.goal_baseline_raw)
+        || (survivor.goal_direction !== undefined && candidate?.goal_direction !== survivor.goal_direction)
+        || (survivor.goal_horizon_months !== undefined && candidate?.goal_horizon_months !== survivor.goal_horizon_months)
+      );
 
-      if (survivor !== undefined && !disagrees) {
-        // ⭐⭐ THE TARGET SURVIVES THE COLLAPSE — the defect this branch exists to
-        // prevent, and the first version of this change shipped it.
-        //
-        // MEASURED: with the goal stated twice and the VALUE on the second copy
-        // only, an early `return` here skipped the goal-value branch entirely, so
-        // `goal_threshold_raw` was ABSENT at HEAD and preserved before the change
-        // — the user's own success criterion reduced to prose inside the label,
-        // which is exactly the harm that branch's ROOT 3 comment exists to
-        // prevent. And in the corpus case (12-similar-options) the model attached
-        // its goal-bound link to the SECOND copy, so the losing copy is the one
-        // carrying the model's own intent.
-        //
-        // Carried ONLY when the survivor registered none: a survivor that already
-        // has a target keeps it, so the FIRST stated target wins and this can
-        // never overwrite one. Nothing is invented — the value is the user's own,
-        // moved from a node being withdrawn onto the node that replaces it.
-        if (survivorTarget === undefined && duplicateStatesATarget) {
-          applyStatedGoalTarget(survivor, item.value as number, item.unit);
-        }
+      if (survivor !== undefined && candidate !== undefined && !disagrees) {
+        // The same evidence-bound target/baseline/horizon bundle survives an absorption.
+        // Conflicting admitted quantities stay visible instead of choosing a winner.
+        Object.assign(survivor, candidate);
         statedIdByIndex.set(index, statedBaseId);
         return;
       }
@@ -2673,7 +2684,7 @@ function projectOnce(
     // What it never knew is whether the brief SAYS this, and that is the thing
     // the user reads off the badge. Derived here, at the brief's bytes, by the
     // one authority the response transform also uses.
-    const briefBinding = bindStatedItemToBrief({
+    const briefBinding = statedValueIsBound(item, brief) ? "verified" : bindStatedItemToBrief({
       quote: item.source_quote,
       value: item.value,
       unit: item.unit,
@@ -2991,12 +3002,17 @@ function projectOnce(
       // ⚠ FactorObservedState REFUSES any `metadata` key (graph.ts:225-233) —
       // a factor carrying constraint metadata matches NEITHER union branch and
       // 400s. Unit lives on `data`, never here.
-      const statedRange = briefRange(quote);
+      const statedRange = bindingEarnsBriefClaim(briefBinding)
+        ? admittedValueRange(item.range, item.source_quote, item.value, item.unit) : undefined;
       node.observed_state = {
         value: item.value,
         raw_value: item.value,
         ...(item.baseline !== undefined ? { baseline: item.baseline } : item.role === "baseline" ? { baseline: item.value } : {}),
-        ...(statedRange !== undefined ? { range: { min: statedRange.min, max: statedRange.max }, rangeMin: statedRange.min, rangeMax: statedRange.max } : {}),
+        ...(statedRange !== undefined ? { range: { min: statedRange.low, max: statedRange.high }, rangeMin: statedRange.low, rangeMax: statedRange.high } : {}),
+      };
+      node.data = { ...node.data,
+        ...(node.observed_state.baseline !== undefined ? { baseline: node.observed_state.baseline } : {}),
+        ...(statedRange !== undefined ? { rangeMin: statedRange.low, rangeMax: statedRange.high } : {}),
       };
       // ⭐⭐ THE USER'S OWN DECLARATION OF WHAT THEIR NUMBER MEANS.
       //
@@ -3049,104 +3065,8 @@ function projectOnce(
       // (`graph.ts:325-330`). So the cap is never derived separately from the
       // value it divides.
       applyStatedGoalTarget(node, item.value, item.unit);
-      if (item.baseline !== undefined) applyStatedGoalBaseline(node, item.baseline, item.unit);
-      // ⚠⚠ `goal_baseline` IS DELIBERATELY NEVER MINTED HERE, and the omission is
-      // the honest branch, not a gap. The contract is explicit: it is
-      // "EXTRACTION ONLY. Present only when the user STATED a current level in
-      // the same breath as the target. Never inferred, never defaulted from the
-      // target, never derived" (`graph.ts:332-336`).
-      //
-      // The C_pricing brief DOES state one ("Annual recurring revenue is
-      // currently £2,400,000") — but it arrives as a SEPARATE stated `figure`
-      // record, and pairing it with this goal would require inferring that the
-      // two records describe the same metric. That inference is precisely the
-      // fabrication class this lane was dispatched to remove: a number the user
-      // gave about one thing, silently asserted as the baseline of another. An
-      // absent baseline makes ISL refuse with `missing_goal_baseline` and render
-      // no probability, which the contract itself calls honest; a guessed one
-      // yields a confident wrong probability. Not symmetric harms, so not a
-      // symmetric default (trap 22b).
-    } else if (kind === "goal" && item.value === undefined && item.role === "target") {
-      // ── ⭐⭐ THE TARGET THE MODEL PUT IN ITS QUOTE INSTEAD OF ITS FIELD ──
-      //
-      // MEASURED, 5 identical draws on the live staging build `50cb5d5f`
-      // (2026-09-14), brief "Given our goal of reaching £20k MRR within 12
-      // months while keeping monthly churn under 4%, should we increase the Pro
-      // plan price from £49 to £59…":
-      //
-      //   £20,000 registered as the goal's target ............ 0 / 5
-      //   goal carried NO threshold at all .................. 3 / 5
-      //   goal carried `raw: 12, unit: "months"` ............ 2 / 5   ⛔ the DEADLINE
-      //
-      // and in all 5 the goal node carried `source_quote: "reaching £20k MRR
-      // within 12 months"` — the user's own words, verbatim. The number was
-      // never lost; it never had a field to land in, because the model wrote
-      // the span and omitted the `value` it could have copied out of it. Two
-      // banked REAL emissions show the same shape and are the reason this is
-      // treated as the model's habit rather than one draw's accident:
-      // `fixtures/live-emission-round11-set12.json` item 0 is
-      // `{kind:"goal", source_quote:"15% ARR growth next year…", role:"target"}`
-      // — `role: "target"` asserted, `value` absent — while every `figure`
-      // beside it carries one.
-      //
-      // ── ⛔ WHY THIS IS NOT #1328's LABEL ROUTE, WHICH IS FORBIDDEN ──
-      // That route read the model-COMPOSED LABEL ("Reach £20k MRR Within 12
-      // Months") and attested its figure against ANY occurrence in the brief.
-      // The attestation scope was the whole brief, which is precisely why "We
-      // rejected the proposal to reach £64k MRR." still minted 64000 after four
-      // oscillating rounds and sixteen defects. Round 6 removed the write.
-      //
-      // This reads `source_quote` on a `stated_items[]` entry the model marked
-      // `kind: "goal"` — the grammar's own resolution of which words are the
-      // objective — and requires `role: "target"` EXPLICITLY. The model has
-      // therefore made both assertions itself: *these user words are the goal*,
-      // and *the role of this goal's number is target*. Nothing here decides
-      // which sentence is the target; it does arithmetic on the span the model
-      // designated. That is the remedy `goal-label-target.ts`'s own header names
-      // as KNOWN AND DUE — bind the attestation to a span the grammar resolved
-      // as a target, not to an occurrence of the figure.
-      //
-      // ── ⚠ STRICTER THAN THE BRANCH ABOVE, DELIBERATELY ──
-      // The valued branch accepts `goalValueIsATarget(item.role)`, which admits
-      // an UNSTATED role, because the model's own `value` corroborates it there.
-      // Here there is no corroboration, so an unstated role is refused. That
-      // keeps #1411's `DISCUSSION ONLY` and `WRONG TARGET` contrasts — both
-      // `{kind:"goal", source_quote}` with NO role — meaning exactly what they
-      // say, and it is pinned in both directions by the discriminating pair in
-      // `goal-target-from-stated-span.test.ts`.
-      const spanTarget = soleStatedQuantityInSpan(item.source_quote);
-      // ⚠ TWO QUANTITIES REFUSE, and that is not a corner: this very brief's
-      // goal span carries "£20k" and "12 months". The deadline is excluded by
-      // the scanner's own unit test, so ONE survives and the mint proceeds. A
-      // span stating two genuine targets ("£30k MRR and 4% churn") yields two,
-      // and the ask-don't-guess exit applies (ROADMAP 2.1051, trap 22f).
-      if (spanTarget !== undefined) {
-        // ⭐ THE QUOTE MUST BE THE USER'S. `bindStatedItemToBrief` is the
-        // estate's existing attestation primitive and is used here rather than
-        // a second containment rule (trap 12). The LOAD-BEARING limb is
-        // `isQuoteStatedInBrief`: a model that invents a span mints nothing.
-        // ⚠ Stated honestly — the magnitude limb is CORROBORATIVE ONLY here,
-        // because the value was read out of the same quote it is checked
-        // against, so it cannot discriminate. It is kept because the two
-        // scanners are independent and a disagreement should refuse, which is
-        // the safe direction; it is NOT evidence, and a reviewer should not read
-        // it as one (trap 13b — a guard agreeing with itself).
-        const spanBinding = bindStatedItemToBrief({
-          quote: item.source_quote,
-          value: spanTarget.value,
-          unit: spanTarget.unit,
-          brief,
-        });
-        if (bindingEarnsBriefClaim(spanBinding)) {
-          // The SAME writer as the valued branch. raw · cap · normalised ·
-          // frame · unit travel together from one derivation, or not at all —
-          // a second mint site would be a second authority on the denominator
-          // ISL divides by (trap 12), and `applyStatedGoalTarget` is bound to
-          // `node`, i.e. to the goal BY IDENTITY, never by a predicate another
-          // node could satisfy (trap 19).
-          applyStatedGoalTarget(node, spanTarget.value, spanTarget.unit);
-        }
-      }
+      applyStatedGoalEvidence(node, item, statedItems, brief);
+      // No unit/label/prose fallback can supply a baseline. Only the typed reference above can earn it.
     }
 
     // ⭐⭐ THE USER'S OWN STATUS QUO, CARRIED. `is_baseline` was structurally
@@ -3160,6 +3080,7 @@ function projectOnce(
     // explicit `false` is carried as faithfully as a `true`, because "the model
     // considered this and said no" and "the model never spoke" are different
     // facts and the consumer distinguishes them (`analysis-ready-helper.ts:276`).
+    if (item.quantity !== undefined) node.quantity_ref = item.quantity;
     if (kind === "option" && typeof item.is_baseline === "boolean") {
       node.is_baseline = item.is_baseline;
     }
@@ -3427,6 +3348,7 @@ function projectOnce(
     // brief that merely lists named alternatives no longer excuses omitting it).
     // Same field name as the stated-item flag because it is the same question
     // asked of the other place an option can come from — see grammar note 5.
+    if (claim.quantity !== undefined) node.quantity_ref = claim.quantity;
     if (nodeKind === "option" && typeof claim.is_baseline === "boolean") {
       node.is_baseline = claim.is_baseline;
     }
@@ -4164,7 +4086,7 @@ function projectOnce(
           binding: factorCarried.binding,
         };
       }
-      const key = `${edge.from} ${edge.to}`;
+      const key = `${edge.from}\u0000${edge.to}`;
       const list = candidatesByPair.get(key) ?? [];
       list.push(candidate);
       candidatesByPair.set(key, list);
@@ -4172,7 +4094,7 @@ function projectOnce(
     for (const [key, candidates] of [...candidatesByPair.entries()].sort(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0,
     )) {
-      const [optionId, factorId] = key.split(" ") as [string, string];
+      const [optionId, factorId] = key.split("\u0000") as [string, string];
       const ordered = [...candidates].sort(compareCanonicalInterventionCandidates);
       const chosen = ordered[0]!;
       const rejected = ordered.slice(1).filter((c) => c.setsTo !== chosen.setsTo);
@@ -4464,10 +4386,75 @@ function projectOnce(
       for (const node of nodes) {
         if (node.kind === "goal" || node.scale_frame !== undefined) continue;
         const unit = (node.data as { unit?: unknown } | undefined)?.unit;
-        if (unit === goal.goal_threshold_unit) node.scale_frame = goal.goal_threshold_cap;
+        if (goal.quantity_ref === undefined || node.quantity_ref !== goal.quantity_ref
+          || typeof unit !== "string" || !sameUnit(unit, goal.goal_threshold_unit)) continue;
+        node.scale_frame = goal.goal_threshold_cap;
+        const raw = node.data?.raw_value ?? node.data?.value;
+        if (typeof raw === "number") {
+          node.observed_state = { ...node.observed_state, value: raw / node.scale_frame, raw_value: raw, unit };
+          node.data = { ...node.data, value: raw / node.scale_frame, raw_value: raw };
+        }
       }
     }
-    const view = magnitudeNodes(nodes.map((node) => Object.fromEntries(Object.entries(node))), percentLevelIds({ goal_constraints: goalConstraints }));
+    // A calculation frame for an otherwise unframed dependent quantity follows
+    // a verified typed relationship and the source's complete frame. This is
+    // dimensional arithmetic, never a level, budget or target inferred from prose.
+    for (let pass = 0; pass < nodes.length; pass++) {
+      let changed = false;
+      const current = magnitudeNodes(nodes.map(node => ({ ...node, interventions: node.data?.interventions })), percentLevelIds({ goal_constraints: goalConstraints }));
+      for (const edge of edges) {
+        const origin = claimOriginByEdgeId.get(edge.id);
+        const claim = origin === undefined ? undefined : claims[origin.index];
+        const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief });
+        const target = nodes.find(node => node.id === edge.to);
+        const source = current.get(edge.from);
+        if (effect === undefined || claim === undefined || target === undefined || source === undefined
+          || target.kind === "goal" || target.scale_frame !== undefined
+          || !statedEffectQuoteMatches(effect.quote, effect, effect.authority)) continue;
+        const targetUnit = target.data?.unit;
+        if (typeof targetUnit !== "string" || !sameUnit(targetUnit, effect.amount_unit)) continue;
+        const sourceUnit = source.observed_state?.unit ?? source.unit;
+        if (typeof sourceUnit !== "string" || !sameUnit(sourceUnit, effect.per_source_change_unit)) continue;
+        const sourceFrame = resolveMagnitudeFrame(source);
+        if (sourceFrame === undefined) continue;
+        const ownedRange = admittedValueRange(claim.effect_detail?.range, effect.quote, Math.abs(effect.amount), effect.amount_unit);
+        const amount = ownedRange === undefined ? Math.abs(effect.amount) : Math.max(Math.abs(ownedRange.low), Math.abs(ownedRange.high));
+        const frame = amount / Math.abs(effect.per_source_change) * sourceFrame;
+        if (!Number.isFinite(frame) || frame <= 1) continue;
+        target.scale_frame = frame;
+        const raw = target.data?.raw_value ?? target.data?.value;
+        if (typeof raw === "number") {
+          target.data = { ...target.data, value: raw / frame, raw_value: raw };
+          target.observed_state = { ...target.observed_state, value: raw / frame, raw_value: raw, unit: targetUnit };
+        }
+        changed = true;
+      }
+      if (!changed) break;
+    }
+    const view = magnitudeNodes(nodes.map(node => ({ ...node, interventions: node.data?.interventions })), percentLevelIds({ goal_constraints: goalConstraints }));
+    // Equality of an explicit quantity identity is an exact unit conversion.
+    // It contributes no newly stated business figure and no inferred causal effect.
+    for (const edge of edges) {
+      const sourceNode = nodes.find(node => node.id === edge.from);
+      const targetNode = nodes.find(node => node.id === edge.to);
+      const origin = claimOriginByEdgeId.get(edge.id);
+      const claim = origin === undefined ? undefined : claims[origin.index];
+      if (sourceNode?.quantity_ref === undefined || sourceNode.quantity_ref !== targetNode?.quantity_ref
+        || claim?.effect !== "positive" || claim.effect_detail !== undefined) continue;
+      const source = view.get(edge.from), target = view.get(edge.to);
+      const unit = statedItems[sourceNode.quantity_ref]?.unit;
+      if (source === undefined || target === undefined || unit === undefined) continue;
+      const sourceUnit = source.observed_state?.unit ?? source.unit;
+      const targetUnit = target.observed_state?.unit ?? target.goal_threshold_unit ?? target.unit;
+      if (typeof sourceUnit !== "string" || typeof targetUnit !== "string"
+        || !sameUnit(unit, sourceUnit) || !sameUnit(unit, targetUnit)) continue;
+      const sized = sizeLink({ direction: "positive", effect_amount: 1, effect_per_source_change: 1, user_stated: true }, source, target);
+      if (sized.problem !== undefined || sized.natural_effect === undefined) continue;
+      edge.strength_mean = sized.mean;
+      edge.strength_std = sized.std;
+      edge.provenance = { ...edge.provenance!, source: "domain_knowledge", definitional: true, natural_effect: sized.natural_effect };
+      provenance[edge.id] = edge.provenance;
+    }
     const groups = new Map<string, StatedEdgeEffectCandidate[]>();
     for (const edge of edges) {
       if (edge.origin !== "ai") continue;
@@ -4475,18 +4462,22 @@ function projectOnce(
       const claim = origin === undefined ? undefined : claims[origin.index];
       const effect = quotedEffectForEdge({ edge, claim, nodes, statedItems, brief });
       if (claim === undefined || effect === undefined) continue;
-      const key = JSON.stringify([effect.quote, effect.amount, effect.amount_unit, effect.per_source_change, effect.per_source_change_unit]);
+      const key = JSON.stringify([effect.quote, effect.authority.from_quantity, effect.authority.to_quantity, effect.amount, effect.per_source_change]);
       const group = groups.get(key) ?? [];
       group.push({ edge, claim, effect });
       groups.set(key, group);
     }
     for (const group of groups.values()) for (const candidate of group) {
       const { edge } = candidate;
-      const effect = effectForEdge(candidate, group, nodes);
+      const effect = effectForEdge(candidate, group);
       if (effect === undefined) continue;
       const source = view.get(edge.from);
       const target = view.get(edge.to);
       if (source === undefined || target === undefined) continue;
+      const sourceUnit = source.observed_state?.unit ?? source.unit;
+      const targetUnit = target.observed_state?.unit ?? target.goal_threshold_unit ?? target.unit;
+      if (typeof sourceUnit !== "string" || typeof targetUnit !== "string"
+        || !sameUnit(effect.per_source_change_unit, sourceUnit) || !sameUnit(effect.amount_unit, targetUnit)) continue;
       const direction = Math.sign(effect.amount) * Math.sign(effect.per_source_change) < 0 ? "negative" : "positive";
       const sizing = sizeLink({
         direction,
@@ -4495,7 +4486,7 @@ function projectOnce(
         user_stated: true,
         ...(effect.stated_range !== undefined ? { stated_range: effect.stated_range } : {}),
       }, source, target);
-      if (sizing.outcome !== "user_stated" || sizing.natural_effect === undefined) continue;
+      if (sizing.outcome !== "user_stated" || sizing.natural_effect === undefined || sizing.problem !== undefined) continue;
       const baseProvenance: RecordProvenance = edge.provenance ?? {
         provenance_class: "ai_inferred",
         ...EDGE_ATTRIBUTION.ai_inferred,
@@ -4506,12 +4497,17 @@ function projectOnce(
         ...baseProvenance,
         source: "brief_extraction",
         quote: effect.quote.slice(0, 100),
+        source_quote: effect.quote,
         magnitude: "user_stated",
-        natural_effect: sizing.natural_effect,
+        // Keep the validated user denomination, rather than the sizer's display-only switch/points wording.
+        natural_effect: { ...sizing.natural_effect, amount: effect.amount, amount_unit: effect.amount_unit,
+          per_source_change: effect.per_source_change, per_source_change_unit: effect.per_source_change_unit },
+        stated_relationship: { ...effect.authority, from_node: edge.from, to_node: edge.to },
       };
       edge.provenance = prov;
       edge.provenance_source = "inferred";
       edge.strength_mean = sizing.mean;
+      edge.strength_std = sizing.std;
       edge.effect_direction = direction;
       provenance[edge.id] = prov;
     }
@@ -4728,7 +4724,9 @@ function projectOnce(
     const discarded = new Set<string>();
     for (const [, group] of [...byPair.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       if (group.length < 2) continue;
-      const explicit = group.filter((e) => typeof e.strength_mean === "number");
+      const authored = group.filter(e => e.provenance?.magnitude === "user_stated" || e.provenance?.definitional === true);
+      // An inferred duplicate never displaces a stated or identity-derived bundle.
+      const explicit = authored.length > 0 ? authored : group.filter((e) => typeof e.strength_mean === "number");
       const ordered = (explicit.length > 0 ? explicit : group).slice().sort((a, b) => {
         const am = Math.abs(a.strength_mean ?? 0);
         const bm = Math.abs(b.strength_mean ?? 0);

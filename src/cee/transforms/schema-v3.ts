@@ -19,7 +19,7 @@ import type {
   GraphV3T,
   ValidationWarningV3T,
 } from "../../schemas/cee-v3.js";
-import { resolveEffectDirection } from "../../schemas/cee-v3.js";
+import { EdgeProvenanceV3, resolveEffectDirection } from "../../schemas/cee-v3.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.js";
 import { isFactorData, isOptionData } from "./schema-v2.js";
@@ -336,6 +336,9 @@ export function transformNodeToV3(
     // Use != null (not !== undefined) to exclude both null and undefined —
     // internal schema accepts nullable values from LLM, but V3 output must not contain nulls.
     ...(node.goal_threshold != null && { goal_threshold: node.goal_threshold }),
+    ...(node.kind === "goal" && node.threshold_source !== undefined ? { threshold_source: node.threshold_source } : {}),
+    ...(node.kind === "goal" && node.goal_direction !== undefined ? { goal_direction: node.goal_direction } : {}),
+    ...(node.kind === "goal" && node.goal_horizon_months !== undefined ? { goal_horizon_months: node.goal_horizon_months } : {}),
     ...(node.goal_threshold_raw != null && { goal_threshold_raw: node.goal_threshold_raw }),
     ...(node.goal_threshold_unit != null && { goal_threshold_unit: node.goal_threshold_unit }),
     ...(node.goal_threshold_cap != null && { goal_threshold_cap: node.goal_threshold_cap }),
@@ -491,6 +494,8 @@ export function transformNodeToV3(
     v3Node.observed_state = {
       value: node.data.value,
       baseline: node.data.baseline,
+      ...(node.data.range !== undefined ? { range: node.data.range } : node.data.rangeMin !== undefined && node.data.rangeMax !== undefined
+        ? { range: { min: node.data.rangeMin, max: node.data.rangeMax } } : {}),
       unit: node.data.unit,
       source,
       // The records producer declares the stored value's scale. This is not a
@@ -1207,8 +1212,17 @@ export function transformEdgeToV3(
 
   // Extract provenance — prefer structured edge.provenance, fall back to
   // edge.provenance_source (flat enum from Anthropic structured outputs).
-  const provenance = extractProvenanceForV3(edge.provenance)
+  let provenance = extractProvenanceForV3(edge.provenance)
     ?? (edge.provenance_source ? { source: mapToV3ProvenanceSource(edge.provenance_source) } : undefined);
+  // A boundary clamp/default cannot retain authorship of the original sizing bundle.
+  if (provenance?.magnitude === "user_stated" && (wasClamped
+    || provenance.natural_effect?.strength_mean !== strengthMean || edge.strength_std !== strengthStd)) {
+    provenance = { ...provenance, source: "cee_hypothesis", magnitude: "olumi_placeholder",
+      source_quote: provenance.source_quote ?? provenance.quote,
+      quote: undefined, natural_effect: undefined, stated_relationship: undefined };
+    defaults.push({ edge_id: edgeId, field: "magnitude", default_value: "olumi_placeholder",
+      reason: "V3 cannot preserve the original stated sizing bundle" });
+  }
 
   return {
     edge: {
@@ -1263,17 +1277,19 @@ function mapToV3ProvenanceSource(source: string): V3ProvenanceSource {
  */
 function extractProvenanceForV3(
   prov?: string | ProvenanceObject
-): { source: V3ProvenanceSource; reasoning?: string } | undefined {
+): EdgeV3T["provenance"] | undefined {
   if (!prov) return undefined;
 
   if (typeof prov === "string") {
     return { source: mapToV3ProvenanceSource(prov) };
   }
 
-  return {
+  const parsed = EdgeProvenanceV3.safeParse({
+    ...prov,
     source: mapToV3ProvenanceSource(prov.source),
     reasoning: prov.quote,
-  };
+  });
+  return parsed.success ? parsed.data : { source: "cee_hypothesis", reasoning: prov.quote };
 }
 
 // ============================================================================

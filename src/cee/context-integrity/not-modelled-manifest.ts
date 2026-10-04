@@ -49,7 +49,10 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
-import { statedEffectQuoteMatches } from "../provenance/stated-effect.js";
+import { magnitudeNodes, percentLevelIds } from "../magnitude/frame-defaulted-links.js";
+import { sizeLink, unitOf } from "../magnitude/link-effect.js";
+import { sameUnit } from "../../orchestrator-v5/agent-lane/same-unit.js";
+import { statedEffectQuoteMatches, readStatedRelationship } from "../provenance/stated-effect.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -169,6 +172,8 @@ export interface NotModelledItem {
    * silence.
    */
   readonly stated_kind: StatedKind;
+  /** Read-only coverage gap; it supplies no value, range or causal link. */
+  readonly reason?: "no_executable_quantity_carrier";
 }
 
 export interface NotModelledManifest {
@@ -1454,6 +1459,8 @@ function collectBriefNaturalEffectCandidates(
   briefText: string,
 ): Candidate[] {
   if (!Array.isArray(graph.edges)) return [];
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes.filter((n): n is Record<string, unknown> => n !== null && typeof n === "object" && !Array.isArray(n)) : [];
+  const view = magnitudeNodes(nodes, percentLevelIds(graph));
   const labels = new Map<string, string>();
   if (Array.isArray(graph.nodes)) {
     for (const raw of graph.nodes) {
@@ -1479,13 +1486,28 @@ function collectBriefNaturalEffectCandidates(
     const sourceLabel = labels.get(from);
     const targetLabel = labels.get(to);
     if (sourceLabel === undefined || targetLabel === undefined) continue;
-    const quote = p.quote;
+    const quote = p.source_quote ?? p.quote;
     if (typeof quote !== "string" || quote.length === 0 || !briefText.includes(quote)) continue;
 
     const amount = natural.amount;
     const amountUnit = natural.amount_unit;
     const perSourceChange = natural.per_source_change;
     const perSourceChangeUnit = natural.per_source_change_unit;
+    const authority = readStatedRelationship(p.stated_relationship);
+    const evidence = p.stated_relationship as { from_node?: unknown; to_node?: unknown } | undefined;
+    const source = view.get(from), target = view.get(to);
+    const strength = edge.strength as { mean?: unknown } | undefined;
+    const mean = strength?.mean ?? edge.strength_mean;
+    if (authority === undefined || evidence?.from_node !== from || evidence.to_node !== to
+      || source === undefined || target === undefined || typeof mean !== "number" || !Number.isFinite(mean)
+      || typeof amount !== "number" || typeof perSourceChange !== "number"
+      || typeof amountUnit !== "string" || typeof perSourceChangeUnit !== "string"
+      || !sameUnit(amountUnit, unitOf(target) ?? "") || !sameUnit(perSourceChangeUnit, unitOf(source) ?? "")) continue;
+    const sized = sizeLink({ direction: amount * perSourceChange < 0 ? "negative" : "positive",
+      effect_amount: amount, effect_per_source_change: perSourceChange, user_stated: true }, source, target);
+    const std = (edge.strength as { std?: unknown } | undefined)?.std ?? edge.strength_std;
+    if (sized.problem !== undefined || sized.outcome !== "user_stated" || mean !== sized.mean
+      || std !== sized.std || natural.strength_mean !== mean) continue;
     if (
       typeof amount !== "number" ||
       typeof amountUnit !== "string" ||
@@ -1496,7 +1518,7 @@ function collectBriefNaturalEffectCandidates(
         amount_unit: amountUnit,
         per_source_change: perSourceChange,
         per_source_change_unit: perSourceChangeUnit,
-      })
+      }, authority)
     ) continue;
     const effectDirection = edge.effect_direction;
     const signedEffect = Math.sign(amount) * Math.sign(perSourceChange);
@@ -1984,6 +2006,7 @@ export function deriveNotModelledManifest(
         // match. A numeric match that cannot name its carrier is not a match.
         matched_node_id: matched?.nodeId ?? null,
         stated_kind: statedKind,
+        ...(verdict !== "in_model" ? { reason: "no_executable_quantity_carrier" as const } : {}),
       });
     }
   }

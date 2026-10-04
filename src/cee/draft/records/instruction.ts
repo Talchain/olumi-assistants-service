@@ -530,8 +530,49 @@ than a gap they must fill before they can see anything at all.
  * sections above, so the delta between them stays legible and each half can be
  * pinned independently.
  */
+export const DRAFT_RECORDS_TYPED_QUANTITY_INSTRUCTION = `
+TYPED QUANTITY EVIDENCE
+One stated item per quantitative clause, with its exact source_quote. Quantities
+are identified by a stated_items index, not by a label or by their unit. Put
+quantity on each node claim and on the stated goal; use the same index ONLY for
+the same quantity. Revenue and support cost remain different quantities even
+when both use £/month. A "customers lost" change is different from today's
+customer count.
+
+For a stated numeric value, value_span and unit_span locate its own number and
+unit wording within source_quote. Every span is {start,end}, zero-based UTF-16,
+end exclusive. Never borrow a number or a unit from another clause. A goal's
+baseline_ref names its quoted baseline item for the SAME quantity; baseline, if
+also supplied, must equal that item's value. The goal's horizon_ref names its
+quoted month-count item, horizon_months repeats that value, and direction_span
+locates the comparator words for the typed direction (floor or ceiling).
+
+A stated cause owns relationship: from_quantity, to_quantity, signed amount,
+amount_unit, signed per_source_change, per_source_change_unit, amount_span and
+source_span. Interpret which quantity rises or falls when typing that signed
+relationship; code will not infer the sign from words. Each/Every/per can locate
+one source unit; its span covers that determiner. Numeric spans cover the numeric
+literal, including its currency or percent symbol. Both amounts must belong to
+one relationship clause. A causal_link's effect_detail must repeat the stated
+relationship's four numeric/unit fields, and basis must cite that one cause.
+Its endpoints must name those same quantity identities. Missing evidence earns
+no user-stated magnitude.
+
+Ranges are typed, never supplied by code from wording. range is {low,high,unit,
+low_span,high_span,meaning}, owned by the stated value it accompanies. Declare
+meaning="min_max" for literal bounds; "likely_range" only when explicitly likely.
+No declared meaning means no persisted intervention range. On effect_detail
+it belongs to amount; on an option-to-factor link it belongs to sets_to. Locate
+the exact two bound literals in that value's cited source_quote. Keep 150 starter
+subscribers with range 80–250 on the starter option's sets_to link, not as today's
+subscriber baseline. Keep 2 customers lost per 1% with range 1–4 on that effect,
+not as the level of the customers-lost node. Absence of bounds means no range.
+Preserve out-of-goal figures as evidence; never invent a causal connection to
+make a support cost into revenue. The compiler discloses what it cannot carry.
+`;
+
 export const DRAFT_RECORDS_INSTRUCTION =
-  `${DRAFT_RECORDS_SHAPE_INSTRUCTION}\n${DRAFT_RECORDS_CONNECT_INSTRUCTION}`.trimEnd();
+  `${DRAFT_RECORDS_SHAPE_INSTRUCTION}\n${DRAFT_RECORDS_CONNECT_INSTRUCTION}\n${DRAFT_RECORDS_TYPED_QUANTITY_INSTRUCTION}`.trimEnd();
 
 /** sha256 of the served instruction bytes. */
 export function draftRecordsInstructionHash(): string {
