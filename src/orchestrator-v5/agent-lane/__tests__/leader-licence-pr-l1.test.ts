@@ -18,6 +18,7 @@ import { modelFacingToolResult, withoutLeaderDesignations } from '../licensed-ru
 import { enforceLeaderLicenceAtFinalEgress, FINAL_EGRESS_FAILED_TEXT, knownSafeEnvelope } from '../leader-final-egress.js';
 import { AnalysisResultBlockSchema, OlumiResponseSchema, RunDeltaSchema } from '@talchain/schemas/boundary';
 import { LICENSED_LABEL_KEYS } from '../licensed-run-view.js';
+import * as leaderWireEnforcement from '../../compose/leading-option-wire-enforcement.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SERVED = JSON.parse(readFileSync(join(here, 'fixtures/served-withheld-leader-0948Z.json'), 'utf8')) as {
@@ -204,8 +205,9 @@ describe('the Agent lane fail-closed final egress', () => {
     run_delta: { leader: { current_leading_option_id: 'ai_reporting_sprint' }, summary: LEADER },
     insights: [LEADER, { text: LEADER }],
     analysis_state: { run_state: { kind: 'complete_current', note: LEADER }, leader_claim: { permitted: false, withheld_reason: 'constraint_verdict_withheld', leading_option_id: 'ai_reporting_sprint' } },
-    analysis_ready: { status: 'ready', options: [{ id: 'ai_reporting_sprint', label: 'AI Reporting Sprint' }], blockers: [{ code: 'b1', message: LEADER }] },
+    analysis_ready: { status: 'ready', options: [{ id: 'ai_reporting_sprint', label: 'AI Reporting Sprint', description: LEADER }], blockers: [{ code: 'b1', message: LEADER }] },
     draft_graph: { nodes: [{ id: 'ai_reporting_sprint', kind: 'option', label: 'AI Reporting Sprint', description: LEADER }], edges: [] },
+    graph: { nodes: [{ id: 'ai_reporting_sprint', kind: 'option', label: 'AI Reporting Sprint', description: LEADER }], edges: [] },
     _diagnostic_trace: { exit_path: 'agent_lane_v1', note: LEADER },
     _agent: { provisional_view: { text: LEADER }, tool_calls: [{ name: 'run_analysis' }], offered: [{ label: 'Why is AI Reporting Sprint the leading option?' }] },
     _answer_shape: { text: LEADER },
@@ -217,22 +219,28 @@ describe('the Agent lane fail-closed final egress', () => {
     return out;
   };
 
-  it('RED (CODEX 5932438459): a forced egress error ships NO leader prose from ANY carrier — summary, block prose, sidecars, model members', () => {
+  it.each(['roster', 'shared'] as const)('RED (CODEX 5932438459): a forced %s error omits unchecked model carriers and all hostile prose', (failure) => {
     const hostile = { get nodes(): never { throw new Error('boom'); } };
-    const out = enforceLeaderLicenceAtFinalEgress(everyCarrier(), { ...opts('withheld'), graph: hostile });
+    if (failure === 'shared') vi.spyOn(leaderWireEnforcement, 'enforceLeadingOptionClaimsAtWire').mockImplementationOnce(() => { throw new Error('shared check failed'); });
+    const input = everyCarrier();
+    const original = JSON.stringify(input);
+    const out = enforceLeaderLicenceAtFinalEgress(input, { ...opts('withheld'), graph: failure === 'roster' ? hostile : GRAPH });
     const body = out.response as Record<string, any>;
     expect(body.assistant_text).toBe(FINAL_EGRESS_FAILED_TEXT);
     const all = strings(body, undefined, []);
-    // No leader sentence anywhere; the option's NAME survives only as a user-given name under a label key.
     expect(all.filter(([, v]) => /performs best|leading|strongest/i.test(v) && v !== FINAL_EGRESS_FAILED_TEXT)).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain(LEADER);
     for (const [k, v] of all) if (v.includes('AI Reporting Sprint')) expect(k !== undefined && LICENSED_LABEL_KEYS.has(k) && v === 'AI Reporting Sprint', `${k}=${v}`).toBe(true);
     expect(JSON.stringify(body)).not.toMatch(/leading_option_id":"ai_reporting_sprint/);
-    // The deterministic result survives, schema-valid; every prose block is gone; the model members are omitted whole.
+    // The deterministic result survives, schema-valid; unchecked model carriers are omitted only from the wire.
     expect(body.blocks).toHaveLength(1);
     expect(body.blocks[0]).toMatchObject({ type: 'analysis_result', summary: '', leading_option_id: null, computed_against_hash: SERVED.block.computed_against_hash });
     expect(body.blocks[0].enrichment).toBeUndefined();
     expect(AnalysisResultBlockSchema.safeParse(body.blocks[0]).success).toBe(true);
     expect(body.draft_graph).toBeUndefined();
+    expect(body.graph).toBeUndefined();
+    expect(body.analysis_ready).toBeUndefined();
+    expect(JSON.stringify(input)).toBe(original);
     expect(body.run_delta).toBeUndefined();
     expect(body.suggested_actions).toEqual([]);
     expect(body.analysis_state.leader_claim).toEqual({ permitted: false, withheld_reason: 'constraint_verdict_withheld', leading_option_id: null });

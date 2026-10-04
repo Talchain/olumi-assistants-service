@@ -4,6 +4,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { goalScopeCheck, reconciliationPending, scopeQuestion } from '../goal-scope.js';
 import { textAtRest } from '../decision-input-ask.js';
 import { withoutProposalIds } from '../display-ids.js';
+import { composeAnalysisStateV1 } from '../../compose/analysis-state-v1.js';
+import { selectCanonicalAnalysisState } from '../../context/canonical-analysis-state.js';
 import { GoalScopeSchema } from '../../../schemas/goal-scope.js';
 
 // Actual route composition and durable answer; the successful construction result is
@@ -42,6 +44,9 @@ describe('B3 one-ask ownership with the retained construction scope issue', () =
     app.post('/assist/v1/scenarios/:id/graph', async () => ({
       graph: { nodes, edges: [] },
       graph_hash: 'h0', analysis_ready: { status: 'blocked', may_run: false },
+      // This is a readable, never-analysed model. Missing authority has separate fail-closed route rows.
+      analysis_state: composeAnalysisStateV1({ canonical: selectCanonicalAnalysisState({ priorFacts: [],
+        currentGraphHash: 'h0', currentGraph: { nodes, edges: [] }, priorFactsReadOk: true }), rawRobustness: null }),
     }));
     await app.register(agentV1TurnRoute); await app.ready();
   }, 120000);
