@@ -86,8 +86,7 @@ name: Graph Evaluator
 on:
   push:
     branches: [main, staging]
-  pull_request:
-    branches: [main, staging]
+  # PoC speed (4 Oct 2026): pull_request trigger removed; runs after merge on push.
 
 # ⛔ SUPERSEDED RUNS MUST NOT HOLD RUNNERS.
 #

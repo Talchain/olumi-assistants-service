@@ -3,8 +3,7 @@ name: Security Scanning
 on:
   push:
     branches: [main, staging]
-  pull_request:
-    branches: [main, staging]
+  # PoC speed (4 Oct 2026): pull_request trigger removed; runs after merge on push.
   schedule:
     # Run weekly on Mondays at 9 AM UTC
     - cron: '0 9 * * 1'
