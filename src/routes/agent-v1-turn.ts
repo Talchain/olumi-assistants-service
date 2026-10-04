@@ -590,7 +590,9 @@ export const REBUILD_AFTER_TOO_LARGE_CHIP = {
  */
 export const NEXT_STEP_CHIPS = [
   { id: 'agent-next-pre-mortem', label: 'Run a pre-mortem', message: 'Run a pre-mortem with me: imagine this decision went badly. What most plausibly went wrong?' },
-  { id: 'agent-next-what-would-change', label: 'What would change the result?', message: 'What would most likely change this result?' },
+  // "this", not "the result": the analysis is a thinking tool, not an oracle (Paul, 10 Sep; the UI's noWinnerVocabulary
+  // guard bans "the result" in tab copy, and the tab's own entry reads "What would change this?", DGAI #2479).
+  { id: 'agent-next-what-would-change', label: 'What would change this?', message: 'What would most likely change this result?' },
   { id: 'agent-next-strengthen', label: 'Strengthen the model', message: 'What would most strengthen this model?' },
 ] as const satisfies readonly OfferedAction[];
 
