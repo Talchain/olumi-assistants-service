@@ -482,14 +482,15 @@ and \`basis\` still records whatever the user said that you built them on.
   from an \`outcome\` to the goal that is normally \`positive\`; from a \`risk\` to
   the goal it is normally \`negative\`. Never store a good thing as a \`risk\`.
 
-When the brief explicitly states a natural effect such as "each 1% price rise
-adds £1,200 a month to MRR" or "each subscriber costs £6 a month", carry it on
+When the brief explicitly states a natural effect such as "each extra delivery
+van cuts the average delivery time by 12 minutes" or "each extra seat costs $4 a
+week", carry it on
 that same \`causal_link\` in \`effect_detail\`: use the signed target change in
 \`amount\`, the target's stated unit in \`amount_unit\`, the signed source
 change in \`per_source_change\`, and the source's stated unit in
 \`per_source_change_unit\`. Set all four fields only when the quoted figures
 and both endpoints are clear; otherwise omit the object. This is a transcription
-of the brief, not an estimate: do not derive £12,000 from £120,000 and 10%, and
+of the brief, not an estimate: do not derive $8,000 from $80,000 and 10%, and
 do not convert units or invent a missing per-change figure. Keep the supporting
 sentence in \`basis\` and \`stated_items\`.
 
@@ -535,9 +536,8 @@ TYPED QUANTITY EVIDENCE
 One stated item per quantitative clause, with its exact source_quote. Quantities
 are identified by a stated_items index, not by a label or by their unit. Put
 quantity on each node claim and on the stated goal; use the same index ONLY for
-the same quantity. Revenue and support cost remain different quantities even
-when both use £/month. A "customers lost" change is different from today's
-customer count.
+the same quantity. Two quantities stay different even when they share a unit,
+and a change in a count is a different quantity from today's level of it.
 
 For a stated numeric value, value_span and unit_span locate its own number and
 unit wording within source_quote. Every span is {start,end}, zero-based UTF-16,
@@ -563,12 +563,12 @@ low_span,high_span,meaning}, owned by the stated value it accompanies. Declare
 meaning="min_max" for literal bounds; "likely_range" only when explicitly likely.
 No declared meaning means no persisted intervention range. On effect_detail
 it belongs to amount; on an option-to-factor link it belongs to sets_to. Locate
-the exact two bound literals in that value's cited source_quote. Keep 150 starter
-subscribers with range 80–250 on the starter option's sets_to link, not as today's
-subscriber baseline. Keep 2 customers lost per 1% with range 1–4 on that effect,
-not as the level of the customers-lost node. Absence of bounds means no range.
-Preserve out-of-goal figures as evidence; never invent a causal connection to
-make a support cost into revenue. The compiler discloses what it cannot carry.
+the exact two bound literals in that value's cited source_quote. A range stated
+with what an option would achieve stays on that option's sets_to link, never on
+today's baseline; a range stated with an effect stays on that effect, never on
+the level of its target. Absence of bounds means no range. Preserve out-of-goal
+figures as evidence; never invent a causal connection to bring an out-of-goal
+figure into the goal. The compiler discloses what it cannot carry.
 `;
 
 export const DRAFT_RECORDS_INSTRUCTION =
