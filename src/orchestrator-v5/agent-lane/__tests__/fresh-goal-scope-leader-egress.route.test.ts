@@ -49,6 +49,8 @@ vi.mock('../runtime/agent-loop.js', async original => ({
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => ({
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readRecent: vi.fn(async () => []),
+  // This control models a readable, empty history; a missing reader now means unknown, not empty.
+  readGuidanceHistory: vi.fn(async () => ({})),
   readScenarioRunAnalysisFactsFor: vi.fn(async (sid: string) => {
     expect(sid).toBe(SID); expect(RESULT.scenario_id).toBe(sid); expect(RESULT.run_id).toBe('bound-prior');
     if (scripted.durableUnavailable) throw new Error('canonical facts unavailable');

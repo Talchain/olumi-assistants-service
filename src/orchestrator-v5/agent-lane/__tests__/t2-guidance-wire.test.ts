@@ -11,6 +11,8 @@ import { randomUUID } from 'node:crypto';
 import served from './fixtures/m1-s1-served-graphs.json';
 import { guidanceLeaderLicensed, guidanceRequestOf, itemRefOf, turnGuidanceFor, type TurnGuidanceInputs } from '../turn-context/guidance-wire.js';
 import { NEXT_STEP_CHIPS } from '../../../routes/agent-v1-turn.js';
+import { guidanceHistoryOf, type AnswerGuidance } from '../turn-context/guidance-history.js';
+import { entryKey } from '../guidance/index.js';
 
 const D1 = served.cases.find((c) => c.id === 'D1-sprint-run')!;
 const D3 = served.cases.find((c) => c.id === 'D3-cost-run')!;
@@ -104,14 +106,17 @@ describe('item_ref — by identity in the same graph', () => {
 const SCENARIO_BASE = '8e3f4a51-6c7d-4e8f-9a01-b2c3d4e5f6';
 let n = 0;
 let SCENARIO = '';
-const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; pending_actions: unknown[] }>();
+const rows = new Map<string, { id: string; request_hash: string; assistant_message: string | null; user_message: string | null; llm_calls_used: number; pending_actions: unknown[]; agent_guidance?: AnswerGuidance }>();
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (sid: string, turnId: string) => rows.get(`${sid}:${turnId}`) ?? null),
+  readGuidanceHistory: vi.fn(async (sid: string) => guidanceHistoryOf([...rows.entries()].reverse()
+    .filter(([key, row]) => key.startsWith(`${sid}:`) && row.agent_guidance !== undefined).map(([, row]) => row.agent_guidance))!),
   readMostRecentPendingActions: vi.fn(async (sid: string) => [...rows.entries()].filter(([k]) => k.startsWith(`${sid}:`)).at(-1)?.[1].pending_actions ?? []),
-  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[] }) => {
+  append: vi.fn(async (w: { scenario_id: string; turn_id: string; request_hash: string; assistantMessage?: string; userMessage?: string; llm_calls_used?: number; pending_actions?: unknown[]; agent_guidance?: AnswerGuidance }) => {
     const k = `${w.scenario_id}:${w.turn_id}`;
-    if (!rows.has(k)) rows.set(k, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0, pending_actions: JSON.parse(JSON.stringify(w.pending_actions ?? [])) });
+    if (!rows.has(k)) rows.set(k, { id: `row-${rows.size + 1}`, request_hash: w.request_hash, assistant_message: w.assistantMessage ?? null, user_message: w.userMessage ?? null, llm_calls_used: w.llm_calls_used ?? 0, pending_actions: JSON.parse(JSON.stringify(w.pending_actions ?? [])),
+      ...(w.agent_guidance !== undefined ? { agent_guidance: structuredClone(w.agent_guidance) } : {}) });
     return { id: rows.get(k)!.id };
   }),
 };
@@ -211,5 +216,50 @@ describe('the real route: the row rides the typed turn, and only it', () => {
     const b = await turn({ message: 'Where does this leave me?' });
     expect(b.assistant_text.trim()).not.toBe('');
     expect((b.guidance as { slot1?: { policy_id?: string } } | undefined)?.slot1?.policy_id).not.toBe('RC-STRENGTHEN-ITEM');
+  });
+  it('records content-free surviving guidance WITH the final answer, including an unnamed turn', async () => {
+    const b = await turn({ message: 'Where does this leave me?' });
+    const key = entryKey('RC-STRENGTHEN-ITEM', `${AI.from}->${AI.to}`);
+    const saved = [...rows.entries()].find(([k]) => k.startsWith(`${SCENARIO}:`))![1];
+    expect(saved.assistant_message).toBe(b.assistant_text);
+    expect(saved.agent_guidance).toEqual({ version: 1, entries: { [key]: {
+      status: 'offered', state_key_hash: (b.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash,
+    } } });
+    expect(JSON.stringify(saved.agent_guidance)).not.toContain(AI.from);
+    expect((await turn({ message: 'What next?' })).guidance).toEqual(b.guidance); // offered is not settled
+  });
+  it('records a pressed event ONLY for the S1 item the successful held card actually targets', async () => {
+    await turn({ message: 'Where does this leave me?' });
+    await press('agent-next-strengthen');
+    const events = [...rows.entries()].filter(([k]) => k.startsWith(`${SCENARIO}:`)).map(([, r]) => r.agent_guidance);
+    const key = entryKey('RC-STRENGTHEN-ITEM', `${AI.from}->${AI.to}`);
+    expect(guidanceHistoryOf(events.filter(e => e !== undefined).reverse())?.[key]?.status).toBe('pressed');
+    expect(events.some(e => Object.values(e?.entries ?? {}).some(v => v.status === 'completed'))).toBe(false);
+  });
+  it('an unreadable history suppresses guidance while keeping the ordinary answer', async () => {
+    store.readGuidanceHistory.mockRejectedValueOnce(new Error('database unavailable'));
+    const b = await turn({ message: 'Where does this leave me?' });
+    expect(b.assistant_text.trim()).not.toBe('');
+    expect(b.guidance).toBeUndefined();
+  });
+  it('a new route instance consumes the same persisted settled entry, without reconstructing conversation history', async () => {
+    const first = await turn({ message: 'Where does this leave me?' });
+    const key = entryKey('RC-STRENGTHEN-ITEM', `${AI.from}->${AI.to}`);
+    // A recorded event fixture; this verifies the real HTTP consumer, not a live DB/browser persistence claim.
+    const saved = [...rows.entries()].find(([k]) => k.startsWith(`${SCENARIO}:`))![1];
+    saved.agent_guidance = { version: 1, entries: { [key]: { status: 'dismissed',
+      state_key_hash: (first.guidance as { slot1: { state_key_hash: string } }).slot1.state_key_hash } } };
+    await app.close();
+    vi.resetModules();
+    const { agentV1TurnRoute } = await import('../../../routes/agent-v1-turn.js');
+    app = Fastify({ logger: false });
+    app.post('/assist/v1/scenarios/:id/graph', async () => ({ graph, graph_hash: 'h-d1',
+      analysis_ready: { status: 'ready', may_run: true }, analysis_state: analysisState, analysis_option_participation: PARTICIPATION }));
+    app.post('/orchestrate/v2/turn', async () => ({ assistant_text: 'ok', blocks: [] }));
+    await app.register(agentV1TurnRoute);
+    await app.ready();
+    const next = await turn({ message: 'What next?' });
+    expect((next.guidance as { slot1?: { item?: string } } | undefined)?.slot1?.item).not.toBe(`${AI.from}->${AI.to}`);
+    expect(store.readGuidanceHistory).toHaveBeenCalledWith(SCENARIO);
   });
 });

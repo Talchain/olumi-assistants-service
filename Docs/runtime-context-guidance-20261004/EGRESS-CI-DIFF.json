@@ -1,0 +1,24 @@
+{
+  "guidance": {
+    "expected": {
+      "slot1": {
+        "policy_id": "RC-WIDEN",
+        "priority": "P3",
+        "variant": "W4",
+        "target": "options",
+        "primary_action": {
+          "label": "Suggest options",
+          "action_kind": "choose_1_of_3",
+          "intent": "elicit_options"
+        },
+        "state_key_hash": "ab0cb339caa7",
+        "copy": {
+          "title": "Comparing against 'carry on as now' shows what each change really adds.",
+          "why": "There is no 'carry on as now' option to compare with.",
+          "question": "Would carrying on as now be a real option worth comparing against?"
+        }
+      }
+    },
+    "received": null
+  }
+}

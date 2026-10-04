@@ -1,0 +1,29 @@
+
+pre-push validation
+-------------------
+  toolchain-preflight                  OK
+  branch-guard                         OK (no refs)
+  typecheck                            OK
+  lint-changed                         OK (9 file(s) linted vs origin/staging)
+  smoke-tests                          OK (11 files)
+  stale-js                             OK
+  dependency-audit                     OK
+  tarball-sha                          OK
+  transport-invariants                 OK
+  data-responsibility                  OK
+  phase-0-complete                     OK
+  docs-consistency                     OK
+  state-write-invariant                FAIL
+      FAIL: direct PostgREST .from('v5_handler_facts') call outside src/orchestrator-v5/session/supabase-store.ts
+      src/orchestrator-v5/decision-records/store-adapter.ts:676:      .from('v5_handler_facts')
+      
+      FAIL: SessionStore imported outside session/ + commit.ts + build-turn-context.ts
+      src/orchestrator/turn-fence-prehandler.ts:49:import { getSessionStore } from '../orchestrator-v5/session/index.js';
+      src/orchestrator-v5/agent-lane/run-currentness.ts:1:import type { SessionStore } from '../session/store.js';
+      src/orchestrator-v5/handlers/clarify-v2-dispatch.ts:47:import { getSessionStore } from '../session/index.js';
+      src/orchestrator-v5/persist-graph-write.ts:119:import type { SessionAppendOutcome, SessionStore, SessionTurnWrite } from './session/store.js';
+      src/orchestrator-v5/system-events/dispatch.ts:56:import { getSessionStore } from '../session/index.js';
+      src/routes/agent-v1-turn.ts:48:import { getSessionStore } from '../orchestrator-v5/session/index.js';
+      src/routes/agent-v1-turn.ts:49:import type { CommittedTurnRecord } from '../orchestrator-v5/session/store.js';
+      src/routes/scenario-graph-analysis-read.ts:139:import { getSessionStore } from '../orchestrator-v5/session/index.js';
+      
