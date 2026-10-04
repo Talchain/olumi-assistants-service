@@ -337,7 +337,7 @@ const GOAL_UNTESTED_LEAD_SHORTFALL_CHARS =
  * the result is not robust: `robustness.is_robust === false` OR
  * `robustness.level === 'low'`. One plain clause — no numbers, no labels.
  */
-const NOT_ROBUST_SENTENCE =
+export const NOT_ROBUST_SENTENCE =
   ' The result is not yet robust — small changes could flip it.';
 
 /**
@@ -380,7 +380,7 @@ const NOT_ROBUST_SENTENCE =
  * added anywhere else is silently rejected at egress and the user receives the
  * locked template instead (the failure mode the constraint-gap disclosure hit).
  */
-const NOT_ROBUST_NO_FLIP_SENTENCE =
+export const NOT_ROBUST_NO_FLIP_SENTENCE =
   ' The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.';
 
 /**
