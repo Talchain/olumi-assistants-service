@@ -386,13 +386,23 @@ describe('prior range hostile identities and field locality', () => {
     else if (mode === 'inherit') target.prior!.distribution = 'normal';
     const p = persistence(initial);
     const event = { ...rangeEvent, ...(mode !== 'inherit' ? { distribution: 'uniform' } : {}),
-      ...(mode === 'collapsed' ? { range_min: 0.6, range_max: 0.6 } : {}) };
+      ...(mode === 'collapsed' ? { range_min: 0.5, range_max: 0.5 } : {}) };
     const result = await dispatchSystemEvent({ payload: payload(event), requestId: REQUEST });
     expect(result.commitPerformed).toBe(true);
     expect(p.durableGraph().nodes.find(n => n.id === 'factor')!.prior).toMatchObject({
       distribution: mode === 'inherit' ? 'normal' : 'uniform', range_min: event.range_min, range_max: event.range_max,
     });
     expect(p.durableRows()).toHaveLength(1);
+  });
+
+  it.each([
+    ['wholly above', 0.6, 0.9], ['wholly below', 0.1, 0.4], ['collapsed off the point', 0.6, 0.6],
+  ] as const)('RED: a range %s the factor\'s own value (0.5) is refused and nothing is written', async (_n, range_min, range_max) => {
+    const p = persistence(); const before = p.durableGraph();
+    const result = await dispatchSystemEvent({ payload: payload({ ...rangeEvent, range_min, range_max }), requestId: REQUEST });
+    expect(result.commitPerformed).toBe(false);
+    expect(p.durableGraph()).toEqual(before);
+    expect(p.durableRows()).toHaveLength(0);
   });
 
   it('a distribution-only edit moves the analytical hash and preserves both bounds', async () => {

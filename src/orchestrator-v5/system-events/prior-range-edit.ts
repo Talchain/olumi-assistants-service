@@ -49,6 +49,11 @@ export function applyPriorRangeEdit(params: {
     && target.prior.distribution === distribution) {
     return { kind: 'unchanged', graph, baseGraph: persistedGraph };
   }
+  // A likely range brackets the factor's own point estimate: a range that excludes it is a contradiction, not an edit.
+  const point = (target as { observed_state?: { value?: unknown } }).observed_state?.value;
+  if (typeof point === 'number' && Number.isFinite(point) && (point < event.range_min || point > event.range_max)) {
+    return refuse('value_outside_range');
+  }
   if (baseHash === null) return refuse('no_persisted_graph');
   // Leaf candidates preserve existing prior metadata, including server-owned
   // stamps: none is resubmitted as user-authored input. A missing prior needs a
