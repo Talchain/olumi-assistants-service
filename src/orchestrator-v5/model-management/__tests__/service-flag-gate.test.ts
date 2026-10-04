@@ -160,6 +160,19 @@ describe('ModelManagementService — committed-turn reads fail weak without othe
 });
 
 describe('ModelManagementService — default flag wiring', () => {
+  it('forwards strict evidence and cancellation options only when explicitly requested', async () => {
+    const store = explodingStore();
+    (store.listVersions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (store.getVersion as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const service = new ModelManagementService({ store, isEnabled: () => true });
+    const signal = new AbortController().signal;
+    const options = { requirePayload: true, signal };
+    expect(await service.listVersions(SCENARIO, 50, 3, options)).toEqual({ status: 'ok', value: [] });
+    expect(store.listVersions).toHaveBeenCalledExactlyOnceWith(SCENARIO, 50, 3, options);
+    await service.getVersion(SCENARIO, VERSION_A, { signal });
+    expect(store.getVersion).toHaveBeenCalledExactlyOnceWith(SCENARIO, VERSION_A, { signal });
+  });
+
   // The repo-wide vitest.setup.ts calls _resetConfigCache() before EACH test,
   // so config.cee must be re-accessed at call time — a module-scope capture
   // would mutate a stale, discarded parse.

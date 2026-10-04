@@ -39,6 +39,7 @@ import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js
 import type { ContextPackGoalTarget } from './goal-target-record.js';
 import type { ContextPackFactorValues } from './factor-value-record.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
+import { projectModelFacingRunDelta } from './model-facing-run-delta.js';
 import { eligibleInvestigationPriority, type InvestigationPriorityLicence } from '../coaching/investigation-priority.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
@@ -1871,14 +1872,7 @@ export function assembleContextPackWithSummary(
     if (runDeltaBuild === null || runDeltaBuild.kind !== 'ok') return null;
     // SC-24's pair members stay OFF the prompt too (see `ContextPackRunDeltaSchema`): an input row has no author.
     // 0.70.0: the typed reason for empty win shares stays off the prompt too (RC's bound UI sentence; parity guard).
-    const {
-      flip_thresholds: _flipThresholdsNotComputed,
-      endpoints: _endpoints, input_coverage: _inputCoverage, input_changes: _inputChanges,
-      win_probabilities_unavailable: _winProbabilitiesUnavailable,
-      ...rest
-    } = runDeltaBuild.delta;
-    void _flipThresholdsNotComputed; void _endpoints; void _inputCoverage; void _inputChanges; void _winProbabilitiesUnavailable;
-    return rest;
+    return projectModelFacingRunDelta(runDeltaBuild.delta);
   })();
   // Plain/direct arrays predate the durable carrier. They may still provide a
   // useful bounded projection, but cannot establish that scenario history is

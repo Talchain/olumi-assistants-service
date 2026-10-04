@@ -178,7 +178,9 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
-import { savedRunContextFacts } from '../saved-run-context-facts.js';
+import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-run-context-facts.js';
+import { selectedRunDeltaForModel } from '../selected-run-delta-for-model.js';
+import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
@@ -970,6 +972,8 @@ interface GraphRead {
   readonly leader_limit_risks?: readonly unknown[] | null;
   /** The read's `analysis_result` block — the selected Run, present only when the route delivers it (`goal-certainty-for-agent.ts`). */
   readonly analysis_result?: unknown;
+  /** Full UI wire data stays internal until the model-facing context projection. */
+  readonly run_delta?: RunDelta;
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
   /** The selected Run's recorded participation via the canonical reader; absent = not recorded. */
@@ -978,7 +982,7 @@ interface GraphRead {
 
 // An edited graph can still carry an earlier Run. Its old result must not be
 // given a display name derived from the new intervention level.
-function optionNameAliasesForCurrentRun(g: GraphRead): ReturnType<typeof optionNameAliases> {
+function optionNameAliasesForCurrentRun(g: Omit<GraphRead, 'run_delta'>): ReturnType<typeof optionNameAliases> {
   const kind = (g.analysis_state as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   // The graph read has already checked the Run against the canonical analysis
   // projection. Its graph_hash is the raw edit/CAS base, which can differ on a
@@ -1455,7 +1459,7 @@ const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<s
  * (`goalCertaintyForAgent`, the one reader): its recorded decisions and each `say`, or `unchecked` when it cannot be bound
  * (a stale Run, nothing recorded, a refused record). No second truth, nothing recomputed.
  */
-function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: string, g: GraphRead): Record<string, unknown> {
+function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: string, g: Omit<GraphRead, 'run_delta'> & Pick<SavedRunContextFactsRead, 'run_delta'>): Record<string, unknown> {
   const analysis = context.analysis as Record<string, unknown> | undefined;
   if (analysis === undefined) return context;
   const certainty = goalCertaintyForAgent(g.analysis_result, { scenario_id: scenarioId, analysis_state: g.analysis_state }, g);
@@ -1890,6 +1894,10 @@ export function createAgentCapabilities(
       ...(() => {
         const readiness = (r.json.current_read as { analysis_ready?: unknown } | undefined)?.analysis_ready;
         return readiness === undefined ? {} : { analysis_ready: readiness };
+      })(),
+      ...(() => {
+        const delta = (r.json.current_read as { run_delta?: RunDelta } | undefined)?.run_delta;
+        return delta === undefined ? {} : { run_delta: delta };
       })(),
       ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
       ...(Array.isArray(r.json.goal_scope_reconciliation) ? { goal_scope_reconciliation: r.json.goal_scope_reconciliation as GoalScopeReconciliation[] } : {}),
@@ -2882,6 +2890,9 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const delta = await selectedRunDeltaForModel(ctx.scenario_id, g, g.run_delta);
+      const { run_delta: _wireDelta, ...readWithoutDelta } = g;
+      const modelRead = { ...readWithoutDelta, ...(delta === undefined ? {} : { run_delta: delta }) };
       const scopeIssues = g.goal_scope_reconciliation ?? [];
       const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission });
       const optionNames = optionNameAliasesForCurrentRun(g);
@@ -2907,7 +2918,7 @@ export function createAgentCapabilities(
         structure: structuralFacts(g.nodes, g.edges, limitNodeIdsOf(g.raw)),
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
-        ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, g),
+        ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest

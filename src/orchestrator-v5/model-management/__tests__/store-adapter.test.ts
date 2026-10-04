@@ -65,6 +65,10 @@ function makeClient(cfg: MockConfig = {}): {
           filters[`lt:${col}`] = val;
           return chain;
         },
+        abortSignal: (signal: AbortSignal) => {
+          filters.signal = signal;
+          return chain;
+        },
         limit: (n: number) => {
           filters.limit = n;
           return Promise.resolve(cfg.selectResult ?? { data: [], error: null });
@@ -364,6 +368,22 @@ describe('SupabaseModelVersionStore.restoreVersionAtomic', () => {
 });
 
 describe('SupabaseModelVersionStore.listVersions', () => {
+  it.each([null, undefined])('strict evidence reads reject a missing payload (%s), preserving legacy empty-list behaviour', async data => {
+    const { client } = makeClient({ selectResult: { data, error: null } });
+    const store = new SupabaseModelVersionStore(client);
+    await expect(store.listVersions(SCENARIO)).resolves.toEqual([]);
+    await expect(store.listVersions(SCENARIO, 50, undefined, { requirePayload: true }))
+      .rejects.toThrow(/returned no array payload/);
+  });
+
+  it('strict evidence reads accept a positively empty page and forward cancellation', async () => {
+    const { client, selectCalls } = makeClient({ selectResult: { data: [], error: null } });
+    const signal = new AbortController().signal;
+    await expect(new SupabaseModelVersionStore(client).listVersions(SCENARIO, 50, 3, { requirePayload: true, signal }))
+      .resolves.toEqual([]);
+    expect(selectCalls[0]!.filters.signal).toBe(signal);
+  });
+
   it('reads newest-first and discards the internal legacy-hash graph from summaries', async () => {
     const rows = [summaryRow({ version_number: 2 }), summaryRow({ id: '44444444-4444-4444-8444-444444444444', version_number: 1 })];
     const { client, selectCalls } = makeClient({ selectResult: { data: rows, error: null } });
@@ -507,6 +527,13 @@ describe('SupabaseModelVersionStore.getVersion', () => {
     expect(version?.analysis_affecting_hash).toBe('e2a118c22bac9b69fc06ec86a26e21762013755bf51a28b1c21db0375fe530e1');
     expect(listed?.analysis_affecting_hash).toBe(version?.analysis_affecting_hash);
   });
+  it('forwards evidence-read cancellation to the version query', async () => {
+    const { client, selectCalls } = makeClient({ selectResult: { data: summaryRow(), error: null } });
+    const signal = new AbortController().signal;
+    await new SupabaseModelVersionStore(client).getVersion(SCENARIO, VERSION_ID, { signal });
+    expect(selectCalls[0]!.filters.signal).toBe(signal);
+  });
+
   it('filters by BOTH scenario_id and id; returns the full record including graph', async () => {
     const graph = { nodes: [{ id: 'n1' }], edges: [] };
     const { client, selectCalls } = makeClient({
