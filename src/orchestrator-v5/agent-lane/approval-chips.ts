@@ -315,11 +315,19 @@ function linkEffectReadingFor(tool: string, source: ApprovalLabelSource | undefi
   const proposal = source?.proposal;
   const result = source?.result;
   if (tool !== 'propose_link_effect' || proposal === undefined || result === undefined || result.ok !== true || result.proposal_id !== proposal.proposal_id) return undefined;
-  const op = proposal.operations.length === 1 && proposal.operations[0]!.op === 'set_link_effect' ? proposal.operations[0]!.value as
-    { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown } : undefined;
-  const link = result.link as { from?: unknown; to?: unknown; your_words?: unknown } | undefined;
-  if (op === undefined || link === undefined || link.your_words !== op.quote) return undefined;
-  return linkEffectReadingOf(proposal, { from: link.from, to: link.to });
+  if (proposal.operations.length === 0 || proposal.operations.some((op) => op.op !== 'set_link_effect')) return undefined;
+  if (proposal.operations.length === 1) {
+    const op = proposal.operations[0]!.value as
+      { effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown }; quote?: unknown };
+    const link = result.link as { from?: unknown; to?: unknown; your_words?: unknown } | undefined;
+    if (link === undefined || link.your_words !== op.quote) return undefined;
+    return linkEffectReadingOf(proposal, { from: link.from, to: link.to });
+  }
+  const links = result.links;
+  if (!Array.isArray(links) || links.length !== proposal.operations.length) return undefined;
+  const labels = links.map((link) => link as { from: unknown; to: unknown; your_words?: unknown });
+  if (labels.some((link, i) => link.your_words !== (proposal.operations[i]!.value as { quote?: unknown }).quote)) return undefined;
+  return linkEffectReadingsOf(proposal, labels);
 }
 
 /**
@@ -335,6 +343,26 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
   const signed = (v: number, unit: string): string => `${v < 0 ? '\u2212' : '+'}${figureInUserUnits(Math.abs(v), unit) ?? `${Math.abs(v)} ${unit}`}`;
   return `Record: ${signed(e.per_source_change, e.per_source_change_unit)} on "${labels.from}" \u2192 ${signed(e.amount, e.amount_unit)} in "${labels.to}" `
     + `\u2014 from your words: "${op.quote}"`;
+}
+
+/** The same card reading for one stored operation; kept separate so the single-link wording remains byte-for-byte. */
+function linkEffectReadingOfOperation(
+  operation: StructuredProposal['operations'][number],
+  labels: { readonly from: unknown; readonly to: unknown },
+): string | undefined {
+  const proposal: StructuredProposal = { ...({} as StructuredProposal), operations: [operation] };
+  return linkEffectReadingOf(proposal, labels);
+}
+
+/** The card reading for an all-link-effect proposal, one natural sentence per line. */
+export function linkEffectReadingsOf(
+  proposal: StructuredProposal,
+  labels: readonly { readonly from: unknown; readonly to: unknown }[],
+): string | undefined {
+  if (proposal.operations.length === 0 || proposal.operations.length !== labels.length
+    || proposal.operations.some((op) => op.op !== 'set_link_effect')) return undefined;
+  const readings = proposal.operations.map((operation, i) => linkEffectReadingOfOperation(operation, labels[i]!));
+  return readings.every((reading): reading is string => reading !== undefined) ? readings.join('\n') : undefined;
 }
 
 /**

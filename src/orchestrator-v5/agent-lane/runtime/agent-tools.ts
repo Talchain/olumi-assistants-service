@@ -360,8 +360,16 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + '`per_source_change` the change in its SOURCE, each in that end\u2019s unit as get_canonical_state gives it. `quote` is the '
       + 'user\u2019s ONE statement from THIS message that says it, copied exactly: the words that give both figures, name both ends '
       + 'and say which way. Never use this for a figure the user did not write; for a strength '
-      + 'said in words ("strong"), use propose_link_strength.',
-    parameters: obj({
+      + 'said in words ("strong"), use propose_link_strength. When the result is withheld because links are unsized, ask for all the listed sizes in ONE message, in plain words with units. When the user gives figures for several links, call propose_link_effect ONCE with all of them. Never invent a figure. Where the context lists Olumi\u2019s own estimate in units, you may offer it and include it only if the user says to use it.',
+    parameters: {
+      ...obj({
+      links: { type: 'array', minItems: 1, maxItems: 12, description: 'Several existing links to size in one approval; use instead of the single-link fields when the user gave several figures.', items: obj({
+        from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
+        to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
+        amount: { type: 'number', description: 'The signed target change.' }, amount_unit: { type: 'string', description: 'The target unit.' },
+        per_source_change: { type: 'number', description: 'The signed source change this is per.' }, per_source_change_unit: { type: 'string', description: 'The source unit.' },
+        quote: { type: 'string', description: 'The exact user words for this link.' },
+      }, ['from_label', 'to_label', 'amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'quote']), },
       from_label: { type: 'string', description: 'Where the link starts, exactly as get_canonical_state labels it.' },
       to_label: { type: 'string', description: 'Where the link ends, exactly as get_canonical_state labels it.' },
       amount: { type: 'number', description: 'The change in the TARGET the user stated, signed (negative when it falls).' },
@@ -369,7 +377,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       per_source_change: { type: 'number', description: 'The change in the SOURCE the user stated it for (non-zero).' },
       per_source_change_unit: { type: 'string', description: 'The source\u2019s unit.' },
       quote: { type: 'string', description: 'The user\u2019s own words from THIS message, copied exactly.' },
-    }, ['from_label', 'to_label', 'amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'quote']),
+      }, []),
+      oneOf: [
+        { required: ['links'] },
+        { required: ['from_label', 'to_label', 'amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'quote'] },
+      ],
+    },
   },
   {
     type: 'function',
@@ -818,8 +831,9 @@ export interface AgentCapabilities {
   }): Promise<ToolResult>;
   /** Optional: the user's stated effect on one link (their figures + words); a capability set without it refuses plainly. */
   proposeLinkEffect?(ctx: AgentToolContext, args: {
-    from_label: string; to_label: string; amount: number; amount_unit: string;
-    per_source_change: number; per_source_change_unit: string; quote: string;
+    links?: readonly { from_label: string; to_label: string; amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string }[];
+    from_label?: string; to_label?: string; amount?: number; amount_unit?: string;
+    per_source_change?: number; per_source_change_unit?: string; quote?: string;
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {

@@ -4,6 +4,7 @@
  * link with the canonical writer in memory, scopes the postimage to that one link, and writes ONE append — or nothing.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
@@ -11,6 +12,9 @@ import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/
 import { linkEffectEdgeToken, linkEffectReadingToken } from '../../../src/orchestrator-v5/system-events/link-effect-edit.js';
 
 const SCENARIO_ID = '64c5eccc-0000-4000-8000-0000000000e1';
+const GROUPED_FIXTURE = JSON.parse(readFileSync(new URL('../../../src/orchestrator-v5/agent-lane/__tests__/fixtures/served-journey-c-price-subscribers-unsized-5411da8.json', import.meta.url), 'utf8')) as {
+  graph: Record<string, unknown>;
+};
 
 function servedShape(): unknown {
   return projectGraphForPersistence({ ...GraphV3.parse({
@@ -159,5 +163,27 @@ describe('⭐ a user-stated link effect is ONE commit through the real level doo
       expected: { mean: 0.7, effect_direction: 'positive' }, band: 'strong', author: 'user_specified' }] }), 'req-le-5');
     expect(res.status).toBe('refused');
     expect(rows.size).toBe(0);
+  });
+
+  it('RED: three natural effects share one durable commit and one fact per link', async () => {
+    persisted = projectGraphForPersistence(structuredClone(GROUPED_FIXTURE.graph));
+    rows.clear();
+    const effects = [
+      { from: 'pro_plan_price', to: 'pro_plan_paying_subscribers', effect: { amount: -50, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'GBP per month' }, quote: 'Every £1 on the Pro plan price loses us about 50 Pro plan paying subscribers' },
+      { from: 'monthly_churn', to: 'pro_plan_paying_subscribers', effect: { amount: -40, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: 'percent per month' }, quote: 'Every 1% monthly churn loses about 40 Pro plan paying subscribers' },
+      { from: 'feature_delivery_scope', to: 'monthly_churn', effect: { amount: -0.75, amount_unit: 'percentage points', per_source_change: 100, per_source_change_unit: 'percent of proposed release' }, quote: 'Every 100% increase in Feature delivery scope loses about 0.75 percentage points of Monthly churn' },
+    ].map((item) => ({ ...item, edge_token: linkEffectEdgeToken(persisted, item.from, item.to)!, reading_token: linkEffectReadingToken(item) }));
+    const res = await commitOptionLevelsInProcess({ scenario_id: SCENARIO_ID, base_graph_hash: baseHash(), turn_id: 'agent-authorise:grouped-3', links: [], levels: [], link_effects: effects } as never, 'req-grouped-3');
+    expect(res.status, JSON.stringify(res)).toBe('committed');
+    expect(rows.size).toBe(1);
+    const row = [...rows.values()][0]!.write;
+    const facts = (row.handler_facts ?? []) as Array<{ fact_type: string; result: { after: { stated_quote?: string } } }>;
+    expect(facts).toHaveLength(3);
+    expect(facts.map((fact) => fact.fact_type)).toEqual(['adjust_edge_strength', 'adjust_edge_strength', 'adjust_edge_strength']);
+    expect(facts.map((fact) => fact.result.after.stated_quote)).toEqual(effects.map((effect) => effect.quote));
+    for (const effect of effects) {
+      const edge = (persisted as { edges: Array<Record<string, unknown>> }).edges.find((candidate) => candidate.from === effect.from && candidate.to === effect.to)!;
+      expect(edge.provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated', natural_effect: effect.effect });
+    }
   });
 });
