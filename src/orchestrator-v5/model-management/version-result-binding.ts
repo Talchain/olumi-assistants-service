@@ -76,7 +76,7 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
 }
 
 /** Compose the canonical claim and licence for this Run on the version it analysed. */
-function boundRunLeaderLicence(run: BoundRun, version: ModelVersionRecord): LeaderLicence {
+export function boundRunLeaderLicence(run: Pick<BoundRun, 'fact' | 'identity'>, version: Pick<ModelVersionRecord, 'graph' | 'scenario_id'>): LeaderLicence {
   const fact = run.fact;
   if (fact.fact_type !== 'run_analysis') return 'withheld';
   const facts = [fact];

@@ -261,6 +261,9 @@ const SANCTIONED_INBOUND_CALL_SITES = new Set(
     // hand would be the twin-of-the-contract defect this module's allowlists
     // exist to prevent. One parser, one more read-only call site, is the shape.
     '../agent-lane/runtime/agent-capabilities.ts',
+    // Selected Run model input reads saved graph evidence and reuses the existing complete per-Run licence.
+    // No version write, new flag, permission rule or wire schema.
+    '../agent-lane/selected-run-delta-for-model.ts',
   ].map((s) => resolve(moduleDir, s)),
 );
 
