@@ -9,6 +9,8 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ### `talchain-schemas-0.76.0.tgz` ← **THE CURRENT PIN** (SCI-DEEP v1, “Test without this link”)
 
+<!-- talchain-schemas-0.76.0.tgz was built from olumi-schemas PR #86 @71da209c (independently approved) and is not yet on schemas main. -->
+
 The approved published `@talchain/schemas@0.76.0` archive supplied for CEE #2544,
 verified against the approved SHA-256 and the installed package version. The supplied
 archive and vendored copy are byte-identical; this checkout did not repack it or fetch the registry.

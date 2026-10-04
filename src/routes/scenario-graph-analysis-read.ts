@@ -134,7 +134,7 @@ import {
 } from '../orchestrator/context/constraint-feasibility.js';
 import { deriveAnalysisFreshness, selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { identityRunUseFromFacts } from '../orchestrator-v5/compose/definitional-links.js';
-import { isScenarioAnalysisReasoningAuthority } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
+import { isScenarioAnalysisReasoningAuthority, readScenarioAnalysisClaimSafetyFact, type ScenarioAnalysisClaimSafetyRead } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import { readStoredGoalCertainty, type StoredGoalCertainty } from '../orchestrator-v5/tools/handlers/run-goal-certainty.js';
 import { readStoredOptionParticipation, type StoredOptionParticipation } from '../orchestrator-v5/tools/handlers/option-participation.js';
@@ -247,6 +247,8 @@ export interface ReadScenarioAnalysisParams {
   readonly requestId: string;
   /** Atomic restore may supply the DB-returned marker and avoid a second read. */
   readonly analysisInvalidatedAt?: string | null;
+  /** Internal receipt from this same reconciled read; never added to the graph route's wire body. */
+  readonly onCurrentnessRead?: (read: ScenarioAnalysisClaimSafetyRead) => void;
 }
 
 /**
@@ -344,6 +346,7 @@ export async function readScenarioAnalysis(
     // consulted only when no fact is selected, so this changes nothing else.
     // Same rule as the turn path: only `complete` licenses "never analysed".
     const durableAuthority = isScenarioAnalysisReasoningAuthority(factSet);
+    params.onCurrentnessRead?.(readScenarioAnalysisClaimSafetyFact(factSet, params.scenarioId));
     const facts = durableAuthority ? factSet.facts : hotWindow.facts;
     const factsReadOk = factSet.status === 'complete';
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {

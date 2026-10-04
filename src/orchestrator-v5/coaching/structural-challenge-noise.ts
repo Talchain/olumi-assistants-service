@@ -45,7 +45,9 @@ export function proportionChangeNoise(prior: number, current: number, priorN: nu
 
 export function leadNoise(leaderShare: number, runnerUpShare: number, n: number): RunDeltaNoiseVerdictLiteral {
   if (!valid(leaderShare, n) || !valid(runnerUpShare, n)) return 'not_noise_qualified';
-  return disjoint(wilsonInterval(leaderShare, n), wilsonInterval(runnerUpShare, n)) ? 'signal' : 'within_noise';
+  if (leaderShare < runnerUpShare) return 'not_noise_qualified';
+  // A disjoint interval in the wrong direction is evidence AGAINST the recorded leader.
+  return wilsonInterval(leaderShare, n).low > wilsonInterval(runnerUpShare, n).high ? 'signal' : 'within_noise';
 }
 
 export function meanChangeNoise(

@@ -12,8 +12,8 @@
  * the independent-run form (`C2_unpaired`). A completed result also proves equal sample budgets and engine builds.
  *
  * BOUND TO THE SELECTED RUN, BY EXISTING AUTHORITIES ONLY:
- *   currentness — the snapshot's analysis-affecting hash (`computeAnalysisAffectingGraphHash` over the raw persisted
- *                 graph, exactly as `run_analysis` computes `graph_hash_at_run`) equals the Run's; else `stale`.
+ *   currentness — `readScenarioAnalysis` supplies the reload/turn verdict over the canonical graph, reconciled durable
+ *                 facts and restore marker; its same-read receipt proves the pinned Run is still the newest.
  *   one edit    — `diffRunInputs` over the two Runs' recorded input snapshots must contain exactly one row (this
  *                 link's `presence`), AND the recorded snapshots must be equal member by member once that one link is
  *                 removed: every other RECORDED input (options, settings, factors, goal, limits, every other link) is
@@ -25,7 +25,8 @@
  *                 the Run sent (`isTheRunsPayload`, the SAME digest rule as "What would change this?"). So a change in
  *                 how CEE builds the payload since the Run is `failed: baseline_payload_mismatch`, never a comparison;
  *                 the candidate is then that same builder's output for the snapshot minus one link.
- *   late reply  — the hash is re-read after the recompute; a model edited meanwhile is `stale`.
+ *   late reply  — those same currentness and identity checks are repeated after the recompute; a model edited or
+ *                 restored meanwhile, or a newer selected Run, is `stale`. An unreadable check is unavailable.
  * Each refusal is a typed contract status; none is turned into a figure.
  */
 import { createHash } from 'node:crypto';
@@ -42,11 +43,14 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import { RunInputSnapshotSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { buildTurnContext, loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
+import { readScenarioAnalysis } from '../../routes/scenario-graph-analysis-read.js';
 import { priorRunForSeed, seedHistoryFacts } from '../coaching/seed-reuse.js';
 import { orderSuccessfulRunAnalysisFactsNewestFirst } from '../context/freshness.js';
-import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
+import type { ScenarioAnalysisClaimSafetyRead } from '../context/reconcile-scenario-analysis-facts.js';
 import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../run-analysis-snapshot-binding.js';
-import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
+import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../tools/handler-errors.js';
+import { AnalysisSnapshotDivergedError } from '../run-analysis-snapshot-binding.js';
 import type { RunAnalysisProbeInput } from '../tools/handlers/run-analysis-probe.js';
 import {
   createRegistry,
@@ -59,11 +63,11 @@ import { diffRunInputs } from '../coaching/run-input-changes.js';
 import {
   NOT_COMPARED,
   compareStructuralChallenge,
+  type StructuralChallengeCertainty,
 } from '../coaching/structural-challenge-compare.js';
 import { graphWithoutLink, structuralChallengeEligibility, type ChallengeLink } from '../coaching/structural-challenge-eligibility.js';
 import { isTheRunsPayload } from './decision-flip-dispatch.js';
-import type { PLoTClient } from '../../orchestrator/plot-client.js';
-import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { PLoTTimeoutError, type PLoTClient } from '../../orchestrator/plot-client.js';
 import { log } from '../../utils/telemetry.js';
 
 type Rec = Record<string, unknown>;
@@ -86,7 +90,31 @@ export interface DispatchStructuralChallengeParams {
 
 export type StructuralChallengeDispatchResult =
   | { readonly kind: 'no_run' }
-  | { readonly kind: 'result'; readonly result: StructuralChallengeResultV1; readonly labels: ReadonlyMap<string, string> };
+  | { readonly kind: 'result'; readonly result: StructuralChallengeResultV1; readonly labels: ReadonlyMap<string, string>; readonly certainty?: StructuralChallengeCertainty };
+
+function currentFacts(context: Awaited<ReturnType<typeof buildTurnContext>>): readonly HandlerFact[] {
+  const history = seedHistoryFacts({ scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set }) ?? [];
+  return context.newest_analysis_fact ? [...history, context.newest_analysis_fact] : history;
+}
+
+/** Consume the sanctioned non-turn reader; the receipt and verdict belong to the SAME canonical read. */
+async function canonicalPinnedFreshness(
+  pinned: HandlerFact, snapshot: RunAnalysisScenarioSnapshot, scenarioId: string, requestId: string,
+): Promise<'fresh' | 'stale' | 'unknown'> {
+  let receipt: ScenarioAnalysisClaimSafetyRead | undefined;
+  const read = await readScenarioAnalysis({
+    scenarioId, graph: snapshot.rawPersistedGraph, requestId,
+    onCurrentnessRead: (current) => { receipt = current; },
+  });
+  const current = receipt as ScenarioAnalysisClaimSafetyRead | undefined;
+  if (!current?.readOk || current.fact === null || read.analysis_state === null) return 'unknown';
+  const identity = compareAnalysisRunFactIdentity(runResult(pinned), runResult(current.fact));
+  if (identity.status === 'unconfirmed') return 'unknown';
+  if (identity.status !== 'match' || runResult(pinned).run_id !== runResult(current.fact).run_id) return 'stale';
+  const state = read.analysis_state;
+  if (state.run_state.kind === 'unknown_degraded' || state.run_state.kind === 'never_run') return 'unknown';
+  return state.run_state.kind === 'complete_current' && !state.requires_rerun ? 'fresh' : 'stale';
+}
 
 /**
  * The contract's `recompute_key` (0.76.0 RETENTION): sha256 of the UTF-8 JSON tuple
@@ -105,13 +133,6 @@ export function structuralChallengeRecomputeKey(
 function pinnableSeed(seedUsed: string | number): number | null {
   const n = typeof seedUsed === 'number' ? seedUsed : /^-?\d{1,15}$/.test(seedUsed) ? Number(seedUsed) : Number.NaN;
   return Number.isSafeInteger(n) ? n : null;
-}
-
-/** The analysis-affecting hash exactly as `run_analysis` records `graph_hash_at_run`. */
-function currentAnalysisHash(snapshot: RunAnalysisScenarioSnapshot): string | null {
-  if (snapshot.rawPersistedGraph === undefined || snapshot.rawPersistedGraph === null) return null;
-  const parsed = GraphStateIngressSchema.safeParse(snapshot.rawPersistedGraph);
-  return parsed.success ? computeAnalysisAffectingGraphHash(parsed.data) : null;
 }
 
 function runResult(fact: HandlerFact): Rec {
@@ -172,9 +193,7 @@ function linkSizing(baseline: HandlerFact, link: ChallengeLink): StructuralChall
 export async function dispatchStructuralChallenge(params: DispatchStructuralChallengeParams): Promise<StructuralChallengeDispatchResult> {
   const { payload, requestId, link } = params;
   const context = await buildTurnContext(payload, requestId);
-  const history = seedHistoryFacts({
-    scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set,
-  });
+  const history = currentFacts(context);
   const selected = history === undefined ? undefined : orderSuccessfulRunAnalysisFactsNewestFirst(history)[0]?.fact;
   if (selected === undefined) return { kind: 'no_run' };
 
@@ -211,12 +230,34 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   if (!params.exploratoryWorkAllowed) return refuse('withheld', 'exploratory_work_not_permitted');
 
   const readSnapshot: ScenarioReader = params.scenarioReader ?? ((scenarioId) => loadScenarioSnapshotForRunAnalysis(scenarioId, requestId));
-  const snapshot = await readSnapshot(payload.scenario_id, params.signal);
+  const unavailable = (err: unknown, phase: 'read' | 'probe' | 'candidate' | 'late', labels = new Map<string, string>()): StructuralChallengeDispatchResult => {
+    if (err instanceof PLoTTimeoutError || (err instanceof HandlerInvocationFailedError && err.cause_kind === 'plot_timeout')) {
+      return refuse('timed_out', 'candidate_run_timeout', labels);
+    }
+    if (err instanceof AnalysisSnapshotDivergedError || (err instanceof HandlerInvocationFailedError && err.cause_kind === 'analysis_snapshot_diverged')) {
+      return refuse('stale', phase === 'read' ? 'run_not_current' : 'model_changed_during_challenge', labels);
+    }
+    if (err instanceof HandlerResultInvalidError) return refuse('failed', 'candidate_unparseable', labels);
+    if (phase === 'candidate' && err instanceof HandlerInvocationFailedError
+      && ['analysis_not_ready', 'options_not_configured', 'args_validation_failed'].includes(err.cause_kind)) {
+      return refuse('unsupported', 'candidate_rejected', labels);
+    }
+    return refuse('failed', phase === 'candidate' ? 'candidate_run_failed' : 'probe_unavailable', labels);
+  };
+  let snapshot: RunAnalysisScenarioSnapshot;
+  try { snapshot = await readSnapshot(payload.scenario_id, params.signal); } catch (err) { return unavailable(err, 'read'); }
   const labels = nodeLabels(snapshot.graph);
-  if (currentAnalysisHash(snapshot) !== baseline.graph_hash_at_run) return refuse('stale', 'run_not_current', labels);
+  try {
+    const canonical = await canonicalPinnedFreshness(selected, snapshot, context.session_id, requestId);
+    if (canonical === 'unknown') return refuse('failed', 'probe_unavailable', labels);
+    if (canonical === 'stale') return refuse('stale', 'run_not_current', labels);
+  } catch (err) { return unavailable(err, 'read', labels); }
 
-  const eligibility = structuralChallengeEligibility(snapshot.graph, link);
-  if (!eligibility.eligible) return refuse('unsupported', eligibility.reason, labels);
+  // Canonical wiring/definition refusals retain priority. Root and reachability are decided on verified wire below.
+  const canonicalEligibility = structuralChallengeEligibility(snapshot.graph, link);
+  if (!canonicalEligibility.eligible && canonicalEligibility.reason !== 'target_becomes_root') {
+    return refuse('unsupported', canonicalEligibility.reason, labels);
+  }
 
   const plotClient = params.plotClient ?? getDefaultPlotClient();
   const invoke = (handlerFn: NonNullable<ReturnType<typeof resolveHandler>>) => runWithBoundAnalysisSnapshot(
@@ -238,12 +279,13 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   try {
     await invoke(probeFn);
   } catch (err) {
-    if (!(err instanceof HandlerInvocationFailedError)) throw err;
-    return refuse('failed', 'probe_unavailable', labels);
+    return unavailable(err, 'probe', labels);
   }
   const rebuilt = sent as RunAnalysisProbeInput | null;
   if (rebuilt === null) return refuse('failed', 'probe_unavailable', labels);
   if (!isTheRunsPayload(rebuilt.plotPayload, selected)) return refuse('failed', 'baseline_payload_mismatch', labels);
+  const eligibility = structuralChallengeEligibility(rebuilt.plotPayload.graph, link);
+  if (!eligibility.eligible) return refuse('unsupported', eligibility.reason, labels);
 
   // The alternative: the SAME snapshot minus one link, with the baseline's seed PINNED (contract S3: seed, budget and
   // engine equal). An explicit seed is the seed authority's own yield (`explicit_seed`), so its reuse rules are not
@@ -258,7 +300,12 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
     briefText: undefined,
     seed: pinnedSeed,
   };
-  const handlerFn = resolveHandler(createRegistry({ scenarioReader: async () => edited, plotClient, counterfactualClient: null }), 'run_analysis');
+  // Per-invocation policy: the ordinary Run handler and all other client callers keep their existing retry policy.
+  const candidateClient: PLoTClient = {
+    run: (body, id, opts) => plotClient.run(body, id, { ...opts, retryPolicy: 'no_retry' }),
+    validatePatch: (body, id, opts) => plotClient.validatePatch(body, id, opts),
+  };
+  const handlerFn = resolveHandler(createRegistry({ scenarioReader: async () => edited, plotClient: candidateClient, counterfactualClient: null }), 'run_analysis');
   if (!handlerFn) return refuse('failed', 'candidate_run_failed', labels);
 
   let candidate: HandlerFact | undefined;
@@ -266,20 +313,20 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
     const outcome = await invoke(handlerFn);
     candidate = outcome.handler_facts.find((f) => f.fact_type === 'run_analysis');
   } catch (err) {
-    if (!(err instanceof HandlerInvocationFailedError)) throw err;
-    if (err.cause_kind === 'plot_timeout') return refuse('timed_out', 'candidate_run_timeout', labels);
-    if (err.cause_kind === 'analysis_snapshot_diverged') return refuse('stale', 'model_changed_during_challenge', labels);
-    if (['analysis_not_ready', 'options_not_configured', 'args_validation_failed'].includes(err.cause_kind)) {
-      return refuse('unsupported', 'candidate_rejected', labels);
-    }
-    return refuse('failed', 'candidate_run_failed', labels);
+    return unavailable(err, 'candidate', labels);
   }
   if (candidate === undefined) return refuse('failed', 'candidate_unparseable', labels);
   if (!isExactlyThisRemoval(selected, candidate, link)) return refuse('failed', 'baseline_payload_mismatch', labels);
 
   // A late reply never overwrites a model the user has since changed.
-  const after = await readSnapshot(payload.scenario_id, params.signal);
-  if (currentAnalysisHash(after) !== baseline.graph_hash_at_run) return refuse('stale', 'model_changed_during_challenge', labels);
+  let after: RunAnalysisScenarioSnapshot;
+  let finalFreshness: 'fresh' | 'stale' | 'unknown';
+  try {
+    after = await readSnapshot(payload.scenario_id, params.signal);
+    finalFreshness = await canonicalPinnedFreshness(selected, after, context.session_id, requestId);
+  } catch (err) { return unavailable(err, 'late', labels); }
+  if (finalFreshness === 'unknown') return refuse('failed', 'probe_unavailable', labels);
+  if (finalFreshness !== 'fresh') return refuse('stale', 'model_changed_during_challenge', labels);
 
   const compared = compareStructuralChallenge({
     baselineFact: selected,
@@ -288,6 +335,8 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
     reachable: eligibility.reachable,
     goalNodeId: snapshot.goal_node_id,
     goalLevelTarget: goalLevelTarget(snapshot.graph, snapshot.goal_node_id),
+    baselineGraph: snapshot.graph,
+    candidateGraph: edited.graph,
   });
   if (!compared.ok) {
     return refuse('failed', compared.reason === 'candidate_unparseable' ? 'candidate_unparseable' : 'baseline_payload_mismatch', labels);
@@ -304,5 +353,5 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   });
   if (!parsed.success) return refuse('failed', 'candidate_unparseable', labels);
   log.info({ event: 'structural_challenge.result', request_id: requestId, status: 'completed', claims: parsed.data.claims.length }, 'structural challenge');
-  return { kind: 'result', labels, result: parsed.data };
+  return { kind: 'result', labels, result: parsed.data, certainty: compared.certainty };
 }

@@ -4,7 +4,7 @@
  *
  * The comparator is agnostic to HOW the alternative was built, so the bank's own alternatives are its oracles:
  *   A vs B  (12-month reading): "£59 leads" HOLDS while "reaching £85k" CHANGES (1 -> 0.5291) and the outcome crosses
- *           the £85k target — an unchanged winner is not an unchanged result.
+ *           the £85k target in the raw figures. The unattested target boundary now travels as delta_only.
  *   A vs A2 (frame control): nothing changes.
  *   A vs C  (direction reversed): no headline changes ("the reply must not say this depends on price raising churn").
  * Goal certainty is decided by CEE's REAL producer (`goalCertaintyOfStoredResult`) on each model's graph, never assumed.
@@ -14,6 +14,8 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { StructuralChallengeClaimV1Schema, type StructuralChallengeClaimV1 } from '@talchain/schemas';
 import { compareStructuralChallenge } from '../structural-challenge-compare.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
+import { leadNoise } from '../structural-challenge-noise.js';
 import { reachableFrom } from '../structural-challenge-eligibility.js';
 import { goalCertaintyOfStoredResult } from '../../agent-lane/goal-certainty.js';
 import { GOAL_FIGURES_WITHHELD_CODES } from '../../../orchestrator/context/option-result-source.js';
@@ -61,8 +63,11 @@ const compare = (b: HandlerFact, reachable: ReadonlySet<string> = ALL, a: Handle
   if (!out.ok) throw new Error(out.reason);
   // All historical fixtures and every evidence variant below exercise the published claim licences.
   for (const c of out.claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
+  expect(identities(out.claims)).toEqual(EXPECTED);
   return out;
 };
+const identities = (claims: readonly StructuralChallengeClaimV1[]) => claims.map((c) => c.kind === 'leader' ? 'leader' : JSON.stringify([c.kind, c.option_id, c.constraint_id])).sort();
+const EXPECTED = ['leader', ...[P59, SQ].flatMap((id) => [JSON.stringify(['goal_probability', id, null]), JSON.stringify(['outcome_level', id, null]), JSON.stringify(['constraint_probability', id, 'agent-lane:monthly_churn:<='])])].sort();
 const claim = (claims: readonly StructuralChallengeClaimV1[], kind: StructuralChallengeClaimV1['kind'], option?: string, constraint?: string) =>
   claims.find((c) => c.kind === kind && (kind === 'leader' || ((c as { option_id: string }).option_id === option
     && (constraint === undefined || (c as { constraint_id: string | null }).constraint_id === constraint))));
@@ -74,13 +79,13 @@ describe('SCI-DEEP comparator · historical oracles (bank 2)', () => {
     expect(decisions.find((d) => d.option_id === P59)).toMatchObject({ probability_of_goal: 1, earned: true });
   });
 
-  it('A vs B: the leader HOLDS while reaching £85k CHANGES, and the £59 outcome crosses the target', () => {
+  it('A vs B: leader and earned certainty retain verdicts; unattested target boundaries weaken to deltas', () => {
     const { claims, pair_provenance } = compare(runFact(B_BODY, B_GRAPH, 'hash-b'));
     expect(pair_provenance).toEqual({ seed_equal: true, hash_equal: false, builds_equal: 'unknown', n_equal: true });
     expect(claim(claims, 'leader')).toMatchObject({ baseline_option_id: P59, alternative_option_id: P59, verdict: 'holds', basis: 'leader_same', noise_verdict: 'signal' });
     expect(claim(claims, 'goal_probability', P59)).toMatchObject({ baseline: 1, alternative: 0.5291, verdict: 'changes', basis: 'certainty_boundary_crossed', noise_verdict: 'signal' });
-    expect(claim(claims, 'outcome_level', P59)).toMatchObject({ target: TARGET, verdict: 'changes', basis: 'target_crossed', noise_verdict: 'signal' });
-    expect(claim(claims, 'outcome_level', SQ)).toMatchObject({ verdict: 'holds', basis: 'same_side_of_target' });
+    expect(claim(claims, 'outcome_level', P59)).toMatchObject({ target: null, verdict: 'delta_only', basis: 'no_licensed_boundary', noise_verdict: 'signal' });
+    expect(claim(claims, 'outcome_level', SQ)).toMatchObject({ target: null, verdict: 'delta_only', basis: 'within_noise' });
   });
 
   it('A vs A2 (frame control): nothing changes', () => {
@@ -237,5 +242,224 @@ describe('SCI-DEEP producer · published 0.76.0 evidence rules', () => {
     const { claims } = compare(runFact(body, graph, 'hash-alternative'));
     expect(claims.length).toBeGreaterThan(0);
     for (const c of claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
+  });
+});
+
+
+describe('independent-review regressions: complete claim identities', () => {
+  const raw = (a: HandlerFact, b: HandlerFact, graphs: { baselineGraph?: unknown; candidateGraph?: unknown } = {}, reachable = ALL) =>
+    compareStructuralChallenge({ baselineFact: a, candidateFact: b, turnMayNameLeader: true, reachable, goalNodeId: GOAL, goalLevelTarget: TARGET, ...graphs });
+  const fact = (body: unknown, side: 'a' | 'b') => runFact(body as Rec, side === 'a' ? A_GRAPH : B_GRAPH, `hash-${side}`);
+  const mutate = (f: HandlerFact, fn: (r: any) => void) => { const c = clone(f); fn((c as any).result); return c; };
+
+  it.each(['a', 'b'] as const)('1: both Runs need qualified evidence (%s side), including unaffected/changed leaders', (side) => {
+    for (const reachable of [ALL, new Set(['unrelated'])]) {
+      for (const shares of [[0.505, 0.495], [0.5, 0.5], [0.1, 0.9], [null, 0.9], [0.9, null]]) {
+        for (const changed of [false, true]) {
+          let a = fact(A_BODY, 'a'); let b = fact(B_BODY, 'b');
+          if (changed) b = mutate(b, (r) => {
+            r.leading_option_id = SQ;
+            for (const o of r.enrichment.option_comparison) o.win_probability = o.option_id === SQ ? 0.9 : 0.1;
+          });
+          const bad = mutate(side === 'a' ? a : b, (r) => {
+            const leader = r.leading_option_id;
+            for (const o of r.enrichment.option_comparison) {
+              const p = shares[o.option_id === leader ? 0 : 1];
+              if (p === null) delete o.win_probability; else o.win_probability = p;
+            }
+          });
+          const out = raw(side === 'a' ? bad : a, side === 'b' ? bad : b, {}, reachable);
+          if (!out.ok) throw new Error(out.reason);
+          expect(identities(out.claims)).toEqual(EXPECTED);
+          expect(claim(out.claims, 'leader')?.verdict).toBe('delta_only');
+          expect(claim(out.claims, 'leader')?.invariant_by_construction).toBe(false);
+          for (const c of out.claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
+        }
+      }
+    }
+    expect(leadNoise(0.1, 0.9, 10000)).toBe('not_noise_qualified');
+  });
+
+  it.each(['a', 'b'] as const)('1: a third competitor blocks a changed-leader verdict on %s', (side) => {
+    const a = mutate(fact(A_BODY, 'a'), (r) => {
+      r.enrichment.option_comparison.push({ ...clone(r.enrichment.option_comparison[0]), option_id: 'third' });
+      for (const o of r.enrichment.option_comparison) o.win_probability = o.option_id === P59 ? 0.8 : 0.1;
+    });
+    const b = mutate(fact(B_BODY, 'b'), (r) => {
+      r.leading_option_id = SQ;
+      r.enrichment.option_comparison.push({ ...clone(r.enrichment.option_comparison[0]), option_id: 'third' });
+      for (const o of r.enrichment.option_comparison) o.win_probability = o.option_id === SQ ? 0.8 : 0.1;
+    });
+    const bad = mutate(side === 'a' ? a : b, (r) => {
+      for (const o of r.enrichment.option_comparison) o.win_probability = o.option_id === 'third' ? 0.7 : o.option_id === r.leading_option_id ? 0.2 : 0.1;
+    });
+    const out = raw(side === 'a' ? bad : a, side === 'b' ? bad : b);
+    if (!out.ok) throw new Error(out.reason);
+    expect(identities(out.claims)).toEqual([...EXPECTED, ...['goal_probability', 'outcome_level', 'constraint_probability'].map((kind) => JSON.stringify([kind, 'third', kind === 'constraint_probability' ? 'agent-lane:monthly_churn:<=' : null]))].sort());
+    expect(claim(out.claims, 'leader')).toMatchObject({ verdict: 'delta_only', noise_verdict: 'not_noise_qualified' });
+    for (const c of out.claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
+  });
+
+  it.each(['a', 'b'] as const)('5: missing current shares never select stale quantities on %s, in every supported carrier', (side) => {
+    for (const carrier of ['current', 'nested', 'legacy', 'nested_options', 'nested_option_results', 'brief']) {
+      let a = fact(A_BODY, 'a'); let b = fact(B_BODY, 'b');
+      const modified = mutate(side === 'a' ? a : b, (r) => {
+        const current = r.enrichment.option_comparison;
+        for (const o of current) delete o.win_probability;
+        const stale = clone(current);
+        for (const o of stale) { o.win_probability = o.option_id === P59 ? 1 : 0; o.probability_of_goal = 0.25; o.outcome.mean = 5; o.constraint_probabilities['agent-lane:monthly_churn:<='] = 0.1; }
+        if (carrier === 'current') r.enrichment.results = stale;
+        else {
+          delete r.enrichment.option_comparison;
+          if (carrier === 'nested') r.enrichment.results = { option_comparison: current, options: stale };
+          if (carrier === 'legacy') r.enrichment.results = current;
+          if (carrier === 'nested_options') r.enrichment.results = { options: current };
+          if (carrier === 'nested_option_results') r.enrichment.results = { option_results: current };
+          if (carrier === 'brief') { delete r.enrichment.results; r.enrichment.decision_brief = { options: current }; }
+        }
+      });
+      if (side === 'a') a = modified; else b = modified;
+      const { claims } = compare(b, ALL, a);
+      expect(claim(claims, 'leader')).toMatchObject({ verdict: 'delta_only', noise_verdict: 'not_noise_qualified' });
+      const key = side === 'a' ? 'baseline' : 'alternative';
+      expect(claim(claims, 'goal_probability', P59)).toMatchObject({ [key]: side === 'a' ? 1 : 0.5291 });
+      expect(claim(claims, 'outcome_level', P59)).toMatchObject({ [key]: side === 'a' ? A_BODY.option_comparison[0].outcome.mean : B_BODY.option_comparison[0].outcome.mean });
+      expect(claim(claims, 'constraint_probability', P59, 'agent-lane:monthly_churn:<=')).toMatchObject({ [key]: side === 'a' ? A_BODY.option_comparison[0].constraint_probabilities['agent-lane:monthly_churn:<='] : B_BODY.option_comparison[0].constraint_probabilities['agent-lane:monthly_churn:<='] });
+    }
+  });
+
+  it.each(['a', 'b'] as const)('6: duplicate option identities and conflicting node bindings are rejected on %s', (side) => {
+    for (const duplicate of ['option', 'constraint']) {
+      const a = fact(A_BODY, 'a'); const b = fact(B_BODY, 'b');
+      const bad = mutate(side === 'a' ? a : b, (r) => {
+        if (duplicate === 'option') r.enrichment.option_comparison.push({ ...clone(r.enrichment.option_comparison[0]), probability_of_goal: 0.1 });
+        else r.enrichment.constraint_results.push({ ...r.enrichment.constraint_results[0], node_id: 'different_node' });
+      });
+      expect(raw(side === 'a' ? bad : a, side === 'b' ? bad : b)).toEqual({ ok: false, reason: side === 'a' ? 'baseline_unreadable' : 'candidate_unparseable' });
+    }
+  });
+
+  it('6: binding conflict between the Runs is rejected', () => {
+    const b = mutate(fact(B_BODY, 'b'), (r) => { r.enrichment.constraint_results[0].node_id = 'different_node'; });
+    expect(raw(fact(A_BODY, 'a'), b)).toEqual({ ok: false, reason: 'candidate_unparseable' });
+  });
+
+  it.each(['option', 'constraint', 'binding'] as const)('6: missing alternative %s retains every baseline identity with an incomparable null side', (missing) => {
+    const b = mutate(fact(B_BODY, 'b'), (r) => {
+      if (missing === 'option') r.enrichment.option_comparison = r.enrichment.option_comparison.filter((o: any) => o.option_id !== SQ);
+      if (missing === 'constraint') for (const o of r.enrichment.option_comparison) delete o.constraint_probabilities['agent-lane:monthly_churn:<='];
+      if (missing === 'binding') r.enrichment.constraint_results = [];
+    });
+    const { claims } = compare(b, new Set(['unrelated']));
+    const absent = missing === 'option' ? claims.filter((c) => c.kind !== 'leader' && c.option_id === SQ) : claims.filter((c) => c.kind === 'constraint_probability');
+    expect(identities(absent)).toEqual(EXPECTED.filter((id) => missing === 'option' ? id.includes(SQ) : id.includes('constraint_probability')));
+    for (const c of absent) expect(c).toMatchObject({ alternative: null, verdict: 'not_comparable', basis: 'missing_on_one_side', invariant_by_construction: false });
+  });
+
+  it.each(['a', 'b'] as const)('6: an unavailable recorded constraint measurement on %s never drops its identity', (side) => {
+    for (const value of [null, 'unavailable', Number.NaN]) {
+      const a = fact(A_BODY, 'a'); const b = fact(B_BODY, 'b');
+      const bad = mutate(side === 'a' ? a : b, (r) => {
+        r.enrichment.option_comparison.find((o: any) => o.option_id === P59).constraint_probabilities['agent-lane:monthly_churn:<='] = value;
+      });
+      const { claims } = compare(side === 'b' ? bad : b, new Set(['unrelated']), side === 'a' ? bad : a);
+      expect(claim(claims, 'constraint_probability', P59, 'agent-lane:monthly_churn:<=')).toMatchObject({
+        [side === 'a' ? 'baseline' : 'alternative']: null, verdict: 'not_comparable', basis: 'missing_on_one_side', invariant_by_construction: false,
+      });
+    }
+  });
+
+  it.each([null, undefined, ''] as const)('9: absent baseline leader %j suppresses the compared identity under a true licence', (id) => {
+    const a = mutate(fact(A_BODY, 'a'), (r) => { r.leading_option_id = id; });
+    expect(claim(compare(fact(B_BODY, 'b'), ALL, a).claims, 'leader')).toMatchObject({ baseline_option_id: null, alternative_option_id: null, verdict: 'not_comparable', basis: 'withheld_on_one_side' });
+  });
+
+  it('9: baseline withholding suppresses the alternative identity', () => {
+    const a = runFact(A_BODY, A_GRAPH, 'hash-a', { mayNameLeader: false });
+    expect(claim(compare(fact(B_BODY, 'b'), ALL, a).claims, 'leader')).toMatchObject({ baseline_option_id: null, alternative_option_id: null, verdict: 'not_comparable' });
+  });
+
+  // A genuinely testable target, with the same goal/unit/frame attested by both Runs' existing input snapshots.
+  const licensedGraph = () => ({ nodes: [
+    { id: GOAL, kind: 'goal', label: 'MRR', goal_threshold_raw: TARGET, goal_threshold: 0.8, goal_threshold_unit: 'GBP/month', goal_threshold_frame: 'level', goal_direction: '>=', observed_state: { baseline: 75000, unit: 'GBP/month' } },
+    { id: 'f', kind: 'factor' }, { id: P59, kind: 'option' }, { id: SQ, kind: 'option' },
+  ], edges: [{ from: P59, to: 'f' }, { from: SQ, to: 'f' }, { from: 'f', to: GOAL, provenance: { natural_effect: { amount: 1, amount_unit: 'GBP/month' } } }] });
+  const withSnapshot = (f: HandlerFact) => mutate(f, (r) => { r.input_snapshot = {
+    snapshot_version: 1, sent_digest: 'd'.repeat(64), goal: { node_id: GOAL, target_raw: TARGET, frame: 'level', unit: 'GBP/month' },
+    options: [], options_not_sent: [], factors: [], constraints: [], links: [],
+  }; });
+
+  it.each(['a', 'b'] as const)('6: a recorded goal identity on %s cannot be relabelled by the comparison', (side) => {
+    const a = withSnapshot(fact(A_BODY, 'a')); const b = withSnapshot(fact(B_BODY, 'b'));
+    const bad = mutate(side === 'a' ? a : b, (r) => { r.input_snapshot.goal.node_id = 'different_goal'; });
+    expect(raw(side === 'a' ? bad : a, side === 'b' ? bad : b)).toEqual({ ok: false, reason: side === 'a' ? 'baseline_unreadable' : 'candidate_unparseable' });
+  });
+
+  it('1: the submitted roster prevents a lead when both responses omit the same third competitor', () => {
+    const addThird = (f: HandlerFact) => mutate(withSnapshot(f), (r) => {
+      r.input_snapshot.options = [P59, SQ, 'third'].map((option_id) => ({ option_id, settings: [] }));
+    });
+    const out = raw(addThird(fact(A_BODY, 'a')), addThird(fact(B_BODY, 'b')));
+    if (!out.ok) throw new Error(out.reason);
+    expect(identities(out.claims)).toEqual([...EXPECTED, JSON.stringify(['goal_probability', 'third', null]), JSON.stringify(['outcome_level', 'third', null])].sort());
+    expect(claim(out.claims, 'leader')).toMatchObject({ verdict: 'delta_only', noise_verdict: 'not_noise_qualified' });
+    for (const kind of ['goal_probability', 'outcome_level'] as const) expect(claim(out.claims, kind, 'third')).toMatchObject({ baseline: null, alternative: null, verdict: 'not_comparable', basis: 'missing_on_one_side' });
+    for (const c of out.claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
+  });
+
+  it.each(['a', 'b'] as const)('5: an explicitly empty current carrier on %s never restores stale legacy quantities', (side) => {
+    const a = withSnapshot(fact(A_BODY, 'a')); const b = withSnapshot(fact(B_BODY, 'b'));
+    for (const f of [a, b]) (f as any).result.input_snapshot.options = [P59, SQ].map((option_id) => ({ option_id, settings: [] }));
+    const bad = mutate(side === 'a' ? a : b, (r) => { r.enrichment.results = clone(r.enrichment.option_comparison); r.enrichment.option_comparison = []; });
+    const out = raw(side === 'a' ? bad : a, side === 'b' ? bad : b);
+    if (!out.ok) throw new Error(out.reason);
+    const expected = side === 'a' ? EXPECTED.filter((id) => !id.includes('constraint_probability')) : EXPECTED;
+    expect(identities(out.claims)).toEqual(expected);
+    for (const c of out.claims) if (c.kind !== 'leader') expect(c).toMatchObject({ [side === 'a' ? 'baseline' : 'alternative']: null, verdict: 'not_comparable' });
+    for (const c of out.claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
+  });
+
+  it.each(['frame', 'unit'] as const)('2/6: recorded %s changes make goal and outcome claims incomparable', (field) => {
+    const a = withSnapshot(fact(A_BODY, 'a'));
+    const b = mutate(withSnapshot(fact(B_BODY, 'b')), (r) => { r.input_snapshot.goal[field] = field === 'frame' ? 'change_rel' : 'USD/month'; });
+    const out = raw(a, b);
+    if (!out.ok) throw new Error(out.reason);
+    expect(identities(out.claims)).toEqual(EXPECTED);
+    for (const c of out.claims.filter((c) => c.kind !== 'constraint_probability')) expect(c).toMatchObject({ verdict: 'not_comparable', basis: field === 'frame' ? 'frame_changed' : 'unit_changed' });
+    for (const c of out.claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
+  });
+
+  it('2: positive target verdict requires both typed testability and both recorded unit licences', () => {
+    const graph = licensedGraph();
+    expect(targetTestabilityOf(graph)).toEqual({ kind: 'testable', goal_id: GOAL });
+    const out = raw(withSnapshot(fact(A_BODY, 'a')), withSnapshot(fact(B_BODY, 'b')), { baselineGraph: graph, candidateGraph: graph });
+    if (!out.ok) throw new Error(out.reason);
+    expect(identities(out.claims)).toEqual(EXPECTED);
+    expect(claim(out.claims, 'outcome_level', P59)).toMatchObject({ target: TARGET, verdict: 'changes', basis: 'target_crossed' });
+    for (const c of out.claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
+  });
+
+  it.each(['a', 'b'] as const)('2: target withholding, change frames, missing/unbound units and unchecked targets on %s never earn a target verdict', (side) => {
+    for (const negative of ['withheld', 'change_abs', 'change_rel', 'unit_changed', 'unit_absent', 'snapshot_missing', 'target_changed', 'baseline_missing', 'unchecked']) {
+      const ga: any = licensedGraph(); const gb: any = licensedGraph();
+      let a = withSnapshot(fact(A_BODY, 'a')); let b = withSnapshot(fact(B_BODY, 'b'));
+      const g = side === 'a' ? ga : gb;
+      const bad = mutate(side === 'a' ? a : b, (r) => {
+        if (negative === 'withheld') r.enrichment.inference_warnings.push({ code: 'GOAL_FIGURES_TARGET_NOT_TESTABLE' });
+        if (negative === 'change_abs' || negative === 'change_rel') g.nodes[0].goal_threshold_frame = negative;
+        if (negative === 'unit_changed') r.input_snapshot.goal.unit = 'USD/month';
+        if (negative === 'unit_absent') delete r.input_snapshot.goal.unit;
+        if (negative === 'snapshot_missing') delete r.input_snapshot;
+        if (negative === 'target_changed') r.input_snapshot.goal.target_raw = TARGET + 1;
+        if (negative === 'baseline_missing') delete g.nodes[0].observed_state.baseline;
+        if (negative === 'unchecked') g.nodes[0].nonlinear_identity = { operation: 'sum', factor_ids: ['f'], stated_in_brief: true };
+      });
+      if (side === 'a') a = bad; else b = bad;
+      const out = raw(a, b, { baselineGraph: ga, candidateGraph: gb });
+      if (!out.ok) throw new Error(out.reason);
+      expect(identities(out.claims)).toEqual(EXPECTED);
+      for (const id of [P59, SQ]) expect(claim(out.claims, 'outcome_level', id)).toMatchObject({ target: null, verdict: negative === 'unit_changed' || negative === 'unit_absent' ? 'not_comparable' : 'delta_only' });
+      for (const c of out.claims) expect(StructuralChallengeClaimV1Schema.parse(c)).toEqual(c);
+    }
   });
 });

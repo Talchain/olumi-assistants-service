@@ -21,7 +21,12 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { StructuralChallengeClaimV1, StructuralChallengeResultV1 } from '@talchain/schemas';
 import type { RunDeltaNoiseVerdictLiteral } from '@talchain/schemas/boundary';
 
-import { runWithheldGoalFigures, winnerOptionResultSource } from '../../orchestrator/context/option-result-source.js';
+import { readOptionResultSources, runWithheldGoalFigures } from '../../orchestrator/context/option-result-source.js';
+import { targetTestabilityOf } from '../admission/target-testability.js';
+import { sameUnit } from '../agent-lane/reconciling-product.js';
+import { normalizeRunGoalUnit } from '../context/run-goal-unit.js';
+import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
+import { readStoredGoalCertainty, type StoredGoalCertainty } from '../tools/handlers/run-goal-certainty.js';
 import { mayPresentComparedRunLeader } from './compared-run-leader.js';
 import { deriveBuildsEquality, readRunEchoes, type RunEchoes } from './build-run-delta.js';
 import { leadNoise, meanChangeNoise, proportionChangeNoise } from './structural-challenge-noise.js';
@@ -47,24 +52,30 @@ interface OptionRow {
   readonly mean: number | null;
   readonly sd: number | null;
   readonly n: number | null;
-  readonly constraints: ReadonlyMap<string, number>;
+  readonly constraints: ReadonlyMap<string, number | null>;
 }
 
 /**
- * Identity-bound option rows from the ONE ordered-source reader (`winnerOptionResultSource`), keyed by `option_id` only
- * (never a label fallback). A Run that WITHHELD its goal figures carries no goal figure here at all.
+ * Identity-bound current measurements, independently of winner-source selection. The existing ordered reader covers
+ * legacy carriers only when no current carrier exists. A missing figure stays null, never a stale copy or zero.
  */
-function optionRows(enrichment: Rec): Map<string, OptionRow> {
+function optionRows(enrichment: Rec, fact: HandlerFact): Map<string, OptionRow> | null {
   const rows = new Map<string, OptionRow>();
   const goalWithheld = runWithheldGoalFigures(enrichment);
-  for (const o of winnerOptionResultSource(enrichment)) {
+  // Quantities use the current measurement carrier, irrespective of whether it has win shares.
+  const nested = isRec(enrichment.results) ? enrichment.results : {};
+  const current = Array.isArray(enrichment.option_comparison)
+    ? enrichment.option_comparison : nested.option_comparison;
+  const source = Array.isArray(current) ? current : readOptionResultSources(enrichment)[0] ?? [];
+  for (const o of source) {
     if (!isRec(o) || typeof o.option_id !== 'string' || o.option_id.length === 0) continue;
+    if (rows.has(o.option_id)) return null;
     const outcome = isRec(o.outcome) ? o.outcome : {};
-    const constraints = new Map<string, number>();
+    const constraints = new Map<string, number | null>();
     if (isRec(o.constraint_probabilities)) {
       for (const [id, p] of Object.entries(o.constraint_probabilities)) {
-        const v = num(p);
-        if (v !== null) constraints.set(id, v);
+        // A recorded constraint identity survives even when its measurement is unavailable.
+        constraints.set(id, num(p));
       }
     }
     rows.set(o.option_id, {
@@ -76,13 +87,26 @@ function optionRows(enrichment: Rec): Map<string, OptionRow> {
       constraints,
     });
   }
+  const recorded = (fact as { result?: Rec }).result?.input_snapshot;
+  const snapshot = recorded === undefined ? undefined : RunInputSnapshotSchema.safeParse(recorded);
+  if (snapshot && !snapshot.success) return null;
+  // The submitted roster attests identity even when the result omits a whole row. It attests no measurements.
+  if (snapshot?.success) for (const option of snapshot.data.options) {
+    if (!rows.has(option.option_id)) rows.set(option.option_id, { win: null, goal: null, mean: null, sd: null, n: null, constraints: new Map() });
+  }
   return rows;
 }
 
-function constraintNodes(enrichment: Rec): Map<string, string> {
+function constraintNodes(enrichment: Rec, fact: HandlerFact): Map<string, string> | null {
   const out = new Map<string, string>();
-  for (const c of Array.isArray(enrichment.constraint_results) ? enrichment.constraint_results : []) {
-    if (isRec(c) && typeof c.constraint_id === 'string' && typeof c.node_id === 'string') out.set(c.constraint_id, c.node_id);
+  const input = (fact as { result?: Rec }).result?.input_snapshot;
+  const parsed = input === undefined ? undefined : RunInputSnapshotSchema.safeParse(input);
+  if (parsed && !parsed.success) return null;
+  for (const c of [...(Array.isArray(enrichment.constraint_results) ? enrichment.constraint_results : []), ...(parsed?.success ? parsed.data.constraints : [])]) {
+    if (isRec(c) && typeof c.constraint_id === 'string' && typeof c.node_id === 'string') {
+      if (out.has(c.constraint_id) && out.get(c.constraint_id) !== c.node_id) return null;
+      out.set(c.constraint_id, c.node_id);
+    }
   }
   return out;
 }
@@ -97,8 +121,42 @@ const rankingStatus = (enrichment: Rec) => (typeof enrichment.option_comparison_
 /** The Run's own recorded certainty decision for one option: earned / not earned / not recorded. */
 function earnedCertainty(fact: HandlerFact, optionId: string, value: number): boolean {
   const certainty = (fact as { result?: { goal_certainty?: unknown } }).result?.goal_certainty;
-  if (!Array.isArray(certainty)) return false;
-  return certainty.some((d) => isRec(d) && d.option_id === optionId && d.probability_of_goal === value && d.earned === true);
+  const decisions = readStoredGoalCertainty(certainty);
+  const matching = decisions?.filter((d) => d.option_id === optionId);
+  return matching?.length === 1 && matching[0].probability_of_goal === value && matching[0].earned === true;
+}
+
+/** Internal rendering carrier: the recorded decisions, never added to the published result or persisted. */
+export interface StructuralChallengeCertainty {
+  readonly baseline: StoredGoalCertainty | undefined;
+  readonly alternative: StoredGoalCertainty | undefined;
+}
+
+function licensedTarget(fact: HandlerFact, graph: unknown, goalId: string, target: number | null): boolean {
+  if (target === null || !isRec(graph) || !Array.isArray(graph.nodes)) return false;
+  const result = (fact as { result?: Rec }).result;
+  if (!result || !isRec(result.enrichment) || runWithheldGoalFigures(result.enrichment)) return false;
+  const testability = targetTestabilityOf(graph);
+  if (testability.kind !== 'testable' || testability.goal_id !== goalId) return false;
+  const snapshot = RunInputSnapshotSchema.safeParse(result.input_snapshot);
+  const goals = graph.nodes.filter((n) => isRec(n) && n.id === goalId);
+  if (!snapshot.success || snapshot.data.goal === null || snapshot.data.goal.node_id !== goalId || goals.length !== 1) return false;
+  const goal = goals[0] as Rec;
+  const level = isRec(goal.observed_state) ? goal.observed_state : {};
+  const unit = normalizeRunGoalUnit(snapshot.data.goal.unit);
+  return snapshot.data.goal.frame === 'level' && snapshot.data.goal.target_raw === target
+    && goal.goal_threshold_frame === 'level' && goal.goal_threshold_raw === target
+    && unit !== undefined && sameUnit(unit, goal.goal_threshold_unit)
+    && sameUnit(unit, level.unit);
+}
+
+function qualifiedLead(rows: ReadonlyMap<string, OptionRow>, id: string, n: number, expected: readonly string[]): RunDeltaNoiseVerdictLiteral {
+  const share = rows.get(id)?.win;
+  if (rows.size !== expected.length || expected.some((option) => !rows.has(option)) || share == null) return 'not_noise_qualified';
+  const others = [...rows].filter(([option]) => option !== id);
+  if (others.length === 0 || others.some(([, row]) => row.win === null)) return 'not_noise_qualified';
+  const verdicts = others.map(([, row]) => leadNoise(share, row.win as number, n));
+  return verdicts.includes('not_noise_qualified') ? 'not_noise_qualified' : verdicts.every((v) => v === 'signal') ? 'signal' : 'within_noise';
 }
 
 const leaderOf = (fact: HandlerFact): string | null => {
@@ -119,6 +177,8 @@ export interface CompareStructuralChallengeInput {
   readonly goalNodeId: string;
   /** The goal's declared LEVEL target in the outcome's own unit; null when none (or stated as a change). */
   readonly goalLevelTarget: number | null;
+  readonly baselineGraph?: unknown;
+  readonly candidateGraph?: unknown;
 }
 
 export type CompareStructuralChallengeOutput =
@@ -126,6 +186,7 @@ export type CompareStructuralChallengeOutput =
       readonly ok: true;
       readonly pair_provenance: NonNullable<StructuralChallengeResultV1['pair_provenance']>;
       readonly claims: readonly StructuralChallengeClaimV1[];
+      readonly certainty: StructuralChallengeCertainty;
     }
   | { readonly ok: false; readonly reason: 'baseline_unreadable' | 'candidate_unparseable' };
 
@@ -146,8 +207,22 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     n_equal: a.nSamples === b.nSamples,
   } as const;
 
-  const rowsA = optionRows(a.enrichment);
-  const rowsB = optionRows(b.enrichment);
+  const rowsA = optionRows(a.enrichment, input.baselineFact);
+  const rowsB = optionRows(b.enrichment, input.candidateFact);
+  const nodesA = constraintNodes(a.enrichment, input.baselineFact);
+  const nodesB = constraintNodes(b.enrichment, input.candidateFact);
+  if (rowsA === null || nodesA === null) return { ok: false, reason: 'baseline_unreadable' };
+  if (rowsB === null || nodesB === null || [...nodesA].some(([id, node]) => nodesB.has(id) && nodesB.get(id) !== node)) {
+    return { ok: false, reason: 'candidate_unparseable' };
+  }
+  const snapshotA = RunInputSnapshotSchema.safeParse((input.baselineFact as { result?: Rec }).result?.input_snapshot);
+  const snapshotB = RunInputSnapshotSchema.safeParse((input.candidateFact as { result?: Rec }).result?.input_snapshot);
+  if (snapshotA.success && snapshotA.data.goal?.node_id !== input.goalNodeId) return { ok: false, reason: 'baseline_unreadable' };
+  if (snapshotB.success && snapshotB.data.goal?.node_id !== input.goalNodeId) return { ok: false, reason: 'candidate_unparseable' };
+  const bindingDifference = snapshotA.success && snapshotB.success && snapshotA.data.goal && snapshotB.data.goal
+    ? snapshotA.data.goal.frame !== snapshotB.data.goal.frame ? 'frame_changed'
+      : snapshotA.data.goal.unit !== snapshotB.data.goal.unit && !sameUnit(snapshotA.data.goal.unit, snapshotB.data.goal.unit) ? 'unit_changed' : null
+    : null;
   const goalReached = input.reachable.has(input.goalNodeId);
   const identityChanged = identityStatus(a.enrichment) !== identityStatus(b.enrichment);
   const claims: StructuralChallengeClaimV1[] = [];
@@ -157,22 +232,24 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     const entitledA = mayPresentComparedRunLeader(input.turnMayNameLeader, input.baselineFact);
     const entitledB = mayPresentComparedRunLeader(input.turnMayNameLeader, input.candidateFact);
     const idA = entitledA ? leaderOf(input.baselineFact) : null;
-    const idB = entitledB ? leaderOf(input.candidateFact) : null;
+    const idB = idA !== null && entitledB ? leaderOf(input.candidateFact) : null;
     const base = { kind: 'leader' as const, baseline_option_id: idA, alternative_option_id: idB };
     if (idA === null || idB === null) {
       claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side', invariant_by_construction: false });
+    } else if (bindingDifference !== null || identityChanged) {
+      claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: bindingDifference ?? 'identity_status_changed', invariant_by_construction: false });
     } else if (rankingStatus(a.enrichment) !== rankingStatus(b.enrichment)) {
       claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'ranking_status_changed', invariant_by_construction: false });
     } else {
       // Missing win shares cannot supply evidence for a clear lead. In particular, never substitute 0 for an
       // absent runner-up and thereby manufacture a signal-qualified HOLDS verdict.
-      const leaderShare = rowsB.get(idB)?.win ?? null;
-      const others = [...rowsB.entries()].filter(([id]) => id !== idB).map(([, r]) => r.win);
-      const runnerUp = idB === idA
-        ? (others.length > 0 && others.every((p) => p !== null) ? Math.max(...others as number[]) : null)
-        : rowsB.get(idA)?.win ?? null;
-      const noise = leaderShare !== null && runnerUp !== null
-        ? leadNoise(leaderShare, runnerUp, b.nSamples) : 'not_noise_qualified';
+      const submitted = (fact: HandlerFact) => {
+        const snapshot = RunInputSnapshotSchema.safeParse((fact as { result?: Rec }).result?.input_snapshot);
+        return snapshot.success ? snapshot.data.options.map((o) => o.option_id) : [];
+      };
+      const roster = [...new Set([...rowsA.keys(), ...rowsB.keys(), ...submitted(input.baselineFact), ...submitted(input.candidateFact)])];
+      const noises = [qualifiedLead(rowsA, idA, a.nSamples, roster), qualifiedLead(rowsB, idB, b.nSamples, roster)];
+      const noise = noises.includes('not_noise_qualified') ? 'not_noise_qualified' : noises.every((n) => n === 'signal') ? 'signal' : 'within_noise';
       if (noise !== 'signal') {
         // Every leader HOLDS needs a signal-qualified lead (contract C2), the unaffected one included.
         claims.push({ ...base, noise_verdict: noise, verdict: 'delta_only', basis: deltaOnlyBasis(noise), invariant_by_construction: false });
@@ -187,7 +264,7 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     }
   }
 
-  const optionIds = [...rowsA.keys()].filter((id) => rowsB.has(id)).sort();
+  const optionIds = [...rowsA.keys()].sort();
 
   // ── Goal probability, per option ──────────────────────────────────────────────────────────────────────────────
   for (const optionId of optionIds) {
@@ -195,13 +272,12 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     const pB = rowsB.get(optionId)?.goal ?? null;
     const base = { kind: 'goal_probability' as const, option_id: optionId, constraint_id: null, baseline: pA, alternative: pB, target: null, constraint_boundary: null };
     if (pA === null || pB === null) {
-      if (pA === null && pB === null) continue; // no goal figure on either side: no claim to test
       const withheld = runWithheldGoalFigures(pA === null ? a.enrichment : b.enrichment);
       claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: withheld ? 'withheld_on_one_side' : 'missing_on_one_side', invariant_by_construction: false });
       continue;
     }
-    if (identityChanged) {
-      claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'identity_status_changed', invariant_by_construction: false });
+    if (bindingDifference !== null || identityChanged) {
+      claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: bindingDifference ?? 'identity_status_changed', invariant_by_construction: false });
       continue;
     }
     const noise = proportionChangeNoise(pA, pB, a.nSamples, b.nSamples);
@@ -227,16 +303,16 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   // ── Outcome level, per option ─────────────────────────────────────────────────────────────────────────────────
   for (const optionId of optionIds) {
     const rA = rowsA.get(optionId) as OptionRow;
-    const rB = rowsB.get(optionId) as OptionRow;
-    if (rA.mean === null && rB.mean === null) continue;
-    const target = input.goalLevelTarget;
-    const base = { kind: 'outcome_level' as const, option_id: optionId, constraint_id: null, baseline: rA.mean, alternative: rB.mean, target, constraint_boundary: null };
-    if (rA.mean === null || rB.mean === null) {
+    const rB = rowsB.get(optionId);
+    const target = licensedTarget(input.baselineFact, input.baselineGraph, input.goalNodeId, input.goalLevelTarget)
+      && licensedTarget(input.candidateFact, input.candidateGraph, input.goalNodeId, input.goalLevelTarget) ? input.goalLevelTarget : null;
+    const base = { kind: 'outcome_level' as const, option_id: optionId, constraint_id: null, baseline: rA.mean, alternative: rB?.mean ?? null, target, constraint_boundary: null };
+    if (rA.mean === null || rB === undefined || rB.mean === null) {
       claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'missing_on_one_side', invariant_by_construction: false });
       continue;
     }
-    if (identityChanged) {
-      claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'identity_status_changed', invariant_by_construction: false });
+    if (bindingDifference !== null || identityChanged) {
+      claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: bindingDifference ?? 'identity_status_changed', invariant_by_construction: false });
       continue;
     }
     const noise = rA.sd !== null && rB.sd !== null && rA.n !== null && rB.n !== null
@@ -258,17 +334,25 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   }
 
   // ── Constraint probability, per option and constraint (no licensed side rule in v1: delta_only unless invariant) ──
-  const nodesA = constraintNodes(a.enrichment);
   for (const optionId of optionIds) {
     const cA = (rowsA.get(optionId) as OptionRow).constraints;
-    const cB = (rowsB.get(optionId) as OptionRow).constraints;
-    for (const constraintId of [...cA.keys()].filter((id) => cB.has(id)).sort()) {
-      const pA = cA.get(constraintId) as number;
-      const pB = cB.get(constraintId) as number;
-      const noise = proportionChangeNoise(pA, pB, a.nSamples, b.nSamples);
+    const cB = rowsB.get(optionId)?.constraints;
+    for (const constraintId of [...cA.keys()].sort()) {
+      const pA = cA.get(constraintId) ?? null;
+      const pB = cB?.get(constraintId) ?? null;
       const node = nodesA.get(constraintId);
       const base = { kind: 'constraint_probability' as const, option_id: optionId, constraint_id: constraintId, baseline: pA, alternative: pB, target: null, constraint_boundary: null };
-      if (node !== undefined && !input.reachable.has(node) && noise === 'within_noise') {
+      const missingBinding = node !== undefined && !nodesB.has(constraintId);
+      if (pA === null || pB === null || missingBinding) {
+        claims.push({ ...base, alternative: missingBinding ? null : pB, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'missing_on_one_side', invariant_by_construction: false });
+        continue;
+      }
+      if (identityChanged) {
+        claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'identity_status_changed', invariant_by_construction: false });
+        continue;
+      }
+      const noise = proportionChangeNoise(pA, pB, a.nSamples, b.nSamples);
+      if (node !== undefined && nodesB.get(constraintId) === node && !input.reachable.has(node) && noise === 'within_noise') {
         claims.push({ ...base, noise_verdict: noise, verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true });
       } else {
         claims.push({ ...base, noise_verdict: noise, verdict: 'delta_only', basis: noise === 'signal' ? 'no_licensed_boundary' : deltaOnlyBasis(noise), invariant_by_construction: false });
@@ -276,5 +360,8 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     }
   }
 
-  return { ok: true, pair_provenance, claims };
+  return { ok: true, pair_provenance, claims, certainty: {
+    baseline: readStoredGoalCertainty((input.baselineFact as { result?: Rec }).result?.goal_certainty),
+    alternative: readStoredGoalCertainty((input.candidateFact as { result?: Rec }).result?.goal_certainty),
+  } };
 }

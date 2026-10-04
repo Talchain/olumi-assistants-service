@@ -19,8 +19,8 @@
 import { createHash } from 'node:crypto';
 import { StructuralChallengeResultV1Schema } from '@talchain/schemas';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
-import { PLoTTimeoutError, type PLoTClient } from '../../../orchestrator/plot-client.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PLoTError, PLoTTimeoutError, type PLoTClient, type PLoTClientRunOpts } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import type { HandlerInvocation } from '../../tools/registry.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
@@ -31,6 +31,8 @@ vi.mock('../../../utils/telemetry.js', () => ({
   emit: vi.fn(), TelemetryEvents: new Proxy({}, { get: (_t, p) => String(p) }),
 }));
 const turnContext = vi.hoisted(() => ({ current: null as unknown }));
+const currentnessStore = vi.hoisted(() => ({ current: undefined as import('../../session/store.js').SessionStore | undefined }));
+vi.mock('../../session/index.js', () => ({ getSessionStore: () => currentnessStore.current }));
 vi.mock('../../build-turn-context.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   buildTurnContext: vi.fn(async () => turnContext.current),
@@ -39,8 +41,13 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => ({
 import { loadScenarioSnapshotForRunAnalysis } from '../../build-turn-context.js';
 import { priorRunForSeed } from '../../coaching/seed-reuse.js';
 import { NO_CLAIM, runWithBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
+import * as registry from '../../tools/registry.js';
+import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../../tools/handler-errors.js';
+import { SessionReadError } from '../../session/store.js';
+import { AnalysisSnapshotDivergedError } from '../../run-analysis-snapshot-binding.js';
 import { createRegistry, resolveHandler } from '../../tools/registry.js';
 import { dispatchStructuralChallenge, isExactlyThisRemoval, structuralChallengeRecomputeKey } from '../structural-challenge-dispatch.js';
+import { readScenarioAnalysis } from '../../../routes/scenario-graph-analysis-read.js';
 
 type Rec = Record<string, any>;
 const SCENARIO = 'c96fc4bb-ccd1-4615-a6d9-52c652e3e0e4';
@@ -90,9 +97,11 @@ function rowsFor(graph: Rec, options: Rec[]): Rec[] {
 
 function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean; candidateIslBuild?: string; candidateMutation?: (response: Rec) => void } = {}) {
   const runBodies: Rec[] = [];
+  const runOpts: (PLoTClientRunOpts | undefined)[] = [];
   const client = {
     validatePatch: vi.fn().mockResolvedValue({}),
-    run: vi.fn(async (body: Rec) => {
+    run: vi.fn(async (body: Rec, _id: string, invocationOpts?: PLoTClientRunOpts) => {
+      runOpts.push(invocationOpts);
       runBodies.push(structuredClone(body));
       if (opts.timeoutOnCandidate && runBodies.length > 1) throw new PLoTTimeoutError('candidate timed out', 'run', 75_000, 75_000);
       const derived = String(parseInt(createHash('sha256').update(JSON.stringify(body.graph)).digest('hex').slice(0, 7), 16));
@@ -130,10 +139,11 @@ function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean; candid
       return response as V2RunResponseEnvelope;
     }),
   } as unknown as PLoTClient;
-  return { client, runBodies };
+  return { client, runBodies, runOpts };
 }
 
 async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?: boolean; candidateIslBuild?: string; candidateMutation?: (response: Rec) => void } = {}) {
+  currentnessStore.current = undefined;
   const graph = structuredClone(opts.graph ?? served.graph);
   const reader = () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: structuredClone(graph) }));
   const plot = plotDouble({ timeoutOnCandidate: opts.timeoutOnCandidate, real: opts.real, candidateIslBuild: opts.candidateIslBuild, candidateMutation: opts.candidateMutation });
@@ -142,8 +152,9 @@ async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?:
     () => handler({ context: context('turn-a', []), payload: payloadOf('turn-a'), requestId: 'turn-a', signal: new AbortController().signal, orientationText: '' } as unknown as HandlerInvocation));
   const runA = a.handler_facts.find((f) => f.fact_type === 'run_analysis') as Rec;
   expect(runA, 'Run A commits one Run fact').toBeDefined();
-  const ask = (link = CHURN_LINK, over: Partial<{ priorFacts: Rec[]; reader: typeof reader; exploratory: boolean }> = {}) => {
-    turnContext.current = context('turn-q', over.priorFacts ?? [runA]);
+  const ask = (link = CHURN_LINK, over: Partial<{ priorFacts: Rec[]; reader: typeof reader; exploratory: boolean; contextPatch: Rec }> = {}) => {
+    turnContext.current = { ...context('turn-q', over.priorFacts ?? [runA]), ...over.contextPatch };
+    currentnessStore.current ??= canonicalStore(over.priorFacts ?? [runA], over.contextPatch?.analysis_invalidated_at ?? null);
     return dispatchStructuralChallenge({
       payload: payloadOf('turn-q'), requestId: 'turn-q', link, origin: 'user_selected',
       turnMayNameLeader: true, exploratoryWorkAllowed: over.exploratory ?? true,
@@ -151,6 +162,20 @@ async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?:
     });
   };
   return { ask, runA, plot, graph };
+}
+
+/** Real reload reader, with durable row identity and chronology bound to the production handler's Run. */
+function canonicalStore(facts: Rec[], invalidatedAt: string | null = null, opts: Partial<Parameters<typeof createNoopSessionStore>[0]> = {}) {
+  const store = createNoopSessionStore({
+    facts: facts as never,
+    factsWithTurn: facts.map((fact, i) => ({
+      fact, fact_row_id: `run-row-${i}`, fact_created_at: fact.result.computed_at, turn_id: `turn-row-${i}`,
+    })) as never,
+    scenarioAnalysisFacts: facts as never,
+    ...opts,
+  });
+  store.readAnalysisInvalidatedAt = vi.fn(async () => invalidatedAt);
+  return store;
 }
 
 const resultOf = (r: Awaited<ReturnType<typeof dispatchStructuralChallenge>>) => {
@@ -186,11 +211,12 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     } else {
       expect(leader).toMatchObject({ baseline_option_id: null, verdict: 'not_comparable', basis: 'withheld_on_one_side' });
     }
-    // The honest no-effect case under model A: nothing CHANGES; churn (upstream of the removed link) holds by construction.
+    // No changed claim is licensed here; unavailable constraint measurements stay unavailable.
     expect(result.claims.filter((c) => c.verdict === 'changes')).toEqual([]);
-    for (const c of result.claims.filter((x) => x.kind === 'constraint_probability')) {
-      expect(c).toMatchObject({ verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true });
-    }
+    const constraints = result.claims.filter((x) => x.kind === 'constraint_probability');
+    // The real handler's typed limit licence withholds these raw bank frequencies. Assert their absence explicitly.
+    expect(constraints).toEqual([]);
+    expect(result.claims.map((c) => c.kind === 'leader' ? 'leader' : [c.kind, c.option_id, c.constraint_id])).toEqual(['leader', ['goal_probability', 'raise_pro_price_to_59', null], ['goal_probability', 'status_quo', null], ['outcome_level', 'raise_pro_price_to_59', null], ['outcome_level', 'status_quo', null]]);
     expect(result.not_compared).toEqual(expect.arrayContaining(['structural_influence', 'e_values', 'driver_rank', 'robustness_label', 'fragile_edges']));
   });
 
@@ -201,6 +227,7 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     expect(h.runA.result.leading_option_id).toBeNull();
     expect(result.claims.find((c) => c.kind === 'leader'))
       .toMatchObject({ baseline_option_id: null, alternative_option_id: null, verdict: 'not_comparable', basis: 'withheld_on_one_side' });
+    expect(result.claims.map((c) => c.kind === 'leader' ? 'leader' : [c.kind, c.option_id, c.constraint_id])).toEqual(['leader', ['goal_probability', 'keep_current_price', null], ['goal_probability', 'raise_price_to_59', null], ['outcome_level', 'keep_current_price', null], ['outcome_level', 'raise_price_to_59', null]]);
     for (const c of result.claims.filter((x) => x.kind === 'goal_probability')) {
       expect(c.verdict).toBe('not_comparable');
     }
@@ -335,5 +362,206 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
       return loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: structuredClone(g) }));
     };
     expect(resultOf(await h.ask(CHURN_LINK, { reader }))).toMatchObject({ status: 'stale', reason: 'model_changed_during_challenge' });
+  });
+});
+
+
+describe('independent-review dispatch regressions', () => {
+  afterEach(() => { currentnessStore.current = undefined; });
+  const empty = (result: ReturnType<typeof resultOf>, status: string, reason: string, baseline: Rec) => {
+    expect(result).toMatchObject({ status, reason, claims: [], pair_provenance: null, baseline: { run_id: baseline.result.run_id, scenario_id: SCENARIO, graph_hash_at_run: baseline.result.graph_hash_at_run }, alternative: { ...CHURN_LINK } });
+    expect(StructuralChallengeResultV1Schema.parse(result)).toEqual(result);
+  };
+
+  it('7: a retained_excluded parent does not make a root-making wire removal eligible', async () => {
+    const graph = structuredClone(confirmed.graph);
+    const parent = structuredClone(graph.nodes.find((n: Rec) => n.id === 'pro_plan_price'));
+    Object.assign(parent, { id: 'excluded_parent', label: 'Excluded parent', analysis_participation: 'retained_excluded', category: 'external' });
+    graph.nodes.push(parent);
+    graph.edges.push({ from: 'excluded_parent', to: 'monthly_churn', strength: { mean: 0.3, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+    const h = await harness({ graph, real: true });
+    const link = { from_id: 'pro_plan_price', to_id: 'monthly_churn' };
+    const result = resultOf(await h.ask(link));
+    expect(result).toMatchObject({ status: 'unsupported', reason: 'target_becomes_root', claims: [], alternative: link });
+    expect(h.plot.runBodies).toHaveLength(1);
+    expect(hasLink(h.plot.runBodies[0].graph, 'excluded_parent', 'monthly_churn')).toBe(false);
+  });
+
+  it.each([
+    ['identity_participant_link', { from_id: 'pro_plan_price', to_id: 'mrr' }],
+    ['anchored_identity_target', { from_id: 'monthly_churn', to_id: 'mrr' }],
+  ])('7: canonical definition refusal %s survives the wire check', async (reason, link) => {
+    const graph = structuredClone(confirmed.graph);
+    if (reason === 'anchored_identity_target') graph.edges.push({ from: link.from_id, to: link.to_id, strength: { mean: 0.3, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' });
+    const h = await harness({ graph, real: true });
+    const result = resultOf(await h.ask(link));
+    expect(result).toMatchObject({ status: 'unsupported', reason, claims: [], alternative: link });
+    expect(h.plot.runBodies).toHaveLength(1);
+  });
+
+  it('8: restored identical graph is stale through the real canonical reload reader', async () => {
+    const h = await harness({ graph: confirmed.graph, real: true });
+    const result = resultOf(await h.ask(CHURN_LINK, { contextPatch: { analysis_invalidated_at: h.runA.result.computed_at } }));
+    empty(result, 'stale', 'run_not_current', h.runA);
+    expect(h.plot.runBodies).toHaveLength(1);
+  });
+
+  it.each(['restore', 'unit', 'newer_run', 'run_id', 'read_unavailable'] as const)('8: late %s invalidates the pinned Run through the real canonical reader', async (negative) => {
+    const h = await harness({ graph: confirmed.graph, real: true });
+    let reads = 0;
+    const reader = async () => {
+      reads += 1;
+      const graph = structuredClone(h.graph);
+      if (reads === 2) {
+        if (negative === 'restore') currentnessStore.current = canonicalStore([h.runA], h.runA.result.computed_at);
+        if (negative === 'unit') graph.nodes.find((n: Rec) => n.id === 'mrr').goal_threshold_unit = 'USD/month';
+        if (negative === 'newer_run' || negative === 'run_id') {
+          const newer = structuredClone(h.runA);
+          newer.result.run_id = 'newer-run';
+          if (negative !== 'run_id') newer.result.computed_at = new Date(Date.parse(h.runA.result.computed_at) + 1).toISOString();
+          currentnessStore.current = canonicalStore([newer]);
+        }
+        if (negative === 'read_unavailable') currentnessStore.current = canonicalStore([h.runA], null, { throwOnScenarioAnalysisFactRead: new SessionReadError('durable read unavailable') });
+      }
+      return loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: graph }));
+    };
+    empty(resultOf(await h.ask(CHURN_LINK, { reader })), negative === 'read_unavailable' ? 'failed' : 'stale', negative === 'read_unavailable' ? 'probe_unavailable' : 'model_changed_during_challenge', h.runA);
+    expect(h.plot.runBodies).toHaveLength(2);
+  });
+
+  it('10: only the candidate invocation disables retries; success is one candidate call', async () => {
+    const h = await harness({ graph: confirmed.graph, real: true });
+    const output = await h.ask();
+    const result = resultOf(output);
+    expect(result.status).toBe('completed');
+    expect(h.plot.runBodies).toHaveLength(2);
+    expect(h.plot.runOpts[0]?.retryPolicy).toBeUndefined();
+    expect(h.plot.runOpts[1]?.retryPolicy).toBe('no_retry');
+    expect(output.kind === 'result' && output.certainty?.baseline).toEqual(h.runA.result.goal_certainty);
+    expect(Object.keys(result)).not.toContain('certainty');
+  });
+
+  it.each([400, 422, 500, 503, 'reset', 'abort'] as const)('10: candidate %s fails once without a second request', async (failure) => {
+    const h = await harness({ graph: confirmed.graph, real: true });
+    const run = vi.mocked(h.plot.client.run);
+    run.mockImplementationOnce(async (_body, _id, opts) => {
+      expect(opts?.retryPolicy).toBe('no_retry');
+      if (typeof failure === 'number') throw new PLoTError('engine rejected request', failure, 'run', 1);
+      if (failure === 'abort') throw new DOMException('aborted', 'AbortError');
+      throw new TypeError('network reset');
+    });
+    empty(resultOf(await h.ask()), 'failed', 'candidate_run_failed', h.runA);
+    expect(run).toHaveBeenCalledTimes(2); // ordinary baseline, then exactly one candidate
+  });
+
+  it.each(['initial', 'late'] as const)('11: strict %s snapshot read failures return typed unavailable results', async (phase) => {
+    const h = await harness({ graph: confirmed.graph, real: true });
+    let reads = 0;
+    const reader = async () => {
+      reads += 1;
+      if (reads === (phase === 'initial' ? 1 : 2)) throw new SessionReadError('snapshot read unavailable');
+      return loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: structuredClone(h.graph) }));
+    };
+    empty(resultOf(await h.ask(CHURN_LINK, { reader })), 'failed', 'probe_unavailable', h.runA);
+    expect(h.plot.runBodies).toHaveLength(phase === 'initial' ? 1 : 2);
+  });
+
+  it.each(['probe', 'candidate'] as const)('11: invalid %s facts, timeouts, divergence and strict read errors never escape', async (phase) => {
+    for (const failure of ['invalid', 'timeout', 'stale', 'read'] as const) {
+      const h = await harness({ graph: confirmed.graph, real: true });
+      const original = registry.resolveHandler;
+      let resolves = 0;
+      const spy = vi.spyOn(registry, 'resolveHandler').mockImplementation((...args) => {
+        resolves += 1;
+        if (resolves !== (phase === 'probe' ? 1 : 2)) return original(...args);
+        return async () => {
+          if (failure === 'invalid') throw new HandlerResultInvalidError('invalid candidate fact');
+          if (failure === 'timeout') throw new HandlerInvocationFailedError('timeout', { cause_kind: 'plot_timeout', retryable: true, details: { handler_id: 'run_analysis' } });
+          if (failure === 'stale') throw new AnalysisSnapshotDivergedError({ scenarioId: SCENARIO, expectedGraphHash: 'a', observedGraphHash: 'b' });
+          throw new SessionReadError('strict read unavailable');
+        };
+      });
+      try {
+        const result = resultOf(await h.ask());
+        empty(result, failure === 'timeout' ? 'timed_out' : failure === 'stale' ? 'stale' : 'failed', failure === 'timeout' ? 'candidate_run_timeout' : failure === 'stale' ? 'model_changed_during_challenge' : failure === 'invalid' ? 'candidate_unparseable' : phase === 'probe' ? 'probe_unavailable' : 'candidate_run_failed', h.runA);
+      } finally { spy.mockRestore(); }
+    }
+  });
+});
+
+
+describe('8/11: identity-bound canonical reload currentness, before and after recomputation', () => {
+  afterEach(() => { currentnessStore.current = undefined; });
+  for (const phase of ['initial', 'late'] as const) {
+    it.each(['restore', 'unit', 'newer_run', 'run_id', 'read_error', 'durable_degraded', 'missing', 'capped_empty'] as const)(`${phase} canonical %s never licenses the pinned Run`, async (negative) => {
+      const h = await harness({ graph: confirmed.graph, real: true });
+      currentnessStore.current = canonicalStore([h.runA]);
+      let reads = 0;
+      const reader = async () => {
+        reads += 1;
+        const graph = structuredClone(h.graph);
+        if (reads === (phase === 'initial' ? 1 : 2)) {
+          if (negative === 'restore') currentnessStore.current = canonicalStore([h.runA], h.runA.result.computed_at);
+          if (negative === 'unit') graph.nodes.find((n: Rec) => n.id === 'mrr').goal_threshold_unit = 'USD/month';
+          if (negative === 'newer_run' || negative === 'run_id') {
+            const newer = structuredClone(h.runA);
+            newer.result.run_id = 'newer-run';
+            if (negative === 'newer_run') newer.result.computed_at = new Date(Date.parse(h.runA.result.computed_at) + 1).toISOString();
+            currentnessStore.current = canonicalStore([newer]);
+          }
+          if (negative === 'read_error') currentnessStore.current!.readAnalysisInvalidatedAt = vi.fn().mockRejectedValue(new SessionReadError('restore marker unavailable'));
+          if (negative === 'durable_degraded') currentnessStore.current = canonicalStore([h.runA], null, {
+            priorTurns: [{ id: 'turn-row-0' }] as never,
+            throwOnScenarioAnalysisFactRead: new SessionReadError('durable read unavailable'),
+          });
+          if (negative === 'missing' || negative === 'capped_empty') currentnessStore.current = canonicalStore([], null,
+            negative === 'capped_empty' ? { scenarioAnalysisFactTotal: 21 } : {});
+
+          // Contrast the real canonical verdict and its SAME-read identity receipt with the handler's refusal.
+          let receipt: unknown;
+          const canonical = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'canonical-witness', onCurrentnessRead: (read) => { receipt = read; } });
+          if (negative === 'restore' || negative === 'unit') expect(canonical.analysis_state?.run_state.kind).toBe('complete_stale');
+          if (negative === 'newer_run' || negative === 'run_id') {
+            expect(canonical.analysis_state?.run_state.kind).toBe('complete_current');
+            expect(receipt).toMatchObject({ readOk: true, fact: { result: { run_id: 'newer-run' } } });
+          }
+          if (negative === 'read_error') expect(canonical.analysis_state).toBeNull();
+          if (negative === 'durable_degraded') {
+            // Reload can retain figures from a healthy hot window; that cannot certify the newest pinned execution.
+            expect(canonical.analysis_state?.run_state.kind).toBe('complete_current');
+            expect(receipt).toEqual({ readOk: false, fact: null });
+          }
+        }
+        return loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: graph }));
+      };
+      const unavailable = ['read_error', 'durable_degraded', 'missing', 'capped_empty'].includes(negative);
+      expect(resultOf(await h.ask(CHURN_LINK, { reader }))).toMatchObject({
+        status: unavailable ? 'failed' : 'stale',
+        reason: unavailable ? 'probe_unavailable' : phase === 'initial' ? 'run_not_current' : 'model_changed_during_challenge',
+        claims: [], pair_provenance: null, baseline: { run_id: h.runA.result.run_id }, alternative: CHURN_LINK,
+      });
+      expect(h.plot.runBodies).toHaveLength(phase === 'initial' ? 1 : 2);
+    });
+  }
+
+  it('a Run computed after restore remains current on both checks', async () => {
+    const h = await harness({ graph: confirmed.graph, real: true });
+    currentnessStore.current = canonicalStore([h.runA], new Date(Date.parse(h.runA.result.computed_at) - 1).toISOString());
+    expect(resultOf(await h.ask()).status).toBe('completed');
+    expect(currentnessStore.current.readAnalysisInvalidatedAt).toHaveBeenCalledTimes(2);
+    expect(h.plot.runBodies).toHaveLength(2);
+  });
+
+  it('a validated capped page retains the newest identity-bound Run on both checks', async () => {
+    const h = await harness({ graph: confirmed.graph, real: true });
+    const older = Array.from({ length: 20 }, (_, i) => {
+      const fact = structuredClone(h.runA);
+      fact.result.run_id = `older-run-${i}`;
+      fact.result.computed_at = new Date(Date.parse(h.runA.result.computed_at) - i - 1).toISOString();
+      return fact;
+    });
+    currentnessStore.current = canonicalStore([h.runA, ...older]);
+    expect(resultOf(await h.ask()).status).toBe('completed');
+    expect(currentnessStore.current.readAnalysisInvalidatedAt).toHaveBeenCalledTimes(2);
   });
 });

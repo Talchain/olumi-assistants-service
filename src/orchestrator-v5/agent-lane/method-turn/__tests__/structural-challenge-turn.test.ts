@@ -12,6 +12,9 @@ import {
   structuralChallengeTurnFor,
   structuralChallengeTurnUnderLicence,
 } from '../structural-challenge-turn.js';
+import { StructuralChallengeResultV1Schema } from '@talchain/schemas';
+import { vi } from 'vitest';
+import type { StructuralChallengeCertainty } from '../../../coaching/structural-challenge-compare.js';
 import type { StructuralChallengeClaimV1, StructuralChallengeResultV1 } from '@talchain/schemas';
 
 const LABELS = new Map([
@@ -39,9 +42,9 @@ const changed: StructuralChallengeResultV1 = {
 
 describe('SCI-DEEP reply', () => {
   it('an unchanged winner with a changed consequence: says both, in model-run terms, and asks for evidence', () => {
-    const reply = composeStructuralChallengeReply({ result: changed, labels: LABELS });
-    expect(reply.split('\n')[0]).toBe('Without the link from Monthly churn to Paying subscribers, Raise Pro price to £59 still leads — but what you can expect from it changes.');
-    expect(reply).toContain('reaches your target in about 53% of model runs now, and in 100% without the link.');
+    const reply = composeStructuralChallengeReply({ result: changed, labels: LABELS, certainty: { baseline: [], alternative: [{ option_id: 'raise_pro_price_to_59', probability_of_goal: 1, earned: true }] } });
+    expect(reply.split('\n')[0]).toBe('Without the link from Monthly churn to Paying subscribers, Raise Pro price to £59 still leads — but part of the result changes.');
+    expect(reply).toContain('baseline: Reaches the target in about 53% of model runs. Without the link: Reaches the target in 100% of model runs.');
     expect(reply).toContain('83,434 now and 90,306 without the link (your target is 85,000)');
     expect(reply).toContain('doesn\'t say which version of the model is right');
     expect(reply).toContain('This test isn\'t saved.');
@@ -65,7 +68,7 @@ describe('SCI-DEEP reply', () => {
     const reply = composeStructuralChallengeReply({ result: held, labels: LABELS });
     expect(reply.split('\n')[0]).toBe('Without the link from Monthly churn to Paying subscribers, the conclusions I tested still hold.');
     expect(reply).toContain('isn\'t evidence either way');
-    expect(reply).toContain('your conclusion doesn\'t depend on this link');
+    expect(reply).toContain('the tested conclusions held in these two model versions');
   });
 
   it('refusals are plain, typed, and say nothing changed', () => {
@@ -92,7 +95,8 @@ describe('SCI-DEEP reply', () => {
   it('a chance is never rounded to certain', () => {
     const near = { ...changed, claims: [{ ...changed.claims[1], baseline: 0.996, alternative: 0.004, verdict: 'delta_only', basis: 'no_licensed_boundary' } as const] } as StructuralChallengeResultV1;
     const reply = composeStructuralChallengeReply({ result: near, labels: LABELS });
-    expect(reply).toContain('over 99% of model runs now, and in under 1% without the link');
+    expect(reply).toContain('over 99% of model runs');
+    expect(reply).toContain('under 1% of model runs');
   });
 
   it('the press id round-trips typed ids; anything else is not this press', () => {
@@ -130,5 +134,128 @@ describe('SCI-DEEP reply', () => {
     expect(narrowed.reply).not.toContain('still leads');
     expect(narrowed.reply).not.toContain('Raise Pro price to £59 leads');
     expect(narrowed.actions).toEqual(turn.actions);
+  });
+});
+
+
+describe('independent-review reply and press regressions', () => {
+  const goal = (baseline: number | null, alternative: number | null, basis: StructuralChallengeClaimV1['basis'] = 'no_licensed_boundary'): StructuralChallengeClaimV1 => ({
+    kind: 'goal_probability', option_id: 'raise_pro_price_to_59', constraint_id: null, baseline, alternative,
+    target: null, constraint_boundary: null, noise_verdict: 'signal', verdict: baseline === null || alternative === null ? 'not_comparable' : 'delta_only', basis, invariant_by_construction: false,
+  });
+  const replyFor = (claims: StructuralChallengeClaimV1[], certainty?: StructuralChallengeCertainty) => {
+    const result = { ...changed, claims };
+    expect(StructuralChallengeResultV1Schema.parse(result)).toEqual(result);
+    const reply = composeStructuralChallengeReply({ result, labels: LABELS, certainty });
+    return reply;
+  };
+
+  it.each(['baseline', 'alternative'] as const)('3: exact 0/1 on %s follows earned, unearned and unrecorded certainty', (side) => {
+    for (const value of [0, 1] as const) for (const licence of ['earned', 'unearned', 'unrecorded', 'duplicate', 'mismatch'] as const) {
+      const c = goal(side === 'baseline' ? value : 0.53, side === 'alternative' ? value : 0.53);
+      const say = 'Olumi can’t yet say how likely this option is to meet the goal: the relevant link isn’t sized.';
+      const decision = { option_id: 'raise_pro_price_to_59', probability_of_goal: value, earned: licence === 'earned', ...(licence === 'unearned' ? { say } : {}) };
+      const recorded = licence === 'unrecorded' ? undefined : licence === 'duplicate' ? [decision, decision] : licence === 'mismatch' ? [{ ...decision, probability_of_goal: value === 1 ? 0 as const : 1 as const }] : [decision];
+      const certainty = { baseline: undefined, alternative: undefined, [side]: recorded };
+      const reply = replyFor([c], certainty);
+      expect(reply).toContain('Raise Pro price to £59');
+      if (licence === 'earned') expect(reply).toContain(value === 1 ? '100% of model runs' : '0% of model runs');
+      else {
+        expect(reply).not.toContain('100%'); expect(reply).not.toContain('0%');
+        expect(reply).toContain(licence === 'unearned' ? say : 'what this model gives, not a certainty');
+      }
+    }
+  });
+
+  it.each(['baseline', 'alternative'] as const)('3/4: withheld certainty on %s keeps its recorded sentence without restoring a number', async (side) => {
+    const say = 'Olumi can’t yet say how likely this option is to meet the goal: the relevant link isn’t sized.';
+    const c = goal(side === 'baseline' ? null : 0.53, side === 'alternative' ? null : 0.53, 'withheld_on_one_side');
+    const certainty: StructuralChallengeCertainty = { baseline: undefined, alternative: undefined, [side]: [{ option_id: 'raise_pro_price_to_59', probability_of_goal: 1, earned: false, say }] };
+    const result = { ...changed, claims: [c] };
+    expect(StructuralChallengeResultV1Schema.parse(result)).toEqual(result);
+    const turn = await structuralChallengeTurnFor(structuralChallengePressId({ from_id: 'a', to_id: 'b' }), async () => ({ kind: 'result', result, labels: LABELS, certainty }));
+    if (turn === null) throw new Error('missing turn');
+    expect(turn.certainty).toEqual(certainty);
+    for (const reply of [turn.reply, structuralChallengeTurnUnderLicence(turn, false).reply]) {
+      expect(reply).toContain(say); expect(reply).not.toContain('100%'); expect(reply).not.toContain('0%');
+    }
+  });
+
+  it('4: unparseable evidence has a specific, honest refusal', () => {
+    const result = { ...BASE, status: 'failed', reason: 'candidate_unparseable', claims: [], pair_provenance: null, not_compared: [] } as StructuralChallengeResultV1;
+    expect(StructuralChallengeResultV1Schema.parse(result)).toEqual(result);
+    expect(composeStructuralChallengeReply({ result, labels: LABELS })).toContain("The test's recorded evidence couldn't be read");
+  });
+
+  it.each(['frame_changed', 'unit_changed', 'identity_status_changed', 'ranking_status_changed', 'withheld_on_one_side', 'missing_on_one_side'] as const)('4: incomparable leader reason %s is never a tie or omitted', (basis) => {
+    const c: StructuralChallengeClaimV1 = { ...changed.claims[0] as Extract<StructuralChallengeClaimV1, { kind: 'leader' }>, verdict: 'not_comparable', basis, noise_verdict: 'not_noise_qualified', ...(basis === 'withheld_on_one_side' || basis === 'missing_on_one_side' ? { baseline_option_id: null, alternative_option_id: null } : {}) };
+    const reply = replyFor([c]);
+    expect(reply).toContain('Which option leads');
+    expect(reply).not.toContain('too close to call');
+    expect(reply).not.toContain('still hold');
+    expect(reply).not.toContain('doesn\'t depend on this link');
+    expect(reply).toContain('resolve the missing or unqualified evidence');
+  });
+
+  it.each(['goal_probability', 'outcome_level', 'constraint_probability'] as const)('4: missing %s keeps its identity and typed reason in the reply', (kind) => {
+    const c: StructuralChallengeClaimV1 = { kind, option_id: 'status_quo', constraint_id: kind === 'constraint_probability' ? 'missing-limit' : null, baseline: kind === 'outcome_level' ? 75000 : 0.53, alternative: null, target: null, constraint_boundary: null, verdict: 'not_comparable', basis: 'missing_on_one_side', noise_verdict: 'not_noise_qualified', invariant_by_construction: false };
+    const reply = replyFor([c]);
+    expect(reply).toContain('Status quo');
+    expect(reply).toContain('unavailable');
+    if (kind === 'constraint_probability') expect(reply).toContain('missing-limit');
+    expect(reply).toContain('At least one run did not record this claim');
+    expect(reply).not.toContain('still hold');
+  });
+
+  it.each(['within_noise', 'not_noise_qualified', 'no_licensed_boundary'] as const)('4: delta reason %s does not imply independence', (basis) => {
+    const c = { ...goal(0.1, 0.9, basis), noise_verdict: basis === 'within_noise' ? 'within_noise' : basis === 'not_noise_qualified' ? 'not_noise_qualified' : 'signal' } as StructuralChallengeClaimV1;
+    const reply = replyFor([c]);
+    expect(reply).not.toContain('doesn\'t depend on this link');
+    expect(reply).not.toContain('still hold');
+    expect(reply).toContain('resolve the missing or unqualified evidence');
+  });
+
+  it('4: construction-only holds are not positive evidence of independence', () => {
+    const reply = replyFor([changed.claims[3]]);
+    expect(reply).toContain('can\'t be affected by this link');
+    expect(reply).not.toContain('the conclusions I tested still hold');
+    expect(reply).not.toContain('doesn\'t depend on this link');
+  });
+
+  it('4: a changed competing option is not described as a changed consequence for the unchanged leader', () => {
+    const competitor = { ...changed.claims[2], option_id: 'status_quo' } as StructuralChallengeClaimV1;
+    const reply = replyFor([changed.claims[0], competitor]);
+    expect(reply.split('\n')[0]).toContain('Raise Pro price to £59 still leads — but part of the result changes.');
+    expect(reply).toContain("Status quo's expected result");
+    expect(reply).not.toContain('what you can expect from it changes');
+  });
+
+  it('9: final true cannot restore a baseline-withheld compared leader', async () => {
+    const result = { ...changed, claims: [{ ...changed.claims[0], baseline_option_id: null, alternative_option_id: null, verdict: 'not_comparable', basis: 'withheld_on_one_side', noise_verdict: 'not_noise_qualified' } as StructuralChallengeClaimV1] };
+    expect(StructuralChallengeResultV1Schema.parse(result)).toEqual(result);
+    const turn = await structuralChallengeTurnFor(structuralChallengePressId({ from_id: 'a', to_id: 'b' }), async () => ({ kind: 'result', result, labels: LABELS }));
+    if (turn === null) throw new Error('missing turn');
+    expect(structuralChallengeTurnUnderLicence(turn, true).result).toEqual(result);
+    expect(turn.reply).not.toContain('Raise Pro price to £59');
+  });
+
+  it.each([{ from_id: 'a::b', to_id: 'c' }, { from_id: 'a', to_id: 'b::c' }, { from_id: 'a::b', to_id: 'c::d' }])('12: delimiter-bearing endpoints round-trip and dispatch once: %j', async (link) => {
+    const press = structuralChallengePressId(link);
+    expect(parseStructuralChallengePress(press)).toEqual(link);
+    const ask = vi.fn(async () => ({ kind: 'no_run' as const }));
+    await structuralChallengeTurnFor(press, ask);
+    expect(ask).toHaveBeenCalledExactlyOnceWith(link);
+  });
+
+  it('12: malformed, oversized, non-string and self-link ids refuse before dispatch', async () => {
+    const ask = vi.fn(async () => { throw new Error('must not dispatch'); });
+    for (const endpoints of [['a', 'a'], ['', 'b'], ['a', ''], ['a'.repeat(201), 'b'], [7, 'b'], [' a', 'b'], ['a?', 'b'], ['a', null], ['a'], ['a', 'b', 'c']]) {
+      const press = `agent-test-without-link:${JSON.stringify(endpoints)}`;
+      expect(parseStructuralChallengePress(press)).toBeNull();
+      expect(await structuralChallengeTurnFor(press, ask)).toMatchObject({ outcome: 'unsupported', result: null, reply: 'This test needs a link between two distinct nodes with valid recorded identities. Nothing in your model changed.' });
+    }
+    expect(parseStructuralChallengePress('agent-test-without-link:a::a')).toBeNull();
+    expect(ask).not.toHaveBeenCalled();
+    expect(structuralChallengePressId({ from_id: 'a::b', to_id: 'c' })).not.toBe(structuralChallengePressId({ from_id: 'a', to_id: 'b::c' }));
   });
 });
