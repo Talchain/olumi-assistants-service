@@ -38,12 +38,11 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, linkEffectUnitIs, linkEndWithoutScale, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
 import { CONFIRM_IDENTITY_OP, identityCardHintFor, identityReadingOf, identityRefusalWords, readingOfIdentityApproval } from '../identity-card.js';
-import { unitComparisonKey } from '../../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { buildFactorScaleMap, resolveRawInterventionValue } from '../../tools/plot-intervention-scale.js';
 import { isPendingActionExpired, type PendingAction } from '../../session/pending-action.js';
 
@@ -182,7 +181,7 @@ import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-ru
 import { selectedRunDeltaForModel } from '../selected-run-delta-for-model.js';
 import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
-import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
+import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectMissOf, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope, type LinkEffectMissDetail } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
 import { KEEP_PROPOSAL_BASIS, figureInUserUnits, linkEffectReadingOf, linkEffectReadingsOf, readingOfLinkEffectApproval } from '../approval-chips.js';
 import { formatEdgeStrengthConfirmed, formatValueWithUnit } from '../../tools/handlers/d1-shared/format-confirmation.js';
@@ -1424,10 +1423,33 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
     const n = ((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as { observed_state?: { unit?: unknown } } | undefined;
     return typeof n?.observed_state?.unit === 'string' ? n.observed_state.unit : 'its own unit';
   };
+  const kindOfNode = (id: string): unknown => (((raw as { nodes?: unknown[] } | null)?.nodes ?? []).find((x) => (x as { id?: unknown })?.id === id) as { kind?: unknown } | undefined)?.kind;
   switch (reason) {
     case 'unit_mismatch':
       return `Nothing was prepared: "${to.label}" is measured in ${unitOfNode(to.id)} and "${from.label}" in ${unitOfNode(from.id)}. `
         + 'Ask the user for their figure in those units; never convert it yourself.';
+    // ⭐ AN END THAT HOLDS NO UNIT (served 4 Oct, journey3 r4: said as "unit mismatch … measured in its own unit", which
+    // sent the user to reword a sentence that was already complete). A size is a strength on the two ends' scales, and a
+    // scale is a number the user did not state, so the stated unit is NOT adopted here: the one end is named instead.
+    case 'target_not_quantified':
+    case 'source_not_quantified': {
+      const end = reason === 'target_not_quantified' ? to : from;
+      return `Nothing was prepared, and it is not the user\u2019s wording: "${end.label}" has no unit and no scale in the model yet, so `
+        + `a size cannot be recorded on the link from "${from.label}" to "${to.label}". Repeat the user\u2019s figure in their own words `
+        + `and say plainly that the ONE thing missing is what "${end.label}" is measured in and how large it gets, and that it cannot be `
+        + 'added from this conversation yet. Never ask them to reword it, never supply a unit or a scale yourself, and never say it was recorded.';
+    }
+    case 'unconvertible': {
+      const which = linkEndWithoutScale(raw, from.id, to.id);
+      if (which === null) break;
+      const end = which === 'target' ? to : from;
+      return `Nothing was prepared, and it is not the user\u2019s wording: "${end.label}" has a unit (${unitOfNode(end.id)}) but no level or `
+        + `range in the model yet, so a size on the link from "${from.label}" to "${to.label}" has nothing to be measured against. `
+        // Only a factor's or the goal's level has a door in this conversation (propose_assumptions, propose_goal_current_level).
+        + (kindOfNode(end.id) === 'factor' || kindOfNode(end.id) === 'goal'
+          ? `Ask the user ONE thing: what "${end.label}" is today, in ${unitOfNode(end.id)}. Never supply that figure yourself.`
+          : `Say plainly that this ONE thing is missing and cannot be added from this conversation yet. Never ask them to reword it, and never supply a figure yourself.`);
+    }
     case 'sign_conflict':
       return `Nothing was prepared: the user's figure says "${from.label}" moves "${to.label}" the OTHER way from the link Olumi has. `
         + 'Tell them so plainly, and offer to reverse the link\u2019s direction with propose_link_strength (their words on one link).';
@@ -1453,7 +1475,62 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
         + `their figure in their own words, tell them so plainly and ask whether the size of that effect should change, or today's level `
         + `of "${to.label}". Never adjust their figure yourself.`;
     default:
-      return `Nothing was prepared: this effect cannot be recorded with this model yet (${String(reason).replace(/_/g, ' ')}). Tell the user plainly.`;
+      break;
+  }
+  return `Nothing was prepared: this effect cannot be recorded with this model yet (${String(reason).replace(/_/g, ' ')}). Tell the user plainly.`;
+}
+
+/**
+ * ⭐ A CONSENT REFUSAL NAMES THE ONE MISSING THING (served 4 Oct: "did not recognise both link names", "could not
+ * associate the £300 figure with that link" — a code in brackets, relayed as a puzzle). `linkEffectMissOf` says exactly
+ * what the user's sentence lacks; these words say that, then the ONE question to ask. A sign the Agent passed against the
+ * user's own words is the Agent's to correct, never the user's to reword.
+ */
+function linkEffectMissWords(
+  d: LinkEffectMissDetail,
+  from: { label: string },
+  to: { label: string },
+  effect: { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string },
+): string {
+  const figure = (n: number, unit: string): string => `${Math.abs(n)} ${unit}`;
+  const howMuch = `how much "${to.label}" changes, and which way, for each ${figure(effect.per_source_change, effect.per_source_change_unit)} change in "${from.label}"`;
+  const end = d.end === 'source' ? from : to;
+  const never = ' Never fill in a figure, a name or a direction for them.';
+  switch (d.miss) {
+    case 'question':
+      return `Nothing was prepared: the words quoted ASK whether "${from.label}" moves "${to.label}"; they do not state it. Ask the user ONE thing: ${howMuch}.${never}`;
+    case 'denied':
+      return `Nothing was prepared: the words quoted say "${from.label}" does NOT have this effect on "${to.label}", so there is no size of theirs to record. `
+        + `Ask the user ONE thing: whether "${from.label}" moves "${to.label}" at all.${never}`;
+    case 'figures_not_in_statement': {
+      const missing = d.figure === 'source' ? figure(effect.per_source_change, effect.per_source_change_unit) : figure(effect.amount, effect.amount_unit);
+      return `Nothing was prepared: the sentence quoted does not write ${missing} as a number in that unit, so it is not a figure the user gave for this link. `
+        + `Ask the user ONE thing: ${howMuch}, in numbers.${never}`;
+    }
+    case 'end_not_named':
+      return `Nothing was prepared: the sentence quoted does not name "${end.label}" (its name as it appears on screen, or a word only it has), so the figure `
+        + `cannot be read as being about this link. Ask the user ONE thing: to say the same fact naming "${end.label}".${never}`;
+    case 'direction_not_stated':
+      return d.end === 'source'
+        ? `Nothing was prepared: the amount given is for a FALL in "${from.label}", but the sentence quoted does not say "${from.label}" falls. `
+          + `If the user described a rise, propose again with per_source_change positive; otherwise ask the user ONE thing: whether that is for a rise or a fall in "${from.label}".${never}`
+        : `Nothing was prepared: the sentence quoted does not say, in one plain word (adds, gains, loses, removes, raises, lowers), whether "${to.label}" goes up or down. `
+          + `Ask the user ONE thing: whether "${to.label}" goes up or down when "${from.label}" rises.${never}`;
+    case 'direction_contradicts':
+      return `Nothing was prepared: the user\u2019s words say "${end.label}" goes ${d.says === 1 ? 'UP' : 'DOWN'}, and the ${d.end === 'source' ? 'per_source_change' : 'amount'} given says the opposite. `
+        + `This is not the user\u2019s to fix: propose again with that figure ${d.says === 1 ? 'positive' : 'negative'}, as their words say, and do not ask them to reword it.`;
+    case 'figure_not_bound':
+      return d.figure === 'source'
+        ? `Nothing was prepared: the sentence quoted writes ${figure(effect.per_source_change, effect.per_source_change_unit)}, but not as a change in "${from.label}" (the figure must sit beside its name). `
+          + `Ask the user ONE thing: ${howMuch}.${never}`
+        : `Nothing was prepared: the sentence quoted writes ${figure(effect.amount, effect.amount_unit)}, but not beside the word that says "${to.label}" goes up or down, so it may be a figure for something else. `
+          + `Ask the user ONE thing: ${howMuch}.${never}`;
+    case 'source_figure_not_a_change':
+      return `Nothing was prepared: the figure written beside "${from.label}" reads as its level, not as a change in it. Ask the user ONE thing: ${howMuch}.${never}`;
+    case 'not_one_statement':
+    default:
+      return `Nothing was prepared: the figures, the two names and the direction are spread over several sentences, so no ONE statement of the user\u2019s says it. `
+        + `Ask the user ONE thing: to say in one sentence ${howMuch}.${never}`;
   }
 }
 
@@ -1639,6 +1716,20 @@ function resolveNamed(
   if (acceptable.length > 1) return { kind: 'ambiguous', candidates: acceptable };
   if (acceptable.length === 1) return { kind: 'one', node: acceptable[0] };
   return candidates.length > 0 ? { kind: 'other', node: candidates[0] } : { kind: 'none' };
+}
+
+/**
+ * A link's SIZE is between two quantities: a decision or an option is never an end of one. Served shape (journey3, 4 Oct):
+ * the decision is titled "monthly recurring revenue" and the goal "Monthly recurring revenue" — one name, two nodes, only
+ * ONE of which a size can be about, so nothing is guessed (`resolveNamed` rule 3). Two QUANTITIES that share a name are
+ * still ambiguous.
+ */
+const isLinkEnd = (n: { kind?: unknown }): boolean => n.kind !== 'option' && n.kind !== 'decision';
+/** Why a name resolved to no link end: it names a decision or an option, or nothing at all. */
+function noLinkEndWords(res: Resolution, asked: unknown): string {
+  return res.kind === 'other'
+    ? `"${String(asked)}" is ${String(res.node.kind) === 'option' ? 'an option' : 'the decision'}, not a quantity, so no size can be recorded on it. Read the state again and name the two quantities the link joins.`
+    : `No entity is labelled "${String(asked)}". Read the state again and use a label exactly as it appears.`;
 }
 
 /** One name that matched more than one acceptable entity, with every candidate. */
@@ -2606,8 +2697,8 @@ export function createAgentCapabilities(
       const stored = check.edges.find((x) => x.from === item.from && x.to === item.to) as { provenance?: unknown } | undefined;
       const prov = (stored?.provenance ?? {}) as { source?: unknown; magnitude?: unknown;
         natural_effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown } };
-      const unitKey = (u: unknown): string | undefined => (typeof u === 'string' ? unitComparisonKey(u) : undefined);
-      const sameUnit = (storedUnit: unknown, stated: string): boolean => unitKey(storedUnit) !== undefined && unitKey(storedUnit) === unitKey(stated);
+      // The writer's own unit reading (`linkEffectUnitIs`): the stored unit words are the end's, which it accepted the stated unit as.
+      const sameUnit = (storedUnit: unknown, stated: string): boolean => typeof storedUnit === 'string' && linkEffectUnitIs(stated, storedUnit);
       return prov.source === 'user_specified' && prov.magnitude === 'user_stated'
         && prov.natural_effect?.amount === item.effect.amount && prov.natural_effect?.per_source_change === item.effect.per_source_change
         && sameUnit(prov.natural_effect?.amount_unit, item.effect.amount_unit) && sameUnit(prov.natural_effect?.per_source_change_unit, item.effect.per_source_change_unit);
@@ -3149,7 +3240,7 @@ export function createAgentCapabilities(
         let working: unknown = g.raw;
         const prepared: { from: string; to: string; effect: { amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string };
           quote: string; edge_token: string; said: string; from_label: string; to_label: string }[] = [];
-        const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string }[] = [];
+        const notPrepared: { from_label: string; to_label: string; refusal: string; detail: string; why?: string }[] = [];
         for (const entry of grouped) {
           const fromLabel = String(entry.from_label ?? '');
           const toLabel = String(entry.to_label ?? '');
@@ -3167,8 +3258,8 @@ export function createAgentCapabilities(
             fail('unreadable_effect', 'Nothing was prepared: this effect needs the change in the target and the change in the source it is per, each with its unit.');
             continue;
           }
-          const fromRes = resolveNamed(g, fromLabel, () => true);
-          const toRes = resolveNamed(g, toLabel, () => true);
+          const fromRes = resolveNamed(g, fromLabel, isLinkEnd);
+          const toRes = resolveNamed(g, toLabel, isLinkEnd);
           const ambiguousEnds = [
             ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, fromLabel, fromRes.candidates)] : []),
             ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, toLabel, toRes.candidates)] : []),
@@ -3177,20 +3268,17 @@ export function createAgentCapabilities(
           const from = fromRes.kind === 'one' ? fromRes.node : undefined;
           const to = toRes.kind === 'one' ? toRes.node : undefined;
           if (from === undefined || to === undefined) {
-            fail('unresolved_entity', `No entity is labelled "${from === undefined ? fromLabel : toLabel}". Read the state again and use a label exactly as it appears.`);
+            fail('unresolved_entity', from === undefined ? noLinkEndWords(fromRes, fromLabel) : noLinkEndWords(toRes, toLabel));
             continue;
           }
           const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
           const effect = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
-          const miss = linkEffectTheUserStated(entryQuote, effect, { source: from.label, target: to.label },
+          const miss = linkEffectMissOf(entryQuote, effect, { source: from.label, target: to.label },
             { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') });
-          if (miss === 'figures_not_in_statement') {
-            fail('not_the_users_figure', 'Nothing was prepared: this quoted statement does not write both figures. Ask the user how much the one moves the other, in numbers.');
-            continue;
-          }
           if (miss !== null) {
-            fail('not_the_users_statement', `Nothing was prepared: the words quoted do not state, as one statement of the user, how much "${from.label}" moves "${to.label}" (${miss.replace(/_/g, ' ')}).`);
+            notPrepared.push({ from_label: fromLabel, to_label: toLabel, refusal: miss.miss === 'figures_not_in_statement' ? 'not_the_users_figure' : 'not_the_users_statement',
+              why: miss.miss, detail: linkEffectMissWords(miss, from, to, effect) });
             continue;
           }
           const said = statingSentenceOf(entryQuote, effect, { source: from.label, target: to.label },
@@ -3249,8 +3337,8 @@ export function createAgentCapabilities(
       }
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
-      const fromRes = resolveNamed(g, String(args.from_label ?? ''), () => true);
-      const toRes = resolveNamed(g, String(args.to_label ?? ''), () => true);
+      const fromRes = resolveNamed(g, String(args.from_label ?? ''), isLinkEnd);
+      const toRes = resolveNamed(g, String(args.to_label ?? ''), isLinkEnd);
       const ambiguousEnds = [
         ...(fromRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.from_label ?? ''), fromRes.candidates)] : []),
         ...(toRes.kind === 'ambiguous' ? [describeAmbiguity(g, String(args.to_label ?? ''), toRes.candidates)] : []),
@@ -3263,7 +3351,7 @@ export function createAgentCapabilities(
       const to = toRes.kind === 'one' ? toRes.node : undefined;
       if (from === undefined || to === undefined) {
         return { ok: false, mutated: false, refusal: 'unresolved_entity',
-          detail: `No entity is labelled "${from === undefined ? args.from_label : args.to_label}". Read the state again and use a label exactly as it appears.` };
+          detail: from === undefined ? noLinkEndWords(fromRes, args.from_label) : noLinkEndWords(toRes, args.to_label) };
       }
       // ⛔ A size is recorded as THEIRS (`magnitude: user_stated`) only when ONE statement of theirs says it: both figures,
       // both ends named, and which way (PR Review CHANGES_REQUIRED on #2275; `linkEffectTheUserStated`).
@@ -3272,16 +3360,10 @@ export function createAgentCapabilities(
       const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const statedEnds = { source: from.label, target: to.label };
       const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') };
-      const miss = linkEffectTheUserStated(quote, statedEffect, statedEnds, statedScope);
-      if (miss === 'figures_not_in_statement') {
-        return { ok: false, mutated: false, refusal: 'not_the_users_figure',
-          detail: 'Nothing was prepared: the statement quoted does not write both figures. Ask the user how much the one moves the other, in numbers.' };
-      }
+      const miss = linkEffectMissOf(quote, statedEffect, statedEnds, statedScope);
       if (miss !== null) {
-        return { ok: false, mutated: false, refusal: 'not_the_users_statement', why: miss,
-          detail: `Nothing was prepared: the words quoted do not state, as one statement of the user\u2019s, how much "${from.label}" moves `
-            + `"${to.label}" (${miss.replace(/_/g, ' ')}). A figure is recorded as theirs only when they say it: ask them to say it as one `
-            + 'statement naming both, which way, and both figures. Never fill in a figure or a direction for them.' };
+        return { ok: false, mutated: false, refusal: miss.miss === 'figures_not_in_statement' ? 'not_the_users_figure' : 'not_the_users_statement',
+          ...(miss.miss === 'figures_not_in_statement' ? {} : { why: miss.miss }), detail: linkEffectMissWords(miss, from, to, statedEffect) };
       }
       // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
       const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;

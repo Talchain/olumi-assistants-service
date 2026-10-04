@@ -905,7 +905,18 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
  */
 export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
   | 'direction_not_stated' | 'direction_contradicts' | 'figure_not_bound' | 'not_one_statement' | 'source_figure_not_a_change';
-const TARGET_DOWN = /^(?:lose|loses|losing|lost|cost|costs|costing|fewer)$/;
+/**
+ * A LOSS verb takes something away from what it is said of ("loses us 50 subscribers", "costs us £300"); REMOVAL words
+ * ("removes £300 of …", "50 fewer") say the target itself gets smaller. Both say the target FALLS — except a loss verb
+ * said of a quantity that itself COUNTS a loss (its label names one: "Customers lost to price rise", "MRR lost to
+ * price-rise churn"): "each 1% rise loses about 2 customers" makes that count GROW by 2. Served 4 Oct (journey2 r4):
+ * "loses about £300 a month … to churn" onto "MRR lost to price-rise churn" was read as the loss falling, and refused.
+ */
+const LOSS_VERB = /^(?:lose|loses|losing|lost|cost|costs|costing)$/;
+const REMOVAL = /^(?:fewer|remove|removes|removing|removed)$/;
+// Only the participle: "<things> lost to <cause>" counts what was lost. "Loss" is left out on purpose ("Profit and loss"
+// counts no loss), so a label that says "loss" under-claims and the user is asked.
+const LOSS_NAME = /^lost$/;
 const TARGET_UP = /^(?:gain|gains|gaining|gained|win|wins|winning|won|adds|added|adding)$/;
 const MOVE_UP = /^(?:rise|rises|rising|rose|increase|increases|increasing|increased|raise|raises|raising|raised|boost|boosts|boosted|boosting|lift|lifts|lifted|lifting|grow|grows|growing|grew|add)$/;
 const MOVE_DOWN = /^(?:fall|falls|falling|fell|drop|drops|dropping|dropped|decrease|decreases|decreasing|decreased|reduce|reduces|reducing|reduced|lower|lowers|lowering|lowered|cut|cuts|cutting)$/;
@@ -934,22 +945,49 @@ const CHANGE_NOUN = /^(?:rise|increase|drop|fall|cut|decrease|reduction|hike|boo
 const BY_LINK = /^(?:the|a|an|our|its|it|their|them|we|you|prices?)$/;
 const AMOUNT_REACH = 4;
 /** The quote's sentences: split at ! ? ; : a new line, or a period — except a period BETWEEN digits ("0.5", "£1.50"). */
-const sentencesOf = (q: string): string[] => q.split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)/).map((x) => x.trim()).filter((x) => x !== '');
+// A worked example joined on with ", so …" ("…, so a 10% rise loses about £3,000 a month") is a consequence of the
+// statement, never part of it: it is read as its own statement, and the card quotes only the one that states the size.
+const sentencesOf = (q: string): string[] => q.split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)|,\s+so\s+/).map((x) => x.trim()).filter((x) => x !== '');
+
+/**
+ * What ONE precise thing is missing from a statement (`linkEffectMissOf`), so the refusal can ask for exactly that:
+ * which end is not named, which figure is not written or not joined to its change, whose direction is unsaid, and — for a
+ * contradiction — which way the user's own words say that end moves.
+ */
+export interface LinkEffectMissDetail {
+  readonly miss: LinkEffectStatementMiss;
+  readonly end?: 'source' | 'target';
+  readonly figure?: 'amount' | 'source';
+  readonly says?: 1 | -1;
+}
 export function linkEffectTheUserStated(
   quote: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
 ): LinkEffectStatementMiss | null {
+  return linkEffectMissOf(quote, effect, ends, scope)?.miss ?? null;
+}
+
+/** `linkEffectTheUserStated`, with the one thing that is missing (`null` when the statement is the user's). */
+export function linkEffectMissOf(
+  quote: string,
+  effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
+  ends: { readonly source: string; readonly target: string },
+  scope: { readonly quantities: readonly string[] },
+): LinkEffectMissDetail | null {
   const q = quote.trim();
-  if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return 'question';
-  if (NEGATOR.test(q)) return 'denied';
+  if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return { miss: 'question' };
+  if (NEGATOR.test(q)) return { miss: 'denied' };
   // ⛔ PR Review's second CR (#2275 @ f5aaec34): every element must come from ONE sentence — "Pro price rises. Paying
   // subscribers fall. Our budget is £1 per month. We currently have 50 paying subscribers." states no £1 → 50.
   const sentences = sentencesOf(q);
   const misses = sentences.map((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope));
   if (misses.some((m) => m === null)) return null;
-  return sentences.length === 1 ? misses[0]! : 'not_one_statement';
+  if (sentences.length === 1) return misses[0]!;
+  // Exactly one sentence writes both figures: what IT lacks is the one thing to ask for. Otherwise they are spread out.
+  const withFigures = misses.filter((m) => m !== null && m.miss !== 'figures_not_in_statement');
+  return withFigures.length === 1 ? withFigures[0]! : { miss: 'not_one_statement' };
 }
 
 /**
@@ -1006,41 +1044,90 @@ function distributiveOneAt(q: string, ends: { readonly source: string; readonly 
   return -1;
 }
 
+/** A sentence's words in order, lower-cased, each with where it starts. */
+type Token = { readonly w: string; readonly at: number };
+const tokensOf = (text: string): Token[] => [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
+
+/**
+ * ⭐ A LABEL WRITTEN OUT IN FULL IS A NAME (served 4 Oct, journey3 r2/r3: "Each 1% Price rise adds about 2 Customers lost
+ * to price rise" was refused `end_not_named`). The source "Price rise" lies wholly inside the target "Customers lost to
+ * price rise", so it has no word of its own, and the word-by-word rule could never name it.
+ *
+ * Read with the model's OWN labels, as the rest of this rule is: each place the sentence writes a label word for word
+ * belongs to ONE label, the LONGEST (so "price rise" at the end of "Customers lost to price rise" is that label's, and
+ * "Enterprise price rise" is never "Price rise"). `whole(label)` is the word positions where that label stands by
+ * itself; `inAName(i)` says word `i` is part of a name of two words or more, and so is never read as a movement (the
+ * "rise" of "Price rise", the "lost" of "Customers lost to price rise").
+ */
+function labelsWrittenOut(tokens: readonly Token[], labels: readonly string[]): { whole: (label: string) => number[]; inAName: (i: number) => boolean } {
+  const keyOf = (label: string): string => tokensOf(label).map((t) => t.w).join(' ');
+  const phrases = [...new Set(labels.map(keyOf))].filter((k) => k !== '').map((k) => k.split(' ')).sort((a, b) => b.length - a.length);
+  const owner = new Map<number, string>();
+  for (const phrase of phrases) {
+    for (let i = 0; i + phrase.length <= tokens.length; i += 1) {
+      if (!phrase.every((w, k) => tokens[i + k]!.w === w && !owner.has(i + k))) continue;
+      for (let k = 0; k < phrase.length; k += 1) owner.set(i + k, phrase.join(' '));
+    }
+  }
+  return {
+    whole: (label) => { const key = keyOf(label); return [...owner].filter(([, k]) => k === key).map(([i]) => i); },
+    inAName: (i) => (owner.get(i) ?? '').includes(' '),
+  };
+}
+
 function linkEffectInOneSentence(
   q: string,
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
-): LinkEffectStatementMiss | null {
+): LinkEffectMissDetail | null {
   const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
-  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit,
-    unitPhraseFamily(effect.per_source_change_unit), q));
+  const perFamily = unitPhraseFamily(effect.per_source_change_unit);
+  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit, perFamily, q));
   // ⭐ R3 #75 5925568501: "each / every / per / one more / an extra / a single" + a word of the SOURCE, one phrase with no
   // punctuation between, is the user writing a change of ONE ("Each extra conversation brings in about £20,000"). A
   // plural with no distributive word ("extra conversations bring £20,000") is not: it could be a total.
   const oneAt = perFigure === undefined && Math.abs(effect.per_source_change) === 1 ? distributiveOneAt(q, ends, effect.per_source_change_unit) : -1;
-  if (amountFigure === undefined || (perFigure === undefined && oneAt < 0)) return 'figures_not_in_statement';
+  if (amountFigure === undefined || (perFigure === undefined && oneAt < 0)) {
+    return { miss: 'figures_not_in_statement', ...(amountFigure === undefined ? { figure: 'amount' as const } : { figure: 'source' as const }) };
+  }
+  const tokens = tokensOf(q);
+  const names = labelsWrittenOut(tokens, [ends.source, ends.target, ...scope.quantities]);
   const othersOf = (label: string): string[] => scope.quantities.filter((l) => l !== label);
   const quoteWords = wordsOf(q);
   const has = (w: string): boolean => quoteWords.some((t) => sameWord(w, t));
-  const named = (end: string, other: string): boolean => wordsOf(end).some((w) => has(w)
+  // An end is named by its whole label standing by itself, or by a word of its own (as before).
+  const named = (end: string, other: string): boolean => names.whole(end).length > 0 || wordsOf(end).some((w) => has(w)
     && !wordsOf(other).some((o) => sameWord(w, o))
     && !othersOf(end).filter((l) => l !== other).some((l) => wordsOf(l).some((x) => sameWord(x, w))
       && wordsOf(l).some((x) => !wordsOf(end).some((e) => sameWord(e, x)) && has(x))));
-  if (!named(ends.source, ends.target) || !named(ends.target, ends.source)) return 'end_not_named';
-  const tokens = [...q.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ w: m[0].toLowerCase(), at: m.index ?? 0 }));
+  if (!named(ends.source, ends.target)) return { miss: 'end_not_named', end: 'source' };
+  if (!named(ends.target, ends.source)) return { miss: 'end_not_named', end: 'target' };
   const sourceOwn = wordsOf(ends.source).filter((w) => !wordsOf(ends.target).some((s) => sameWord(w, s)));
-  const sourceAt = tokens.flatMap((t, i) => (sourceOwn.some((w) => sameWord(w, t.w)) ? [i] : []));
+  const sourceWhole = new Set(names.whole(ends.source));
+  const sourceAt = tokens.flatMap((t, i) => (sourceWhole.has(i) || sourceOwn.some((w) => sameWord(w, t.w)) ? [i] : []));
   const tokenAt = (index: number | undefined): number => tokens.findIndex((t) => t.at >= (index ?? 0));
   const perAt = perFigure === undefined ? oneAt : tokenAt(perFigure.index);
   const amountAt = tokenAt(amountFigure.index);
+  // The source figure's own UNIT, written straight after it, is part of the figure ("1 percentage point of …", "10
+  // subscribers on …"): the unit's words, and for a percentage the estate's own words for one (`targetUnitWords`).
+  const perUnitWords = [...wordsOf(effect.per_source_change_unit), ...(perFamily === 'percent' ? ['percent', 'percentage', 'points'] : [])];
+  const perEnd = perFigure === undefined ? -1 : (perFigure.index ?? 0) + perFigure.matchedText.length;
+  let perUnitUntil = -1;
+  if (perFigure !== undefined) {
+    for (let i = tokens.findIndex((t) => t.at >= perEnd); i >= 0 && i < tokens.length && perUnitWords.some((u) => sameWord(u, tokens[i]!.w)); i += 1) {
+      if (/[,;:()–—]/.test(q.slice(perEnd, tokens[i]!.at))) break;
+      perUnitUntil = i;
+    }
+  }
   // A figure's own digits ("0.5" → 0, 5) are never words standing between it and what it sizes.
-  const inFigure = (i: number): boolean => [perFigure, amountFigure].some((f) => f !== undefined && tokens[i]!.at >= (f.index ?? 0)
-    && tokens[i]!.at < (f.index ?? 0) + f.matchedText.length);
+  const inFigure = (i: number): boolean => (perFigure !== undefined && tokens[i]!.at >= perEnd && i <= perUnitUntil)
+    || [perFigure, amountFigure].some((f) => f !== undefined && tokens[i]!.at >= (f.index ?? 0)
+      && tokens[i]!.at < (f.index ?? 0) + f.matchedText.length);
   // Punctuation ends a phrase (PR Review's fifth CR: "£1, raising it"): a comma, dash or bracket between two words breaks them.
   const unbroken = (a: number, b: number): boolean => {
     const [x, y] = a < b ? [a, b] : [b, a];
-    return !/[,;:()\u2013\u2014]/.test(q.slice(tokens[x]!.at + tokens[x]!.w.length, tokens[y]!.at));
+    return !/[,;:()–—]/.test(q.slice(tokens[x]!.at + tokens[x]!.w.length, tokens[y]!.at));
   };
   const joined = (a: number, b: number, reach: number, link: (w: string) => boolean): boolean => a >= 0 && b >= 0
     && Math.abs(a - b) <= reach && unbroken(a, b)
@@ -1050,25 +1137,31 @@ function linkEffectInOneSentence(
   // a word naming the source. "add … to the Pro price": up to four words before it.
   const isSourceMove = (i: number, w: string): boolean => (perAt >= 0 && i > perAt && i - perAt <= 3)
     || sourceAt.some((s) => (w === 'add' ? s > i && s - i <= 4 : Math.abs(s - i) <= 2));
+  // A loss verb said of a quantity that COUNTS a loss makes it grow (`LOSS_VERB`).
+  const targetCountsALoss = tokensOf(ends.target).some((t) => LOSS_NAME.test(t.w));
   let target = 0; let targetBoth = false; let source = 0; let sourceBoth = false;
   const targetMoves: number[] = []; const sourceMoves: number[] = [];
   const say = (end: 'target' | 'source', dir: 1 | -1, i: number): void => {
     if (end === 'target') { if (target !== 0 && target !== dir) targetBoth = true; target = dir; targetMoves.push(i); } else { if (source !== 0 && source !== dir) sourceBoth = true; source = dir; sourceMoves.push(i); }
   };
   tokens.forEach((t, i) => {
+    // A word of a name written out in full is the name, never a movement ("Price rise", "Customers lost to price rise").
+    if (names.inAName(i)) return;
     // "brings in £20,000" is money coming in (R3 5925568501's served step 2); a bare "brings" ("brings down") says no way.
     if (/^(?:bring|brings|bringing|brought)$/.test(t.w) && tokens[i + 1]?.w === 'in') say('target', 1, i + 1);
-    else if (TARGET_DOWN.test(t.w)) say('target', -1, i);
+    else if (LOSS_VERB.test(t.w)) say('target', targetCountsALoss ? 1 : -1, i);
+    else if (REMOVAL.test(t.w)) say('target', -1, i);
     else if (TARGET_UP.test(t.w)) say('target', 1, i);
     else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1, i);
     else if (MOVE_DOWN.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', -1, i);
   });
-  if (target === 0 || targetBoth || sourceBoth) return 'direction_not_stated';
+  if (target === 0 || targetBoth) return { miss: 'direction_not_stated', end: 'target' };
+  if (sourceBoth) return { miss: 'direction_not_stated', end: 'source' };
   // Each figure SIZES its change: the amount joined to the target's movement, the source's figure to a source word.
   const sourceLinkWord = (w: string): boolean => SOURCE_LINK.test(w) || MOVE_UP.test(w) || MOVE_DOWN.test(w)
     || sourceLabel.some((x) => sameWord(x, w));
-  if (!targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))
-    || !sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord))) return 'figure_not_bound';
+  if (!targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))) return { miss: 'figure_not_bound', figure: 'amount' };
+  if (!sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord))) return { miss: 'figure_not_bound', figure: 'source' };
   // The source's figure is itself IN a change phrase (PR Review's fifth CR: "With Pro price £1, raising it" is today's
   // price, then a rise of no stated size): distributive ("every £1"), its own move straight after ("£10 rise", "£1 price
   // increase"), or "by £1" after a move ("falls by £1", "raise the Pro price by £1").
@@ -1081,10 +1174,10 @@ function linkEffectInOneSentence(
     const m = Math.max(0, perAt - 7) + k;
     return isMove(t.w) && unbroken(m, perAt) && xs.slice(k + 1).every((u) => BY_LINK.test(u.w) || isLabel(u.w));
   });
-  if (!distributive && !moveAfter && !byAfterMove) return 'source_figure_not_a_change';
-  if (target !== Math.sign(effect.amount)) return 'direction_contradicts';
+  if (!distributive && !moveAfter && !byAfterMove) return { miss: 'source_figure_not_a_change' };
+  if (target !== Math.sign(effect.amount)) return { miss: 'direction_contradicts', end: 'target', says: target as 1 | -1 };
   if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
-    return source === 0 ? 'direction_not_stated' : 'direction_contradicts';
+    return source === 0 ? { miss: 'direction_not_stated', end: 'source' } : { miss: 'direction_contradicts', end: 'source', says: source as 1 | -1 };
   }
   return null;
 }

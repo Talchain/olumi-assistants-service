@@ -359,7 +359,8 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'Give both figures exactly as the user wrote them: `amount` is the change in the link\u2019s TARGET (negative when it falls), '
       + '`per_source_change` the change in its SOURCE, each in that end\u2019s unit as get_canonical_state gives it. `quote` is the '
       + 'user\u2019s ONE statement from THIS message that says it, copied exactly: the words that give both figures, name both ends '
-      + 'and say which way. Never use this for a figure the user did not write; for a strength '
+      + 'and say which way. When the target itself counts a loss (a label such as "Customers lost to \u2026"), something the user says is lost makes it go UP: a positive `amount`. '
+      + 'If a refusal says an end has no unit, that is the model\u2019s gap, not the user\u2019s wording: say so and do not ask them to reword. Never use this for a figure the user did not write; for a strength '
       + 'said in words ("strong"), use propose_link_strength. When the result is withheld because links are unsized, ask for all the listed sizes in ONE message, in plain words with units. When the user gives figures for several links, call propose_link_effect ONCE with all of them. Never invent a figure. Where the context lists Olumi\u2019s own estimate in units, you may offer it and include it only if the user says to use it.',
     parameters: {
       ...obj({

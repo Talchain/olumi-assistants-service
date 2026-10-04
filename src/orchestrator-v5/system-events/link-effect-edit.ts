@@ -25,7 +25,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
-import { resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitOf, type LinkSizeProblem } from '../../cee/magnitude/link-effect.js';
+import { resolveMagnitudeFrame, sizeLink, sourceUnitWords, targetUnitWords, unitAfterOne, unitOf, type LinkSizeProblem } from '../../cee/magnitude/link-effect.js';
 import { createHash } from 'node:crypto';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
@@ -83,6 +83,9 @@ export type LinkEffectRefusal =
   | 'superseded'
   | 'definitional_link'
   | 'unit_mismatch'
+  /** The end holds NO unit at all (a served risk or outcome is `{label, provenance}`): nothing to say a size in. */
+  | 'target_not_quantified'
+  | 'source_not_quantified'
   | 'unconvertible'
   | Exclude<LinkSizeProblem, 'unconvertible'>;
 
@@ -129,7 +132,35 @@ export function linkEffectReadingToken(reading: {
   return `reading:${createHash('sha256').update(stableStringify(bound)).digest('hex')}`;
 }
 const refuse = (reason: LinkEffectRefusal): LinkEffectEditResult => ({ kind: 'refused', reason });
+
+/**
+ * ⭐ THE STATED UNIT IS THE END'S OWN, HOWEVER IT IS SPELLED (served 4 Oct, journey3: "£49 a month", "each subscriber").
+ * The estate's one unit key (`unitComparisonKey`: "£/month" = "GBP per month"), read after the two spellings a plain
+ * sentence uses that the key does not fold: a rate said with "a" / "each" / "every" ("£ a month" is "£ per month"), and
+ * the unit said of ONE (`unitAfterOne`, the sizer's own singular rule: "subscriber" is "subscribers"). Never a
+ * conversion: another currency, period or noun is still a different unit.
+ */
+export function linkEffectUnitIs(stated: string, own: string | undefined): boolean {
+  if (own === undefined || own.trim() === '') return false;
+  const key = (unit: string): string | undefined => unitComparisonKey(unitAfterOne(unit.trim().replace(/\s+(?:an?|each|every)\s+/i, ' per ')));
+  const statedKey = key(stated);
+  return statedKey !== undefined && statedKey === key(own);
+}
 const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+
+/**
+ * Which end of a link has NO SCALE to size against (`resolveMagnitudeFrame`), read as the writer reads it — so an
+ * `unconvertible` refusal can name the one end, never "this model". `null` when both resolve (or the graph is unreadable).
+ */
+export function linkEndWithoutScale(graph: unknown, from: string, to: string): 'target' | 'source' | null {
+  if (!isRec(graph) || !Array.isArray(graph.nodes)) return null;
+  const view = magnitudeNodes(graph.nodes.filter(isRec), percentLevelIds(graph));
+  const target = view.get(to);
+  const source = view.get(from);
+  if (target !== undefined && resolveMagnitudeFrame(target) === undefined) return 'target';
+  if (source !== undefined && resolveMagnitudeFrame(source) === undefined) return 'source';
+  return null;
+}
 
 export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffectEditResult {
   const { from, to, effect, expected } = params;
@@ -163,10 +194,14 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const targetNode = view.get(to)!;
   // Either the end's stored unit or the words the ask itself is phrased in (Runtime 5882802252: a % level is asked in
   // "percentage points", a yes/no source as "switch") — the same key `sizeLink` says the natural effect back in.
-  const same = (stated: string, ...own: (string | undefined)[]) => unitComparisonKey(stated) !== undefined
-    && own.some((u) => u !== undefined && u !== '' && unitComparisonKey(stated) === unitComparisonKey(u));
-  if (!same(effect.amount_unit, unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))
-    || !same(effect.per_source_change_unit, unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)))) {
+  const targetUnits = [unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode))];
+  const sourceUnits = [unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode))];
+  // An end that holds no unit at all is not a mismatch of the user's: it is named, so the refusal can say which end.
+  const held = (units: readonly (string | undefined)[]): boolean => units.some((u) => u !== undefined && u.trim() !== '');
+  if (!held(targetUnits)) return refuse('target_not_quantified');
+  if (!held(sourceUnits)) return refuse('source_not_quantified');
+  if (!targetUnits.some((u) => linkEffectUnitIs(effect.amount_unit, u))
+    || !sourceUnits.some((u) => linkEffectUnitIs(effect.per_source_change_unit, u))) {
     return refuse('unit_mismatch');
   }
   if (!finite(effect.amount) || !finite(effect.per_source_change) || effect.per_source_change === 0 || effect.amount === 0) {

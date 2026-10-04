@@ -332,7 +332,7 @@ const isPercentLevel = (node: MagnitudeNode, frame: number | undefined): boolean
  * singular rule, `pluraliseUnit` ("1 subscriber", "1 enterprise customer per AE per 12 months", "1 hire/month"). Served
  * on Paul's first reply as "by 1 subscribers" (AI Conversation #70 5852012649). The rest of the unit is kept as written.
  */
-function unitAfterOne(unit: string): string {
+export function unitAfterOne(unit: string): string {
   const cut = unit.search(/\s+per\s|\s*\//i);
   if (cut < 0) return pluraliseUnit(unit, 1);
   return `${pluraliseUnit(unit.slice(0, cut), 1)}${unit.slice(cut)}`;
