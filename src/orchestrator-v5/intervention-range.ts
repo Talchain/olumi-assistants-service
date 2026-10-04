@@ -67,6 +67,8 @@ export function admitInterventionRange(
   if (!isRec(intervention) || intervention.range === undefined) return undefined;
   const parsed = StoredInterventionRange.safeParse(intervention.range);
   if (!parsed.success) return { refused: 'malformed' };
+  // A likely range has width: equal bounds state a point, not a range (agent admission already requires low < high).
+  if (parsed.data.high <= parsed.data.low) return { refused: 'malformed' };
   const point = interventionPoint(intervention);
   if (point === undefined) return { refused: 'no_point' };
   if (point < parsed.data.low || point > parsed.data.high) return { refused: 'value_outside_range' };

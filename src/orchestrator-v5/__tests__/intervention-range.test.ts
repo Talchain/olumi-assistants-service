@@ -142,6 +142,11 @@ describe('S1 writer — the persisted form refuses a range that contradicts its 
     expect(admitInterventionRange({ value: 0.25, raw_value: 10, range: R })).toEqual({ range: R });
   });
 
+  it('RED: equal bounds are a point, not a likely range → refused (and inverted bounds too)', () => {
+    expect(admitInterventionRange({ value: 10, range: { low: 10, high: 10, meaning: 'likely_range', ...USER } })).toEqual({ refused: 'malformed' });
+    expect(admitInterventionRange({ value: 10, range: { low: 12, high: 8, meaning: 'likely_range', ...USER } })).toEqual({ refused: 'malformed' });
+  });
+
   it('a categorical value has no point for a range to bracket → refused', () => {
     expect(admitInterventionRange({ value: 1, raw_value: 'UK', value_type: 'categorical', range: { low: 5, high: 20, meaning: 'likely_range', ...USER } }))
       .toEqual({ refused: 'no_point' });
