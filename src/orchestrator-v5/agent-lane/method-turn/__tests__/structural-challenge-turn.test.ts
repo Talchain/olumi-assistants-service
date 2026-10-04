@@ -439,6 +439,47 @@ describe('review closure: final presentation is bound to its baseline execution 
   );
 });
 
+describe('repeated structural challenge licence adaptation only narrows', () => {
+  const caveat = ', as a provisional finding on Olumi’s starting estimates';
+  const disclosure = 'The figures are provisional estimates from these two model versions.';
+  const completed = (): StructuralChallengeTurn => ({
+    reply: composeStructuralChallengeReply({ result: changed, labels: LABELS }), outcome: 'completed', result: changed,
+    labels: LABELS, actions: [TALK_IT_THROUGH_CHIP], baselineRunIdentity: BASELINE_IDENTITY, candidateLeaderLicence: 'permitted',
+  });
+
+  it('L1: provisional then plain keeps the caveated presentation byte for byte', () => {
+    const first = structuralChallengeTurnUnderLicence(completed(), finalRead(true, true));
+    expect(first.outcome).toBe('completed');
+    expect(first.reply).toContain(caveat);
+    expect(first.reply).toContain(disclosure);
+    const second = structuralChallengeTurnUnderLicence(first, finalRead());
+    expect(second.reply).toBe(first.reply);
+    expect(second.presentedLicence).toBe('permitted_with_caveat');
+  });
+
+  it('L2: plain then plain stays permitted without a caveat', () => {
+    const first = structuralChallengeTurnUnderLicence(completed(), finalRead());
+    const second = structuralChallengeTurnUnderLicence(first, finalRead());
+    expect(second.reply).toBe(first.reply);
+    expect(second.reply).not.toContain(caveat);
+    expect(second.reply).not.toContain(disclosure);
+    expect(second.presentedLicence).toBe('permitted');
+  });
+
+  it.each([false, true])('L3: withheld then plain stays withheld (provisional figures: %s)', (provisional) => {
+    const first = structuralChallengeTurnUnderLicence(completed(), finalRead(false, provisional));
+    expect(first.outcome).toBe('completed');
+    expect(first.result?.claims.find((claim) => claim.kind === 'leader')).toMatchObject({
+      baseline_option_id: null, alternative_option_id: null, verdict: 'not_comparable', basis: 'withheld_on_one_side',
+    });
+    expect(first.reply).toContain('Which option leads cannot be compared. At least one run withheld this claim.');
+    if (provisional) expect(first.reply).toContain(disclosure);
+    const second = structuralChallengeTurnUnderLicence(first, finalRead());
+    expect(second.result?.claims.find((claim) => claim.kind === 'leader')).toEqual(first.result?.claims.find((claim) => claim.kind === 'leader'));
+    expect(second.reply).toBe(first.reply);
+  });
+});
+
 /** Replay must preserve safe refusals and rebind conclusions, rather than infer a result from recorded prose. */
 describe('structural challenge replay under a fresh receipt', () => {
   const remembered = (): StructuralChallengeTurn => structuralChallengeTurnUnderLicence({
