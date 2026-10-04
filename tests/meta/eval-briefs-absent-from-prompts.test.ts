@@ -4,9 +4,10 @@
  *
  * Every text a model can read from this repo is scanned against fingerprints of the SEALED brief and both blind-written
  * HELD-OUT briefs (`./eval-brief-fingerprint.ts`): string and template literals of non-test script sources under `src/`,
- * `tools/` and `scripts/` (a prompt assembled from `+`, `.concat`, `.join`, templates or the file's constants reads as one
- * text), every tracked text file there (prompt candidates and stores are text), prompt-directory markdown/JSON/YAML, and
- * every string of a JSON prompt store. Threat model: accidental reuse (`./eval-brief-fingerprint.ts`). The held-out briefs are fingerprinted, never committed, so they stay unseen by
+ * `tools/` and `scripts/` (a prompt assembled from `+`, `.concat`, `.join`, `.push`, templates, object members or the
+ * file's unchanged bindings reads as one text), every Python source there read whole (prompt builders write candidate
+ * stores), every tracked text file there (prompt candidates and stores are text), markdown/JSON/YAML/text in any
+ * directory named for prompts (profiles, estates, stores), and every string of a JSON prompt store. Threat model: accidental reuse (`./eval-brief-fingerprint.ts`). The held-out briefs are fingerprinted, never committed, so they stay unseen by
  * anyone building against this repo. Prompt versions held in a DATABASE prompt store (`src/prompts/stores/{supabase,
  * postgres}.ts`) are outside this offline guard.
  */
@@ -16,7 +17,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { DRAFT_RECORDS_INSTRUCTION } from '../../src/cee/draft/records/instruction.js';
-import { briefConstantOf, fingerprintBrief, jsonStringsOf, literalsOf, scanText, type BriefFingerprint } from './eval-brief-fingerprint.js';
+import { briefConstantOf, fingerprintBrief, jsonStringsOf, literalsOf, scanText, tokensOf, type BriefFingerprint } from './eval-brief-fingerprint.js';
 
 const ROOT = join(__dirname, '..', '..');
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, '__fixtures__', 'eval-brief-fingerprints.json'), 'utf8')) as { briefs: BriefFingerprint[] };
@@ -29,6 +30,10 @@ const TRACKED = execSync('git ls-files', { cwd: ROOT, encoding: 'utf8', maxBuffe
 const NOT_A_TEST = (f: string): boolean => !/(^|\/)(__tests__|tests?|__fixtures__)\//.test(f) && !/\.(test|spec)\.(ts|mts|cts|js|mjs|cjs)$/.test(f) && !/\.d\.ts$/.test(f);
 const TS_SOURCES = TRACKED.filter((f) => /^(src|tools|scripts)\/.*\.(ts|mts|cts|js|mjs|cjs)$/.test(f) && NOT_A_TEST(f)
   && !/^src\/generated\//.test(f));
+/** Python prompt builders, read whole: a worked example in a builder lands in every prompt it writes. */
+const PYTHON_SOURCES = TRACKED.filter((f) => /^(src|tools|scripts)\/.*\.py$/.test(f) && NOT_A_TEST(f));
+/** A directory named for prompts ("prompts", "prompt-estate", "prompt-profiles"), at any depth. */
+const IN_PROMPT_DIR = (f: string): boolean => f.split('/').slice(0, -1).some((seg) => /prompt/i.test(seg));
 const PROMPT_FILES = TRACKED.filter((f) => NOT_A_TEST(f) && !/^Docs\//.test(f) && (
   // Prompt candidates, baselines, drafts and stores are text: every tracked .txt under these roots.
   /^(src|tools|scripts|Prompts|data)\/.*\.txt$/.test(f)
@@ -37,7 +42,8 @@ const PROMPT_FILES = TRACKED.filter((f) => NOT_A_TEST(f) && !/^Docs\//.test(f) &
     || /^tools\/.*\/prompts?\//.test(f)
     || /^tools\/conversation-harness\/prompt-estate\/candidates\//.test(f)
     // A prompt or instruction stored as data anywhere else (never prose: .md outside the prompt dirs is a doc).
-    || /(^|\/)[^/]*(prompt|instruction)[^/]*\.(json|ya?ml)$/i.test(f)))));
+    || /(^|\/)[^/]*(prompt|instruction)[^/]*\.(json|ya?ml)$/i.test(f)))
+  || (/\.(md|json|ya?ml|txt)$/.test(f) && IN_PROMPT_DIR(f))));
 
 /** The scannable texts of one prompt file: the whole text, and every string of a JSON store. */
 const textsOfPromptFile = (f: string): string[] => {
@@ -84,6 +90,10 @@ describe('the scanner (positive controls, formats, splits, and the generic contr
     'each subscriber costs £6 monthly',
     'each subscriber costs £6/mo',
     'each subscriber costs GBP 6 a month',
+    // Any spacing, and the currency as a word (Codex round 3).
+    'each subscriber costs GBP  6 a month',
+    'each subscriber costs 6 pounds a month',
+    'each 1 percent price rise adds £1,200 a month to MRR',
     // Space-separated table cells read apart as well as merged; a unit after an amount is not a magnitude suffix.
     'starter subscriber costs per month £6 150',
     'adds £1200 m^-1 to revenue',
@@ -125,9 +135,44 @@ describe('the scanner (positive controls, formats, splits, and the generic contr
     expect(lits.filter((l) => l.line === 5).some((l) => hit(l.text))).toBe(false);
   });
 
+  it('resolves each name in its own scope, and reads members, unchanged lets and pushed arrays (Codex round 3)', () => {
+    const src = [
+      'const H = "each subscriber costs about ";',
+      'const T = "£6 a month in support";',
+      'export function draft(): string { return H + T; }',
+      'export function other(): string { const H = "generic "; return H + "words"; }',
+      'const P = { head: "each subscriber costs about ", tail: "£6 a month in support" };',
+      'export const fromMembers = P.head + P.tail;',
+      'let L = "each subscriber costs about ";',
+      'export const fromLet = L + T;',
+      'const parts: string[] = [];',
+      'parts.push("each subscriber costs about ");',
+      'parts.push(T);',
+      'export const fromPush = parts.join("");',
+      'export function shadowedByParam(H: string): string { return H + T; }',
+      'let M = "each subscriber costs about "; M = "x";',
+      'export const fromReassigned = M + "£6 in support";',
+    ].join('\n');
+    const lits = literalsOf('probe.ts', src);
+    const hitAt = (line: number): boolean => lits.filter((l) => l.line === line).some((l) => hit(l.text));
+    for (const line of [3, 6, 8, 12]) expect(hitAt(line), `line ${line}`).toBe(true);
+    // The other scope's H is its own; a parameter and a reassigned let are not the outer text.
+    expect(lits.filter((l) => l.line === 4).map((l) => l.text)).toContain('generic words');
+    expect(lits.filter((l) => l.line === 13).some((l) => l.text.includes('each subscriber costs'))).toBe(false);
+    expect(lits.filter((l) => l.line === 15).some((l) => l.text.includes('each subscriber costs'))).toBe(false);
+  });
+
   it('reads a JavaScript prompt script too', () => {
     const lits = literalsOf('probe.mjs', 'const system = "each 1% price rise adds £1,200 a month to MRR";\n');
     expect(lits.some((l) => hit(l.text))).toBe(true);
+  });
+
+  it('catches a figure-free run of the brief only at 10+ tokens (common prose is not a brief)', () => {
+    const tokens = tokensOf(SEALED);
+    const start = tokens.findIndex((_, i) => tokens.slice(i, i + 12).length === 12 && !tokens.slice(i, i + 12).some((t) => /\d/.test(t)));
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(hit(tokens.slice(start, start + 12).join(' '))).toBe(true);
+    expect(scanText(tokens.slice(start, start + 7).join(' '), BRIEFS)).toEqual([]);
   });
 
   it('reads a prompt file whole, so a sentence broken across lines is still caught', () => {
@@ -146,6 +191,10 @@ describe('the scanner (positive controls, formats, splits, and the generic contr
     'For example, set a £49 budget and a 10% contingency',
     'A starter subscriber costs £6 per year',
     'Lay 6 m of cable per week',
+    // Common prose, and a figure whose own rate differs beside an incidental time word (Codex round 3).
+    'For example: We are a B2B software company.',
+    'A starter subscriber costs £6 per year, and month-end accounts record it.',
+    'do not derive $900 from $6,000 and 15%',
   ])('contrast: a generic example is not a brief: %s', (text) => {
     expect(scanText(text, BRIEFS)).toEqual([]);
   });
@@ -171,6 +220,12 @@ describe('no evaluation brief in any prompt source', () => {
       'tools/orchestrator-eval/drafts/decision_review.v15-draft.txt']) {
       expect(PROMPT_FILES, f).toContain(f);
     }
+    expect(PYTHON_SOURCES.length).toBeGreaterThan(10);
+    for (const f of ['tools/conversation-harness/prompt-estate/candidates/build-v42.2b.py',
+      'tools/conversation-harness/prompt-estate/candidates/build-s5c.py']) {
+      expect(PYTHON_SOURCES, f).toContain(f);
+    }
+    expect(PROMPT_FILES).toContain('tools/graph-evaluator/fixtures/prompt-profiles/framing_saas_pricing.json');
   });
 
   it('every text a model can read from this repo is clean', () => {
@@ -181,6 +236,10 @@ describe('no evaluation brief in any prompt source', () => {
         texts += 1;
         for (const h of scanText(lit.text, BRIEFS)) hits.push(`${f}:${lit.line} ${h.brief} ${h.kind}`);
       }
+    }
+    for (const f of PYTHON_SOURCES) {
+      texts += 1;
+      for (const h of scanText(readFileSync(join(ROOT, f), 'utf8'), BRIEFS)) hits.push(`${f} ${h.brief} ${h.kind}`);
     }
     for (const f of PROMPT_FILES) {
       for (const text of textsOfPromptFile(f)) {

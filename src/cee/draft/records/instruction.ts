@@ -490,7 +490,7 @@ that same \`causal_link\` in \`effect_detail\`: use the signed target change in
 change in \`per_source_change\`, and the source's stated unit in
 \`per_source_change_unit\`. Set all four fields only when the quoted figures
 and both endpoints are clear; otherwise omit the object. This is a transcription
-of the brief, not an estimate: do not derive $8,000 from $80,000 and 10%, and
+of the brief, not an estimate: do not derive $900 from $6,000 and 15%, and
 do not convert units or invent a missing per-change figure. Keep the supporting
 sentence in \`basis\` and \`stated_items\`.
 
