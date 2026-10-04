@@ -18,8 +18,6 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setTestSink } from '../../../../utils/telemetry.js';
-import { RUN_ANALYSIS_PROJECTION_KEY } from '../../../context/analysis-projection-policy.js';
-import { ANALYSIS_PROJECTION_VERSION } from '../../../context/graph-identity.js';
 import { z } from 'zod';
 import * as talchainSchemas from '@talchain/schemas/orchestrator';
 
@@ -188,35 +186,10 @@ describe('run_analysis handler — happy path', () => {
   });
 
   /**
-   * RE-POINTED 2026-07-26 (T1 claim safety, layer 2) — read this before
-   * loosening it further.
-   *
-   * The invariant WAS "fact.result.enrichment equals the validated
-   * V2RunResponse byte-for-byte". It is now: **PLoT's response verbatim, PLUS
-   * EXACTLY ONE CEE-owned `__cee_`-namespaced key, and nothing else.**
-   *
-   * That is a TIGHTER statement than the old one, not a weaker one: the old
-   * test permitted no exception and therefore said nothing about what a future
-   * exception would be allowed to look like. This one pins the exception to a
-   * single, namespaced, enumerable key — so a second CEE key, an un-namespaced
-   * key, or any edit to a PLoT field all still fail here.
-   *
-   * WHY THE EXCEPTION EXISTS. "May a leading option be named" is a fact about
-   * the analysis and must be readable on every path that rebuilds prose from
-   * the fact — including the prior-fact lifecycle rebuild, which runs no
-   * handler and so has no `HandlerOutcome` to thread. Its correct home is a
-   * first-class `constraint_verdict` field on `RunAnalysisResultSchema`, which
-   * is `.strict()` in the vendored `@talchain/schemas`, so adding it needs a
-   * package release blocked behind V5-CI-01. `enrichment` is `z.record` and
-   * passes strict unchanged. See `CEE_CLAIM_SAFETY_ENRICHMENT_KEY`.
-   *
-   * The pass-through itself is UNCHANGED: the handler still builds and
-   * schema-validates `enrichment: response as Record<string, unknown>` verbatim
-   * (which `scripts/validate-handler-ownership.sh` §6 still enforces), and the
-   * stamp is applied afterwards as a separate, named step.
-   *
-   * WHEN V5-CI-01 UNBLOCKS: move the verdict to the fact field, delete the
-   * stamp, and restore the plain byte-for-byte assertion below.
+   * Gap-free Runs retain the validated PLoT envelope byte-for-byte, exactly
+   * as on staging. Claim safety lives on constraint_verdict. The separate
+   * graph-hash-run-stamp regression checks the projection metadata exception
+   * for actual admission gaps, including saved-fact and transport readback.
    */
   it('fact.result.enrichment is the validated V2RunResponse VERBATIM — zero added keys', async () => {
     const responseSnapshot = JSON.parse(JSON.stringify(happyFixture)) as V2RunResponseEnvelope;
@@ -231,22 +204,18 @@ describe('run_analysis handler — happy path', () => {
 
     const enrichment = fact.result.enrichment as Record<string, unknown>;
 
-    // 1. Exactly one internal projection stamp in the existing persisted JSON
-    // record. No provider field changes and no claim-safety key returns.
+    // 1. A healthy gap-free Run retains staging's exact fact/wire shape.
     const added = Object.keys(enrichment).filter(
       (k) => !Object.prototype.hasOwnProperty.call(responseSnapshot, k),
     );
-    expect(added).toEqual([RUN_ANALYSIS_PROJECTION_KEY]);
-    expect(enrichment[RUN_ANALYSIS_PROJECTION_KEY]).toBe(ANALYSIS_PROJECTION_VERSION);
+    expect(added).toEqual([]);
     // The interim key specifically is GONE — nothing writes it any more.
     expect(CEE_CLAIM_SAFETY_ENRICHMENT_KEY in enrichment).toBe(false);
 
     // 2. Every PLoT field is untouched — no projection, no stripping, and no
     //    field reordering that would change JSON.stringify byte output.
-    const providerEnvelope = { ...enrichment };
-    delete providerEnvelope[RUN_ANALYSIS_PROJECTION_KEY];
-    expect(providerEnvelope).toEqual(responseSnapshot);
-    expect(JSON.stringify(providerEnvelope)).toBe(JSON.stringify(responseSnapshot));
+    expect(enrichment).toEqual(responseSnapshot);
+    expect(JSON.stringify(enrichment)).toBe(JSON.stringify(responseSnapshot));
 
     // 3. The verdict carries a real answer, not a placeholder, and it is on the
     //    CONTRACT field. This fixture ratifies no hard constraint, so the

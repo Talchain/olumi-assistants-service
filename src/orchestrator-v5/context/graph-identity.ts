@@ -43,6 +43,10 @@ import {
   computeAnalysisAffectingGraphHash,
   computeAnalysisAffectingGraphHashSha256,
 } from './graph-hash.js';
+import {
+  computeLegacyAnalysisAffectingGraphHash,
+  computeLegacyAnalysisAffectingGraphHashSha256,
+} from './graph-hash-legacy.js';
 
 // ---------------------------------------------------------------------------
 // Versioned projection metadata (contract §8 "Normalisation must be versioned",
@@ -66,6 +70,25 @@ export const IDENTITY_PROJECTION_VERSION = 'identity.v1' as const;
  */
 export const ANALYSIS_NORMALISER_VERSION = '1' as const;
 export const ANALYSIS_PROJECTION_VERSION = 'analysis_affecting.admission_gaps.v2' as const;
+
+/** Existing persisted JSON metadata, needed only when a Run carries gaps. */
+export const RUN_ANALYSIS_PROJECTION_KEY = '__cee_analysis_projection_version';
+
+/** Immutable version validation only; never licenses current freshness. */
+export function matchesHistoricalAnalysisIdentity(graph: GraphStateIngress, storedHash: string): boolean {
+  return computeAnalysisAffectingGraphHashSha256(graph) === storedHash
+    || computeLegacyAnalysisAffectingGraphHashSha256(graph) === storedHash;
+}
+
+/** Compare's recorded Run identity uses this same sanctioned hash seam.
+ * Only an unstamped historical Run may match the frozen legacy projection. */
+export function matchesHistoricalRunAnalysisIdentity(
+  graph: GraphStateIngress, storedHash: string, projection: unknown,
+): boolean {
+  if (projection !== undefined && projection !== ANALYSIS_PROJECTION_VERSION) return false;
+  return computeAnalysisAffectingGraphHash(graph) === storedHash
+    || (projection === undefined && computeLegacyAnalysisAffectingGraphHash(graph) === storedHash);
+}
 
 const HASH_ALGORITHM = 'sha256' as const;
 

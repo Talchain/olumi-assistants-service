@@ -72,7 +72,7 @@ import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
 // spelled out? Derived here, at the point of the claim, from the two pieces of
 // canonical persisted state this handler already holds (`snapshot.briefText`
 // and the graph's option labels). Not persisted and not stamped: PLoT's fields
-// remain unchanged (only CEE's projection metadata is added), and a
+// remain unchanged (CEE's projection metadata is added only for carried gaps), and a
 // copy of labels on the fact would be a second thing to drift (trap 12) — the
 // sibling `withheld-reason-tail.ts` records the identical decision for the
 // ratified constraint labels it names.
@@ -147,7 +147,7 @@ import {
   resolveRunAdmission,
 } from './analysis-ready-core.js';
 import { AnalysisSnapshotDivergedError, currentBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
-import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
+import { runAnalysisProjectionNeedsStamp, stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { decideSeedReuse } from '../../coaching/seed-reuse.js';
 // The 2026-08-28 disclosure defect: the run proceeds past unset option effects
 // (the compute-discard waiver) and the analyse turn says nothing about them.
@@ -2737,11 +2737,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // fields in some builds — safer to conditionally include).
         ...(winProbabilities !== null ? { win_probabilities: winProbabilities } : {}),
         summary,
-        // Keep every PLoT field unchanged; the existing persisted JSON record
-        // also carries CEE's projection stamp. The result/snapshot schemas are
-        // strict, so this namespaced metadata avoids a migration or package
-        // change. Written before fact validation, never onto the provider response.
-        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
+        // Gap-free Runs retain the provider envelope byte-for-byte. Only a
+        // carried admission gap needs CEE's persisted projection metadata;
+        // never mutate the provider response itself.
+        enrichment: runAnalysisProjectionNeedsStamp(snapshot.rawPersistedGraph ?? snapshot.graph)
+          ? stampRunAnalysisProjection(response as Record<string, unknown>)
+          : response as Record<string, unknown>,
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run

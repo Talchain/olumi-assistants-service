@@ -130,6 +130,34 @@ describe('legacy node shapes with a valid mirror', () => {
 });
 
 describe('projection evidence cannot be silently repaired', () => {
+  it.each([undefined, null])('preserves the hash-only gap-free API with no graph (%j) and leaves fact bytes untouched', graph => {
+    const fact = legacyRun('node', false, true);
+    delete fact.result.input_snapshot;
+    const bytes = JSON.stringify(fact);
+    expect(deriveAnalysisFreshness([fact], fact.result.graph_hash_at_run!, undefined, { currentGraph: graph }))
+      .toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+    expect(JSON.stringify(fact)).toBe(bytes);
+  });
+  it.each(CARRIERS)('gap-free Runs with empty %s carriers remain fresh with or without a snapshot/stamp', carrier => {
+    for (const withSnapshot of [true, false]) {
+      const graph = legacyGraph(carrier, []);
+      const fact = legacyRun(carrier, false, true);
+      if (!withSnapshot) delete fact.result.input_snapshot;
+      expect(deriveAnalysisFreshness([fact], computeAnalysisAffectingGraphHash(graph),
+        undefined, { currentGraph: graph })).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+      expect(fact.result.enrichment).not.toHaveProperty(RUN_ANALYSIS_PROJECTION_KEY);
+    }
+  });
+  it.each(CARRIERS)('valid question-only wording on %s carriers never invents a gap for an unstamped Run', carrier => {
+    const graph = legacyGraph(carrier, []);
+    for (const row of [...graph.nodes, ...(graph.options as Record<string, unknown>[] ?? [])]) {
+      if (Object.hasOwn(row, 'unresolved_targets')) row.user_questions = ['What evidence would challenge this?'];
+    }
+    const fact = legacyRun(carrier, false, true);
+    delete fact.result.input_snapshot;
+    expect(deriveAnalysisFreshness([fact], computeAnalysisAffectingGraphHash(graph),
+      undefined, { currentGraph: graph })).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+  });
   it.each([undefined, null, {}, { nodes: [], edges: 'invalid' }])('withholds legacy freshness without a verifiable graph: %j', graph => {
     const fact = legacyRun('node');
     expect(deriveAnalysisFreshness([fact], fact.result.graph_hash_at_run!, undefined, { currentGraph: graph }))

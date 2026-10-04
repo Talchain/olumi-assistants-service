@@ -1,13 +1,11 @@
 import { RunInputSnapshotSchema, type HandlerFact, type RunInputSnapshot } from '@talchain/schemas/orchestrator';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeGraphIdentityHash, computeAnalysisAffectingHashRecord,
-  computeVersionAnalysisAffectingHashRecord } from '../context/graph-identity.js';
+  computeVersionAnalysisAffectingHashRecord, matchesHistoricalAnalysisIdentity,
+  matchesHistoricalRunAnalysisIdentity, RUN_ANALYSIS_PROJECTION_KEY,
+  ANALYSIS_PROJECTION_VERSION } from '../context/graph-identity.js';
 import { validateAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
 import { compareRunGoalUnitSnapshot, isSuccessfulRunAnalysisFact } from '../context/freshness.js';
-import { matchesHistoricalAnalysisIdentity } from '../context/historical-analysis-identity.js';
-import { computeLegacyAnalysisAffectingGraphHash } from '../context/graph-hash-legacy.js';
-import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
-import { ANALYSIS_PROJECTION_VERSION } from '../context/graph-identity.js';
 import { selectCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
 import { composeAnalysisStateV1 } from '../compose/analysis-state-v1.js';
 import { leaderLicenceFromState, type LeaderLicence } from '../compose/leader-licence.js';
@@ -62,8 +60,8 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
     if (projection !== undefined && projection !== ANALYSIS_PROJECTION_VERSION) {
       refusal = 'unconfirmed_identity'; continue;
     }
-    if (checked.identity.graph_hash_at_run !== runHash.value
-      && (projection !== undefined || checked.identity.graph_hash_at_run !== computeLegacyAnalysisAffectingGraphHash(version.graph as typeof parsed.data))) continue;
+    if (!matchesHistoricalRunAnalysisIdentity(version.graph as typeof parsed.data,
+      checked.identity.graph_hash_at_run, projection)) continue;
     const runId = result?.run_id;
     const snapshot = RunInputSnapshotSchema.safeParse(result?.input_snapshot);
     if (checked.identity.scenario_id !== version.scenario_id || typeof runId !== 'string'
