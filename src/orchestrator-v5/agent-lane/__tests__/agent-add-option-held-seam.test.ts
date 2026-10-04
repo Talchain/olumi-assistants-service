@@ -377,16 +377,18 @@ describe('(A0) the Agent adds an option through the typed add-option seam — li
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);
   }, 120_000);
 
-  it('[i] a typed "yes" — the Agent authorises the held proposal by its id and it applies', async () => {
+  it('[i] a typed approval card — the exact held proposal applies and the next turn sees current readiness', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const t1 = await proposeOptionC(54);
     const ref = t1._agent.tool_calls.find((c) => c.name === 'propose_new_option')?.proposal_id;
     expect(ref).toMatch(/^gmh_[0-9a-f]{12}$/);
     let seenByModel = '';
-    script = [() => fnCall('authorise_change', { proposal_id: ref }), (body) => { seenByModel = JSON.stringify(asSent(body)['input']); return say('Added.'); }];
-    const t2 = await turn({ message: 'Yes, add it.' });
+    const approve = approveChipOf(t1)!;
+    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    script = [(body) => { seenByModel = JSON.stringify(asSent(body)['input']); return say('Added.'); }];
+    await turn({ message: 'Can the analysis run now?' });
     // (B) the Agent is told what the model needs NOW, from the stored graph after the write — in plain words.
-    expect(seenByModel, seenByModel.slice(-1500)).toMatch(/readiness_after/);
+    expect(seenByModel, seenByModel.slice(-1500)).toMatch(/readiness/);
     expect(seenByModel).toMatch(/\\"may_run\\":true/);
     expect(t2._agent.tool_calls.find((c) => c.name === 'authorise_change'), JSON.stringify(t2._agent.tool_calls)).toEqual(expect.objectContaining({ ok: true, mutated: true }));
     expect(graphNow().edges.some((e) => e.from === 'dec_x' && e.to === newOption()!.id)).toBe(true);

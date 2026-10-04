@@ -233,6 +233,24 @@ describe('SLICE C2 — the Agent reaches the product\'s own writers: a new risk 
 
   // ── add-risk ─────────────────────────────────────────────────────────────
 
+  it('risk consent: a model-only authorise_change after "Do not add anything" refuses the live hold; its typed card still works', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
+    const t1 = await proposeRisk();
+    const approve = approveChipOf(t1)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    script = [() => fnCall('authorise_change', { proposal_id: ref }), () => say('Nothing changed.')];
+    const refused = await turn({ message: 'Do not add anything.' });
+    expect(refused._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false,
+      mutated: false, refusal: 'approval_required', proposal_id: ref }));
+    expect(bytes()).toBe(before);
+    expect(newRisk()).toBeUndefined();
+    expect((await heldOnLatestRow()).map((p) => p.chip_id)).toEqual([ref]);
+    const applied = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(applied._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: ref })]);
+    expect(newRisk()).toBeDefined();
+  }, 120_000);
+
   it('(1) RED: propose → exactly ONE live held hold keyed node:<risk id>; add_node {id,kind,label} first, then one hypothesis link each (cee_hypothesis + defaulted, never user_specified, never into a factor); stored graph unchanged; one approve chip', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();
