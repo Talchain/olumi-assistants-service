@@ -13,9 +13,10 @@
  * goal MRR carries the price x subscribers product and whose churn limit has a ratified constraint id.
  */
 import { randomUUID } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 import { CURRENT_MODEL_STATE_PREFIX, runAgentTurn } from '../runtime/agent-loop.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -36,6 +37,10 @@ import { issueContextPacket } from '../runtime/request-assembly.js';
 import { modelFacingToolResult } from '../licensed-run-view.js';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { reconcileScenarioAnalysisFacts, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT } from '../../context/reconcile-scenario-analysis-facts.js';
+import { ModelManagementService } from '../../model-management/service.js';
+import { SupabaseModelVersionStore } from '../../model-management/store-adapter.js';
+import { SELECTED_RUN_DELTA_DEADLINE_MS, SELECTED_RUN_DELTA_MAX_PAGE_READS,
+  SELECTED_RUN_DELTA_MAX_VERSION_READS } from '../selected-run-delta-for-model.js';
 
 type Json = Record<string, any>;
 const SERVED = JSON.parse(readFileSync(new URL('./fixtures/served-w3-520aab46-cold-read-f074916.json', import.meta.url), 'utf8')) as Json;
@@ -57,9 +62,11 @@ let selectedVersions = [FROM, TO];
 let unreadVersions = new Set<string>();
 let versionPageFailure = false;
 const versionListCalls: (number | undefined)[] = [];
+let evidenceService: ModelManagementService | undefined;
+let pendingFactRead: Promise<never> | undefined;
 vi.mock('../../model-management/index.js', async original => ({
   ...await original<Record<string, unknown>>(),
-  getModelManagementService: () => ({
+  getModelManagementService: () => evidenceService ?? ({
     listVersions: async (_scenario: string, limit = 50, beforeSequence?: number) => {
       versionListCalls.push(beforeSequence);
       if (versionPageFailure && beforeSequence !== undefined) return { status: 'disabled' };
@@ -73,12 +80,15 @@ vi.mock('../../model-management/index.js', async original => ({
 }));
 vi.mock('../../build-turn-context.js', async original => ({
   ...await original<Record<string, unknown>>(),
-  loadScenarioAnalysisFactsForRead: async () => ({ factSet: reconcileScenarioAnalysisFacts({ scenarioId: SCENARIO,
+  loadScenarioAnalysisFactsForRead: async () => {
+    if (pendingFactRead !== undefined) await pendingFactRead;
+    return { factSet: reconcileScenarioAnalysisFacts({ scenarioId: SCENARIO,
     hotWindowFacts: [], durableRead: { status: 'ok', scenario_id: SCENARIO,
       query_limit: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT, total_count: selectedFacts.length,
       facts: selectedFacts.slice(0, SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT).map((fact, i) => ({ fact,
         fact_row_id: `selected-row-${i}`, fact_created_at: new Date(Date.UTC(2026, 9, 2, 12, 0, 59 - i)).toISOString() })) },
-  }), hotWindow: { status: 'ok', facts: selectedFacts } }),
+    }), hotWindow: { status: 'ok', facts: selectedFacts } };
+  },
 }));
 const fresh = (): Json => JSON.parse(JSON.stringify(SERVED)) as Json;
 /** The Run turn's own `analysis_ready`: the same admission the read carries (the turn and the read agree). */
@@ -144,7 +154,9 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
   beforeEach(() => { read = fresh(); selectedFacts = selectedRunContextPair(read.graph_hash, read.analysis_state.run_state.computed_at);
-    unreadVersions = new Set(); versionPageFailure = false; versionListCalls.length = 0; rows.length = 0; modelBodies = []; });
+    unreadVersions = new Set(); versionPageFailure = false; evidenceService = undefined; pendingFactRead = undefined;
+    versionListCalls.length = 0; rows.length = 0; modelBodies = []; });
+  afterEach(() => { vi.useRealTimers(); });
 
   type First = { suggested_actions: { id: string }[]; _agent: { session_id: string } };
   const run = async (): Promise<First> => {
@@ -216,6 +228,47 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
   };
 
   const modelInput = (consumer: 'ordinary' | 'cold') => consumer === 'ordinary' ? ordinaryLoopState() : coldState();
+  // Real service + adapter, with only the database transport stubbed: strict payloads and signals reach the store.
+  const evidenceStore = (options: { pageSize?: number; pageSizes?: number[]; missingPage?: number; missingPayload?: null;
+    stall?: 'initial page' | 'later page' | 'version'; pageDelay?: number } = {}) => {
+    let pageReads = 0;
+    const versionReads: string[] = [];
+    const signals: AbortSignal[] = [];
+    let rejectPending!: (error: Error) => void;
+    const pending = new Promise<never>((_resolve, reject) => { rejectPending = reject; });
+    // A reader without cancellation may reject after abandonment; always keep that rejection handled.
+    void pending.catch(() => undefined);
+    const client = { from: () => {
+      let cursor: number | undefined;
+      let versionId: string | undefined;
+      const chain = {
+        select: () => chain,
+        eq: (key: string, value: string) => { if (key === 'id') versionId = value; return chain; },
+        order: () => chain,
+        lt: (_key: string, value: number) => { cursor = value; return chain; },
+        abortSignal: (signal: AbortSignal) => { signals.push(signal); return chain; },
+        limit: async (limit: number) => {
+          pageReads++;
+          versionListCalls.push(cursor);
+          if ((options.stall === 'initial page' && pageReads === 1)
+            || (options.stall === 'later page' && pageReads === 2)) await pending;
+          if (options.pageDelay !== undefined) await new Promise(resolve => setTimeout(resolve, options.pageDelay));
+          if (pageReads === options.missingPage) return { data: options.missingPayload, error: null };
+          return { data: selectedVersions.filter(v => cursor === undefined || v.version_number < cursor)
+            .sort((a, b) => b.version_number - a.version_number)
+            .slice(0, Math.min(limit, options.pageSizes?.[pageReads - 1] ?? options.pageSize ?? limit)), error: null };
+        },
+        maybeSingle: async () => {
+          versionReads.push(versionId!);
+          if (options.stall === 'version') await pending;
+          return { data: selectedVersions.find(v => v.id === versionId) ?? null, error: null };
+        },
+      };
+      return chain;
+    } } as unknown as SupabaseClient;
+    evidenceService = new ModelManagementService({ store: new SupabaseModelVersionStore(client), isEnabled: () => true });
+    return { versionReads, signals, rejectPending };
+  };
   const endpointConsumers = (['prior', 'current'] as const).flatMap(endpoint =>
     (['ordinary', 'cold'] as const).map(consumer => ({ endpoint, consumer })));
   const canonicalPairWithEdgeAuthorship = (endpoint: 'prior' | 'current') => canonicalPair((_facts, graphs) => {
@@ -265,7 +318,7 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
     expect(JSON.stringify(read.current_read)).toBe(wire);
   });
 
-  it.each(endpointConsumers)('complete version history: hidden restrictive $endpoint evidence reaches $consumer', async ({ endpoint, consumer }) => {
+  it.each(endpointConsumers)('oversized version history: hidden restrictive $endpoint evidence cannot license $consumer', async ({ endpoint, consumer }) => {
     const index = endpoint === 'prior' ? 0 : 1;
     await canonicalPairWithEdgeAuthorship(endpoint);
     const graph = selectedVersions[index]!.graph;
@@ -276,21 +329,159 @@ describe('P0 context — Explain carries the Run guard fields; one leader-permis
       ...Array.from({ length: 50 }, (_, i) => ({ ...selectedVersions[i % 2]!, id: `permissive-${i}`, version_number: i + 2 }))];
     const wire = JSON.stringify(read.current_read);
     expect((await modelInput(consumer)).analysis).not.toHaveProperty('run_delta');
-    expect(versionListCalls).toContain(2);
+    expect(versionListCalls).toHaveLength(SELECTED_RUN_DELTA_MAX_PAGE_READS);
     expect(JSON.stringify(read.current_read)).toBe(wire);
   });
 
   it.each((['ordinary', 'cold'] as const).flatMap(consumer => [false, true].map(failed => ({ consumer, failed }))))(
-    'complete version history: exactly 50 / $consumer / next-page failure=$failed', async ({ consumer, failed }) => {
+    'oversized version history: exactly 50 / $consumer / next-page failure=$failed omits', async ({ consumer, failed }) => {
       await canonicalPair();
       selectedVersions = Array.from({ length: 50 }, (_, i) => ({ ...selectedVersions[i % 2]!, id: `version-${i}`, version_number: i + 1 }));
       versionPageFailure = failed;
-      const delta = read.current_read.run_delta;
       const state = await modelInput(consumer);
-      expect(versionListCalls).toContain(1);
-      if (failed) expect(state.analysis).not.toHaveProperty('run_delta');
-      else expect(state.analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
+      expect(versionListCalls).toHaveLength(failed ? 2 : SELECTED_RUN_DELTA_MAX_PAGE_READS);
+      expect(state.analysis).not.toHaveProperty('run_delta');
     });
+
+  it.each(endpointConsumers.flatMap(row => (['first', 'later'] as const).map(page => ({ ...row, page }))))(
+    'short $page page: hidden restrictive $endpoint evidence omits from $consumer', async ({ endpoint, consumer, page }) => {
+      await canonicalPairWithEdgeAuthorship(endpoint);
+      const base = selectedVersions[endpoint === 'prior' ? 0 : 1]!;
+      const restrictive = JSON.parse(JSON.stringify(base.graph)) as Json;
+      restrictive.edges.forEach((edge: Json) => { edge.defaulted = true; });
+      expect(deriveDecisionContextGraphHash(restrictive)).toBe(deriveDecisionContextGraphHash(base.graph));
+      expect(buildCanonicalAnalysisReadyFromGraph(restrictive)?.analysis_admission?.permitted_analysis_mode).toBe('quantified_provisional');
+      const permissiveCount = page === 'first' ? 2 : 6;
+      selectedVersions = [versionRecord(GraphStateIngressSchema.parse(restrictive), {
+        id: 'short-page-restriction', scenario_id: SCENARIO, version_number: 1,
+      }), ...Array.from({ length: permissiveCount }, (_, i) => ({ ...selectedVersions[i % 2]!, id: `short-permissive-${i}`, version_number: i + 2 }))];
+      const transport = evidenceStore({ pageSizes: page === 'first' ? [2] : [4, 2] });
+      const wire = JSON.stringify(read.current_read);
+      expect((await modelInput(consumer)).analysis).not.toHaveProperty('run_delta');
+      expect(versionListCalls).toEqual(page === 'first' ? [undefined, 2] : [undefined, 4, 2]);
+      expect(transport.versionReads).toContain('short-page-restriction');
+      expect(JSON.stringify(read.current_read)).toBe(wire);
+    });
+
+  it.each(['ordinary', 'cold'] as const)('short first and later pages require a positively empty page for $0', async consumer => {
+    await canonicalPair();
+    selectedVersions.push({ ...selectedVersions[0]!, id: 'extra-permissive', version_number: 3 });
+    evidenceStore({ pageSize: 2 });
+    const delta = read.current_read.run_delta;
+    expect((await modelInput(consumer)).analysis.run_delta).toEqual(projectModelFacingRunDelta(delta));
+    expect(versionListCalls).toEqual([undefined, 2, 1]);
+  });
+
+  it.each(endpointConsumers.flatMap(row => [null, undefined].map(payload => ({ ...row, payload }))))(
+    'missing page payload $payload after permissive $endpoint matches omits from $consumer', async ({ endpoint, consumer, payload }) => {
+      await canonicalPairWithEdgeAuthorship(endpoint);
+      // Positive control: these exact graphs and executions do license the comparison when exhaustion is confirmed.
+      expect((await modelInput(consumer)).analysis.run_delta).toEqual(projectModelFacingRunDelta(read.current_read.run_delta));
+      versionListCalls.length = 0;
+      const transport = evidenceStore({ missingPage: 2, missingPayload: payload });
+      const wire = JSON.stringify(read.current_read);
+      expect((await modelInput(consumer)).analysis).not.toHaveProperty('run_delta');
+      expect(versionListCalls).toEqual([undefined, 1]);
+      expect(transport.versionReads).toHaveLength(2);
+      expect(JSON.stringify(read.current_read)).toBe(wire);
+    });
+
+  it.each((['ordinary', 'cold'] as const).flatMap(consumer =>
+    (['facts', 'initial page', 'later page', 'version'] as const).map(stall => ({ consumer, stall }))))(
+    'total deadline: stalled $stall omits from $consumer within the budget', async ({ consumer, stall }) => {
+      await canonicalPair();
+      const transport = evidenceStore(stall === 'facts' ? {} : { stall });
+      if (stall === 'facts') pendingFactRead = new Promise<never>((_resolve, reject) => { transport.rejectPending = reject; });
+      const wire = JSON.stringify(read.current_read);
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      const started = Date.now();
+      let settled = false;
+      const result = modelInput(consumer).then(state => { settled = true; return state; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      if (stall === 'facts') expect(versionListCalls).toHaveLength(0);
+      else if (stall === 'initial page') expect(versionListCalls).toHaveLength(1);
+      else if (stall === 'later page') { expect(versionListCalls).toHaveLength(2); expect(transport.versionReads).toHaveLength(2); }
+      else expect(transport.versionReads).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(SELECTED_RUN_DELTA_DEADLINE_MS - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled, 'the user turn must resolve despite an uncancellable read').toBe(true);
+      expect((await result).analysis).not.toHaveProperty('run_delta');
+      expect(Date.now() - started).toBeLessThanOrEqual(SELECTED_RUN_DELTA_DEADLINE_MS);
+      expect(transport.signals).toHaveLength(versionListCalls.length + transport.versionReads.length);
+      expect(transport.signals.every(signal => signal.aborted)).toBe(true);
+      const readsAtDeadline = [versionListCalls.length, transport.versionReads.length];
+      transport.rejectPending(new Error('Late abandoned read rejection.'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect([versionListCalls.length, transport.versionReads.length]).toEqual(readsAtDeadline);
+      expect(JSON.stringify(read.current_read)).toBe(wire);
+    });
+
+  it.each(['ordinary', 'cold'] as const)('total deadline spans multiple successful reads for $0', async consumer => {
+    await canonicalPair();
+    evidenceStore({ pageSize: 1, pageDelay: 600 });
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    let settled = false;
+    const result = modelInput(consumer).then(state => { settled = true; return state; });
+    await vi.advanceTimersByTimeAsync(SELECTED_RUN_DELTA_DEADLINE_MS);
+    expect(versionListCalls).toEqual([undefined, 2, 1]);
+    expect(settled).toBe(true);
+    expect((await result).analysis).not.toHaveProperty('run_delta');
+    await vi.advanceTimersByTimeAsync(600);
+    expect(versionListCalls).toHaveLength(3);
+  });
+
+  it.each(['ordinary', 'cold'] as const)('version work limit: 2,000 valid versions omit promptly from $0', async consumer => {
+    await canonicalPair();
+    selectedVersions = Array.from({ length: 2000 }, (_, i) => ({ ...selectedVersions[i % 2]!, id: `large-history-${i}`, version_number: i + 1 }));
+    const transport = evidenceStore();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const started = Date.now();
+    let settled = false;
+    const result = modelInput(consumer).then(state => { settled = true; return state; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled, 'work exhaustion must resolve without waiting for the deadline').toBe(true);
+    expect((await result).analysis).not.toHaveProperty('run_delta');
+    expect(Date.now() - started).toBeLessThanOrEqual(SELECTED_RUN_DELTA_DEADLINE_MS);
+    expect(versionListCalls).toHaveLength(SELECTED_RUN_DELTA_MAX_PAGE_READS);
+    expect(transport.versionReads).toHaveLength(SELECTED_RUN_DELTA_MAX_VERSION_READS);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each((['ordinary', 'cold'] as const).flatMap(consumer => [12, 13].map(count => ({ consumer, count }))))(
+    'version work boundary: $count valid versions / $consumer', async ({ consumer, count }) => {
+      await canonicalPair();
+      selectedVersions = Array.from({ length: count }, (_, i) => ({ ...selectedVersions[i % 2]!, id: `boundary-${i}`, version_number: i + 1 }));
+      const transport = evidenceStore();
+      const state = await modelInput(consumer);
+      if (count === 12) expect(state.analysis.run_delta).toEqual(projectModelFacingRunDelta(read.current_read.run_delta));
+      else expect(state.analysis).not.toHaveProperty('run_delta');
+      expect(transport.versionReads).toHaveLength(12);
+    });
+
+  it.each(['ordinary', 'cold'] as const)('page work boundary: three nonempty pages and one empty page license $0', async consumer => {
+    await canonicalPair();
+    selectedVersions.push({ ...selectedVersions[0]!, id: 'page-boundary-extra', version_number: 3 });
+    evidenceStore({ pageSize: 1 });
+    expect((await modelInput(consumer)).analysis.run_delta).toEqual(projectModelFacingRunDelta(read.current_read.run_delta));
+    expect(versionListCalls).toHaveLength(4);
+  });
+
+  it.each(['ordinary', 'cold'] as const)('page work limit: no empty page within four reads omits promptly from $0', async consumer => {
+    await canonicalPair();
+    selectedVersions = Array.from({ length: 4 }, (_, i) => ({ ...selectedVersions[i % 2]!, id: `page-budget-${i}`, version_number: i + 1 }));
+    const transport = evidenceStore({ pageSize: 1 });
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    let settled = false;
+    const result = modelInput(consumer).then(state => { settled = true; return state; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(true);
+    expect((await result).analysis).not.toHaveProperty('run_delta');
+    expect(versionListCalls).toHaveLength(SELECTED_RUN_DELTA_MAX_PAGE_READS);
+    expect(transport.versionReads).toHaveLength(4);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   it.each(endpointConsumers.flatMap(row => (['unread', 'unconfirmed', 'incompatible'] as const).flatMap(evidence =>
     (['newer', 'older'] as const).map(order => ({ ...row, evidence, order }))))) (

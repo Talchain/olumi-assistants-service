@@ -7,9 +7,15 @@ import type { ContextPackRunDelta } from '../context/context-pack-schema.js';
 import { leaderLicenceFromState } from '../compose/leader-licence.js';
 import { getModelManagementService } from '../model-management/index.js';
 import { bindVersionResults, boundRunLeaderLicence } from '../model-management/version-result-binding.js';
-import { MODEL_VERSION_LIST_DEFAULT_LIMIT } from '../model-management/store-adapter.js';
 import { isScenarioAnalysisReasoningAuthority } from '../context/reconcile-scenario-analysis-facts.js';
 import type { SavedRunContextFactsRead } from './saved-run-context-facts.js';
+
+// Optional evidence on the ordinary reply path must stay small and yield to the user's turn.
+export const SELECTED_RUN_DELTA_DEADLINE_MS = 1500;
+export const SELECTED_RUN_DELTA_MAX_PAGE_READS = 4;
+export const SELECTED_RUN_DELTA_MAX_VERSION_READS = 12;
+// Three full pages can use the version budget; the fourth can positively confirm exhaustion.
+export const SELECTED_RUN_DELTA_PAGE_SIZE = 4;
 
 /** Read evidence for the existing selected pair; no calculation or mutation of the UI delta. */
 export async function selectedRunDeltaForModel(
@@ -19,8 +25,38 @@ export async function selectedRunDeltaForModel(
 ): Promise<ContextPackRunDelta | undefined> {
   if (delta === undefined || leaderLicenceFromState(read.analysis_state,
     { analysis_admission: read.analysis_admission }) === 'withheld') return undefined;
+  const controller = new AbortController();
+  const deadlineAt = Date.now() + SELECTED_RUN_DELTA_DEADLINE_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<undefined>(resolve => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(undefined);
+    }, SELECTED_RUN_DELTA_DEADLINE_MS);
+  });
+  try {
+    // The race handles late rejection even when a reader cannot cancel (including the fact loader).
+    return await Promise.race([
+      readSelectedRunDeltaEvidence(scenarioId, read, delta, controller.signal, deadlineAt).catch(() => undefined),
+      deadline,
+    ]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+async function readSelectedRunDeltaEvidence(
+  scenarioId: string,
+  read: SavedRunContextFactsRead & { readonly analysis_admission?: unknown },
+  delta: RunDelta,
+  signal: AbortSignal,
+  deadlineAt: number,
+): Promise<ContextPackRunDelta | undefined> {
+  const expired = () => signal.aborted || Date.now() >= deadlineAt;
   try {
     const { factSet } = await loadScenarioAnalysisFactsForRead(scenarioId, 'selected_run_delta_context');
+    if (expired()) return undefined;
     // The existing capped-page authority proves its newest pair, not the whole history.
     if (!isScenarioAnalysisReasoningAuthority(factSet)) return undefined;
     const pair = selectTwoNewestRunAnalysisFacts(factSet.facts);
@@ -50,9 +86,17 @@ export async function selectedRunDeltaForModel(
     const found = new Set<string>();
     const seenVersions = new Set<string>();
     let beforeSequence: number | undefined;
+    let pageReads = 0;
+    let versionReads = 0;
     while (true) {
-      const versions = await service.listVersions(scenarioId, MODEL_VERSION_LIST_DEFAULT_LIMIT, beforeSequence);
-      if (versions.status !== 'ok' || versions.value.length > MODEL_VERSION_LIST_DEFAULT_LIMIT) return undefined;
+      if (expired() || pageReads >= SELECTED_RUN_DELTA_MAX_PAGE_READS) return undefined;
+      pageReads++;
+      const versions = await service.listVersions(scenarioId, SELECTED_RUN_DELTA_PAGE_SIZE, beforeSequence,
+        { requirePayload: true, signal });
+      if (expired() || versions.status !== 'ok' || !Array.isArray(versions.value)
+        || versions.value.length > SELECTED_RUN_DELTA_PAGE_SIZE) return undefined;
+      // Only a positively empty payload confirms exhaustion; PostgREST may shorten nonempty pages.
+      if (versions.value.length === 0) break;
       let previousSequence = beforeSequence ?? Infinity;
       for (const summary of versions.value) {
         // Refuse ambiguous/non-progressing pages rather than mistaking them for complete history.
@@ -61,9 +105,11 @@ export async function selectedRunDeltaForModel(
           || summary.version_number < 1 || summary.version_number >= previousSequence) return undefined;
         previousSequence = summary.version_number;
         seenVersions.add(summary.id);
-        const version = await service.getVersion(scenarioId, summary.id);
+        if (expired() || versionReads >= SELECTED_RUN_DELTA_MAX_VERSION_READS) return undefined;
+        versionReads++;
+        const version = await service.getVersion(scenarioId, summary.id, { signal });
         // Unread candidates cannot be excluded by an analysis hash: that hash omits admission evidence.
-        if (version.status !== 'ok') return undefined;
+        if (expired() || version.status !== 'ok') return undefined;
         for (const key of ['id', 'scenario_id', 'version_number', 'graph_identity_hash', 'analysis_affecting_hash',
           'hash_algorithm', 'identity_projection_version', 'identity_normaliser_version', 'graph_schema_version'] as const) {
           if (version.value[key] !== summary[key]) return undefined;
@@ -83,10 +129,9 @@ export async function selectedRunDeltaForModel(
           found.add(run.identity.run_id);
         }
       }
-      if (versions.value.length < MODEL_VERSION_LIST_DEFAULT_LIMIT) break;
       beforeSequence = previousSequence;
     }
-    if (!found.has(prior.identity.run_id) || !found.has(current.identity.run_id)) return undefined;
+    if (expired() || !found.has(prior.identity.run_id) || !found.has(current.identity.run_id)) return undefined;
     return projectModelFacingRunDelta(delta);
   } catch {
     return undefined;

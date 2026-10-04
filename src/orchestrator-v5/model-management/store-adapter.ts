@@ -130,6 +130,15 @@ export interface AtomicRestoreVersionWrite {
   readonly label?: string;
 }
 
+export interface ModelVersionReadOptions {
+  readonly signal?: AbortSignal;
+}
+
+export interface ModelVersionListReadOptions extends ModelVersionReadOptions {
+  /** Evidence readers must distinguish an absent payload from confirmed exhaustion. */
+  readonly requirePayload?: boolean;
+}
+
 /** Store port — the service depends on this interface, not the class, so
  *  tests inject hand-rolled fakes without a Supabase client. */
 export interface ModelVersionStorePort {
@@ -138,8 +147,9 @@ export interface ModelVersionStorePort {
     scenarioId: string,
     limit?: number,
     beforeSequence?: number,
+    options?: ModelVersionListReadOptions,
   ): Promise<readonly ModelVersionSummary[]>;
-  getVersion(scenarioId: string, versionId: string): Promise<ModelVersionRecord | null>;
+  getVersion(scenarioId: string, versionId: string, options?: ModelVersionReadOptions): Promise<ModelVersionRecord | null>;
   /** Exact committed-turn lookup; never substitutes the current/newest version. */
   getVersionForCommittedTurn?(
     scenarioId: string, sourceTurnId: string, mutationId: string,
@@ -258,6 +268,7 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
     scenarioId: string,
     limit: number = MODEL_VERSION_LIST_DEFAULT_LIMIT,
     beforeSequence?: number,
+    options?: ModelVersionListReadOptions,
   ): Promise<readonly ModelVersionSummary[]> {
     // Newest-first by the monotonic per-scenario ordering identity —
     // version_number, NOT created_at (fixture/same-ms timestamps must never
@@ -271,6 +282,7 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
     if (beforeSequence !== undefined) {
       query = query.lt('version_number', beforeSequence);
     }
+    if (options?.signal !== undefined) query = query.abortSignal(options.signal);
     const { data, error } = await query.limit(limit);
     if (error) {
       throw new ModelVersionStoreError(
@@ -278,21 +290,25 @@ export class SupabaseModelVersionStore implements ModelVersionStorePort {
         { cause: error },
       );
     }
+    if (options?.requirePayload && !Array.isArray(data)) {
+      throw new ModelVersionStoreError(`listVersions(${scenarioId}) returned no array payload`);
+    }
     return ((data ?? []) as Record<string, unknown>[]).map((row) =>
       parseSummaryRow(scenarioId, row),
     );
   }
 
-  async getVersion(scenarioId: string, versionId: string): Promise<ModelVersionRecord | null> {
+  async getVersion(scenarioId: string, versionId: string, options?: ModelVersionReadOptions): Promise<ModelVersionRecord | null> {
     // scenario_id filter alongside id: a version id from another scenario
     // must read as absent, never leak (defence-in-depth on top of RLS —
     // the service-role client bypasses RLS by design).
-    const { data, error } = await this.client
+    let query = this.client
       .from('model_versions')
       .select(MODEL_VERSION_RECORD_COLUMNS)
       .eq('scenario_id', scenarioId)
-      .eq('id', versionId)
-      .maybeSingle();
+      .eq('id', versionId);
+    if (options?.signal !== undefined) query = query.abortSignal(options.signal);
+    const { data, error } = await query.maybeSingle();
     if (error) {
       throw new ModelVersionStoreError(
         `getVersion(${scenarioId}, ${versionId}) failed: ${errMsg(error)}`,
