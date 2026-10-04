@@ -1,3 +1,7 @@
+import { RUN_ANALYSIS_PROJECTION_KEY, stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
+import { deriveAnalysisFreshness } from '../../context/freshness.js';
+import { loadScenarioAnalysisFactsForRead } from '../../build-turn-context.js';
+import { legacyEditFactsForFreshness } from '../../context/reconcile-scenario-analysis-facts.js';
 /**
  * SupabaseSessionStore unit tests (slice B).
  *
@@ -12,11 +16,12 @@ import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { SessionLRUCache } from '../cache.js';
-import { SupabaseSessionStore } from '../supabase-store.js';
+import { LEGACY_ANALYSIS_EDIT_READ_TIMEOUT_MS, SupabaseSessionStore } from '../supabase-store.js';
 import {
   SessionReadError,
   StateCommitFailedError,
   type SessionTurnWrite,
+  type SessionStore,
 } from '../store.js';
 import { EMPTY_COACHING_STATE } from '../../coaching/coaching-state.js';
 import { toPreDispatchSnapshot } from '../../coaching/coaching-state-snapshot.js';
@@ -54,6 +59,8 @@ function validRow(turnId: string, createdAt = '2026-04-17T10:00:00.000+00:00', u
 }
 
 interface MockConfig {
+  editSelectResult?: MockConfig['selectResult'];
+  editSelectPromise?: Promise<MockConfig['selectResult']>;
   rpcResult?: { data?: unknown; error?: { message: string; code?: string } | null };
   selectResult?: {
     data?: unknown;
@@ -92,6 +99,9 @@ function makeClient(cfg: MockConfig = {}): {
           filters[`eq:${col}`] = val;
           return chain;
         },
+        gt: (col: string, val: unknown) => {
+          filters[`gt:${col}`] = val; return chain;
+        },
         in: (col: string, vals: unknown[]) => {
           filters[`in:${col}`] = vals;
           return chain;
@@ -107,7 +117,9 @@ function makeClient(cfg: MockConfig = {}): {
         limit: (n: number) => {
           filters.limit = n;
           // Terminal — return the promise result
-          return Promise.resolve(cfg.selectResult ?? { data: [], error: null });
+          return filters['eq:handler_id'] === 'edit_graph' && cfg.editSelectPromise !== undefined
+            ? cfg.editSelectPromise
+            : Promise.resolve((filters['eq:handler_id'] === 'edit_graph' ? cfg.editSelectResult : undefined) ?? cfg.selectResult ?? { data: [], error: null });
         },
         maybeSingle: () =>
           Promise.resolve(cfg.selectResult ?? { data: null, error: null }),
@@ -1244,7 +1256,7 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
         leading_option_id: 'option-a',
         summary: 'Analysis completed.',
         computed_at: '2026-08-27T09:59:00.000Z',
-        enrichment: { analysis_status: 'computed' },
+        enrichment: stampRunAnalysisProjection({ analysis_status: 'computed' }),
       },
     },
   };
@@ -1297,6 +1309,82 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
 
     await store.readScenarioRunAnalysisFactsFor(SCENARIO, 21);
     expect(selectCalls).toHaveLength(2);
+  });
+
+  it.each(['complete', 'capped', 'failed', 'missing count', 'wrong identity'] as const)('durable legacy clearance read is %s and never erases Run identity', async state => {
+    const row = structuredClone(runAnalysisRow);
+    delete row.payload.result.enrichment[RUN_ANALYSIS_PROJECTION_KEY];
+    const editRow = {
+      ...row, id: '22222222-2222-4222-8222-222222222222', created_at: '2026-08-28T10:00:00.000Z',
+      handler_id: 'edit_graph', action_type: 'edit_graph',
+      payload: { fact_type: 'edit_graph', fact_version: 1, result: {
+        edit_kind: 'option_configuration', status: 'applied', operations_count: 1, affected_entities: [],
+        graph_hash_before: 'same', graph_hash_after: 'same', safe_summary: 'Cleared option-a gaps',
+        impact: 'moderate', rerun_recommended: true,
+      } },
+    };
+    const { client, selectCalls } = makeClient({
+      selectResult: { data: [row], error: null, count: 1 },
+      editSelectResult: {
+        data: state === 'complete' ? [editRow] : state === 'wrong identity' ? [{ ...editRow, scenario_id: 'other-scenario' }] : [],
+        error: state === 'failed' ? { message: 'unavailable' } : null,
+        count: state === 'capped' ? 22 : state === 'missing count' ? undefined : state === 'failed' ? 0 : 1,
+      },
+    });
+    const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    const page = await store.readScenarioRunAnalysisFactsFor(SCENARIO, 21);
+    expect(page.facts[0]!.fact_row_id).toBe(row.id);
+    expect(page.legacy_edit_facts?.readOk).toBe(state === 'complete');
+    expect(selectCalls).toHaveLength(2);
+    expect(selectCalls[1]!.filters).toMatchObject({ 'eq:scenario_id': SCENARIO, 'eq:handler_id': 'edit_graph',
+      'eq:noop': false, 'eq:payload->result->>status': 'applied', 'eq:payload->result->>rerun_recommended': 'true',
+      'gt:created_at': row.payload.result.computed_at, limit: 21 });
+    const fact = { ...page.facts[0]!.fact, result: { ...page.facts[0]!.fact.result, graph_hash_at_run: 'same' } } as typeof page.facts[number]['fact'];
+    expect(deriveAnalysisFreshness([fact], 'same', undefined, { legacyEditFacts: page.legacy_edit_facts }).freshness).toBe('stale');
+    if (state === 'complete') expect(page.legacy_edit_facts!.facts[0]!.fact_row_id).toBe(editRow.id);
+  });
+
+  it.each([false, true])('shared loader bounds pending edit read (abort support=%s) and handles late rejection by exact Run', async abortable => {
+    vi.useFakeTimers();
+    try {
+      const row = structuredClone(runAnalysisRow);
+      delete row.payload.result.enrichment[RUN_ANALYSIS_PROJECTION_KEY];
+      Object.assign(row.payload.result, { run_id: 'deadline-bound-run', graph_hash_at_run: 'deadline-bound-hash' });
+      let rejectRead!: (error: Error) => void;
+      const pending = new Promise<MockConfig['selectResult']>((_resolve, reject) => { rejectRead = reject; });
+      let signal: AbortSignal | undefined;
+      if (abortable) Object.assign(pending, { abortSignal: (value: AbortSignal) => { signal = value; return pending; } });
+      const { client, selectCalls } = makeClient({ selectResult: { data: [row], error: null, count: 1 }, editSelectPromise: pending });
+      const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+      // The turn/reload/writer shared loader; the hot window is intentionally empty.
+      const read = loadScenarioAnalysisFactsForRead(SCENARIO, 'pending-edit-read', {
+        readRecent: async () => [], readScenarioRunAnalysisFactsFor: store.readScenarioRunAnalysisFactsFor.bind(store),
+      } as unknown as SessionStore);
+      let settled = false;
+      void read.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(LEGACY_ANALYSIS_EDIT_READ_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      expect(selectCalls[1]!.filters).toMatchObject({ 'eq:scenario_id': SCENARIO,
+        'gt:created_at': row.payload.result.computed_at });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      const loaded = await read;
+      expect(loaded.factSet.status).toBe('complete');
+      expect(loaded.factSet.facts).toHaveLength(1);
+      expect(loaded.factSet.facts[0]).toMatchObject({ result: { scenario_id: SCENARIO,
+        run_id: 'deadline-bound-run', computed_at: row.payload.result.computed_at,
+        graph_hash_at_run: 'deadline-bound-hash' } });
+      expect(loaded.factSet.legacy_edit_facts?.readOk).toBe(false);
+      expect(signal?.aborted).toBe(abortable ? true : undefined);
+      expect(deriveAnalysisFreshness(loaded.factSet.facts, 'deadline-bound-hash',
+        undefined, { legacyEditFacts: legacyEditFactsForFreshness(loaded.factSet) }).freshness).not.toBe('fresh');
+      rejectRead(new Error('late rejection after reply returned'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loaded.factSet.legacy_edit_facts?.readOk).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('returns authoritative zero only with an exact zero count and empty page', async () => {

@@ -138,6 +138,7 @@ export interface SessionAppendOutcome {
 export interface ScenarioRunAnalysisFactPage {
   readonly facts: readonly IdentifiedHandlerFact[];
   readonly total_count: number;
+  readonly legacy_edit_facts?: import('../types/handler-fact.js').LegacyAnalysisEditFacts;
 }
 
 export interface SessionTurnWrite {
@@ -565,7 +566,9 @@ export interface SessionStore {
    * existing freshness/analysis selectors.
    *
    * Unlike {@link readFactsFor}, this read is not constrained to the recent
-   * turn window. Production implementations must make one uncached query with
+   * turn window. Production also reads applied, rerun-recommended edit_graph facts
+   * after the selected unstamped Run, with an exact count; failed/incomplete
+   * edit reads carry readOk=false. Run queries are uncached with
    * an exact pre-limit count, stable `created_at DESC, id DESC` ordering and
    * the caller-supplied lookahead limit. They must validate row identity,
    * parent identity, timestamps, handler/action type, noop and strict payload

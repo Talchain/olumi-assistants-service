@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 /**
  * POST /orchestrate/v2/turn — V5 orchestrator endpoint.
  *
@@ -4234,6 +4235,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // `dispatchAddOptionTransaction`'s gate.
             {
               currentGraph: addOptionFrameGraph,
+              analysisInvalidatedAt: turnContext.analysis_invalidated_at,
+              priorFactsWithTurn: turnContext.prior_facts_with_turn,
+              legacyEditFacts: legacyEditFactsForFreshness(turnContext.scenario_analysis_fact_set),
               ...(turnContext.prior_facts_read_ok === undefined
                 ? {}
                 : { priorFactsReadOk: turnContext.prior_facts_read_ok }),
@@ -7916,6 +7920,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // from a THROWN read must not read as "never analysed".
             {
               currentGraph: textFrameGraph,
+              analysisInvalidatedAt: turnContext.analysis_invalidated_at,
+              priorFactsWithTurn: turnContext.prior_facts_with_turn,
+              legacyEditFacts: legacyEditFactsForFreshness(turnContext.scenario_analysis_fact_set),
               ...(turnContext.prior_facts_read_ok === undefined
                 ? {}
                 : { priorFactsReadOk: turnContext.prior_facts_read_ok }),

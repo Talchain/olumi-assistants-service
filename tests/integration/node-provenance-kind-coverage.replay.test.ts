@@ -700,6 +700,12 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       // is read in and WHO read it ({unit, source, source_quote}, closed), never HOW MUCH: the sibling of
       // `quantity_frame`. A node carrying only a unit reading carries no value; joining would let a unit read as a figure.
       "unit_reading",
+      // Admission-gap retention: neither field is value-bearing. Targets name
+      // effects that still need mapping; questions ask for missing information.
+      // Neither asserts a quantity, so neither joins carriesValue or
+      // NODE_QUANTITY_FIELDS, even if a question happens to contain a number.
+      "unresolved_targets",
+      "user_questions",
     ]);
   });
 });

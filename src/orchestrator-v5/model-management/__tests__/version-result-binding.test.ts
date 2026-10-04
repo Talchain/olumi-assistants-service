@@ -1,6 +1,8 @@
+import { CARRIERS, legacyGraph, legacyRun, SCENARIO } from '../../context/__tests__/legacy-gap-projection.fixture.js';
 import { sharedLicensedPair } from './shared-licensed-pair.fixture.js';
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { RUN_ANALYSIS_PROJECTION_KEY, stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { bindVersionResults } from '../version-result-binding.js';
 import { buildRunDelta } from '../../coaching/build-run-delta.js';
 import { versionRecord, FIX_SCENARIO } from './fixtures.js';
@@ -113,5 +115,70 @@ describe('both bound saved Run licences reach the final Compare input', () => {
     if (bound.kind !== 'paired') return;
     expect(bound.leaderLicences[which]).toBe('withheld');
     expect(bound.mayNameLeadingOption).toBe(false);
+  });
+});
+
+
+describe('Compare respects the saved Run projection stamp', () => {
+  it.each(['node', 'mirror', 'both'] as const)('selects exact Runs for %s gaps in either direction and same-version comparisons', placement => {
+    const clear = FROM;
+    const graph = clone(FROM.graph) as { nodes: Record<string, unknown>[]; options?: Record<string, unknown>[] };
+    const target = graph.nodes.find(n => n.id === 'opt-a')!;
+    const gaps = { unresolved_targets: ['billable seats'], user_questions: ['Which seats?'] };
+    if (placement !== 'node') graph.options = graph.nodes.filter(n => n.kind === 'option').map(n => ({ id: n.id, label: n.label, status: 'ready', interventions: clone(n.interventions) }));
+    if (placement !== 'mirror') Object.assign(target, gaps);
+    if (placement !== 'node') Object.assign(graph.options!.find(n => n.id === target.id)!, gaps);
+    const held = versionRecord(graph as never, { id: TO.id });
+    const cleanRun = savedRun(clear, 'exact-clean', '2026-10-03T02:00:00.000Z');
+    const heldRun = savedRun(held, 'exact-held', '2026-10-03T01:00:00.000Z');
+    for (const run of [cleanRun, heldRun]) result(run).enrichment = stampRunAnalysisProjection(result(run).enrichment as Record<string, unknown>);
+    for (const [from, to] of [[held, clear], [clear, held]]) {
+      const bound = binding(factSet([cleanRun, heldRun]), from, to);
+      expect(bound.kind).toBe('paired');
+      if (bound.kind === 'paired') {
+        expect(bound.selectedPair.prior.run_id).toBe(from === held ? 'exact-held' : 'exact-clean');
+        expect(bound.selectedPair.current.run_id).toBe(to === held ? 'exact-held' : 'exact-clean');
+      }
+    }
+    expect(binding(factSet([cleanRun, heldRun]), held, held)).toMatchObject({ kind: 'shared', recordedRun: { run_id: 'exact-held' } });
+    expect(binding(factSet([cleanRun]), held, held).kind).toBe('unavailable');
+  });
+  it('rejects an unknown stamp even on an identical version', () => {
+    const run = clone(PRIOR);
+    (result(run).enrichment as Record<string, unknown>)[RUN_ANALYSIS_PROJECTION_KEY] = 'unknown';
+    expect(binding(factSet([run]), FROM, FROM)).toStrictEqual({ kind: 'unavailable', reason: 'unconfirmed_identity' });
+  });
+});
+
+
+// Mutant: accept either historical hash without attested admission/version identity.
+describe('legacy digest never bridges admission states', () => {
+  for (const placement of CARRIERS) for (const transition of ['add', 'clear', 'replace'] as const) {
+    it(`${placement} ${transition}: forward, reverse and same-version ambiguity are unavailable`, () => {
+      const beforeGraph = legacyGraph(placement, transition === 'add' ? [] : ['unmapped effect']);
+      const afterGraph = legacyGraph(placement, transition === 'clear' ? [] : ['replacement effect']);
+      const from = versionRecord(beforeGraph);
+      const to = versionRecord(afterGraph, { id: TO.id });
+      const run = legacyRun(placement, false, transition === 'add');
+      expect(run.result.input_snapshot!.options.length).toBeGreaterThan(0);
+      for (const [a, b] of [[from, to], [to, from], [to, to]]) {
+        expect(bindVersionResults({ scenarioId: SCENARIO, from: a!, to: b!, factSet: factSet([run]) }).kind).toBe('unavailable');
+      }
+    });
+  }
+
+  it('a contradictory non-empty snapshot refuses a stamped same-version Run', () => {
+    const run = clone(PRIOR);
+    const snapshot = result(run).input_snapshot as { options: { option_id: string }[]; options_not_sent: { option_id: string; reason: string }[] };
+    const excluded = snapshot.options.pop()!;
+    snapshot.options_not_sent.push({ option_id: excluded.option_id, reason: 'not_analysable' });
+    result(run).enrichment = stampRunAnalysisProjection(result(run).enrichment as Record<string, unknown>);
+    expect(snapshot.options.length).toBeGreaterThan(0);
+    expect(binding(factSet([run]), FROM, FROM).kind).toBe('unavailable');
+  });
+
+  it('empty legacy option snapshots provide no admission attestation', () => {
+    const run = clone(PRIOR); (result(run).input_snapshot as { options: { option_id: string }[]; options_not_sent: { option_id: string; reason: string }[] }).options = [];
+    expect(binding(factSet([run]), FROM, FROM).kind).toBe('unavailable');
   });
 });

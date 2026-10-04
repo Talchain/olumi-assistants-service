@@ -68,3 +68,11 @@ export interface IdentifiedHandlerFact {
   /** Read-only projection from that occurrence's verified immutable versions. */
   readonly label_transition?: CanonicalNodeLabelTransition;
 }
+
+/** Durable applied/rerun edit evidence after the selected legacy Run. */
+export interface LegacyAnalysisEditFacts {
+  readonly since: string | null;
+  readonly facts: readonly IdentifiedHandlerFact[];
+  readonly readOk: boolean;
+  readonly total_count: number | null;
+}

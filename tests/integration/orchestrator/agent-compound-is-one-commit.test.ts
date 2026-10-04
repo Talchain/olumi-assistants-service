@@ -1,3 +1,4 @@
+import { createProposal } from '../../../src/orchestrator-v5/agent-lane/proposal.js';
 /**
  * ⛔ A COMPOUND APPROVAL IS ONE COMMIT (Canonical #70 5849037691: "the last two-commit path in the Agent lane").
  * A starting point — Olumi's starting values AND an option's level — was approved as ONE user operation, yet
@@ -14,6 +15,10 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { optionGapsHeld } from '../../../src/orchestrator-v5/agent-lane/unmodelled-mechanisms.js';
+import { approvalChipsFor } from '../../../src/orchestrator-v5/agent-lane/approval-chips.js';
+import { log } from '../../../src/utils/telemetry.js';
+import { deriveAnalysisFreshness } from '../../../src/orchestrator-v5/context/freshness.js';
 
 const SCENARIO_ID = '88888888-8888-4888-8888-888888888888';
 const RAISE = 'Raise to £59 at release';
@@ -38,6 +43,8 @@ function pricingGraph() {
 }
 
 let persisted: unknown = pricingGraph();
+let durableRuns: unknown[] = [];
+let analysisInvalidatedAt: string | null = null;
 let receiptFor: ((write: Record<string, unknown>) => Record<string, unknown>) | undefined;
 const rows = new Map<string, { id: string; write: Record<string, unknown> }>();
 
@@ -47,6 +54,10 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     loadGraphAndBriefText: async () => ({ graph: persisted, briefText: null }),
     readMostRecentPendingActions: async () => [],
     readFactsFor: async () => [],
+    readAnalysisInvalidatedAt: async () => analysisInvalidatedAt,
+    readScenarioRunAnalysisFactsFor: async () => ({ total_count: durableRuns.length,
+      facts: durableRuns.map((fact, index) => ({ fact, fact_row_id: `saved-run-${index}`,
+        fact_created_at: '2026-09-25T00:00:00.000Z' })) }),
     // The door verifies its OWN row and fact through these (as `route-v2-option-intervention-edit.test.ts` models them).
     readRecent: async () => [...rows.values()].reverse().map(r => ({
       id: r.id, scenario_id: r.write.scenario_id, turn_id: r.write.turn_id, turn_class: r.write.turn_class,
@@ -57,7 +68,7 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
     readFactsWithTurnFor: async (ids: readonly string[]) => [...rows.values()].flatMap(r => {
       if (!ids.includes(r.id)) return [];
       const facts = (r.write.handler_facts ?? []) as unknown[];
-      return facts.map(fact => ({ turn_id: r.id, fact_created_at: '2026-09-26T00:00:00.000Z', fact }));
+      return facts.map(fact => ({ turn_id: r.id, fact_created_at: '2026-10-04T01:00:00.000Z', fact }));
     }),
     append: async (write: Record<string, unknown>) => {
       const key = `${String(write.scenario_id)}/${String(write.turn_id)}`;
@@ -104,6 +115,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
   });
   beforeEach(() => {
     persisted = pricingGraph();
+    durableRuns = []; analysisInvalidatedAt = null;
     rows.clear();
     receiptFor = (write) => ({
       mutation_id: '33333333-3333-4333-8333-333333333333', version_id: '44444444-4444-4444-8444-444444444444', version_number: 7,
@@ -119,7 +131,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
    * The Agent over this harness. Reads return the persisted graph. `/graph/register` is the whole-graph writer it is on
    * staging: it persists the caller's graph as its OWN commit (a row) — so a second write path is visible as a second row.
    */
-  const agent = () => {
+  const agent = (opts: { beforeCommit?: () => void; afterCommit?: () => void } = {}) => {
     const store = new ProposalStore();
     const d = async (path: string, body?: unknown) => {
       if (path.endsWith('/graph/register')) {
@@ -132,9 +144,14 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
       return { status: 200, json: { graph: persisted, graph_hash: currentHash() } };
     };
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
-      commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
+      commitOptionLevels: async (input) => {
+        opts.beforeCommit?.();
+        const result = await commitOptionLevelsInProcess(input, 'req-agent');
+        opts.afterCommit?.();
+        return result;
+      },
     });
-    return { caps, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: 'Use a starting point.' } };
+    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: 'Use a starting point.' } };
   };
   const nodeOf = (id: string) => (persisted as { nodes: { id: string; observed_state?: Record<string, unknown>; interventions?: Record<string, Record<string, unknown>> }[] }).nodes.find((n) => n.id === id)!;
 
@@ -173,4 +190,230 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     expect(rows.size).toBe(0);
     expect(JSON.stringify(persisted), 'the model is exactly as approved against').toBe(before);
   });
+
+  const GAP = { unresolved_targets: ['billable seat basis'], user_questions: ['Which seats are billable?'] };
+  type GappedGraph = { nodes: (Record<string, unknown> & { id: string })[]; options?: (Record<string, unknown> & { id: string })[] };
+  const carriers = () => {
+    const graph = persisted as GappedGraph;
+    return [graph.nodes.find(n => n.id === 'opt_raise')!, ...(graph.options ?? []).filter(o => o.id === 'opt_raise')];
+  };
+  function withGap(where: 'both' | 'mirror' | 'node' = 'both') {
+    const graph = structuredClone(pricingGraph()) as unknown as GappedGraph;
+    const node = graph.nodes.find(n => n.id === 'opt_raise')!;
+    node.interventions = { fac_price: { value: 0.245, source: 'cee_hypothesis', target_match: { node_id: 'fac_price', match_type: 'exact_id', confidence: 'high' } } };
+    persisted = projectGraphForPersistence(graph);
+    const rows = carriers();
+    if (where !== 'mirror') Object.assign(rows[0]!, structuredClone(GAP));
+    if (where !== 'node') Object.assign(rows[1]!, structuredClone(GAP));
+    expect(projectGraphForPersistence(persisted)).toEqual(persisted);
+  }
+  const clearLevel = () => ({ option_label: RAISE, factor_label: 'Pro plan monthly price', value: 49, basis: 'Keep the same level; resolve the stated gap', unmodelled_mechanisms: [] as string[] });
+
+  it.each([
+    ['81 characters', ['x'.repeat(81)]], ['six entries', ['a', 'b', 'c', 'd', 'e', 'f']],
+    ['non-string', [42]], ['blank', [' ']], ['non-array', 'effect'], ['mixed', ['valid', null]],
+    ['null', null], ['present undefined', undefined],
+  ])('malformed %s refuses the entire starting-point offer before any proposal or write', async (_name, value) => {
+    withGap('mirror'); const before = JSON.stringify(persisted);
+    const { caps, store, ctx } = agent(); const put = vi.spyOn(store, 'put');
+    const level = { ...clearLevel(), unmodelled_mechanisms: value };
+    const result = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      option_levels: [clearLevel(), level as never],
+    });
+    expect(result.ok).toBe(false); expect(put).not.toHaveBeenCalled(); expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
+  });
+
+  it('conflicting repeated declarations refuse before either starting-point half is proposed', async () => {
+    withGap(); const { caps, store, ctx } = agent(); const put = vi.spyOn(store, 'put');
+    const result = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      option_levels: [clearLevel(), { ...clearLevel(), unmodelled_mechanisms: ['another effect'] }],
+    });
+    expect(result).toMatchObject({ ok: false, refusal: 'conflicting_option_gap_declarations' });
+    expect(put).not.toHaveBeenCalled(); expect(rows.size).toBe(0);
+  });
+
+  it.each(['both', 'mirror', 'node'] as const)('same-level %s clearance carries exact operands on the card and lands through ONE real commit/receipt', async where => {
+    withGap(where); const before = structuredClone(persisted) as GappedGraph;
+    const { caps, store, ctx } = agent();
+    const offered = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+    expect(offered.ok, JSON.stringify(offered)).toBe(true); expect(rows.size).toBe(0);
+    const proposal = store.get(String(offered.proposal_id))!;
+    expect(proposal.operations[0]?.value).toMatchObject({ unmodelled_mechanisms: [] });
+    expect(proposal.public_label).toContain(RAISE); expect(proposal.public_label).toContain(GAP.unresolved_targets[0]);
+    expect(proposal.public_label).toContain(GAP.user_questions[0]);
+    const [chip] = approvalChipsFor([{ name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: proposal.proposal_id }], () => ({ proposal, result: offered }));
+    expect(chip?.detail).toBe(proposal.public_label);
+    const result = await caps.authoriseChange({ ...ctx, typed_approval_of: proposal.proposal_id }, { proposal_id: proposal.proposal_id });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, applied: true, public_label: proposal.public_label });
+    expect(rows.size).toBe(1); expect(result.receipts).toHaveLength(1);
+    expect(optionGapsHeld(persisted, [{ optionId: 'opt_raise', mechanisms: [] }])).toBe(true);
+    for (const row of [...before.nodes, ...(before.options ?? [])]) if (row.id === 'opt_raise') {
+      delete row.unresolved_targets; delete row.user_questions;
+    }
+    expect(persisted).toEqual(before); // In particular, the unchanged cell keeps its source.
+    const retry = await caps.authoriseChange({ ...ctx, typed_approval_of: proposal.proposal_id }, { proposal_id: proposal.proposal_id });
+    expect(retry).toMatchObject({ applied: true, already_applied: true }); expect(rows.size).toBe(1);
+  });
+
+  it.each(['node', 'mirror', 'both'] as const)('cold durable %s clearance reply consumes the visible edit fact without an append marker', async where => {
+    withGap(where);
+    const clean = structuredClone(persisted) as GappedGraph;
+    for (const row of [...clean.nodes, ...(clean.options ?? [])]) if (row.id === 'opt_raise') {
+      delete row.unresolved_targets; delete row.user_questions;
+    }
+    const cleanHash = computeAnalysisAffectingGraphHash(clean as never)!;
+    durableRuns = [{ fact_version: 1, fact_type: 'run_analysis', noop: false, result: {
+      scenario_id: SCENARIO_ID, leading_option_id: 'opt_raise', summary: 'Older clean Run',
+      graph_hash_at_run: cleanHash, computed_at: '2026-09-25T00:00:00.000Z', enrichment: { analysis_status: 'computed' },
+    } }]; // No hot Run, projection stamp or admission snapshot.
+    expect(deriveAnalysisFreshness(durableRuns as never, currentHash(), undefined, { currentGraph: persisted }).freshness).toBe('stale');
+    const info = vi.spyOn(log, 'info');
+    try {
+      const { caps, ctx, store } = agent();
+      const offered = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+      const proposal = store.get(String(offered.proposal_id))!;
+      const out = await caps.authoriseChange({ ...ctx, typed_approval_of: proposal.proposal_id }, { proposal_id: proposal.proposal_id });
+      expect(out, JSON.stringify(out)).toMatchObject({ applied: true });
+      expect(rows.size).toBe(1); expect(currentHash()).toBe(cleanHash);
+      expect(analysisInvalidatedAt).toBeNull();
+      const reply = info.mock.calls.map(call => call[0] as Record<string, unknown>)
+        .find(event => event.event === 'v5.analysis_freshness.derived' && event.dispatch_path === 'system_event.option_intervention_edit');
+      expect(reply).toMatchObject({ freshness: 'stale', reason: 'model_edited_after_analysis' });
+      const { readScenarioAnalysis } = await import('../../../src/routes/scenario-graph-analysis-read.js');
+      const visibleRead = await readScenarioAnalysis({ scenarioId: SCENARIO_ID, graph: persisted, requestId: 'visible-clearance' });
+      expect(visibleRead.analysis_state?.run_state.kind).toBe('complete_stale');
+      expect(visibleRead.analysis_result).toBeNull();
+      // Cold return after the edit's turn is outside the hot window. The Run
+      // is still durable, but today's append RPC left no restore marker.
+      rows.clear();
+      const coldRead = await readScenarioAnalysis({ scenarioId: SCENARIO_ID, graph: persisted, requestId: 'known-limit-clearance' });
+      expect(coldRead.analysis_state?.run_state.kind).toBe('complete_current');
+    } finally { info.mockRestore(); }
+  });
+
+  it('malformed approved operation bytes refuse before any compound part is prepared or written', async () => {
+    withGap(); const { caps, ctx, store } = agent();
+    const offered = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      option_levels: [clearLevel()],
+    });
+    expect(offered.ok, JSON.stringify(offered)).toBe(true);
+    const proposal = store.get(String(offered.proposal_id))!;
+    // Emulate an older producer's malformed but integrity-bound stored proposal,
+    // so the operation validator (rather than the tamper guard) must refuse it.
+    const { proposal_id: _oldId, ...content } = structuredClone(proposal);
+    const operation = content.operations.find(o => o.op === 'set_option_intervention')!;
+    (operation.value as Record<string, unknown>).unmodelled_mechanisms = ['valid', null];
+    store.discard(proposal.proposal_id);
+    const malformed = store.put(createProposal(content));
+    const before = structuredClone(persisted);
+    const result = await caps.authoriseChange({ ...ctx, typed_approval_of: malformed.proposal_id }, { proposal_id: malformed.proposal_id });
+    expect(result).toMatchObject({ applied: false, mutated: false, reason: 'invalid_mechanism' });
+    expect(persisted).toEqual(before); expect(rows.size).toBe(0);
+    expect(store.outstanding(SCENARIO_ID, 'user-a')).toHaveLength(1);
+  });
+
+  it('a changed question after offer refuses even though the analytical hash is unchanged', async () => {
+    withGap(); const { caps, ctx } = agent();
+    const p = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+    const hash = currentHash(); carriers()[1]!.user_questions = ['A different retained question'];
+    expect(currentHash()).toBe(hash);
+    expect(await caps.authoriseChange({ ...ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) }))
+      .toMatchObject({ applied: false, reason: 'gap_statement_changed_since_approval' });
+    expect(rows.size).toBe(0);
+  });
+
+  it('a changed question between approval read and writer read refuses before append', async () => {
+    withGap(); const { caps, ctx } = agent({ beforeCommit: () => { carriers()[1]!.user_questions = ['Concurrent question']; } });
+    const p = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+    const result = await caps.authoriseChange({ ...ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    expect(result).toMatchObject({ applied: false, mutated: false }); expect(rows.size).toBe(0);
+    expect(carriers()[1]!.user_questions).toEqual(['Concurrent question']);
+  });
+
+  it('stale mirror after the commit never marks the proposal applied', async () => {
+    withGap(); const { caps, ctx, store } = agent({ afterCommit: () => { Object.assign(carriers()[1]!, GAP); } });
+    const p = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+    const result = await caps.authoriseChange({ ...ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    expect(result).toMatchObject({ applied: false, refusal: 'not_verified' });
+    expect(store.outstanding(SCENARIO_ID, 'user-a')).toHaveLength(1);
+  });
+
+  it('a non-empty declaration and a numerical change use the same ONE compound door', async () => {
+    withGap(); const { caps, ctx } = agent();
+    const p = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      option_levels: [{ ...clearLevel(), value: 59, unmodelled_mechanisms: ['  support   demand ', 'Support demand'] }],
+    });
+    expect(p.ok, JSON.stringify(p)).toBe(true); expect(String(p.public_label)).toContain('support demand');
+    const result = await caps.authoriseChange({ ...ctx, typed_approval_of: String(p.proposal_id) }, { proposal_id: String(p.proposal_id) });
+    expect(result, JSON.stringify(result)).toMatchObject({ applied: true }); expect(rows.size).toBe(1);
+    expect(optionGapsHeld(persisted, [{ optionId: 'opt_raise', mechanisms: ['support demand'] }])).toBe(true);
+  });
+
+
+  // Mutant: omit the stored-operation typed identity gate in ProposalStore.authorise.
+  for (const mechanisms of [[], ['replacement effect'], ['new effect']]) {
+    it.each(['absent', 'wrong id', 'words only'] as const)(`gap ${JSON.stringify(mechanisms)} refuses without server-bound consent (%s)`, async identity => {
+      withGap();
+      if (mechanisms[0] === 'new effect') for (const row of carriers()) { delete row.unresolved_targets; delete row.user_questions; }
+      const { caps, store, ctx } = agent(); const before = JSON.stringify(persisted);
+      const offered = await caps.proposeOptionInterventions(ctx, { interventions: [{ ...clearLevel(), unmodelled_mechanisms: mechanisms }] });
+      expect(offered.ok, JSON.stringify(offered)).toBe(true);
+      const id = String(offered.proposal_id); expect(store.get(id)).toBeDefined();
+      const noConsent = { ...ctx, user_text: 'Do not change the model.',
+        ...(identity === 'wrong id' ? { typed_approval_of: 'another-proposal' } : {}),
+        ...(identity === 'words only' ? { typed_approval_words: 'Yes, use those.' } : {}) };
+      expect(await caps.authoriseChange(noConsent, { proposal_id: id })).toMatchObject({ ok: false, mutated: false, refusal: 'approval_required' });
+      expect(rows.size).toBe(0); expect(JSON.stringify(persisted)).toBe(before);
+      expect(store.outstanding(SCENARIO_ID, 'user-a')).toHaveLength(1);
+      // The exact same stored proposal executes WITH real typed approval.
+      expect(await caps.authoriseChange({ ...ctx, typed_approval_of: id }, { proposal_id: id })).toMatchObject({ ok: true, applied: true });
+      expect(rows.size).toBe(1);
+    });
+  }
+
+  // Mutant: emit generic approval chip when its gap card is missing/mismatched.
+  it.each(['missing', 'wrong label', 'wrong identity', 'missing proposal'] as const)('suppresses a gap approval with %s card', async missing => {
+    withGap(); const { caps, store, ctx } = agent();
+    const offered = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+    const proposal = store.get(String(offered.proposal_id))!;
+    const result = missing === 'missing' ? undefined : { ...offered,
+      ...(missing === 'wrong label' ? { public_label: 'A different statement' } : { proposal_id: 'another-proposal' }) };
+    expect(approvalChipsFor([{ name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: proposal.proposal_id }],
+      () => ({ proposal: missing === 'missing proposal' ? undefined : proposal, result }))).toEqual([]);
+    expect(rows.size).toBe(0);
+  });
+
+  // Mutant: duplicate-level first-wins drops the later declaration.
+  it('retains a later gap declaration on an otherwise identical duplicate level', async () => {
+    withGap(); const { caps, store, ctx } = agent(); const plain = { ...clearLevel(), value: 59 };
+    const { unmodelled_mechanisms: _omitted, ...level } = plain;
+    const offered = await caps.proposeOptionInterventions(ctx, { interventions: [level, plain] });
+    expect(offered.ok, JSON.stringify(offered)).toBe(true);
+    const proposal = store.get(String(offered.proposal_id))!;
+    expect(proposal.operations.filter(op => op.op === 'set_option_intervention')).toHaveLength(1);
+    expect(proposal.operations.find(op => op.op === 'set_option_intervention')!.value).toHaveProperty('unmodelled_mechanisms', []);
+    expect(await caps.authoriseChange(ctx, { proposal_id: proposal.proposal_id })).toMatchObject({ refusal: 'approval_required' });
+  });
+
+  it.each(['levels', 'starting point'].flatMap(caller => [49, 59].flatMap(declaredValue =>
+    [false, true].map(reverse => ({ caller, declaredValue, reverse })))))(
+    'duplicate cohort refuses $caller with declaration on $declaredValue, reverse=$reverse', async ({ caller, declaredValue, reverse }) => {
+      withGap(); const { caps, store, ctx } = agent(); const declared = { ...clearLevel(), value: declaredValue };
+      const { unmodelled_mechanisms: _omitted, ...plain } = { ...clearLevel(), value: declaredValue === 49 ? 59 : 49 };
+      const levels = reverse ? [plain, declared] : [declared, plain];
+      const offered = caller === 'levels'
+        ? await caps.proposeOptionInterventions(ctx, { interventions: levels })
+        : await caps.proposeStartingPoint(ctx, {
+          assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+          option_levels: levels,
+        });
+      expect(offered, JSON.stringify({ caller, declaredValue, reverse })).toMatchObject({ ok: false, refusal: 'conflicting_option_gap_declarations' });
+      expect(store.outstanding(SCENARIO_ID, 'user-a')).toHaveLength(0); expect(rows.size).toBe(0);
+  });
+
 });
