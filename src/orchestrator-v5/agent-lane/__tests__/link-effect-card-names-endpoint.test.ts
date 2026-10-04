@@ -218,7 +218,9 @@ describe('link-effect approval cards name the exact endpoint', () => {
     const graph = duplicatedGraph();
     graph.nodes.reverse();
     graph.edges.reverse();
-    graph.edges.push(structuredClone(graph.edges.find((e: Json) => e.from === COPY && e.to === TARGET)));
+    // A duplicate NEIGHBOUR of the original (its MRR link twice), never a parallel copy of a proposed pair, which now
+    // prepares nothing (`target_ambiguous`, rows below).
+    graph.edges.push(structuredClone(graph.edges.find((e: Json) => e.from === ORIGINAL && e.to === 'mrr')));
     const second = world(graph);
     const after = await prepare(second, true);
     expect(cardFor(second, after).message).toBe(cardFor(first, before).message);
@@ -252,5 +254,108 @@ describe('link-effect approval cards name the exact endpoint', () => {
       ok: false, mutated: false, reason: 'reading_not_confirmed',
     }));
     expect(w.sent).toEqual([]);
+  });
+});
+
+/**
+ * ⛔ A CARD NAME IS UNIQUE ACROSS THE WHOLE GRAPH, not only within its shared-label group (DL #2561 round 2, P1): a
+ * decorated name must never read as another node's literal label, at every suffix tier. Each row binds the endpoint ids.
+ */
+describe('card names never collide with a literal label elsewhere in the graph', () => {
+  const LITERAL = 'literal_label_node';
+  const COPY2 = 'pro_plan_price_copy2';
+  const withLiteral = (literal: string, setup: (g: Json) => void, kind: 'factor' | 'option'): Json => {
+    const graph = duplicatedGraph();
+    setup(graph);
+    if (kind === 'option') {
+      graph.nodes.push({ id: LITERAL, kind: 'option', label: literal });
+    } else {
+      graph.nodes.push({ ...structuredClone(graph.nodes.find((n: Json) => n.id === ORIGINAL)), id: LITERAL, label: literal });
+      graph.edges.push({ ...structuredClone(graph.edges.find((e: Json) => e.from === ORIGINAL && e.to === TARGET)), from: LITERAL });
+    }
+    return graph;
+  };
+  // [tier, the other node's literal label, setup, the copy's card name, the literal node's kind]. The connection tier's
+  // literal names the target ("…linked to Pro plan paying subscribers"), which the statement rule (unchanged here) reads as
+  // a rival end for a quantity; as an option's label it is outside that rule and still on the card's graph.
+  const tiers: [string, string, (g: Json) => void, string, 'factor' | 'option'][] = [
+    ['description', 'Pro plan price (Pilot)', (g) => { g.nodes.find((n: Json) => n.id === COPY).description = 'Pilot'; },
+      'Pro plan price (pro_plan_price_copy)', 'factor'],
+    ['connection', COPY_NAME, () => {}, 'Pro plan price (pro_plan_price_copy)', 'option'],
+    // COPY2 shares COPY's label, description (none) and connections, so both fall to the id tier; a literal label
+    // equal to COPY's id name pushes it to the next free id name.
+    ['id', 'Pro plan price (pro_plan_price_copy)', (g) => {
+      g.nodes.push({ ...structuredClone(g.nodes.find((n: Json) => n.id === COPY)), id: COPY2 });
+      g.edges.push({ ...structuredClone(g.edges.find((e: Json) => e.from === COPY && e.to === TARGET)), from: COPY2 });
+    }, 'Pro plan price (pro_plan_price_copy, 2)', 'factor'],
+  ];
+
+  it.each(tiers)('RED (%s tier): the shared-label node never reads as the literal label, and its card binds its own id', async (_tier, literal, setup, copyName, kind) => {
+    const w = world(withLiteral(literal, setup, kind));
+    const both = kind === 'factor';
+    // One link goes through the single call: a one-link GROUP's card is the pre-existing P2 follow-up (approval-chips reads
+    // `result.link` for one operation), not this row's subject.
+    const result = await w.caps.proposeLinkEffect!(ctx(), both
+      ? { links: [{ ...ARGS, from_label: COPY }, { ...ARGS, from_label: LITERAL }] } : { ...ARGS, from_label: COPY }) as Json;
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(w.store.get(String(result.proposal_id))?.operations).toEqual([operation(w.graph, COPY), ...(both ? [operation(w.graph, LITERAL)] : [])]);
+    expect((both ? result.links : [result.link]).map((l: Json) => l.from)).toEqual([copyName, ...(both ? [literal] : [])]);
+    expect(copyName).not.toBe(literal);
+    expect(cardFor(w, result).detail).toBe([reading(copyName), ...(both ? [reading(literal)] : [])].join('\n'));
+    const applied = await press(w, result, cardFor(w, result).message);
+    expect(applied, JSON.stringify(applied)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    expect(w.sent).toHaveLength(1);
+    const sent = w.sent[0]!.link_effect !== undefined ? [w.sent[0]!.link_effect] : w.sent[0]!.link_effects!;
+    expect(sent.map((e) => `${e.from}::${e.to}`)).toEqual([`${COPY}::${TARGET}`, ...(both ? [`${LITERAL}::${TARGET}`] : [])]);
+  });
+
+  it.each(tiers)('RED (%s tier): a card worded with the literal label never approves the shared-label node\'s proposal', async (_tier, literal, setup, copyName, kind) => {
+    const w = world(withLiteral(literal, setup, kind));
+    const copy = await w.caps.proposeLinkEffect!(ctx(), { ...ARGS, from_label: COPY }) as Json;
+    expect(copy.ok, JSON.stringify(copy)).toBe(true);
+    expect(copy.link.from).toBe(copyName);
+    if (kind === 'factor') {
+      const lit = await w.caps.proposeLinkEffect!(ctx(), { ...ARGS, from_label: LITERAL }) as Json;
+      expect(lit.link.from).toBe(literal);
+      expect(cardFor(w, copy).message).not.toBe(cardFor(w, lit).message);
+    }
+    expect(await press(w, copy, `Yes — ${reading(literal)}`)).toEqual(expect.objectContaining({ ok: false, reason: 'reading_not_confirmed' }));
+    expect(w.sent).toEqual([]);
+  });
+});
+
+/**
+ * ⛔ A PARALLEL COPY OF THE PAIR PREPARES AND WRITES NOTHING (DL #2561 round 2, P1): the card names neither copy, so
+ * neither is chosen by array order — at preparation, and at an approval prepared before the copy appeared.
+ */
+describe('a parallel link prepares nothing and an approval over one writes nothing', () => {
+  const withParallel = (graph: Json, copyFirst: boolean): void => {
+    const edge = { ...structuredClone(graph.edges.find((e: Json) => e.from === COPY && e.to === TARGET)), provenance: { source: 'cee_hypothesis' } };
+    graph.edges = copyFirst ? [edge, ...graph.edges] : [...graph.edges, edge];
+  };
+
+  it.each([false, true])('RED single + grouped: target_ambiguous, nothing stored (parallel copy first=%s)', async (copyFirst) => {
+    const w = world();
+    withParallel(w.graph, copyFirst);
+    const single = await w.caps.proposeLinkEffect!(ctx(), { ...ARGS, from_label: COPY }) as Json;
+    expect(single).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'target_ambiguous' }));
+    const grouped = await w.caps.proposeLinkEffect!(ctx(), { links: [{ ...ARGS, from_label: COPY }] }) as Json;
+    expect(grouped).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'target_ambiguous' }));
+    expect(w.store.size()).toBe(0);
+    // Control in the same graph: the other, unique pair still prepares.
+    const other = await w.caps.proposeLinkEffect!(ctx(), { ...ARGS, from_label: ORIGINAL }) as Json;
+    expect(other.ok, JSON.stringify(other)).toBe(true);
+  });
+
+  // Guard (passes on the base too: the copy moves the analysis hash, so the approval is already model_changed).
+  it.each([false, true])('guard: a card prepared before a parallel copy appeared records nothing (grouped=%s)', async (grouped) => {
+    const w = world();
+    const result = await prepare(w, grouped);
+    expect(result.ok).toBe(true);
+    withParallel(w.graph, true);
+    const out = await press(w, result, cardFor(w, result).message) as Json;
+    expect(out).toEqual(expect.objectContaining({ ok: false, mutated: false }));
+    expect(w.sent).toEqual([]);
+    expect(w.graph.edges.filter((e: Json) => e.provenance?.magnitude === 'user_stated')).toEqual([]);
   });
 });

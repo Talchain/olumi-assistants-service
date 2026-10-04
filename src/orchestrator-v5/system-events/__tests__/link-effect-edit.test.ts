@@ -10,7 +10,7 @@ import { convertLinkEffect } from '../../../cee/magnitude/link-effect.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, linkEffectTargetOf, type ApplyLinkEffectEditParams } from '../link-effect-edit.js';
 
 type Rec = Record<string, any>;
 
@@ -298,5 +298,58 @@ describe('link effect writer — refuses what it cannot do exactly (fail closed,
     const before = JSON.stringify(base);
     applyLinkEffectEdit(params({}, base));
     expect(JSON.stringify(base)).toBe(before);
+  });
+});
+
+/**
+ * ⛔ EXACTLY ONE LINK AND ONE NODE PER END (DL #2561 round 2, P1 "nonunique persisted targets"; the edge-strength writer's
+ * own `target_ambiguous`). A parallel copy of the pair, or two nodes under one end's id, is never resolved by array order.
+ */
+describe('link effect writer — a non-unique target writes nothing, in either array order', () => {
+  const withParallel = (copyFirst: boolean): Rec => {
+    const g = storedGraph();
+    const copy = { ...structuredClone(edgeOf(g)), provenance: { source: 'cee_hypothesis', reasoning: 'a parallel copy' } };
+    g.edges = copyFirst ? [copy, ...g.edges] : [...g.edges, copy];
+    return g;
+  };
+  const withDuplicateNode = (id: 'price' | 'subs', copyFirst: boolean): Rec => {
+    const g = storedGraph();
+    const copy = { ...structuredClone(g.nodes.find((n: Rec) => n.id === id)), label: 'Another node, same id' };
+    g.nodes = copyFirst ? [copy, ...g.nodes] : [...g.nodes, copy];
+    return g;
+  };
+
+  it('control: the one stored pair is written (the rows below differ only by the duplicate)', () => {
+    expect(linkEffectTargetOf(storedGraph(), 'price', 'subs').kind).toBe('one');
+    expect(applyLinkEffectEdit(params()).kind).toBe('mutated');
+  });
+
+  it.each([false, true])('RED: a parallel copy of the pair → no token, target_ambiguous, nothing written (copy first=%s)', (copyFirst) => {
+    const g = withParallel(copyFirst);
+    const pristine = structuredClone(g);
+    expect(linkEffectEdgeToken(g, 'price', 'subs')).toBeNull();
+    expect(linkEffectTargetOf(g, 'price', 'subs')).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
+    // Prepared on the one link BEFORE the copy appeared: the write still refuses, by the pair, before any revision check.
+    const prepared = revisionOf(storedGraph());
+    const r = applyLinkEffectEdit(params({ expected: prepared }, g));
+    expect(r).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
+    expect(g).toEqual(pristine);
+  });
+
+  it.each([
+    ['price', false], ['price', true], ['subs', false], ['subs', true],
+  ] as const)('RED: two nodes under one end\'s id (%s, copy first=%s) → target_ambiguous, nothing written', (id, copyFirst) => {
+    const g = withDuplicateNode(id, copyFirst);
+    const pristine = structuredClone(g);
+    expect(linkEffectTargetOf(g, 'price', 'subs')).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
+    const r = applyLinkEffectEdit(params({}, g));
+    expect(r).toEqual({ kind: 'refused', reason: 'target_ambiguous' });
+    expect(g).toEqual(pristine);
+  });
+
+  it('a pair that is not stored stays edge_not_found (no token)', () => {
+    const g = storedGraph();
+    expect(linkEffectTargetOf(g, 'subs', 'price')).toEqual({ kind: 'refused', reason: 'edge_not_found' });
+    expect(linkEffectEdgeToken(g, 'subs', 'price')).toBeNull();
   });
 });

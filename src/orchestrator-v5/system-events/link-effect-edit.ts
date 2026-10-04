@@ -80,6 +80,7 @@ export type LinkEffectRefusal =
   | 'quote_invalid'
   | 'reading_not_confirmed'
   | 'edge_not_found'
+  | 'target_ambiguous'
   | 'superseded'
   | 'definitional_link'
   | 'unit_mismatch'
@@ -106,9 +107,27 @@ const QUOTE_MAX = 400;
  * `null` when there is no such link. The Agent computes it on the read it proposes from and stores it on the proposal.
  */
 export function linkEffectEdgeToken(graph: unknown, from: string, to: string): string | null {
-  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges : [];
-  const edge = edges.find((e): e is Rec => isRec(e) && e.from === from && e.to === to);
-  return edge === undefined ? null : `edge:${createHash('sha256').update(stableStringify(edge)).digest('hex')}`;
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter((e): e is Rec => isRec(e) && e.from === from && e.to === to) : [];
+  // A parallel copy of the pair has no ONE link to bind: no token, so nothing is prepared or written against it.
+  return edges.length !== 1 ? null : `edge:${createHash('sha256').update(stableStringify(edges[0])).digest('hex')}`;
+}
+
+/**
+ * ⛔ EXACTLY ONE STORED LINK AND ONE NODE PER END, OR NOTHING (DL #2561 round 2; the edge-strength writer's own
+ * `target_ambiguous` rule, `edge-strength-edit.ts`). A parallel copy of the endpoint pair, or two nodes under one end's
+ * id, is never resolved by array order: the card names neither copy, so a write to "the first" is a guess. The token,
+ * every dry run and every write read through this; a missing pair stays `edge_not_found`.
+ */
+export function linkEffectTargetOf(graph: unknown, from: string, to: string):
+  | { readonly kind: 'one'; readonly edge: Rec }
+  | { readonly kind: 'refused'; readonly reason: 'edge_not_found' | 'target_ambiguous' } {
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter((e): e is Rec => isRec(e) && e.from === from && e.to === to) : [];
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const sources = nodes.filter((n) => n.id === from).length;
+  const targets = nodes.filter((n) => n.id === to).length;
+  if (edges.length > 1 || sources > 1 || targets > 1) return { kind: 'refused', reason: 'target_ambiguous' };
+  if (edges.length === 0 || sources === 0 || targets === 0) return { kind: 'refused', reason: 'edge_not_found' };
+  return { kind: 'one', edge: edges[0]! };
 }
 
 /**
@@ -143,10 +162,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   }
   const graph = structuredClone(params.persistedGraph) as Rec & { nodes: unknown[]; edges: unknown[] };
   const nodes = graph.nodes.filter(isRec);
-  const edge = graph.edges.find((e): e is Rec => isRec(e) && e.from === from && e.to === to);
-  const source = nodes.find((n) => n.id === from);
-  const target = nodes.find((n) => n.id === to);
-  if (edge === undefined || source === undefined || target === undefined) return refuse('edge_not_found');
+  const found = linkEffectTargetOf(graph, from, to);
+  if (found.kind === 'refused') return refuse(found.reason);
+  const edge = found.edge;
 
   // ── REVISION-SAFE: the analysis revision AND every byte of this link are what the ask was prepared against ─────────
   if (computeAnalysisAffectingGraphHash(params.persistedGraph as never) !== expected.graph_hash

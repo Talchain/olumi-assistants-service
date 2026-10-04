@@ -38,7 +38,7 @@ import { GM_HELD_HANDLER_ID, GM_HELD_OPERATIONS_MAX_JSON_CHARS, gmHeldProposalRe
 import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js';
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
-import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, linkEffectTargetOf, type LinkEffectRefusal } from '../../system-events/link-effect-edit.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
@@ -1433,6 +1433,9 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
         + 'Tell them so plainly, and offer to reverse the link\u2019s direction with propose_link_strength (their words on one link).';
     case 'superseded':
       return 'Nothing was prepared: the model changed while this was being read. Read the state again and propose once more.';
+    case 'target_ambiguous':
+      return `Nothing was prepared: the model holds more than one link from "${from.label}" to "${to.label}", or more than one entity under `
+        + 'one of their ids, so there is no ONE link the user\u2019s figure is for. Tell the user plainly; never pick one of them.';
     // The sizer's own terms and questions (`link-effect.ts` D7). At the answer door the writer refuses and asks (Canonical
     // 5883568580): nothing is stored, the user's figure stays in the reply, and never shrunk to fit.
     // AIQ 5883669977: the user's stated figure never yields first. No typed field says whose a cap is (Canonical
@@ -1456,6 +1459,8 @@ function linkEffectRefusalWords(reason: LinkEffectRefusal, raw: unknown, from: {
       return `Nothing was prepared: this effect cannot be recorded with this model yet (${String(reason).replace(/_/g, ' ')}). Tell the user plainly.`;
   }
 }
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> =>
   Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
@@ -1659,30 +1664,56 @@ function describeAmbiguity(g: Pick<GraphRead, 'nodes' | 'edges'>, requested: str
   };
 }
 
-/** Consent names an identity: keep unique labels verbatim, otherwise use the read's distinguishing context. */
+/**
+ * ⛔ CONSENT NAMES AN IDENTITY, UNIQUE ACROSS THE WHOLE GRAPH (P1-4; DL #2561 round 2). A label no other node carries is
+ * kept verbatim. A shared label takes the read's distinguishing context: its description, else what it is linked to. That
+ * name is kept only when NO node's literal label, no other name, and no other shared-label node's id name reads the same
+ * (a `Price` described "Pilot" never reads as a node literally labelled "Price (Pilot)"). Otherwise it falls back to its
+ * id, and an id name that is itself taken gains a counter, so no two entities ever read the same on a card.
+ */
+function cardNamesOf(g: Pick<GraphRead, 'nodes' | 'edges'>): ReadonlyMap<string, string> {
+  const names = new Map<string, string>();
+  const groups = new Map<string, GraphRead['nodes'][number][]>();
+  for (const n of g.nodes) groups.set(norm(n.label), [...(groups.get(norm(n.label)) ?? []), n]);
+  const shared: { id: string; label: string; name: string }[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) { names.set(group[0]!.id, group[0]!.label); continue; }
+    // Reuse the ambiguity response's deduplicated, sorted connected_to labels, comparing the rendered words.
+    const connections = describeAmbiguity(g, group[0]!.label, group).candidates.map((n) => ({
+      id: n.id, words: (n.connected_to as string[]).join(', '),
+    }));
+    for (const n of group) {
+      const description = n.description?.trim();
+      const connected = connections.find((c) => c.id === n.id)!.words;
+      const suffix = description && group.every((r) => r.id === n.id || norm(r.description) !== norm(description))
+        ? description
+        : connected !== '' && connections.every((c) => c.id === n.id || c.words !== connected)
+          ? `linked to ${connected}` : n.id;
+      shared.push({ id: n.id, label: n.label, name: `${n.label} (${suffix})` });
+    }
+  }
+  const taken = new Set(g.nodes.map((n) => norm(n.label)));
+  const idName = (n: { id: string; label: string }): string => `${n.label} (${n.id})`;
+  const fallback: typeof shared = [];
+  for (const n of shared) {
+    const clash = taken.has(norm(n.name))
+      || shared.some((o) => o.id !== n.id && (norm(o.name) === norm(n.name) || norm(idName(o)) === norm(n.name)));
+    if (clash) fallback.push(n);
+    else names.set(n.id, n.name);
+  }
+  for (const name of names.values()) taken.add(norm(name));
+  for (const n of [...fallback].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    let name = idName(n);
+    for (let k = 2; taken.has(norm(name)); k += 1) name = `${n.label} (${n.id}, ${k})`;
+    names.set(n.id, name);
+    taken.add(norm(name));
+  }
+  return names;
+}
+
+/** The one card name of a node (`cardNamesOf`); an id the read does not hold is said as itself. */
 function cardNameOf(g: Pick<GraphRead, 'nodes' | 'edges'>, nodeId: string): string {
-  const node = g.nodes.find((n) => n.id === nodeId);
-  if (node === undefined) return nodeId;
-  const sameLabel = g.nodes.filter((n) => norm(n.label) === norm(node.label));
-  if (sameLabel.length === 1) return node.label;
-  // Reuse the ambiguity response's deduplicated, sorted connected_to labels, comparing the rendered words.
-  const connections = describeAmbiguity(g, node.label, sameLabel).candidates.map((n) => ({
-    id: n.id, words: (n.connected_to as string[]).join(', '),
-  }));
-  const names = sameLabel.map((n) => {
-    const description = n.description?.trim();
-    const connected = connections.find((c) => c.id === n.id)!.words;
-    const suffix = description && sameLabel.every((r) => r.id === n.id || norm(r.description) !== norm(description))
-      ? description
-      : connected !== '' && connections.every((c) => c.id === n.id || c.words !== connected)
-        ? `linked to ${connected}` : n.id;
-    return { id: n.id, name: `${n.label} (${suffix})`, fallback: `${n.label} (${n.id})` };
-  });
-  const named = names.find((n) => n.id === nodeId)!;
-  // A description can itself read "linked to …" or be another node's id. Reserve id names as well, so even
-  // cross-tier collisions fall back deterministically to distinct identities.
-  return names.some((n) => n.id !== nodeId && (n.name === named.name || n.fallback === named.name))
-    ? named.fallback : named.name;
+  return cardNamesOf(g).get(nodeId) ?? nodeId;
 }
 
 /** What the Agent is told to do about a name that matched more than one entity. */
@@ -2575,6 +2606,13 @@ export function createAgentCapabilities(
       return notApplied('link_effect_writer_unavailable', 'This link\u2019s size could not be recorded here, so nothing was recorded.');
     }
     let working: unknown = approvedRead.raw;
+    /**
+     * ⛔ THE READ-BACK LOOKS FOR THE WRITER'S OWN POSTIMAGE (DL #2561 round 2, P1): the dry run below IS the canonical writer
+     * on the same base, so its natural effect is exactly what the door stores. Never the stated words re-keyed: the sizer
+     * stores a % source's change as "%" when the user said "percentage points", and a words check then reported an applied
+     * write as not_verified, never marking the proposal applied.
+     */
+    const postimages: { from: string; to: string; natural_effect: Record<string, unknown> | undefined }[] = [];
     const approvedEffects = values.map((v) => ({ from: v.from as string, to: v.to as string,
       effect: { amount: v.effect!.amount as number, amount_unit: v.effect!.amount_unit as string,
         per_source_change: v.effect!.per_source_change as number, per_source_change_unit: v.effect!.per_source_change_unit as string },
@@ -2600,6 +2638,10 @@ export function createAgentCapabilities(
         return notApplied('link_effect_refused', linkEffectRefusalWords(dry.reason, working, from, to));
       }
       working = dry.mutatedGraph;
+      const written = linkEffectTargetOf(working, item.from, item.to);
+      const writtenProvenance = written.kind === 'one' && isPlainRecord(written.edge.provenance) ? written.edge.provenance : undefined;
+      postimages.push({ from: item.from, to: item.to,
+        natural_effect: isPlainRecord(writtenProvenance?.natural_effect) ? writtenProvenance.natural_effect : undefined });
     }
     const res = await opts.commitOptionLevels({
       scenario_id: ctx.scenario_id,
@@ -2626,17 +2668,19 @@ export function createAgentCapabilities(
     }
     const receipts: ReceiptSummary[] = res.receipt !== null ? [{ ...res.receipt, source_turn_id: res.receipt.source_turn_id ?? '' }] : [];
     const check = await readGraph(ctx.scenario_id);
-    // PR Review on #2275: the read-back proves THIS figure — the user's source, both numbers, and both units (by the
-    // writer's own unit key: the sizer stores each end's unit words, which the writer accepted the stated unit as).
-    const holds = check !== null && approvedEffects.every((item) => {
-      const stored = check.edges.find((x) => x.from === item.from && x.to === item.to) as { provenance?: unknown } | undefined;
-      const prov = (stored?.provenance ?? {}) as { source?: unknown; magnitude?: unknown;
+    // PR Review on #2275: the read-back proves THIS figure — the user's source, both numbers, and both units — on the ONE
+    // stored link of each pair, against the writer's own postimage of it (above), never against the stated words.
+    const holds = check !== null && postimages.every((post) => {
+      const matches = check.edges.filter((x) => x.from === post.from && x.to === post.to) as { provenance?: unknown }[];
+      const prov = (matches[0]?.provenance ?? {}) as { source?: unknown; magnitude?: unknown;
         natural_effect?: { amount?: unknown; amount_unit?: unknown; per_source_change?: unknown; per_source_change_unit?: unknown } };
+      const want = post.natural_effect;
       const unitKey = (u: unknown): string | undefined => (typeof u === 'string' ? unitComparisonKey(u) : undefined);
-      const sameUnit = (storedUnit: unknown, stated: string): boolean => unitKey(storedUnit) !== undefined && unitKey(storedUnit) === unitKey(stated);
-      return prov.source === 'user_specified' && prov.magnitude === 'user_stated'
-        && prov.natural_effect?.amount === item.effect.amount && prov.natural_effect?.per_source_change === item.effect.per_source_change
-        && sameUnit(prov.natural_effect?.amount_unit, item.effect.amount_unit) && sameUnit(prov.natural_effect?.per_source_change_unit, item.effect.per_source_change_unit);
+      const sameUnit = (storedUnit: unknown, written: unknown): boolean => unitKey(storedUnit) !== undefined && unitKey(storedUnit) === unitKey(written);
+      return matches.length === 1 && want !== undefined && prov.source === 'user_specified' && prov.magnitude === 'user_stated'
+        && typeof want.amount === 'number' && prov.natural_effect?.amount === want.amount
+        && typeof want.per_source_change === 'number' && prov.natural_effect?.per_source_change === want.per_source_change
+        && sameUnit(prov.natural_effect?.amount_unit, want.amount_unit) && sameUnit(prov.natural_effect?.per_source_change_unit, want.per_source_change_unit);
     });
     if (!holds) {
       return { ok: false, mutated: true, applied: false, proposal_id: parent.proposal_id, refusal: check === null ? 'not_confirmed' : 'not_verified', receipts,
@@ -2647,7 +2691,7 @@ export function createAgentCapabilities(
       ok: true, mutated: true, applied: true, proposal_id: parent.proposal_id, receipts,
       revision_before: parent.base_graph_identity_hash, revision_after: res.graph_hash,
       follow_up: approvedEffects.length === 1
-        ? `Recorded your figure for how "${approvedRead.nodes.find((n) => n.id === approvedEffects[0]!.from)?.label ?? approvedEffects[0]!.from}" moves "${approvedRead.nodes.find((n) => n.id === approvedEffects[0]!.to)?.label ?? approvedEffects[0]!.to}", in your words: "${approvedEffects[0]!.quote}". Any earlier result is now out of date.`
+        ? `Recorded your figure for how "${labelOf(approvedEffects[0]!.from)}" moves "${labelOf(approvedEffects[0]!.to)}", in your words: "${approvedEffects[0]!.quote}". Any earlier result is now out of date.`
         : `Recorded your figures for ${approvedEffects.length} links, in your words. Any earlier result is now out of date.`,
     };
   };
@@ -3221,6 +3265,11 @@ export function createAgentCapabilities(
           }
           const said = statingSentenceOf(entryQuote, effect, { source: from.label, target: to.label },
             { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') }) ?? entryQuote;
+          const endpoints = linkEffectTargetOf(working, from.id, to.id);
+          if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
+            fail('target_ambiguous', linkEffectRefusalWords('target_ambiguous', working, from, to));
+            continue;
+          }
           const edgeToken = linkEffectEdgeToken(working, from.id, to.id);
           if (edgeToken === null) {
             fail('no_such_link', `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.`);
@@ -3312,6 +3361,10 @@ export function createAgentCapabilities(
       }
       // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
       const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
+      const endpoints = linkEffectTargetOf(g.raw, from.id, to.id);
+      if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
+        return { ok: false, mutated: false, refusal: 'target_ambiguous', detail: linkEffectRefusalWords('target_ambiguous', g.raw, from, to) };
+      }
       const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
       if (edgeToken === null) {
         return { ok: false, mutated: false, refusal: 'no_such_link',
