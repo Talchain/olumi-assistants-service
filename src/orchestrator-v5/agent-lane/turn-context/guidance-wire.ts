@@ -9,7 +9,7 @@
  * the id string; an item no single entity answers to gets no `item_ref` (the row is then words only). Absent `guidance`
  * = no row this turn. Pure.
  */
-import { selectGuidance, type Selection, type SelectedRow } from '../guidance/index.js';
+import { selectGuidance, type GuidanceState, type Selection, type SelectedRow } from '../guidance/index.js';
 import type { LeaderLicence } from '../../compose/leader-licence.js';
 import { assembleGuidanceSignals, type GuidanceRequest } from './guidance-signals.js';
 import { selectorSignalsOf } from './selector-signals.js';
@@ -78,6 +78,8 @@ export interface TurnGuidanceInputs {
   /** The ONE licence (`compose/leader-licence.ts`) from the same final readback; only `permitted` names a leader. */
   readonly licence: LeaderLicence;
   readonly runKey?: string;
+  /** Bounded persisted history; null means unreadable. Omission retains legacy callers' behaviour. */
+  readonly guidance?: GuidanceState | null;
   readonly state: {
     readonly graph?: unknown;
     readonly analysisState?: unknown;
@@ -89,19 +91,21 @@ export interface TurnGuidanceInputs {
 
 /**
  * THE ROW THIS TURN CARRIES, from the final readback: #2465's signals → SCIENCE/DSK's adapter → RC's selector → the wire.
- * No persisted guidance record is read yet, so there is no cooldown: the same state gives the same row on every turn,
- * until the state moves (Accept sizes the link, and S1 moves on). Never throws: an unreadable state is no row.
+ * The caller supplies bounded persisted history. The existing selector owns cooldown; an unreadable history or
+ * state gives no row. Legacy callers without a history keep their existing offers until the state moves.
  */
 export function turnGuidanceFor(i: TurnGuidanceInputs): GuidanceWire | undefined {
   if (typeof i.assistantText !== 'string' || i.assistantText.trim() === '') return undefined;
+  if (i.guidance === null) return undefined;
   try {
     const signals = assembleGuidanceSignals({
       request: i.request, offeredSpecific: i.offeredSpecific, graph: i.state.graph, analysisState: i.state.analysisState,
       analysisResult: i.state.analysisResult, optionParticipation: i.state.optionParticipation,
       identityEvaluations: [...(i.state.identityEvaluated ?? [])].map((node_id) => ({ node_id, evaluated: true })),
-      guidance: {}, explicitRequest: null, leaderLicensed: guidanceLeaderLicensed(i.licence),
+      guidance: i.guidance ?? {}, explicitRequest: null, leaderLicensed: guidanceLeaderLicensed(i.licence),
     });
-    return guidanceWireFor(selectGuidance(selectorSignalsOf(signals, null, i.runKey), {}), i.state.graph);
+    const selectedSignals = selectorSignalsOf(signals, null, i.runKey);
+    return guidanceWireFor(selectGuidance(selectedSignals, selectedSignals.guidance ?? {}), i.state.graph);
   } catch {
     return undefined;
   }

@@ -123,7 +123,8 @@ import { dispatchStructuralChallenge } from '../orchestrator-v5/handlers/structu
 import { parseStructuralChallengePress, structuralChallengeTurnFor, structuralChallengeTurnUnderLicence, type StructuralChallengeTurn } from '../orchestrator-v5/agent-lane/method-turn/structural-challenge-turn.js';
 import type { StructuralChallengeFinalRead } from '../orchestrator-v5/handlers/structural-challenge-dispatch.js';
 import { STRENGTHEN_PRESS_CHIP_ID, strengthenCardFor } from '../orchestrator-v5/agent-lane/strengthen-press.js';
-import { guidanceRequestOf, turnGuidanceFor } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
+import { guidanceRequestOf, turnGuidanceFor, type GuidanceWire } from '../orchestrator-v5/agent-lane/turn-context/guidance-wire.js';
+import { guidanceOnAnswer, type HandledGuidancePress } from '../orchestrator-v5/agent-lane/turn-context/guidance-history.js';
 import { previewBesideItsChip, proposalPreviewFor, type ProposalPreview } from '../orchestrator-v5/agent-lane/turn-context/proposal-preview.js';
 import { optionNameAliases } from '../orchestrator-v5/agent-lane/option-name-truth.js';
 import { limitAskIdsOf } from '../orchestrator-v5/agent-lane/limit-checks.js';
@@ -2201,6 +2202,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * calls, no implicit analysis. Words alone never take this path.
      */
     let fastPath: 'approve' | 'run' | 'explain' | 'research' | 'strengthen' | 'method' | undefined;
+    let handledGuidancePress: HandledGuidancePress | undefined;
     /** Whether the Run fast path made its one interpreting model call (a failed run makes none). */
     let runInterpreted = false;
     let firstAnalysisResultFirst = false;
@@ -2502,6 +2504,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         : await dispatchTool('propose_link_strengths', JSON.stringify(card.args), toolCtx, capabilities, mode);
       if (card !== null && issued !== undefined && issued.ok === true && typeof issued.proposal_id === 'string') {
         fastPath = 'strengthen';
+        handledGuidancePress = { policy_id: 'RC-STRENGTHEN-ITEM', item: `${card.target.from_id}->${card.target.to_id}` };
         const text = card.text;
         const ms = Date.now() - fastStartedAt;
         result = {
@@ -3460,8 +3463,19 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /**
      * ⭐ T2 — THE GUIDANCE ROW (M1; `turn-context/guidance-wire.ts`): at most one coaching row (+ one edits row) from this
      * same final readback, as root `guidance: {slot1?, slot2?}` with `item_ref` by id (PANEL `readGuidanceRow`). Added
-     * BEFORE the final egress so the fail-closed walk covers it; never on the answer row (a replay carries none).
+     * BEFORE final egress so the fail-closed walk covers it. Only content-free events from the surviving row are
+     * committed with the answer; a replay still carries no live row (PANEL restores from its transcript).
      */
+    let guidanceHistory: Awaited<ReturnType<NonNullable<typeof store.readGuidanceHistory>>> | null = null;
+    if (typeof store.readGuidanceHistory === 'function') {
+      try { guidanceHistory = await store.readGuidanceHistory(scenarioId); }
+      catch (err) { log.warn({ scenario_id: scenarioId, err: String(err) }, 'agent-lane: guidance history unreadable'); }
+    }
+    if (fastPath === 'method') {
+      if (pressedChipId === WIDEN_PRESS_ID) handledGuidancePress = { policy_id: 'RC-WIDEN' };
+      else if (isWhatChangesPress(pressedChipId)) handledGuidancePress = { policy_id: 'RC-WHAT-CHANGES' };
+      else if (pressedChipId === 'agent-next-pre-mortem') handledGuidancePress = { policy_id: 'RC-PREMORTEM' };
+    }
     {
       // Any proposal that would still execute waits for its yes: that card is the step, re-offered or not (`offeredNow`).
       const waitingIds = executableWaitingProposalIds(scenarioId, userId, graphHash);
@@ -3471,6 +3485,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         offeredSpecific: firstOfEachId([...offeredSpecific, ...waiting]),
         assistantText: wireBody.assistant_text,
         licence: leaderLicenceFromState(analysisState, analysisReady),
+        guidance: guidanceHistory,
         ...(narrationKey !== undefined ? { runKey: narrationKey } : {}),
         state: { graph: readbackGraph, analysisState, analysisResult, optionParticipation, identityEvaluated },
       });
@@ -3540,7 +3555,8 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
      * with no id that has an offer to carry writes its answer row under an id minted HERE, at the end —
      * no claim, no replay, no fence, exactly as before for everything else about an unnamed turn.
      */
-    const rowTurnId = turnId ?? (durablePending.length > 0 ? randomUUID() : undefined);
+    const answerGuidance = guidanceOnAnswer(wireBody.guidance as GuidanceWire | undefined, guidanceHistory, handledGuidancePress);
+    const rowTurnId = turnId ?? (durablePending.length > 0 || answerGuidance !== undefined ? randomUUID() : undefined);
     if (rowTurnId !== undefined) {
       try {
         // Through the SHARED persistence floor, like every turn row: the one
@@ -3570,6 +3586,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           handler_facts: [],
           userMessage: message,
           assistantMessage: String(wireBody.assistant_text ?? text),
+          ...(answerGuidance !== undefined ? { agent_guidance: answerGuidance } : {}),
           // The Run offer AND the offered approval, durably, with THIS answer row — so a replay, or an
           // approval that reaches a restarted process, can still find them.
           ...(durablePending.length > 0 ? { pending_actions: durablePending } : {}),

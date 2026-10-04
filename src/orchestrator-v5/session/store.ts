@@ -26,6 +26,8 @@ import type {
 import type { CoachingState } from '../coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from '../coaching/coaching-state-snapshot.js';
 import type { SessionTurnWithContent } from './conversation-content.js';
+import type { AnswerGuidance } from '../agent-lane/turn-context/guidance-history.js';
+import type { GuidanceState } from '../agent-lane/guidance/index.js';
 // Type-only, and deliberately so: `turn-fence.ts` imports
 // `StateCommitFailedError` from THIS file, and a value import here would close
 // that into a runtime cycle. `import type` is erased entirely.
@@ -209,6 +211,8 @@ export interface SessionTurnWrite {
    * signal codes + SHA-prefix hashes are persisted, never raw user content.
    */
   readonly coaching_state?: CoachingState | null;
+  /** Content-free post-egress guidance events, atomically committed with this Agent answer. */
+  readonly agent_guidance?: AnswerGuidance;
   /**
    * V5 Conversation Context Reliability: the user's verbatim turn message
    * (boundary `payload.message`), persisted to
@@ -279,6 +283,8 @@ export interface CommittedTurnRecord {
 
 export interface SessionStore {
   append(write: SessionTurnWrite): Promise<SessionAppendOutcome>;
+  /** Uncached, scenario-scoped bounded answer history. Read failure throws; absent capability is unknown. */
+  readGuidanceHistory?(scenarioId: string): Promise<GuidanceState>;
   // V5 Conversation Context Reliability: returns the content-bearing superset
   // (user_message / assistant_message re-attached after the vendored strict
   // parse). SessionTurnWithContent ⊇ SessionTurn, so existing consumers that

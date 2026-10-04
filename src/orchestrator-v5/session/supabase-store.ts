@@ -107,6 +107,9 @@ import {
 import { MUTATION_RECEIPT_FACT_TYPES } from '../mutation-receipt-fact-types.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { repairGraphForPersistence } from '../repair-graph-for-persistence.js';
+import { guidanceHistoryOf, GUIDANCE_HISTORY_LIMIT, parseAnswerGuidance } from '../agent-lane/turn-context/guidance-history.js';
+import type { GuidanceState } from '../agent-lane/guidance/index.js';
+import { isAgentAnswerRow } from './conversation-as-seen.js';
 
 function parseAtomicVersionedAppend(data: unknown): SessionAppendOutcome {
   if (data === null || typeof data !== 'object' || Array.isArray(data)) {
@@ -367,6 +370,13 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   private async appendThroughRpc(write: SessionTurnWrite): Promise<SessionAppendOutcome> {
+    if (write.agent_guidance !== undefined && (parseAnswerGuidance(write.agent_guidance) === null
+      || write.graph != null || write.modelVersion !== undefined || write.briefText != null
+      || write.coaching_state != null || write.handler_facts.length !== 0
+      || write.turn_class !== 'direct_answer' || write.handler_id !== null || !write.response_emitted
+      || write.turn_id.endsWith(TURN_CLAIM_SUFFIX) || !isAgentAnswerRow(write))) {
+      throw new StateCommitFailedError('Guidance metadata requires a final Agent answer without a graph write');
+    }
     // A3 graph CAS observe-mode — pre-RPC stale-write evaluation. Runs ONLY
     // for graph-bearing writes when the mode is not 'off'; flag-off pays zero
     // SELECTs and the RPC call below is byte-identical to today. In observe
@@ -494,9 +504,10 @@ export class SupabaseSessionStore implements SessionStore {
     write: SessionTurnWrite,
     baseRpcArgs: Record<string, unknown>,
     rpcMode: GraphCasRpcMode,
-  ): Promise<{ id: string }> {
+  ): Promise<SessionAppendOutcome> {
     const useV3 = rpcMode !== 'off' && write.graph != null;
-    const rpcName = useV3 ? 'append_turn_atomic_v3' : 'append_turn_atomic_v2';
+    const rpcName = useV3 ? 'append_turn_atomic_v3'
+      : write.agent_guidance !== undefined ? 'append_agent_answer_with_guidance' : 'append_turn_atomic_v2';
     const { data, error } = useV3
       ? await this.client.rpc('append_turn_atomic_v3', {
           ...baseRpcArgs,
@@ -513,7 +524,10 @@ export class SupabaseSessionStore implements SessionStore {
           // enforce → real CAS (OLGC1 on divergence); shadow → unconditional.
           p_cas_enforce: rpcMode === 'enforce',
         })
-      : await this.client.rpc('append_turn_atomic_v2', baseRpcArgs);
+      : await this.client.rpc(rpcName, {
+          ...baseRpcArgs,
+          ...(write.agent_guidance !== undefined ? { p_agent_guidance: write.agent_guidance } : {}),
+        });
 
     if (error) {
       // v3 atomic CAS conflict → typed 409-class refusal, NEVER a silent
@@ -538,6 +552,16 @@ export class SupabaseSessionStore implements SessionStore {
         `${rpcName} RPC failed: ${errMsg(error)}`,
         { cause: error, rpc_code: errCode(error) },
       );
+    }
+    if (write.agent_guidance !== undefined) {
+      if (data === null || typeof data !== 'object' || Array.isArray(data) || typeof data.id !== 'string'
+        || typeof data.replayed_prior_turn !== 'boolean' || typeof data.prior_turn_conflict !== 'boolean'
+        || (data.replayed_prior_turn && data.prior_turn_conflict)) {
+        throw new StateCommitFailedError(`${rpcName} returned malformed answer receipt`);
+      }
+      this.cache.invalidateAll(write.scenario_id);
+      return { id: data.id, ...(data.replayed_prior_turn ? { replayedPriorTurn: true } : {}),
+        ...(data.prior_turn_conflict ? { priorTurnConflict: true } : {}) };
     }
     if (typeof data !== 'string') {
       throw new StateCommitFailedError(
@@ -1570,6 +1594,24 @@ export class SupabaseSessionStore implements SessionStore {
    * Only the return shape differs at the seam (`string | null` here,
    * re-wrapped as `{ id } | null` for the existing caller).
    */
+  async readGuidanceHistory(scenarioId: string): Promise<GuidanceState> {
+    const { data, error } = await this.client.from('v5_conversation_turns')
+      .select('scenario_id, request_hash, turn_id, agent_guidance')
+      .eq('scenario_id', scenarioId).eq('turn_class', 'direct_answer').is('handler_id', null)
+      .eq('response_emitted', true).like('request_hash', 'agent_turn:%')
+      .not('turn_id', 'like', NOT_A_CLAIM_PATTERN).not('agent_guidance', 'is', null)
+      .order('created_at', { ascending: false }).order('id', { ascending: false })
+      .limit(GUIDANCE_HISTORY_LIMIT).abortSignal(AbortSignal.timeout(ANALYSIS_REREAD_TIMEOUT_MS));
+    if (error || !Array.isArray(data)) throw new SessionReadError('Guidance history unavailable');
+    if (data.some(row => row.scenario_id !== scenarioId || !isAgentAnswerRow(row)
+      || typeof row.turn_id !== 'string' || row.turn_id.endsWith(TURN_CLAIM_SUFFIX))) {
+      throw new SessionReadError('Guidance history scope invalid');
+    }
+    const history = guidanceHistoryOf(data.map(row => row.agent_guidance));
+    if (history === null) throw new SessionReadError('Guidance history malformed');
+    return history;
+  }
+
   async readCommittedTurn(scenarioId: string, turnId: string): Promise<CommittedTurnRecord | null> {
     const { data, error } = await this.client
       .from('v5_conversation_turns')
