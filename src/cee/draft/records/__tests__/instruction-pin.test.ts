@@ -845,7 +845,7 @@ const CONTAMINATED_2558_CONNECT_SHA256 =
   "656f282ca14dfa882b5f46958895b8ef1bfd3874f42fc9c6fdf20e90eef57ef3";
 const CONTAMINATED_2558_CONNECT_BYTES = 5843;
 /**
- * v24, 4 Oct 2026. UNMEASURED on model output. #2558's bytes with the sealed
+ * SUPERSEDED — v24, 4 Oct 2026 (#2562). UNMEASURED on model output. #2558's bytes with the sealed
  * brief's figures in the natural-effect paragraph replaced by generic examples
  * that belong to no evaluation brief ("each extra delivery van cuts the average
  * delivery time by 12 minutes", "each extra seat costs $4 a week", "$8,000 from
@@ -863,6 +863,20 @@ const PREREGISTERED_V24_SHAPE_BYTES = 17414;
 const PREREGISTERED_V24_CONNECT_SHA256 =
   "e783f7080d2575f42acc704f255877a3a55eb815d077e5c70cedf7d5cba987f3";
 const PREREGISTERED_V24_CONNECT_BYTES = 5859;
+/**
+ * v25, 5 Oct 2026. UNMEASURED on model output. v24 with its derivation example
+ * moved off the sealed brief's 10% ("$8,000 from $80,000 and 10%" became
+ * "$900 from $6,000 and 15%"): the 10% was the sealed price rise, so the
+ * example echoed that brief's own derivation (contamination audit, 5 Oct).
+ * ⭐ THE SHAPE HALF IS BYTE-IDENTICAL to v24's (and #2558's): v25 moves the
+ * connect half only.
+ */
+const PREREGISTERED_V25_INSTRUCTION_SHA256 =
+  "7b7b542c2f4c44efe30df6646d611170e0a0e3ae40450e8ab86eef3bde081497";
+const PREREGISTERED_V25_INSTRUCTION_BYTES = 23270;
+const PREREGISTERED_V25_CONNECT_SHA256 =
+  "bebb68395b9e4eaf9db5d935abf99d4343a2fa2fa2655de5b37641664c03a0af";
+const PREREGISTERED_V25_CONNECT_BYTES = 5856;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
@@ -936,22 +950,36 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the registered artefact", () => {
-  it("hashes to the unmeasured v24 source registration at the pinned byte length, halves pinned apart", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V24_INSTRUCTION_SHA256);
+  it("hashes to the unmeasured v25 source registration at the pinned byte length, halves pinned apart", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V25_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V24_INSTRUCTION_BYTES,
+      PREREGISTERED_V25_INSTRUCTION_BYTES,
     );
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
       PREREGISTERED_V24_SHAPE_SHA256,
     );
     expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V24_SHAPE_BYTES);
     expect(createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex")).toBe(
-      PREREGISTERED_V24_CONNECT_SHA256,
+      PREREGISTERED_V25_CONNECT_SHA256,
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V24_CONNECT_BYTES);
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V25_CONNECT_BYTES);
   });
 
-  it("keeps the contaminated #2558 bytes identifiable: v24 differs in the connect half alone", () => {
+  it("keeps v24 (#2562) identifiable: v25 moves its connect half alone", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(PREREGISTERED_V24_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V24_INSTRUCTION_BYTES);
+    expect(createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      PREREGISTERED_V24_CONNECT_SHA256,
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V24_CONNECT_BYTES);
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      PREREGISTERED_V24_SHAPE_SHA256,
+    );
+    // The sealed brief's 10% derivation is gone from the example.
+    expect(DRAFT_RECORDS_INSTRUCTION).not.toContain("and 10%");
+  });
+
+  it("keeps the contaminated #2558 bytes identifiable: v25 differs in the connect half alone", () => {
     expect(draftRecordsInstructionHash()).not.toBe(CONTAMINATED_2558_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(CONTAMINATED_2558_INSTRUCTION_BYTES);
     expect(createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex")).not.toBe(
@@ -1252,7 +1280,7 @@ describe("the draft records instruction is the registered artefact", () => {
     // say which convention its number is in" without reading a diff.
     // ⚠⚠ #2558 (4 Oct) changed this half (the explicit-baseline sentence) and
     // re-pointed the v23 literal in place; v23 is restored and the current
-    // half is v24's, byte-identical to #2558's (v24 moves the connect half only).
+    // half is v24's, byte-identical to #2558's (v24 and v25 move the connect half only).
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
       PREREGISTERED_V24_SHAPE_SHA256,
     );
@@ -1263,7 +1291,7 @@ describe("the draft records instruction is the registered artefact", () => {
         Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8") -
         1,
       "the three pins no longer add up — one of them was updated without the others",
-    ).toBe(PREREGISTERED_V24_INSTRUCTION_BYTES);
+    ).toBe(PREREGISTERED_V25_INSTRUCTION_BYTES);
     // WITHDRAWN — v20.0's shape half, the value this pin USED to name, kept
     // beside the live one exactly as every entry below it is. Asserted DISTINCT
     // for a DIFFERENT reason from those, and the difference is worth stating:
@@ -1383,11 +1411,12 @@ describe("the draft records instruction is the registered artefact", () => {
     // replaced was false at `f18d941b`.
     // ⚠⚠ #2558 changed this half (the natural-effect paragraph, with the sealed
     // brief's figures as its examples) and re-pointed the v22 literal in place;
-    // v22 is restored, and v24 is that paragraph with generic examples.
+    // v22 is restored; v24 is that paragraph with generic examples, and v25 moves
+    // its derivation example off the sealed brief's 10%.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe(PREREGISTERED_V24_CONNECT_SHA256);
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V24_CONNECT_BYTES);
+    ).toBe(PREREGISTERED_V25_CONNECT_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V25_CONNECT_BYTES);
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
     ).not.toBe(PREREGISTERED_V22_CONNECT_SHA256);
