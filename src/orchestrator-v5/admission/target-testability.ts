@@ -194,9 +194,9 @@ export function notTargetTestableSentence(graph: unknown, verdict: TargetTestabi
   const lever = verdict.failures.find((f) => f.case === 'c')?.lever;
   const identityCase = verdict.failures.some((f) => f.code === 'identity_unconfirmed');
   const said = (c: TargetCase): readonly [string, string | null] => c === 'a' ? [`it needs today's level of ${name}`, `What is ${name} today?`]
-    : c === 'c' ? [`the model doesn't yet say how ${lever ?? 'what the options change'} turns into ${name}`,
+    : c === 'c' ? [`the model doesn't yet say how ${lever ?? 'what the options change'} turns into ${name} in ${unit || 'the goal unit'}`,
       // AIQ (c): the smallest missing link, in natural units; a pending identity has its own card, so no second question.
-      identityCase || lever === undefined ? null : `Roughly how much ${name} does a change in ${lever} bring?`]
+      identityCase || lever === undefined ? null : `Roughly how much ${name} in ${unit || 'the goal unit'} does a change in ${lever} bring?`]
     : c === 'b' ? [`it can't yet test a '${typeof comparator === 'string' ? comparator : ''} ${figure}' target on ${name}`, null]
     : [`your target is in ${unit || 'its own units'}, but the model measures ${name} only relative to that target`, `What is ${name} today${unit !== '' ? `, in ${unit}` : ''}?`];
   const cases = [...new Set(verdict.failures.map((f) => f.case))];
