@@ -110,7 +110,8 @@ describe('agent route: real structural challenge press reachability', () => {
     const { buildTurnContext, loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
     const { createRegistry, resolveHandler } = await import('../../tools/registry.js');
     const { priorRunForSeed } = await import('../../coaching/seed-reuse.js');
-    const { NO_CLAIM, runWithBoundAnalysisSnapshot } = await import('../../run-analysis-snapshot-binding.js');
+    // Kept as the module namespace: destructuring widens its `unique symbol` NO_CLAIM to `symbol` (typecheck ratchet).
+    const binding = await import('../../run-analysis-snapshot-binding.js');
     const payload = makeMessagePayload({ scenario_id: SCENARIO, stage: 'analyse', turn_class: 'decide', message: 'run analysis',
       ...(runTurnId !== undefined ? { turn_id: runTurnId } : {}) });
     const context = await buildTurnContext(payload, requestId);
@@ -119,7 +120,7 @@ describe('agent route: real structural challenge press reachability', () => {
       scenarioReader: () => loadScenarioSnapshotForRunAnalysis(SCENARIO, requestId),
       counterfactualClient: null,
     }), 'run_analysis')!;
-    const output = await runWithBoundAnalysisSnapshot({ scenarioId: SCENARIO, analysisGraphHash: NO_CLAIM, priorRunSeed: priorRunForSeed([]) },
+    const output = await binding.runWithBoundAnalysisSnapshot({ scenarioId: SCENARIO, analysisGraphHash: binding.NO_CLAIM, priorRunSeed: priorRunForSeed([]) },
       () => handler({ context, payload, requestId, signal: new AbortController().signal, orientationText: '' }));
     const fact = output.handler_facts.find((entry) => entry.fact_type === 'run_analysis')!;
     expect(fact).toBeDefined();
