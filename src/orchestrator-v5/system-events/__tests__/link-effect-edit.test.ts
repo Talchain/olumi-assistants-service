@@ -355,3 +355,34 @@ describe('link effect writer — a non-unique target writes nothing, in either a
     expect(linkEffectEdgeToken(g, 'subs', 'price')).toBeNull();
   });
 });
+
+/**
+ * ⛔ ONLY A CAUSAL LINK IS SIZED (adversarial review of #2561, pre-existing on staging): a bidirected edge is an
+ * unmeasured-confounder annotation the analysis never simulates, so the user's figure is never written onto it.
+ */
+describe('link effect writer — a confounder (bidirected) edge is never the link a figure sizes', () => {
+  const confounderOf = (e: Rec): Rec => ({ ...structuredClone(e), edge_type: 'bidirected', provenance: { source: 'cee_hypothesis' } });
+
+  it('RED: a pair holding only a confounder → no token, edge_not_found, nothing written', () => {
+    const g = storedGraph();
+    g.edges = g.edges.map((e: Rec) => (e.from === 'price' && e.to === 'subs' ? confounderOf(e) : e));
+    const pristine = structuredClone(g);
+    expect(linkEffectEdgeToken(g, 'price', 'subs')).toBeNull();
+    expect(linkEffectTargetOf(g, 'price', 'subs')).toEqual({ kind: 'refused', reason: 'edge_not_found' });
+    expect(applyLinkEffectEdit(params({ expected: revisionOf(storedGraph()) }, g))).toEqual({ kind: 'refused', reason: 'edge_not_found' });
+    expect(g).toEqual(pristine);
+  });
+
+  it.each([false, true])('RED: a directed link beside a confounder on the same pair → the directed link is sized, the confounder byte-equal (confounder first=%s)', (first) => {
+    const g = storedGraph();
+    const confounder = confounderOf(edgeOf(g));
+    g.edges = first ? [confounder, ...g.edges] : [...g.edges, confounder];
+    const before = structuredClone(confounder);
+    const r = applyLinkEffectEdit(params({}, g));
+    expect(r.kind, JSON.stringify(r)).toBe('mutated');
+    if (r.kind !== 'mutated') return;
+    const out = (r.mutatedGraph as Rec).edges.filter((e: Rec) => e.from === 'price' && e.to === 'subs');
+    expect(out.find((e: Rec) => e.edge_type === 'bidirected')).toEqual(before);
+    expect(out.find((e: Rec) => e.edge_type !== 'bidirected').provenance.magnitude).toBe('user_stated');
+  });
+});
