@@ -2375,12 +2375,8 @@ async function dispatchFactorValueEdit(
    * the window this function always read, so the handler's `priorFacts` input
    * keeps its meaning; only the freshness below chooses the durable set.
    */
-  const {
-    hotWindow: priorFactsRead,
-    factSet: analysisFactSet,
-    analysisInvalidatedAt,
-    analysisInvalidatedAtReadOk,
-  } = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
+  const analysisInputs = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
+  const { hotWindow: priorFactsRead } = analysisInputs;
   const priorFacts = priorFactsRead.facts;
 
   const result = await applyFactorValueEdit({
@@ -2652,7 +2648,7 @@ async function dispatchFactorValueEdit(
    */
   // The shared rule (`deriveWriteReplyFreshness`): absence only in a COMPLETE record.
   const freshness: FreshnessDerivation = deriveWriteReplyFreshness(
-    { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt, analysisInvalidatedAtReadOk },
+    analysisInputs,
     persistedAnalysisGraphHash,
     persistedGraphBytes,
   );
