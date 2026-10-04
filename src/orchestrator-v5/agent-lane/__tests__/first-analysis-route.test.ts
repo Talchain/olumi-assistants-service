@@ -46,8 +46,12 @@ const st = (sid: string): Scenario => {
   }
   return s;
 };
-const hashOf = (s: Scenario) => knobs.canonicalHash
-  ? computeAnalysisAffectingGraphHash({ ...s.graph, edges: [...s.graph.edges, ...s.extraEdges] } as never) : `rev-${s.revision}`;
+const hashOf = (s: Scenario): string => {
+  if (!knobs.canonicalHash) return `rev-${s.revision}`;
+  const hash = computeAnalysisAffectingGraphHash({ ...s.graph, edges: [...s.graph.edges, ...s.extraEdges] } as never);
+  if (hash === null) throw new Error('The L3 fixture must have a canonical analysis hash.');
+  return hash;
+};
 
 /** Knobs, reset per test. */
 let knobs: {
