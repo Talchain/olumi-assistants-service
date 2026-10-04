@@ -65,11 +65,14 @@ import { buildOptionEffectRawOperation, linkedFactorsOf, formatOptionEffectWrite
 import { mergeAppliedGraphForPersistence } from '../handlers/edit-graph-dispatch.js';
 import { buildEditGraphHandlerFact } from '../handlers/edit-graph-fact-builder.js';
 import { evaluateEditGraphMutations } from '../handlers/edit-graph-referee-gate.js';
+import { evaluateFrameGate } from '../graph-management/frame-gate.js';
 import { threadHoldsThroughMutatingCommit } from '../handlers/hold-thread-through.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { normaliseAbsenceOnly, projectGraphForPersistence } from '../persisted-graph-projection.js';
 import { interventionKeysFollowInterventions } from '../reindex-intervention-keys.js';
 import { reconcileTopLevelOptionsFromNodes } from '../reconcile-top-level-options.js';
+import { applyOptionGapDeclarations, optionGapFields, optionGapCardWords, optionGapsHeld,
+  optionGapPostimageIsScoped, optionGapOperands, parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
 import { APPROVED_LEVEL_ADOPTION_SOURCE, approvedLevelSourceFor, runWithApprovedAdoption, runWithApprovedLinkAdoptions } from '../agent-lane/approved-adoption-context.js';
 import { runWithStatedLinkBand } from '../agent-lane/stated-link-band-context.js';
 import { factorUnitOf } from '../agent-lane/unit-conflict.js';
@@ -689,6 +692,8 @@ export type OptionInterventionBatchExecutionInput =
      * exactly these, or nothing is written (`links_mismatch`): what was approved is what is written.
      */
     readonly expectedLinks?: readonly string[];
+    /** Declarations carried by the SAME approved proposal; no extra wire operation or write. */
+    readonly optionGaps?: readonly ApprovedOptionGap[];
     /**
      * ⭐ A COMPOUND APPROVAL'S FACTOR VALUES (Canonical #70 5849037691): applied through the canonical value writer on
      * the SAME base, and written in the SAME append as the links and levels — one approval, one commit, one receipt.
@@ -722,6 +727,15 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       readonly linkIndex?: number }
   | { readonly kind: 'unverified'; readonly reason: string; readonly commitAttempted: boolean }
 > {
+  const gapInput = parseOptionGapDeclarations(input.optionGaps, Object.hasOwn(input, 'optionGaps'));
+  if (gapInput.kind === 'invalid') return { kind: 'refused', reason: gapInput.reason };
+  const optionGaps = gapInput.declarations;
+  if (optionGaps.some(d => !input.targets.some(t => t.optionId === d.optionId))) {
+    return { kind: 'refused', reason: 'option_gap_without_level_anchor' };
+  }
+  if (optionGaps.length > 0 && ((input.linkStrengths?.length ?? 0) > 0 || input.linkEffect !== undefined || input.identityConfirm !== undefined)) {
+    return { kind: 'refused', reason: 'option_gaps_not_alone_with_identity_or_links' };
+  }
   let before: unknown;
   let pendings: Awaited<ReturnType<OptionInterventionStore['readMostRecentPendingActions']>>;
   try {
@@ -729,6 +743,15 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     pendings = await store.readMostRecentPendingActions(input.scenarioId, { validation: 'strict' });
   } catch {
     return { kind: 'unverified', reason: 'canonical_read_failed', commitAttempted: false };
+  }
+  if (optionGaps.length > 0) {
+    if (!isEditableGraph(before) || !isDeepStrictEqual(projectGraphForPersistence(before), normaliseAbsenceOnly(before))) {
+      return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+    }
+    if (computeAnalysisAffectingGraphHash(before) !== input.expectedGraphHash) return { kind: 'refused', reason: 'stale_graph' };
+    if (optionGaps.some(d => d.operands !== undefined && !isDeepStrictEqual(d.operands, optionGapOperands(before, d.optionId)))) {
+      return { kind: 'refused', reason: 'gap_statement_changed_since_approval' };
+    }
   }
   // ⭐ Whose level this is: Olumi's, when THIS write is the approved adoption the Agent's verified
   // proposal names (same scenario, option, factor, value); otherwise the inspector's `user_specified`.
@@ -738,7 +761,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     return { optionId: t.optionId, factorId: t.factorId, modelValue: t.modelValue, ...(source !== undefined ? { source } : {}),
       ...(t.figure !== undefined ? { figure: t.figure } : {}) };
   });
-  const { targets: _callerTargets, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
+  const { targets: _callerTargets, optionGaps: _callerGaps, expectedLinks, values: _callerValues, frames: _callerFrames, linkStrengths: _callerLinks,
     linkEffect: _callerEffect, identityConfirm: _callerIdentity, lastRunIdentityUse: _callerRunUse, ...common } = input;
   // ⭐ THE VALUES FIRST, ON THE PERSISTED BASE, IN MEMORY — then the links and levels on the graph they produce, and ONE
   // append for all of it. The caller's base is checked against the PERSISTED model before anything is applied: the
@@ -868,17 +891,48 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // ⭐ A VALUES-ONLY APPROVAL IS ONE COMMIT TOO (Canonical #70 5850018984): Olumi's starting point is usually values
   // with no level, and wrote each value as its own commit. With no level to prepare, the values (and their ranges)
   // are the whole plan: the same writer, adoption authority, scope guard, ONE append and ONE read-back.
-  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount > 0
+  const candidate = targets.length === 0 && values.length + frames.length + linkStrengths.length + effectCount + optionGaps.length > 0
     ? ({ kind: 'unchanged' } as const)
     : applyOptionInterventionBatch({ ...common, expectedGraphHash: levelBaseHash, persistedGraph: levelBase, targets });
   if (candidate.kind === 'refused') return candidate;
-  if (candidate.kind === 'unchanged' && !valuesChanged) return candidate;
   // Every level already held (a compound whose values alone change): the values commit on their own, still ONE append.
-  const plan = candidate.kind === 'candidate'
+  let plan = candidate.kind === 'candidate'
     ? { graph: candidate.graph, operations: candidate.operations, analysisGraphHash: candidate.analysisGraphHash,
       targetsWritten: candidate.targetsWritten, handlerFacts: [...valueFacts, candidate.handlerFact] as unknown[] }
     : { graph: levelBase as EditableGraph, operations: [] as PatchOperation[], analysisGraphHash: levelBaseHash,
       targetsWritten: [] as OptionLevelTarget[], handlerFacts: [...valueFacts] as unknown[] };
+  let gapsChanged = false;
+  if (optionGaps.length > 0) {
+    const gaps = applyOptionGapDeclarations(plan.graph, optionGaps);
+    if (gaps.kind === 'refused') return { kind: 'refused', reason: gaps.reason };
+    gapsChanged = gaps.changed;
+    if (gapsChanged) {
+      const gapOperations: PatchOperation[] = optionGaps.map(d => ({ op: 'update_node', path: d.optionId,
+        value: d.mechanisms.length === 0 ? { unresolved_targets: [], user_questions: [] }
+          : optionGapFields(String(plan.graph.nodes.find(n => n.id === d.optionId)?.label ?? d.optionId), d.mechanisms) }));
+      // These invariant-coupled fields belong to this approved level batch,
+      // never the generic update_node referee/applier. Reuse its frame authority;
+      // preparation and scoped readback keep both carriers in this ONE commit.
+      const permission = evaluateFrameGate(input.expectedGraphHash, {
+        graphReadable: true, currentGraphHash: computeAnalysisAffectingGraphHash(before as EditableGraph), freshness: input.freshness,
+      });
+      if (permission.outcome.kind !== 'proceed') return { kind: 'refused', reason: `mutation_${permission.outcome.kind}` };
+      const graph = projectGraphForPersistence(gaps.graph);
+      if (!isEditableGraph(graph) || !optionGapPostimageIsScoped(plan.graph, graph, optionGaps) || !optionGapsHeld(graph, optionGaps)) {
+        return { kind: 'refused', reason: 'option_gap_scope_mismatch' };
+      }
+      const analysisGraphHash = computeAnalysisAffectingGraphHash(graph);
+      if (!analysisGraphHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
+      const operations = [...plan.operations, ...gapOperations];
+      const appliedChanges = buildAppliedChanges(operations, graph, input.hasExistingAnalysis, levelBase as EditableGraph);
+      const fact = buildEditGraphHandlerFact({ editResult: { blocks: [], assistantText: appliedChanges.summary,
+        latencyMs: 0, wasRejected: false, operations, appliedGraph: graph, appliedChanges },
+        preEditGraph: levelBase as EditableGraph, hasExistingAnalysis: input.hasExistingAnalysis });
+      if (fact === null) return { kind: 'refused', reason: 'mutation_fact_unavailable' };
+      plan = { ...plan, graph, operations, analysisGraphHash, handlerFacts: [...valueFacts, fact] as unknown[] };
+    }
+  }
+  if (candidate.kind === 'unchanged' && !valuesChanged && !gapsChanged) return candidate;
   if (expectedLinks !== undefined) {
     const adding = plan.operations.filter(o => o.op === 'add_edge').map(o => o.path).sort();
     if (!isDeepStrictEqual(adding, [...new Set(expectedLinks)].sort())) return { kind: 'refused', reason: 'links_mismatch' };
@@ -892,7 +946,8 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
   // P1-a: one line naming Olumi's own links this commit re-sized, labels read from the committed graph.
   const resizedLine = groupResizedLinks(linksResized, [...values.map(v => v.factorId), ...frames.map(f => f.factorId)], labelOf)
     .map(resizedLinksSentence);
-  const acknowledgment = [...valueConfirmations, ...resizedLine, ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
+  const acknowledgment = [...valueConfirmations, ...resizedLine,
+    ...(gapsChanged ? optionGaps.map(d => optionGapCardWords(labelOf(d.optionId), d.mechanisms)) : []), ...plan.targetsWritten.map(t => formatOptionEffectWriteAck({ optionLabel: labelOf(t.optionId),
     factorLabel: labelOf(t.factorId), committedValue: t.modelValue,
     ...((f) => (f !== undefined ? { committedFigure: f } : {}))(committedFigureOf(plan.graph, t.optionId, t.factorId, t.modelValue)) })
     + (linked.has(`${t.optionId}::${t.factorId}`) ? ` ${labelOf(t.optionId)} is now linked to ${labelOf(t.factorId)}, in the same change.` : ''))]
@@ -920,7 +975,7 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
     const reloaded = await store.loadGraph(input.scenarioId);
     // CommitResult.persistedGraph is projected INPUT, not DB readback. A
     // duplicate turn may return an older row without applying new request bytes.
-    if (!committed.graphPersisted || !isDeepStrictEqual(reloaded, plan.graph)
+    if (!committed.graphPersisted || !isDeepStrictEqual(reloaded, plan.graph) || (optionGaps.length > 0 && !optionGapsHeld(reloaded, optionGaps))
       || input.targets.some(t => readCommittedOptionEffect(reloaded, t.optionId, t.factorId) !== t.modelValue)) {
       return { kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true };
     }

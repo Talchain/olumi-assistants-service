@@ -6,6 +6,8 @@ import { validateAnalysisRunFactIdentity } from '../context/analysis-interpretat
 import { compareRunGoalUnitSnapshot, isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { matchesHistoricalAnalysisIdentity } from '../context/historical-analysis-identity.js';
 import { computeLegacyAnalysisAffectingGraphHash } from '../context/graph-hash-legacy.js';
+import { RUN_ANALYSIS_PROJECTION_KEY } from '../context/analysis-projection-policy.js';
+import { ANALYSIS_PROJECTION_VERSION } from '../context/graph-identity.js';
 import { selectCanonicalAnalysisState } from '../context/canonical-analysis-state.js';
 import { composeAnalysisStateV1 } from '../compose/analysis-state-v1.js';
 import { leaderLicenceFromState, type LeaderLicence } from '../compose/leader-licence.js';
@@ -56,8 +58,12 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
     const result = record((fact as { result?: unknown }).result);
     const checked = validateAnalysisRunFactIdentity(result);
     if (checked.status !== 'confirmed') { refusal = 'unconfirmed_identity'; continue; }
+    const projection = record(result?.enrichment)?.[RUN_ANALYSIS_PROJECTION_KEY];
+    if (projection !== undefined && projection !== ANALYSIS_PROJECTION_VERSION) {
+      refusal = 'unconfirmed_identity'; continue;
+    }
     if (checked.identity.graph_hash_at_run !== runHash.value
-      && checked.identity.graph_hash_at_run !== computeLegacyAnalysisAffectingGraphHash(version.graph as typeof parsed.data)) continue;
+      && (projection !== undefined || checked.identity.graph_hash_at_run !== computeLegacyAnalysisAffectingGraphHash(version.graph as typeof parsed.data))) continue;
     const runId = result?.run_id;
     const snapshot = RunInputSnapshotSchema.safeParse(result?.input_snapshot);
     if (checked.identity.scenario_id !== version.scenario_id || typeof runId !== 'string'

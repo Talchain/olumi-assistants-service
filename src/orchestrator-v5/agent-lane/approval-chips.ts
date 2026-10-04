@@ -208,7 +208,9 @@ export function approvalChipsFor(
       AMEND_CHIP,
     ];
   }
-  const detail = usersOwnCardFor(tool, labelSourceFor?.(proposalId))
+  const gapCard = stored?.operations.some(op => op.op === 'set_option_intervention' && Object.hasOwn((op.value ?? {}) as object, 'unmodelled_mechanisms'))
+    && stored.proposal_id === proposalId && held?.public_label === stored.public_label ? stored.public_label : undefined;
+  const detail = gapCard ?? usersOwnCardFor(tool, labelSourceFor?.(proposalId))
     ?? (tool === 'propose_link_strengths' ? linkStrengthCardFor(proposalId, labelSourceFor?.(proposalId)?.proposal) : undefined);
   return [{ id: approvalChipIdFor(proposalId), label: approvalLabelFor(tool, labelSourceFor?.(proposalId)), message: approve.message, ...(detail !== undefined ? { detail } : {}) }, AMEND_CHIP];
 }

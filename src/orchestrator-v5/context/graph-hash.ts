@@ -158,7 +158,7 @@ export function computeAnalysisAffectingGraphHashSha256(
     return null;
   }
 
-  const factorIds = new Set(nodes.filter((node) => node.kind === 'factor').map((node) => node.id));
+  const factorIds = new Set(nodes.filter((node) => node != null && node.kind === 'factor').map((node) => node.id));
   const mirroredOptions = Array.isArray(options)
     ? options.map((option) => projectOptionForCanonicalBuilder(option, factorIds))
         .filter((option) => option !== null)
@@ -168,9 +168,9 @@ export function computeAnalysisAffectingGraphHashSha256(
     nodes: nodes.map((node) => {
       // Match canonical readiness: one valid mirror owns this option, even in
       // a partial mirror; missing/invalid/duplicate mirrors fall back to the node.
-      const mirrors = node.kind === 'option' && typeof node.id === 'string'
+      const mirrors = node != null && node.kind === 'option' && typeof node.id === 'string'
         ? mirroredOptions.filter((option) => option.id === node.id.trim()) : [];
-      const option = node.kind === 'option' && typeof node.id === 'string'
+      const option = node != null && node.kind === 'option' && typeof node.id === 'string'
         ? mirrors.length === 1 ? mirrors[0]! : projectOptionForCanonicalBuilder(node, factorIds) : null;
       return { ...projectNode(node), ...projectAdmissionGaps(option) };
     }).sort((a, b) => a.id.localeCompare(b.id)),

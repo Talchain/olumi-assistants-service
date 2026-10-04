@@ -1,3 +1,5 @@
+import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
+
 /**
  * V5 deterministic system-event dispatch.
  *
@@ -2820,6 +2822,7 @@ export async function dispatchOptionLevelsBatch(
     readonly base_graph_hash: string;
     /** The links the approved proposal declared (`from::to`); a different set writes nothing. */
     readonly expectedLinks?: readonly string[];
+    readonly optionGaps?: readonly ApprovedOptionGap[];
     /** A compound approval's factor values, in the user's units: written in the SAME commit as the levels. */
     readonly values?: readonly ApprovedFactorValue[];
     /** The ranges it attaches to factors holding a bare amount: the SAME commit too. */
@@ -2897,13 +2900,14 @@ export async function dispatchOptionLevelsBatch(
   // level whose approved links are declared — goes through the batch entry.
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
-    && batch.identityConfirm === undefined
+    && batch.identityConfirm === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
       getSessionStore())
     : await executeOptionInterventionBatch({ ...common, targets: batch.targets,
       ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}),
+      ...(batch.optionGaps !== undefined ? { optionGaps: batch.optionGaps } : {}),
       ...(batch.values !== undefined && batch.values.length > 0 ? { values: batch.values } : {}),
       ...(batch.frames !== undefined && batch.frames.length > 0 ? { frames: batch.frames } : {}),
       ...(linkStrengths.length > 0 ? { linkStrengths, lastRunIdentityUse } : {}),
@@ -3135,6 +3139,8 @@ export type CommitOptionLevelsInput = {
   readonly turn_id: string;
   /** The links the approved proposal declared. They must EQUAL the ones its levels need (`links_mismatch` otherwise). */
   readonly links: readonly { readonly option_id: string; readonly factor_id: string }[];
+  /** Exact gap declarations carried by the approved proposal, committed with its levels. */
+  readonly option_gaps?: readonly { readonly option_id: string; readonly mechanisms: readonly string[]; readonly operands?: Record<string, unknown> }[];
   readonly levels: readonly {
     readonly option_id: string;
     readonly factor_id: string;
@@ -3239,6 +3245,13 @@ export type CommitOptionLevelsResult =
  * route's ownership pre-flight); this grants nothing new, and adds no wire member.
  */
 export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> {
+  const rawGaps: unknown = input.option_gaps;
+  const gapRows = Array.isArray(rawGaps) ? rawGaps.map(row => row !== null && typeof row === 'object' && !Array.isArray(row)
+    ? { optionId: row.option_id, ...(Object.hasOwn(row, 'mechanisms') ? { mechanisms: row.mechanisms } : {}),
+      ...(Object.hasOwn(row, 'operands') ? { operands: row.operands } : {}) } : row) : rawGaps;
+  const gapInput = parseOptionGapDeclarations(gapRows, Object.hasOwn(input, 'option_gaps'));
+  if (gapInput.kind === 'invalid') return { status: 'refused', reason: gapInput.reason };
+
   const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
     ...(l.raw_value !== undefined || l.cap !== undefined
       ? { figure: { raw_value: Number(l.raw_value), cap: Number(l.cap), ...(l.unit !== undefined ? { unit: l.unit } : {}) } } : {}) }));
@@ -3249,6 +3262,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   // the idempotency key is (scenario_id, turn_id)).
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
     kind: 'system_event', event: { kind: 'option_levels_batch', links: input.links, levels: input.levels,
+      ...(Object.hasOwn(input, 'option_gaps') ? { option_gaps: input.option_gaps } : {}),
       ...(input.values !== undefined && input.values.length > 0 ? { values: input.values } : {}),
       ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames } : {}),
       ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { link_strengths: input.link_strengths } : {}),
@@ -3259,6 +3273,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
   const r = await runWithApprovedLevelAdoptions(adoptions, () => dispatchOptionLevelsBatch(payload, {
     targets, base_graph_hash: input.base_graph_hash, expectedLinks: input.links.map(l => `${l.option_id}::${l.factor_id}`),
+    ...(gapInput.declarations.length > 0 ? { optionGaps: gapInput.declarations } : {}),
     fenceRefusalReachesCaller: true,
     ...(input.values !== undefined && input.values.length > 0 ? { values: input.values.map(v => ({ factorId: v.factor_id, value: v.value,
       ...(v.unit !== undefined ? { unit: v.unit } : {}), ...(v.author === 'model_proposed' ? { adopted: true } : {}) })) } : {}),

@@ -1,3 +1,4 @@
+import { createProposal } from '../../../src/orchestrator-v5/agent-lane/proposal.js';
 /**
  * ⛔ A COMPOUND APPROVAL IS ONE COMMIT (Canonical #70 5849037691: "the last two-commit path in the Agent lane").
  * A starting point — Olumi's starting values AND an option's level — was approved as ONE user operation, yet
@@ -14,6 +15,8 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { GraphV3 } from '../../../src/schemas/cee-v3.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { optionGapsHeld } from '../../../src/orchestrator-v5/agent-lane/unmodelled-mechanisms.js';
+import { approvalChipsFor } from '../../../src/orchestrator-v5/agent-lane/approval-chips.js';
 
 const SCENARIO_ID = '88888888-8888-4888-8888-888888888888';
 const RAISE = 'Raise to £59 at release';
@@ -119,7 +122,7 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
    * The Agent over this harness. Reads return the persisted graph. `/graph/register` is the whole-graph writer it is on
    * staging: it persists the caller's graph as its OWN commit (a row) — so a second write path is visible as a second row.
    */
-  const agent = () => {
+  const agent = (opts: { beforeCommit?: () => void; afterCommit?: () => void } = {}) => {
     const store = new ProposalStore();
     const d = async (path: string, body?: unknown) => {
       if (path.endsWith('/graph/register')) {
@@ -132,9 +135,14 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
       return { status: 200, json: { graph: persisted, graph_hash: currentHash() } };
     };
     const caps = createAgentCapabilities(d as never, store, undefined, 'full', undefined, {
-      commitOptionLevels: (input) => commitOptionLevelsInProcess(input, 'req-agent'),
+      commitOptionLevels: async (input) => {
+        opts.beforeCommit?.();
+        const result = await commitOptionLevelsInProcess(input, 'req-agent');
+        opts.afterCommit?.();
+        return result;
+      },
     });
-    return { caps, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: 'Use a starting point.' } };
+    return { caps, store, ctx: { scenario_id: SCENARIO_ID, authenticated_user_id: 'user-a', request_id: 'r', user_text: 'Use a starting point.' } };
   };
   const nodeOf = (id: string) => (persisted as { nodes: { id: string; observed_state?: Record<string, unknown>; interventions?: Record<string, Record<string, unknown>> }[] }).nodes.find((n) => n.id === id)!;
 
@@ -173,4 +181,132 @@ describe('a starting point — values and a level — is ONE commit or NONE, thr
     expect(rows.size).toBe(0);
     expect(JSON.stringify(persisted), 'the model is exactly as approved against').toBe(before);
   });
+
+  const GAP = { unresolved_targets: ['billable seat basis'], user_questions: ['Which seats are billable?'] };
+  type GappedGraph = { nodes: (Record<string, unknown> & { id: string })[]; options?: (Record<string, unknown> & { id: string })[] };
+  const carriers = () => {
+    const graph = persisted as GappedGraph;
+    return [graph.nodes.find(n => n.id === 'opt_raise')!, ...(graph.options ?? []).filter(o => o.id === 'opt_raise')];
+  };
+  function withGap(where: 'both' | 'mirror' | 'node' = 'both') {
+    const graph = structuredClone(pricingGraph()) as unknown as GappedGraph;
+    const node = graph.nodes.find(n => n.id === 'opt_raise')!;
+    node.interventions = { fac_price: { value: 0.245, source: 'cee_hypothesis', target_match: { node_id: 'fac_price', match_type: 'exact_id', confidence: 'high' } } };
+    persisted = projectGraphForPersistence(graph);
+    const rows = carriers();
+    if (where !== 'mirror') Object.assign(rows[0]!, structuredClone(GAP));
+    if (where !== 'node') Object.assign(rows[1]!, structuredClone(GAP));
+    expect(projectGraphForPersistence(persisted)).toEqual(persisted);
+  }
+  const clearLevel = () => ({ option_label: RAISE, factor_label: 'Pro plan monthly price', value: 49, basis: 'Keep the same level; resolve the stated gap', unmodelled_mechanisms: [] as string[] });
+
+  it.each([
+    ['81 characters', ['x'.repeat(81)]], ['six entries', ['a', 'b', 'c', 'd', 'e', 'f']],
+    ['non-string', [42]], ['blank', [' ']], ['non-array', 'effect'], ['mixed', ['valid', null]],
+    ['null', null], ['present undefined', undefined],
+  ])('malformed %s refuses the entire starting-point offer before any proposal or write', async (_name, value) => {
+    withGap('mirror'); const before = JSON.stringify(persisted);
+    const { caps, store, ctx } = agent(); const put = vi.spyOn(store, 'put');
+    const level = { ...clearLevel(), unmodelled_mechanisms: value };
+    const result = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      option_levels: [clearLevel(), level as never],
+    });
+    expect(result.ok).toBe(false); expect(put).not.toHaveBeenCalled(); expect(rows.size).toBe(0);
+    expect(JSON.stringify(persisted)).toBe(before);
+  });
+
+  it('conflicting repeated declarations refuse before either starting-point half is proposed', async () => {
+    withGap(); const { caps, store, ctx } = agent(); const put = vi.spyOn(store, 'put');
+    const result = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      option_levels: [clearLevel(), { ...clearLevel(), unmodelled_mechanisms: ['another effect'] }],
+    });
+    expect(result).toMatchObject({ ok: false, refusal: 'conflicting_option_gap_declarations' });
+    expect(put).not.toHaveBeenCalled(); expect(rows.size).toBe(0);
+  });
+
+  it.each(['both', 'mirror', 'node'] as const)('same-level %s clearance carries exact operands on the card and lands through ONE real commit/receipt', async where => {
+    withGap(where); const before = structuredClone(persisted) as GappedGraph;
+    const { caps, store, ctx } = agent();
+    const offered = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+    expect(offered.ok, JSON.stringify(offered)).toBe(true); expect(rows.size).toBe(0);
+    const proposal = store.get(String(offered.proposal_id))!;
+    expect(proposal.operations[0]?.value).toMatchObject({ unmodelled_mechanisms: [] });
+    expect(proposal.public_label).toContain(RAISE); expect(proposal.public_label).toContain(GAP.unresolved_targets[0]);
+    expect(proposal.public_label).toContain(GAP.user_questions[0]);
+    const [chip] = approvalChipsFor([{ name: 'propose_option_interventions', ok: true, mutated: false, proposal_id: proposal.proposal_id }], () => ({ proposal, result: offered }));
+    expect(chip?.detail).toBe(proposal.public_label);
+    const result = await caps.authoriseChange(ctx, { proposal_id: proposal.proposal_id });
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, applied: true, public_label: proposal.public_label });
+    expect(rows.size).toBe(1); expect(result.receipts).toHaveLength(1);
+    expect(optionGapsHeld(persisted, [{ optionId: 'opt_raise', mechanisms: [] }])).toBe(true);
+    for (const row of [...before.nodes, ...(before.options ?? [])]) if (row.id === 'opt_raise') {
+      delete row.unresolved_targets; delete row.user_questions;
+    }
+    expect(persisted).toEqual(before); // In particular, the unchanged cell keeps its source.
+    const retry = await caps.authoriseChange(ctx, { proposal_id: proposal.proposal_id });
+    expect(retry).toMatchObject({ applied: true, already_applied: true }); expect(rows.size).toBe(1);
+  });
+
+  it('malformed approved operation bytes refuse before any compound part is prepared or written', async () => {
+    withGap(); const { caps, ctx, store } = agent();
+    const offered = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      option_levels: [clearLevel()],
+    });
+    expect(offered.ok, JSON.stringify(offered)).toBe(true);
+    const proposal = store.get(String(offered.proposal_id))!;
+    // Emulate an older producer's malformed but integrity-bound stored proposal,
+    // so the operation validator (rather than the tamper guard) must refuse it.
+    const { proposal_id: _oldId, ...content } = structuredClone(proposal);
+    const operation = content.operations.find(o => o.op === 'set_option_intervention')!;
+    (operation.value as Record<string, unknown>).unmodelled_mechanisms = ['valid', null];
+    store.discard(proposal.proposal_id);
+    const malformed = store.put(createProposal(content));
+    const before = structuredClone(persisted);
+    const result = await caps.authoriseChange(ctx, { proposal_id: malformed.proposal_id });
+    expect(result).toMatchObject({ applied: false, mutated: false, reason: 'invalid_mechanism' });
+    expect(persisted).toEqual(before); expect(rows.size).toBe(0);
+    expect(store.outstanding(SCENARIO_ID, 'user-a')).toHaveLength(1);
+  });
+
+  it('a changed question after offer refuses even though the analytical hash is unchanged', async () => {
+    withGap(); const { caps, ctx } = agent();
+    const p = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+    const hash = currentHash(); carriers()[1]!.user_questions = ['A different retained question'];
+    expect(currentHash()).toBe(hash);
+    expect(await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) }))
+      .toMatchObject({ applied: false, reason: 'gap_statement_changed_since_approval' });
+    expect(rows.size).toBe(0);
+  });
+
+  it('a changed question between approval read and writer read refuses before append', async () => {
+    withGap(); const { caps, ctx } = agent({ beforeCommit: () => { carriers()[1]!.user_questions = ['Concurrent question']; } });
+    const p = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+    const result = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(result).toMatchObject({ applied: false, mutated: false }); expect(rows.size).toBe(0);
+    expect(carriers()[1]!.user_questions).toEqual(['Concurrent question']);
+  });
+
+  it('stale mirror after the commit never marks the proposal applied', async () => {
+    withGap(); const { caps, ctx, store } = agent({ afterCommit: () => { Object.assign(carriers()[1]!, GAP); } });
+    const p = await caps.proposeOptionInterventions(ctx, { interventions: [clearLevel()] });
+    const result = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(result).toMatchObject({ applied: false, refusal: 'not_verified' });
+    expect(store.outstanding(SCENARIO_ID, 'user-a')).toHaveLength(1);
+  });
+
+  it('a non-empty declaration and a numerical change use the same ONE compound door', async () => {
+    withGap(); const { caps, ctx } = agent();
+    const p = await caps.proposeStartingPoint(ctx, {
+      assumptions: [{ factor_label: 'Monthly churn rate', value: 5, unit: '%', basis: 'a starting assumption' }],
+      option_levels: [{ ...clearLevel(), value: 59, unmodelled_mechanisms: ['  support   demand ', 'Support demand'] }],
+    });
+    expect(p.ok, JSON.stringify(p)).toBe(true); expect(String(p.public_label)).toContain('support demand');
+    const result = await caps.authoriseChange(ctx, { proposal_id: String(p.proposal_id) });
+    expect(result, JSON.stringify(result)).toMatchObject({ applied: true }); expect(rows.size).toBe(1);
+    expect(optionGapsHeld(persisted, [{ optionId: 'opt_raise', mechanisms: ['support demand'] }])).toBe(true);
+  });
+
 });

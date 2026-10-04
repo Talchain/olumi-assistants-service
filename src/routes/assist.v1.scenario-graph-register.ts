@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { GoalScopeIdentityConflict, assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, scopeIssuesAfterWrite, scopeOf } from '../orchestrator-v5/agent-lane/goal-scope.js';
 /**
  * ROADMAP 2.467 — `register_graph`: THE DETERMINISTIC WHOLE-GRAPH WRITE SEAM.
@@ -212,6 +213,40 @@ function withStoredGoalScopeWhenUnstated<T extends { nodes: ReadonlyArray<{ id?:
 }
 
 type EdgeRecord = Record<string, unknown>;
+
+class OptionGapApprovalRequiredError extends Error {}
+
+/** Registration carries stored gap evidence. Only the existing approved batch
+ * may change this pair on an option that already exists. */
+function withStoredOptionGapsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: unknown; kind?: unknown }>; options?: unknown }>(graph: T, stored: unknown): T {
+  if (!isEdgeRecord(stored)) return graph;
+  const keys = ['unresolved_targets', 'user_questions'];
+  const existingOption = (id: unknown): boolean => Array.isArray(stored.nodes)
+    && stored.nodes.some(old => isEdgeRecord(old) && old.kind === 'option' && old.id === id);
+  const retainedOption = (id: unknown): boolean => graph.nodes.some(n => n.id === id && n.kind === 'option');
+  const carry = (rows: readonly unknown[], prior: unknown, nodes: boolean): unknown[] => rows.map(row => {
+    if (!isEdgeRecord(row) || (nodes && row.kind !== 'option')) return row;
+    const matches = Array.isArray(prior) ? prior.filter(old => isEdgeRecord(old) && old.id === row.id && (!nodes || old.kind === 'option')) : [];
+    if (matches.length > 1 || rows.filter(other => isEdgeRecord(other) && other.id === row.id).length !== 1) return row;
+    const old = (matches[0] ?? {}) as EdgeRecord;
+    const carried = { ...row };
+    for (const key of keys) {
+      if (Object.hasOwn(row, key) && existingOption(row.id)
+        && (!Object.hasOwn(old, key) || !isDeepStrictEqual(row[key], old[key]))) throw new OptionGapApprovalRequiredError();
+      if (!Object.hasOwn(row, key) && Object.hasOwn(old, key)) carried[key] = structuredClone(old[key]);
+    }
+    return carried;
+  });
+  const prior = Array.isArray(stored.options) ? stored.options : [];
+  const heldMirrors = prior.filter(old => isEdgeRecord(old) && retainedOption(old.id)
+    && keys.some(key => Object.hasOwn(old, key)) && prior.filter(other => isEdgeRecord(other) && other.id === old.id).length === 1);
+  const options = Array.isArray(graph.options) ? [...graph.options] : heldMirrors.length > 0 ? prior.filter(old => isEdgeRecord(old) && retainedOption(old.id)) : undefined;
+  if (options !== undefined) for (const old of heldMirrors) {
+    if (!options.some(row => isEdgeRecord(row) && row.id === (old as EdgeRecord).id)) options.push(structuredClone(old));
+  }
+  return { ...graph, nodes: carry(graph.nodes, stored.nodes, true),
+    ...(options !== undefined ? { options: carry(options, prior, false) } : {}) } as T;
+}
 
 const isEdgeRecord = (value: unknown): value is EdgeRecord =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -743,10 +778,18 @@ export default async function route(app: FastifyInstance) {
       // An absent `goal_constraints` keeps the stored limits, and an unchanged edge keeps the
       // stored CEE-owned facts the caller omitted (see the helpers). Both are bound to the SAME
       // server read as the CAS base above.
-      const graphToRegister = withStoredEdgeFactsWhenUnstated(
-        withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
-        baseGraphForInvariants,
-      );
+      let graphToRegister: typeof parsed.data;
+      try {
+        graphToRegister = withStoredOptionGapsWhenUnstated(withStoredEdgeFactsWhenUnstated(
+          withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
+          baseGraphForInvariants,
+        ), baseGraphForInvariants);
+      } catch (err) {
+        if (!(err instanceof OptionGapApprovalRequiredError)) throw err;
+        return reply.code(409).send(buildErrorV1('BAD_INPUT',
+          'Changes to the listed model gaps and questions need approval on their change card. Nothing was written.',
+          { code: 'OPTION_GAP_APPROVAL_REQUIRED' }, requestId));
+      }
 
       /**
        * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE, AGAINST THE
