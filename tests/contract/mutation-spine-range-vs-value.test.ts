@@ -429,12 +429,14 @@ describe('prior range hostile identities and field locality', () => {
     expect(restored).toEqual(initial);
   });
 
-  it('missing prior and unspecified distribution refuses rather than inventing uniform', async () => {
+  it('missing prior and unspecified distribution never invents a shape: the model is untouched and no prior is written', async () => {
     const initial = clone(graphFixture()); delete initial.nodes.find(n => n.id === 'factor')!.prior;
     const p = persistence(initial);
     const result = await dispatchSystemEvent({ payload: payload(), requestId: REQUEST });
-    expect(result).toMatchObject({ commitPerformed: false, refusal: { reason: 'distribution_required' } });
-    expect(p.attempts).toEqual([]); expect(p.durableGraph()).toEqual(initial);
+    // Not a silent refusal: it keeps the judgement-fact carry (no graph write), as before this change.
+    expect(result.refusal).toBeUndefined();
+    expect(p.durableGraph()).toEqual(initial);
+    expect(p.durableGraph().nodes.find(n => n.id === 'factor')!.prior).toBeUndefined();
   });
 
   it('manual intent cannot bypass an existing referee refusal', async () => {

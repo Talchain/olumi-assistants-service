@@ -1146,7 +1146,7 @@ export async function dispatchSystemEvent(
   // typed FEATURE_NOT_ENABLED, strict newest-pending carry, no graph read/fact/
   // writer effect. Enabling the emitter is therefore insufficient on its own;
   // the service must be objectively running the RPC in enforce mode.
-  const handling =
+  let handling =
     payload.event.kind === 'edge_strength_edit' &&
     declaredHandling === 'mutating' &&
     config.features.graphCas.rpcEnforce !== true
@@ -1182,7 +1182,14 @@ export async function dispatchSystemEvent(
     handling === 'mutating' &&
     (payload.event.kind === 'factor_value_edit' || payload.event.kind === 'prior_range_edit')
   ) {
-    return await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
+    const edited = await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
+    // A range on a factor with no stated distribution cannot become a canonical prior without
+    // inventing its shape. It is not refused either (the editor's send is best-effort and a
+    // refusal would be silent): it keeps the judgement-fact carry it has always had, below.
+    if (!(payload.event.kind === 'prior_range_edit' && edited.refusal?.reason === 'distribution_required')) {
+      return edited;
+    }
+    handling = 'fact_and_commit';
   }
   if (
     handling === 'mutating' &&
