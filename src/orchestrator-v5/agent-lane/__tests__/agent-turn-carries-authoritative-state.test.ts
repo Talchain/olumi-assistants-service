@@ -44,6 +44,8 @@ const store = {
   readRecent: vi.fn(async () => (runFact === null ? [] : [{ id: 'row-run', turn_id: 't-run', turn_class: 'decide', created_at: '2026-09-23T10:00:00Z' }])),
   readFactsFor: vi.fn(async () => (runFact === null ? [] : [runFact])),
   readAnalysisInvalidatedAt: vi.fn(async () => null),
+  // These binding fixtures have no scope issue; absence of the reader means unavailable authority.
+  readMostRecentPendingActions: vi.fn(async () => []),
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
 vi.mock('../../../orchestrator/user-identity.js', async (importOriginal) => {

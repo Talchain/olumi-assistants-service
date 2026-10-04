@@ -946,7 +946,7 @@ export function separationWithholdFromRobustness(
   return raw !== null ? WITHHELD_NEAR_TIE : WITHHELD_SEPARATION_UNAVAILABLE;
 }
 
-function composeLeaderClaim(
+export function composeLeaderClaim(
   input: AnalysisStateComposeInput,
   runState: AnalysisRunState,
   newerDegradedRun: boolean,
