@@ -82,6 +82,9 @@ import {
  *    passed, or the write proceeds unfenced per the documented gaps) and the
  *    caller dispatches the pre-v4 RPC (v2/v3).
  */
+// Optional chronology must not strand turn, reload or post-commit writer replies.
+export const LEGACY_ANALYSIS_EDIT_READ_TIMEOUT_MS = 1_000;
+
 type TurnFencePlan =
   | { readonly path: 'atomic'; readonly generation: number }
   | { readonly path: 'checked' };
@@ -2210,13 +2213,26 @@ export class SupabaseSessionStore implements SessionStore {
       legacyEdits = { since, facts: [], readOk: false, total_count: null };
       if (since !== null && Number.isFinite(Date.parse(since))) {
         try {
-          const edits = await this.client.from('v5_handler_facts')
+          const controller = new AbortController();
+          const query = this.client.from('v5_handler_facts')
             .select('id, scenario_id, v5_conversation_turn_id, payload, handler_id, action_type, noop, created_at', { count: 'exact' })
             .eq('scenario_id', scenarioId).eq('handler_id', 'edit_graph').eq('noop', false)
             .eq('payload->result->>status', 'applied')
             .eq('payload->result->>rerun_recommended', 'true')
             .gt('created_at', since)
             .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit);
+          const cancellable = typeof query.abortSignal === 'function' ? query.abortSignal(controller.signal) : query;
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const edits = await Promise.race([
+            // The race handles late rejection even when the client cannot cancel.
+            Promise.resolve(cancellable),
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(() => {
+                reject(new Error('Legacy edit read timed out'));
+                controller.abort();
+              }, LEGACY_ANALYSIS_EDIT_READ_TIMEOUT_MS);
+            }),
+          ]).finally(() => clearTimeout(timer));
           if (edits.error || !Array.isArray(edits.data) || !Number.isSafeInteger(edits.count)
             || edits.count === null || edits.count < 0) throw new Error('Legacy edit read unavailable');
           const editFacts = parseScenarioRunAnalysisRows(edits.data, scenarioId, 'edit_graph');

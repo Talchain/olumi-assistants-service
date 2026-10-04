@@ -1,5 +1,7 @@
 import { RUN_ANALYSIS_PROJECTION_KEY, stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { deriveAnalysisFreshness } from '../../context/freshness.js';
+import { loadScenarioAnalysisFactsForRead } from '../../build-turn-context.js';
+import { legacyEditFactsForFreshness } from '../../context/reconcile-scenario-analysis-facts.js';
 /**
  * SupabaseSessionStore unit tests (slice B).
  *
@@ -14,11 +16,12 @@ import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { SessionLRUCache } from '../cache.js';
-import { SupabaseSessionStore } from '../supabase-store.js';
+import { LEGACY_ANALYSIS_EDIT_READ_TIMEOUT_MS, SupabaseSessionStore } from '../supabase-store.js';
 import {
   SessionReadError,
   StateCommitFailedError,
   type SessionTurnWrite,
+  type SessionStore,
 } from '../store.js';
 import { EMPTY_COACHING_STATE } from '../../coaching/coaching-state.js';
 import { toPreDispatchSnapshot } from '../../coaching/coaching-state-snapshot.js';
@@ -57,6 +60,7 @@ function validRow(turnId: string, createdAt = '2026-04-17T10:00:00.000+00:00', u
 
 interface MockConfig {
   editSelectResult?: MockConfig['selectResult'];
+  editSelectPromise?: Promise<MockConfig['selectResult']>;
   rpcResult?: { data?: unknown; error?: { message: string; code?: string } | null };
   selectResult?: {
     data?: unknown;
@@ -113,7 +117,9 @@ function makeClient(cfg: MockConfig = {}): {
         limit: (n: number) => {
           filters.limit = n;
           // Terminal — return the promise result
-          return Promise.resolve((filters['eq:handler_id'] === 'edit_graph' ? cfg.editSelectResult : undefined) ?? cfg.selectResult ?? { data: [], error: null });
+          return filters['eq:handler_id'] === 'edit_graph' && cfg.editSelectPromise !== undefined
+            ? cfg.editSelectPromise
+            : Promise.resolve((filters['eq:handler_id'] === 'edit_graph' ? cfg.editSelectResult : undefined) ?? cfg.selectResult ?? { data: [], error: null });
         },
         maybeSingle: () =>
           Promise.resolve(cfg.selectResult ?? { data: null, error: null }),
@@ -1336,6 +1342,49 @@ describe('SupabaseSessionStore.readScenarioRunAnalysisFactsFor', () => {
     const fact = { ...page.facts[0]!.fact, result: { ...page.facts[0]!.fact.result, graph_hash_at_run: 'same' } } as typeof page.facts[number]['fact'];
     expect(deriveAnalysisFreshness([fact], 'same', undefined, { legacyEditFacts: page.legacy_edit_facts }).freshness).toBe('stale');
     if (state === 'complete') expect(page.legacy_edit_facts!.facts[0]!.fact_row_id).toBe(editRow.id);
+  });
+
+  it.each([false, true])('shared loader bounds pending edit read (abort support=%s) and handles late rejection by exact Run', async abortable => {
+    vi.useFakeTimers();
+    try {
+      const row = structuredClone(runAnalysisRow);
+      delete row.payload.result.enrichment[RUN_ANALYSIS_PROJECTION_KEY];
+      Object.assign(row.payload.result, { run_id: 'deadline-bound-run', graph_hash_at_run: 'deadline-bound-hash' });
+      let rejectRead!: (error: Error) => void;
+      const pending = new Promise<MockConfig['selectResult']>((_resolve, reject) => { rejectRead = reject; });
+      let signal: AbortSignal | undefined;
+      if (abortable) Object.assign(pending, { abortSignal: (value: AbortSignal) => { signal = value; return pending; } });
+      const { client, selectCalls } = makeClient({ selectResult: { data: [row], error: null, count: 1 }, editSelectPromise: pending });
+      const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+      // The turn/reload/writer shared loader; the hot window is intentionally empty.
+      const read = loadScenarioAnalysisFactsForRead(SCENARIO, 'pending-edit-read', {
+        readRecent: async () => [], readScenarioRunAnalysisFactsFor: store.readScenarioRunAnalysisFactsFor.bind(store),
+      } as unknown as SessionStore);
+      let settled = false;
+      void read.then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(LEGACY_ANALYSIS_EDIT_READ_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      expect(selectCalls[1]!.filters).toMatchObject({ 'eq:scenario_id': SCENARIO,
+        'gt:created_at': row.payload.result.computed_at });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      const loaded = await read;
+      expect(loaded.factSet.status).toBe('complete');
+      expect(loaded.factSet.facts).toHaveLength(1);
+      expect(loaded.factSet.facts[0]).toMatchObject({ result: { scenario_id: SCENARIO,
+        run_id: 'deadline-bound-run', computed_at: row.payload.result.computed_at,
+        graph_hash_at_run: 'deadline-bound-hash' } });
+      expect(loaded.factSet.legacy_edit_facts?.readOk).toBe(false);
+      expect(signal?.aborted).toBe(abortable ? true : undefined);
+      expect(deriveAnalysisFreshness(loaded.factSet.facts, 'deadline-bound-hash',
+        undefined, { legacyEditFacts: legacyEditFactsForFreshness(loaded.factSet) }).freshness).not.toBe('fresh');
+      rejectRead(new Error('late rejection after reply returned'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loaded.factSet.legacy_edit_facts?.readOk).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('returns authoritative zero only with an exact zero count and empty page', async () => {

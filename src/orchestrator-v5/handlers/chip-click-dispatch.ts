@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from '../context/reconcile-scenario-analysis-facts.js';
 /**
  * V5 deterministic chip-click dispatch.
  *
@@ -85,6 +86,7 @@ import {
   // "Did THIS turn complete a run?" — the executor's own run_delta gate, CALLED, never re-implemented.
   isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
+  type DeriveAnalysisFreshnessOptions,
 } from '../context/freshness.js';
 import {
   buildAnalysisRefusalFact,
@@ -774,6 +776,7 @@ function deriveChipClickFreshness(
    */
   priorFactsReadOk?: boolean,
   analysisInvalidatedAt?: string | null,
+  chronology?: Pick<DeriveAnalysisFreshnessOptions, 'priorFactsWithTurn' | 'legacyEditFacts'>,
 ): FreshnessDerivation {
   let currentGraphHash: string | null = null;
   if (
@@ -797,6 +800,7 @@ function deriveChipClickFreshness(
       ? extractGraphOptionIds(cachedSnapshot?.rawPersistedGraph ?? null)
       : undefined,
     {
+      ...chronology,
       currentGraph: cachedSnapshot?.rawPersistedGraph,
       analysisInvalidatedAt,
       ...(priorFactsReadOk === undefined ? {} : { priorFactsReadOk }),
@@ -1545,6 +1549,8 @@ export async function dispatchChipClickRunAnalysis(
                 context.prior_facts,
                 context.prior_facts_read_ok,
                 context.analysis_invalidated_at,
+                { priorFactsWithTurn: context.prior_facts_with_turn,
+                  legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set) },
               )
             : undefined,
           payload,
@@ -1858,6 +1864,8 @@ export async function dispatchChipClickRunAnalysis(
       postDispatchFacts,
       context.prior_facts_read_ok,
       context.analysis_invalidated_at,
+      { priorFactsWithTurn: context.prior_facts_with_turn,
+        legacyEditFacts: legacyEditFactsForFreshness(context.scenario_analysis_fact_set) },
     );
 
     let response = composeToolCallResponse({
