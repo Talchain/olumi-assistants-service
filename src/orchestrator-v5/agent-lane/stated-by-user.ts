@@ -82,6 +82,7 @@ function amountIs(
   unit: unknown,
   family: ReturnType<typeof unitPhraseFamily>,
   text?: string,
+  percentAsFraction = true,
 ): boolean {
   const scale = moneyUnitScale(unit);
   const written = value * scale;
@@ -94,7 +95,7 @@ function amountIs(
     return (family === null || family === 'currency') && sameCurrency && same(a.magnitude, written);
   }
   // "40%" is 40 on a percentage, or 0.4 on a share kept as 0–1: the Agent passes the factor's own units.
-  if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || same(a.magnitude / 100, value));
+  if (a.kind === 'percent') return (family === null || family === 'percent') && (same(a.magnitude, value) || (percentAsFraction && same(a.magnitude / 100, value)));
   // A count in words grounds a PLAIN figure only: "two" is never £2 or 2%, which need their written unit.
   if (a.kind === 'words') return family !== 'currency' && family !== 'percent' && same(a.magnitude, value);
   if (scale !== 1 && !writtenWithALetter(a)) return false;
@@ -886,8 +887,8 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
  * effect at all. The quote itself must, read with the model's OWN labels:
  *   1. STATE, not ask: no "?", and not opened by an auxiliary (the same reading as `bandTheUserWrote`);
  *   2. not DENY it (the shared negator);
- *   3. write BOTH figures (`figureTheUserWrote`, on the quote only — never the rest of the turn);
- *   4. NAME BOTH ENDS: each end by a word of its label the OTHER end lacks ("the Pro price" / "paying subscribers" for
+ *   3. write BOTH figures in their RAW change units, in that statement (never a percentage's divided-by-100 alternative);
+ *   4. NAME BOTH ENDS: a full label occurrence owned by that label, or a word of its label the OTHER end lacks ("the Pro price" / "paying subscribers" for
  *      Pro plan price → Pro plan paying subscribers), unless the quote also writes a word of another quantity that
  *      carries that word and the end lacks ("price sensitivity" claims "price" for Price sensitivity risk) — the same
  *      label words and stems as `factorTheUserNamed`; the two ends named in one statement disambiguate each other;
@@ -906,17 +907,11 @@ export function userWordsOf(typedEarlier: readonly string[], typedNow: string | 
 export type LinkEffectStatementMiss = 'question' | 'denied' | 'figures_not_in_statement' | 'end_not_named'
   | 'direction_not_stated' | 'direction_contradicts' | 'figure_not_bound' | 'not_one_statement' | 'source_figure_not_a_change';
 /**
- * A LOSS verb takes something away from what it is said of ("loses us 50 subscribers", "costs us £300"); REMOVAL words
- * ("removes £300 of …", "50 fewer") say the target itself gets smaller. Both say the target FALLS — except a loss verb
- * said of a quantity that itself COUNTS a loss (its label names one: "Customers lost to price rise", "MRR lost to
- * price-rise churn"): "each 1% rise loses about 2 customers" makes that count GROW by 2. Served 4 Oct (journey2 r4):
- * "loses about £300 a month … to churn" onto "MRR lost to price-rise churn" was read as the loss falling, and refused.
+ * Loss and removal words say the quantity they govern FALLS. A label is only a name: no word in it can invert a
+ * movement. If the figure and movement cannot be joined to an occurrence of the target, ask which way it moves.
  */
 const LOSS_VERB = /^(?:lose|loses|losing|lost|cost|costs|costing)$/;
 const REMOVAL = /^(?:fewer|remove|removes|removing|removed)$/;
-// Only the participle: "<things> lost to <cause>" counts what was lost. "Loss" is left out on purpose ("Profit and loss"
-// counts no loss), so a label that says "loss" under-claims and the user is asked.
-const LOSS_NAME = /^lost$/;
 const TARGET_UP = /^(?:gain|gains|gaining|gained|win|wins|winning|won|adds|added|adding)$/;
 const MOVE_UP = /^(?:rise|rises|rising|rose|increase|increases|increasing|increased|raise|raises|raising|raised|boost|boosts|boosted|boosting|lift|lifts|lifted|lifting|grow|grows|growing|grew|add)$/;
 const MOVE_DOWN = /^(?:fall|falls|falling|fell|drop|drops|dropping|dropped|decrease|decreases|decreasing|decreased|reduce|reduces|reducing|reduced|lower|lowers|lowering|lowered|cut|cuts|cutting)$/;
@@ -945,9 +940,21 @@ const CHANGE_NOUN = /^(?:rise|increase|drop|fall|cut|decrease|reduction|hike|boo
 const BY_LINK = /^(?:the|a|an|our|its|it|their|them|we|you|prices?)$/;
 const AMOUNT_REACH = 4;
 /** The quote's sentences: split at ! ? ; : a new line, or a period — except a period BETWEEN digits ("0.5", "£1.50"). */
-// A worked example joined on with ", so …" ("…, so a 10% rise loses about £3,000 a month") is a consequence of the
-// statement, never part of it: it is read as its own statement, and the card quotes only the one that states the size.
-const sentencesOf = (q: string): string[] => q.split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)|,\s+so\s+/).map((x) => x.trim()).filter((x) => x !== '');
+// A ", so" clause may correct or contradict the preceding reading. Keep it for consent AND the stored/card quote.
+const sentencesOf = (q: string): string[] => q.split(/[!?;:\n]|(?<!\d)\.|\.(?!\d)/).map((x) => x.trim()).filter((x) => x !== '');
+
+/** A supplied quote may stop before a correction. Retain the rest of its user's sentence, on both proposal paths. */
+function quoteWithContinuation(quote: string, userText?: string): string | null {
+  if (quote === '' || userText === undefined || /[!?;:\n.]$/.test(quote)) return quote;
+  const readings = new Set<string>();
+  for (let at = userText.indexOf(quote); at >= 0; at = userText.indexOf(quote, at + quote.length)) {
+    const tail = userText.slice(at + quote.length);
+    const boundary = /[!?;:\n]|(?<!\d)\.|\.(?!\d)/.exec(tail);
+    readings.add(quote + tail.slice(0, boundary?.index ?? tail.length) + (boundary?.[0] === '?' ? '?' : ''));
+  }
+  // Repeated snippets with different continuations cannot identify ONE statement to record.
+  return readings.size === 1 ? [...readings][0]! : null;
+}
 
 /**
  * What ONE precise thing is missing from a statement (`linkEffectMissOf`), so the refusal can ask for exactly that:
@@ -975,8 +982,11 @@ export function linkEffectMissOf(
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
+  userText?: string,
 ): LinkEffectMissDetail | null {
-  const q = quote.trim();
+  const contextualQuote = quoteWithContinuation(quote.trim(), userText);
+  if (contextualQuote === null) return { miss: 'not_one_statement' };
+  const q = contextualQuote.trim();
   if (q.includes('?') || (AUXILIARY_FIRST.test(q) && !REQUEST_FORM.test(q))) return { miss: 'question' };
   if (NEGATOR.test(q)) return { miss: 'denied' };
   // ⛔ PR Review's second CR (#2275 @ f5aaec34): every element must come from ONE sentence — "Pro price rises. Paying
@@ -1001,9 +1011,12 @@ export function statingSentenceOf(
   effect: { readonly amount: number; readonly amount_unit: string; readonly per_source_change: number; readonly per_source_change_unit: string },
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
+  userText?: string,
 ): string | null {
-  if (linkEffectTheUserStated(quote, effect, ends, scope) !== null) return null;
-  return sentencesOf(quote.trim()).find((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope) === null) ?? null;
+  if (linkEffectMissOf(quote, effect, ends, scope, userText) !== null) return null;
+  const contextualQuote = quoteWithContinuation(quote.trim(), userText);
+  return contextualQuote === null ? null
+    : sentencesOf(contextualQuote.trim()).find((sentence) => linkEffectInOneSentence(sentence, effect, ends, scope) === null) ?? null;
 }
 
 /** Words that may stand between a distributive word and the source it counts ("each EXTRA conversation", "one MORE hire"). */
@@ -1056,22 +1069,25 @@ const tokensOf = (text: string): Token[] => [...text.matchAll(/[\p{L}\p{N}]+/gu)
  * Read with the model's OWN labels, as the rest of this rule is: each place the sentence writes a label word for word
  * belongs to ONE label, the LONGEST (so "price rise" at the end of "Customers lost to price rise" is that label's, and
  * "Enterprise price rise" is never "Price rise"). `whole(label)` is the word positions where that label stands by
- * itself; `inAName(i)` says word `i` is part of a name of two words or more, and so is never read as a movement (the
+ * itself; `inAName(i)` says word `i` is part of a name, and so is never read as a movement (the
  * "rise" of "Price rise", the "lost" of "Customers lost to price rise").
  */
-function labelsWrittenOut(tokens: readonly Token[], labels: readonly string[]): { whole: (label: string) => number[]; inAName: (i: number) => boolean } {
+function labelsWrittenOut(tokens: readonly Token[], labels: readonly string[]): {
+  whole: (label: string) => number[]; inAName: (i: number) => boolean; availableTo: (label: string, i: number) => boolean;
+} {
   const keyOf = (label: string): string => tokensOf(label).map((t) => t.w).join(' ');
   const phrases = [...new Set(labels.map(keyOf))].filter((k) => k !== '').map((k) => k.split(' ')).sort((a, b) => b.length - a.length);
   const owner = new Map<number, string>();
   for (const phrase of phrases) {
     for (let i = 0; i + phrase.length <= tokens.length; i += 1) {
-      if (!phrase.every((w, k) => tokens[i + k]!.w === w && !owner.has(i + k))) continue;
+      if (!phrase.every((w, k) => sameWord(tokens[i + k]!.w, w) && !owner.has(i + k))) continue;
       for (let k = 0; k < phrase.length; k += 1) owner.set(i + k, phrase.join(' '));
     }
   }
   return {
     whole: (label) => { const key = keyOf(label); return [...owner].filter(([, k]) => k === key).map(([i]) => i); },
-    inAName: (i) => (owner.get(i) ?? '').includes(' '),
+    inAName: (i) => owner.has(i),
+    availableTo: (label, i) => !owner.has(i) || owner.get(i) === keyOf(label),
   };
 }
 
@@ -1081,9 +1097,11 @@ function linkEffectInOneSentence(
   ends: { readonly source: string; readonly target: string },
   scope: { readonly quantities: readonly string[] },
 ): LinkEffectMissDetail | null {
-  const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q));
+  // Link deltas are RAW changes in the stated units; percentage-to-fraction conversion belongs to typed frames,
+  // never to attribution. Keep the fraction allowance for factor levels in the other amountIs callers.
+  const amountFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.amount), effect.amount_unit, unitPhraseFamily(effect.amount_unit), q, false));
   const perFamily = unitPhraseFamily(effect.per_source_change_unit);
-  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit, perFamily, q));
+  const perFigure = findStatedAmounts(q).find((a) => amountIs(a, Math.abs(effect.per_source_change), effect.per_source_change_unit, perFamily, q, false));
   // ⭐ R3 #75 5925568501: "each / every / per / one more / an extra / a single" + a word of the SOURCE, one phrase with no
   // punctuation between, is the user writing a change of ONE ("Each extra conversation brings in about £20,000"). A
   // plural with no distributive word ("extra conversations bring £20,000") is not: it could be a total.
@@ -1096,21 +1114,25 @@ function linkEffectInOneSentence(
   const othersOf = (label: string): string[] => scope.quantities.filter((l) => l !== label);
   const quoteWords = wordsOf(q);
   const has = (w: string): boolean => quoteWords.some((t) => sameWord(w, t));
-  // An end is named by its whole label standing by itself, or by a word of its own (as before).
-  const named = (end: string, other: string): boolean => names.whole(end).length > 0 || wordsOf(end).some((w) => has(w)
-    && !wordsOf(other).some((o) => sameWord(w, o))
-    && !othersOf(end).filter((l) => l !== other).some((l) => wordsOf(l).some((x) => sameWord(x, w))
-      && wordsOf(l).some((x) => !wordsOf(end).some((e) => sameWord(e, x)) && has(x))));
-  if (!named(ends.source, ends.target)) return { miss: 'end_not_named', end: 'source' };
-  if (!named(ends.target, ends.source)) return { miss: 'end_not_named', end: 'target' };
-  const sourceOwn = wordsOf(ends.source).filter((w) => !wordsOf(ends.target).some((s) => sameWord(w, s)));
-  const sourceWhole = new Set(names.whole(ends.source));
-  const sourceAt = tokens.flatMap((t, i) => (sourceWhole.has(i) || sourceOwn.some((w) => sameWord(w, t.w)) ? [i] : []));
+  // Bind to OCCURRENCES, not a label somewhere else in the sentence. If the label is written out, only those
+  // occurrences name it; otherwise retain the unique-word fallback. A sibling's owned words never name this end.
+  const endAt = (end: string, other: string): number[] => {
+    const whole = names.whole(end);
+    if (whole.length > 0) return whole;
+    const own = wordsOf(end).filter((w) => !wordsOf(other).some((o) => sameWord(w, o))
+      && !othersOf(end).filter((l) => l !== other).some((l) => wordsOf(l).some((x) => sameWord(x, w))
+        && wordsOf(l).some((x) => !wordsOf(end).some((e) => sameWord(e, x)) && has(x))));
+    return tokens.flatMap((t, i) => names.availableTo(end, i) && own.some((w) => sameWord(w, t.w)) ? [i] : []);
+  };
+  const sourceAt = endAt(ends.source, ends.target);
+  const targetAt = endAt(ends.target, ends.source);
+  if (sourceAt.length === 0) return { miss: 'end_not_named', end: 'source' };
+  if (targetAt.length === 0) return { miss: 'end_not_named', end: 'target' };
   const tokenAt = (index: number | undefined): number => tokens.findIndex((t) => t.at >= (index ?? 0));
   const perAt = perFigure === undefined ? oneAt : tokenAt(perFigure.index);
   const amountAt = tokenAt(amountFigure.index);
   // The source figure's own UNIT, written straight after it, is part of the figure ("1 percentage point of …", "10
-  // subscribers on …"): the unit's words, and for a percentage the estate's own words for one (`targetUnitWords`).
+  // subscribers on …"): the unit's words, including "percent", "percentage" and "points" for a percentage.
   const perUnitWords = [...wordsOf(effect.per_source_change_unit), ...(perFamily === 'percent' ? ['percent', 'percentage', 'points'] : [])];
   const perEnd = perFigure === undefined ? -1 : (perFigure.index ?? 0) + perFigure.matchedText.length;
   let perUnitUntil = -1;
@@ -1127,7 +1149,13 @@ function linkEffectInOneSentence(
   // Punctuation ends a phrase (PR Review's fifth CR: "£1, raising it"): a comma, dash or bracket between two words breaks them.
   const unbroken = (a: number, b: number): boolean => {
     const [x, y] = a < b ? [a, b] : [b, a];
-    return !/[,;:()–—]/.test(q.slice(tokens[x]!.at + tokens[x]!.w.length, tokens[y]!.at));
+    const start = tokens[x]!.at + tokens[x]!.w.length;
+    return [...q.slice(start, tokens[y]!.at).matchAll(/[,;:()–—]/g)].every((m) => {
+      const at = start + m.index;
+      // The comma of "£20,000" is part of the scanner's figure, never a clause boundary.
+      return [perFigure, amountFigure].some((f) => f !== undefined && at >= (f.index ?? 0)
+        && at < (f.index ?? 0) + f.matchedText.length);
+    });
   };
   const joined = (a: number, b: number, reach: number, link: (w: string) => boolean): boolean => a >= 0 && b >= 0
     && Math.abs(a - b) <= reach && unbroken(a, b)
@@ -1137,8 +1165,6 @@ function linkEffectInOneSentence(
   // a word naming the source. "add … to the Pro price": up to four words before it.
   const isSourceMove = (i: number, w: string): boolean => (perAt >= 0 && i > perAt && i - perAt <= 3)
     || sourceAt.some((s) => (w === 'add' ? s > i && s - i <= 4 : Math.abs(s - i) <= 2));
-  // A loss verb said of a quantity that COUNTS a loss makes it grow (`LOSS_VERB`).
-  const targetCountsALoss = tokensOf(ends.target).some((t) => LOSS_NAME.test(t.w));
   let target = 0; let targetBoth = false; let source = 0; let sourceBoth = false;
   const targetMoves: number[] = []; const sourceMoves: number[] = [];
   const say = (end: 'target' | 'source', dir: 1 | -1, i: number): void => {
@@ -1149,7 +1175,7 @@ function linkEffectInOneSentence(
     if (names.inAName(i)) return;
     // "brings in £20,000" is money coming in (R3 5925568501's served step 2); a bare "brings" ("brings down") says no way.
     if (/^(?:bring|brings|bringing|brought)$/.test(t.w) && tokens[i + 1]?.w === 'in') say('target', 1, i + 1);
-    else if (LOSS_VERB.test(t.w)) say('target', targetCountsALoss ? 1 : -1, i);
+    else if (LOSS_VERB.test(t.w)) say('target', -1, i);
     else if (REMOVAL.test(t.w)) say('target', -1, i);
     else if (TARGET_UP.test(t.w)) say('target', 1, i);
     else if (MOVE_UP.test(t.w)) say(isSourceMove(i, t.w) ? 'source' : 'target', 1, i);
@@ -1161,7 +1187,23 @@ function linkEffectInOneSentence(
   const sourceLinkWord = (w: string): boolean => SOURCE_LINK.test(w) || MOVE_UP.test(w) || MOVE_DOWN.test(w)
     || sourceLabel.some((x) => sameWord(x, w));
   if (!targetMoves.some((m) => joined(amountAt, m, AMOUNT_REACH, (w) => AMOUNT_LINK.test(w)))) return { miss: 'figure_not_bound', figure: 'amount' };
-  if (!sourceAt.some((s) => joined(perAt, s, SOURCE_REACH, sourceLinkWord))) return { miss: 'figure_not_bound', figure: 'source' };
+  const ownedBetween = (end: string, a: number, b: number): boolean => a >= 0 && b >= 0
+    && tokens.slice(Math.min(a, b), Math.max(a, b) + 1).every((_, k) => names.availableTo(end, Math.min(a, b) + k));
+  const boundSourceAt = sourceAt.filter((s) => ownedBetween(ends.source, perAt, s) && joined(perAt, s, SOURCE_REACH, sourceLinkWord));
+  if (boundSourceAt.length === 0) {
+    return { miss: 'figure_not_bound', figure: 'source' };
+  }
+  // The SAME amount occurrence must also govern a target occurrence, through its unit, linking words and its name.
+  // Never cross a sibling's name or another clause to reuse a detached target ("Enterprise revenue while Revenue …").
+  const targetLabel = wordsOf(ends.target);
+  const amountUnitWords = [...wordsOf(effect.amount_unit), ...(unitPhraseFamily(effect.amount_unit) === 'percent' ? ['percent', 'percentage', 'points'] : [])];
+  const targetLinkWord = (w: string): boolean => AMOUNT_LINK.test(w) || /^(?:to|towards|per)$/.test(w) || REMOVAL.test(w)
+    || LOSS_VERB.test(w) || TARGET_UP.test(w) || MOVE_UP.test(w) || MOVE_DOWN.test(w)
+    || amountUnitWords.some((u) => sameWord(u, w)) || targetLabel.some((u) => sameWord(u, w));
+  if (!targetAt.some((t) => ownedBetween(ends.target, amountAt, t)
+    && joined(amountAt, t, AMOUNT_REACH + targetLabel.length + amountUnitWords.length, targetLinkWord))) {
+    return { miss: 'direction_not_stated', end: 'target' };
+  }
   // The source's figure is itself IN a change phrase (PR Review's fifth CR: "With Pro price £1, raising it" is today's
   // price, then a rise of no stated size): distributive ("every £1"), its own move straight after ("£10 rise", "£1 price
   // increase"), or "by £1" after a move ("falls by £1", "raise the Pro price by £1").
@@ -1175,6 +1217,11 @@ function linkEffectInOneSentence(
     return isMove(t.w) && unbroken(m, perAt) && xs.slice(k + 1).every((u) => BY_LINK.test(u.w) || isLabel(u.w));
   });
   if (!distributive && !moveAfter && !byAfterMove) return { miss: 'source_figure_not_a_change' };
+  if (sourceMoves.some((m) => !ownedBetween(ends.source, perAt, m)
+    || !joined(perAt, m, SOURCE_REACH, sourceLinkWord)
+    || !boundSourceAt.some((s) => joined(m, s, SOURCE_REACH, sourceLinkWord)))) {
+    return { miss: 'direction_not_stated', end: 'source' };
+  }
   if (target !== Math.sign(effect.amount)) return { miss: 'direction_contradicts', end: 'target', says: target as 1 | -1 };
   if (source === 0 ? effect.per_source_change < 0 : source !== Math.sign(effect.per_source_change)) {
     return source === 0 ? { miss: 'direction_not_stated', end: 'source' } : { miss: 'direction_contradicts', end: 'source', says: source as 1 | -1 };

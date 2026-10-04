@@ -3275,14 +3275,14 @@ export function createAgentCapabilities(
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
           const effect = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
           const miss = linkEffectMissOf(entryQuote, effect, { source: from.label, target: to.label },
-            { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') });
+            { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') }, text);
           if (miss !== null) {
             notPrepared.push({ from_label: fromLabel, to_label: toLabel, refusal: miss.miss === 'figures_not_in_statement' ? 'not_the_users_figure' : 'not_the_users_statement',
               why: miss.miss, detail: linkEffectMissWords(miss, from, to, effect) });
             continue;
           }
           const said = statingSentenceOf(entryQuote, effect, { source: from.label, target: to.label },
-            { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') }) ?? entryQuote;
+            { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') }, text) ?? entryQuote;
           const edgeToken = linkEffectEdgeToken(working, from.id, to.id);
           if (edgeToken === null) {
             fail('no_such_link', `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.`);
@@ -3360,13 +3360,13 @@ export function createAgentCapabilities(
       const statedEffect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
       const statedEnds = { source: from.label, target: to.label };
       const statedScope = { quantities: labelsOf((k) => k !== 'option' && k !== 'decision') };
-      const miss = linkEffectMissOf(quote, statedEffect, statedEnds, statedScope);
+      const miss = linkEffectMissOf(quote, statedEffect, statedEnds, statedScope, text);
       if (miss !== null) {
         return { ok: false, mutated: false, refusal: miss.miss === 'figures_not_in_statement' ? 'not_the_users_figure' : 'not_the_users_statement',
           ...(miss.miss === 'figures_not_in_statement' ? {} : { why: miss.miss }), detail: linkEffectMissWords(miss, from, to, statedEffect) };
       }
       // AIQ 5884881500 ("proposer, not stamper"): the ONE sentence the rule read is what is stored and shown for approval.
-      const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope) ?? quote;
+      const said = statingSentenceOf(quote, statedEffect, statedEnds, statedScope, text) ?? quote;
       const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
       if (edgeToken === null) {
         return { ok: false, mutated: false, refusal: 'no_such_link',

@@ -14,8 +14,8 @@
  *   · journey2 r2 → `figure_not_bound`: the unit words "percentage point" stood between the figure and the source;
  *   · journey3 r4 (and r3, r5 once read) → the WRITER's `unit_mismatch`, said as "measured in its own unit": the served
  *     risk and outcome hold no unit and no scale at all.
- * The consent rule is unchanged in principle (PR Review on #2275): one statement of the user's names both ends, writes
- * both figures and says which way. The controls at the bottom still refuse.
+ * The review corrections below retain the conservative consent rule (PR Review on #2275): one statement of the user's
+ * names both ends, writes both figures and says which way. The controls at the bottom still refuse.
  */
 import { describe, expect, it } from 'vitest';
 import { linkEffectTheUserStated, statingSentenceOf } from '../stated-by-user.js';
@@ -51,8 +51,8 @@ describe('the consent rule reads the served sentences as a careful reader does',
   it('RED journey3 r3: a source label wholly inside the target\'s ("Price rise" in "Customers lost to price rise") is named by its whole label', () => {
     expect(rule(R3, lost2, 'Price rise', 'Customers lost to price rise', J3)).toBeNull();
   });
-  it('RED journey3 r2: "loses about 2 customers … from Customers lost to price rise" says that loss GROWS by 2', () => {
-    expect(rule(R2, lost2, 'Price rise', 'Customers lost to price rise', J3)).toBeNull();
+  it('journey3 r2: the detached loss-count label supplies no direction; ask rather than invert the loss verb', () => {
+    expect(rule(R2, lost2, 'Price rise', 'Customers lost to price rise', J3)).toBe('direction_not_stated');
   });
   it('journey3 r4: the rule already passed "Each Starter tier subscribers adds £49 a month to …" (the writer refused it)', () => {
     expect(rule(R4, starter49, 'Starter tier subscribers', 'Starter tier monthly recurring revenue', J3)).toBeNull();
@@ -60,9 +60,9 @@ describe('the consent rule reads the served sentences as a careful reader does',
   it('RED journey3 r5: "removes £300 a month of monthly recurring revenue" is a fall of £300, per one of the source', () => {
     expect(rule(R5, removes300, 'Customers lost to price rise', 'Monthly recurring revenue', J3)).toBeNull();
   });
-  it('RED journey2 r4: "loses about £300 a month … to churn" onto "MRR lost to price-rise churn" says that loss GROWS by £300', () => {
+  it('journey2 r4: a label cannot invert loses, and the whole consequence clause is checked', () => {
     expect(rule(J2R4, { amount: 300, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: '%' },
-      'Existing-plan price change from today', 'MRR lost to price-rise churn', J2)).toBeNull();
+      'Existing-plan price change from today', 'MRR lost to price-rise churn', J2)).toBe('direction_not_stated');
   });
   it('RED journey2 r2: "Every 1 percentage point of <source> adds £1,200 a month to <target>" — the unit words are part of the figure', () => {
     for (const unit of ['%', 'percentage points']) {
@@ -70,10 +70,12 @@ describe('the consent rule reads the served sentences as a careful reader does',
         'Existing-plan price change from today', 'monthly recurring revenue', J2), unit).toBeNull();
     }
   });
-  it('the card quotes the ONE clause that states it, never the worked example after ", so"', () => {
+  it('a refused loss reading supplies no card quote; an accepted statement keeps its consequence clause', () => {
     expect(statingSentenceOf(J2R4, { amount: 300, amount_unit: '£/month', per_source_change: 1, per_source_change_unit: '%' },
       { source: 'Existing-plan price change from today', target: 'MRR lost to price-rise churn' }, { quantities: J2 }))
-      .toBe('Each 1% price rise on existing plans loses about £300 a month of monthly recurring revenue to churn');
+      .toBeNull();
+    expect(statingSentenceOf(J2R2, { amount: 1200, amount_unit: 'GBP/month', per_source_change: 1, per_source_change_unit: '%' },
+      { source: 'Existing-plan price change from today', target: 'monthly recurring revenue' }, { quantities: J2 })).toBe(J2R2.slice(0, -1));
   });
   it('plural or singular, "a month" or "/month": "Each Starter tier subscriber adds £49 a month to …" is the same statement', () => {
     expect(rule('Each Starter tier subscriber adds £49 a month to Starter tier monthly recurring revenue', starter49,
@@ -106,7 +108,7 @@ describe('controls: what a careful reader would NOT accept still refuses, and fo
   });
   it('the OPPOSITE sign for a loss that grows: −2 on "adds about 2 Customers lost to price rise" contradicts the words', () => {
     expect(rule(R3, { ...lost2, amount: -2 }, 'Price rise', 'Customers lost to price rise', J3)).toBe('direction_contradicts');
-    expect(rule(R2, { ...lost2, amount: -2 }, 'Price rise', 'Customers lost to price rise', J3)).toBe('direction_contradicts');
+    expect(rule(R2, { ...lost2, amount: -2 }, 'Price rise', 'Customers lost to price rise', J3)).toBe('direction_not_stated');
   });
   it('a loss verb onto a quantity that is NOT a loss still says it falls: +£300 on r5 contradicts "removes"', () => {
     expect(rule(R5, { ...removes300, amount: 300 }, 'Customers lost to price rise', 'Monthly recurring revenue', J3)).toBe('direction_contradicts');
@@ -116,7 +118,7 @@ describe('controls: what a careful reader would NOT accept still refuses, and fo
   });
   it('journey3 r6 stays refused: "monthly price of £49 a month per subscriber" is a LEVEL, and sizes no change', () => {
     expect(rule(R6, { amount: 49, amount_unit: '£/month', per_source_change: 49, per_source_change_unit: '£ per subscriber / month' },
-      'Starter tier monthly price', 'Starter tier monthly recurring revenue', J3)).not.toBeNull();
+      'Starter tier monthly price', 'Starter tier monthly recurring revenue', J3)).toBe('figure_not_bound');
   });
   it('a label\'s own words are a NAME, never a movement: "Customers lost to price rise" alone says no direction', () => {
     expect(rule('Each 1% Price rise and 2 Customers lost to price rise', lost2, 'Price rise', 'Customers lost to price rise', J3)).toBe('direction_not_stated');
@@ -175,15 +177,180 @@ const A3 = args('Price rise', 'Customers lost to price rise', lost2, R3);
 const A4 = args('Starter tier subscribers', 'Starter tier monthly recurring revenue', starter49, R4);
 const A5 = args('Customers lost to price rise', 'Monthly recurring revenue', removes300, R5);
 
+/** Pin the actual writer destinations, not just the number of operations or the effect values. */
+function expectOperations(store: ProposalStore, result: Json, endpoints: readonly (readonly [string, string])[]): void {
+  const proposal = store.get(String(result.proposal_id))!;
+  expect(proposal.operations.map((op) => ({ op: op.op, path: op.path,
+    from: (op.value as Json).from, to: (op.value as Json).to }))).toEqual(
+    endpoints.map(([from, to]) => ({ op: 'set_link_effect', path: `${from}::${to}`, from, to })),
+  );
+}
+const servedEndpoints = [['price_rise', 'customers_lost'], ['starter_subs', 'starter_mrr'], ['customers_lost', 'mrr']] as const;
+
+
+type Counterexample = { name: string; quote: string; source: string; target: string; siblings?: string[];
+  effect: Effect; why: string };
+const counterexamples: Counterexample[] = [
+  ...['lose', 'loses', 'losing', 'lost', 'cost', 'costs', 'costing'].map((verb) => ({
+    name: `loss verb ${verb} cannot invert a label containing lost`,
+    quote: `Each 1% Price rise ${verb} £300 of Revenue from lost customers`, source: 'Price rise', target: 'Revenue from lost customers',
+    effect: { amount: 300, amount_unit: '£', per_source_change: 1, per_source_change_unit: '%' }, why: 'direction_contradicts',
+  })),
+  { name: 'source figure belongs to the longer sibling',
+    quote: 'Each 10 Starter tier subscribers adds £49 to MRR while Starter subscribers stay constant',
+    source: 'Starter subscribers', target: 'MRR', siblings: ['Starter tier subscribers'],
+    effect: { amount: 49, amount_unit: '£', per_source_change: 10, per_source_change_unit: 'subscribers' }, why: 'figure_not_bound' },
+  { name: 'implicit per-one source belongs to the longer sibling (singular spelling)',
+    quote: 'Each Starter tier subscriber adds £49 to MRR while Starter subscribers stay constant',
+    source: 'Starter subscribers', target: 'MRR', siblings: ['Starter tier subscribers'],
+    effect: { amount: 49, amount_unit: '£', per_source_change: 1, per_source_change_unit: 'subscribers' }, why: 'figures_not_in_statement' },
+  { name: 'target figure belongs to the longer sibling',
+    quote: 'Each 10 Subscribers adds £49 to Enterprise revenue while Revenue stays constant',
+    source: 'Subscribers', target: 'Revenue', siblings: ['Enterprise revenue'],
+    effect: { amount: 49, amount_unit: '£', per_source_change: 10, per_source_change_unit: 'subscribers' }, why: 'direction_not_stated' },
+  { name: 'a sibling owns the shorter label even when it is also a written unit',
+    quote: 'Each 10 Enterprise subscribers adds £49 to MRR while Subscribers stay constant',
+    source: 'Subscribers', target: 'MRR', siblings: ['Enterprise subscribers'],
+    effect: { amount: 49, amount_unit: '£', per_source_change: 10, per_source_change_unit: 'subscribers' }, why: 'figure_not_bound' },
+  { name: 'a target unit word is also owned by the longer sibling',
+    quote: 'Each 10 Subscribers adds 5 Enterprise customers while Customers stay constant',
+    source: 'Subscribers', target: 'Customers', siblings: ['Enterprise customers'],
+    effect: { amount: 5, amount_unit: 'customers', per_source_change: 10, per_source_change_unit: 'subscribers' }, why: 'direction_not_stated' },
+  { name: 'per_source_change is raw percent, never its fraction',
+    quote: 'Each 1% Price rise adds 2 Customers lost to price rise', source: 'Price rise', target: 'Customers lost to price rise',
+    effect: { ...lost2, per_source_change: 0.01 }, why: 'figures_not_in_statement' },
+  ...['percentage points', '%'].map((unit) => ({ name: `amount is raw percent, never its fraction (${unit})`,
+    quote: 'Each 10% Price rise adds 5% Monthly churn from price rise', source: 'Price rise', target: 'Monthly churn from price rise',
+    effect: { amount: 0.05, amount_unit: unit, per_source_change: 10, per_source_change_unit: '%' }, why: 'figures_not_in_statement' })),
+  { name: 'a source movement at a detached occurrence cannot supply the figure’s direction',
+    quote: 'Each £1 on Pro price adds 2 Subscribers while Pro price falls', source: 'Pro price', target: 'Subscribers',
+    effect: { amount: 2, amount_unit: 'subscribers', per_source_change: -1, per_source_change_unit: '£' }, why: 'direction_not_stated' },
+  { name: 'a single-word target label supplies no loss movement',
+    quote: 'Each £1 on Pro price 2 Lost', source: 'Pro price', target: 'Lost',
+    effect: { amount: -2, amount_unit: 'customers', per_source_change: 1, per_source_change_unit: '£' }, why: 'direction_not_stated' },
+  { name: 'a corrective so clause stays in the consent check',
+    quote: 'Each £1 on Pro price adds 2 Subscribers, so the actual effect is 4 fewer Subscribers', source: 'Pro price', target: 'Subscribers',
+    effect: { amount: 2, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£' }, why: 'direction_not_stated' },
+];
+
+/** Compatible units, scales and signs: if consent fails, it must fail before any writer operation is stored. */
+const controlQuote = 'Each £1 on Control price adds 2 Control subscribers';
+const controlArgs = args('Control price', 'Control subscribers',
+  { amount: 2, amount_unit: 'subscribers', per_source_change: 1, per_source_change_unit: '£' }, controlQuote);
+function counterexampleGraph(c: Counterexample): Json {
+  const graph = journey3Graph(true);
+  graph.nodes.push(...[
+    ['review_source', c.source, c.effect.per_source_change_unit], ['review_target', c.target, c.effect.amount_unit],
+    ['control_source', 'Control price', '£'], ['control_target', 'Control subscribers', 'subscribers'],
+    ...(c.siblings ?? []).map((label, i) => [`review_sibling_${i}`, label, 'subscribers']),
+  ].map(([id, label, unit]) => ({ id, kind: 'factor', label, category: 'controllable', provenance: 'from_brief',
+    scale_frame: id === 'review_target' || id === 'control_target' ? 1000000 : 1000, observed_state: { unit, value: 0, raw_value: 0, source: 'cee_inference' } })));
+  // Remove duplicate fixture labels; the intended ends must resolve to exactly the review IDs.
+  graph.nodes = graph.nodes.filter((n: Json) => String(n.id).startsWith('review_') || ![c.source, c.target, ...(c.siblings ?? [])].includes(n.label));
+  graph.edges.push(edge('review_source', 'review_target', Math.sign(c.effect.amount / c.effect.per_source_change)), edge('control_source', 'control_target', 1));
+  return graph;
+}
+
+describe('PR #2559 P1 regressions: consent cannot record another reading as the user’s', () => {
+  it.each(counterexamples)('$name: the scanner refuses and supplies no stating sentence', (c) => {
+    const quantities = [c.source, c.target, ...(c.siblings ?? [])];
+    expect(rule(c.quote, c.effect, c.source, c.target, quantities)).toBe(c.why);
+    expect(statingSentenceOf(c.quote, c.effect, { source: c.source, target: c.target }, { quantities })).toBeNull();
+  });
+  it.each(counterexamples)('$name: single and links[] refuse the same reading, including a re-proposal', async (c) => {
+    for (const grouped of [false, true]) {
+      const { caps, store } = world(counterexampleGraph(c));
+      const a = args(c.source, c.target, c.effect, c.quote);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const r = await caps.proposeLinkEffect!(ctxSaying(c.quote), grouped ? { links: [a] } : a) as Json;
+        const refusal = c.why === 'figures_not_in_statement' ? 'not_the_users_figure' : 'not_the_users_statement';
+        expect(r, JSON.stringify(r)).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal }));
+        if (grouped) expect(r.not_prepared).toEqual([expect.objectContaining({ from_label: c.source, to_label: c.target, refusal, why: c.why })]);
+        else if (c.why !== 'figures_not_in_statement') expect(r.why).toBe(c.why);
+        expect(store.size()).toBe(0);
+      }
+      // A grouped sibling path may keep a valid link, but never store the refused endpoint pair.
+      const r = await caps.proposeLinkEffect!(ctxSaying(`${c.quote}. ${controlQuote}`), { links: [a, controlArgs] }) as Json;
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r.not_prepared).toEqual([expect.objectContaining({ from_label: c.source, to_label: c.target, why: c.why })]);
+      expectOperations(store, r, [['control_source', 'control_target']]);
+    }
+  });
+
+  it.each(['source', 'target'])('the longer %s sibling that owns the figure remains recordable, single and links[]', async (end) => {
+    const c = counterexamples.find((x) => x.name === `${end} figure belongs to the longer sibling`)!;
+    const from = end === 'source' ? 'review_sibling_0' : 'review_source';
+    const to = end === 'target' ? 'review_sibling_0' : 'review_target';
+    for (const grouped of [false, true]) {
+      const graph = counterexampleGraph(c);
+      const sibling = graph.nodes.find((n: Json) => n.id === 'review_sibling_0');
+      sibling.observed_state.unit = end === 'source' ? c.effect.per_source_change_unit : c.effect.amount_unit;
+      sibling.scale_frame = end === 'source' ? 1000 : 1000000;
+      graph.edges.push(edge(from, to, 1));
+      const { caps, store } = world(graph);
+      const a = args(end === 'source' ? c.siblings![0]! : c.source, end === 'target' ? c.siblings![0]! : c.target, c.effect, c.quote);
+      const r = await caps.proposeLinkEffect!(ctxSaying(c.quote), grouped ? { links: [a] } : a) as Json;
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expectOperations(store, r, [[from, to]]);
+    }
+  });
+
+  it.each(['single', 'links[]'])('a quote cut before the so correction still refuses through %s', async (form) => {
+    const c = counterexamples.at(-1)!;
+    const { caps, store } = world(counterexampleGraph(c));
+    const a = args(c.source, c.target, c.effect, c.quote.split(', so')[0]!);
+    const r = await caps.proposeLinkEffect!(ctxSaying(c.quote), form === 'single' ? a : { links: [a] }) as Json;
+    expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'not_the_users_statement' }));
+    expect(form === 'single' ? r.why : r.not_prepared[0].why).toBe('direction_not_stated');
+    expect(String(r.detail)).toContain('whether "Subscribers" goes up or down');
+    expect(store.size()).toBe(0);
+  });
+
+  it.each(['single', 'links[]'])('a quote cannot drop the question mark from its user’s sentence through %s', async (form) => {
+    const { caps, store } = world(journey3Graph(true));
+    const quote = 'Each 1% Price rise adds 2 Customers lost to price rise';
+    const a = { ...A3, quote };
+    const r = await caps.proposeLinkEffect!(ctxSaying(`${quote}?`), form === 'single' ? a : { links: [a] }) as Json;
+    expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'not_the_users_statement' }));
+    expect(form === 'single' ? r.why : r.not_prepared[0].why).toBe('question');
+    expect(store.size()).toBe(0);
+  });
+
+  it.each(['single', 'links[]'])('the structurally named revenue falls despite lost in its label, through %s', async (form) => {
+    const c = counterexamples[1]!;
+    const { caps, store } = world(counterexampleGraph({ ...c, effect: { ...c.effect, amount: -300 } }));
+    const a = args(c.source, c.target, { ...c.effect, amount: -300 }, c.quote);
+    const r = await caps.proposeLinkEffect!(ctxSaying(c.quote), form === 'single' ? a : { links: [a] }) as Json;
+    expect(r.ok, JSON.stringify(r)).toBe(true);
+    expectOperations(store, r, [['review_source', 'review_target']]);
+    expect((store.get(String(r.proposal_id))!.operations[0]!.value as Json).effect.amount).toBe(-300);
+  });
+
+  it.each(['single', 'links[]'])('raw percentage figures and the entire so consequence are stored through %s', async (form) => {
+    for (const c of counterexamples.filter((x) => x.effect.amount === 0.05 || x.effect.per_source_change === 0.01)) {
+      const { caps, store } = world(counterexampleGraph(c));
+      const effect = c.effect.per_source_change === 0.01 ? { ...c.effect, per_source_change: 1 } : { ...c.effect, amount: 5 };
+      const text = `${c.quote}, so this is our working assumption.`;
+      const a = args(c.source, c.target, effect, c.quote);
+      const r = await caps.proposeLinkEffect!(ctxSaying(text), form === 'single' ? a : { links: [a] }) as Json;
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expectOperations(store, r, [['review_source', 'review_target']]);
+      expect((store.get(String(r.proposal_id))!.operations[0]!.value as Json).effect).toEqual(effect);
+      expect((store.get(String(r.proposal_id))!.operations[0]!.value as Json).quote).toBe(text.slice(0, -1));
+    }
+  });
+});
+
 describe('propose_link_effect on the served labels', () => {
-  it.each([['r3', A3, R3], ['r4', A4, R4], ['r5', A5, R5]] as const)(
-    'RED journey3 %s, both ends quantified: prepared as ONE change, quoting the user\'s sentence', async (_n, a, said) => {
+  it.each([['r3', A3, R3, servedEndpoints[0]], ['r4', A4, R4, servedEndpoints[1]], ['r5', A5, R5, servedEndpoints[2]]] as const)(
+    'RED journey3 %s, both ends quantified: prepared as ONE change, quoting the user\'s sentence', async (_n, a, said, endpoints) => {
       const { caps, store } = world(journey3Graph(true));
       const r = await caps.proposeLinkEffect!(ctxSaying(said), a) as Json;
       expect(r.ok, JSON.stringify(r)).toBe(true);
       const p = store.get(String(r.proposal_id))!;
       expect(p.provenance.authored_by).toBe('user_stated');
       expect(p.operations).toHaveLength(1);
+      expectOperations(store, r, [endpoints]);
       // No figure the user did not write: the stored effect is exactly the two figures of the sentence.
       expect((p.operations[0]!.value as Json).effect).toEqual({ amount: a.amount, amount_unit: a.amount_unit,
         per_source_change: a.per_source_change, per_source_change_unit: a.per_source_change_unit });
@@ -196,18 +363,21 @@ describe('propose_link_effect on the served labels', () => {
       [A4, R4, { amount_unit: 'GBP/month' }],
       [A5, R5, { per_source_change_unit: 'customer', amount_unit: '£ per month' }],
     ] as const) {
-      const { caps } = world(journey3Graph(true));
+      const { caps, store } = world(journey3Graph(true));
       const r = await caps.proposeLinkEffect!(ctxSaying(said), { ...a, ...over }) as Json;
       expect(r.ok, JSON.stringify(r)).toBe(true);
+      expectOperations(store, r, [a === A4 ? servedEndpoints[1] : servedEndpoints[2]]);
     }
   });
 
   it('the decision shares the goal\'s name (served: "monthly recurring revenue"): a size is about the QUANTITY, so r5 is not ambiguous', async () => {
     const g = journey3Graph(true);
     expect(g.nodes.filter((n: Json) => String(n.label).toLowerCase() === 'monthly recurring revenue').map((n: Json) => n.kind)).toEqual(['decision', 'goal']);
-    const r = await world(g).caps.proposeLinkEffect!(ctxSaying(R5), A5) as Json;
+    const { caps, store } = world(g);
+    const r = await caps.proposeLinkEffect!(ctxSaying(R5), A5) as Json;
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect((r.link as Json).to).toBe('Monthly recurring revenue');
+    expectOperations(store, r, [servedEndpoints[2]]);
   });
   it('control: TWO QUANTITIES with one name are still ambiguous — nothing is prepared, single or grouped', async () => {
     const g = journey3Graph(true);
@@ -221,6 +391,7 @@ describe('propose_link_effect on the served labels', () => {
     const grouped = await many.caps.proposeLinkEffect!(ctxSaying(`${R3} ${R4}`), { links: [A3, A4] }) as Json;
     expect((grouped.not_prepared as Json[]).map((x) => x.refusal)).toEqual(['ambiguous_entity']);
     expect(many.store.get(String(grouped.proposal_id))!.operations).toHaveLength(1);
+    expectOperations(many.store, grouped, [servedEndpoints[1]]);
     expect(one.store.size()).toBe(0);
   });
   it('control: a name that is only an OPTION is not a link end, and the refusal says so', async () => {
@@ -238,6 +409,7 @@ describe('propose_link_effect on the served labels', () => {
     expect(r.ok, JSON.stringify(r)).toBe(true);
     expect(r.not_prepared).toBeUndefined();
     expect(store.get(String(r.proposal_id))!.operations).toHaveLength(3);
+    expectOperations(store, r, servedEndpoints);
   });
 
   /**
@@ -269,7 +441,7 @@ describe('propose_link_effect on the served labels', () => {
   });
 
   it('every consent refusal names ONE precise thing to ask (never a bare code)', async () => {
-    const { caps } = world(journey3Graph(true));
+    const { caps, store } = world(journey3Graph(true));
     const ask = async (said: string, a: LinkArgs): Promise<Json> => await caps.proposeLinkEffect!(ctxSaying(said), { ...a, quote: said }) as Json;
     const unnamed = await ask('Each 1% rise adds about 2 Customers lost to price rise', A3);
     expect(unnamed).toEqual(expect.objectContaining({ ok: false, refusal: 'not_the_users_statement', why: 'end_not_named' }));
@@ -284,6 +456,7 @@ describe('propose_link_effect on the served labels', () => {
       { amount: 49, amount_unit: 'GBP per month', per_source_change: 49, per_source_change_unit: 'GBP per subscriber / month' }, R6));
     expect(level.ok).toBe(false);
     expect(String(level.detail)).toMatch(/Ask the user ONE thing/);
+    expect(store.size()).toBe(0);
   });
 });
 
@@ -308,11 +481,13 @@ describe('the writer refuses an end with no unit by name, and reads the end\'s o
     const outcome = g.nodes.find((n: Json) => n.id === 'starter_mrr');
     delete outcome.scale_frame;
     outcome.observed_state = { unit: 'GBP per month', value: 5, raw_value: 5, source: 'cee_inference' };
-    const r = await world(g).caps.proposeLinkEffect!(ctxSaying(R4), A4) as Json;
+    const { caps, store } = world(g);
+    const r = await caps.proposeLinkEffect!(ctxSaying(R4), A4) as Json;
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'unconvertible' }));
     expect(String(r.detail)).toContain('"Starter tier monthly recurring revenue" has a unit (GBP per month) but no level or range');
     expect(String(r.detail)).toContain('cannot be added from this conversation yet');
     expect(String(r.detail)).not.toMatch(/\(unconvertible\)/);
+    expect(store.size()).toBe(0);
   });
   it('written: the size is exactly the user\'s two figures on the ends\' scales, recorded as theirs', () => {
     const r = write(journey3Graph(true), 'starter_subs', 'starter_mrr', starter49);
