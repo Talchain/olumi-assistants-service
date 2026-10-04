@@ -2724,7 +2724,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           // PJ-C1 latency: a lone proposal is answered from its own result, with no narrating call (proposal-reply.ts).
           composeReply: (tool, args, toolResult) => {
             const firstResult = tool === 'build_model_from_brief'
-              ? firstAnalysisResultReply(args, toolResult, firstAnalysis?.outcome.ran === true, message) : null;
+              ? firstAnalysisResultReply(args, toolResult, firstAnalysis?.outcome.ran === true) : null;
             if (firstResult !== null) { firstAnalysisResultFirst = true; return firstResult; }
             return composeProposalReply(tool, args, toolResult, message);
           },

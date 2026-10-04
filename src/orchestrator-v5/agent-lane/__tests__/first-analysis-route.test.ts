@@ -285,8 +285,28 @@ describe('L3: a whole build request delivers its canonical first result before n
     expect(b.assistant_text).toContain('A later narrating call.');
   });
 
-  it('does not suppress a question even when the model incorrectly marks the whole request', async () => {
-    const b = await build({ whole_request: true }, 'Build the model. What evidence should we collect?');
+  it.each([
+    'Build the model and tell me what evidence we need',
+    'Build the model. Answer “What evidence should we collect?”',
+    'Construye el modelo y dime qué evidencia necesitamos',
+    'モデルを作り、必要な証拠を教えてください',
+  ])('keeps a typed incomplete request narrated regardless of its wording: %s', async words => {
+    // The selector already carries request coverage. This fixture does not classify the user's language.
+    const b = await build({ whole_request: false }, words);
+    expect(modelBodies).toHaveLength(2);
+    expect(b.assistant_text).toContain('A later narrating call.');
+    expect(b._diagnostic_trace.first_analysis).toMatchObject({ narrator_skipped: false });
+  });
+
+  it('does not let quoted punctuation veto a typed complete build request', async () => {
+    const b = await build({ whole_request: true }, 'Build the model for our “What next?” programme.');
+    expect(modelBodies).toHaveLength(1);
+    expect(b._diagnostic_trace.first_analysis).toMatchObject({ narrator_skipped: true });
+    expect(b.assistant_text).toContain(RUN_RESULT_READY_TEXT);
+  });
+
+  it('keeps narration when request coverage is not a boolean', async () => {
+    const b = await build({ whole_request: 'true' });
     expect(modelBodies).toHaveLength(2);
     expect(b.assistant_text).toContain('A later narrating call.');
   });
