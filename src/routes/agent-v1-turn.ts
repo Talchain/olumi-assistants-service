@@ -3339,8 +3339,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // Keep the pending authority verbatim. Normalise exact narrator copies before
     // the whole-reply scrub, so other IDs cannot give this display question a
     // different replacement name and defeat final deduplication.
-    const scopedNarration = rawScopeQuestion === null || freshScopeQuestion === null ? narration.text : narration.text.split(rawScopeQuestion).join(freshScopeQuestion);
-    let narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
+    const scopedNarrationRaw = rawScopeQuestion === null || freshScopeQuestion === null ? narration.text : narration.text.split(rawScopeQuestion).join(freshScopeQuestion);
     // Decide only at assembly, against the final scope-composed, identity-bound authority used by egress.
     const explainEnrichment = (analysisResult as { enrichment?: Record<string, unknown> } | null | undefined)?.enrichment;
     if (fastPath === 'explain' && narrationStatus === 'ready' && narratorWords !== null
@@ -3350,11 +3349,12 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       && leaderLicenceFromState(analysisState, composedRead.analysisReady) !== 'withheld'
       && explainEnrichment != null && isRawFragile(readRawRobustnessSignals(explainEnrichment.robustness))) {
       explainRobustnessCaveat = explainRobustnessSentence(analysisResult, composedRead.graph);
-      // Whole-text exits keep the caveat after the narrator's at-rest prose, before any folded questions.
-      narrationText = withoutSentenceCopies(narrationText, explainRobustnessCaveat);
-      narrationText = [narrationText.trimEnd(), explainRobustnessCaveat].filter(Boolean).join(' ');
-      narrationText = withB3LinesAtRest(narrationText, [explainRobustnessCaveat]);
     }
+    // Whole-text exits keep the caveat after the narrator's at-rest prose, before any folded questions.
+    // Equivalent order: withDecisionInputAskDisplay only replaces the raw ask with its id-free form; it cannot contain/create the caveat or add/move Questions this model does not answer yet:.
+    const scopedNarration = explainRobustnessCaveat === null ? scopedNarrationRaw
+      : withB3LinesAtRest([withoutSentenceCopies(scopedNarrationRaw, explainRobustnessCaveat).trimEnd(), explainRobustnessCaveat].filter(Boolean).join(' '), [explainRobustnessCaveat]);
+    const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
       && claimPermissionsFrom(analysisState, analysisReady, { requested: fastPath === 'run' }).leader_may_be_named
