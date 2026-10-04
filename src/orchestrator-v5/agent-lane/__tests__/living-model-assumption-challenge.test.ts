@@ -193,7 +193,8 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
   const approveChipOf = (b: Body) => b.suggested_actions.find((c) => c.id.startsWith('agent-approve-proposal:'));
   const optionLabels = () => graphNow().nodes.filter((x) => x.kind === 'option').map((x) => String(x.label)).sort();
   const heldOnLatestRow = async () => {
-    const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; action: { kind: string; inline_patch?: { handler_id?: string } } }[];
+    const pendings = (await store.readMostRecentPendingActions(SCENARIO)) as { chip_id: string; action: { kind: string;
+      inline_patch?: { handler_id?: string; operations?: { op: string; path: string; value?: Rec }[] } } }[];
     return pendings.filter((p) => p.action.kind === 'apply_proposed_change' && p.action.inline_patch?.handler_id === 'graph_management_held_v1');
   };
   const addsOption = () => inner.filter((b) => (b['chip'] as { intent?: string } | undefined)?.intent === 'add_option');
@@ -203,10 +204,10 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
   };
 
   /** The press, exactly as a client sends it: the typed chip naming the stored link by its endpoints. */
-  const pressFor = async (from: string, to: string) => {
+  const pressFor = async (from: string, to: string, turnId = randomUUID()) => {
     const { challengePressFor } = await import('../method-turn/widen-turn.js');
     const chip = challengePressFor(from, to);
-    return turn({ message: chip.message, source: 'chip', chip: { id: chip.id } });
+    return turn({ turn_id: turnId, message: chip.message, source: 'chip', chip: { id: chip.id } });
   };
   /** Olumi's estimate for a LOWER churn (cap 200: 20 → 0.1), the door's own level shape. */
   const retention = { label: 'Retention offer', acts_on: [{ factor_label: 'Customer churn', direction: 'negative',
@@ -278,7 +279,8 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
     expect(t1._agent.tool_calls.map((c) => [c.name, c.ok])).toEqual([['propose_new_option', true]]);
     const approve = approveChipOf(t1);
     expect(approve?.id, JSON.stringify(t1.suggested_actions)).toMatch(/^agent-approve-proposal:gmh_[0-9a-f]{12}$/);
-    expect(t1.suggested_actions.map((c) => c.id)).toEqual([approve!.id, 'agent-amend-proposal', 'agent-question-keep']);
+    expect(t1.suggested_actions.map((c) => c.id)).toEqual([approve!.id, 'agent-amend-proposal',
+      `agent-question-keep:${approve!.id.slice('agent-approve-proposal:'.length)}`]);
     // The reply names the assumption it questions (typed labels) and the ONE option it holds.
     expect(t1.assistant_text).toContain('‘Price’ → ‘Customer churn’');
     expect(t1.assistant_text).toContain('Retention offer');
@@ -328,14 +330,25 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
     expect((await coldRead()).analysis_state?.run_state.kind).toBe('complete_current');
 
     script = [() => fnCall('propose_new_option', { ...retention, rationale: 'Lowers churn directly.' })];
-    const t1 = await pressFor(ASSUMED.from, ASSUMED.to);
+    const questionTurnId = randomUUID();
+    const t1 = await pressFor(ASSUMED.from, ASSUMED.to, questionTurnId);
     const approve = approveChipOf(t1)!;
-    const t2 = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    const answerRow = latestRow()!;
+    expect(answerRow.turn_id).toBe(questionTurnId);
+    const held = (await heldOnLatestRow())[0]!;
+    expect(held.chip_id).toBe(approve.id.slice('agent-approve-proposal:'.length));
+    const heldNode = held.action.inline_patch!.operations!.find((o) => o.op === 'add_node' && o.value?.kind === 'option')!;
+    expect(heldNode, 'the approval names this exact held option').toBeDefined();
+    expect(graphNow().nodes.some((x) => x.id === heldNode.path)).toBe(false);
+    const adoptionTurnId = randomUUID();
+    const t2 = await turn({ turn_id: adoptionTurnId, message: approve.message, source: 'chip', chip: { id: approve.id } });
     expect(t2._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
     // 3: adopted — and the adopted level is OLUMI'S ESTIMATE, never the user's figure.
-    const added = graphNow().nodes.find((x) => x.kind === 'option' && x.label === 'Retention offer')!;
+    expect(latestRow()!.turn_id).toBe(adoptionTurnId);
+    const added = graphNow().nodes.find((x) => x.id === heldNode.path)!;
+    expect(added).toMatchObject({ id: heldNode.path, kind: 'option', label: 'Retention offer' });
     expect(Object.keys(added.interventions)).toEqual(['fac_churn']);
-    expect(added.interventions.fac_churn).toMatchObject({ raw_value: 20, source: 'cee_hypothesis' });
+    expect(added.interventions.fac_churn).toMatchObject({ value: 0.1, raw_value: 20, source: 'cee_hypothesis' });
     expect(graphNow().edges.some((x) => x.from === 'dec_x' && x.to === added.id)).toBe(true);
     // The old Run no longer describes this model.
     expect((await coldRead()).analysis_state?.run_state.kind).toBe('complete_stale');
@@ -343,6 +356,9 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
     // 4 + 5: the rerun's Analysis Projection carries the adopted option, and its result is in the cold read.
     const second = await runAnalysis('turn-run-2');
     expect((plotBodies.at(-1)!.options as Rec[]).map((o) => o.option_id)).toEqual(['opt_a', 'opt_b', added.id]);
+    // The Run's existing request projection converts the stored 0.1 on cap 200 to its native wire scale, 20.
+    expect((plotBodies.at(-1)!.options as Rec[]).find((o) => o.option_id === heldNode.path)!.interventions)
+      .toEqual({ fac_churn: 20 });
     expect(second.result.graph_hash_at_run).not.toBe(first.result.graph_hash_at_run);
 
     // 6: a COLD reload — the stored graph and the analysis read, nothing carried in memory.
@@ -358,22 +374,109 @@ describe('LIVING MODEL: question ONE assumption → ONE different mechanism as a
     expect(linkSizing(edgeOf(reloaded, ASSUMED.from, ASSUMED.to))).toBe('olumi_estimate');
     expect(reloaded.nodes.find((x) => x.id === added.id)!.interventions.fac_churn.source, 'provenance: Olumi’s estimate').toBe('cee_hypothesis');
     // The conversation's own record of WHICH assumption the option answers survives on the stored answer row.
-    const questioned = [...rows.values()].filter((r) => r.scenario_id === SCENARIO && (r.assistant_message ?? '').includes('Retention offer'));
-    expect(questioned.some((r) => (r.assistant_message ?? '').includes('‘Price’ → ‘Customer churn’'))).toBe(true);
+    const recordedAnswer = await store.readCommittedTurn(SCENARIO, questionTurnId);
+    expect(recordedAnswer).toMatchObject({ id: answerRow.id, turn_id: answerRow.turn_id, scenario_id: SCENARIO });
+    expect(recordedAnswer!.assistant_message).toContain('‘Price’ → ‘Customer churn’');
+    expect(recordedAnswer!.assistant_message).toContain('Retention offer');
+    const answerHold = (recordedAnswer!.pending_actions as typeof held[]).find((p) => p.chip_id === held.chip_id)!;
+    expect(answerHold.action.inline_patch!.operations!.find((o) => o.op === 'add_node' && o.path === added.id))
+      .toEqual(heldNode);
   }, 180_000);
 
   it('LM-R REJECT (control): the user keeps their options → nothing is written, and the next Run compares only their options', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const before = await hashes();
-    script = [() => fnCall('propose_new_option', { ...retention, rationale: 'r' }), () => say('Understood. Your options stay as they are.')];
+    script = [() => fnCall('propose_new_option', { ...retention, rationale: 'r' })];
     const t1 = await pressFor(ASSUMED.from, ASSUMED.to);
-    const keep = t1.suggested_actions.find((c) => c.id === 'agent-question-keep')!;
+    const approve = approveChipOf(t1)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    const keep = t1.suggested_actions.find((c) => c.id === `agent-question-keep:${ref}`)!;
     expect(keep, JSON.stringify(t1.suggested_actions)).toBeDefined();
-    await turn({ message: keep.message, source: 'chip', chip: { id: keep.id } });
+    const rejected = await turn({ message: keep.message, source: 'chip', chip: { id: keep.id } });
+    expect(rejected._agent.tool_calls).toEqual([expect.objectContaining({ name: 'withdraw_proposal', ok: true, mutated: false, proposal_id: ref })]);
+    expect(openAiCalls, 'Keep withdraws the exact hold without interpretation').toBe(1);
+    expect(await heldOnLatestRow(), 'the hold is retired on the answer row').toEqual([]);
+    script = [() => fnCall('authorise_change', { proposal_id: ref }), () => say('Nothing changed.')];
+    const afterRejection = await turn({ message: 'Do not add anything.' });
+    expect(afterRejection._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false,
+      mutated: false, refusal: 'approval_required', proposal_id: ref }));
+    await app.close();
+    app = await buildApp();
+    const oldCard = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(oldCard._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false,
+      mutated: false, refusal: 'unknown_proposal', proposal_id: ref })]);
     expect(await hashes()).toBe(before);
     expect(optionLabels()).toEqual(['Keep £49', 'Raise to £59']);
     plotBodies.length = 0;
     await runAnalysis('turn-run-reject');
     expect((plotBodies[0]!.options as Rec[]).map((o) => o.option_id)).toEqual(['opt_a', 'opt_b']);
+  }, 120_000);
+
+  it('LM-Keep identity: declining one hold retires only that hold, including an old Keep press after reload', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    script = [() => fnCall('propose_new_option', { ...retention, rationale: 'r' })];
+    const first = await pressFor(ASSUMED.from, ASSUMED.to);
+    const firstApprove = approveChipOf(first)!;
+    const firstRef = firstApprove.id.slice('agent-approve-proposal:'.length);
+    const keep = first.suggested_actions.find((c) => c.id === `agent-question-keep:${firstRef}`)!;
+    script = [() => fnCall('propose_new_option', { ...retention, label: 'Retention support', rationale: 'r' })];
+    const second = await pressFor(ASSUMED.from, ASSUMED.to);
+    const secondApprove = approveChipOf(second)!;
+    const secondRef = secondApprove.id.slice('agent-approve-proposal:'.length);
+    expect(secondRef).not.toBe(firstRef);
+    expect((await heldOnLatestRow()).map((p) => p.chip_id).sort()).toEqual([firstRef, secondRef].sort());
+    await turn({ message: keep.message, source: 'chip', chip: { id: keep.id } });
+    expect((await heldOnLatestRow()).map((p) => p.chip_id)).toEqual([secondRef]);
+    await app.close();
+    app = await buildApp();
+    await turn({ message: keep.message, source: 'chip', chip: { id: keep.id } });
+    expect((await heldOnLatestRow()).map((p) => p.chip_id)).toEqual([secondRef]);
+    expect(optionLabels()).toEqual(['Keep £49', 'Raise to £59']);
+    const applied = await turn({ message: secondApprove.message, source: 'chip', chip: { id: secondApprove.id } });
+    expect(applied._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true,
+      proposal_id: secondRef })]);
+    expect(graphNow().nodes.some((x) => x.label === 'Retention support')).toBe(true);
+    expect(graphNow().nodes.some((x) => x.label === 'Retention offer')).toBe(false);
+  }, 120_000);
+
+  it.each([false, true])('LM-consent: a model calling authorise_change on negative user text is refused, including reload (%s) and retry', async (reload) => {
+    graphOf.set(SCENARIO, seedGraph());
+    const before = structuredClone(graphNow());
+    script = [() => fnCall('propose_new_option', { ...retention, rationale: 'r' })];
+    const offered = await pressFor(ASSUMED.from, ASSUMED.to);
+    const approve = approveChipOf(offered)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    if (reload) { await app.close(); app = await buildApp(); }
+    const turnId = randomUUID();
+    script = [() => fnCall('authorise_change', { proposal_id: ref }), () => say('Nothing changed.')];
+    const refused = await turn({ turn_id: turnId, message: 'Do not add anything.' });
+    expect(refused._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false,
+      mutated: false, refusal: 'approval_required', proposal_id: ref }));
+    const callsBeforeRetry = openAiCalls;
+    await turn({ turn_id: turnId, message: 'Do not add anything.', source: 'retry' });
+    expect(openAiCalls, 'retry replays without confirming').toBe(callsBeforeRetry);
+    expect(addsOption()).toHaveLength(1);
+    expect(inner.filter((b) => (b.chip as { id?: string } | undefined)?.id === ref), 'no held confirm dispatched').toEqual([]);
+    expect(graphNow()).toEqual(before);
+    // Positive control: the same live hold can still be approved by the exact typed card.
+    const applied = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(applied._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true,
+      mutated: true, proposal_id: ref })]);
+  }, 120_000);
+
+  it('LM-card binding: a correct held ID with different approval words cannot confirm its stored operation', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const before = structuredClone(graphNow());
+    script = [() => fnCall('propose_new_option', { ...retention, rationale: 'r' })];
+    const t1 = await pressFor(ASSUMED.from, ASSUMED.to);
+    const approve = approveChipOf(t1)!;
+    const refused = await turn({ message: 'Do not add anything.', source: 'chip', chip: { id: approve.id } });
+    expect(refused._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: false,
+      mutated: false, refusal: 'approval_required' })]);
+    expect(inner.filter((b) => (b.chip as { id?: string } | undefined)?.id === approve.id.slice('agent-approve-proposal:'.length)))
+      .toEqual([]);
+    expect(graphNow()).toEqual(before);
+    const applied = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(applied._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true })]);
   }, 120_000);
 });

@@ -5,7 +5,7 @@
  * method-turn reply fixtures, vendored from programme-docs @a00cb9c8).
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { POLICY } from '../../guidance/policy.js';
 import { methodPlanOf, type GuidanceSignals as SelectorSignals } from '../../guidance/index.js';
@@ -65,6 +65,12 @@ const methodState = (state: Record<string, unknown>): TurnSignals => {
 };
 
 describe('the corpus', () => {
+  let nextStepIds: readonly string[];
+  // The route's full service import belongs in the configured bootstrap hook, outside the assertion's 5s budget.
+  beforeAll(async () => {
+    const { NEXT_STEP_CHIPS } = await import('../../../../routes/agent-v1-turn.js');
+    nextStepIds = NEXT_STEP_CHIPS.map((c) => c.id);
+  });
   it('served cases are byte-identical to their captures; RC carries its 4 pre-mortem method cases and (at least) the reply fixtures these rows were built on', () => {
     expect(SERVED.cases.every((c) => c.capture_sha_matches_case)).toBe(true);
     const method = RC.cases.filter((c) => c.id.startsWith('A-PREMORTEM') && c.state['turn.request'] === 'method');
@@ -80,9 +86,8 @@ describe('the corpus', () => {
     expect(RC_REPLIES.some((f) => f.expect === 'pass') && RC_REPLIES.some((f) => f.expect === 'fail')).toBe(true);
   });
 
-  it('the generic press IS the served next-step chip, and RC\'s fallback is quoted verbatim', async () => {
-    const { NEXT_STEP_CHIPS } = await import('../../../../routes/agent-v1-turn.js');
-    expect(NEXT_STEP_CHIPS.map((c) => c.id)).toContain(PREMORTEM_PRESS_ID);
+  it('the generic press IS the served next-step chip, and RC\'s fallback is quoted verbatim', () => {
+    expect(nextStepIds).toContain(PREMORTEM_PRESS_ID);
     expect(/'(Imagine [^']+)'/u.exec(POLICY.method_turns['RC-PREMORTEM'].fallback)?.[1]).toBe(FALLBACK_TEMPLATE);
   });
 });

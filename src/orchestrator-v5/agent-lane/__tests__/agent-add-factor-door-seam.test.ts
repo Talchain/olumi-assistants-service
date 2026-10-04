@@ -228,6 +228,22 @@ describe('PJ-E-FIG — the Agent adds new factors with the user\'s figures, held
   };
   const callOf = (b: Body) => b._agent.tool_calls.find((c) => c.name === 'propose_new_factor');
 
+  it('factor consent: a model-only authorise_change after "Do not add anything" refuses the live hold; its typed card still works', async () => {
+    graphOf.set(SCENARIO, seedGraph());
+    const before = bytes();
+    const t1 = await propose(factorArgs());
+    const approve = approveChipOf(t1)!;
+    const ref = approve.id.slice('agent-approve-proposal:'.length);
+    script = [() => fnCall('authorise_change', { proposal_id: ref }), () => say('Nothing changed.')];
+    const refused = await turn({ message: 'Do not add anything.' });
+    expect(refused._agent.tool_calls).toContainEqual(expect.objectContaining({ name: 'authorise_change', ok: false,
+      mutated: false, refusal: 'approval_required', proposal_id: ref }));
+    expect(bytes()).toBe(before);
+    expect((await heldOnLatestRow()).map((p) => p.chip_id)).toEqual([ref]);
+    const applied = await turn({ message: approve.message, source: 'chip', chip: { id: approve.id } });
+    expect(applied._agent.tool_calls).toEqual([expect.objectContaining({ name: 'authorise_change', ok: true, mutated: true, proposal_id: ref })]);
+  }, 120_000);
+
   it('CONTROL (passes at base): the seeded model and its £400k limit are what the Agent is given; a question writes nothing', async () => {
     graphOf.set(SCENARIO, seedGraph());
     const before = bytes();

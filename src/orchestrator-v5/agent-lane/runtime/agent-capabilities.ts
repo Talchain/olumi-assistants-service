@@ -1970,6 +1970,12 @@ export function createAgentCapabilities(
    * the model moved, the hold is gone and the id is present — and none of it is this write.
    */
   const confirmHeld = async (ctx: AgentToolContext, ref: string): Promise<ToolResult> => {
+    // The server-bound card identity is consent, never the model's interpretation of user text.
+    // This applies to EVERY product hold (options, risks and factors), including carried holds.
+    if (ctx.typed_approval_of !== ref) {
+      return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
+        detail: 'Nothing changed. Press the approval card for this waiting change before it can be applied.' };
+    }
     let hold: PendingAction | undefined;
     try {
       hold = await liveHeldHold(ctx.scenario_id, ref);
@@ -1981,9 +1987,13 @@ export function createAgentCapabilities(
       return { ok: false, mutated: false, refusal: 'unknown_proposal', proposal_id: ref,
         detail: 'That change is no longer waiting (it expired, or the model changed since it was offered), so nothing was applied. Offer to prepare it again.' };
     }
+    const copy = resolveProposalRenderCopy(hold.action as { kind: string; public_label?: string; public_message?: string });
+    if (ctx.typed_approval_words !== copy.message) {
+      return { ok: false, mutated: false, refusal: 'approval_required', proposal_id: ref,
+        detail: 'Nothing changed. Approval must use the displayed card for this exact waiting change.' };
+    }
     const before = await readGraph(ctx.scenario_id);
     if (before === null) return { ok: false, mutated: false, refusal: 'not_found', proposal_id: ref };
-    const copy = resolveProposalRenderCopy(hold.action as { kind: string; public_label?: string; public_message?: string });
     const r = await dispatch('/orchestrate/v2/turn', {
       kind: 'message', turn_id: authorisationTurnId(`agent_confirm_held:${hold.id}`), scenario_id: ctx.scenario_id,
       stage: 'frame', turn_class: 'frame', source: 'chip', message: copy.message, chip: { id: ref },

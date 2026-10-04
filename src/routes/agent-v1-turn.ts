@@ -113,7 +113,7 @@ import { goalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim
 import { AnalysisStateV1Schema, type AnalysisStateV1 } from '@talchain/schemas/boundary';
 import { cardCallFor, isMethodPress, methodTurnForReadback, methodTurnItems, settleMethodTurn, TALK_IT_THROUGH_CHIP, type MethodTurn } from '../orchestrator-v5/agent-lane/method-turn/method-turn.js';
 import {
-  isWidenPress, nextStepsWithWiden, settleWidenTurn, widenGate, widenOffered, widenTurnForReadback,
+  isWidenPress, keptProposalOf, nextStepsWithWiden, settleWidenTurn, widenGate, widenOffered, widenTurnForReadback,
   WIDEN_GATE_REFUSAL, WIDEN_PRESS_ID, WIDEN_TOOL, type WidenGateResult, type WidenTurn,
 } from '../orchestrator-v5/agent-lane/method-turn/widen-turn.js';
 import { isWhatChangesPress, whatChangesTurnFor, type WhatChangesTurn } from '../orchestrator-v5/agent-lane/method-turn/what-changes-turn.js';
@@ -2179,8 +2179,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     // is not on offer carries no words, so it writes nothing.
     const offeredCard = approvedProposal === undefined ? undefined : [lastApproveOffer.get(approveKey), carriedProposals.get(approveKey)?.chip]
       .find((c) => c !== undefined && typedApprovalOf({ chip: { id: c.id } }) === approvedProposal);
+    // A product hold is its own durable card; confirmHeld checks these words against that exact live hold.
     const pressedApproval = approvedProposal !== undefined
-      ? { typed_approval_of: approvedProposal, ...(offeredCard !== undefined ? { typed_approval_words: message } : {}) } : {};
+      ? { typed_approval_of: approvedProposal,
+        ...(offeredCard !== undefined || approvedProposal.startsWith('gmh_') ? { typed_approval_words: message } : {}) } : {};
     const toolCtx: AgentToolContext = { ...pressedApproval, scenario_id: scenarioId, authenticated_user_id: userId, request_id: req.id, user_turn_text: typedNow ?? '', user_text: userWordsOf(histories.typedWords(sessionId), typedNow) };
     if (typedNow !== null) histories.recordTyped(sessionId, typedNow);
 
@@ -2220,6 +2222,22 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     /** Which typed outcome this turn's Run was said as (`run-outcome.ts`), on either path; `undefined` when none. */
     let runOutcomeKind: RunOutcome['kind'] | undefined;
     let result: AgentTurnResult | undefined;
+    const keptProposal = keptProposalOf((body['chip'] as { id?: unknown } | undefined)?.id);
+    if (keptProposal !== undefined) {
+      const started = Date.now();
+      const withdrawn = await dispatchTool(WITHDRAW_PROPOSAL, JSON.stringify({ proposal_id: keptProposal }), toolCtx, capabilities, mode);
+      const said = withdrawn.ok === true ? 'Your options stay as they are. The suggested change has been withdrawn.'
+        : 'Your options stay as they are. That suggested change could not be withdrawn.';
+      const ms = Date.now() - started;
+      result = {
+        assistant_text: said,
+        items: [...(history ?? []), { role: 'user', content: [{ type: 'input_text', text: message }] },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: said }] }],
+        tool_calls: [{ name: WITHDRAW_PROPOSAL, ok: withdrawn.ok === true, mutated: false, proposal_id: keptProposal }],
+        tool_results: [withdrawn], mutated: false, hops: 0, stopped_reason: 'answered',
+        timing: { total_ms: ms, provider_ms: 0, tool_ms: ms, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 1, hops: 0 },
+      };
+    }
     if (approvedProposal !== undefined) {
       const fastStartedAt = Date.now();
       const applied = await dispatchTool(

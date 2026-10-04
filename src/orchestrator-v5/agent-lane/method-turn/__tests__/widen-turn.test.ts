@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { POLICY } from '../../guidance/policy.js';
 import type { GuidanceSignals } from '../../turn-context/guidance-signals.js';
 import {
-  doorFactorOf, existingLevers, nextStepsWithWiden, sameLevers, settleWidenTurn, SOMETHING_ELSE_CHIP, WIDEN_CARD_LINE, WIDEN_CHIP,
+  actsWithout, doorFactorOf, existingLevers, keptProposalOf, nextStepsWithWiden, openAssumptionOf, sameLevers, settleWidenTurn, SOMETHING_ELSE_CHIP, WIDEN_CARD_LINE, WIDEN_CHIP,
   WIDEN_FALLBACK_TEMPLATE, WIDEN_REPLACES_CHIP_ID, widenDoorReply, widenGate, widenTurnFromSignals, type RunWidenTurn,
 } from '../widen-turn.js';
 
@@ -296,5 +296,75 @@ describe('RC-WIDEN method turn', () => {
     const steps = [{ id: 'agent-next-pre-mortem', label: 'a', message: 'a' }, { id: WIDEN_REPLACES_CHIP_ID, label: 'b', message: 'b' }, { id: 'agent-next-strengthen', label: 'c', message: 'c' }];
     expect(nextStepsWithWiden(steps, true).map((s) => s.id)).toEqual(['agent-next-pre-mortem', 'agent-next-widen', 'agent-next-strengthen']);
     expect(nextStepsWithWiden(steps, false)).toEqual(steps);
+  });
+});
+
+describe('Living Model causal paths and selected goal identity', () => {
+  const assumptionGraph = (multihop: boolean) => ({
+    ...GRAPH,
+    goal_node_id: 'goal',
+    nodes: [...GRAPH.nodes, { id: 'f_alt', kind: 'factor', label: 'Referral rate', observed_state: { value: 0.1 } },
+      { id: 'out_suffix', kind: 'outcome', label: 'Retained revenue' },
+      { id: 'out_alt', kind: 'outcome', label: 'New revenue' }],
+    edges: [
+      ...GRAPH.edges.filter((e) => e.from !== 'f_churn'),
+      { from: 'f_price', to: 'f_churn', provenance: { magnitude: 'olumi_estimate' }, strength: { mean: 0.3 } },
+      ...(multihop ? [{ from: 'f_churn', to: 'out_suffix' }, { from: 'out_suffix', to: 'goal' },
+        { from: 'f_alt', to: 'out_alt' }, { from: 'out_alt', to: 'goal' }]
+        : [{ from: 'f_churn', to: 'goal' }, { from: 'f_alt', to: 'goal' }]),
+    ] as Record<string, unknown>[],
+  });
+  const alt = { label: 'Referral programme', rationale: 'r', acts_on: [{ factor_label: 'Referral rate', direction: 'positive',
+    level: { value: 0.2, estimate: true, basis: 'a typical referral programme' } }] };
+
+  it.each([false, true])('direct/multihop control (%s): an open causal assumption and a different goal path pass', (multihop) => {
+    const g = assumptionGraph(multihop);
+    const q = openAssumptionOf(g, 'f_price', 'f_churn')!;
+    expect(q).toMatchObject({ goal_id: 'goal', goal_label: 'Revenue' });
+    expect(actsWithout(g, 'f_alt', q)).toBe(true);
+    expect(widenGate(widenTurnFromSignals(signals(), g, q) as RunWidenTurn, alt)).toEqual({ ok: true });
+  });
+
+  for (const multihop of [false, true]) {
+    for (const blocked of [{ edge_type: 'bidirected' }, { exists_probability: 0 }]) {
+      it.each(['questioned', 'suffix', 'alternative'] as const)(
+        `rejects ${JSON.stringify(blocked)} at %s (${multihop ? 'multihop' : 'direct'})`, (position) => {
+          const g = assumptionGraph(multihop);
+          const from = position === 'questioned' ? 'f_price' : position === 'suffix'
+            ? (multihop ? 'out_suffix' : 'f_churn') : (multihop ? 'out_alt' : 'f_alt');
+          const to = position === 'questioned' ? 'f_churn' : 'goal';
+          g.edges = g.edges.map((e) => e.from === from && e.to === to ? { ...e, ...blocked } : e);
+          const q = openAssumptionOf(g, 'f_price', 'f_churn');
+          if (position !== 'alternative') expect(q).toBeUndefined();
+          else {
+            expect(q).toBeDefined();
+            expect(actsWithout(g, 'f_alt', q!)).toBe(false);
+            expect(widenGate(widenTurnFromSignals(signals(), g, q) as RunWidenTurn, alt))
+              .toEqual({ ok: false, failed: ['CH-OTHER-MECHANISM'] });
+          }
+        });
+    }
+  }
+
+  it.each([false, true])('selected goal ID, directive, headline and fallback agree after goal reorder (%s)', (reverse) => {
+    const g = assumptionGraph(false);
+    const other = { id: 'goal_other', kind: 'goal', label: 'Customer satisfaction' };
+    g.nodes = reverse ? [...g.nodes, other] : [other, ...g.nodes];
+    const q = openAssumptionOf(g, 'f_price', 'f_churn')!;
+    const t = widenTurnFromSignals(signals({ 'model.goal_label': 'Customer satisfaction' }), g, q) as RunWidenTurn;
+    expect(t.goal_label).toBe('Revenue');
+    expect(t.directive).toContain('The goal is ‘Revenue’.');
+    expect(t.directive).not.toContain('Customer satisfaction');
+    const card = settleWidenTurn(t, { assistant_text: 'A referral programme.',
+      tool_calls: [{ name: 'propose_new_option', ok: true, proposal_id: 'gmh_0123456789ab' }] });
+    expect(card.reply).toContain('Revenue');
+    expect(card.reply).not.toContain('Customer satisfaction');
+    expect(keptProposalOf(card.actions[0]!.id)).toBe('gmh_0123456789ab');
+    const fallback = settleWidenTurn(t, { assistant_text: '', tool_calls: [] });
+    expect(fallback.reply).toContain('Revenue');
+    expect(fallback.reply).not.toContain('Customer satisfaction');
+    // A path only to the other goal never qualifies as a path to the selected goal.
+    g.edges = g.edges.map((e) => e.from === 'f_alt' ? { ...e, to: 'goal_other' } : e);
+    expect(actsWithout(g, 'f_alt', q)).toBe(false);
   });
 });
