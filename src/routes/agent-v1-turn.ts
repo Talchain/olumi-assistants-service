@@ -937,7 +937,8 @@ async function withRetainedScopeIssues(read: Awaited<ReturnType<typeof readBackS
         leader_claim: composeLeaderClaim({ canonical: null, rawRobustness: null, goalScopeClaimInput: scopeInput }, state.run_state, false),
       } };
     }
-    return { ...read, scopeOpen: false, analysisState: current.analysis_state };
+    // Restore the verdict and its projected result from this SAME identity-bound canonical read.
+    return { ...read, scopeOpen: false, analysisState: current.analysis_state, analysisResult: current.analysis_result ?? undefined };
   }
   const authorityAvailable = AnalysisStateV1Schema.safeParse(state).success;
   const base = authorityAvailable ? state! : composeAnalysisStateV1({ canonical: canonicalStateFromFreshness(NO_ANALYSIS_CONTEXT_DERIVATION), rawRobustness: null })!;
@@ -2879,7 +2880,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       : await readBackState(fastPath === 'explain' || whatChangesRead !== undefined
         ? (path, payload) => readingDispatch(path, { ...payload as Record<string, unknown>, fresh: true }) : readingDispatch, scenarioId);
     const freshScopeIssues = [...new Map(result.tool_results.flatMap(r => { const p = parsePendingAction(r.pending_action); return p?.scenario_id === scenarioId && p.action.kind === 'reconcile_goal_scope' ? [[p.chip_id, p] as const] : []; })).values()];
-    const { graphHash, analysisReady, draftGraph, analysisResult, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
+    const { graphHash, analysisReady, draftGraph, graph: readbackGraph, constraintVerdictState, leaderLimitRisks, notModelled, limitVerdicts, identityEvaluated, goalCertainty, optionParticipation } = finalRead;
     let liveHolds: readonly PendingAction[] = [];
     let liveScopeIssues: readonly PendingAction[] = [];
     if (typeof store.readMostRecentPendingActions === 'function') {
@@ -2909,7 +2910,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const scopeWithdrawals = new Set(result.tool_results.filter(r => r.withdrawn === true).map(r => r.proposal_id));
     const retainedScopeIssues = [...freshScopeIssues, ...liveScopeIssues].flatMap(p => { const refreshed = refreshScopePending(p, readbackGraph); return refreshed && !scopeWithdrawals.has(p.chip_id) ? [refreshed] : []; });
     const composedRead = await withRetainedScopeIssues(finalRead, scenarioId, retainedScopeIssues, String(req.id));
-    const { analysisState } = composedRead;
+    const { analysisState, analysisResult } = composedRead;
     if (whatChangesRead !== undefined) {
       const answer = whatWouldChangeAnswer(scenarioId,
         await withRetainedScopeIssues(whatChangesRead, scenarioId, retainedScopeIssues, String(req.id)), measuredCandidate);

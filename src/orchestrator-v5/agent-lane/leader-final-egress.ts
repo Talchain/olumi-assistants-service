@@ -19,7 +19,8 @@
  * Prose that only matches the wide alarm vocabulary is reported at level 40 and left alone: the alarm is wider than any
  * enforcer may safely be over user-facing prose (see `leading-option-egress-guard.ts`).
  *
- * `draft_graph`, `graph` and `analysis_ready.options` retain the user's model bytes on every projection.
+ * `draft_graph`, `graph` and `analysis_ready.options` retain the user's model bytes on ordinary withholding;
+ * an error/unavailable-authority envelope omits those unchecked carriers from the wire without changing the model.
  * `_agent` (the provisional view, permitted on a withheld turn by design) is never touched. NEVER THROWS: a failure
  * logs at level 50 and the reply is replaced by a known-safe envelope (fail closed), never shipped half-checked.
  */
@@ -204,7 +205,7 @@ function envelopeAllowList(value: unknown, key: string | undefined, depth: numbe
   if (rec === undefined) return value;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rec)) {
-    if (key === 'analysis_ready' && k === 'options') { out[k] = v; continue; }
+    if (key === 'analysis_ready' && k === 'options') continue;
     if (keyNamesLeader(k) && v !== null && v !== undefined && v !== '') { if (NULLABLE_LEADER_KEYS.has(k)) out[k] = null; continue; }
     const kept = envelopeAllowList(v, k, depth + 1);
     if (kept !== undefined) out[k] = kept;
@@ -235,7 +236,7 @@ function envelopeBlocks(blocks: unknown): unknown[] {
 const MINIMAL_ENVELOPE: Readonly<Record<string, unknown>> = Object.freeze({ assistant_text: WIRE_WITHHELD_LEADER_REPLACEMENT, suggested_actions: [], blocks: [] });
 
 /**
- * Known-safe, by ALLOW-LIST: the fixed withheld line, no chips, no run delta, unchanged model carriers, the `analysis_result`
+ * Known-safe, by ALLOW-LIST: the fixed withheld line, no chips, no run delta, no unchecked model carriers, the `analysis_result`
  * block reduced to codes and numbers, and every other member reduced to codes, numbers, booleans and user-given names
  * with leader-designating keys nulled. Never throws: a failure here returns {@link MINIMAL_ENVELOPE}.
  */
@@ -243,7 +244,7 @@ export function knownSafeEnvelope(response: Record<string, unknown>): Record<str
   try {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(response)) {
-      if (MODEL_MEMBERS.has(k)) { out[k] = v; continue; }
+      if (MODEL_MEMBERS.has(k)) continue;
       if (ENVELOPE_DROPPED.has(k)) continue;
       if (k === 'blocks') { out.blocks = envelopeBlocks(v); continue; }
       if (k === '_agent') {
