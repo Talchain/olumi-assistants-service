@@ -343,7 +343,7 @@ function rememberMeasuredWhatChanges(key: string, measured: MeasuredWhatChanges)
   }
   measuredWhatChanges.set(key, measured);
 }
-/** SCI-DEEP remembers the typed presentation, not stored prose: a replay must bind it to today's selected Run. */
+/** SCI-DEEP binds the remembered typed presentation to today's Run; identical re-presentation permits stored words. */
 const PRESENTED_STRUCTURAL_CHALLENGES_MAX = 500;
 const presentedStructuralChallenges = new Map<string, StructuralChallengeTurn>();
 function rememberStructuralChallenge(key: string, turn: StructuralChallengeTurn): void {
@@ -1845,7 +1845,10 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
           goalScopeClaimInput: goalScopeClaimInput([...currentScope, ...scopeIssues].filter(p => p.scenario_id === scenarioId), state.graph),
         });
         const presented = structuralChallengeReplay(remembered, receipt);
-        replayText = presented.reply;
+        // Replay the stored words (including live egress tails) only while today's fresh receipt re-presents the
+        // identical typed answer. Compare only the two deterministic composer outputs, never stored wording.
+        replayText = remembered !== undefined && presented.reply === remembered.reply
+          ? prior.assistant_message ?? presented.reply : presented.reply;
         boundControl.push(...presented.actions);
       } else if (approvedProposal === undefined && isRunExplanationChip(explanationId)) {
         const runKey = explanationId.slice(RUN_EXPLANATION_PREFIX.length);

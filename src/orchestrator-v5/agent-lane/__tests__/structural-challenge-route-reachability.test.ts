@@ -106,12 +106,13 @@ describe('agent route: real structural challenge press reachability', () => {
   afterAll(async () => { await app.close(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   /** Both baselines use the real Run handler and transport; only the selected durable fact set changes. */
-  async function realRun(requestId: string) {
+  async function realRun(requestId: string, runTurnId?: string) {
     const { buildTurnContext, loadScenarioSnapshotForRunAnalysis } = await import('../../build-turn-context.js');
     const { createRegistry, resolveHandler } = await import('../../tools/registry.js');
     const { priorRunForSeed } = await import('../../coaching/seed-reuse.js');
     const { NO_CLAIM, runWithBoundAnalysisSnapshot } = await import('../../run-analysis-snapshot-binding.js');
-    const payload = makeMessagePayload({ scenario_id: SCENARIO, stage: 'analyse', turn_class: 'decide', message: 'run analysis' });
+    const payload = makeMessagePayload({ scenario_id: SCENARIO, stage: 'analyse', turn_class: 'decide', message: 'run analysis',
+      ...(runTurnId !== undefined ? { turn_id: runTurnId } : {}) });
     const context = await buildTurnContext(payload, requestId);
     const handler = resolveHandler(createRegistry({
       plotClient: transport.plot,
@@ -299,7 +300,20 @@ describe('agent route: real structural challenge press reachability', () => {
     const { buildCanonicalAnalysisReadyFromGraph } = await import('../../../orchestrator/tools/analysis-ready-helper.js');
     graphRead.analysis_ready = buildCanonicalAnalysisReadyFromGraph(graph);
     graphRead = { ...graphRead, graph: { ...graph, edges: graph.edges.map(({ from, to, ...edge }: Rec) => ({ ...edge, from_id: from, to_id: to })) } };
-    await accepted('agent-test-without-link:driver_retention::goal_value');
+    const response = await post('agent-test-without-link:driver_retention::goal_value');
+    const body = response.json();
+    expect(response.statusCode).toBe(200);
+    // This read-back graph has no decision-context hash on served code.
+    // No current result can be presented from it, even though the legacy press resolves and dispatches.
+    expect(body.assistant_text).toBe("I couldn't line this test up exactly with the analysis you ran, so there's no fair comparison to show. Run the analysis again, then try this test. Nothing in your model changed.");
+    expect(body.assistant_text).not.toContain('What I tested:');
+    expect(plotCalls).toHaveLength(1);
+    expect(plotCalls[0].requestId).toContain('structural-challenge');
+    expect(plotCalls[0].opts?.retryPolicy).toBe('no_retry');
+    expect(plotCalls[0].body.graph).toEqual({ ...baselineBody.graph, edges: baselineBody.graph.edges
+      .filter((edge: Rec) => !(edge.from === link.from_id && edge.to === link.to_id)) });
+    expect(baselineBody.graph.edges).toContainEqual(expect.objectContaining({ from: link.from_id, to: link.to_id }));
+    noModelCallsOrGraphWrites(body);
   });
 
   it.each(['read fails', 'no graph'] as const)('prefixed press refuses when graph %s with zero provider calls', async (cause) => {
@@ -323,13 +337,13 @@ describe('agent route: real structural challenge press reachability', () => {
     const PRESS = 'agent-test-without-link:driver_retention::goal_value';
     const WITHHELD = 'The current analysis permission does not allow this comparison to be shown, so there is no conclusion to report. Nothing in your model changed.';
 
-    /** A second real Run is newest on exactly the same graph; the clock separates executions deterministically. */
+    /** Run identity hashes the turn id, not the seed; a distinct turn and later clock make B a newer Run on the same graph. */
     async function newerRun() {
       const runA = runFacts[0] as Rec;
       vi.useFakeTimers({ toFake: ['Date'] });
       vi.setSystemTime(Date.parse(runA.result.computed_at) + 1_000);
       let next: Awaited<ReturnType<typeof realRun>>;
-      try { next = await realRun('baseline-b'); } finally { vi.useRealTimers(); }
+      try { next = await realRun('baseline-b', randomUUID()); } finally { vi.useRealTimers(); }
       const runB = next.fact;
       expect((runB as Rec).result.run_id).not.toBe(runA.result.run_id);
       expect((runB as Rec).result.graph_hash_at_run).toBe(runA.result.graph_hash_at_run);

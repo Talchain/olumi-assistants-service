@@ -268,7 +268,7 @@ export function structuralChallengeTurnUnderLicence(
 export const STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY =
   'I can\'t show this link test again because it may not match your current analysis. Open the link on the canvas and choose "Test without this link" to test it against the current analysis. Nothing in your model changed.';
 
-/** A replay re-presents a remembered SCI-DEEP turn only under a fresh receipt; never the stored words. */
+/** Re-present the typed turn under a fresh receipt; the route replays stored words only for an identical typed answer. */
 export function structuralChallengeReplay(
   remembered: StructuralChallengeTurn | undefined, receipt: StructuralChallengeFinalRead | undefined,
 ): StructuralChallengeTurn {
