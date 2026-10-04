@@ -451,6 +451,8 @@ function cancellableSleep(ms: number, signal?: AbortSignal): Promise<boolean> {
 // ============================================================================
 
 export interface PLoTClientRunOpts {
+  /** One ephemeral candidate invocation must issue at most one engine request. Other callers retain their policy. */
+  retryPolicy?: 'no_retry';
   /** Turn-level AbortSignal for budget-aware retry. */
   turnSignal?: AbortSignal;
   /** Timestamp (Date.now()) when the turn started — used to compute remaining budget. */
@@ -524,7 +526,7 @@ class PLoTClientImpl implements PLoTClient {
       requestId,
       opts,
       {
-        skipRetryEntirely: briefBearing,
+        skipRetryEntirely: briefBearing || opts?.retryPolicy === 'no_retry',
         baseTimeoutMs: timeoutMs,
         // FIX 2 (this lane): the TIMEOUT class is not retried on /v2/run.
         // Fast-failing 5xx / network errors still get exactly one clamped
@@ -660,7 +662,7 @@ class PLoTClientImpl implements PLoTClient {
                 ? '5xx'
                 : 'network',
           },
-          "PLoT retry skipped — brief-bearing run; retrying would double the LLM-backed decision-review chain",
+          "PLoT retry skipped — invocation policy forbids a second request",
         );
         throw firstError;
       }

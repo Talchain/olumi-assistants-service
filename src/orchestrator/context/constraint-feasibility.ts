@@ -1287,7 +1287,7 @@ function collectLeaderScoredConstraintIds(
  *
  * Pure.
  */
-function collectProducerNotDecisionGradeConstraintIds(
+export function collectProducerNotDecisionGradeConstraintIds(
   envelope: Record<string, unknown>,
 ): Set<string> {
   const out = new Set<string>();
@@ -2160,7 +2160,7 @@ export function readLeaderLimitRisksFromResult(
  * {@link collectProducerNotDecisionGradeConstraintIds} — same parse, same rule — for a caller that needs PROOF of
  * certification rather than proof of its absence (a ratified id with no entry at all is in neither set). Pure.
  */
-function collectProducerCertifiedConstraintIds(envelope: Record<string, unknown>): Set<string> {
+export function collectProducerCertifiedConstraintIds(envelope: Record<string, unknown>): Set<string> {
   const out = new Set<string>();
   const results = envelope.constraint_results;
   if (!Array.isArray(results)) return out;

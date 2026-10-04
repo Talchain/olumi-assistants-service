@@ -271,7 +271,10 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // identical; four files are byte-unchanged and `dist/fixtures/index.js` differs with 0 changed lines naming it. The
     // 40 changed dist lines naming a strength or a band are MOVED, not changed (each text appears equally often on both
     // sides: 20/20). Contrast: the same diff finds 18 changed lines naming `DecisionFlip`/`decision_flip`.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.75.0');
+    // 0.75.0 → 0.76.0 (SCI-DEEP structural challenge), re-derived from the supplied published archives:
+    // all four boundary files above are byte-identical; the fixture registry changes, but its edge_strength_edit
+    // lines are identical. The existing reader assertions below still exercise the current package.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.76.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

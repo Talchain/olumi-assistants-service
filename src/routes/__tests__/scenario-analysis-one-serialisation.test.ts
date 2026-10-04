@@ -85,14 +85,14 @@ function runFact(opts: { separated: boolean }) {
   });
 }
 
-async function reload(fact: ReturnType<typeof runFact>, requestId: string): Promise<Rec> {
+async function reload(fact: ReturnType<typeof runFact>, requestId: string, onCurrentnessRead?: Parameters<typeof readScenarioAnalysis>[0]['onCurrentnessRead']): Promise<Rec> {
   readScenarioRunAnalysisFactsFor.mockResolvedValue({
     facts: [{ fact, fact_row_id: 'row-0', fact_created_at: fact.result.computed_at }], total_count: 1,
   });
   readRecent.mockResolvedValue([]);
   readFactsFor.mockResolvedValue([]);
   readFactsWithTurnFor.mockResolvedValue([]);
-  return readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId }) as Promise<Rec>;
+  return readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId, onCurrentnessRead }) as Promise<Rec>;
 }
 
 /** The Agent lane's final egress exactly as `agent-v1-turn.ts` calls it, over one block, under a given state. */
@@ -276,5 +276,34 @@ describe('Semantic spine: unresolved scope uses the existing claim licence', () 
     expect((gated.analysis_result.enrichment?.decision_brief as Rec)).not.toHaveProperty('headline');
     expect(gated.current_read.current_analysis_hash).toBe(ordinary.current_read.current_analysis_hash);
     expect(fact.result.leading_option_id).toBe('option-b');
+  });
+});
+
+
+describe('identity-bound final presentation receipt: full canonical permission, same Run', () => {
+  it.each([false, true])('reads the selected Run and its full licence together (separated=%s)', async (separated) => {
+    const fact = runFact({ separated });
+    const receipt = vi.fn();
+    const read = await reload(fact, 'presentation-receipt', receipt);
+    expect(receipt).toHaveBeenCalledTimes(1);
+    const current = receipt.mock.calls[0][0];
+    expect(current).toMatchObject({ readOk: true, fact: { result: {
+      scenario_id: SCENARIO, graph_hash_at_run: HASH, computed_at: RUN_AT,
+    } }, permissions: { leader_may_be_named: separated, permitted_analysis_mode: 'quantified_provisional' } });
+    expect(current.permissions.provisional).toBe(separated ? true : undefined);
+    expect(read.analysis_state.run_state.kind).toBe('complete_current');
+    expect(read).not.toHaveProperty('permissions');
+  });
+  it.each(['unresolved', 'unavailable'] as const)('scope %s carries a withhold or an unavailable permission, never a plain licence', async (status) => {
+    const fact = runFact({ separated: true });
+    await reload(fact, 'seed-receipt');
+    const receipt = vi.fn();
+    const read = await readScenarioAnalysis({ scenarioId: SCENARIO, graph: GRAPH, requestId: 'scope-receipt',
+      goalScopeClaimInput: { status, issues: [] }, onCurrentnessRead: receipt });
+    const current = receipt.mock.calls[0][0];
+    expect(current).toMatchObject({ readOk: true, fact: { result: { scenario_id: SCENARIO, graph_hash_at_run: HASH, computed_at: RUN_AT } } });
+    expect(read.analysis_state?.leader_claim.permitted).toBe(false);
+    if (status === 'unavailable') expect(current.permissions).toBeUndefined();
+    else expect(current.permissions).toMatchObject({ leader_may_be_named: false, total_goal_claims_allowed: false });
   });
 });

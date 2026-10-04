@@ -264,6 +264,9 @@ const SANCTIONED_INBOUND_CALL_SITES = new Set(
     // Selected Run model input reads saved graph evidence and reuses the existing complete per-Run licence.
     // No version write, new flag, permission rule or wire schema.
     '../agent-lane/selected-run-delta-for-model.ts',
+    // "Test without this link" re-licenses its reply on the final canonical read with the SAME complete per-Run
+    // licence (boundRunLeaderLicence), rather than a second boolean rule. Read-only: no version write, flag or schema.
+    '../handlers/structural-challenge-dispatch.ts',
   ].map((s) => resolve(moduleDir, s)),
 );
 
