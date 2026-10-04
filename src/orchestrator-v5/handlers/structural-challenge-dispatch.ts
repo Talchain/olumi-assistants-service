@@ -84,15 +84,23 @@ export type StructuralChallengeDispatchResult =
   | { readonly kind: 'no_run' }
   | { readonly kind: 'result'; readonly result: StructuralChallengeResult; readonly labels: ReadonlyMap<string, string> };
 
-/** sha256 over the inputs that determine the recompute (contract: `recompute_key`). */
-export function structuralChallengeRecomputeKey(sentDigest: string, link: ChallengeLink, seedUsed: string | number, nSamples: number): string {
-  const canonical = JSON.stringify({
-    alternative: { from_id: link.from_id, op: 'remove_link', to_id: link.to_id },
-    n_samples: nSamples,
-    seed_used: String(seedUsed),
-    sent_digest: sentDigest,
-  });
-  return createHash('sha256').update(canonical).digest('hex');
+/**
+ * The contract's `recompute_key` (0.76.0 RETENTION): sha256 of the UTF-8 JSON tuple
+ * `[sent_digest, {from_id, op, origin, sizing, to_id}, seed_used, n_samples]` — members in that order, no whitespace,
+ * the seed's string/number type preserved.
+ */
+export function structuralChallengeRecomputeKey(
+  sentDigest: string, alternative: StructuralChallengeAlternative, seedUsed: string | number, nSamples: number,
+): string {
+  const { from_id, op, origin, sizing, to_id } = alternative;
+  const canonical = JSON.stringify([sentDigest, { from_id, op, origin, sizing, to_id }, seedUsed, nSamples]);
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+/** The baseline's seed echo as the explicit seed the candidate is sent (`RunAnalysisScenarioSnapshot.seed`). */
+function pinnableSeed(seedUsed: string | number): number | null {
+  const n = typeof seedUsed === 'number' ? seedUsed : /^-?\d{1,15}$/.test(seedUsed) ? Number(seedUsed) : Number.NaN;
+  return Number.isSafeInteger(n) ? n : null;
 }
 
 /** The analysis-affecting hash exactly as `run_analysis` records `graph_hash_at_run`. */
@@ -187,7 +195,7 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   const shell = {
     method: 'full_recompute_unpaired_v1', perturbation_class: 'topology', baseline, alternative,
     attribution_case: 'C2_unpaired', retention: 'not_retained',
-    recompute_key: structuralChallengeRecomputeKey(baseline.sent_digest, link, seedUsed, nSamples),
+    recompute_key: structuralChallengeRecomputeKey(baseline.sent_digest, alternative, seedUsed, nSamples),
   } as const;
   const refuse = (status: Exclude<StructuralChallengeResult['status'], 'completed'>, reason: string, labels = new Map<string, string>()): StructuralChallengeDispatchResult => {
     log.info({ event: 'structural_challenge.result', request_id: requestId, status, reason }, 'structural challenge');
@@ -231,13 +239,18 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   if (rebuilt === null) return refuse('failed', 'probe_unavailable', labels);
   if (!isTheRunsPayload(rebuilt.plotPayload, selected)) return refuse('failed', 'baseline_payload_mismatch', labels);
 
-  // The alternative: the SAME snapshot minus one link. `briefText` is dropped — it only feeds PLoT's decision-review
-  // chain, which the comparison never reads.
+  // The alternative: the SAME snapshot minus one link, with the baseline's seed PINNED (contract S3: seed, budget and
+  // engine equal). An explicit seed is the seed authority's own yield (`explicit_seed`), so its reuse rules are not
+  // touched; the pair stays C2_unpaired because the edit still changes the draw structure. `briefText` is dropped — it
+  // only feeds PLoT's decision-review chain, which the comparison never reads.
+  const pinnedSeed = pinnableSeed(seedUsed);
+  if (pinnedSeed === null) return refuse('failed', 'candidate_run_failed', labels);
   const edited: RunAnalysisScenarioSnapshot = {
     ...snapshot,
     graph: graphWithoutLink(snapshot.graph, link),
     ...(snapshot.rawPersistedGraph !== undefined ? { rawPersistedGraph: graphWithoutLink(snapshot.rawPersistedGraph, link) } : {}),
     briefText: undefined,
+    seed: pinnedSeed,
   };
   const handlerFn = resolveHandler(createRegistry({ scenarioReader: async () => edited, plotClient, counterfactualClient: null }), 'run_analysis');
   if (!handlerFn) return refuse('failed', 'candidate_run_failed', labels);
@@ -273,6 +286,10 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   if (!compared.ok) {
     return refuse('failed', compared.reason === 'candidate_unparseable' ? 'candidate_unparseable' : 'baseline_payload_mismatch', labels);
   }
+  // Contract S3: a verdict needs the same seed, the same sample budget and engine builds PROVEN equal (RunDelta's
+  // `deriveBuildsEquality`). Otherwise the difference could be the engine or the budget, not the link — no verdict.
+  const pair = compared.pair_provenance;
+  if (!pair.seed_equal || !pair.n_equal || pair.builds_equal !== 'equal') return refuse('failed', 'baseline_payload_mismatch', labels);
   log.info({ event: 'structural_challenge.result', request_id: requestId, status: 'completed', claims: compared.claims.length }, 'structural challenge');
   return {
     kind: 'result',

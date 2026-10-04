@@ -87,7 +87,7 @@ function rowsFor(graph: Rec, options: Rec[]): Rec[] {
   });
 }
 
-function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean } = {}) {
+function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean; candidateIslBuild?: string } = {}) {
   const runBodies: Rec[] = [];
   const client = {
     validatePatch: vi.fn().mockResolvedValue({}),
@@ -119,7 +119,7 @@ function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean } = {})
       response.fact_objects = [];
       response.review_cards = [];
       response.meta = { ...(response.meta as Rec), seed_used: seedUsed, n_samples: 10_000 };
-      response._meta = { builds: { plot: 'p1', isl: 'i1' } };
+      response._meta = { builds: { plot: 'p1', isl: runBodies.length > 1 && opts.candidateIslBuild !== undefined ? opts.candidateIslBuild : 'i1' } };
       // As the real ISL does (live p4): every identity the sent graph declares is reported as evaluated.
       response.identity_evaluations = ((body.graph as Rec).nodes as Rec[])
         .filter((n) => n.nonlinear_identity)
@@ -130,10 +130,10 @@ function plotDouble(opts: { timeoutOnCandidate?: boolean; real?: boolean } = {})
   return { client, runBodies };
 }
 
-async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?: boolean } = {}) {
+async function harness(opts: { timeoutOnCandidate?: boolean; graph?: Rec; real?: boolean; candidateIslBuild?: string } = {}) {
   const graph = structuredClone(opts.graph ?? served.graph);
   const reader = () => loadScenarioSnapshotForRunAnalysis(SCENARIO, 'sd', createNoopSessionStore({ loadGraphResult: structuredClone(graph) }));
-  const plot = plotDouble({ timeoutOnCandidate: opts.timeoutOnCandidate, real: opts.real });
+  const plot = plotDouble({ timeoutOnCandidate: opts.timeoutOnCandidate, real: opts.real, candidateIslBuild: opts.candidateIslBuild });
   const handler = resolveHandler(createRegistry({ plotClient: plot.client, scenarioReader: reader, counterfactualClient: null }), 'run_analysis')!;
   const a = await runWithBoundAnalysisSnapshot({ scenarioId: SCENARIO, analysisGraphHash: NO_CLAIM, priorRunSeed: priorRunForSeed([]) },
     () => handler({ context: context('turn-a', []), payload: payloadOf('turn-a'), requestId: 'turn-a', signal: new AbortController().signal, orientationText: '' } as unknown as HandlerInvocation));
@@ -168,6 +168,9 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     const { graph: gA, seed: _sA, request_id: _rA, brief: _bA, ...restA } = sentA;
     const { graph: gB, seed: _sB, request_id: _rB, brief: _bB, ...restB } = sentB;
     expect(restB).toEqual(restA); // everything else the Run sent is unchanged
+    // The baseline's seed is PINNED on the candidate (contract S3), and the pair proves seed, budget and engine equal.
+    expect(String(sentB.seed)).toBe(String(result.baseline.seed_used));
+    expect(result.pair_provenance).toMatchObject({ seed_equal: true, n_equal: true, builds_equal: 'equal', hash_equal: false });
     expect(gB.nodes).toEqual(gA.nodes);
     expect(result).toMatchObject({ attribution_case: 'C2_unpaired', retention: 'not_retained', pair_provenance: { hash_equal: false } });
     expect(result.baseline).toMatchObject({ scenario_id: SCENARIO, graph_hash_at_run: h.runA.result.graph_hash_at_run, run_id: h.runA.result.run_id });
@@ -240,7 +243,20 @@ describe('SCI-DEEP dispatch — the selected Run, one link, one Run path, nothin
     const first = resultOf(await h.ask());
     const second = resultOf(await h.ask());
     expect(second).toEqual(first);
-    expect(first.recompute_key).toBe(structuralChallengeRecomputeKey(first.baseline.sent_digest, CHURN_LINK, first.baseline.seed_used, first.baseline.n_samples));
+    expect(first.recompute_key).toBe(structuralChallengeRecomputeKey(first.baseline.sent_digest, first.alternative, first.baseline.seed_used, first.baseline.n_samples));
+  });
+
+  it('the recompute key is the contract\'s canonical encoding (schemas 0.76.0 golden digest)', () => {
+    const alternative = { op: 'remove_link', from_id: 'monthly_churn', to_id: 'paying_subscribers', origin: 'olumi_suggested', sizing: 'olumi_estimate' } as const;
+    const sent = '90d572771786ae04e8fe0885fd6bceaed633ad03dd41d7005c928969d6b45da2';
+    expect(structuralChallengeRecomputeKey(sent, alternative, '1254899477', 10000)).toBe('7ef9ac27f55d3c44c3226801fa4c39916232d43342607d8f0fc1edcd4e78c65e');
+    expect(structuralChallengeRecomputeKey(sent, alternative, 1254899477, 10000)).not.toBe('7ef9ac27f55d3c44c3226801fa4c39916232d43342607d8f0fc1edcd4e78c65e');
+  });
+
+  it('S11: engine builds that differ between the Run and the recompute license no verdict', async () => {
+    const h = await harness({ candidateIslBuild: 'i2' });
+    expect(resultOf(await h.ask())).toMatchObject({ status: 'failed', reason: 'baseline_payload_mismatch', claims: [], pair_provenance: null });
+    expect(h.plot.runBodies).toHaveLength(2); // the candidate ran; its pair could not be proven
   });
 
   it('S9: the one-edit guard — exactly this link\'s presence, and nothing else the Runs recorded', async () => {

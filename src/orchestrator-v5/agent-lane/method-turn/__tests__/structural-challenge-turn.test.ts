@@ -12,7 +12,7 @@ import {
   structuralChallengeTurnFor,
   structuralChallengeTurnUnderLicence,
 } from '../structural-challenge-turn.js';
-import type { StructuralChallengeResult } from '../../../coaching/structural-challenge-compare.js';
+import type { StructuralChallengeClaim, StructuralChallengeResult } from '../../../coaching/structural-challenge-compare.js';
 
 const LABELS = new Map([
   ['monthly_churn', 'Monthly churn'], ['paying_subscribers', 'Paying subscribers'], ['pro_plan_price', 'Pro plan price'],
@@ -31,9 +31,9 @@ const changed: StructuralChallengeResult = {
   pair_provenance: { seed_equal: true, hash_equal: false, builds_equal: 'equal', n_equal: true },
   claims: [
     { kind: 'leader', baseline_option_id: 'raise_pro_price_to_59', alternative_option_id: 'raise_pro_price_to_59', noise_verdict: 'signal', verdict: 'holds', basis: 'leader_same', invariant_by_construction: false },
-    { kind: 'goal_probability', option_id: 'raise_pro_price_to_59', constraint_id: null, baseline: 0.5291, alternative: 1, target: null, noise_verdict: 'signal', verdict: 'changes', basis: 'certainty_boundary_crossed', invariant_by_construction: false },
-    { kind: 'outcome_level', option_id: 'raise_pro_price_to_59', constraint_id: null, baseline: 83433.86, alternative: 90306.12, target: 85000, noise_verdict: 'signal', verdict: 'changes', basis: 'target_crossed', invariant_by_construction: false },
-    { kind: 'constraint_probability', option_id: 'raise_pro_price_to_59', constraint_id: 'c', baseline: 0.8746, alternative: 0.8744, target: null, noise_verdict: 'within_noise', verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true },
+    { kind: 'goal_probability', option_id: 'raise_pro_price_to_59', constraint_id: null, baseline: 0.5291, alternative: 1, target: null, constraint_boundary: null, noise_verdict: 'signal', verdict: 'changes', basis: 'certainty_boundary_crossed', invariant_by_construction: false },
+    { kind: 'outcome_level', option_id: 'raise_pro_price_to_59', constraint_id: null, baseline: 83433.86, alternative: 90306.12, target: 85000, constraint_boundary: null, noise_verdict: 'signal', verdict: 'changes', basis: 'target_crossed', invariant_by_construction: false },
+    { kind: 'constraint_probability', option_id: 'raise_pro_price_to_59', constraint_id: 'c', baseline: 0.8746, alternative: 0.8744, target: null, constraint_boundary: null, noise_verdict: 'within_noise', verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true },
   ],
 };
 
@@ -79,6 +79,14 @@ describe('SCI-DEEP reply', () => {
       .toBe('I couldn\'t line this test up exactly with the analysis you ran, so there\'s no fair comparison to show. Run the analysis again, then try this test. Nothing in your model changed.');
     const failed: StructuralChallengeResult = { ...root, status: 'failed', reason: 'candidate_run_failed' };
     expect(composeStructuralChallengeReply({ result: failed, labels: LABELS })).toContain('I couldn\'t complete the test of the link from Pro plan price to Monthly churn');
+  });
+
+  it('a lead that is not clear is never stated as a lead', () => {
+    const close: StructuralChallengeResult = { ...changed, claims: [{ ...changed.claims[0], noise_verdict: 'within_noise', verdict: 'delta_only', basis: 'within_noise' } as StructuralChallengeClaim, ...changed.claims.slice(1)] };
+    const reply = composeStructuralChallengeReply({ result: close, labels: LABELS });
+    expect(reply).toContain('Which option leads is too close to call in at least one version.');
+    expect(reply).not.toContain('leads in both versions');
+    expect(reply).not.toContain('still leads');
   });
 
   it('a chance is never rounded to certain', () => {

@@ -54,6 +54,8 @@ function linkPhrase(result: StructuralChallengeResult, label: (id: string) => st
 function claimLine(c: StructuralChallengeClaim, label: (id: string) => string): string | null {
   if (c.kind === 'leader') {
     if (c.baseline_option_id === null || c.alternative_option_id === null) return null;
+    // A lead that is not clear in the model runs is never stated as a lead (contract C2/C3).
+    if (c.verdict !== 'holds' && c.verdict !== 'changes') return 'Which option leads is too close to call in at least one version.';
     return c.baseline_option_id === c.alternative_option_id
       ? `${label(c.baseline_option_id)} leads in both versions.`
       : `${label(c.alternative_option_id)} would lead instead of ${label(c.baseline_option_id)}.`;

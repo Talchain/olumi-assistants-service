@@ -146,6 +146,18 @@ describe('SCI-DEEP comparator · licences, absence and construction', () => {
     expect(claim(claims, 'leader')).toMatchObject({ verdict: 'delta_only', basis: 'within_noise', noise_verdict: 'within_noise' });
   });
 
+  it('an unaffected leader still needs a clear lead to HOLD: within noise it is delta_only, never invariant', () => {
+    const body = clone(A2_BODY) as Rec & { option_comparison: Rec[] };
+    for (const o of body.option_comparison) o.win_probability = o.option_id === P59 ? 0.505 : 0.495;
+    const { claims } = compare(runFact(body, A2_GRAPH, 'hash-a2'), new Set(['an_unrelated_leaf']));
+    expect(claim(claims, 'leader')).toMatchObject({ verdict: 'delta_only', basis: 'within_noise', invariant_by_construction: false });
+  });
+
+  it('every quantity claim states it carries no constraint boundary (CEE declares none in v1)', () => {
+    const { claims } = compare(runFact(B_BODY, B_GRAPH, 'hash-b'));
+    for (const c of claims) if (c.kind !== 'leader') expect(c.constraint_boundary).toBeNull();
+  });
+
   it('an unreadable candidate is a typed failure, never a comparison', () => {
     const broken = runFact(B_BODY, B_GRAPH, 'hash-b') as unknown as { result: { enrichment: Rec } };
     delete broken.result.enrichment.meta;

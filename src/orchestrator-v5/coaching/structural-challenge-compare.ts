@@ -28,7 +28,7 @@ import { leadNoise, meanChangeNoise, proportionChangeNoise } from './structural-
 // ── The 0.76.0 contract, as CEE produces it. ────────────────────────────────────────────────────────────────────────
 // ⚠ TEMPORARY MIRROR: CEE vendors only PUBLISHED schema tarballs; when @talchain/schemas 0.76.0 is published these
 // types are replaced by `StructuralChallengeResultV1` and the dispatch strict-parses with its schema (the validating
-// boundary). Field-for-field identical to src/boundary/structural-challenge.ts on olumi-schemas#86.
+// boundary). Field-for-field identical to src/boundary/structural-challenge.ts on olumi-schemas#86 @71da209 (APPROVED).
 export type StructuralChallengeVerdict = 'holds' | 'changes' | 'delta_only' | 'not_comparable';
 export type StructuralChallengeBasis =
   | 'leader_changed' | 'certainty_boundary_crossed' | 'target_crossed' | 'constraint_side_changed'
@@ -52,6 +52,8 @@ export interface StructuralChallengeQuantityClaim {
   readonly baseline: number | null;
   readonly alternative: number | null;
   readonly target: number | null;
+  /** Only on constraint_probability, and only with a declared probability boundary; CEE declares none in v1. */
+  readonly constraint_boundary: { readonly probability_threshold: number; readonly operator: '>=' | '<=' | '>' | '<' } | null;
   readonly noise_verdict: RunDeltaNoiseVerdictLiteral;
   readonly verdict: StructuralChallengeVerdict;
   readonly basis: StructuralChallengeBasis;
@@ -234,12 +236,12 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     } else {
       const shares = [...rowsB.values()].map((r) => r.win ?? 0).sort((x, y) => y - x);
       const noise = leadNoise(rowsB.get(idB)?.win ?? 0, idB === idA ? (shares[1] ?? 0) : (rowsB.get(idA)?.win ?? 0), b.nSamples);
-      if (!goalReached && idA === idB) {
-        // The removed link cannot reach the goal: the leader holds by construction (never robustness evidence). The
-        // tag still reports how clear the lead is (contract C6).
-        claims.push({ ...base, noise_verdict: noise, verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true });
-      } else if (noise !== 'signal') {
+      if (noise !== 'signal') {
+        // Every leader HOLDS needs a signal-qualified lead (contract C2), the unaffected one included.
         claims.push({ ...base, noise_verdict: noise, verdict: 'delta_only', basis: deltaOnlyBasis(noise), invariant_by_construction: false });
+      } else if (!goalReached && idA === idB) {
+        // The removed link cannot reach the goal: the leader holds by construction (never robustness evidence, C6).
+        claims.push({ ...base, noise_verdict: noise, verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true });
       } else if (idA === idB) {
         claims.push({ ...base, noise_verdict: noise, verdict: 'holds', basis: 'leader_same', invariant_by_construction: false });
       } else {
@@ -254,7 +256,7 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   for (const optionId of optionIds) {
     const pA = rowsA.get(optionId)?.goal ?? null;
     const pB = rowsB.get(optionId)?.goal ?? null;
-    const base = { kind: 'goal_probability' as const, option_id: optionId, constraint_id: null, baseline: pA, alternative: pB, target: null };
+    const base = { kind: 'goal_probability' as const, option_id: optionId, constraint_id: null, baseline: pA, alternative: pB, target: null, constraint_boundary: null };
     if (pA === null || pB === null) {
       if (pA === null && pB === null) continue; // no goal figure on either side: no claim to test
       const withheld = runWithheldGoalFigures(pA === null ? a.enrichment : b.enrichment);
@@ -291,7 +293,7 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
     const rB = rowsB.get(optionId) as OptionRow;
     if (rA.mean === null && rB.mean === null) continue;
     const target = input.goalLevelTarget;
-    const base = { kind: 'outcome_level' as const, option_id: optionId, constraint_id: null, baseline: rA.mean, alternative: rB.mean, target };
+    const base = { kind: 'outcome_level' as const, option_id: optionId, constraint_id: null, baseline: rA.mean, alternative: rB.mean, target, constraint_boundary: null };
     if (rA.mean === null || rB.mean === null) {
       claims.push({ ...base, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'missing_on_one_side', invariant_by_construction: false });
       continue;
@@ -328,7 +330,7 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
       const pB = cB.get(constraintId) as number;
       const noise = proportionChangeNoise(pA, pB, a.nSamples, b.nSamples);
       const node = nodesA.get(constraintId);
-      const base = { kind: 'constraint_probability' as const, option_id: optionId, constraint_id: constraintId, baseline: pA, alternative: pB, target: null };
+      const base = { kind: 'constraint_probability' as const, option_id: optionId, constraint_id: constraintId, baseline: pA, alternative: pB, target: null, constraint_boundary: null };
       if (node !== undefined && !input.reachable.has(node) && noise !== 'signal') {
         claims.push({ ...base, noise_verdict: noise, verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true });
       } else {
