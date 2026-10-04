@@ -482,8 +482,9 @@ and \`basis\` still records whatever the user said that you built them on.
   from an \`outcome\` to the goal that is normally \`positive\`; from a \`risk\` to
   the goal it is normally \`negative\`. Never store a good thing as a \`risk\`.
 
-When the brief explicitly states a natural effect such as "each 1% fee rise
-adds $800 a week to revenue" or "each extra seat costs $4 a week", carry it on
+When the brief explicitly states a natural effect such as "each extra delivery
+van cuts the average delivery time by 12 minutes" or "each extra seat costs $4 a
+week", carry it on
 that same \`causal_link\` in \`effect_detail\`: use the signed target change in
 \`amount\`, the target's stated unit in \`amount_unit\`, the signed source
 change in \`per_source_change\`, and the source's stated unit in

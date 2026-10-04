@@ -847,21 +847,22 @@ const CONTAMINATED_2558_CONNECT_BYTES = 5843;
 /**
  * v24, 4 Oct 2026. UNMEASURED on model output. #2558's bytes with the sealed
  * brief's figures in the natural-effect paragraph replaced by generic examples
- * that belong to no evaluation brief ("each 1% fee rise adds $800 a week to
- * revenue", "each extra seat costs $4 a week", "$8,000 from $80,000 and 10%").
+ * that belong to no evaluation brief ("each extra delivery van cuts the average
+ * delivery time by 12 minutes", "each extra seat costs $4 a week", "$8,000 from
+ * $80,000 and 10%").
  * ⭐ THE SHAPE HALF IS BYTE-IDENTICAL to #2558's, so v24 differs from the
  * contaminated bytes in the connect half alone. Guarded repo-wide by
  * `tests/meta/eval-briefs-absent-from-prompts.test.ts`.
  */
 const PREREGISTERED_V24_INSTRUCTION_SHA256 =
-  "74ac617dcbd46e424a66ace9b6fe0a9a1eff6d9a74a07b60db3d6eb1b0118ab1";
-const PREREGISTERED_V24_INSTRUCTION_BYTES = 23249;
+  "c14eac0ee9d0753dd3211b70aa56e998d9ead39f717c72f77278b02f4e8b6192";
+const PREREGISTERED_V24_INSTRUCTION_BYTES = 23273;
 const PREREGISTERED_V24_SHAPE_SHA256 =
   "75148b86dbd510a6e2df99bdc63bb0a69f327b3715a2ceb7872f3b66283148a1";
 const PREREGISTERED_V24_SHAPE_BYTES = 17414;
 const PREREGISTERED_V24_CONNECT_SHA256 =
-  "0ba48fd7f822688171263dbd5d4dc7b804a3bb49df5cda47a52ac259bbc61ac7";
-const PREREGISTERED_V24_CONNECT_BYTES = 5835;
+  "e783f7080d2575f42acc704f255877a3a55eb815d077e5c70cedf7d5cba987f3";
+const PREREGISTERED_V24_CONNECT_BYTES = 5859;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
