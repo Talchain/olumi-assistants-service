@@ -165,8 +165,15 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // "percentage points", a yes/no source as "switch") — the same key `sizeLink` says the natural effect back in.
   const same = (stated: string, ...own: (string | undefined)[]) => unitComparisonKey(stated) !== undefined
     && own.some((u) => u !== undefined && u !== '' && unitComparisonKey(stated) === unitComparisonKey(u));
+  // ⛔ A PERCENTAGE LEVEL'S CHANGE IS SAID IN POINTS AT EITHER END (served on 074de08, 29 Sep, Canonical's #2283 witness):
+  // the sizer says a % level's change in points whether it is the target or the SOURCE (`statementWords` →
+  // `amountWords`), so the ask reads "raising "Monthly churn rate" by 1 point …", and the writer refused exactly those
+  // words for the source ("requires the churn change in its stored unit, %"). The Agent then asked for "rises by 1%",
+  // which on a rate reads as a RELATIVE change. Accepted here: the stored natural effect is still `naturalEffectOf`'s
+  // own unit, and one point is one raw unit of a % level, so the conversion is unchanged.
   if (!same(effect.amount_unit, unitOf(targetNode), targetUnitWords(targetNode, resolveMagnitudeFrame(targetNode)))
-    || !same(effect.per_source_change_unit, unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)))) {
+    || !same(effect.per_source_change_unit, unitOf(sourceNode), sourceUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)),
+      targetUnitWords(sourceNode, resolveMagnitudeFrame(sourceNode)))) {
     return refuse('unit_mismatch');
   }
   if (!finite(effect.amount) || !finite(effect.per_source_change) || effect.per_source_change === 0 || effect.amount === 0) {
