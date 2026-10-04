@@ -1,3 +1,6 @@
+import { legacyRun } from '../../context/__tests__/legacy-gap-projection.fixture.js';
+import { deriveAnalysisFreshness } from '../../context/freshness.js';
+import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { _resetConfigCache } from '../../../config/index.js';
@@ -104,6 +107,8 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
       if (loads === options.failLoadAt) throw new Error('canonical read unavailable');
       return JSON.parse(graphJson);
     },
+    // Today only restore sets this marker; append never does.
+    readAnalysisInvalidatedAt: async () => null,
     readMostRecentPendingActions: async () => {
       if (options.failPendingRead) throw new Error('pending authority unavailable');
       return clone(options.pendings ?? []) as PendingAction[];
@@ -125,7 +130,10 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
       const stored = clone(write);
       const id = `persisted-row-${rows.size + 1}`;
       rows.set(key, { id, json: JSON.stringify(stored) });
-      if (stored.graph !== undefined) graphJson = JSON.stringify(stored.graph);
+      if (stored.graph !== undefined) {
+        graphJson = JSON.stringify(stored.graph);
+
+      }
       const receipt = options.receiptFor?.(stored);
       if (receipt !== undefined) return { id, modelVersionReceipt: receipt };
       // Guest/no-version outcome: ordinary graph+turn+fact persistence succeeds.
@@ -1176,4 +1184,117 @@ describe('approved option gaps use the existing atomic level door', () => {
     expect((await executeOptionInterventionBatch({ ...request(before, clear), freshness: 'unknown' }, persistence.fresh())).kind).toBe('refused');
     expect(persistence.attempts).toHaveLength(0); expect(persistence.durableGraph()).toStrictEqual(before);
   });
+
+  it.each(['node', 'mirror', 'both'] as const)(
+    'KNOWN LIMIT without migration: unstamped pre-B3 Run without admission snapshot reads FRESH after last-gap %s clearance when the edit fact leaves the window', async where => {
+    const before = withStoredGap(where); const persistence = jsonStore(before);
+    const expectedClear = clone(before);
+    for (const row of [...expectedClear.nodes, ...expectedClear.options!]) {
+      delete (row as Record<string, unknown>).unresolved_targets; delete (row as Record<string, unknown>).user_questions;
+    }
+    const cleanHash = computeAnalysisAffectingGraphHash(expectedClear)!;
+    const old = legacyRun('node', false, true);
+    delete old.result.input_snapshot; old.result.graph_hash_at_run = cleanHash;
+    expect(deriveAnalysisFreshness([old], computeAnalysisAffectingGraphHash(before), undefined,
+      { currentGraph: before }).freshness).toBe('stale');
+    // The hot window lost the Run; the approved writer must still emit the signal.
+    const input = { ...request(before, clear), hasExistingAnalysis: false };
+    expect((await executeOptionInterventionBatch(input, persistence.fresh())).kind).toBe('committed');
+    expect(persistence.attempts).toHaveLength(1);
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(cold).toEqual(expectedClear); expect(computeAnalysisAffectingGraphHash(cold)).toBe(cleanHash);
+    const marker = await persistence.fresh().readAnalysisInvalidatedAt!(SCENARIO_ID);
+    expect(marker).toBeNull();
+    const edit = persistence.durableRows()[0]!.handler_facts[0]!;
+    expect(edit).toMatchObject({ fact_type: 'edit_graph', noop: false,
+      result: { status: 'applied', rerun_recommended: true } });
+    expect(deriveAnalysisFreshness([edit, old], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: marker })).toMatchObject({ freshness: 'stale', reason: 'model_edited_after_analysis' });
+    const visibleEdit = { fact: edit, turn_id: TURN_ID, fact_created_at: '2026-10-04T01:00:00.000Z' };
+    expect(deriveAnalysisFreshness([old], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: marker, priorFactsWithTurn: [visibleEdit] }))
+      .toMatchObject({ freshness: 'stale', reason: 'model_edited_after_analysis' });
+    for (const control of [
+      { ...edit, noop: true },
+      { ...edit, result: { ...edit.result, status: 'rejected' } },
+      { ...edit, result: { ...edit.result, rerun_recommended: false } },
+    ]) {
+      expect(deriveAnalysisFreshness([old], cleanHash, undefined,
+        { currentGraph: cold, priorFactsWithTurn: [{ ...visibleEdit, fact: control } as typeof visibleEdit] }).freshness).toBe('fresh');
+    }
+    // This is the exact residual: no stamp, no admission snapshot, equal clean
+    // hash, no restore marker, and no clearance fact in the cold read window.
+    expect(deriveAnalysisFreshness([old], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: marker })).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+    const rerun = clone(old); rerun.result.computed_at = '2026-10-04T02:00:00.000Z';
+    rerun.result.enrichment = stampRunAnalysisProjection(rerun.result.enrichment!);
+    expect(deriveAnalysisFreshness([rerun, edit, old], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: marker }).freshness).toBe('fresh');
+    // A newer Run supersedes a persisted edit even if input array order differs.
+    expect(deriveAnalysisFreshness([edit, rerun, old], cleanHash, undefined,
+      { currentGraph: cold, priorFactsWithTurn: [visibleEdit] }).freshness).toBe('fresh');
+    // Current-turn facts have no DB chronology yet; their handler ordering
+    // must not turn the just-computed Run stale on its own response.
+    expect(deriveAnalysisFreshness([edit, rerun, old], cleanHash, undefined,
+      { currentGraph: cold, priorFactsWithTurn: [] }).freshness).toBe('fresh');
+    const refused = jsonStore(before, { rejectAppend: true });
+    expect((await executeOptionInterventionBatch(input, refused.fresh())).kind).toBe('unverified');
+    expect(await refused.fresh().readAnalysisInvalidatedAt!(SCENARIO_ID)).toBeNull();
+    expect(refused.durableGraph()).toEqual(before);
+  });
+
+  it.each(['node', 'mirror', 'both'] as const)(
+    'STAMPED Run at the gapped %s admission stays STALE after approved clearance and cold reload with no marker or edit fact', async where => {
+    const before = withStoredGap(where);
+    const persistence = jsonStore(before);
+    const saved = legacyRun('node', false, true);
+    delete saved.result.input_snapshot;
+    saved.result.graph_hash_at_run = computeAnalysisAffectingGraphHash(before)!;
+    saved.result.enrichment = stampRunAnalysisProjection(saved.result.enrichment!);
+    expect(deriveAnalysisFreshness([saved], saved.result.graph_hash_at_run, undefined,
+      { currentGraph: before, analysisInvalidatedAt: null }).freshness).toBe('fresh');
+    expect((await executeOptionInterventionBatch(request(before, clear), persistence.fresh())).kind).toBe('committed');
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(await persistence.fresh().readAnalysisInvalidatedAt!(SCENARIO_ID)).toBeNull();
+    const cleanHash = computeAnalysisAffectingGraphHash(cold)!;
+    expect(cleanHash).not.toBe(saved.result.graph_hash_at_run);
+    expect(deriveAnalysisFreshness([saved], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: null })).toMatchObject({ freshness: 'stale', reason: 'graph_hash_diverged' });
+    const rerun = clone(saved); rerun.result.graph_hash_at_run = cleanHash;
+    expect(deriveAnalysisFreshness([rerun], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: null }).freshness).toBe('fresh');
+  });
+
+
+  it('KNOWN LIMIT without migration: a stamped gap-free Run reads FRESH after approved add-then-clear returns the same hash and both edit facts leave the window', async () => {
+    const before = canonicalGraph(); const persistence = jsonStore(before);
+    const cleanHash = computeAnalysisAffectingGraphHash(before)!;
+    const saved = legacyRun('node', false, true);
+    saved.result.graph_hash_at_run = cleanHash;
+    saved.result.enrichment = stampRunAnalysisProjection(saved.result.enrichment!);
+    saved.result.scenario_id = SCENARIO_ID;
+    saved.result.leading_option_id = 'option';
+    // Populated, gap-free admission snapshot: the counterexample does not
+    // depend on omitting the snapshot that today's producer always records.
+    saved.result.input_snapshot!.options = [
+      { option_id: 'option', settings: [{ factor_id: 'factor', encoded: 0.2 }, { factor_id: 'other_factor', encoded: 0.55 }] },
+      { option_id: 'other_option', settings: [{ factor_id: 'factor', encoded: 0.7 }, { factor_id: 'other_factor', encoded: 0.65 }] },
+    ];
+    expect(deriveAnalysisFreshness([saved], cleanHash, undefined, { currentGraph: before }).freshness).toBe('fresh');
+    expect((await executeOptionInterventionBatch(request(before, [{ optionId: 'option', mechanisms: [GAP] }]), persistence.fresh())).kind).toBe('committed');
+    const gapped = persistence.durableGraph();
+    expect(deriveAnalysisFreshness([saved], computeAnalysisAffectingGraphHash(gapped), undefined,
+      { currentGraph: gapped }).freshness).toBe('stale');
+    expect((await executeOptionInterventionBatch({ ...request(gapped, clear),
+      turnId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }, persistence.fresh())).kind).toBe('committed');
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(cold).toEqual(before); expect(computeAnalysisAffectingGraphHash(cold)).toBe(cleanHash);
+    expect(await persistence.fresh().readAnalysisInvalidatedAt!(SCENARIO_ID)).toBeNull();
+    const edits = persistence.durableRows().flatMap(row => row.handler_facts).reverse();
+    expect(deriveAnalysisFreshness([...edits, saved], cleanHash, undefined,
+      { currentGraph: cold }).freshness).toBe('stale');
+    expect(deriveAnalysisFreshness([saved], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: null })).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+  });
+
 });

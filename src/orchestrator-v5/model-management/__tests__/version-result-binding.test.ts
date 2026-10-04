@@ -1,3 +1,4 @@
+import { CARRIERS, legacyGraph, legacyRun, SCENARIO } from '../../context/__tests__/legacy-gap-projection.fixture.js';
 import { sharedLicensedPair } from './shared-licensed-pair.fixture.js';
 import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -146,5 +147,38 @@ describe('Compare respects the saved Run projection stamp', () => {
     const run = clone(PRIOR);
     (result(run).enrichment as Record<string, unknown>)[RUN_ANALYSIS_PROJECTION_KEY] = 'unknown';
     expect(binding(factSet([run]), FROM, FROM)).toStrictEqual({ kind: 'unavailable', reason: 'unconfirmed_identity' });
+  });
+});
+
+
+// Mutant: accept either historical hash without attested admission/version identity.
+describe('legacy digest never bridges admission states', () => {
+  for (const placement of CARRIERS) for (const transition of ['add', 'clear', 'replace'] as const) {
+    it(`${placement} ${transition}: forward, reverse and same-version ambiguity are unavailable`, () => {
+      const beforeGraph = legacyGraph(placement, transition === 'add' ? [] : ['unmapped effect']);
+      const afterGraph = legacyGraph(placement, transition === 'clear' ? [] : ['replacement effect']);
+      const from = versionRecord(beforeGraph);
+      const to = versionRecord(afterGraph, { id: TO.id });
+      const run = legacyRun(placement, false, transition === 'add');
+      expect(run.result.input_snapshot!.options.length).toBeGreaterThan(0);
+      for (const [a, b] of [[from, to], [to, from], [to, to]]) {
+        expect(bindVersionResults({ scenarioId: SCENARIO, from: a!, to: b!, factSet: factSet([run]) }).kind).toBe('unavailable');
+      }
+    });
+  }
+
+  it('a contradictory non-empty snapshot refuses a stamped same-version Run', () => {
+    const run = clone(PRIOR);
+    const snapshot = run.result.input_snapshot!;
+    const excluded = snapshot.options.pop()!;
+    snapshot.options_not_sent.push({ option_id: excluded.option_id, reason: 'not_analysable' });
+    result(run).enrichment = stampRunAnalysisProjection(result(run).enrichment as Record<string, unknown>);
+    expect(snapshot.options.length).toBeGreaterThan(0);
+    expect(binding(factSet([run]), FROM, FROM).kind).toBe('unavailable');
+  });
+
+  it('empty legacy option snapshots provide no admission attestation', () => {
+    const run = clone(PRIOR); run.result.input_snapshot!.options = [];
+    expect(binding(factSet([run]), FROM, FROM).kind).toBe('unavailable');
   });
 });

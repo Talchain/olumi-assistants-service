@@ -216,36 +216,72 @@ type EdgeRecord = Record<string, unknown>;
 
 class OptionGapApprovalRequiredError extends Error {}
 
+/** Private exact-target refusal of the registration authority. Temporal and
+ * other carrier preservation use the same cohorts rather than choosing a row. */
+function requireUnambiguousRegistrationTarget(cohorts: readonly (readonly unknown[])[], refusal: Error): void {
+  if (cohorts.some(rows => rows.length > 1)) throw refusal;
+}
+
 /** Registration carries stored gap evidence. Only the existing approved batch
  * may change this pair on an option that already exists. */
 function withStoredOptionGapsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: unknown; kind?: unknown }>; options?: unknown }>(graph: T, stored: unknown): T {
-  if (!isEdgeRecord(stored)) return graph;
+  const priorGraph = isEdgeRecord(stored) ? stored : {};
   const keys = ['unresolved_targets', 'user_questions'];
-  const existingOption = (id: unknown): boolean => Array.isArray(stored.nodes)
-    && stored.nodes.some(old => isEdgeRecord(old) && old.kind === 'option' && old.id === id);
-  const retainedOption = (id: unknown): boolean => graph.nodes.some(n => n.id === id && n.kind === 'option');
-  const carry = (rows: readonly unknown[], prior: unknown, nodes: boolean): unknown[] => rows.map(row => {
-    if (!isEdgeRecord(row) || (nodes && row.kind !== 'option')) return row;
-    const matches = Array.isArray(prior) ? prior.filter(old => isEdgeRecord(old) && old.id === row.id && (!nodes || old.kind === 'option')) : [];
-    if (matches.length > 1 || rows.filter(other => isEdgeRecord(other) && other.id === row.id).length !== 1) return row;
-    const old = (matches[0] ?? {}) as EdgeRecord;
-    const carried = { ...row };
-    for (const key of keys) {
-      if (Object.hasOwn(row, key) && existingOption(row.id)
-        && (!Object.hasOwn(old, key) || !isDeepStrictEqual(row[key], old[key]))) throw new OptionGapApprovalRequiredError();
-      if (!Object.hasOwn(row, key) && Object.hasOwn(old, key)) carried[key] = structuredClone(old[key]);
+  const idOf = (row: EdgeRecord): unknown => typeof row.id === 'string' ? row.id.trim() : row.id;
+  const oldNodes = Array.isArray(priorGraph.nodes) ? priorGraph.nodes.filter(isEdgeRecord) : [];
+  const oldMirrors = Array.isArray(priorGraph.options) ? priorGraph.options.filter(isEdgeRecord) : [];
+  const incomingNodes = graph.nodes.filter(isEdgeRecord);
+  const incomingMirrors = Array.isArray(graph.options) ? graph.options.filter(isEdgeRecord) : [];
+  const matching = (rows: readonly EdgeRecord[], id: unknown) => rows.filter(row => idOf(row) === id);
+  const retained = (id: unknown) => incomingNodes.some(row => row.kind === 'option' && idOf(row) === id);
+  // Refusal belongs to the existing preservation authority. It checks both
+  // sides of a replacement, including inherited ambiguity repaired by a client.
+  // Temporal carrier preservation can use this same exact-target refusal seam.
+  for (const row of [...oldNodes.filter(n => n.kind === 'option'), ...incomingNodes.filter(n => n.kind === 'option')]) {
+    const id = idOf(row);
+    const evidence = [...matching(oldNodes, id), ...matching(oldMirrors, id)]
+      .some(old => keys.some(key => Object.hasOwn(old, key)));
+    if (evidence && matching(incomingNodes, id).some(n => n.kind !== 'option' || n.id !== row.id)) {
+      throw new OptionGapApprovalRequiredError();
     }
-    return carried;
-  });
-  const prior = Array.isArray(stored.options) ? stored.options : [];
-  const heldMirrors = prior.filter(old => isEdgeRecord(old) && retainedOption(old.id)
-    && keys.some(key => Object.hasOwn(old, key)) && prior.filter(other => isEdgeRecord(other) && other.id === old.id).length === 1);
-  const options = Array.isArray(graph.options) ? [...graph.options] : heldMirrors.length > 0 ? prior.filter(old => isEdgeRecord(old) && retainedOption(old.id)) : undefined;
-  if (options !== undefined) for (const old of heldMirrors) {
-    if (!options.some(row => isEdgeRecord(row) && row.id === (old as EdgeRecord).id)) options.push(structuredClone(old));
+    if (!retained(id)) continue;
+    requireUnambiguousRegistrationTarget([oldNodes, oldMirrors, incomingNodes, incomingMirrors]
+      .map(rows => matching(rows, id)), new OptionGapApprovalRequiredError());
   }
-  return { ...graph, nodes: carry(graph.nodes, stored.nodes, true),
-    ...(options !== undefined ? { options: carry(options, prior, false) } : {}) } as T;
+  const carry = (row: EdgeRecord, prior: EdgeRecord | undefined): EdgeRecord => {
+    if (prior === undefined) return row;
+    const hasEvidence = keys.some(key => Object.hasOwn(prior, key));
+    // Canonical readers trim ids and require a usable label. Preserving bytes
+    // while disabling their consumption is an unapproved admission change.
+    if (hasEvidence && (row.id !== prior.id || typeof row.label !== 'string' || row.label.trim() === ''
+      || (Object.hasOwn(row, 'kind') && row.kind !== 'option'))) throw new OptionGapApprovalRequiredError();
+    const next = { ...row };
+    for (const key of keys) {
+      if (Object.hasOwn(row, key) && (!Object.hasOwn(prior, key) || !isDeepStrictEqual(row[key], prior[key]))) {
+        throw new OptionGapApprovalRequiredError();
+      }
+      if (!Object.hasOwn(row, key) && Object.hasOwn(prior, key)) next[key] = structuredClone(prior[key]);
+    }
+    // Baseline status can suppress consumption of an existing unresolved gap.
+    if (hasEvidence && (row.is_baseline === true) !== (prior.is_baseline === true)) throw new OptionGapApprovalRequiredError();
+    return next;
+  };
+  const nodes = incomingNodes.map(row => row.kind === 'option'
+    ? carry(row, matching(oldNodes, idOf(row))[0]) : row);
+  const heldMirrors = oldMirrors.filter(row => retained(idOf(row)) && keys.some(key => Object.hasOwn(row, key)));
+  const options = Array.isArray(graph.options) ? [...incomingMirrors]
+    : heldMirrors.length > 0 ? oldMirrors.filter(row => retained(idOf(row))) : undefined;
+  if (options !== undefined) {
+    for (const old of heldMirrors) if (matching(options, idOf(old)).length === 0) options.push(structuredClone(old));
+    for (let i = 0; i < options.length; i++) {
+      const row = options[i]!;
+      // A newly created mirror inherits the node's evidence rather than
+      // shadowing it with READY. Existing historical shadowing is retained.
+      const prior = matching(oldMirrors, idOf(row))[0] ?? matching(oldNodes, idOf(row))[0];
+      options[i] = carry(row, prior);
+    }
+  }
+  return { ...graph, nodes, ...(options !== undefined ? { options } : {}) } as T;
 }
 
 const isEdgeRecord = (value: unknown): value is EdgeRecord =>

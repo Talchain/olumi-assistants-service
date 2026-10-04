@@ -1,3 +1,6 @@
+import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { runAnalysisProjectionNeedsStamp } from './analysis-projection-policy.js';
 import { goalScopeMeaning } from '../../schemas/goal-scope.js';
 /**
  * Group A — Canonical State foundation: CEE-local `graphIdentityHash`.
@@ -43,10 +46,6 @@ import {
   computeAnalysisAffectingGraphHash,
   computeAnalysisAffectingGraphHashSha256,
 } from './graph-hash.js';
-import {
-  computeLegacyAnalysisAffectingGraphHash,
-  computeLegacyAnalysisAffectingGraphHashSha256,
-} from './graph-hash-legacy.js';
 
 // ---------------------------------------------------------------------------
 // Versioned projection metadata (contract §8 "Normalisation must be versioned",
@@ -71,23 +70,56 @@ export const IDENTITY_PROJECTION_VERSION = 'identity.v1' as const;
 export const ANALYSIS_NORMALISER_VERSION = '1' as const;
 export const ANALYSIS_PROJECTION_VERSION = 'analysis_affecting.admission_gaps.v2' as const;
 
-/** Existing persisted JSON metadata, needed only when a Run carries gaps. */
+/** Existing persisted JSON metadata recorded by every new Run. */
 export const RUN_ANALYSIS_PROJECTION_KEY = '__cee_analysis_projection_version';
 
 /** Immutable version validation only; never licenses current freshness. */
 export function matchesHistoricalAnalysisIdentity(graph: GraphStateIngress, storedHash: string): boolean {
   return computeAnalysisAffectingGraphHashSha256(graph) === storedHash
-    || computeLegacyAnalysisAffectingGraphHashSha256(graph) === storedHash;
+    || computeAnalysisAffectingGraphHashSha256(graph, 'legacy') === storedHash;
 }
 
-/** Compare's recorded Run identity uses this same sanctioned hash seam.
- * Only an unstamped historical Run may match the frozen legacy projection. */
+/** Compare's recorded Run and admission identity use the existing sanctioned seam.
+ * Frozen model-version compatibility never licenses a Run across omitted fields. */
 export function matchesHistoricalRunAnalysisIdentity(
-  graph: GraphStateIngress, storedHash: string, projection: unknown,
+  graph: GraphStateIngress, storedHash: string, projection: unknown, inputSnapshot: unknown,
 ): boolean {
   if (projection !== undefined && projection !== ANALYSIS_PROJECTION_VERSION) return false;
-  return computeAnalysisAffectingGraphHash(graph) === storedHash
-    || (projection === undefined && computeLegacyAnalysisAffectingGraphHash(graph) === storedHash);
+  const carriesGaps = runAnalysisProjectionNeedsStamp(graph);
+  const currentHash = computeAnalysisAffectingGraphHash(graph);
+  // A current digest attests the gap identity itself. A frozen digest may
+  // bind only without gaps: exclusion reasons alone cannot identify which
+  // unresolved targets an unstamped historical Run consumed.
+  if (projection === undefined && carriesGaps
+    && currentHash === computeAnalysisAffectingGraphHash(graph, 'legacy')) return false;
+  if (currentHash !== storedHash
+    && (projection !== undefined || carriesGaps
+      || computeAnalysisAffectingGraphHash(graph, 'legacy') !== storedHash)) return false;
+  const snapshot = RunInputSnapshotSchema.safeParse(inputSnapshot);
+  const ready = buildCanonicalAnalysisReadyFromGraph(graph);
+  if (!snapshot.success || ready === undefined
+    || snapshot.data.options.length + snapshot.data.options_not_sent.length === 0) return false;
+  const sent = new Set(snapshot.data.options.map(option => option.option_id));
+  const excluded = new Map(snapshot.data.options_not_sent.map(option => [option.option_id, option.reason]));
+  const ids = new Set(ready.options.map(option => option.option_id));
+  if (ids.size !== ready.options.length || sent.size !== snapshot.data.options.length
+    || excluded.size !== snapshot.data.options_not_sent.length
+    || (carriesGaps && sent.size + excluded.size !== ids.size)
+    || [...sent].some(id => !ids.has(id) || excluded.has(id))
+    || [...excluded.keys()].some(id => !ids.has(id))) return false;
+  // Gap-free historical snapshots may record only a subset of arms, or no
+  // sent arms when every arm was excluded. Check the states actually attested
+  // rather than requiring a present-day, nonempty exhaustive sent population.
+  // With gaps, every admission state must be recorded as well as hash-bound.
+  return ready.options.every(option => {
+    if (sent.has(option.option_id)) return option.status === 'ready';
+    const reason = excluded.get(option.option_id);
+    if (reason === undefined) return !carriesGaps;
+    return reason === 'not_analysable' ? option.status !== 'ready'
+      : reason === 'olumi_proposed' ? graph.nodes.some(node => node.id === option.option_id
+        && node.proposed_by === 'olumi' && node.analysis_participation !== 'included')
+      : graph.nodes.some(node => node.id === option.option_id && node.option_status === reason);
+  });
 }
 
 const HASH_ALGORITHM = 'sha256' as const;

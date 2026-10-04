@@ -147,7 +147,7 @@ import {
   resolveRunAdmission,
 } from './analysis-ready-core.js';
 import { AnalysisSnapshotDivergedError, currentBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
-import { runAnalysisProjectionNeedsStamp, stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
+import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { decideSeedReuse } from '../../coaching/seed-reuse.js';
 // The 2026-08-28 disclosure defect: the run proceeds past unset option effects
 // (the compute-discard waiver) and the analyse turn says nothing about them.
@@ -2737,12 +2737,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // fields in some builds — safer to conditionally include).
         ...(winProbabilities !== null ? { win_probabilities: winProbabilities } : {}),
         summary,
-        // Gap-free Runs retain the provider envelope byte-for-byte. Only a
-        // carried admission gap needs CEE's persisted projection metadata;
-        // never mutate the provider response itself.
-        enrichment: runAnalysisProjectionNeedsStamp(snapshot.rawPersistedGraph ?? snapshot.graph)
-          ? stampRunAnalysisProjection(response as Record<string, unknown>)
-          : response as Record<string, unknown>,
+        // Every new Run records the existing projection version in persisted
+        // enrichment. Transport strips this internal key; the provider response
+        // is unchanged. Freshness still uses the one analysis-affecting hash.
+        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run

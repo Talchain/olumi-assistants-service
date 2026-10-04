@@ -121,9 +121,8 @@ import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
  * can hide an older run). `priorFactsReadOk` is consulted only when no fact is
  * selected, so a success in the window stays positive evidence compared by hash.
  *
- * ⚠ NOT YET `option_intervention_edit`: it also feeds the window's verdict into
- * its pre-write referee, so moving its source changes write behaviour, not only
- * the reply. Named follow-up with its own RED case.
+ * Gap-bearing `option_intervention_edit` replies reuse this reader. Its
+ * pre-write referee still consumes its original window authority unchanged.
  */
 function deriveWriteReplyFreshness(
   read: WriteReplyAnalysisInputs,
@@ -135,7 +134,8 @@ function deriveWriteReplyFreshness(
     durableAuthority ? read.factSet.facts : read.hotWindow.facts,
     persistedAnalysisGraphHash,
     undefined,
-    { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt, currentGraph },
+    { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt,
+      currentGraph, priorFactsWithTurn: read.priorFactsWithTurn },
   );
   // ⛔ AN UNREAD RESTORE MARKER NEVER BECOMES A POSITIVE `fresh`. The marker can
   // only turn a hash MATCH from fresh to stale, so when it could not be read a
@@ -159,8 +159,8 @@ type WriteReplyAnalysisInputs = Awaited<ReturnType<typeof loadScenarioAnalysisFa
  * EVERY WRITER'S ANALYSIS INPUTS: the facts AND the restore marker, read side by
  * side exactly as the reload reads them (`scenario-graph-analysis-read.ts`).
  *
- * The marker (`scenarios.analysis_invalidated_at`) is the ONLY input that can
- * make a hash MATCH read `stale`: restore the analysed version after a run
+ * The marker (`scenarios.analysis_invalidated_at`) carries restore chronology:
+ * it can make a hash MATCH read `stale`: restore the analysed version after a run
  * (A → analyse → B → restore A) and the bytes equal A again while the analysis
  * is no longer about the model the user is looking at. Without it, a write that
  * lands on the analysed hash — a rename never moves it — replied `fresh` while
@@ -2936,10 +2936,14 @@ export async function dispatchOptionLevelsBatch(
     // ⚠ AND THE HEALTHY-EMPTY / DEGRADED DISTINCTION SURVIVES. A history read
     // that succeeded and found nothing is `none` — a real verdict. A read that
     // degraded is `unknown`. Collapsing them would let a transport failure
-    // masquerade as "this model has never been analysed". No extra I/O: the
-    // prior facts are re-projected against the committed hash.
+    // masquerade as "this model has never been analysed". Gap edits reuse the
+    // write-reply reader for durable Runs, visible edit facts and the restore
+    // marker. Append does not set that marker. Gap-free edits retain their
+    // original fact projection; the pre-write referee is unchanged.
     const freshnessAfterCommit: FreshnessDerivation =
-      priorFactsRead.status === 'ok'
+      (batch.optionGaps?.length ?? 0) > 0
+        ? deriveWriteReplyFreshness(await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId), outcome.analysisGraphHash, outcome.graph)
+        : priorFactsRead.status === 'ok'
         ? deriveAnalysisFreshness(priorFactsRead.facts, outcome.analysisGraphHash, undefined, { currentGraph: outcome.graph })
         : {
             freshness: 'unknown',

@@ -68,6 +68,7 @@ import {
   selectRunAnalysisFact,
   type FreshnessDerivation,
   type FreshnessReason,
+  type DeriveAnalysisFreshnessOptions,
 } from './freshness.js';
 import {
   compareAnalysedOptionIdentity,
@@ -350,6 +351,7 @@ export interface SelectCanonicalAnalysisStateInput {
    * verdict through this function so it gets the same degraded-fact detection as a turn. Omitted ⇒ byte-identical.
    */
   readonly analysisInvalidatedAt?: string | null;
+  readonly priorFactsWithTurn?: DeriveAnalysisFreshnessOptions['priorFactsWithTurn'];
 }
 
 /** Defensive read of a fact's run-time `computed_at`. */
@@ -388,12 +390,14 @@ export function selectCanonicalAnalysisState(
     // Defect 4: distinguishes "the store says no analysis" from "the store
     // could not be read". Absent => pre-fix behaviour, by construction.
     // The restore marker rides the same options object; absent => unchanged.
-    input.priorFactsReadOk === undefined && input.analysisInvalidatedAt === undefined && input.currentGraph === undefined
+    input.priorFactsReadOk === undefined && input.analysisInvalidatedAt === undefined
+      && input.currentGraph === undefined && input.priorFactsWithTurn === undefined
       ? undefined
       : {
           ...(input.priorFactsReadOk === undefined ? {} : { priorFactsReadOk: input.priorFactsReadOk }),
           ...(input.analysisInvalidatedAt === undefined ? {} : { analysisInvalidatedAt: input.analysisInvalidatedAt }),
           ...(input.currentGraph === undefined ? {} : { currentGraph: input.currentGraph }),
+          ...(input.priorFactsWithTurn === undefined ? {} : { priorFactsWithTurn: input.priorFactsWithTurn }),
         },
   );
   const selected = selectRunAnalysisFact(unifiedFacts);

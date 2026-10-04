@@ -471,15 +471,30 @@ describe('SupabaseModelVersionStore.listVersions', () => {
 
 describe('SupabaseModelVersionStore.getVersion', () => {
   it.each(CARRIERS)('a NULL-hash legacy %s snapshot still binds its old Run without rewriting history', async carrier => {
-    const graph = legacyGraph(carrier);
-    const { client } = makeClient({ selectResult: { data: {
+    // A gap-free frozen digest attests the same inputs as today's projection.
+    // The original gapped pair is retained below as the unsafe negative: its
+    // not_analysable reason cannot identify which omitted gap was consumed.
+    const graph = legacyGraph(carrier, []);
+    const { client, rpcCalls } = makeClient({ selectResult: { data: {
       ...versionRecord(graph),
       analysis_affecting_hash: null,
     }, error: null } });
     const version = await new SupabaseModelVersionStore(client).getVersion(LEGACY_SCENARIO, VERSION_ID);
     expect(version).not.toBeNull();
     expect(bindVersionResults({ scenarioId: LEGACY_SCENARIO, from: version!, to: version!,
-      factSet: factSet([legacyRun(carrier)]) })).toMatchObject({ kind: 'shared' });
+      factSet: factSet([legacyRun(carrier, false, true)]) })).toMatchObject({ kind: 'shared' });
+    expect(rpcCalls).toEqual([]);
+  });
+  it.each(CARRIERS)('a NULL-hash legacy %s snapshot cannot attest gaps omitted from its old Run identity', async carrier => {
+    const graph = legacyGraph(carrier);
+    const { client, rpcCalls } = makeClient({ selectResult: { data: {
+      ...versionRecord(graph), analysis_affecting_hash: null,
+    }, error: null } });
+    const version = await new SupabaseModelVersionStore(client).getVersion(LEGACY_SCENARIO, VERSION_ID);
+    expect(version).not.toBeNull();
+    expect(bindVersionResults({ scenarioId: LEGACY_SCENARIO, from: version!, to: version!,
+      factSet: factSet([legacyRun(carrier)]) })).toMatchObject({ kind: 'unavailable' });
+    expect(rpcCalls).toEqual([]);
   });
   it.each([undefined, null, 42])('legacy nodes with id %j and a valid mirror derive identical identities on list/get reads', async id => {
     const graph = { nodes: [{ kind: 'option', label: 'Legacy node', ...(id === undefined ? {} : { id }) }], edges: [],

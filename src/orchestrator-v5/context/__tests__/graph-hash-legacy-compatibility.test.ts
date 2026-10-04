@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import { computeAnalysisAffectingGraphHash, computeAnalysisAffectingGraphHashSha256 } from '../graph-hash.js';
-import { computeLegacyAnalysisAffectingGraphHash, computeLegacyAnalysisAffectingGraphHashSha256 } from '../graph-hash-legacy.js';
 import { deriveAnalysisFreshness } from '../freshness.js';
 import { selectCanonicalAnalysisState } from '../canonical-analysis-state.js';
 import { deriveCanonicalNodeLabelTransition } from '../canonical-label-transition.js';
@@ -23,8 +22,8 @@ describe.each(CARRIERS)('frozen pre-upgrade identity: %s', carrier => {
       const graph = legacyGraph(carrier, gaps);
       // Passing undefined uses the default; explicitly remove the fields for the absent control.
       if (gaps === undefined) for (const row of [...graph.nodes, ...(graph.options as Record<string, unknown>[] ?? [])]) delete row.unresolved_targets;
-      expect(computeLegacyAnalysisAffectingGraphHashSha256(graph)).toBe(hash);
-      expect(computeLegacyAnalysisAffectingGraphHash(graph)).toBe(hash.slice(0, 16));
+      expect(computeAnalysisAffectingGraphHashSha256(graph, 'legacy')).toBe(hash);
+      expect(computeAnalysisAffectingGraphHash(graph, 'legacy')).toBe(hash.slice(0, 16));
       if (gaps?.length !== 1) {
         expect(computeAnalysisAffectingGraphHashSha256(graph)).toBe(hash);
         expect(computeAnalysisAffectingGraphHash(graph)).toBe(hash.slice(0, 16));
@@ -64,31 +63,31 @@ describe.each(CARRIERS)('frozen pre-upgrade identity: %s', carrier => {
       undefined, { currentGraph: graph }).freshness).toBe('fresh');
   });
 
-  it('confirms an old Run even when a NULL-hash legacy reader derived the current version digest', () => {
+  it('refuses a legacy gapped Run even when a reader derived the current version digest', () => {
     const version = versionRecord(legacyGraph(carrier));
     expect(version.analysis_affecting_hash).not.toBe(hash);
     expect(bindVersionResults({ scenarioId: SCENARIO, from: version, to: version,
-      factSet: factSet([legacyRun(carrier)]) })).toMatchObject({ kind: 'shared' });
+      factSet: factSet([legacyRun(carrier)]) })).toMatchObject({ kind: 'unavailable' });
     expect(freshness(legacyGraph(carrier)).freshness).toBe('stale');
   });
 
-  it('confirms the legacy gapped version and shared recorded Run in both Compare directions', () => {
+  it('withholds legacy gapped version identity in both Compare directions', () => {
     const from = versionRecord(legacyGraph(carrier), { analysis_affecting_hash: hash });
     const to = versionRecord(legacyGraph(carrier), { id: '22222222-2222-4222-8222-222222222222', analysis_affecting_hash: hash });
     for (const [a, b] of [[from, to], [to, from]]) {
       expect(bindVersionResults({ scenarioId: SCENARIO, from: a!, to: b!, factSet: factSet([legacyRun(carrier)]) }))
-        .toMatchObject({ kind: 'shared', recordedRun: { graph_hash_at_run: hash.slice(0, 16), run_id: 'legacy-original' } });
+        .toMatchObject({ kind: 'unavailable' });
     }
   });
 
-  it('confirms paired legacy Runs and preserves their recorded 16-hex identities', () => {
+  it('withholds paired legacy Runs whose admission version is un-attested', () => {
     const changed = legacyGraph(carrier);
     changed.nodes.find(n => n.id === 'factor')!.observed_state = { value: 0.5 };
-    expect(computeLegacyAnalysisAffectingGraphHashSha256(changed)).toBe(LEGACY_CHANGED_SHA256[carrier]);
+    expect(computeAnalysisAffectingGraphHashSha256(changed, 'legacy')).toBe(LEGACY_CHANGED_SHA256[carrier]);
     const from = versionRecord(legacyGraph(carrier), { analysis_affecting_hash: hash });
     const to = versionRecord(changed, { id: '22222222-2222-4222-8222-222222222222', analysis_affecting_hash: LEGACY_CHANGED_SHA256[carrier] });
     for (const [a, b] of [[from, to], [to, from]]) {
-      expect(bindVersionResults({ scenarioId: SCENARIO, from: a!, to: b!, factSet: factSet([legacyRun(carrier), legacyRun(carrier, true)]) }).kind).toBe('paired');
+      expect(bindVersionResults({ scenarioId: SCENARIO, from: a!, to: b!, factSet: factSet([legacyRun(carrier), legacyRun(carrier, true)]) }).kind).toBe('unavailable');
     }
   });
 
@@ -121,7 +120,7 @@ describe('legacy node shapes with a valid mirror', () => {
         options: [{ id: 'valid-option', label: 'Valid mirror', status: 'ready', interventions: { factor: { value: 0.5 } } }] } as unknown as GraphStateIngress;
       const before = structuredClone(graph);
       const legacy = FROZEN_LEGACY[kind];
-      expect(computeLegacyAnalysisAffectingGraphHashSha256(graph)).toBe(legacy);
+      expect(computeAnalysisAffectingGraphHashSha256(graph, 'legacy')).toBe(legacy);
       expect(() => computeAnalysisAffectingGraphHashSha256(graph)).not.toThrow();
       expect(computeAnalysisAffectingGraphHashSha256(graph)).toBe(legacy);
       expect(graph).toEqual(before);

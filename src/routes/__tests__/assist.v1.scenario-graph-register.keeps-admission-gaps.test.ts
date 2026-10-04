@@ -38,7 +38,6 @@ import { GraphStateIngressSchema } from '../../orchestrator-v5/boundary/request-
 import { assignEntityRefs } from '../../orchestrator-v5/graph/entity-refs.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { computeAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash.js';
-import { computeLegacyAnalysisAffectingGraphHash } from '../../orchestrator-v5/context/graph-hash-legacy.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../../orchestrator-v5/context/freshness.js';
 import { RUN_ANALYSIS_PROJECTION_KEY, stampRunAnalysisProjection } from '../../orchestrator-v5/context/analysis-projection-policy.js';
 import { bindVersionResults } from '../../orchestrator-v5/model-management/version-result-binding.js';
@@ -82,7 +81,7 @@ function graphs(p: typeof PLACEMENTS[number]): { clean: Graph; held: Graph } {
 function legacyRun(clean: Graph, held: Graph, id: string, snapshot: 'absent' | 'noncontradicting'): HandlerFact {
   const fact = savedRun(versionRecord(clean as never), id, '2026-10-03T00:00:00.000Z');
   const result = (fact as unknown as { result: Rec }).result;
-  result.graph_hash_at_run = computeLegacyAnalysisAffectingGraphHash(held as never);
+  result.graph_hash_at_run = computeAnalysisAffectingGraphHash(held as never, 'legacy');
   delete (result.enrichment as Rec)[RUN_ANALYSIS_PROJECTION_KEY];
   if (snapshot === 'absent') delete result.input_snapshot;
   return fact;
@@ -159,14 +158,7 @@ describe('whole-graph registration cannot erase admission evidence and resurrect
         const bound = bindVersionResults({ scenarioId: FIX_SCENARIO,
           from: reverse ? clearVersion : heldVersion, to: reverse ? heldVersion : clearVersion,
           factSet: factSet([current, ...reloadedFacts]) });
-        if (snapshot === 'absent') expect(bound.kind).toBe('unavailable');
-        else {
-          expect(bound.kind).toBe('paired');
-          if (bound.kind === 'paired') {
-            expect(bound.selectedPair.prior.run_id).toBe(reverse ? currentId : legacyId);
-            expect(bound.selectedPair.current.run_id).toBe(reverse ? legacyId : currentId);
-          }
-        }
+        expect(bound.kind).toBe('unavailable'); // Unstamped gaps cannot attest their version identity.
       }
     });
   }
@@ -228,4 +220,109 @@ describe('whole-graph registration cannot erase admission evidence and resurrect
     const bound = bindVersionResults({ scenarioId: FIX_SCENARIO, from: v, to: v, factSet: factSet(doc().facts) });
     expect(bound).toMatchObject({ kind: 'shared', recordedRun: { run_id: 'b3-register-genuinely-gap-free' } });
   });
+
+  // Mutant: return incoming rows from withStoredOptionGapsWhenUnstated.
+  it.each(['', '   ', undefined, null, 42, false, {}])('refuses an unusable active mirror label (%j) before append', async label => {
+    const { held } = graphs(PLACEMENTS[1]); persistedJson = JSON.stringify({ graph: held, facts: [] });
+    const bytes = persistedJson; const incoming = withoutGaps(held);
+    if (label === undefined) delete mirror(incoming)!.label;
+    else mirror(incoming)!.label = label;
+    const res = await register(incoming);
+    expect(res.statusCode, res.body).toBe(409); expect(res.json().details.code).toBe('OPTION_GAP_APPROVAL_REQUIRED');
+    expect(append).not.toHaveBeenCalled(); expect(persistedJson).toBe(bytes);
+  });
+
+  it.each(['nodes', 'options'] as const)('refuses a whitespace id alias on the active %s target', async carrier => {
+    const { held } = graphs(PLACEMENTS[1]); persistedJson = JSON.stringify({ graph: held, facts: [] });
+    const bytes = persistedJson; const incoming = withoutGaps(held);
+    incoming[carrier]!.find(row => row.id === OPTION)!.id = ` ${OPTION} `;
+    const res = await register(incoming);
+    expect(res.statusCode, res.body).toBe(409); expect(append).not.toHaveBeenCalled(); expect(persistedJson).toBe(bytes);
+  });
+
+  // Mutant: do not copy node gap fields in optionEntryFromNode / the registration carrier.
+  it.each(['explicit', 'empty array'] as const)('creating a READY mirror via %s preserves an active node gap', async how => {
+    const { held } = graphs(PLACEMENTS[0]); persistedJson = JSON.stringify({ graph: held, facts: [] });
+    const incoming = withoutGaps(held);
+    incoming.options = how === 'empty array' ? [] : incoming.nodes.filter(n => n.kind === 'option').map(n => ({
+      id: n.id, label: n.label, status: 'ready', interventions: structuredClone(n.interventions),
+    }));
+    const res = await register(incoming); expect(res.statusCode, res.body).toBe(200);
+    expect(mirror(doc().graph)).toMatchObject(GAP); expect(option(doc().graph).status).toBe('needs_user_mapping');
+    const cold = GraphStateIngressSchema.parse(doc().graph) as unknown as Graph;
+    expect(option(cold).status).toBe('needs_user_mapping');
+  });
+
+  it.each(['baseline', 'kind'] as const)('refuses unapproved admission change by %s', async change => {
+    const { held } = graphs(PLACEMENTS[2]); persistedJson = JSON.stringify({ graph: held, facts: [] });
+    const bytes = persistedJson; const incoming = withoutGaps(held);
+    if (change === 'baseline') mirror(incoming)!.is_baseline = true;
+    else node(incoming).kind = 'factor';
+    const res = await register(incoming); expect(res.statusCode, res.body).toBe(409);
+    expect(append).not.toHaveBeenCalled(); expect(persistedJson).toBe(bytes);
+  });
+
+  // Mutant: restore duplicate-match early return (unchecked incoming rows).
+  for (const carrier of ['nodes', 'options'] as const) for (const side of ['stored', 'incoming'] as const) {
+    for (const submitted of ['omit', 'clear', 'replace'] as const) {
+      it(`ambiguous ${side} ${carrier}, ${submitted}: refuses the whole registration, including inherited repair`, async () => {
+        const { held } = graphs(PLACEMENTS[2]); const incoming = withoutGaps(held);
+        const target = (side === 'stored' ? held : incoming)[carrier]!;
+        target.push(structuredClone(target.find(row => row.id === OPTION)!));
+        if (submitted !== 'omit') for (const row of incoming[carrier]!.filter(r => r.id === OPTION)) {
+          row.unresolved_targets = submitted === 'clear' ? [] : ['replacement'];
+          row.user_questions = submitted === 'clear' ? [] : ['replacement question'];
+        }
+        persistedJson = JSON.stringify({ graph: held, facts: [] }); const bytes = persistedJson;
+        const res = await register(incoming); expect(res.statusCode, res.body).toBe(409);
+        expect(res.json().details.code).toBe('OPTION_GAP_APPROVAL_REQUIRED');
+        expect(append).not.toHaveBeenCalled(); expect(persistedJson).toBe(bytes);
+      });
+    }
+  }
+
+  it('an explicit false baseline keeps the same admission when a gapped mirror is created', async () => {
+    const { held } = graphs(PLACEMENTS[0]);
+    const incoming = structuredClone(held);
+    incoming.options = incoming.nodes.filter(row => row.kind === 'option').map(row => ({
+      id: row.id, label: row.label, status: 'ready', is_baseline: false, interventions: structuredClone(row.interventions),
+    }));
+    persistedJson = JSON.stringify({ graph: held, facts: [] });
+    const res = await register(incoming);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(mirror(doc().graph)).toMatchObject(GAP);
+    expect(option(doc().graph).status).not.toBe('ready');
+  });
+
+  it.each(['nodes', 'options'] as const)('first registration refuses ambiguous %s targets before append', async carrier => {
+    const { held } = graphs(PLACEMENTS[2]);
+    const incoming = structuredClone(held);
+    incoming[carrier]!.push({ ...structuredClone(incoming[carrier]!.find(row => row.id === OPTION)!), id: ` ${OPTION} ` });
+    persistedJson = JSON.stringify({ graph: null, facts: [] }); const bytes = persistedJson;
+    const res = await register(incoming);
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json().details.code).toBe('OPTION_GAP_APPROVAL_REQUIRED');
+    expect(append).not.toHaveBeenCalled(); expect(persistedJson).toBe(bytes);
+  });
+
+  // Mutant: remove the GraphStateIngress carrier validation (passthrough).
+  for (const key of ['unresolved_targets', 'user_questions'] as const) {
+    for (const carrier of ['nodes', 'options'] as const) for (const registration of ['first', 'added'] as const) {
+      it.each([null, 'gap', { gap: 'effect' }, [42], ['valid', null]].map(value => [value]))(`malformed ${key} on ${registration} ${carrier} refuses before append (%j)`, async value => {
+        const { clean } = graphs(PLACEMENTS[2]);
+        persistedJson = JSON.stringify({ graph: registration === 'first' ? null : clean, facts: [] }); const bytes = persistedJson;
+        const incoming = structuredClone(clean);
+        const target = registration === 'first' ? incoming[carrier]!.find(r => r.id === OPTION)! : {
+          id: 'new-option', ...(carrier === 'nodes' ? { kind: 'option' } : { status: 'ready' }),
+          label: 'New option', interventions: structuredClone(node(incoming).interventions),
+        };
+        if (registration === 'added') incoming[carrier]!.push(target);
+        target[key] = value;
+        const res = await register(incoming); expect(res.statusCode, res.body).toBe(422);
+        expect(res.json().details.code).toBe('GRAPH_CONTRACT_INVALID');
+        expect(append).not.toHaveBeenCalled(); expect(persistedJson).toBe(bytes);
+      });
+    }
+  }
+
 });

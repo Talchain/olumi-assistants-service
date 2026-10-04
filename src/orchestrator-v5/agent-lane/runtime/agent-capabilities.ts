@@ -4396,7 +4396,21 @@ export function createAgentCapabilities(
           continue;
         }
         const key = `${option.id}::${factor.id}`;
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+          const prior = set.find(level => `${level.option.id}::${level.factor.id}` === key)!;
+          const unit = typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? '');
+          if (prior.raw !== raw || prior.normalised !== normalised || prior.cap !== (cap ?? derivedFrame)
+            || prior.unit !== unit || prior.userStated !== userWrote || prior.needsLink !== needsLink
+            || (declaration.kind === 'valid' && prior.mechanisms !== undefined
+              && !isDeepStrictEqual(prior.mechanisms, declaration.mechanisms))) {
+            return { ok: false, mutated: false, refusal: 'conflicting_option_gap_declarations',
+              detail: 'Nothing was proposed: repeated option levels and their gap statements must agree.' };
+          }
+          if (declaration.kind === 'valid' && gapOperands != null) {
+            prior.mechanisms = declaration.mechanisms; prior.gapOperands = gapOperands;
+          }
+          continue;
+        }
         seen.add(key);
         set.push({
           option: { id: option.id, label: option.label },
@@ -4548,6 +4562,7 @@ export function createAgentCapabilities(
         scenario_id: ctx.scenario_id,
         authenticated_user_id: ctx.authenticated_user_id,
         current_graph_identity_hash: before.graph_hash,
+        typed_approval_of: ctx.typed_approval_of,
       });
       if (decision.status === 'already_applied') {
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so

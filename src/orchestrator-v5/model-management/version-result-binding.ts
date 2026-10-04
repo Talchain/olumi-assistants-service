@@ -60,14 +60,14 @@ function bind(version: ModelVersionRecord, facts: readonly HandlerFact[]): Bound
     if (projection !== undefined && projection !== ANALYSIS_PROJECTION_VERSION) {
       refusal = 'unconfirmed_identity'; continue;
     }
-    if (!matchesHistoricalRunAnalysisIdentity(version.graph as typeof parsed.data,
-      checked.identity.graph_hash_at_run, projection)) continue;
     const runId = result?.run_id;
     const snapshot = RunInputSnapshotSchema.safeParse(result?.input_snapshot);
     if (checked.identity.scenario_id !== version.scenario_id || typeof runId !== 'string'
       || runId.length === 0 || runId.length > 200 || runId.trim() !== runId || !snapshot.success) {
       refusal = 'unconfirmed_identity'; continue;
     }
+    if (!matchesHistoricalRunAnalysisIdentity(version.graph as typeof parsed.data,
+      checked.identity.graph_hash_at_run, projection, result?.input_snapshot)) continue;
     // A confirmed immutable snapshot is historical identity, not current
     // freshness. Reuse only the Run-attested goal-unit check, including
     // goal-free work; never bypass the legacy guard on a live current graph.

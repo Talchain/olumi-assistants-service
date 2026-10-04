@@ -3291,6 +3291,7 @@ export async function dispatchEditGraph(
   // fired) — which is pre-fix behaviour and correct: that path has no read
   // state to describe.
   let priorFactsReadOkForRecovery: boolean | undefined;
+  let analysisInvalidatedAtForRecovery: string | null | undefined;
   // V5 P0 — captured proposed concept from the prior turn's pending
   // actions, used by the no-op recovery layer to drive the deterministic
   // Stage 1 / Stage 2 clarifier. Null when no prior proposal exists, when
@@ -3317,6 +3318,7 @@ export async function dispatchEditGraph(
     const turnContext = await buildTurnContext(payload, requestId);
     priorFactsForRecovery = turnContext.prior_facts;
     priorFactsReadOkForRecovery = turnContext.prior_facts_read_ok;
+    analysisInvalidatedAtForRecovery = turnContext.analysis_invalidated_at;
     // V5-PERSIST-FIX-01: the merge base was already resolved above via the
     // strict persisted read (so a degraded read fails closed). buildTurnContext
     // is used here only for prior_facts / pending actions — NOT for the base.
@@ -3384,6 +3386,7 @@ export async function dispatchEditGraph(
       // the recovery re-derivations below then repeat.
       {
         currentGraph: persistedPostEditGraph,
+        analysisInvalidatedAt: turnContext.analysis_invalidated_at,
         ...(turnContext.prior_facts_read_ok === undefined
           ? {}
           : { priorFactsReadOk: turnContext.prior_facts_read_ok }),
@@ -3632,6 +3635,7 @@ export async function dispatchEditGraph(
             // throwing, so `freshness.reason` is `no_successful_run_analysis_fact`).
             {
               currentGraph: gmFrameBase,
+              analysisInvalidatedAt: analysisInvalidatedAtForRecovery,
               ...(priorFactsReadOkForRecovery === undefined
                 ? {}
                 : { priorFactsReadOk: priorFactsReadOkForRecovery }),
@@ -4022,6 +4026,7 @@ export async function dispatchEditGraph(
           : undefined,
         {
           currentGraph: gmFrameBase,
+          analysisInvalidatedAt: analysisInvalidatedAtForRecovery,
           ...(priorFactsReadOkForRecovery === undefined
             ? {}
             : { priorFactsReadOk: priorFactsReadOkForRecovery }),
@@ -4074,6 +4079,7 @@ export async function dispatchEditGraph(
         // `derivation_failed`, which a degraded read does NOT produce.
         {
           currentGraph: gmFrameBase,
+          analysisInvalidatedAt: analysisInvalidatedAtForRecovery,
           ...(priorFactsReadOkForRecovery === undefined
             ? {}
             : { priorFactsReadOk: priorFactsReadOkForRecovery }),
@@ -4168,6 +4174,7 @@ export async function dispatchEditGraph(
         // `derivation_failed`, which a degraded read does NOT produce.
         {
           currentGraph: gmFrameBase,
+          analysisInvalidatedAt: analysisInvalidatedAtForRecovery,
           ...(priorFactsReadOkForRecovery === undefined
             ? {}
             : { priorFactsReadOk: priorFactsReadOkForRecovery }),
@@ -5564,6 +5571,7 @@ export async function dispatchEditGraph(
             // screens `derivation_failed`, which a degraded read does NOT produce.
             {
               currentGraph: gmFrameBase,
+              analysisInvalidatedAt: analysisInvalidatedAtForRecovery,
               ...(priorFactsReadOkForRecovery === undefined
                 ? {}
                 : { priorFactsReadOk: priorFactsReadOkForRecovery }),

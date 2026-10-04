@@ -45,6 +45,9 @@ import largerFixture from '../../../../../tests/fixtures/plot/v2-run-golden-larg
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
 import { composeAnalysisStateV1 } from '../../../compose/analysis-state-v1.js';
 import { claimPermissionsFrom } from '../../../agent-lane/first-analysis.js';
+import { RUN_ANALYSIS_PROJECTION_KEY } from '../../../context/analysis-projection-policy.js';
+import { ANALYSIS_PROJECTION_VERSION } from '../../../context/graph-identity.js';
+import { toSafeTransportEnrichment } from '../../../compose.js';
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -186,12 +189,11 @@ describe('run_analysis handler — happy path', () => {
   });
 
   /**
-   * Gap-free Runs retain the validated PLoT envelope byte-for-byte, exactly
-   * as on staging. Claim safety lives on constraint_verdict. The separate
-   * graph-hash-run-stamp regression checks the projection metadata exception
-   * for actual admission gaps, including saved-fact and transport readback.
+   * Every new Run records the existing projection stamp in persisted metadata.
+   * PLoT fields and transport bytes remain unchanged. Claim safety lives on
+   * constraint_verdict, and no other key may be added to enrichment.
    */
-  it('fact.result.enrichment is the validated V2RunResponse VERBATIM — zero added keys', async () => {
+  it('fact.result.enrichment adds only the existing projection stamp; provider and transport remain VERBATIM', async () => {
     const responseSnapshot = JSON.parse(JSON.stringify(happyFixture)) as V2RunResponseEnvelope;
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(responseSnapshot),
@@ -204,18 +206,24 @@ describe('run_analysis handler — happy path', () => {
 
     const enrichment = fact.result.enrichment as Record<string, unknown>;
 
-    // 1. A healthy gap-free Run retains staging's exact fact/wire shape.
+    // 1. Only the existing internal projection key is added to persisted facts.
     const added = Object.keys(enrichment).filter(
       (k) => !Object.prototype.hasOwnProperty.call(responseSnapshot, k),
     );
-    expect(added).toEqual([]);
+    expect(added).toEqual([RUN_ANALYSIS_PROJECTION_KEY]);
+    expect(enrichment[RUN_ANALYSIS_PROJECTION_KEY]).toBe(ANALYSIS_PROJECTION_VERSION);
     // The interim key specifically is GONE — nothing writes it any more.
     expect(CEE_CLAIM_SAFETY_ENRICHMENT_KEY in enrichment).toBe(false);
 
     // 2. Every PLoT field is untouched — no projection, no stripping, and no
     //    field reordering that would change JSON.stringify byte output.
-    expect(enrichment).toEqual(responseSnapshot);
-    expect(JSON.stringify(enrichment)).toBe(JSON.stringify(responseSnapshot));
+    const providerFields = { ...enrichment };
+    delete providerFields[RUN_ANALYSIS_PROJECTION_KEY];
+    expect(providerFields).toEqual(responseSnapshot);
+    expect(JSON.stringify(providerFields)).toBe(JSON.stringify(responseSnapshot));
+    expect(responseSnapshot).toEqual(happyFixture);
+    expect(JSON.stringify(toSafeTransportEnrichment(enrichment)))
+      .toBe(JSON.stringify(toSafeTransportEnrichment(responseSnapshot)));
 
     // 3. The verdict carries a real answer, not a placeholder, and it is on the
     //    CONTRACT field. This fixture ratifies no hard constraint, so the

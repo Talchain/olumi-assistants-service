@@ -924,7 +924,11 @@ export async function executeOptionInterventionBatch(input: OptionInterventionBa
       const analysisGraphHash = computeAnalysisAffectingGraphHash(graph);
       if (!analysisGraphHash) return { kind: 'refused', reason: 'canonical_graph_unavailable' };
       const operations = [...plan.operations, ...gapOperations];
-      const appliedChanges = buildAppliedChanges(operations, graph, input.hasExistingAnalysis, levelBase as EditableGraph);
+      // Keep the existing edit_graph rerun signal even when the hot window
+      // has lost the Run. Append persists this fact; only the restore RPC sets
+      // analysis_invalidated_at. A legacy Run can lose this edit evidence once
+      // the fact leaves the read window (see the known-limit transaction test).
+      const appliedChanges = buildAppliedChanges(operations, graph, true, levelBase as EditableGraph);
       const fact = buildEditGraphHandlerFact({ editResult: { blocks: [], assistantText: appliedChanges.summary,
         latencyMs: 0, wasRejected: false, operations, appliedGraph: graph, appliedChanges },
         preEditGraph: levelBase as EditableGraph, hasExistingAnalysis: input.hasExistingAnalysis });

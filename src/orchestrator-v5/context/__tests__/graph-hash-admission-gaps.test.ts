@@ -161,14 +161,16 @@ describe.each(CONSUMED)('gap-only saved-Run freshness: $name', placement => {
   });
 });
 
-it('CURRENT CONSUMER LIMIT: a matching ready mirror shadows a node-only gap', () => {
+it('a ready mirror shadows node admission but retained node gaps still stale the stamped Run', () => {
   const before = base({ name: 'mirror', node: false, mirror: true });
   const after = withGaps(before, { name: 'shadowed node', node: true, mirror: false }, ['brand equity']);
   expect(targetNode(after).unresolved_targets).toEqual(['brand equity']);
   expect(after.options![0]!.unresolved_targets).toBeUndefined();
-  // Report this unconsumed carrier separately; it is not a readiness transition.
+  // The existing readiness precedence remains; analytical identity still
+  // retains the model's node uncertainty without an append marker.
   expect(canonicalOption(before).status).toBe('ready');
   expect(canonicalOption(after).status).toBe('ready');
-  expect(hash(after)).toBe(hash(before));
-  expect(freshness(runAt(before), after).freshness).toBe('fresh');
+  expect(hash(after)).not.toBe(hash(before));
+  expect(freshness(runAt(before), after).freshness).toBe('stale');
+  expect(freshness(runAt(after), before).freshness).toBe('stale');
 });

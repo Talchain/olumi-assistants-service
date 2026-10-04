@@ -192,6 +192,22 @@ describe('the four states a conversation layer must tell apart', () => {
     expect(view.snapshot?.computedAt).toBe('2026-09-20T10:00:00.000Z');
   });
 
+  it('existing restore marker keeps the replacement reader stale when the legacy hash returns', () => {
+    const fact = runAnalysisFact(); // no admission stamp or input snapshot
+    const clearedGraphContext = contextWith({
+      scenario_analysis_fact_set: attestedSet([fact]),
+      analysis_invalidated_at: '2026-10-04T01:00:00.000Z',
+    });
+    const view = projectTurnContext(clearedGraphContext, GRAPH_HASH, null);
+    expect(view.freshness.freshness).toBe('stale');
+    expect(view.freshness.reason).toBe('model_restored_after_analysis');
+    expect(view.snapshot?.freshness).toBe('stale');
+    expect(view.snapshot?.enrichment).toEqual(ENRICHMENT_SHAPE);
+    // The same healthy Run without a later restore retains its existing bytes.
+    const clean = projectTurnContext(contextWith({ scenario_analysis_fact_set: attestedSet([fact]) }), GRAPH_HASH, null);
+    expect(clean.freshness.freshness).toBe('fresh');
+  });
+
   it('STATE 3 — the graph moved since the run: STALE, and the figures still come through', () => {
     const view = projectTurnContext(
       contextWith({ scenario_analysis_fact_set: attestedSet([runAnalysisFact()]) }),

@@ -308,7 +308,7 @@ export async function readScenarioAnalysis(
     const currentGraphHash = deriveDecisionContextGraphHash(params.graph);
 
     const store = getSessionStore();
-    const [{ hotWindow, factSet }, analysisInvalidatedAt] = await Promise.all([
+    const [{ hotWindow, factSet, priorFactsWithTurn }, analysisInvalidatedAt] = await Promise.all([
       loadScenarioAnalysisFactsForRead(params.scenarioId, params.requestId),
       params.analysisInvalidatedAt !== undefined
         ? Promise.resolve(params.analysisInvalidatedAt)
@@ -349,6 +349,7 @@ export async function readScenarioAnalysis(
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
       analysisInvalidatedAt,
+      priorFactsWithTurn,
       currentGraph: params.graph,
     });
 
@@ -417,6 +418,7 @@ export async function readScenarioAnalysis(
           ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
           priorFactsReadOk: factsReadOk,
           analysisInvalidatedAt,
+          priorFactsWithTurn,
         }),
         freshness: derivation,
         ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),

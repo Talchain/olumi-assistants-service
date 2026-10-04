@@ -12,7 +12,7 @@ import { RUN_ANALYSIS_PROJECTION_KEY } from '../analysis-projection-policy.js';
 import { toSafeTransportEnrichment } from '../../compose.js';
 
 it.each(['absent', 'empty', 'questions', 'gapped'] as const)(
-  'real run_analysis preserves gap-free bytes and stamps only admission gaps: %s', async carrier => {
+  'real run_analysis stamps every new Run and preserves provider/transport bytes: %s', async carrier => {
   const scenarioId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const response = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/plot/v2-run-golden-happy.json', import.meta.url), 'utf8'));
   const untouchedResponse = structuredClone(response);
@@ -44,14 +44,12 @@ it.each(['absent', 'empty', 'questions', 'gapped'] as const)(
   expect(outcome.llm_calls_used).toBe(0);
   expect(providerCalls).toBe(1);
   const saved = RunAnalysisHandlerFactSchema.parse(JSON.parse(JSON.stringify(outcome.handler_facts[0])));
-  expect(saved.result.enrichment?.[RUN_ANALYSIS_PROJECTION_KEY]).toBe(
-    carrier === 'gapped' ? ANALYSIS_PROJECTION_VERSION : undefined);
+  expect(saved.result.enrichment?.[RUN_ANALYSIS_PROJECTION_KEY]).toBe(ANALYSIS_PROJECTION_VERSION);
   expect(saved.result.graph_hash_at_run).toBe(computeAnalysisAffectingGraphHash(graph));
   const envelope = { ...saved.result.enrichment };
   delete envelope[RUN_ANALYSIS_PROJECTION_KEY];
   expect(envelope).toEqual(response);
   expect(response).toEqual(untouchedResponse);
-  if (carrier !== 'gapped') expect(JSON.stringify(saved.result.enrichment)).toBe(JSON.stringify(response));
   expect(toSafeTransportEnrichment(saved.result.enrichment)).toEqual(toSafeTransportEnrichment(response));
   expect(JSON.stringify(toSafeTransportEnrichment(saved.result.enrichment)))
     .toBe(JSON.stringify(toSafeTransportEnrichment(response)));

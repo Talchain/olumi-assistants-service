@@ -773,6 +773,7 @@ function deriveChipClickFreshness(
    * the prior half is therefore genuinely unexplained.
    */
   priorFactsReadOk?: boolean,
+  analysisInvalidatedAt?: string | null,
 ): FreshnessDerivation {
   let currentGraphHash: string | null = null;
   if (
@@ -797,6 +798,7 @@ function deriveChipClickFreshness(
       : undefined,
     {
       currentGraph: cachedSnapshot?.rawPersistedGraph,
+      analysisInvalidatedAt,
       ...(priorFactsReadOk === undefined ? {} : { priorFactsReadOk }),
     },
   );
@@ -1542,6 +1544,7 @@ export async function dispatchChipClickRunAnalysis(
                 cachedSnapshot,
                 context.prior_facts,
                 context.prior_facts_read_ok,
+                context.analysis_invalidated_at,
               )
             : undefined,
           payload,
@@ -1854,6 +1857,7 @@ export async function dispatchChipClickRunAnalysis(
       cachedSnapshot,
       postDispatchFacts,
       context.prior_facts_read_ok,
+      context.analysis_invalidated_at,
     );
 
     let response = composeToolCallResponse({
