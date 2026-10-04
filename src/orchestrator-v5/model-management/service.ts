@@ -56,6 +56,8 @@ import {
   ModelVersionSignInRequiredError,
   type AtomicRestoreVersionWrite,
   type ModelVersionStorePort,
+  type ModelVersionListReadOptions,
+  type ModelVersionReadOptions,
 } from './store-adapter.js';
 import {
   CAS_CONFLICT_KIND,
@@ -268,11 +270,14 @@ export class ModelManagementService {
     scenarioId: string,
     limit?: number,
     beforeSequence?: number,
+    options?: ModelVersionListReadOptions,
   ): Promise<ModelManagementResult<readonly ModelVersionSummary[]>> {
     if (!this.isEnabled()) return { status: 'disabled' };
     try {
       const versions =
-        limit === undefined && beforeSequence === undefined
+        options !== undefined
+          ? await this.store.listVersions(scenarioId, limit, beforeSequence, options)
+          : limit === undefined && beforeSequence === undefined
           ? await this.store.listVersions(scenarioId)
           : await this.store.listVersions(scenarioId, limit, beforeSequence);
       return { status: 'ok', value: versions };
@@ -284,10 +289,13 @@ export class ModelManagementService {
   async getVersion(
     scenarioId: string,
     versionId: string,
+    options?: ModelVersionReadOptions,
   ): Promise<ModelManagementResult<ModelVersionRecord>> {
     if (!this.isEnabled()) return { status: 'disabled' };
     try {
-      const version = await this.store.getVersion(scenarioId, versionId);
+      const version = options === undefined
+        ? await this.store.getVersion(scenarioId, versionId)
+        : await this.store.getVersion(scenarioId, versionId, options);
       if (version === null) {
         return {
           status: 'error',
@@ -400,7 +408,10 @@ export class ModelManagementService {
     scenarioId: string,
     fromVersionId: string,
     toVersionId: string,
-  ): Promise<ModelManagementResult<VersionComparison>> {
+    includeRecords = false,
+  ): Promise<ModelManagementResult<VersionComparison & {
+    readonly records?: { readonly from: ModelVersionRecord; readonly to: ModelVersionRecord };
+  }>> {
     if (!this.isEnabled()) return { status: 'disabled' };
     try {
       const [from, to] = await Promise.all([
@@ -418,7 +429,9 @@ export class ModelManagementService {
           },
         };
       }
-      return { status: 'ok', value: compareVersionRecords(from, to) };
+      const comparison = compareVersionRecords(from, to);
+      // Reuse these two reads for opt-in result binding; never send records on the wire.
+      return { status: 'ok', value: includeRecords ? { ...comparison, records: { from, to } } : comparison };
     } catch (err) {
       return mapThrownError(err);
     }

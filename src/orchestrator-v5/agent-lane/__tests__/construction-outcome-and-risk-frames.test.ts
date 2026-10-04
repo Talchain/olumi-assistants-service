@@ -214,7 +214,16 @@ describe('strict only at the OpenAI boundary: a candidate recorded before the fr
     const b = await registered(nulls);
     expect((a.out as { ok?: boolean }).ok, JSON.stringify(a.out)).toBe(true);
     expect(a.graph).toEqual(b.graph);
-    expect(a.out).toEqual(b.out);
+    // A fresh durable question has its own row id and answer window on each build; its meaning is identical.
+    const stable = (out: unknown) => {
+      if (out === null || typeof out !== 'object' || Array.isArray(out)) return out;
+      const record = out as Record<string, unknown>;
+      const p = record.pending_action as Record<string, unknown> | undefined;
+      if (!p) return out;
+      const { id: _id, emitted_at_iso: _asked, expires_at_iso: _expiry, ...pending } = p;
+      return { ...record, pending_action: pending };
+    };
+    expect(stable(a.out)).toEqual(stable(b.out));
     const nodes = (a.graph as { nodes: Record<string, unknown>[] }).nodes.filter((n) => n.kind === 'risk' || n.kind === 'outcome');
     expect(nodes.length).toBeGreaterThanOrEqual(1);
     for (const n of nodes) expect(n.scale_frame, String(n.id)).toBeUndefined();

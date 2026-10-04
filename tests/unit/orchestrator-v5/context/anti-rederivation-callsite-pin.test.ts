@@ -103,6 +103,10 @@ function scanRepo(ident: string): Record<string, number> {
 const EXPECTED: Record<string, Record<string, number>> = {
   deriveAnalysisFreshness: {
     'src/orchestrator-v5/context/freshness.ts': 1, // authority (definition)
+    // Admission-gap projection upgrade: the immutable version binder now
+    // reads compareRunGoalUnitSnapshot directly. Its former import + live
+    // freshness call are removed, reducing this pin by two references. The
+    // canonical per-Run claim composition remains pinned separately below.
     // 21 Sep 2026 — NEW APPROVED SEAM, with the justification this map demands.
     // The replacement conversation controller BYPASSES THE TURN-EXECUTOR BY
     // DESIGN, so there is no CanonicalContextFrame for it to read from: the
@@ -303,7 +307,9 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // referee input is the option-level batch's own derivation, extracted unchanged into `preWriteRefereeFreshness`
     // and shared by both writers (same prior-facts read, `unknown` on a degraded read). The limit-edit door shares
     // goal_target_edit's body, so it adds none either. Its first cut added a sixth reference; this pin caught it.
-    'src/orchestrator-v5/system-events/dispatch.ts': 5,
+    // 2026-10-04 B3 (#2543, review 58ed64dd): −2 — the two ad-hoc post-write derivations (former ~2804, ~2945)
+    // now go through the shared `deriveWriteReplyFreshness` authority with the complete durable evidence.
+    'src/orchestrator-v5/system-events/dispatch.ts': 3,
     // 2026-09-24 MG&Q: +1 (one call) — `dispatchFactorValueEdit` now derives the
     // wire freshness for a factor-value edit, exactly as the edge_strength_edit
     // writer in this same file already does. Programme #63 item 15: the value
@@ -370,11 +376,17 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // projection. A mismatch refreshes through the existing canonical reader.
     // Requires owning HARNESS/DL review in this PR; remove this entry if a
     // canonical frame from that post-wait snapshot becomes available here.
-    'src/orchestrator-v5/agent-lane/run-currentness.ts': 2,
+    // 2026-10-04 B3 (#2543, review 58ed64dd): REMOVED (was 2). The fast after-narration check judged on Run + graph
+    // alone and could not see edit chronology (add-then-clear); it now requests the existing canonical reread.
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)
     'src/orchestrator-v5/context/context-pack-assembler.ts': 2, // approved seam
+    // VERSION RESULT-DIFF — DL-approved historical comparison seam: import + one call.
+    // No turn frame exists for these saved versions. The binder judges each bound
+    // Run on its own saved graph and matching Run identity through the canonical
+    // selector and claim composition; it defines no alternative permission rule.
+    'src/orchestrator-v5/model-management/version-result-binding.ts': 2,
     // C2 Phase-3 lifecycle: freshness deliberately selects the older successful
     // Run for historical cards, while this one card-builder seam needs the
     // canonical contradiction from the same prior-fact set to suppress those

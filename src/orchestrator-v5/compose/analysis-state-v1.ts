@@ -1,3 +1,5 @@
+import { GOAL_SCOPE_UNRESOLVED_REASON } from '../../schemas/goal-scope.js';
+import type { GoalScopeClaimInput } from './goal-scope-claim-input.js';
 /**
  * ANALYSIS-STATE AUTHORITY, STEP 3 — compose `AnalysisStateV1` (schemas 0.46.0).
  *
@@ -199,6 +201,7 @@ export const BLOCKED_REASON_UNSPECIFIED = 'analysis_blocked_unspecified';
 export const REFUSAL_REASON_UNSPECIFIED = 'analysis_refused_unspecified';
 
 /** `withheld_reason` codes. Producer-owned; a consumer maps them to its copy. */
+export const WITHHELD_GOAL_SCOPE_UNRESOLVED = GOAL_SCOPE_UNRESOLVED_REASON;
 export const WITHHELD_CONSTRAINT_VERDICT = 'constraint_verdict_withheld';
 /** A selected Run withheld its leader while its constraint verdict was not applicable. No cause is asserted. */
 export const WITHHELD_LEADER_CAUSE_UNRECORDED = 'analysis_leader_withheld';
@@ -325,6 +328,7 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_LEADER_CAUSE_UNRECORDED]: 'withheld',
   [WITHHELD_UNREQUESTED_ANALYSIS]: 'withheld',
   [WITHHELD_NONLINEAR_IDENTITY_SIGN_UNPROVEN]: 'withheld',
+  [WITHHELD_GOAL_SCOPE_UNRESOLVED]: 'withheld',
   [WITHHELD_NO_OPTION_MEETS_LIMIT]: 'withheld',
   [WITHHELD_EVERY_OPTION_LIKELY_BREAKS_LIMIT]: 'withheld',
   [WITHHELD_NEAR_TIE]: 'withheld',
@@ -476,6 +480,8 @@ export const NO_ANALYSIS_CONTEXT_DERIVATION: FreshnessDerivation = Object.freeze
 });
 
 export interface AnalysisStateComposeInput {
+  /** Same canonical scope input for Run, callback, model view and cold read. */
+  readonly goalScopeClaimInput?: GoalScopeClaimInput;
   /**
    * Optional adoption seam: a caller that has read a scenario's facts supplies
    * the selected fact's original result fields. Scenario scope comes from the
@@ -940,11 +946,17 @@ export function separationWithholdFromRobustness(
   return raw !== null ? WITHHELD_NEAR_TIE : WITHHELD_SEPARATION_UNAVAILABLE;
 }
 
-function composeLeaderClaim(
+export function composeLeaderClaim(
   input: AnalysisStateComposeInput,
   runState: AnalysisRunState,
   newerDegradedRun: boolean,
 ): AnalysisLeaderClaim {
+  if (input.goalScopeClaimInput !== undefined && input.goalScopeClaimInput.status !== 'clear') {
+    // Scope restricts total-goal claims even when a newer degraded Run also
+    // withholds the leader. That Run's state and contradictions remain intact.
+    // An unavailable read cannot establish an attested empty scope issue list.
+    return { permitted: false, withheld_reason: WITHHELD_GOAL_SCOPE_UNRESOLVED };
+  }
   // A newer partial/refused Run supersedes the older success's claim, but
   // supplies no usable robustness verdict for the displayed older figures.
   // This is a known withhold, not an unperformed separation check.

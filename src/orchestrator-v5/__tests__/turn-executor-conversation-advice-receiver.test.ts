@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../context/analysis-projection-policy.js';
 /** Real executor receiving-path test; storage and one routing adapter are mocked.
  * Proves contextual prompt/response transport and no canonical write, not live model quality. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -478,6 +479,7 @@ describe('conversation advice reaches contextual reasoning', () => {
       fact_type: 'run_analysis', fact_version: 1, noop: false,
       result: {
         ...captured.analysis_result,
+        enrichment: stampRunAnalysisProjection(captured.analysis_result.enrichment ?? {}),
         scenario_id: captured.source.scenario_id,
         graph_hash_at_run: captured.analysis_result.computed_against_hash,
         computed_at: captured.analysis_state.run_state.computed_at,

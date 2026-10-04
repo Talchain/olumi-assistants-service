@@ -17,10 +17,12 @@
 import { goalChanceWithheldForAgent, type GoalChanceWithheld } from '../goal-chance-withheld.js';
 import { hasGoalCertaintyCandidates, goalCertaintyForAgent, type GoalCertaintyRead } from '../goal-certainty-for-agent.js';
 import { readStoredGoalCertainty } from '../../tools/handlers/run-goal-certainty.js';
+import { readStoredOptionParticipation, type StoredOptionParticipation } from '../../tools/handlers/option-participation.js';
 import { addedFactorsReceipt, type AddedFactorPart } from '../added-factors-receipt.js';
 import { acceptedOlumiEstimateSentence } from '../rerun-explanation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapApprovalWords, applyOptionGapDeclarations } from '../unmodelled-mechanisms.js';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { AGENT_ADD_OPTION_CHIP_ID, AGENT_RUN_ANALYSIS_CHIP_ID } from '../../handlers/agent-chip-ids.js';
 import { runWithUserNamedOptions, type StatedTodayLevel } from '../../handlers/add-option-authorship-context.js';
@@ -176,6 +178,9 @@ import { unitFamilyOf } from '../../routing/value-unit-resolution.js';
 import { isCurrencyUnit } from '../../../utils/currency-alphabet.js';
 import { countedNoun } from '../counted-nouns.js';
 import { analysisResultForAgent } from '../decision-sensitivity.js';
+import { savedRunContextFacts, type SavedRunContextFactsRead } from '../saved-run-context-facts.js';
+import { selectedRunDeltaForModel } from '../selected-run-delta-for-model.js';
+import type { RunDelta } from '@talchain/schemas/boundary';
 import { optionNameAliases } from '../option-name-truth.js';
 import { bandTheUserWrote, comparatorTheUserWrote, contradictsItsName, directionTheWordsSay, factorTheUserNamed, figuresWrittenIn, figureTheUserWrote, figureTheUserWroteFor, holdsABandWord, linkEffectTheUserStated, quoteOfFigure, sameWord, statingSentenceOf, wordsOf, wordsTheUserWrote, type EntityScope } from '../stated-by-user.js';
 import { derivedSplitOf, partUnit, statedTotalsOf } from '../derived-split.js';
@@ -877,6 +882,9 @@ function valueAuthorshipNote(ops: readonly ProposalOperation[], proposal: Struct
 }
 
 /** One internal dispatch, so every path is the product's own. */
+import { reconcileGoalScope } from '../reconcile-goal-scope.js';
+import { goalScopeCheck, scopeOf, scopeReconciliationKey, scopeWithdrawalWords } from '../goal-scope.js';
+import type { GoalScopeReconciliation } from '../../../schemas/goal-scope.js';
 export type InternalDispatch = (path: string, body: unknown) => Promise<{ status: number; json: Record<string, unknown> }>;
 
 interface GraphRead {
@@ -913,6 +921,7 @@ interface GraphRead {
     analysis_participation?: unknown;
     /** MG F1 T6: the user's own word for an option (`option_status_edit`); absent = feasible. */
     option_status?: unknown;
+    goal_scope?: unknown;
     observed_state?: Record<string, unknown>;
     interventions?: Record<string, unknown>;
     changes?: unknown;
@@ -942,6 +951,8 @@ interface GraphRead {
    * `permitted_analysis_mode` is the mode half of the selected Run's leader permission (`claimPermissionsFrom`).
    */
   readonly analysis_admission?: unknown;
+  /** Refreshed issues from the same canonical read; explanatory data, never a second permission gate. */
+  readonly goal_scope_reconciliation?: readonly GoalScopeReconciliation[];
   /** The persisted graph exactly as read — every top-level carrier, not only nodes/edges. */
   readonly raw: Record<string, unknown>;
   /** A7: the read's own `not_modelled` (derived by the read route over this graph); absent when the read had none. */
@@ -956,15 +967,22 @@ interface GraphRead {
   readonly identity_run_use?: IdentityRunUse | null;
   /** The selected run's per-limit rows (`analysis_limit_verdicts`), read off the SAME graph read (`limit-checks.ts`). */
   readonly limit_verdicts?: StoredLimitVerdicts;
+  /** Selected canonical sidecars; narrowed by the existing verdict reader in savedRunContextFacts. */
+  readonly constraint_verdict_state?: unknown;
+  readonly leader_limit_risks?: readonly unknown[] | null;
   /** The read's `analysis_result` block — the selected Run, present only when the route delivers it (`goal-certainty-for-agent.ts`). */
   readonly analysis_result?: unknown;
+  /** Full UI wire data stays internal until the model-facing context projection. */
+  readonly run_delta?: RunDelta;
   /** The read's `analysis_goal_certainty` via #2280's ONE reader (`readStoredGoalCertainty`); absent = not recorded. */
   readonly goal_certainty?: readonly unknown[];
+  /** The selected Run's recorded participation via the canonical reader; absent = not recorded. */
+  readonly option_participation?: StoredOptionParticipation;
 }
 
 // An edited graph can still carry an earlier Run. Its old result must not be
 // given a display name derived from the new intervention level.
-function optionNameAliasesForCurrentRun(g: GraphRead): ReturnType<typeof optionNameAliases> {
+function optionNameAliasesForCurrentRun(g: Omit<GraphRead, 'run_delta'>): ReturnType<typeof optionNameAliases> {
   const kind = (g.analysis_state as { run_state?: { kind?: unknown } } | undefined)?.run_state?.kind;
   // The graph read has already checked the Run against the canonical analysis
   // projection. Its graph_hash is the raw edit/CAS base, which can differ on a
@@ -1250,6 +1268,7 @@ export function projectModelContext(g: Pick<GraphRead, 'nodes' | 'edges' | 'raw'
     return {
       id: n.id,
       label: n.label,
+      ...(scopeOf(n.goal_scope) ? { scope: n.goal_scope, conditional_derivations: goalScopeCheck(g.raw, n.id, scopeOf(n.goal_scope)!).derivations } : {}),
       ...(trio.goal_threshold_raw === undefined ? {} : {
         target: {
           value: trio.goal_threshold_raw,
@@ -1440,7 +1459,7 @@ const pickKeys = (o: Record<string, unknown>, keys: readonly string[]): Record<s
  * (`goalCertaintyForAgent`, the one reader): its recorded decisions and each `say`, or `unchecked` when it cannot be bound
  * (a stale Run, nothing recorded, a refused record). No second truth, nothing recomputed.
  */
-function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: string, g: GraphRead): Record<string, unknown> {
+function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: string, g: Omit<GraphRead, 'run_delta'> & Pick<SavedRunContextFactsRead, 'run_delta'>): Record<string, unknown> {
   const analysis = context.analysis as Record<string, unknown> | undefined;
   if (analysis === undefined) return context;
   const certainty = goalCertaintyForAgent(g.analysis_result, { scenario_id: scenarioId, analysis_state: g.analysis_state }, g);
@@ -1455,8 +1474,11 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
   // model chance, as the Run chip's own result does. The retained history no longer holds that result (#2322), so
   // without it the Agent said "not confirmed" beside a Goal panel showing 25%. A withheld leader keeps AI Quality's
   // standing drop of per-option chances; an exact 0 or 1 travels only through its earned `goal_certainty` decision.
-  const chancePermitted = current && goalChance === undefined
-    && claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true }).leader_may_be_named === true;
+  // The selected Run uses the same existing requested-Run licence, including separable provisional caveats.
+  const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission }, { requested: true });
+  const selectedPermissions = current && g.analysis_result !== undefined && permissions.leader_may_be_named !== true
+    ? withNonlinearIdentity(permissions, g.raw, g.identity_evaluated) : permissions;
+  const chancePermitted = current && goalChance === undefined && permissions.leader_may_be_named === true;
   const compared = rec(rec(g.analysis_result)?.enrichment)?.option_comparison;
   const optionNames = optionNameAliasesForCurrentRun(g);
   const decisions = Array.isArray(certainty?.options) ? certainty.options : [];
@@ -1479,10 +1501,27 @@ function withSavedRunCertainty(context: Record<string, unknown>, scenarioId: str
       ...(decision !== undefined ? { goal_certainty: decision } : {}),
     }];
   }) : [];
+  // Participation belongs to the same selected, delivered current Run. Only labels come from this read's graph;
+  // today's option authorship, adoption and status never reinterpret the Run's recorded reason.
+  const labels = new Map(g.nodes.filter((n) => n.kind === 'option').map((n) => [n.id, n.label]));
+  const labelledOption = (id: string): { option_id: string; label?: string } => ({
+    option_id: id, ...(labels.has(id) ? { label: labels.get(id)! } : {}),
+  });
+  const participation = current && g.analysis_result !== undefined && g.option_participation !== undefined
+    ? g.option_participation
+      .map((entry) => ({ ...entry, ...labelledOption(entry.option_id),
+        ...(entry.unanalysable_user_option_ids === undefined ? {} : {
+          unanalysable_user_options: entry.unanalysable_user_option_ids.map(labelledOption),
+        }),
+      }))
+    : undefined;
   return { ...context, analysis: { ...analysis,
+    claim_permissions: selectedPermissions,
+    ...savedRunContextFacts(scenarioId, g, selectedPermissions),
     ...(certainty !== undefined ? { goal_certainty: certainty } : {}),
     ...(goalChance !== undefined ? { goal_chance: goalChance } : {}),
     ...(savedRunOptions.length > 0 ? { saved_run_options: savedRunOptions } : {}),
+    ...(participation !== undefined ? { option_participation: participation } : {}),
   } };
 }
 
@@ -1856,13 +1895,23 @@ export function createAgentCapabilities(
         const readiness = (r.json.current_read as { analysis_ready?: unknown } | undefined)?.analysis_ready;
         return readiness === undefined ? {} : { analysis_ready: readiness };
       })(),
+      ...(() => {
+        const delta = (r.json.current_read as { run_delta?: RunDelta } | undefined)?.run_delta;
+        return delta === undefined ? {} : { run_delta: delta };
+      })(),
       ...(r.json.analysis_admission !== undefined && r.json.analysis_admission !== null ? { analysis_admission: r.json.analysis_admission } : {}),
+      ...(Array.isArray(r.json.goal_scope_reconciliation) ? { goal_scope_reconciliation: r.json.goal_scope_reconciliation as GoalScopeReconciliation[] } : {}),
       raw: g,
       ...(notModelled !== undefined ? { not_modelled: notModelled } : {}),
       ...(identityEvaluated !== undefined ? { identity_evaluated: identityEvaluated } : {}),
       ...(limitVerdicts !== null ? { limit_verdicts: limitVerdicts } : {}),
+      ...(r.json.analysis_constraint_verdict_state !== undefined
+        ? { constraint_verdict_state: r.json.analysis_constraint_verdict_state } : {}),
+      ...(() => { const risks = r.json.analysis_leader_limit_risks;
+        return risks === null || Array.isArray(risks) ? { leader_limit_risks: risks } : {}; })(),
       ...(r.json.analysis_result !== undefined && r.json.analysis_result !== null ? { analysis_result: r.json.analysis_result } : {}),
       ...(() => { const stored = readStoredGoalCertainty(r.json.analysis_goal_certainty); return stored !== undefined ? { goal_certainty: stored } : {}; })(),
+      ...(() => { const stored = readStoredOptionParticipation(r.json.analysis_option_participation); return stored !== undefined ? { option_participation: stored } : {}; })(),
     };
   };
 
@@ -2134,6 +2183,16 @@ export function createAgentCapabilities(
     }
     const valueOps = parent.operations.filter((o) => o.op === 'set_factor_value');
     const levelOps = parent.operations.filter((o) => o.op === 'set_option_intervention');
+    const gapInput = parseOptionGapsOfLevelOps(levelOps);
+    if (gapInput.kind === 'invalid') return notApplied(gapInput.reason, 'The gap statement could not be read from this proposal. Nothing was written.');
+    const optionGaps = gapInput.declarations;
+    for (const gap of optionGaps) {
+      const op = levelOps.find(o => o.path.split('::')[0] === gap.optionId && Object.hasOwn((o.value ?? {}) as object, 'unmodelled_mechanisms'));
+      const operands = (op?.value as { gap_operands?: unknown } | undefined)?.gap_operands;
+      if (operands === undefined || !isDeepStrictEqual(operands, optionGapOperands(approvedRead.raw, gap.optionId))) {
+        return notApplied('gap_statement_changed_since_approval', 'The named gaps or questions changed after this was proposed. Nothing was written; prepare a new statement.');
+      }
+    }
     const linkOps = parent.operations.filter(isLevelLink);
     const pairOf = (path: string): { option_id: string; factor_id: string } => {
       const [option_id, factor_id] = path.split('::');
@@ -2321,6 +2380,7 @@ export function createAgentCapabilities(
         turn_id: authorisationTurnId(`${parent.proposal_id}#levels`),
         links,
         levels,
+        ...(optionGaps.length > 0 ? { option_gaps: optionGaps.map(d => ({ option_id: d.optionId, mechanisms: d.mechanisms, operands: optionGapOperands(approvedRead.raw, d.optionId)! })) } : {}),
         ...(values.length > 0 ? { values } : {}),
         ...(frames.length > 0 ? { frames } : {}),
       });
@@ -2345,6 +2405,7 @@ export function createAgentCapabilities(
         // ⛔ LANDED = WHAT THE MODEL HOLDS (#1995): every approved link and level, read back — never the revision alone.
         const check = await readGraph(ctx.scenario_id);
         const holds = check !== null
+          && optionGapsHeld(check.raw, optionGaps)
           && levels.every((l) => heldLevelOf(check, l.option_id, l.factor_id) === l.value)
           && links.every((k) => check.edges.some((e) => e.from === k.option_id && e.to === k.factor_id))
           && [...expectedValueOf].every(([id, v]) => (check.nodes.find((n) => n.id === id)?.observed_state as { value?: unknown } | undefined)?.value === v);
@@ -2383,6 +2444,7 @@ export function createAgentCapabilities(
       ok: all,
       mutated: valuesLanded || linksAdded.length > 0 || levelsRecorded > 0,
       applied: all,
+      ...(optionGaps.length > 0 ? { public_label: parent.public_label } : {}),
       proposal_id: parent.proposal_id,
       parts,
       receipts,
@@ -2561,6 +2623,7 @@ export function createAgentCapabilities(
     if (approvedRead.graph_hash !== parent.base_graph_identity_hash) {
       return notApplied('model_changed_since_approval', 'The model changed after this was offered, so nothing was recorded. Read it again; offer the reading afresh only if it still applies.');
     }
+    if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return notApplied('goal_scope_unresolved', 'Resolve the retained scope question before confirming this identity. Nothing was written.');
     if (opts.commitOptionLevels === undefined) {
       return notApplied('identity_writer_unavailable', 'This reading could not be recorded here, so nothing was recorded.');
     }
@@ -2766,6 +2829,12 @@ export function createAgentCapabilities(
         }
       }
     }
+    const gaps = parseOptionGapsOfLevelOps(ops);
+    if (gaps.kind === 'invalid') return readinessViewOf(undefined);
+    if (gaps.declarations.length > 0) {
+      const prepared = applyOptionGapDeclarations(raw, gaps.declarations);
+      return readinessViewOf(prepared.kind === 'prepared' ? prepared.graph : undefined);
+    }
     return readinessViewOf(raw);
   };
   /**
@@ -2821,10 +2890,17 @@ export function createAgentCapabilities(
     async getCanonicalState(ctx: AgentToolContext): Promise<ToolResult> {
       const g = await readGraph(ctx.scenario_id);
       if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+      const delta = await selectedRunDeltaForModel(ctx.scenario_id, g, g.run_delta);
+      const { run_delta: _wireDelta, ...readWithoutDelta } = g;
+      const modelRead = { ...readWithoutDelta, ...(delta === undefined ? {} : { run_delta: delta }) };
+      const scopeIssues = g.goal_scope_reconciliation ?? [];
+      const permissions = claimPermissionsFrom(g.analysis_state, { analysis_admission: g.analysis_admission });
       const optionNames = optionNameAliasesForCurrentRun(g);
       return {
         ok: true,
         mutated: false,
+        ...(permissions.total_goal_claims_allowed === false ? { claim_permissions: permissions } : {}),
+        ...(scopeIssues.length > 0 ? { goal_scope_reconciliation: scopeIssues } : {}),
         graph_revision: g.graph_hash,
         empty: g.nodes.length === 0,
         entities: g.nodes.map((n) => {
@@ -2842,7 +2918,7 @@ export function createAgentCapabilities(
         structure: structuralFacts(g.nodes, g.edges, limitNodeIdsOf(g.raw)),
         // (B) goal target, limits, links, the ONE readiness verdict, and the earlier analysis kept apart from it — with the
         // saved Run's own goal certainty (`withSavedRunCertainty`).
-        ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, g),
+        ...withSavedRunCertainty(projectModelContext(g), ctx.scenario_id, modelRead),
         // A7: what of the brief the model does NOT carry — the read's own manifest, projected; none when the read had none.
         ...(g.not_modelled !== undefined ? { not_modelled: notModelledContext(g.not_modelled) } : {}),
         // Every proposal this user has been shown and not yet approved, newest
@@ -3100,6 +3176,7 @@ export function createAgentCapabilities(
       if (g === null) {
         return { ok: false, mutated: false, refusal: 'unreadable_model', detail: 'The model could not be read, so no reading was offered. Nothing was changed.' };
       }
+      if ((await opts.readPendingActions?.(ctx.scenario_id) ?? []).some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Resolve the retained goal-scope question before confirming a product identity.' };
       const card = proposeProductIdentity(g.raw);
       if (card === null) {
         return { ok: false, mutated: false, refusal: 'no_reading_to_confirm',
@@ -3986,12 +4063,31 @@ export function createAgentCapabilities(
       if (assumptions.length === 0 && levels.length === 0) {
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: `Nothing was proposed.${EMPTY_PROPOSAL_WORDS}` };
       }
+      for (const level of levels) {
+        const declaration = parseUnmodelledMechanisms(level?.unmodelled_mechanisms, level != null && Object.hasOwn(level, 'unmodelled_mechanisms'));
+        if (declaration.kind === 'invalid') return { ok: false, mutated: false, refusal: declaration.reason, detail: 'Nothing was proposed: every gap declaration must be valid.' };
+      }
       // ⛔ A keep is its own approval (`keep_with_other_changes`, CODEX CEE BUDDY 5925846990): never folded into a starting
       // point's one Yes, whose card would call Olumi's kept figure a starting assumption.
       if (assumptions.some((x) => (x as { keep?: unknown } | null)?.keep === true)) {
         return { ok: false, mutated: false, refusal: 'keep_with_other_changes',
           detail: 'Keeping Olumi\u2019s estimate is its own approval. Nothing was proposed: use propose_assumptions with keep for it, '
             + 'and propose the starting point without it.' };
+      }
+      if (levels.some(level => level != null && Object.hasOwn(level, 'unmodelled_mechanisms'))) {
+        const read = await readGraph(ctx.scenario_id);
+        if (read === null) return { ok: false, mutated: false, refusal: 'not_found' };
+        const optionNodes = { nodes: read.nodes.filter(n => n.kind === 'option') };
+        const factorNodes = { nodes: read.nodes.filter(n => n.kind === 'factor') };
+        const declarations = levels.flatMap(level => {
+          const parsed = parseUnmodelledMechanisms(level?.unmodelled_mechanisms, level != null && Object.hasOwn(level, 'unmodelled_mechanisms'));
+          const option = resolveNamed(optionNodes, String(level?.option_label ?? ''), () => true);
+          const factor = resolveNamed(factorNodes, String(level?.factor_label ?? ''), () => true);
+          return parsed.kind === 'valid' && option.kind === 'one' && factor.kind === 'one'
+            ? [{ op: 'set_option_intervention', path: `${option.node.id}::${factor.node.id}`, value: { unmodelled_mechanisms: parsed.mechanisms } }] : [];
+        });
+        const parsed = parseOptionGapsOfLevelOps(declarations);
+        if (parsed.kind === 'invalid') return { ok: false, mutated: false, refusal: parsed.reason, detail: 'Nothing was proposed: repeated option gap declarations must agree.' };
       }
       const a = assumptions.length > 0 ? await caps.proposeAssumptions(ctx, { assumptions }) : null;
       // What THIS starting point would make each factor's starting value — read off the stored
@@ -4003,6 +4099,10 @@ export function createAgentCapabilities(
         if (o.op === 'set_factor_value' && typeof v.value === 'number') startingValues.set(o.path, v.value);
       }
       const b = levels.length > 0 ? await caps.proposeOptionInterventions(ctx, { interventions: levels }, { startingValues }) : null;
+      if (b?.refusal === 'conflicting_option_gap_declarations') {
+        if (valueHalf !== undefined) proposals.discard(valueHalf.proposal_id);
+        return b;
+      }
       const refused = {
         ...(a !== null && a.ok !== true ? { assumptions_refused: a } : {}),
         ...(b !== null && b.ok !== true ? { option_levels_refused: b } : {}),
@@ -4093,6 +4193,10 @@ export function createAgentCapabilities(
       if (input.length === 0) {
         return { ok: false, mutated: false, refusal: 'empty_proposal', detail: `No interventions were given.${EMPTY_PROPOSAL_WORDS}` };
       }
+      const declarations = input.map(i => parseUnmodelledMechanisms(i?.unmodelled_mechanisms, i != null && Object.hasOwn(i, 'unmodelled_mechanisms')));
+      const invalid = declarations.find(d => d.kind === 'invalid');
+      if (invalid?.kind === 'invalid') return { ok: false, mutated: false, refusal: invalid.reason, detail: 'Nothing was proposed: every gap declaration must be valid.' };
+      const declaredOps: ProposalOperation[] = [];
       // Resolved within the kind first (a label on a node of another kind never shadows the
       // right one), then by `resolveNamed`: an id is identity, a label beats a description,
       // and two nodes of the kind answering to one name are AMBIGUOUS, never "the first".
@@ -4125,9 +4229,12 @@ export function createAgentCapabilities(
         userStated: boolean;
         // The option is not yet linked to this factor: the link is added in the same change, before the level.
         needsLink: boolean;
+        mechanisms?: readonly string[];
+        gapOperands?: Record<string, unknown>;
       }[] = [];
 
-      for (const i of input) {
+      for (const [index, i] of input.entries()) {
+        const declaration = declarations[index]!;
         const asGiven = { option: String(i?.option_label ?? ''), factor: String(i?.factor_label ?? ''), value: i?.value };
         const optionRes = resolveNamed(optionNodes, asGiven.option, () => true);
         const factorRes = resolveNamed(factorNodes, asGiven.factor, () => true);
@@ -4180,6 +4287,11 @@ export function createAgentCapabilities(
          * on approval the link is written first and the level on the revision that write reported (`applyCompound`).
          */
         const needsLink = !linkedFactorsOf(g as never, option.id).some((f) => f.id === factor.id);
+        const gapOperands = declaration.kind === 'valid' ? optionGapOperands(g.raw, option.id) : undefined;
+        if (declaration.kind === 'valid') {
+          if (gapOperands == null) return { ok: false, mutated: false, refusal: 'gap_operands_unavailable' };
+          declaredOps.push({ op: 'set_option_intervention', path: `${option.id}::${factor.id}`, value: { unmodelled_mechanisms: declaration.mechanisms } });
+        }
         // ⛔ A held status quo takes no level the AGENT supplies (`heldStatusQuoPairs`):
         // not accepted, never an operation. ⭐ The USER's own correction is the
         // exception (independent review of #1849, 5820560331): the Agent is told to
@@ -4292,24 +4404,47 @@ export function createAgentCapabilities(
           }
         }
 
-        const current = (option.interventions ?? {})[factor.id] as { value?: unknown } | number | undefined;
-        const currentValue = typeof current === 'number' ? current : (current as { value?: unknown } | undefined)?.value;
-        if (currentValue === normalised || currentValue === raw) {
-          unchanged.push(`${option.label} already sets ${factor.label} to ${String(currentValue)}`);
+        const key = `${option.id}::${factor.id}`;
+        if (seen.has(key)) {
+          const prior = set.find(level => `${level.option.id}::${level.factor.id}` === key)!;
+          const unit = typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? '');
+          if (prior.raw !== raw || prior.normalised !== normalised || prior.cap !== (cap ?? derivedFrame)
+            || prior.unit !== unit || prior.userStated !== userWrote || prior.needsLink !== needsLink
+            || (declaration.kind === 'valid' && prior.mechanisms !== undefined
+              && !isDeepStrictEqual(prior.mechanisms, declaration.mechanisms))) {
+            return { ok: false, mutated: false, refusal: 'conflicting_option_gap_declarations',
+              detail: 'Nothing was proposed: repeated option levels and their gap statements must agree.' };
+          }
+          if (declaration.kind === 'valid' && gapOperands != null) {
+            prior.mechanisms = declaration.mechanisms; prior.gapOperands = gapOperands;
+          }
           continue;
         }
-        const key = `${option.id}::${factor.id}`;
-        if (seen.has(key)) continue;
         seen.add(key);
         set.push({
           option: { id: option.id, label: option.label },
           factor: { id: factor.id, label: factor.label },
           raw, normalised, cap: cap ?? derivedFrame, unit: typeof os.unit === 'string' && os.unit !== '' ? os.unit : (statedUnit ?? ''),
           basis: String(i?.basis ?? ''), derivedFrame, userStated: userWrote, needsLink,
+          ...(declaration.kind === 'valid' && gapOperands != null ? { mechanisms: declaration.mechanisms, gapOperands } : {}),
         });
       }
 
-      if (set.length === 0) {
+      const declaredGaps = parseOptionGapsOfLevelOps(declaredOps);
+      if (declaredGaps.kind === 'invalid') return { ok: false, mutated: false, refusal: declaredGaps.reason, detail: 'Nothing was proposed: repeated option gap declarations must agree.' };
+
+      // Validate the whole resolved cohort before dropping unchanged, undeclared levels.
+      const changed = set.filter(level => {
+        const option = optionNodes.nodes.find(node => node.id === level.option.id)!;
+        const current = (option.interventions ?? {})[level.factor.id] as { value?: unknown } | number | undefined;
+        const currentValue = typeof current === 'number' ? current : current?.value;
+        if ((currentValue === level.normalised || currentValue === level.raw) && level.mechanisms === undefined) {
+          unchanged.push(`${level.option.label} already sets ${level.factor.label} to ${String(currentValue)}`);
+          return false;
+        }
+        return true;
+      });
+      if (changed.length === 0) {
         return {
           ok: false, mutated: false, refusal: 'nothing_to_set',
           ...(unresolved.length > 0 ? { unresolved } : {}),
@@ -4322,7 +4457,7 @@ export function createAgentCapabilities(
         };
       }
 
-      const ordered = [...set].sort((x, y) =>
+      const ordered = [...changed].sort((x, y) =>
         `${x.option.id}::${x.factor.id}` < `${y.option.id}::${y.factor.id}` ? -1 : 1);
       // The links the levels need come first; each is written before any level (`applyCompound` step 2b).
       const linkOps: ProposalOperation[] = ordered.filter((i) => i.needsLink)
@@ -4335,8 +4470,11 @@ export function createAgentCapabilities(
           ...(i.unit !== '' ? { unit: i.unit } : {}),
           // Per level, like `valueOpAuthor`: whose level this is travels to the writer (`levelOpAuthor`).
           authored_by: i.userStated ? 'user_stated' : 'model_proposed',
+          ...(i.mechanisms !== undefined ? { unmodelled_mechanisms: i.mechanisms, gap_operands: i.gapOperands } : {}),
         },
       }))];
+      const gaps = parseOptionGapsOfLevelOps(operations);
+      if (gaps.kind === 'invalid') return { ok: false, mutated: false, refusal: gaps.reason };
       const proposal = createProposal({
         scenario_id: ctx.scenario_id,
         user_id: ctx.authenticated_user_id,
@@ -4346,7 +4484,8 @@ export function createAgentCapabilities(
         validation: { admitted: true, loss_count: 0, refusals: [] },
         public_label:
           ordered.map((i) => `${i.option.label} ${i.needsLink ? `acts on ${i.factor.label} (a new link) and sets it` : `sets ${i.factor.label}`} to ${sayFigureExactly(i.raw, i.unit) ?? `${i.raw}${i.unit !== '' ? ' ' + i.unit : ''}`}`).join('; ') +
-          ambiguousClause(ambiguous),
+          ambiguousClause(ambiguous) +
+          gaps.declarations.map(d => `; ${optionGapApprovalWords(optionNodes.nodes.find(n => n.id === d.optionId)!.label, d.mechanisms, optionGapOperands(g.raw, d.optionId)!)}`).join(''),
       });
       proposals.put(proposal);
       return {
@@ -4392,7 +4531,14 @@ export function createAgentCapabilities(
       if (readOnly) return refuseReadOnly();
       const id = typeof args?.proposal_id === 'string' ? args.proposal_id : '';
       const notFound = { ok: false, mutated: false, refusal: 'not_proposed_this_turn', detail: 'No change with that id is awaiting approval. Nothing was withdrawn.' };
-      if (/^gmh_[0-9a-f]{12}$/.test(id)) {
+      if (id.startsWith('goal-scope:')) {
+        const issue = (await opts.readPendingActions?.(ctx.scenario_id) ?? []).find(p => p.action.kind === 'reconcile_goal_scope' && p.chip_id === id);
+        if (issue?.action.kind !== 'reconcile_goal_scope') return notFound;
+        const words = scopeWithdrawalWords(issue.action.goal_id);
+        if ((ctx.user_turn_text ?? ctx.user_text ?? '').trim() !== words) return { ok: false, mutated: false, refusal: 'withdrawal_not_approved', approval_words: words,
+          detail: 'This unresolved reading belongs to the user. It is retained until they explicitly withdraw it with the displayed words.' };
+        withdrawnHolds.add(id);
+      } else if (/^gmh_[0-9a-f]{12}$/.test(id)) {
         withdrawnHolds.add(id);
       } else {
         const p = proposals.get(id);
@@ -4436,6 +4582,7 @@ export function createAgentCapabilities(
         scenario_id: ctx.scenario_id,
         authenticated_user_id: ctx.authenticated_user_id,
         current_graph_identity_hash: before.graph_hash,
+        typed_approval_of: ctx.typed_approval_of,
       });
       if (decision.status === 'already_applied') {
         // ⭐ A retry RECOVERS the first result. It carries the proposal id, so
@@ -4455,6 +4602,13 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: decision.status, ...(decision.status === 'superseded' ? { expected: decision.expected, actual: decision.actual } : {}) };
       }
 
+      const scopeRevision = pendingAdoption?.operations.find(op => op.op === 'update_node')?.value as { reconciliation_key?: string } | undefined;
+      if (scopeRevision?.reconciliation_key) {
+        const issues = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+        if (!issues.some(p => p.action.kind === 'reconcile_goal_scope' && scopeReconciliationKey(p.action) === scopeRevision.reconciliation_key)) {
+          return { ok: false, mutated: false, applied: false, refusal: 'superseded', detail: 'The retained scope reading changed or was withdrawn after this card was offered. Nothing was written; ask for a fresh card.' };
+        }
+      }
       // The STORED operations are applied. Nothing is regenerated here.
       const ops = decision.proposal.operations;
 
@@ -4830,6 +4984,8 @@ export function createAgentCapabilities(
       if (ops.some((o) => o.op === 'set_link_effect')) return applyLinkEffect(ctx, decision.proposal, before);
       if (ops.some((o) => o.op === CONFIRM_IDENTITY_OP)) return applyIdentityConfirm(ctx, decision.proposal, before);
       if (ops.length > 0 && ops.every((o) => o.op === 'set_link_strength')) return applyLinkStrengthSet(ctx, decision.proposal, before);
+
+      if (ops.some(o => o.op === 'set_option_intervention' && Object.hasOwn((o.value ?? {}) as object, 'unmodelled_mechanisms'))) return applyCompound(ctx, decision.proposal, before);
 
       // A starting point mixes kinds; each single-kind path below handles one.
       if (new Set(ops.map((o) => o.op)).size > 1) return applyCompound(ctx, decision.proposal, before);
@@ -7430,8 +7586,14 @@ export function createAgentCapabilities(
       };
     },
 
+    async reconcileGoalScope(ctx, args): Promise<ToolResult> {
+      if (readOnly) return refuseReadOnly();
+      return reconcileGoalScope({ readGraph, proposals, readPending: () => opts.readPendingActions ? opts.readPendingActions(ctx.scenario_id) : Promise.resolve([]) }, ctx, args);
+    },
     async proposeGoalCurrentLevel(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
+      const issues = await opts.readPendingActions?.(ctx.scenario_id) ?? [];
+      if (issues.some(p => p.action.kind === 'reconcile_goal_scope')) return { ok: false, mutated: false, refusal: 'goal_scope_unresolved', detail: 'Use reconcile_goal_scope to resolve the retained question before preparing the goal baseline. Nothing was prepared.' };
       return proposeGoalCurrentLevel({ readGraph, proposals }, ctx, args);
     },
 

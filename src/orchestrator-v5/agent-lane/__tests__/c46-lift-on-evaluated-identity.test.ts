@@ -203,6 +203,7 @@ function plotResponse(ranked: Ranked[], identityEvaluations?: unknown): V2RunRes
 /** Register body → production loader → the handler, PLoT faked. The persisted fact, as the handler wrote it. */
 async function runOn(registered: Graph, ranked: Ranked[], identityEvaluations?: unknown): Promise<RunAnalysisHandlerFact> {
   const store = {
+    readMostRecentPendingActions: async () => [],
     loadGraph: async () => registered,
     loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }),
   } as unknown as SessionStore;

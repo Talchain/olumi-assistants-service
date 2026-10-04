@@ -31,7 +31,7 @@ import {
   ALLOWED_OBSERVED_SUBKEYS,
 } from '../field-safety.js';
 import { refereeMutation } from '../referee.js';
-import { FIELD_NOT_ALLOWED, PIPELINE_OWNED_FIELD } from '../reason-codes.js';
+import { FIELD_NOT_ALLOWED, PIPELINE_OWNED_FIELD, STRUCTURAL_APPLY_HELD } from '../reason-codes.js';
 import { buildReadyGraph, frameFor, hashOf, makeEnvelope } from './fixtures.js';
 
 const G = buildReadyGraph();
@@ -119,6 +119,7 @@ describe('corpus A — union assertion: the owned set covers every stamp reachab
       // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level — construction only.
       'goal_level_reading',
       // MG #2306 (29 Sep): Olumi's reading of a decrease target — CEE-owned; only construction writes it.
+      'goal_scope',
       'goal_sense_reading',
       // The saved-example stamps: CEE-owned and deliberately unread here (writer audit 2026-09-27).
       'interventionkeys',
@@ -166,6 +167,7 @@ const SIX_SMUGGLE_NAMES = [
   // PJ-E-A2 part 2 (28 Sep): the deadline in the brief's own words — the same G1 class.
   'goal_deadline_as_stated',
   // MG #2306 (29 Sep): Olumi's reading of a decrease target, written only by construction.
+  'goal_scope',
   'goal_sense_reading',
   // MG (29 Sep, AIQ (b)): Olumi's reading of the brief's figure as a change goal's today level, construction only.
   'goal_level_reading',
@@ -341,4 +343,25 @@ describe('corpus D — hand-written attack spellings, every one refused', () => 
     const code = edgeUpdate('confidence', 'high').blocker?.code;
     expect(code).toBe(FIELD_NOT_ALLOWED);
   });
+});
+
+
+describe('B3 gap fields stay outside generic mutation permission', () => {
+  for (const field of ['unresolved_targets', 'user_questions']) {
+    it(`${field}: a generic field write is refused`, () => {
+      expect(REFUSALS.has(nodeUpdate(field, []).blocker?.code ?? '')).toBe(true);
+    });
+    it(`${field}: a fresh-node declaration is structurally held, never auto-applied`, () => {
+      // Construction has no existing sibling to desynchronise: the documented
+      // add path is held by structural permission, not the update allowlist.
+      const before = structuredClone(G);
+      const verdict = addNode({ [field]: [] });
+      expect(verdict.verdict).toBe('held');
+      expect(verdict.blocker?.code).toBe(STRUCTURAL_APPLY_HELD);
+      expect(G).toEqual(before);
+    });
+    it(`${field}: a gap field cannot become an editable container`, () => {
+      expect(REFUSALS.has(nodeUpdate(`${field}/0`, 'replacement').blocker?.code ?? '')).toBe(true);
+    });
+  }
 });

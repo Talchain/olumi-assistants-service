@@ -1,3 +1,5 @@
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { RunInputSnapshotSchema } from '@talchain/schemas/orchestrator';
 /**
  * V5 state-trust — analysis freshness derivation.
  *
@@ -36,6 +38,7 @@
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import type { LegacyAnalysisEditFacts, HandlerFactWithTurn } from '../types/handler-fact.js';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 import {
@@ -45,6 +48,8 @@ import {
 } from './option-identity.js';
 import { isAnalysisRefusalFact } from './analysis-refusal-continuity.js';
 import { normalizeRunGoalUnit } from './run-goal-unit.js';
+import { runAnalysisProjectionNeedsStamp } from './analysis-projection-policy.js';
+import { ANALYSIS_PROJECTION_VERSION, RUN_ANALYSIS_PROJECTION_KEY } from './graph-identity.js';
 
 /**
  * Four-valued freshness state. Reachable from new code paths only as
@@ -62,11 +67,14 @@ export type FreshnessReason =
   | 'graph_hash_match'
   | 'graph_hash_diverged'
   | 'model_restored_after_analysis'
+  | 'model_edited_after_analysis'
   /** The hash does not include the goal's display unit. A Run-input snapshot
    * must agree with that unit before old figures may be called current. */
   | 'goal_unit_changed'
   /** A snapshotted Run was read without one verifiable selected goal. */
   | 'goal_snapshot_unverified'
+  /** A legacy Run's projection cannot attest unchanged option admission. */
+  | 'legacy_admission_unverified'
   | 'legacy_fact_missing_hash'
   | 'current_graph_hash_unavailable'
   | 'no_successful_run_analysis_fact'
@@ -103,7 +111,7 @@ export type FreshnessReason =
 /**
  * Optional read-state the caller may thread into {@link deriveAnalysisFreshness}.
  *
- * Legacy facts retain their hash verdict. A Run that supplies a selected-goal
+ * Legacy facts require verifiable projection/admission evidence. A Run that supplies a selected-goal
  * snapshot also requires the current graph; missing proof fails closed. Only
  * callers that distinguish an empty store from a failed read should supply
  * priorFactsReadOk — CEE #977's `PriorFactsReadResult` is that distinction.
@@ -124,6 +132,10 @@ export interface DeriveAnalysisFreshnessOptions {
    * later rerun naturally supersedes the marker by timestamp.
    */
   readonly analysisInvalidatedAt?: string | null;
+  /** Existing DB-authored fact chronology, for visible edits when the Run is
+   * loaded from scenario history rather than the same hot fact window. */
+  readonly priorFactsWithTurn?: readonly HandlerFactWithTurn[];
+  readonly legacyEditFacts?: LegacyAnalysisEditFacts;
 }
 
 /**
@@ -591,7 +603,7 @@ function checkHardInvariants(
       assertExhaustive(derivation.freshness);
   }
 
-  // Invariant 2: identical-hash ⇒ fresh unless chronology or the snapshotted
+  // Invariant 2: identical-hash ⇒ fresh unless projection/admission, chronology or the snapshotted
   // goal unit invalidates that fact. Goal units are outside the hash projection;
   // A -> analyse -> B -> restore A also remains stale until a newer rerun.
   if (
@@ -599,8 +611,10 @@ function checkHardInvariants(
     derivation.current_graph_hash !== null &&
     derivation.graph_hash_at_run === derivation.current_graph_hash &&
     derivation.reason !== 'model_restored_after_analysis' &&
+    derivation.reason !== 'model_edited_after_analysis' &&
     derivation.reason !== 'goal_unit_changed' &&
     derivation.reason !== 'goal_snapshot_unverified' &&
+    derivation.reason !== 'legacy_admission_unverified' &&
     derivation.freshness !== 'fresh'
   ) {
     return { coerce_to: 'fresh' };
@@ -629,7 +643,7 @@ function checkHardInvariants(
  *     (legacy fact predating 0.10.0)
  *   - Successful fact selected, currentGraphHash null → unknown
  *     (graph absent on this turn)
- *   - Hashes match → fresh
+ *   - Hashes match → fresh only with supported projection/admission and goal-unit evidence
  *   - Hashes differ → stale
  *
  * Option-identity guard (optional `currentGraphOptionIds`, gated by
@@ -642,8 +656,8 @@ function checkHardInvariants(
  * so behaviour is byte-identical to the two-argument form. `none` and already-
  * `stale` verdicts, and indeterminate option data, are left untouched.
  *
- * INVARIANT (F10 root, ROADMAP 1.133): identical-hash ⇒ fresh, by
- * construction. The guard is deliberately NOT consulted on the hash-proven
+ * INVARIANT (F10 root, ROADMAP 1.133): enrichment option namespaces are never
+ * compared on the matching-hash path. That guard is deliberately NOT consulted on the hash-proven
  * `fresh` path: the analysis-affecting graph hash already includes
  * options[].id, so equal hashes prove the option set is unchanged — whereas
  * the analysed identifiers on the fact (enrichment.option_comparison[]
@@ -652,8 +666,8 @@ function checkHardInvariants(
  * former "defence-in-depth check on the fresh path" compared those two
  * namespaces and stamped a run's OWN response stale with identical hashes on
  * both sides (verified live, 16 Jul). `enforceInvariants` backstops this
- * structurally: a non-fresh verdict with equal non-null hashes is coerced to
- * `fresh`.
+ * structurally, except for independent restore, goal-unit and projection/
+ * admission evidence. A legacy hash ignored gaps and cannot prove admission.
  *
  * Caller is responsible for emitting the `analysis_freshness.derived`
  * telemetry event with the returned derivation. The function does not
@@ -732,6 +746,21 @@ export function deriveAnalysisFreshness(
     });
   }
 
+  // Append writes the edit fact, never the restore marker. Consume its existing
+  // rerun signal while that evidence is visible. The DB creation time permits
+  // comparison with a cold, scenario-loaded Run; otherwise the ordinary fact
+  // chain is newest-first. A later successful rerun supersedes earlier edits.
+  const editedAfterRun = opts?.priorFactsWithTurn !== undefined
+    ? opts.priorFactsWithTurn.some(({ fact, fact_created_at }) =>
+      fact.fact_type === 'edit_graph' && fact.noop === false
+      && fact.result.status === 'applied' && fact.result.rerun_recommended === true
+      && Number.isFinite(Date.parse(fact_created_at))
+      && (selectedAtMs === null || !Number.isFinite(selectedAtMs)
+        || Date.parse(fact_created_at) > selectedAtMs))
+    : priorFacts.slice(0, selected.index).some(fact =>
+      fact.fact_type === 'edit_graph' && fact.noop === false
+      && fact.result.status === 'applied' && fact.result.rerun_recommended === true);
+
   // Base verdict from the graph-hash comparison (unchanged logic).
   let base: FreshnessDerivation;
   if (selected.graph_hash_at_run === null) {
@@ -770,6 +799,28 @@ export function deriveAnalysisFreshness(
       current_graph_hash: currentGraphHash,
       computed_at: selected.computed_at,
     };
+  }
+
+  const legacyEdits = opts?.legacyEditFacts;
+  const legacyRun = selected.fact.fact_type === 'run_analysis'
+    && selected.fact.result.enrichment?.[RUN_ANALYSIS_PROJECTION_KEY] === undefined;
+  const durableEditedAfterRun = legacyRun && legacyEdits?.since === selected.computed_at
+    && legacyEdits.facts.some(({ fact, fact_created_at }) => fact.fact_type === 'edit_graph'
+      && fact.noop === false && fact.result.status === 'applied' && fact.result.rerun_recommended === true
+      && selectedAtMs !== null && Date.parse(fact_created_at) > selectedAtMs);
+  if (base.freshness === 'fresh' && (editedAfterRun || durableEditedAfterRun)) {
+    base = { ...base, freshness: 'stale', reason: 'model_edited_after_analysis' };
+  }
+
+  if (base.freshness === 'fresh' && !runProjectionAllowsFreshness(
+    selected.fact, selected.graph_hash_at_run!, opts?.currentGraph,
+  )) {
+    base = { ...base, freshness: 'stale', reason: 'legacy_admission_unverified' };
+  }
+
+  if (base.freshness === 'fresh' && legacyRun && legacyEdits !== undefined
+    && (legacyEdits.readOk !== true || legacyEdits.since !== selected.computed_at)) {
+    base = { ...base, freshness: 'stale', reason: 'legacy_admission_unverified' };
   }
 
   // SC-24's one Run-input snapshot owns the unit at computation time. The
@@ -812,6 +863,8 @@ export function deriveAnalysisFreshness(
 
 /** Human copy for the existing freshness_reason text carrier; no new wire enum. */
 export function goalSnapshotStaleMessage(reason: FreshnessReason): string | undefined {
+  if (reason === 'legacy_admission_unverified') return 'the saved Run’s option admission could not be confirmed';
+  if (reason === 'model_edited_after_analysis') return 'the model was edited after this analysis';
   if (reason === 'goal_unit_changed') return 'your goal’s unit changed';
   if (reason === 'goal_snapshot_unverified') return 'the saved goal’s unit could not be confirmed';
   return undefined;
@@ -819,7 +872,7 @@ export function goalSnapshotStaleMessage(reason: FreshnessReason): string | unde
 
 /** Read only SC-24's existing input_snapshot.goal carrier. No second snapshot,
  * numeric inference or unit default is created by this currentness gate. */
-function compareRunGoalUnitSnapshot(
+export function compareRunGoalUnitSnapshot(
   fact: HandlerFact,
   currentGraph: unknown,
 ): 'legacy' | 'match' | 'unit_changed' | 'unverified' {
@@ -979,4 +1032,54 @@ export function emitFreshnessTelemetry(
       current_graph_hash: derivation.current_graph_hash,
     });
   }
+}
+
+/** Private rejection branch of deriveAnalysisFreshness, not an exported currency authority. */
+/** Hash equality alone cannot identify a pre-gap Run's admission when gap
+ * evidence survives. Nonempty/invalid targets need the stamp. Empty arrays
+ * and valid question wording do not assert a gap; a Run-input exclusion can
+ * still prove contradictory admission independently of those carriers.
+ * The established hash-only API retains its verdict when no Run-input
+ * exclusion supplies evidence requiring the graph to be inspected.
+ * Durable applied/rerun edit facts preserve clearance chronology outside the
+ * hot window. Failed or incomplete legacy edit reads cannot license freshness.
+ * A stamped gap-free Run may match again after add-then-clear restores its
+ * complete input identity and admission. Never infer a version from timestamps,
+ * analysed namespaces, or request residual digests.
+ * Called only after the caller has established matching stored/current
+ * hashes; the stored-hash argument is retained for API compatibility.
+ */
+function runProjectionAllowsFreshness(fact: HandlerFact, _storedHash: string, graph: unknown): boolean {
+  if (fact.fact_type !== 'run_analysis') return false;
+  const version = fact.result.enrichment?.[RUN_ANALYSIS_PROJECTION_KEY];
+  if (version === ANALYSIS_PROJECTION_VERSION) return true;
+  if (version !== undefined) return false;
+  // Existing admission evidence can REJECT a contradiction, but cannot
+  // attest every consumed gap: a held baseline can be sent with gaps. These
+  // request-input ids are distinct from enrichment's result namespaces.
+  // Historical SC-24 readers can carry only input_snapshot.goal. Do not
+  // impose today's full snapshot schema on that independent unit contract.
+  const input = fact.result.input_snapshot as unknown;
+  if (input !== undefined && (input === null || typeof input !== 'object' || Array.isArray(input))) return false;
+  const hasAdmissionSnapshot = input !== undefined
+    && (input as Record<string, unknown>).options_not_sent !== undefined;
+  const snapshot = hasAdmissionSnapshot ? RunInputSnapshotSchema.safeParse(input) : undefined;
+  if (snapshot !== undefined && !snapshot.success) return false;
+  const notAnalysable = snapshot?.success
+    ? snapshot.data.options_not_sent.filter(option => option.reason === 'not_analysable') : [];
+  // Both null and undefined are the established "graph not supplied" form.
+  // A recorded exclusion still needs the graph, and fails closed without it.
+  if (graph == null) return notAnalysable.length === 0;
+  if (typeof graph !== 'object' || Array.isArray(graph)) return false;
+  const raw = graph as Record<string, unknown>;
+  if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges)
+    || (raw.options !== undefined && !Array.isArray(raw.options))) return false;
+  if (notAnalysable.length > 0) {
+    const ready = buildCanonicalAnalysisReadyFromGraph(raw);
+    if (ready === undefined || notAnalysable.some(excluded => ready.options.some(option =>
+      option.option_id === excluded.option_id && option.status === 'ready'))) return false;
+  }
+  // On a gap-free graph, the caller's equal hashes remain the authority.
+  // Rehashing here breaks hash-only callers and creates a second hash verdict.
+  return !runAnalysisProjectionNeedsStamp(raw);
 }

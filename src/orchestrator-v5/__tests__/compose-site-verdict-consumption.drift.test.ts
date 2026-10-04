@@ -1895,9 +1895,9 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     expect(RUN_ANALYSIS).toContain(
       'const leaderPermission = applyNonlinearIdentityToLeaderPermission(\n      applyIntakeToLeaderPermission(',
     );
-    // The provisional Olumi-option gate can only remove that permission.
+    // The provisional/scope gates can only remove that permission; the reason is chosen by the common composer.
     expect(RUN_ANALYSIS).toContain(
-      'constraint_verdict: keptOlumiProvisional\n          ? { ...leaderPermission, may_name_leading_option: false }\n          : leaderPermission,',
+      "constraint_verdict: keptOlumiProvisional\n          || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')\n          ? { ...leaderPermission, may_name_leading_option: false }\n          : leaderPermission,",
     );
   });
 

@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { describe, expect, it } from "vitest";
 import type { RunAnalysisHandlerFact } from "@talchain/schemas/orchestrator";
 
@@ -85,7 +86,7 @@ function fact(hash: string, computedAt = "2026-08-24T10:00:00.000Z"):
       summary: "Analysis complete.",
       graph_hash_at_run: hash,
       computed_at: computedAt,
-      enrichment: { analysis_status: "computed" },
+      enrichment: stampRunAnalysisProjection({ analysis_status: "computed" }),
     },
   };
 }

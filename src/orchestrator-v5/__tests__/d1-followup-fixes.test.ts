@@ -254,6 +254,7 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
     };
 
     const fakeStore = {
+      readMostRecentPendingActions: async () => [],
       append: async () => ({ id: 'mock-row-id' }),
       readRecent: async () => [],
       readFactsFor: async () => [],
@@ -285,6 +286,7 @@ describe('P0-2 — loadScenarioSnapshotForRunAnalysis surfaces goal_constraints'
   it('omits goal_constraints when the graph has none', async () => {
     const graphWithoutConstraints = buildReadyD1SnapshotGraph();
     const fakeStore = {
+      readMostRecentPendingActions: async () => [],
       append: async () => ({ id: 'mock-row-id' }),
       readRecent: async () => [],
       readFactsFor: async () => [],
@@ -430,6 +432,7 @@ const mockState: {
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
+    readMostRecentPendingActions: async () => [],
     append: async (write: { graph?: unknown; handler_id?: unknown; handler_facts?: unknown }) => {
       appendCalls.push(write);
       return { id: 'mock-row-id' };

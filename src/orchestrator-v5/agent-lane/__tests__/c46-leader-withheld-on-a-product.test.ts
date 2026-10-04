@@ -246,6 +246,7 @@ async function runOn(registered: Graph, ranked: Ranked[], opts: { checkedConstra
   // The register route's ingress and persistence are passthrough (`goal-direction-reaches-plot.test.ts`), so the
   // stored bytes are the register body.
   const store = {
+    readMostRecentPendingActions: async () => [],
     loadGraph: async () => registered,
     loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }),
   } as unknown as SessionStore;
@@ -305,7 +306,8 @@ describe('(a) the checked declaration is carried on the product node, from regis
     expect(registered.nodes.filter((n) => 'nonlinear_identity' in n).map((n) => n.id)).toEqual(['mrr']);
     const parsed = GraphV3.parse(registered) as unknown as Graph;
     expect(nodeById(parsed, 'mrr')?.nonlinear_identity).toEqual(carrier);
-    const store = { loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }) } as unknown as SessionStore;
+    const store = {
+      readMostRecentPendingActions: async () => [], loadGraphAndBriefText: async () => ({ graph: registered, briefText: null }) } as unknown as SessionStore;
     const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO, REQUEST_ID, store);
     expect(nodeById(snapshot.graph as unknown as Graph, 'mrr')?.nonlinear_identity).toEqual(carrier);
   });

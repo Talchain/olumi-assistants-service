@@ -14,6 +14,7 @@
 import { deriveEmittedGoalDirection } from '../goal-target/goal-direction.js';
 import { deriveGoalIntent } from '../coaching/objective-contradiction.js';
 import { inertRiskBranch } from '../../graph/inert-risk.js';
+import { withoutProposalIds } from './display-ids.js';
 
 type Rec = Record<string, unknown>;
 const recordOf = (v: unknown): Rec | undefined => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Rec : undefined);
@@ -80,6 +81,20 @@ export function textAtRest(text: string): string {
   return after ? `${lead} ${after}` : lead;
 }
 
+/** Keep selected host obligations visible using the existing consumer split. */
+export function withB3LinesAtRest(text: string, lines: readonly (string | null)[]): string {
+  let out = text;
+  for (const line of lines) {
+    if (line === null || textAtRest(out).includes(line)) continue;
+    // Only the caller's bound basis/selected objective moves. Other prose stays verbatim.
+    const body = out.split(line).join('').trimEnd();
+    const at = textAtRest(out) === out ? -1 : body.indexOf(QUESTIONS_MARKER);
+    out = at < 0 ? `${body}\n\n${line}`
+      : `${body.slice(0, at).trimEnd()}\n\n${line}\n\n${body.slice(at)}`;
+  }
+  return out;
+}
+
 /** DL #75 5923219186 (R3 K4): words on screen per turn — the reply at rest plus the toggle's label. */
 export const AT_REST_WORD_BOUND = 160;
 const words = (s: string): number => s.split(/\s+/).filter(Boolean).length;
@@ -129,6 +144,21 @@ function leftOutLines(graph: unknown, goalLabel: string): string[] {
 /** A7's own opener: the one way A7 is told apart from the other owed lines (CODEX K3 P2: never "the first non-ask line"). */
 const A7_OPENER = 'This model doesn\'t yet say whether any option gets there';
 
+/** The one ask writer, before display scrubbing or turn eligibility. */
+function rawDecisionInputAsk(graph: unknown): string | null {
+  const goal = goalOf(graph);
+  const label = typeof goal?.label === 'string' ? goal.label.trim() : '';
+  if (goal === undefined || label === '') return null;
+  return goal.provenance === 'ai_inferred' ? `I used "${label}" as a provisional objective. What should this model help you explore?`
+    : !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, withinMonths(goal)) : null;
+}
+
+/** Normalise only exact narrator copies of this graph's host ask before placement. */
+export function withDecisionInputAskDisplay(text: string, graph: unknown): string {
+  const raw = rawDecisionInputAsk(graph);
+  return raw === null ? text : text.split(raw).join(withoutProposalIds(raw));
+}
+
 export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext): string[] {
   if (!ctx.builtOrRan) return [];
   const goal = goalOf(graph);
@@ -139,7 +169,9 @@ export function decisionInputLines(graph: unknown, ctx: DecisionInputAskContext)
   const leftOut = leftOutLines(graph, label);
   const within = withinMonths(goal);
   const a7 = within !== '' && !hasDurationLimit(graph) ? `${A7_OPENER}${within}.` : null;
-  const wanted = !ctx.awaitingApproval && !/\?/.test(ctx.restingText) && !goalHasStatedTarget(goal) ? targetAsk(graph, goal, label, within) : null;
+  const rawWanted = ctx.awaitingApproval || /\?/.test(ctx.restingText) ? null : rawDecisionInputAsk(graph);
+  // Dedup the host's displayed ask, independent of unrelated proposal IDs in the narrator's reply.
+  const wanted = rawWanted === null ? null : withoutProposalIds(rawWanted);
   const ask = wanted !== null && (ctx.recentReplies ?? []).some((t) => t.includes(wanted)) ? null : wanted;
   // AIQ 5923963470: over the bound, A7 is the line that folds back behind the toggle (its fact is there) — never the ask.
   const onScreen = (ls: readonly (string | null)[]) => words(ctx.restingText) + (ctx.questionsToggle ? TOGGLE_LABEL_WORDS : 0)
@@ -158,9 +190,14 @@ function targetAsk(graph: unknown, goal: Rec, label: string, within: string): st
   return `What figure should "${label}" reach or stay under${within}? I'll propose it as your target.`;
 }
 
-/** The one ask (D1), or null. */
+/** The host's framing or target ask, recognised by every selector and replay reader. */
+export function isDecisionInputAsk(line: string): boolean {
+  return line.endsWith('as your target.') || line.endsWith('What should this model help you explore?');
+}
+
+/** The one framing or target ask, or null. */
 export function decisionInputAsk(graph: unknown, ctx: DecisionInputAskContext): string | null {
-  return decisionInputLines(graph, ctx).find((l) => l.endsWith('as your target.')) ?? null;
+  return decisionInputLines(graph, ctx).find(isDecisionInputAsk) ?? null;
 }
 
 /**
@@ -182,7 +219,7 @@ export function withA7AfterGate(
   if (a7 === undefined || text.includes(a7)) return text;
   const rest = textAtRest(text);
   if (rest !== text && words(rest) + TOGGLE_LABEL_WORDS + words(a7) > AT_REST_WORD_BOUND) return text;
-  const ask = owedLines.find((l) => l.endsWith('as your target.'));
+  const ask = owedLines.find(isDecisionInputAsk);
   if (ask !== undefined && text.split(ask).length === 2) return text.replace(ask, `${a7}\n\n${ask}`);
   if (statusText === null) return text;
   const at = text.lastIndexOf(`\n\n${statusText}`);

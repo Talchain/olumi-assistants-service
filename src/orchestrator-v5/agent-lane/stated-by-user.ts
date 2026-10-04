@@ -398,6 +398,8 @@ export interface EntityScope {
    *    "the user's, for any target". The user is asked.
    */
   readonly strict?: true;
+  /** A short answer may use a live question elsewhere; this door requires the figure's entity in this clause. */
+  readonly requireNamed?: true;
   /**
    * ⭐ A4 (CODEX CEE BUDDY 5919834707, AIQ 5919953251): read ONLY the written amount that starts at this index — one span,
    * never "the same figure anywhere". Opt-in, passed only by `writtenRangeFor`; every other door reads as before.
@@ -610,7 +612,7 @@ export function figureTheUserWroteFor(value: number, unit: unknown, userText: st
       ?? (scope.nearOnly === true && comparatorOpens ? null : firstMention(afterRate.slice(rightAfter.length)));
     // ⛔ STRICT, FAIL CLOSED (DL ruling (b)): among two figures or more, one no label word attributes is nobody's, never
     // "the user's, for any target" — that fallthrough let a SWAP through the door. The user is asked.
-    if (about === null) return !(strict && severalFigures);
+    if (about === null) return scope.requireNamed !== true && !(strict && severalFigures);
     return about === 'target';
   });
 }

@@ -3,11 +3,11 @@ import { POLICY } from './policy.js';
 import type { GuidanceSignals, RenderedCopy, RowIdentity } from './types.js';
 
 /** Python reference uses 39 code points, rstrip, then an ellipsis (40 in total). */
-function cut(label: string): string {
+export function cut(label: string): string {
   const chars = Array.from(label);
   return chars.length <= 40 ? label : `${chars.slice(0, 39).join('').trimEnd()}…`;
 }
-function midSentence(label: string): string {
+export function midSentence(label: string): string {
   const chars = Array.from(label);
   return chars.length > 1 && /\p{Lu}/u.test(chars[0]) && /\p{Ll}/u.test(chars[1])
     ? chars[0].toLowerCase() + chars.slice(1).join('') : label;
@@ -18,6 +18,11 @@ function pick(value: string | Readonly<Record<string, string>>, variant?: string
 
 /** No invented labels or raw-id fallback; unavailable copy fields are null. */
 export function renderCopy(selected: RowIdentity, signals: GuidanceSignals): RenderedCopy {
+  const tipping = signals['run.tipping_point'];
+  if (selected.policy_id === 'RC-WHAT-CHANGES' && signals['run.kind'] === 'complete_current' && tipping?.status === 'found') {
+    return { title: `${tipping.label} could change this.`, why: tipping.say,
+      question: `Would you like to refine ${tipping.label}?` };
+  }
   const row = POLICY.rows.find(r => r.policy_id === selected.policy_id)!;
   const options = signals['model.non_sq_option_ids'] ?? [];
   const labels = signals['model.option_labels'] ?? {};

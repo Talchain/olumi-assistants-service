@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from './context/reconcile-scenario-analysis-facts.js';
 /**
  * Build a V5 TurnContext from an ingress payload.
  *
@@ -21,6 +22,7 @@
  * `TurnContext` continues to compile via structural subtyping.
  */
 
+import { goalScopeClaimInput, type GoalScopeClaimInput } from './compose/goal-scope-claim-input.js';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type {
   DecisionContext,
@@ -605,6 +607,7 @@ export interface BuildTurnContextOptions {
 }
 
 export interface RunAnalysisScenarioSnapshot {
+  readonly goalScopeClaimInput: GoalScopeClaimInput;
   readonly graph: GraphV3T;
   readonly options: Array<{
     readonly id: string;
@@ -742,8 +745,8 @@ export async function buildTurnContext(
     // one of the twenty derivation sites.
     //
     // WHY IT IS NEEDED. `deriveAnalysisFreshness` has accepted
-    // `analysisInvalidatedAt` since C8 and it is the ONLY input that can make a
-    // hash MATCH still read `stale` — a model restored to an earlier version
+    // `analysisInvalidatedAt` since C8 to make a hash MATCH still read `stale`
+    // after a restore — a model restored to an earlier version
     // can be byte-identical to the one the analysis ran against while the
     // analysis is no longer about the model the user is looking at. Measured at
     // this SHA: of the twenty production `deriveAnalysisFreshness` call sites,
@@ -1021,7 +1024,9 @@ export async function buildTurnContext(
     // have it replayed indefinitely — long after the store recovered.
     // Threading the read state makes the degraded case `'unknown' /
     // derivation_failed`, which maps to an `unavailable` signal instead.
-    { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph },
+    { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph,
+      analysisInvalidatedAt: analysisInvalidatedAtRead, priorFactsWithTurn,
+      legacyEditFacts: legacyEditFactsForFreshness(scenarioAnalysisFactSet) },
   );
   // AUTHORITATIVE STAGE — CEE decides the reasoning stage from the model it
   // holds, rather than echoing the client's guess back at it. See
@@ -2076,6 +2081,7 @@ async function fetchScenarioAnalysisFacts(
       query_limit: SCENARIO_ANALYSIS_FACT_LOOKAHEAD_LIMIT,
       total_count: page.total_count,
       facts: page.facts,
+      ...(page.legacy_edit_facts === undefined ? {} : { legacy_edit_facts: page.legacy_edit_facts }),
     };
   } catch (error) {
     const rawCode = error instanceof SessionReadError ? error.code : undefined;
@@ -2106,7 +2112,7 @@ async function fetchScenarioAnalysisFacts(
     });
     return {
       status: 'degraded',
-      reason: contractInvalid ? 'contract_invalid' : 'unavailable',
+      reason: contractInvalid ? 'contract_invalid' : 'read_failed',
     };
   }
 }
@@ -2778,6 +2784,7 @@ export async function loadScenarioAnalysisFactsForRead(
 ): Promise<{
   readonly hotWindow: PriorFactsReadResult;
   readonly factSet: ScenarioAnalysisFactSet;
+  readonly priorFactsWithTurn: readonly HandlerFactWithTurn[];
 }> {
   const store = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
   if (store === undefined) {
@@ -2785,6 +2792,7 @@ export async function loadScenarioAnalysisFactsForRead(
     return {
       hotWindow: { status: 'degraded', facts: [] },
       factSet: reconcileScenarioAnalysisFacts({ scenarioId, hotWindowFacts: [] }),
+      priorFactsWithTurn: [],
     };
   }
   // C1: the hot-window facts depend ONLY on the turns, so they are read as soon as the turns land, inside
@@ -2797,6 +2805,7 @@ export async function loadScenarioAnalysisFactsForRead(
   const hotReadOk = readOk && priorTurnsRead.readOk;
   return {
     hotWindow: hotReadOk ? { status: 'ok', facts } : { status: 'degraded', facts: [] },
+    priorFactsWithTurn: factsWithTurn,
     factSet: reconcileScenarioAnalysisFacts({
       scenarioId,
       hotWindowFacts: facts,
@@ -3107,7 +3116,18 @@ export async function loadScenarioSnapshotForRunAnalysis(
   // (the round-3 TOCTOU). Read-only: the persisted graph is never mutated.
   const options = mergeOptionInterventionObjects(parsedGraph.data.nodes, readiness.options);
 
+  const pendingStore = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
+  if (!pendingStore) {
+    throw new SessionReadError(`loadScenarioSnapshotForRunAnalysis(${scenarioId}): pending store unavailable`, {});
+  }
+  // A failed/corrupt read stops before PLoT; it cannot mint a licensed Run.
+  const scopeInput = goalScopeClaimInput(
+    await pendingStore.readMostRecentPendingActions(scenarioId, { validation: 'strict' }),
+    persistedGraph,
+  );
+
   return {
+    goalScopeClaimInput: scopeInput,
     graph: parsedGraph.data,
     options,
     goal_node_id: readiness.goal_node_id,

@@ -22,10 +22,10 @@ describe('pinned reasoning-coach acceptance contract (RC re-pin)', () => {
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length);
     expect(SPEC_SHA).toBe('712625a1c484943ad330214504634121a44216e7');
   });
-  it('vendors exact source bytes and uses the same typed policy constants', () => {
+  it('pins amended source bytes and uses the same typed policy constants', () => {
     const policy = readFileSync(new URL('../guidance/reasoning-interventions.json', import.meta.url));
     const fixture = readFileSync(new URL('./fixtures/reasoning-coach-acceptance.json', import.meta.url));
-    expect(createHash('sha256').update(policy).digest('hex')).toBe('98c6316254198f6f7384911adf0c06c71096181c422fcc96a2ffbca857ca4f45');
+    expect(createHash('sha256').update(policy).digest('hex')).toBe('9d93844e20dfcf7525c3c93d4c9254a4f739fb7a0b302663019c606c8159178a');
     expect(createHash('sha256').update(fixture).digest('hex')).toBe('6a50e594ea1aee4650ef1c6e2f1b06bdce5cdca6f93741b3df4c0b38ab8f9592');
     const source = JSON.parse(policy.toString());
     expect(POLICY).toEqual(Object.fromEntries(Object.keys(POLICY).map(key => [key, source[key]])));
@@ -211,7 +211,9 @@ describe('all deterministic text post-check ids, including methods without vendo
   it.each(textCases)('$id checks every text rule on a good and bad reply', c => {
     expect(checkMethodTurn(c.id, c.good, c.inputs)).toEqual({ pass: true, failed: [], targets: [] });
     expect(new Set(checkMethodTurn(c.id, c.bad, c.inputs).failed)).toEqual(new Set(c.failed));
-    expect(new Set(c.failed)).toEqual(new Set(POLICY.method_turns[c.id].post_checks.map(c => c.id)));
+    // WC-TIPPING-FACT applies only to the new typed crossing; the legacy corpus intentionally has none.
+    expect(new Set(c.failed)).toEqual(new Set(POLICY.method_turns[c.id].post_checks.map(c => c.id)
+      .filter(id => c.inputs.tipping_point !== undefined || id !== 'WC-TIPPING-FACT')));
   });
   it('list numbers are not invented figures; quoted/punctuated names normalise identically', () => {
     expect(checkMethodTurn('RC-WIDEN', '- ‘Angel-investor outreach’: more.', { current_option_labels: ['Angel investor outreach'] }).failed).toContain('WD-NO-DUP');

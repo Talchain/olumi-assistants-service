@@ -1,3 +1,4 @@
+import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
 /**
  * POST /orchestrate/v2/turn — V5 orchestrator endpoint.
  *
@@ -86,6 +87,7 @@
  * No imports from V4 pipeline (pipeline-v4, response-assembler, handlers).
  */
 
+import { readGoalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
 import type { FastifyInstance } from 'fastify';
 import type { BoundaryError, OlumiResponse, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 import { isReplayedTurnSource } from '../orchestrator-v5/routing/turn-source-authorship.js';
@@ -1114,7 +1116,7 @@ async function sendFinalised200(
         scenarioFreshness: ctx.scenarioFreshness,
         ...(ctx.analysisReady ? { readiness: ctx.analysisReady } : {}),
       });
-  const finaliserContext = analysisAuthorityUnavailable
+  const analysisFinaliserContext = analysisAuthorityUnavailable
     ? {
         ...ctx,
         freshness: ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
@@ -1136,6 +1138,11 @@ async function sendFinalised200(
           analysisStateCanonical: scenarioSupersession.canonicalState,
         }
       : ctx;
+  const scopeInput = ctx.scenarioId === undefined ? undefined : await readGoalScopeClaimInput(
+    ctx.graph,
+    () => loadMostRecentPendingActionsIntegrityStrict(ctx.scenarioId!, requestId),
+  );
+  const finaliserContext = { ...analysisFinaliserContext, goalScopeClaimInput: scopeInput };
   let analysisAuthorityUnavailableEgressMode: AnalysisAuthorityUnavailableEgressMode =
     'substantive_replaced';
   // ── ROADMAP 2.709 invariant 6 — surface a STANDING draft loss ─────────
@@ -4228,6 +4235,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // `dispatchAddOptionTransaction`'s gate.
             {
               currentGraph: addOptionFrameGraph,
+              analysisInvalidatedAt: turnContext.analysis_invalidated_at,
+              priorFactsWithTurn: turnContext.prior_facts_with_turn,
+              legacyEditFacts: legacyEditFactsForFreshness(turnContext.scenario_analysis_fact_set),
               ...(turnContext.prior_facts_read_ok === undefined
                 ? {}
                 : { priorFactsReadOk: turnContext.prior_facts_read_ok }),
@@ -7910,6 +7920,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // from a THROWN read must not read as "never analysed".
             {
               currentGraph: textFrameGraph,
+              analysisInvalidatedAt: turnContext.analysis_invalidated_at,
+              priorFactsWithTurn: turnContext.prior_facts_with_turn,
+              legacyEditFacts: legacyEditFactsForFreshness(turnContext.scenario_analysis_fact_set),
               ...(turnContext.prior_facts_read_ok === undefined
                 ? {}
                 : { priorFactsReadOk: turnContext.prior_facts_read_ok }),

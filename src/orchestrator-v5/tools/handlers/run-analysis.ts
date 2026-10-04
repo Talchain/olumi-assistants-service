@@ -40,6 +40,7 @@
  * keeps the handler pure and the test surface small.
  */
 
+import type { GoalScopeClaimInput } from '../../compose/goal-scope-claim-input.js';
 import { optionsRestingOnAcceptedOlumiSizes } from '../../../cee/magnitude/link-sizing.js';
 import { collectUnvaluedFactorIds } from '../../coaching/unvalued-factor-ids.js';
 import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../../coaching/identity-not-evaluated-ask.js';
@@ -70,8 +71,8 @@ import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
 // ROADMAP 2.579 — the intake axis: did the graph keep every option the brief
 // spelled out? Derived here, at the point of the claim, from the two pieces of
 // canonical persisted state this handler already holds (`snapshot.briefText`
-// and the graph's option labels). Not persisted and not stamped: `enrichment`
-// is a byte-for-byte PLoT pass-through by handler-ownership invariant §6, and a
+// and the graph's option labels). Not persisted and not stamped: PLoT's fields
+// remain unchanged (CEE's projection metadata is added only for carried gaps), and a
 // copy of labels on the fact would be a second thing to drift (trap 12) — the
 // sibling `withheld-reason-tail.ts` records the identical decision for the
 // ratified constraint labels it names.
@@ -128,6 +129,7 @@ import { guardAnalysisParticipation } from './run-analysis-participation-guard.j
 import { filterOlumiProposedOptions } from './olumi-option-filter.js';
 import { userExcludedOptions, PARTICIPATION_STATE_FOR } from './user-option-status-filter.js';
 import { buildRunInputSnapshot, runIdFor, sentDigest } from './run-input-snapshot.js';
+import type { RunAnalysisProbe } from './run-analysis-probe.js';
 import {
   carryLevelLimitBaselines,
   carryLimitTargetCaps,
@@ -145,6 +147,7 @@ import {
   resolveRunAdmission,
 } from './analysis-ready-core.js';
 import { AnalysisSnapshotDivergedError, currentBoundAnalysisSnapshot } from '../../run-analysis-snapshot-binding.js';
+import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { decideSeedReuse } from '../../coaching/seed-reuse.js';
 // The 2026-08-28 disclosure defect: the run proceeds past unset option effects
 // (the compute-discard waiver) and the analyse turn says nothing about them.
@@ -302,6 +305,8 @@ function withholdStatedOperator<C>(goalConstraints: C): C {
  * The reader produces them; PLoT consumes them; the handler is the conduit.
  */
 export interface RunAnalysisScenarioSnapshot {
+  /** Production reader attests current scope; a failed pending read throws before PLoT. */
+  readonly goalScopeClaimInput?: GoalScopeClaimInput;
   /** The current graph (PLoT consumes as-is). */
   readonly graph: unknown;
   /** PLoT-shape options: each with {id, option_id, label, interventions{}}. */
@@ -360,6 +365,11 @@ export interface RunAnalysisHandlerDeps {
   readonly plotClient: PLoTClient;
   /** Scenario state reader — test injects mock, production injects real. */
   readonly scenarioReader: ScenarioReader;
+  /**
+   * SCIENCE ROBUSTNESS (EXPERIMENT): when set, receive the exact payload a Run would send and return BEFORE PLoT with
+   * no facts (`run-analysis-probe.ts`). Only the decision-flip dispatch sets it; production Runs never do.
+   */
+  readonly probe?: RunAnalysisProbe;
 }
 
 /**
@@ -1266,6 +1276,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       { event: 'run_analysis.seed_reuse', request_id: invocation.requestId, scenario_id: args.scenario_id, reason: seedReuse.reason },
       'run_analysis seed decision',
     );
+
+    // SCIENCE ROBUSTNESS (EXPERIMENT): the decision-flip probe takes the EXACT payload this Run would send — after the
+    // seed decision, before PLoT — and the handler returns with no facts, so no Run happens and nothing is persisted.
+    if (deps.probe) {
+      await deps.probe({ plotPayload: structuredClone(plotPayload), runInputSnapshot, graphHashAtRun, requestId: invocation.requestId });
+      return { assistant_text: '', handler_facts: [], llm_calls_used: 0 };
+    }
 
     // --- 4. Invoke PLoT ---------------------------------------------------
     let response: V2RunResponseEnvelope;
@@ -2720,13 +2737,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // fields in some builds — safer to conditionally include).
         ...(winProbabilities !== null ? { win_probabilities: winProbabilities } : {}),
         summary,
-        // Byte-for-byte pass-through of the validated PLoT envelope. No
-        // projection, no stripping, no derived CEE-owned fields. F.6
-        // ownership; the handler-ownership invariant enforces this pattern
-        // verbatim ("enrichment: response as Record"). Scenario brief for
-        // the decision_review auto-fire travels out-of-band via
-        // TurnExecutor options; do not reintroduce brief attachment here.
-        enrichment: response as Record<string, unknown>,
+        // Every new Run records the existing projection version in persisted
+        // enrichment. Transport strips this internal key; the provider response
+        // is unchanged. Freshness still uses the one analysis-affecting hash.
+        enrichment: stampRunAnalysisProjection(response as Record<string, unknown>),
         // V5 state-trust freshness fields (schema 0.10.0+). Conditionally
         // included to keep parity with the existing optional-field idiom —
         // if the graph was empty (hash null), we omit graph_hash_at_run
@@ -2785,6 +2799,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // take the permission away, and leaves `constraint_verdict_state` untouched (its REASON is chosen
         // at compose, where the constraint code keeps precedence: AI Quality option (i), #70 5842615260).
         constraint_verdict: keptOlumiProvisional
+          || (snapshot.goalScopeClaimInput !== undefined && snapshot.goalScopeClaimInput.status !== 'clear')
           ? { ...leaderPermission, may_name_leading_option: false }
           : leaderPermission,
       },

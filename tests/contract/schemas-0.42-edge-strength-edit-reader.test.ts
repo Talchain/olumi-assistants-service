@@ -265,7 +265,13 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // against the PUBLISHED tarballs (sha1 `fd389b22…` → `ab0b2c9a…`): the FILE SET naming `edge_strength_edit` is identical and
     // all five files are byte-unchanged; 0 changed dist lines name a strength or a band (contrast: the same diff finds 42
     // lines naming `authorship_digest`).
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.73.0');
+    //
+    // 0.73.0 → 0.75.0 (0.74.0 ModelVersionDiffV2 + 0.75.0 DecisionFlipBlockV1, schemas #85; main `55a72e62`), RE-DERIVED on
+    // 2 Oct against the PUBLISHED tarballs (sha1 `ab0b2c9a…` → `b608fb22…`): the FILE SET naming `edge_strength_edit` is
+    // identical; four files are byte-unchanged and `dist/fixtures/index.js` differs with 0 changed lines naming it. The
+    // 40 changed dist lines naming a strength or a band are MOVED, not changed (each text appears equally often on both
+    // sides: 20/20). Contrast: the same diff finds 18 changed lines naming `DecisionFlip`/`decision_flip`.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.75.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {

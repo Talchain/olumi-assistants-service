@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+import { GoalScopeIdentityConflict, assertNoScopedIdentityConflict, assertNoPendingScopeAmendment, scopeIssuesAfterWrite, scopeOf } from '../orchestrator-v5/agent-lane/goal-scope.js';
 /**
  * ROADMAP 2.467 — `register_graph`: THE DETERMINISTIC WHOLE-GRAPH WRITE SEAM.
  *
@@ -199,7 +201,88 @@ function withStoredLimitsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: un
   return carried.length === 0 ? graph : { ...graph, goal_constraints: carried };
 }
 
+/** A UI that omits the approved CEE scope makes no statement about it. */
+function withStoredGoalScopeWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: unknown }> }>(graph: T, stored: unknown): T {
+  const ns = stored !== null && typeof stored === 'object' && Array.isArray((stored as {nodes?: unknown}).nodes)
+    ? (stored as {nodes: Record<string, unknown>[]}).nodes : [];
+  return { ...graph, nodes: graph.nodes.map(n => {
+    const matches = ns.filter(old => old.id === n.id && old.kind === 'goal');
+    if ('goal_scope' in n || matches.length !== 1 || !scopeOf(matches[0]!.goal_scope)) return n;
+    return { ...n, goal_scope: matches[0]!.goal_scope };
+  }) };
+}
+
 type EdgeRecord = Record<string, unknown>;
+
+class OptionGapApprovalRequiredError extends Error {}
+
+/** Private exact-target refusal of the registration authority. Temporal and
+ * other carrier preservation use the same cohorts rather than choosing a row. */
+function requireUnambiguousRegistrationTarget(cohorts: readonly (readonly unknown[])[], refusal: Error): void {
+  if (cohorts.some(rows => rows.length > 1)) throw refusal;
+}
+
+/** Registration carries stored gap evidence. Only the existing approved batch
+ * may change this pair on an option that already exists. */
+function withStoredOptionGapsWhenUnstated<T extends { nodes: ReadonlyArray<{ id?: unknown; kind?: unknown }>; options?: unknown }>(graph: T, stored: unknown): T {
+  const priorGraph = isEdgeRecord(stored) ? stored : {};
+  const keys = ['unresolved_targets', 'user_questions'];
+  const idOf = (row: EdgeRecord): unknown => typeof row.id === 'string' ? row.id.trim() : row.id;
+  const oldNodes = Array.isArray(priorGraph.nodes) ? priorGraph.nodes.filter(isEdgeRecord) : [];
+  const oldMirrors = Array.isArray(priorGraph.options) ? priorGraph.options.filter(isEdgeRecord) : [];
+  const incomingNodes = graph.nodes.filter(isEdgeRecord);
+  const incomingMirrors = Array.isArray(graph.options) ? graph.options.filter(isEdgeRecord) : [];
+  const matching = (rows: readonly EdgeRecord[], id: unknown) => rows.filter(row => idOf(row) === id);
+  const retained = (id: unknown) => incomingNodes.some(row => row.kind === 'option' && idOf(row) === id);
+  // Refusal belongs to the existing preservation authority. It checks both
+  // sides of a replacement, including inherited ambiguity repaired by a client.
+  // Temporal carrier preservation can use this same exact-target refusal seam.
+  for (const row of [...oldNodes.filter(n => n.kind === 'option'), ...incomingNodes.filter(n => n.kind === 'option')]) {
+    const id = idOf(row);
+    const evidence = [...matching(oldNodes, id), ...matching(oldMirrors, id)]
+      .some(old => keys.some(key => Object.hasOwn(old, key)));
+    if (evidence && matching(incomingNodes, id).some(n => n.kind !== 'option' || n.id !== row.id)) {
+      throw new OptionGapApprovalRequiredError();
+    }
+    if (!retained(id)) continue;
+    requireUnambiguousRegistrationTarget([oldNodes, oldMirrors, incomingNodes, incomingMirrors]
+      .map(rows => matching(rows, id)), new OptionGapApprovalRequiredError());
+  }
+  const carry = (row: EdgeRecord, prior: EdgeRecord | undefined): EdgeRecord => {
+    if (prior === undefined) return row;
+    const hasEvidence = keys.some(key => Object.hasOwn(prior, key));
+    // Canonical readers trim ids and require a usable label. Preserving bytes
+    // while disabling their consumption is an unapproved admission change.
+    if (hasEvidence && (row.id !== prior.id || typeof row.label !== 'string' || row.label.trim() === ''
+      || (Object.hasOwn(row, 'kind') && row.kind !== 'option'))) throw new OptionGapApprovalRequiredError();
+    const next = { ...row };
+    for (const key of keys) {
+      if (Object.hasOwn(row, key) && (!Object.hasOwn(prior, key) || !isDeepStrictEqual(row[key], prior[key]))) {
+        throw new OptionGapApprovalRequiredError();
+      }
+      if (!Object.hasOwn(row, key) && Object.hasOwn(prior, key)) next[key] = structuredClone(prior[key]);
+    }
+    // Baseline status can suppress consumption of an existing unresolved gap.
+    if (hasEvidence && (row.is_baseline === true) !== (prior.is_baseline === true)) throw new OptionGapApprovalRequiredError();
+    return next;
+  };
+  const nodes = incomingNodes.map(row => row.kind === 'option'
+    ? carry(row, matching(oldNodes, idOf(row))[0]) : row);
+  const heldMirrors = oldMirrors.filter(row => retained(idOf(row)) && keys.some(key => Object.hasOwn(row, key)));
+  const options = Array.isArray(graph.options) ? [...incomingMirrors]
+    : heldMirrors.length > 0 ? oldMirrors.filter(row => retained(idOf(row))) : undefined;
+  if (options !== undefined) {
+    for (const old of heldMirrors) if (matching(options, idOf(old)).length === 0) options.push(structuredClone(old));
+    for (let i = 0; i < options.length; i++) {
+      const row = options[i]!;
+      // A newly created mirror inherits the node's evidence rather than
+      // shadowing it with READY. Existing historical shadowing is retained.
+      const prior = matching(oldMirrors, idOf(row))[0] ?? matching(oldNodes, idOf(row))[0];
+      options[i] = carry(row, prior);
+    }
+  }
+  return { ...graph, nodes, ...(options !== undefined ? { options } : {}) } as T;
+}
 
 const isEdgeRecord = (value: unknown): value is EdgeRecord =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -311,9 +394,8 @@ const UUID_PATTERN =
  * offer — it may re-send the very graph the offer was made on.
  *
  * NOT a conversational turn, so no turn-TTL decrement (the commit carry-forward
- * owns that on real turns). Returns `undefined` — today's write, no
- * `pending_actions` key — when there is nothing to thread or the read failed;
- * the failure is logged, never silent.
+ * owns that on real turns). Always carries the surviving pending set. A failed
+ * authoritative read refuses registration instead of erasing an unresolved issue.
  */
 async function threadLiveHoldsThroughRegistration(input: {
   readonly scenarioId: string;
@@ -333,11 +415,11 @@ async function threadLiveHoldsThroughRegistration(input: {
         scenario_id: input.scenarioId,
         err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
       },
-      "Graph registration — prior pending read failed; the register writes without threading live holds",
+      "Graph registration — prior pending read failed; refusing to erase live holds or scope issues",
     );
-    return undefined;
+    throw err; // Never erase an unresolved issue because its authoritative read failed.
   }
-  if (prior.length === 0) return undefined;
+  // Even with no earlier issue, an approved scope may now contradict a canvas value.
   const result = threadHoldsThroughMutatingCommit({
     priorPendingActions: prior,
     graphAfterCommit: input.graphForStore,
@@ -354,7 +436,7 @@ async function threadLiveHoldsThroughRegistration(input: {
     turnId: input.turnId,
     site: "graph_registration",
   });
-  return result.threaded;
+  return scopeIssuesAfterWrite(result.threaded, input.graphForStore, input.scenarioId);
 }
 
 export default async function route(app: FastifyInstance) {
@@ -732,10 +814,18 @@ export default async function route(app: FastifyInstance) {
       // An absent `goal_constraints` keeps the stored limits, and an unchanged edge keeps the
       // stored CEE-owned facts the caller omitted (see the helpers). Both are bound to the SAME
       // server read as the CAS base above.
-      const graphToRegister = withStoredEdgeFactsWhenUnstated(
-        withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants),
-        baseGraphForInvariants,
-      );
+      let graphToRegister: typeof parsed.data;
+      try {
+        graphToRegister = withStoredOptionGapsWhenUnstated(withStoredEdgeFactsWhenUnstated(
+          withStoredGoalScopeWhenUnstated(withStoredLimitsWhenUnstated(parsed.data, submittedRecord, baseGraphForInvariants), baseGraphForInvariants),
+          baseGraphForInvariants,
+        ), baseGraphForInvariants);
+      } catch (err) {
+        if (!(err instanceof OptionGapApprovalRequiredError)) throw err;
+        return reply.code(409).send(buildErrorV1('BAD_INPUT',
+          'Changes to the listed model gaps and questions need approval on their change card. Nothing was written.',
+          { code: 'OPTION_GAP_APPROVAL_REQUIRED' }, requestId));
+      }
 
       /**
        * ⛔ A CALLER'S EXPECTATION IS CHECKED BEFORE ANY WRITE, AGAINST THE
@@ -982,6 +1072,15 @@ export default async function route(app: FastifyInstance) {
       // which a graph is persisted". Hashing before it would advertise an
       // identity for bytes we do not store, which is the exact ordering defect
       // `commit.ts` was restructured to close.
+      try {
+        // Same deterministic check as the proposal writer and final append floor.
+        assertNoScopedIdentityConflict(graphToRegister);
+        assertNoPendingScopeAmendment(graphToRegister, baseGraphForInvariants, await loadMostRecentPendingActionsIntegrityStrict(scenarioId, requestId));
+      } catch (err) {
+        if (err instanceof GoalScopeIdentityConflict) return reply.code(422).send(buildErrorV1('BAD_INPUT', err.message, { code: err.code }, requestId));
+        log.warn({ event: 'v5.scenario_graph_register.pending_wipe_risk', request_id: requestId, scenario_id: scenarioId }, 'Graph registration refused because the authoritative reconciliation read failed');
+        return unavailable();
+      }
       const graphForStore = withEntityRefs(projectGraphForPersistence(graphToRegister, {
         scenarioId,
         turnClass: "direct_answer",
@@ -1145,6 +1244,7 @@ export default async function route(app: FastifyInstance) {
           });
         });
       } catch (err) {
+        if (err instanceof GoalScopeIdentityConflict) return reply.code(422).send(buildErrorV1('BAD_INPUT', err.message, { code: err.code }, requestId));
         if (err instanceof TurnFenceRejectedError) {
           // A later-started write on this scenario owns the graph now, or the
           // user stopped it: nothing was written, and saying so is a 409 the

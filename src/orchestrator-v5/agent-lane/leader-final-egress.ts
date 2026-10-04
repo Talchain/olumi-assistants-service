@@ -19,11 +19,14 @@
  * Prose that only matches the wide alarm vocabulary is reported at level 40 and left alone: the alarm is wider than any
  * enforcer may safely be over user-facing prose (see `leading-option-egress-guard.ts`).
  *
+ * `draft_graph`, `graph` and `analysis_ready.options` retain the user's model bytes on ordinary withholding;
+ * an error/unavailable-authority envelope omits those unchecked carriers from the wire without changing the model.
  * `_agent` (the provisional view, permitted on a withheld turn by design) is never touched. NEVER THROWS: a failure
  * logs at level 50 and the reply is replaced by a known-safe envelope (fail closed), never shipped half-checked.
  */
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { log } from '../../utils/telemetry.js';
+import { WITHHELD_GOAL_SCOPE_UNRESOLVED } from '../compose/analysis-state-v1.js';
 import type { LeaderLicence } from '../compose/leader-licence.js';
 import { isCodeShaped, keyNamesLeader, LICENSED_LABEL_KEYS } from './licensed-run-view.js';
 import {
@@ -41,7 +44,10 @@ import {
 } from '../compose/leading-option-wire-enforcement.js';
 import { projectTransportEnrichmentForWithheldClaim } from '../compose/withheld-claim-projection.js';
 
-/** Top-level members never walked: prose (handled by the shared gate) and the provisional view (permitted by design). */
+/** Human-authored model definitions are never claim prose, even when their labels use leader vocabulary. */
+const MODEL_MEMBERS: ReadonlySet<string> = new Set(['draft_graph', 'graph']);
+
+/** Prose has its shared gate; the provisional view is permitted by design. */
 const SKIPPED_TOP_LEVEL: ReadonlySet<string> = new Set(['assistant_text', 'framing_question', '_agent', 'suggested_actions', 'blocks']);
 
 const CHIP_TEXT_MEMBERS = ['label', 'message', 'detail'] as const;
@@ -68,6 +74,8 @@ function withheldKey(rec: Record<string, unknown>, key: string): Record<string, 
 
 export interface LeaderFinalEgressOpts extends WireLeaderClaimEnforcementOpts {
   readonly licence: LeaderLicence;
+  /** Scope survives, but the canonical analysis authority could not be established on this read. */
+  readonly scopeAuthorityUnavailable?: boolean;
   /**
    * The caller has NO earlier gate, so a removal is the projection itself, not a residual (the stored `/graph` read,
    * `scenario-graph-analysis-read.ts`). Logged at level 30 under its own event; the removals are unchanged.
@@ -79,6 +87,8 @@ export interface LeaderFinalEgressResult<T> {
   readonly response: T;
   readonly removedPaths: readonly string[];
   readonly proseEdited: boolean;
+  /** The fixed envelope admits no additional unverified prose after this final check. */
+  readonly leaderFreeEnvelope?: true;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -140,6 +150,8 @@ function scrub(value: unknown, path: string, names: readonly string[], removed: 
   let changed = false;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rec)) {
+    // Readiness options are user model definitions, including labels/descriptions/ids, never claim prose.
+    if (path === 'analysis_ready' && k === 'options') { out[k] = v; continue; }
     if (keyNamesLeader(k) && hasIdentity(v)) {
       removed.push(`${path}.${k}`);
       if (NULLABLE_LEADER_KEYS.has(k)) out[k] = null;
@@ -169,13 +181,6 @@ export const FINAL_EGRESS_FAILED_TEXT = WIRE_WITHHELD_LEADER_REPLACEMENT;
 const ENVELOPE_DROPPED: ReadonlySet<string> = new Set(['assistant_text', 'framing_question', 'suggested_actions', 'run_delta', '_answer_shape']);
 
 /**
- * Members that carry the user's MODEL (`draft_graph`, the applied `graph`): omitted whole, never shipped thinned. The
- * UI applies them to the canvas, so a graph with its descriptions stripped would show (and could later save) a
- * different model; omitted, the UI keeps the model it has and the next turn's readback carries it.
- */
-const ENVELOPE_MODEL_MEMBERS: ReadonlySet<string> = new Set(['draft_graph', 'graph']);
-
-/**
  * The envelope's ONE string rule (CODEX CEE BUDDY 5932438459: the whole unchecked-text class, not one more field). A
  * string ships only when it is code-shaped (an id, code, enum, hash or timestamp) or a NAME under a label key, and in
  * either case uses no leader vocabulary. Everything else (summaries, block prose, sidecar notes, messages) is dropped.
@@ -200,6 +205,7 @@ function envelopeAllowList(value: unknown, key: string | undefined, depth: numbe
   if (rec === undefined) return value;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rec)) {
+    if (key === 'analysis_ready' && k === 'options') continue;
     if (keyNamesLeader(k) && v !== null && v !== undefined && v !== '') { if (NULLABLE_LEADER_KEYS.has(k)) out[k] = null; continue; }
     const kept = envelopeAllowList(v, k, depth + 1);
     if (kept !== undefined) out[k] = kept;
@@ -230,7 +236,7 @@ function envelopeBlocks(blocks: unknown): unknown[] {
 const MINIMAL_ENVELOPE: Readonly<Record<string, unknown>> = Object.freeze({ assistant_text: WIRE_WITHHELD_LEADER_REPLACEMENT, suggested_actions: [], blocks: [] });
 
 /**
- * Known-safe, by ALLOW-LIST: the fixed withheld line, no chips, no run delta, no model members, the `analysis_result`
+ * Known-safe, by ALLOW-LIST: the fixed withheld line, no chips, no run delta, no unchecked model carriers, the `analysis_result`
  * block reduced to codes and numbers, and every other member reduced to codes, numbers, booleans and user-given names
  * with leader-designating keys nulled. Never throws: a failure here returns {@link MINIMAL_ENVELOPE}.
  */
@@ -238,7 +244,8 @@ export function knownSafeEnvelope(response: Record<string, unknown>): Record<str
   try {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(response)) {
-      if (ENVELOPE_DROPPED.has(k) || ENVELOPE_MODEL_MEMBERS.has(k)) continue;
+      if (MODEL_MEMBERS.has(k) || k === 'analysis_ready') continue; // readiness without its required `options` is malformed: omit it whole
+      if (ENVELOPE_DROPPED.has(k)) continue;
       if (k === 'blocks') { out.blocks = envelopeBlocks(v); continue; }
       if (k === '_agent') {
         const agent = record(v);
@@ -266,9 +273,18 @@ export function enforceLeaderLicenceAtFinalEgress<T extends Record<string, unkno
     const names = optionNamesAndIds(opts.graph, opts.analysisReady);
     const labels = [...new Set([...optionRosterFromGraph(opts.graph), ...optionRosterFromAnalysisReady(opts.analysisReady)])];
 
+    // A surviving scope issue with no authority or roster has no safe prose interpretation. This consumes the
+    // canonical restriction; no text classifier grants or withholds permission here.
+    if (opts.leaderClaimWithheldReason === WITHHELD_GOAL_SCOPE_UNRESOLVED && (opts.scopeAuthorityUnavailable === true || labels.length === 0)) {
+      log.warn({ event: 'agent_lane.scope_leader_egress_unavailable', request_id: opts.requestId, exit_path: opts.exitPath,
+        authority_unavailable: opts.scopeAuthorityUnavailable === true, roster_unavailable: labels.length === 0 },
+      'agent-lane: unresolved scope has no verified authority or roster — using the leader-free envelope');
+      return { response: knownSafeEnvelope(response) as T, removedPaths: ['*'], proseEdited: true, leaderFreeEnvelope: true };
+    }
+
     // 1 + 2: structured members (everything but prose, chips, blocks and the provisional view).
     for (const [k, v] of Object.entries(body)) {
-      if (SKIPPED_TOP_LEVEL.has(k)) continue;
+      if (SKIPPED_TOP_LEVEL.has(k) || MODEL_MEMBERS.has(k)) continue;
       if (keyNamesLeader(k) && hasIdentity(v)) { removed.push(k); body = withheldKey(body, k); continue; }
       const next = scrub(v, k, names, removed, 0);
       if (next !== v) body = { ...body, [k]: next };
@@ -324,7 +340,7 @@ export function enforceLeaderLicenceAtFinalEgress<T extends Record<string, unkno
       { event: 'agent_lane.leader_final_egress_failed', request_id: opts.requestId, exit_path: opts.exitPath, err: err instanceof Error ? err.message : String(err), removed_paths: removed },
       'agent-lane: the final leader egress threw — the reply is replaced by the known-safe envelope',
     );
-    return { response: knownSafeEnvelope(response) as T, removedPaths: ['*'], proseEdited: true };
+    return { response: knownSafeEnvelope(response) as T, removedPaths: ['*'], proseEdited: true, leaderFreeEnvelope: true };
   }
 
   if (removed.length > 0 && opts.noEarlierGate === true) {

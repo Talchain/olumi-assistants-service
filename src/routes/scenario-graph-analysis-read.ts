@@ -1,3 +1,6 @@
+import { legacyEditFactsForFreshness } from '../orchestrator-v5/context/reconcile-scenario-analysis-facts.js';
+import { readGoalScopeClaimInput, type GoalScopeClaimInput } from '../orchestrator-v5/compose/goal-scope-claim-input.js';
+import { loadMostRecentPendingActionsIntegrityStrict } from '../orchestrator-v5/build-turn-context.js';
 /**
  * ROADMAP 2.1271 — READ A SCENARIO'S COMMITTED ANALYSIS, OUTSIDE A TURN.
  *
@@ -237,6 +240,8 @@ const NOT_ANSWERED: ScenarioAnalysisRead = Object.freeze({
 });
 
 export interface ReadScenarioAnalysisParams {
+  /** An open scope issue restricts claims without rewriting the saved Run or its freshness. */
+  readonly goalScopeClaimInput?: GoalScopeClaimInput;
   readonly scenarioId: string;
   /** The graph this read just returned, or `null` when the scenario has none. */
   readonly graph: unknown;
@@ -304,7 +309,7 @@ export async function readScenarioAnalysis(
     const currentGraphHash = deriveDecisionContextGraphHash(params.graph);
 
     const store = getSessionStore();
-    const [{ hotWindow, factSet }, analysisInvalidatedAt] = await Promise.all([
+    const [{ hotWindow, factSet, priorFactsWithTurn }, analysisInvalidatedAt] = await Promise.all([
       loadScenarioAnalysisFactsForRead(params.scenarioId, params.requestId),
       params.analysisInvalidatedAt !== undefined
         ? Promise.resolve(params.analysisInvalidatedAt)
@@ -345,6 +350,8 @@ export async function readScenarioAnalysis(
     const derivation = deriveAnalysisFreshness(facts, currentGraphHash, undefined, {
       priorFactsReadOk: factsReadOk,
       analysisInvalidatedAt,
+      priorFactsWithTurn,
+      legacyEditFacts: legacyEditFactsForFreshness(factSet),
       currentGraph: params.graph,
     });
 
@@ -396,8 +403,12 @@ export async function readScenarioAnalysis(
       );
     }
 
-    const analysisState =
-      composeAnalysisStateV1({
+    const scopeInput = params.goalScopeClaimInput ?? await readGoalScopeClaimInput(
+      params.graph,
+      () => loadMostRecentPendingActionsIntegrityStrict(params.scenarioId, params.requestId),
+    );
+    const analysisState = composeAnalysisStateV1({
+        goalScopeClaimInput: scopeInput,
         // ⭐ THE FACT-BASED CANONICAL STATE (Canonical ruling, 28 Sep): the SAME function a turn uses, over the SAME
         // fact set and read status `derivation` was built from, so degraded detection (a newer refused/failed Run →
         // trust downgrade → `requires_rerun`) is not lost here. `canonicalStateFromFreshness` hard-codes
@@ -409,6 +420,8 @@ export async function readScenarioAnalysis(
           ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),
           priorFactsReadOk: factsReadOk,
           analysisInvalidatedAt,
+          priorFactsWithTurn,
+          legacyEditFacts: legacyEditFactsForFreshness(factSet),
         }),
         freshness: derivation,
         ...(analysisReady !== undefined ? { readiness: analysisReady } : {}),

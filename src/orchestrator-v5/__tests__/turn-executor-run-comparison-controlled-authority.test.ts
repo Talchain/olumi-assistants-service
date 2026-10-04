@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../context/analysis-projection-policy.js';
 /**
  * Data Authority & Claim Safety — run-comparison controlled-factor authority.
  *
@@ -205,6 +206,7 @@ function makeRunFact(opts: {
       graph_hash_at_run: opts.graphHashAtRun ?? hashOf(opts.hashGraph),
       computed_at: opts.computedAt,
       enrichment: {
+        ...stampRunAnalysisProjection({}), // Current producer: gap-free input identity is attested.
         analysis_status: 'computed',
         option_comparison: options,
         results: [

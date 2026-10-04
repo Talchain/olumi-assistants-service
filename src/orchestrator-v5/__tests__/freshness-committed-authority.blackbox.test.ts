@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../context/analysis-projection-policy.js';
 /**
  * POC-BOARD item 4 — RELOAD black-box + freshness-vs-committed.
  *
@@ -92,7 +93,7 @@ function mkRunAnalysisFact(graphHashAtRun: string): RunAnalysisHandlerFact {
     scenario_id: SCENARIO_ID,
     leading_option_id: 'opt_lead',
     summary: 'Ran analysis on your current scenario.',
-    enrichment: { analysis_status: 'computed' },
+    enrichment: stampRunAnalysisProjection({ analysis_status: 'computed' }),
     graph_hash_at_run: graphHashAtRun,
   };
   return { fact_type: 'run_analysis', fact_version: 1, noop: false, result };

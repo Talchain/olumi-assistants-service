@@ -9,6 +9,10 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { CARRIERS, legacyGraph, legacyRun, SCENARIO as LEGACY_SCENARIO } from '../../context/__tests__/legacy-gap-projection.fixture.js';
+import { bindVersionResults } from '../version-result-binding.js';
+import { factSet } from './version-result-fixtures.js';
+import { versionRecord } from './fixtures.js';
 
 import {
   ModelVersionCasConflictError,
@@ -59,6 +63,10 @@ function makeClient(cfg: MockConfig = {}): {
         },
         lt: (col: string, val: unknown) => {
           filters[`lt:${col}`] = val;
+          return chain;
+        },
+        abortSignal: (signal: AbortSignal) => {
+          filters.signal = signal;
           return chain;
         },
         limit: (n: number) => {
@@ -360,6 +368,22 @@ describe('SupabaseModelVersionStore.restoreVersionAtomic', () => {
 });
 
 describe('SupabaseModelVersionStore.listVersions', () => {
+  it.each([null, undefined])('strict evidence reads reject a missing payload (%s), preserving legacy empty-list behaviour', async data => {
+    const { client } = makeClient({ selectResult: { data, error: null } });
+    const store = new SupabaseModelVersionStore(client);
+    await expect(store.listVersions(SCENARIO)).resolves.toEqual([]);
+    await expect(store.listVersions(SCENARIO, 50, undefined, { requirePayload: true }))
+      .rejects.toThrow(/returned no array payload/);
+  });
+
+  it('strict evidence reads accept a positively empty page and forward cancellation', async () => {
+    const { client, selectCalls } = makeClient({ selectResult: { data: [], error: null } });
+    const signal = new AbortController().signal;
+    await expect(new SupabaseModelVersionStore(client).listVersions(SCENARIO, 50, 3, { requirePayload: true, signal }))
+      .resolves.toEqual([]);
+    expect(selectCalls[0]!.filters.signal).toBe(signal);
+  });
+
   it('reads newest-first and discards the internal legacy-hash graph from summaries', async () => {
     const rows = [summaryRow({ version_number: 2 }), summaryRow({ id: '44444444-4444-4444-8444-444444444444', version_number: 1 })];
     const { client, selectCalls } = makeClient({ selectResult: { data: rows, error: null } });
@@ -466,6 +490,50 @@ describe('SupabaseModelVersionStore.listVersions', () => {
 });
 
 describe('SupabaseModelVersionStore.getVersion', () => {
+  it.each(CARRIERS)('a NULL-hash legacy %s snapshot still binds its old Run without rewriting history', async carrier => {
+    // A gap-free frozen digest attests the same inputs as today's projection.
+    // The original gapped pair is retained below as the unsafe negative: its
+    // not_analysable reason cannot identify which omitted gap was consumed.
+    const graph = legacyGraph(carrier, []);
+    const { client, rpcCalls } = makeClient({ selectResult: { data: {
+      ...versionRecord(graph),
+      analysis_affecting_hash: null,
+    }, error: null } });
+    const version = await new SupabaseModelVersionStore(client).getVersion(LEGACY_SCENARIO, VERSION_ID);
+    expect(version).not.toBeNull();
+    expect(bindVersionResults({ scenarioId: LEGACY_SCENARIO, from: version!, to: version!,
+      factSet: factSet([legacyRun(carrier, false, true)]) })).toMatchObject({ kind: 'shared' });
+    expect(rpcCalls).toEqual([]);
+  });
+  it.each(CARRIERS)('a NULL-hash legacy %s snapshot cannot attest gaps omitted from its old Run identity', async carrier => {
+    const graph = legacyGraph(carrier);
+    const { client, rpcCalls } = makeClient({ selectResult: { data: {
+      ...versionRecord(graph), analysis_affecting_hash: null,
+    }, error: null } });
+    const version = await new SupabaseModelVersionStore(client).getVersion(LEGACY_SCENARIO, VERSION_ID);
+    expect(version).not.toBeNull();
+    expect(bindVersionResults({ scenarioId: LEGACY_SCENARIO, from: version!, to: version!,
+      factSet: factSet([legacyRun(carrier)]) })).toMatchObject({ kind: 'unavailable' });
+    expect(rpcCalls).toEqual([]);
+  });
+  it.each([undefined, null, 42])('legacy nodes with id %j and a valid mirror derive identical identities on list/get reads', async id => {
+    const graph = { nodes: [{ kind: 'option', label: 'Legacy node', ...(id === undefined ? {} : { id }) }], edges: [],
+      options: [{ id: 'valid-option', label: 'Valid mirror', status: 'ready', interventions: { factor: { value: 0.5 } } }] };
+    const row = { ...summaryRow(), graph, analysis_affecting_hash: null };
+    const getClient = makeClient({ selectResult: { data: row, error: null } }).client;
+    const listClient = makeClient({ selectResult: { data: [row], error: null } }).client;
+    const version = await new SupabaseModelVersionStore(getClient).getVersion(SCENARIO, VERSION_ID);
+    const [listed] = await new SupabaseModelVersionStore(listClient).listVersions(SCENARIO);
+    expect(version?.analysis_affecting_hash).toBe('e2a118c22bac9b69fc06ec86a26e21762013755bf51a28b1c21db0375fe530e1');
+    expect(listed?.analysis_affecting_hash).toBe(version?.analysis_affecting_hash);
+  });
+  it('forwards evidence-read cancellation to the version query', async () => {
+    const { client, selectCalls } = makeClient({ selectResult: { data: summaryRow(), error: null } });
+    const signal = new AbortController().signal;
+    await new SupabaseModelVersionStore(client).getVersion(SCENARIO, VERSION_ID, { signal });
+    expect(selectCalls[0]!.filters.signal).toBe(signal);
+  });
+
   it('filters by BOTH scenario_id and id; returns the full record including graph', async () => {
     const graph = { nodes: [{ id: 'n1' }], edges: [] };
     const { client, selectCalls } = makeClient({

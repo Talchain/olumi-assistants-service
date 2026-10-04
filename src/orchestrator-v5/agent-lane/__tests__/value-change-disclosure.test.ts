@@ -138,7 +138,10 @@ describe('the route actually carries it to the user', () => {
     const body = decl.slice(0, decl.indexOf('];') + 2);
     expect(body).toContain('disclosuresFor(result.tool_results)');
     expect(body).toContain('valueChangeDisclosures(stateFacts)');
-    expect(ROUTE).toContain('withDisclosures(narration.text, owed)');
+    // The same owed array reaches both ask selection and the final displayed reply.
+    expect(ROUTE).toContain('const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);');
+    expect(ROUTE).toContain('withDisclosures(narrationText, owed)');
+    expect(ROUTE).toContain('withDisclosures(narrationText, [...owed, ...decisionLines])');
   });
 
   it('⛔⛔ AND `current_state_unknown` SUPPRESSES THE OTHER DISCLOSURES ENTIRELY — the composition order is what decides it', () => {
