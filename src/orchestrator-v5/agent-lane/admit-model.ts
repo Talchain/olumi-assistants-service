@@ -45,6 +45,9 @@ import { resolveMagnitudeFrame, sizeLink, type LinkSizing, type MagnitudeNode, t
 import { LLM_STRENGTH_STD_FLOOR } from '../../cee/constants.js';
 import { niceFrameAtLeast } from './refit-frames.js';
 import { findStatedAmounts, readCurrencyUnitWithQualifiers } from '../../cee/provenance/stated-amounts.js';
+import { admitStatedLinkEffect, type StatedEffectDetail } from '../../cee/provenance/stated-effect.js';
+import { sameUnit } from './same-unit.js';
+import { log } from '../../utils/telemetry.js';
 /** A4: the link a written range must be about — its source (the countable), the source's unit, every other quantity. */
 export type SizeRangeScope = { readonly source: string; readonly sourceUnit: unknown; readonly others: readonly string[] };
 import type { BriefGoalLevel } from './unplaced-goal-level.js';
@@ -3704,24 +3707,58 @@ function admitOnce(
   // Every quantity a stated size could be about (options and the decision name none): the size door's rivals.
   const quantityLabels = nodes.filter((n) => n.kind !== 'option' && n.kind !== 'decision').map((n) => n.label);
   const nodeOf = new Map(nodes.map((n) => [n.id, n] as const));
+  const statedQuotes = new Map<string, string>();
+  const sizeAdmissions = new Map<CandidateLink, { served: boolean; quote?: string }>();
+  const effectDetail = (l: CandidateLink): StatedEffectDetail | undefined => {
+    const source = nodeOf.get(l.from);
+    const target = nodeOf.get(l.to);
+    if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return undefined;
+    const amount_unit = target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit;
+    const per_source_change_unit = unitById.get(source.id);
+    if (typeof l.effect_amount !== 'number' || typeof l.effect_per_source_change !== 'number'
+      || typeof amount_unit !== 'string' || typeof per_source_change_unit !== 'string') return undefined;
+    return { amount: l.effect_amount, amount_unit, per_source_change: l.effect_per_source_change, per_source_change_unit };
+  };
+  const sharedAdmission = (l: CandidateLink): string | undefined => {
+    const detail = effectDetail(l);
+    if (detail === undefined) return undefined;
+    // statedEffectQuoteMatches binds BOTH figure units with sameUnit against these node units.
+    const verdict = admitStatedLinkEffect(brief ?? '', detail);
+    if (!verdict.admitted) return undefined;
+    const tied = resolvable.some((other) => {
+      if (other === l) return false;
+      const rival = effectDetail(other);
+      if (rival === undefined || rival.amount !== detail.amount || rival.per_source_change !== detail.per_source_change
+        || !sameUnit(rival.amount_unit, detail.amount_unit) || !sameUnit(rival.per_source_change_unit, detail.per_source_change_unit)) return false;
+      const rivalVerdict = admitStatedLinkEffect(brief ?? '', rival);
+      return rivalVerdict.admitted && rivalVerdict.quote === verdict.quote;
+    });
+    return tied ? undefined : verdict.quote;
+  };
   /**
    * D9: a user's own edit (`user_specified`) always wins; otherwise the size is the user's only when stated as theirs
-   * AND the brief writes it, in the target's own unit (AIQ #2383 5916497454; the G6 door): a figure the drafter tagged
-   * `explicit` that no sentence carries is Olumi's estimate, never the user's. ONE predicate, read by the normalising
+   * AND either the served scoped matcher or one untied sentence validates it in the nodes' own units. The extension
+   * is monotone: every served admission is kept. ONE predicate, read by the normalising
    * frame below AND by link sizing (CODEX CEE BUDDY 5922482284: an unwritten £100m tagged `explicit` once set the frame).
    */
   const userSizeEarned = (l: CandidateLink): boolean => {
-    if (l.provenance_source === 'user_specified') return true;
+    if (l.provenance_source === 'user_specified') {
+      sizeAdmissions.set(l, { served: true });
+      return true;
+    }
     const source = nodeOf.get(l.from);
     const target = nodeOf.get(l.to);
     if (source === undefined || target === undefined || (l.effect_provenance ?? l.provenance) !== 'explicit') return false;
     // The size is in the target's LEVEL unit (a change goal's "−£9,000" is in £/month, never its threshold's %).
     const levelUnit = target.observed_state?.unit ?? unitById.get(target.id) ?? target.goal_threshold_unit;
-    return typeof l.effect_amount === 'number' && Number.isFinite(l.effect_amount)
+    const served = typeof l.effect_amount === 'number' && Number.isFinite(l.effect_amount)
       && sizeWritten(Math.abs(l.effect_amount), levelUnit, {
         target: [source.label, target.label],
         others: quantityLabels.filter((q) => q !== source.label && q !== target.label),
       });
+    const quote = sharedAdmission(l);
+    sizeAdmissions.set(l, { served, ...(quote !== undefined ? { quote } : {}) });
+    return served || quote !== undefined;
   };
   const normalisingFrameGoalId = ((): string | undefined => {
     const goal = nodes.find((n) => n.kind === 'goal');
@@ -3776,6 +3813,7 @@ function admitOnce(
     ...(goalGap(n) !== undefined ? { goal_gap: goalGap(n) } : {}),
   }]));
   const sizing = new Map<string, LinkSizing>();
+  const admittedPredicates = new Map<string, 'served' | 'stated_effect' | 'both'>();
   for (const l of resolvable) {
     if (l.direction === 'unknown' || typeof l.strength_mean === 'number') continue;
     const source = magnitudeNodeById.get(l.from);
@@ -3802,11 +3840,26 @@ function admitOnce(
     // (`definitionalLink`); every other link into it is sized exactly as before, on no frame.
     const unframed = l.to === normalisingFrameGoalId ? { ...target, scale_frame: undefined } : target;
     const framed = sizeLink(statement, source, target);
-    sizing.set(`${l.from}::${l.to}`, l.to !== normalisingFrameGoalId || user_stated || (l.definitional === true && definitionalLink(l, framed))
-      ? framed : sizeLink(statement, source, unframed));
+    const key = `${l.from}::${l.to}`;
+    const sized = l.to !== normalisingFrameGoalId || user_stated || (l.definitional === true && definitionalLink(l, framed))
+      ? framed : sizeLink(statement, source, unframed);
+    // A later duplicate cannot replace an already admitted user size or its evidence.
+    if (sizing.get(key)?.outcome === 'user_stated') continue;
+    sizing.set(key, sized);
+    statedQuotes.delete(key);
+    admittedPredicates.delete(key);
+    if (sized.magnitude === 'user_stated') {
+      const admission = sizeAdmissions.get(l)!;
+      if (admission.quote !== undefined) statedQuotes.set(key, admission.quote);
+      admittedPredicates.set(key, admission.quote === undefined ? 'served' : admission.served ? 'both' : 'stated_effect');
+    }
   }
 
-  const linkResult = admitCandidateLinks(resolvable, sizing);
+  for (const [key, predicate] of admittedPredicates) {
+    const [from, to] = key.split('::');
+    log.info({ event: 'agent.construct.size_admitted', from, to, predicate }, 'Construction link size admitted');
+  }
+  const linkResult = admitCandidateLinks(resolvable, sizing, statedQuotes);
 
   // decision -> option edges are TOPOLOGY, not causal belief. They use the
   // canonical structural constant and are deliberately NOT marked `defaulted`
@@ -4554,6 +4607,7 @@ function admitOnce(
   if (sums.length > 0) {
     const partsOf = new Map(sums.map((t) => [t.node_id, new Set(t.factor_ids)] as const));
     finalEdges = finalEdges.map((e) => {
+      if (e.provenance?.magnitude === 'user_stated' || e.provenance?.source === 'user_specified') return e;
       if (partsOf.get(e.to)?.has(e.from) !== true) return e;
       const source = magnitudeNodeById.get(e.from);
       const target = magnitudeNodeById.get(e.to);

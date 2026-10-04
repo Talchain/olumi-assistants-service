@@ -8,6 +8,31 @@ export interface StatedEffectDetail {
   readonly per_source_change_unit: string;
 }
 
+export type StatedLinkEffectRejectionReason = 'invalid_effect' | 'no_matching_sentence' | 'ambiguous_sentence';
+
+/** Admit one verbatim sentence validating all four fields; never borrow figures across sentences. */
+export function admitStatedLinkEffect(
+  brief: string,
+  effect: StatedEffectDetail,
+): { admitted: true; quote: string } | { admitted: false; reason: StatedLinkEffectRejectionReason } {
+  if (![effect.amount, effect.per_source_change].every((value) => Number.isFinite(value) && value !== 0)
+    || ![effect.amount_unit, effect.per_source_change_unit].every((unit) => typeof unit === 'string' && unit.trim() !== '')) {
+    return { admitted: false, reason: 'invalid_effect' };
+  }
+  const sentences: string[] = [];
+  let start = 0;
+  // Terminators only; a decimal point followed by a digit is not a boundary.
+  for (const match of brief.matchAll(/[.!?]+(?=\s|$)/gu)) {
+    const end = match.index + match[0].length;
+    sentences.push(brief.slice(start, end).trim());
+    start = end;
+  }
+  sentences.push(brief.slice(start).trim());
+  const valid = sentences.filter((sentence) => statedEffectQuoteMatches(sentence, effect));
+  if (valid.length === 1) return { admitted: true, quote: valid[0]! };
+  return { admitted: false, reason: valid.length > 1 ? 'ambiguous_sentence' : 'no_matching_sentence' };
+}
+
 interface LocatedAmount extends StatedAmount {
   readonly units: readonly string[];
   readonly implicitSource?: true;

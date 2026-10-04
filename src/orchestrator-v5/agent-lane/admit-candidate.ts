@@ -113,7 +113,7 @@ export interface AdmittedEdge {
    * for (`strength_mean`, the staleness key). Both absent on an edge that keeps today's projection unchanged.
    */
   /** `definitional`: the size holds by definition, checked (`definitionalLink`); absent on every other edge. */
-  provenance?: { source: string; reasoning?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; definitional?: true };
+  provenance?: { source: string; reasoning?: string; quote?: string; source_quote?: string; magnitude?: MagnitudeAuthor; natural_effect?: NaturalEffect; definitional?: true };
   /** CIL flag — true when the magnitude is a projection default, not authored. */
   defaulted?: boolean;
 }
@@ -266,6 +266,7 @@ export function definitionalLink(link: CandidateLink, sized: LinkSizing): boolea
 export function admitCandidateLinks(
   links: readonly CandidateLink[],
   sizing: ReadonlyMap<string, LinkSizing> = new Map(),
+  statedQuotes: ReadonlyMap<string, string> = new Map(),
 ): AdmissionResult {
   const edges: AdmittedEdge[] = [];
   const loss: RepairEntry[] = [];
@@ -314,6 +315,8 @@ export function admitCandidateLinks(
           source: link.provenance_source ?? provenanceSourceFor(link.provenance),
           magnitude: sized.magnitude!,
           ...(sized.natural_effect !== undefined ? { natural_effect: sized.natural_effect } : {}),
+          ...(sized.magnitude === 'user_stated' && statedQuotes.has(key)
+            ? { quote: statedQuotes.get(key)!.slice(0, 100), source_quote: statedQuotes.get(key)! } : {}),
           ...(definitionalLink(link, sized) ? { definitional: true as const } : {}),
         },
       };
