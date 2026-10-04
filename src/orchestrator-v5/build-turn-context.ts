@@ -744,8 +744,8 @@ export async function buildTurnContext(
     // one of the twenty derivation sites.
     //
     // WHY IT IS NEEDED. `deriveAnalysisFreshness` has accepted
-    // `analysisInvalidatedAt` since C8 and it is the ONLY input that can make a
-    // hash MATCH still read `stale` — a model restored to an earlier version
+    // `analysisInvalidatedAt` since C8 to make a hash MATCH still read `stale`
+    // after a restore — a model restored to an earlier version
     // can be byte-identical to the one the analysis ran against while the
     // analysis is no longer about the model the user is looking at. Measured at
     // this SHA: of the twenty production `deriveAnalysisFreshness` call sites,
@@ -1023,7 +1023,8 @@ export async function buildTurnContext(
     // have it replayed indefinitely — long after the store recovered.
     // Threading the read state makes the degraded case `'unknown' /
     // derivation_failed`, which maps to an `unavailable` signal instead.
-    { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph },
+    { priorFactsReadOk: scenarioAnalysisFactsReadOk, currentGraph: scenarioState.graph,
+      analysisInvalidatedAt: analysisInvalidatedAtRead, priorFactsWithTurn },
   );
   // AUTHORITATIVE STAGE — CEE decides the reasoning stage from the model it
   // holds, rather than echoing the client's guess back at it. See
@@ -2780,6 +2781,7 @@ export async function loadScenarioAnalysisFactsForRead(
 ): Promise<{
   readonly hotWindow: PriorFactsReadResult;
   readonly factSet: ScenarioAnalysisFactSet;
+  readonly priorFactsWithTurn: readonly HandlerFactWithTurn[];
 }> {
   const store = sessionStore ?? tryGetSessionStore(requestId, scenarioId);
   if (store === undefined) {
@@ -2787,6 +2789,7 @@ export async function loadScenarioAnalysisFactsForRead(
     return {
       hotWindow: { status: 'degraded', facts: [] },
       factSet: reconcileScenarioAnalysisFacts({ scenarioId, hotWindowFacts: [] }),
+      priorFactsWithTurn: [],
     };
   }
   // C1: the hot-window facts depend ONLY on the turns, so they are read as soon as the turns land, inside
@@ -2799,6 +2802,7 @@ export async function loadScenarioAnalysisFactsForRead(
   const hotReadOk = readOk && priorTurnsRead.readOk;
   return {
     hotWindow: hotReadOk ? { status: 'ok', facts } : { status: 'degraded', facts: [] },
+    priorFactsWithTurn: factsWithTurn,
     factSet: reconcileScenarioAnalysisFacts({
       scenarioId,
       hotWindowFacts: facts,

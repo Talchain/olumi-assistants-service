@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../context/analysis-projection-policy.js';
 /**
  * G3 AT THE WIRE — a saved analysis that has ROLLED OUT OF THE BOUNDED HOT
  * WINDOW must stay identifiable and must be marked as belonging to an earlier
@@ -67,7 +68,7 @@ function savedRunAnalysisFact(): HandlerFact {
       summary: 'Saved analysis',
       graph_hash_at_run: ANALYSED_HASH,
       computed_at: SAVED_COMPUTED_AT,
-      enrichment: { analysis_status: 'completed' },
+      enrichment: stampRunAnalysisProjection({ analysis_status: 'completed' }),
       win_probabilities: { opt_hire: 0.72, opt_status_quo: 0.28 },
     },
   } as unknown as HandlerFact;

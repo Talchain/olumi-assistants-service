@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import {
   computeAnalysisAffectingGraphHash,
+  computeAnalysisAffectingGraphHashSha256,
   computeDeterministicGraphHash,
 } from '../graph-hash.js';
 
@@ -682,5 +683,17 @@ describe('computeAnalysisAffectingGraphHash — mutation taxonomy (Tier 0 stalen
     expect(computeAnalysisAffectingGraphHash(before)).not.toBe(
       computeAnalysisAffectingGraphHash(after),
     );
+  });
+});
+
+// Stored raw graphs historically tolerate structurally empty node entries.
+describe('raw stored node guards retain the legacy projection', () => {
+  it.each([[null], [undefined], [null, undefined], [null, { id: 'f', kind: 'factor' }, undefined]].map(nodes => ({ nodes })))('hashes $nodes at both widths', ({ nodes }) => {
+    const graph = { nodes, edges: [] } as unknown as GraphV3T;
+    const placeholders = { nodes: nodes.map(n => n ?? {}), edges: [] } as unknown as GraphV3T;
+    expect(computeAnalysisAffectingGraphHash(graph)).toBe(computeAnalysisAffectingGraphHash(placeholders));
+    expect(computeAnalysisAffectingGraphHashSha256(graph)).toBe(computeAnalysisAffectingGraphHashSha256(placeholders));
+    expect(computeAnalysisAffectingGraphHash(graph)).toHaveLength(16);
+    expect(computeAnalysisAffectingGraphHashSha256(graph)).toHaveLength(64);
   });
 });

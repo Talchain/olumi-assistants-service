@@ -4234,6 +4234,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // `dispatchAddOptionTransaction`'s gate.
             {
               currentGraph: addOptionFrameGraph,
+              analysisInvalidatedAt: turnContext.analysis_invalidated_at,
+              priorFactsWithTurn: turnContext.prior_facts_with_turn,
               ...(turnContext.prior_facts_read_ok === undefined
                 ? {}
                 : { priorFactsReadOk: turnContext.prior_facts_read_ok }),
@@ -7916,6 +7918,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // from a THROWN read must not read as "never analysed".
             {
               currentGraph: textFrameGraph,
+              analysisInvalidatedAt: turnContext.analysis_invalidated_at,
+              priorFactsWithTurn: turnContext.prior_facts_with_turn,
               ...(turnContext.prior_facts_read_ok === undefined
                 ? {}
                 : { priorFactsReadOk: turnContext.prior_facts_read_ok }),

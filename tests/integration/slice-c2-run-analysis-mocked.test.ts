@@ -16,6 +16,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
+import { ANALYSIS_PROJECTION_VERSION } from '../../src/orchestrator-v5/context/graph-identity.js';
+import { RUN_ANALYSIS_PROJECTION_KEY } from '../../src/orchestrator-v5/context/analysis-projection-policy.js';
 
 import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
 
@@ -274,11 +276,13 @@ describe('Slice C2 integration — Suite B (mocked PLoT, golden fixtures)', () =
       coaching_signal_id,
       coaching_signal_turn_id,
       coaching_signal_produced_at,
+      [RUN_ANALYSIS_PROJECTION_KEY]: projectionVersion,
       ...enrichmentWithoutCoaching
     } = fact.result.enrichment;
     void coaching_signal_id;
     void coaching_signal_turn_id;
     void coaching_signal_produced_at;
+    expect(projectionVersion).toBe(ANALYSIS_PROJECTION_VERSION);
     // Asserted (not merely assumed) so this test cannot hide an ABSENT verdict:
     // a missing one fails the read side CLOSED and would silently suppress
     // every leader-presuming block on a healthy run.

@@ -319,6 +319,8 @@ export function projectTurnContext(
   const freshness = deriveAnalysisFreshness(facts, currentGraphHash, extractGraphOptionIds(graph), {
     priorFactsReadOk: readOk,
     currentGraph: graph,
+    analysisInvalidatedAt: context.analysis_invalidated_at,
+    priorFactsWithTurn: context.prior_facts_with_turn,
   });
 
   if (!readOk) {

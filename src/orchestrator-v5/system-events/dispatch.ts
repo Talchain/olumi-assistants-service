@@ -1,3 +1,5 @@
+import { parseOptionGapDeclarations, type ApprovedOptionGap } from '../agent-lane/unmodelled-mechanisms.js';
+
 /**
  * V5 deterministic system-event dispatch.
  *
@@ -119,9 +121,8 @@ import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
  * can hide an older run). `priorFactsReadOk` is consulted only when no fact is
  * selected, so a success in the window stays positive evidence compared by hash.
  *
- * ⚠ NOT YET `option_intervention_edit`: it also feeds the window's verdict into
- * its pre-write referee, so moving its source changes write behaviour, not only
- * the reply. Named follow-up with its own RED case.
+ * Gap-bearing `option_intervention_edit` replies reuse this reader. Its
+ * pre-write referee still consumes its original window authority unchanged.
  */
 function deriveWriteReplyFreshness(
   read: WriteReplyAnalysisInputs,
@@ -133,7 +134,8 @@ function deriveWriteReplyFreshness(
     durableAuthority ? read.factSet.facts : read.hotWindow.facts,
     persistedAnalysisGraphHash,
     undefined,
-    { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt, currentGraph },
+    { priorFactsReadOk: read.factSet.status === 'complete', analysisInvalidatedAt: read.analysisInvalidatedAt,
+      currentGraph, priorFactsWithTurn: read.priorFactsWithTurn },
   );
   // ⛔ AN UNREAD RESTORE MARKER NEVER BECOMES A POSITIVE `fresh`. The marker can
   // only turn a hash MATCH from fresh to stale, so when it could not be read a
@@ -157,8 +159,8 @@ type WriteReplyAnalysisInputs = Awaited<ReturnType<typeof loadScenarioAnalysisFa
  * EVERY WRITER'S ANALYSIS INPUTS: the facts AND the restore marker, read side by
  * side exactly as the reload reads them (`scenario-graph-analysis-read.ts`).
  *
- * The marker (`scenarios.analysis_invalidated_at`) is the ONLY input that can
- * make a hash MATCH read `stale`: restore the analysed version after a run
+ * The marker (`scenarios.analysis_invalidated_at`) carries restore chronology:
+ * it can make a hash MATCH read `stale`: restore the analysed version after a run
  * (A → analyse → B → restore A) and the bytes equal A again while the analysis
  * is no longer about the model the user is looking at. Without it, a write that
  * lands on the analysed hash — a rename never moves it — replied `fresh` while
@@ -2373,12 +2375,8 @@ async function dispatchFactorValueEdit(
    * the window this function always read, so the handler's `priorFacts` input
    * keeps its meaning; only the freshness below chooses the durable set.
    */
-  const {
-    hotWindow: priorFactsRead,
-    factSet: analysisFactSet,
-    analysisInvalidatedAt,
-    analysisInvalidatedAtReadOk,
-  } = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
+  const analysisInputs = await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId);
+  const { hotWindow: priorFactsRead } = analysisInputs;
   const priorFacts = priorFactsRead.facts;
 
   const result = await applyFactorValueEdit({
@@ -2650,7 +2648,7 @@ async function dispatchFactorValueEdit(
    */
   // The shared rule (`deriveWriteReplyFreshness`): absence only in a COMPLETE record.
   const freshness: FreshnessDerivation = deriveWriteReplyFreshness(
-    { hotWindow: priorFactsRead, factSet: analysisFactSet, analysisInvalidatedAt, analysisInvalidatedAtReadOk },
+    analysisInputs,
     persistedAnalysisGraphHash,
     persistedGraphBytes,
   );
@@ -2820,6 +2818,7 @@ export async function dispatchOptionLevelsBatch(
     readonly base_graph_hash: string;
     /** The links the approved proposal declared (`from::to`); a different set writes nothing. */
     readonly expectedLinks?: readonly string[];
+    readonly optionGaps?: readonly ApprovedOptionGap[];
     /** A compound approval's factor values, in the user's units: written in the SAME commit as the levels. */
     readonly values?: readonly ApprovedFactorValue[];
     /** The ranges it attaches to factors holding a bare amount: the SAME commit too. */
@@ -2897,13 +2896,14 @@ export async function dispatchOptionLevelsBatch(
   // level whose approved links are declared — goes through the batch entry.
   const only = batch.targets.length === 1 && batch.expectedLinks === undefined
     && (batch.values ?? []).length + (batch.frames ?? []).length + linkStrengths.length === 0 && batch.linkEffect === undefined
-    && batch.identityConfirm === undefined
+    && batch.identityConfirm === undefined && (batch.optionGaps?.length ?? 0) === 0
     ? batch.targets[0]! : undefined;
   const outcome: Awaited<ReturnType<typeof executeOptionInterventionBatch>> = only !== undefined
     ? await executeOptionInterventionEdit({ ...common, optionId: only.optionId, factorId: only.factorId, modelValue: only.modelValue },
       getSessionStore())
     : await executeOptionInterventionBatch({ ...common, targets: batch.targets,
       ...(batch.expectedLinks !== undefined ? { expectedLinks: batch.expectedLinks } : {}),
+      ...(batch.optionGaps !== undefined ? { optionGaps: batch.optionGaps } : {}),
       ...(batch.values !== undefined && batch.values.length > 0 ? { values: batch.values } : {}),
       ...(batch.frames !== undefined && batch.frames.length > 0 ? { frames: batch.frames } : {}),
       ...(linkStrengths.length > 0 ? { linkStrengths, lastRunIdentityUse } : {}),
@@ -2932,10 +2932,14 @@ export async function dispatchOptionLevelsBatch(
     // ⚠ AND THE HEALTHY-EMPTY / DEGRADED DISTINCTION SURVIVES. A history read
     // that succeeded and found nothing is `none` — a real verdict. A read that
     // degraded is `unknown`. Collapsing them would let a transport failure
-    // masquerade as "this model has never been analysed". No extra I/O: the
-    // prior facts are re-projected against the committed hash.
+    // masquerade as "this model has never been analysed". Gap edits reuse the
+    // write-reply reader for durable Runs, visible edit facts and the restore
+    // marker. Append does not set that marker. Gap-free edits retain their
+    // original fact projection; the pre-write referee is unchanged.
     const freshnessAfterCommit: FreshnessDerivation =
-      priorFactsRead.status === 'ok'
+      (batch.optionGaps?.length ?? 0) > 0
+        ? deriveWriteReplyFreshness(await loadWriteReplyAnalysisInputs(payload.scenario_id, requestId), outcome.analysisGraphHash, outcome.graph)
+        : priorFactsRead.status === 'ok'
         ? deriveAnalysisFreshness(priorFactsRead.facts, outcome.analysisGraphHash, undefined, { currentGraph: outcome.graph })
         : {
             freshness: 'unknown',
@@ -3135,6 +3139,8 @@ export type CommitOptionLevelsInput = {
   readonly turn_id: string;
   /** The links the approved proposal declared. They must EQUAL the ones its levels need (`links_mismatch` otherwise). */
   readonly links: readonly { readonly option_id: string; readonly factor_id: string }[];
+  /** Exact gap declarations carried by the approved proposal, committed with its levels. */
+  readonly option_gaps?: readonly { readonly option_id: string; readonly mechanisms: readonly string[]; readonly operands?: Record<string, unknown> }[];
   readonly levels: readonly {
     readonly option_id: string;
     readonly factor_id: string;
@@ -3239,6 +3245,13 @@ export type CommitOptionLevelsResult =
  * route's ownership pre-flight); this grants nothing new, and adds no wire member.
  */
 export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput, requestId: string): Promise<CommitOptionLevelsResult> {
+  const rawGaps: unknown = input.option_gaps;
+  const gapRows = Array.isArray(rawGaps) ? rawGaps.map(row => row !== null && typeof row === 'object' && !Array.isArray(row)
+    ? { optionId: row.option_id, ...(Object.hasOwn(row, 'mechanisms') ? { mechanisms: row.mechanisms } : {}),
+      ...(Object.hasOwn(row, 'operands') ? { operands: row.operands } : {}) } : row) : rawGaps;
+  const gapInput = parseOptionGapDeclarations(gapRows, Object.hasOwn(input, 'option_gaps'));
+  if (gapInput.kind === 'invalid') return { status: 'refused', reason: gapInput.reason };
+
   const targets = input.levels.map(l => ({ optionId: l.option_id, factorId: l.factor_id, modelValue: l.value,
     ...(l.raw_value !== undefined || l.cap !== undefined
       ? { figure: { raw_value: Number(l.raw_value), cap: Number(l.cap), ...(l.unit !== undefined ? { unit: l.unit } : {}) } } : {}) }));
@@ -3249,6 +3262,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   // the idempotency key is (scenario_id, turn_id)).
   const requestHash = `sha256:${createHash('sha256').update(JSON.stringify({ scenario_id: input.scenario_id, stage: 'frame',
     kind: 'system_event', event: { kind: 'option_levels_batch', links: input.links, levels: input.levels,
+      ...(Object.hasOwn(input, 'option_gaps') ? { option_gaps: input.option_gaps } : {}),
       ...(input.values !== undefined && input.values.length > 0 ? { values: input.values } : {}),
       ...(input.frames !== undefined && input.frames.length > 0 ? { frames: input.frames } : {}),
       ...(input.link_strengths !== undefined && input.link_strengths.length > 0 ? { link_strengths: input.link_strengths } : {}),
@@ -3259,6 +3273,7 @@ export async function commitOptionLevelsInProcess(input: CommitOptionLevelsInput
   const payload = { scenario_id: input.scenario_id, turn_id: input.turn_id, stage: 'frame' as const, requestHash };
   const r = await runWithApprovedLevelAdoptions(adoptions, () => dispatchOptionLevelsBatch(payload, {
     targets, base_graph_hash: input.base_graph_hash, expectedLinks: input.links.map(l => `${l.option_id}::${l.factor_id}`),
+    ...(gapInput.declarations.length > 0 ? { optionGaps: gapInput.declarations } : {}),
     fenceRefusalReachesCaller: true,
     ...(input.values !== undefined && input.values.length > 0 ? { values: input.values.map(v => ({ factorId: v.factor_id, value: v.value,
       ...(v.unit !== undefined ? { unit: v.unit } : {}), ...(v.author === 'model_proposed' ? { adopted: true } : {}) })) } : {}),
