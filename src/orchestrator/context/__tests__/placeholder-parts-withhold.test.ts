@@ -30,7 +30,7 @@ import {
   deriveConstraintVerdict,
   readRatifiedConstraints,
 } from '../constraint-feasibility.js';
-import { placeholderMovedOptions, targetMovedOnlyThroughPlaceholderParts } from '../placeholder-parts.js';
+import { placeholderMovedOptions, targetMovedOnlyThroughPlaceholderParts, sizedLinkTest } from '../placeholder-parts.js';
 import { levelLimitBaselineNodeIds } from '../../../orchestrator-v5/tools/handlers/level-limit-baseline.js';
 import { limitChecksForAgent } from '../../../orchestrator-v5/agent-lane/limit-checks.js';
 
@@ -38,6 +38,22 @@ type Json = Record<string, any>;
 const fixture = (rel: string): Json => JSON.parse(readFileSync(new URL(rel, import.meta.url), 'utf8')) as Json;
 const JOURNEY_C = fixture('../../../orchestrator-v5/__tests__/fixtures/served-journey-c-nonroot-budget-limit-082121Z.json').c15 as Json;
 const CLOUD = fixture('../../../orchestrator-v5/__tests__/fixtures/served-cloud-downtime-estimated-parts-20260929.json').graph as Json;
+
+describe('goal-test link sizing uses the canonical unit vocabulary', () => {
+  it('accepts GBP/month and £/month as the same user-sized target unit', () => {
+    const nodes = [
+      { id: 'price', kind: 'factor', unit: 'percentage points' },
+      { id: 'mrr', kind: 'goal', unit: '£/month', observed_state: { unit: '£/month', value: 120000 } },
+    ];
+    const edge = {
+      from: 'price', to: 'mrr', strength: { mean: 0.1 },
+      provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: {
+        amount: 1200, amount_unit: 'GBP/month', strength_mean: 0.1,
+      } },
+    };
+    expect(sizedLinkTest(nodes)(edge)).toBe(true);
+  });
+});
 
 const BUDGET_LABEL = 'Total initiative spend';
 const BUDGET_LIMIT = 'agent-lane:total_initiative_spend:<=';

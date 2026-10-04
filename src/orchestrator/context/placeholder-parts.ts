@@ -197,7 +197,7 @@ function linkIsSized(edge: Rec, unitById: ReadonlyMap<unknown, string | undefine
   if (p === undefined || !SIZED_MAGNITUDES.has(p.magnitude)) return false;
   const effect = isRec(p.natural_effect) ? p.natural_effect : undefined;
   const to = unitById.get(edge.to);
-  if (effect === undefined || to === undefined || norm(effect.amount_unit) !== to) return false;
+  if (effect === undefined || to === undefined || !sameUnit(effect.amount_unit, to)) return false;
   const mean = isRec(edge.strength) ? edge.strength.mean : undefined;
   return typeof mean === 'number' && mean === effect.strength_mean;
 }
