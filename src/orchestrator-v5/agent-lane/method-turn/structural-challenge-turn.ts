@@ -236,10 +236,15 @@ export interface StructuralChallengeTurn {
   readonly actions: readonly SuggestedAction[];
   readonly certainty?: StructuralChallengeCertainty;
   readonly candidateLeaderLicence?: LeaderLicence;
+  readonly presentedLicence?: LeaderLicence;
+  /** Keep the provisional-figures disclosure even when the leader is withheld. */
+  readonly presentedProvisionalFigures?: boolean;
   readonly baselineRunIdentity?: SelectedRunIdentity;
 }
 
-/** Final presentation requires a SAME-read receipt naming this baseline Run and the full canonical licence. */
+/** Each receipt (dispatch, final, replay) applies this adapter with SAME-read baseline authority.
+ * The effective presentation licence only narrows; provisional disclosures persist too.
+ */
 export function structuralChallengeTurnUnderLicence(
   turn: StructuralChallengeTurn, finalRead: StructuralChallengeFinalRead | undefined,
 ): StructuralChallengeTurn {
@@ -251,18 +256,42 @@ export function structuralChallengeTurnUnderLicence(
     return { ...turn, result, outcome: result.status, certainty: undefined,
       reply: composeStructuralChallengeReply({ result, labels: turn.labels }) };
   }
-  const licence: LeaderLicence = !permission.permissions.leader_may_be_named || turn.candidateLeaderLicence === 'withheld'
+  let licence: LeaderLicence = !permission.permissions.leader_may_be_named || turn.candidateLeaderLicence === 'withheld'
     || turn.candidateLeaderLicence === undefined ? 'withheld'
     : permission.permissions.provisional === true || turn.candidateLeaderLicence === 'permitted_with_caveat'
       ? 'permitted_with_caveat' : 'permitted';
+  const licenceOrder: Record<LeaderLicence, number> = { withheld: 0, permitted_with_caveat: 1, permitted: 2 };
+  if (turn.presentedLicence !== undefined && licenceOrder[turn.presentedLicence] < licenceOrder[licence]) {
+    licence = turn.presentedLicence;
+  }
+  const provisionalFigures = turn.presentedProvisionalFigures === true
+    || permission.permissions.permitted_analysis_mode === 'quantified_provisional' || licence === 'permitted_with_caveat';
+  const claimPermissions: ClaimPermissions = provisionalFigures
+    ? { ...permission.permissions, permitted_analysis_mode: 'quantified_provisional' } : permission.permissions;
   const result: StructuralChallengeResultV1 = {
     ...turn.result,
     claims: turn.result.claims.map((c) => (c.kind === 'leader' && licence === 'withheld'
       ? { kind: 'leader', baseline_option_id: null, alternative_option_id: null, noise_verdict: 'not_noise_qualified', verdict: 'not_comparable', basis: 'withheld_on_one_side', invariant_by_construction: false }
       : c)),
   };
-  return { ...turn, result, reply: composeStructuralChallengeReply({ result, labels: turn.labels,
-    certainty: turn.certainty, leaderLicence: licence, claimPermissions: permission.permissions }) };
+  return { ...turn, result, presentedLicence: licence, presentedProvisionalFigures: provisionalFigures,
+    reply: composeStructuralChallengeReply({ result, labels: turn.labels,
+      certainty: turn.certainty, leaderLicence: licence, claimPermissions }) };
+}
+
+export const STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY =
+  'I can\'t show this link test again because it may not match your current analysis. Open the link on the canvas and choose "Test without this link" to test it against the current analysis. Nothing in your model changed.';
+
+/** Re-present the typed turn under a fresh receipt; the route replays stored words only for an identical typed answer. */
+export function structuralChallengeReplay(
+  remembered: StructuralChallengeTurn | undefined, receipt: StructuralChallengeFinalRead | undefined,
+): StructuralChallengeTurn {
+  const unbound = (): StructuralChallengeTurn => ({ reply: STRUCTURAL_CHALLENGE_REPLAY_UNBOUND_REPLY,
+    outcome: 'failed', result: null, labels: new Map(), actions: [TALK_IT_THROUGH_CHIP] });
+  if (remembered === undefined) return unbound();
+  if (remembered.result?.status !== 'completed') return remembered;
+  const presented = structuralChallengeTurnUnderLicence(remembered, receipt);
+  return presented.result?.status === 'completed' || presented.result?.status === 'withheld' ? presented : unbound();
 }
 
 export const STRUCTURAL_CHALLENGE_NO_RUN_REPLY =

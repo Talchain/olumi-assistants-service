@@ -16,6 +16,19 @@ const state = vi.hoisted(() => ({ run: 'run-a', permission: 'licensed' as 'licen
 
 vi.mock('../../handlers/structural-challenge-dispatch.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  /** This isolated route spec stubs both read seams; reachability rows exercise the real canonical reader. */
+  readStructuralChallengeReceipt: vi.fn(async () => {
+    const readState = { run_state: { kind: 'complete_current' }, requires_rerun: false,
+      leader_claim: { permitted: state.permission === 'licensed', separation: 'separated' } };
+    const permissions = claimPermissionsFrom(readState, { analysis_admission: { structurally_analysable: true,
+      permitted_analysis_mode: 'comparative_leader' } }, { requested: true });
+    return { read: { analysis_state: readState, analysis_result: { type: 'analysis_result' } },
+      currentness: { readOk: true, permissions, fact: { fact_type: 'run_analysis', result: {
+        run_id: state.run, scenario_id: SCENARIO, graph_hash_at_run: 'a'.repeat(16), computed_at: '2026-10-04T10:00:00.000Z',
+        enrichment: { meta: { seed_used: '7', n_samples: 1000 } },
+        input_snapshot: { snapshot_version: 1, sent_digest: 'a'.repeat(64), goal: null, options: [], options_not_sent: [], factors: [], constraints: [], links: [] },
+      } } } };
+  }),
   dispatchStructuralChallenge: vi.fn(async (params: Rec) => {
     dispatch.calls.push(params);
     if (state.throws) throw new Error('offline SCI-DEEP dispatch exception');
