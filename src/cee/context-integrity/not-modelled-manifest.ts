@@ -49,6 +49,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readCurrencyUnitWithQualifiers, readUnit, type AmountKind } from "../provenance/stated-amounts.js";
+import { statedEffectQuoteMatches } from "../provenance/stated-effect.js";
 import {
   classifyValueSource,
   reflectsAHumanAct,
@@ -447,6 +448,36 @@ export function extractStatedQuantities(text: string): Quantity[] {
     }
   }
   return out;
+}
+
+export interface StatedLikelyRange {
+  readonly low: number;
+  readonly high: number;
+  readonly text: string;
+}
+
+function relationNumber(raw: string): { value: number; unit: string } | undefined {
+  const money = raw.match(/£\s?([\d,]+(?:\.\d+)?)([kmb])?/i);
+  if (money) {
+    const multiplier = money[2]?.toLowerCase() === "k" ? 1_000 : money[2]?.toLowerCase() === "m" ? 1_000_000 : money[2]?.toLowerCase() === "b" ? 1_000_000_000 : 1;
+    return { value: Number(money[1]!.replace(/,/g, "")) * multiplier, unit: "£" };
+  }
+  const percent = raw.match(/([\d,]+(?:\.\d+)?)\s*%/);
+  if (percent) return { value: Number(percent[1]!.replace(/,/g, "")), unit: "%" };
+  const count = raw.match(/([\d,]+(?:\.\d+)?)\s+([a-z]+)/i);
+  if (count) return { value: Number(count[1]!.replace(/,/g, "")), unit: count[2]!.toLowerCase() };
+  const bare = raw.match(/^[\d,]+(?:\.\d+)?$/);
+  return bare ? { value: Number(bare[0].replace(/,/g, "")), unit: "" } : undefined;
+}
+
+/** Read a plain likely range from a quoted statement, without interpreting bounds. */
+export function extractStatedLikelyRange(text: string): StatedLikelyRange | undefined {
+  const match = /\bbetween\s+(£\s?[\d,]+(?:\.\d+)?|\d[\d,]*(?:\.\d+)?)\s+and\s+(£\s?[\d,]+(?:\.\d+)?|\d[\d,]*(?:\.\d+)?)/iu.exec(text);
+  if (!match) return undefined;
+  const low = relationNumber(match[1]!);
+  const high = relationNumber(match[2]!);
+  if (low === undefined || high === undefined || low.unit !== high.unit || low.value > high.value) return undefined;
+  return { low: low.value, high: high.value, text: match[0] };
 }
 
 // ── the two surfaces ────────────────────────────────────────────────────────
@@ -1284,19 +1315,19 @@ const briefCurrencyCode = (symbol: string | null): string | null =>
   symbol === null ? null : CURRENCY_SYMBOL_TO_CODE[symbol] ?? null;
 
 /**
- * Numeric candidates come ONLY from node/option value carriers that declare a
- * unit alongside them. Everything else numeric in the graph — prior bounds
- * (unitless [0,1]), intervention encodings (unitless 0..1), and the entire
- * `edges` subtree (strength, exists_probability, validation passes) — is
- * DELIBERATELY EXCLUDED. Those numbers are how the model computes, not what it
- * is claiming about the world, and matching against them is how a stated
- * quantity gets "found" in a model that never carried it.
+ * Numeric candidates come from node/option value carriers that declare a unit
+ * alongside them, plus verified natural effects written from the brief.
+ * Everything else numeric in the graph — prior bounds (unitless [0,1]),
+ * intervention encodings (unitless 0..1), and ordinary `edges` metadata
+ * (strength, exists_probability, validation passes) — is DELIBERATELY
+ * EXCLUDED. Those numbers are how the model computes, not what it is claiming
+ * about the world, and matching against them is how a stated quantity gets
+ * "found" in a model that never carried it.
  *
- * ⚠ THE `edges` SUBTREE IS EXCLUDED AND `SCOPE.model_surface` IS DERIVED FROM
- * THIS CONSTANT so the user-facing sentence cannot claim otherwise. It did:
- * it advertised "node, edge and option values" while this walked only nodes and
- * options. Edge LABELS are still text-searched (they are strings under a
- * non-skip top-level key); edge VALUES are not.
+ * ⚠ Ordinary edge values remain excluded. A verified
+ * `brief_extraction` / `user_stated` natural effect is different: it is the
+ * user's stated amount and per-change figure, with its own units, and is a
+ * named carrier rather than topology metadata.
  */
 const CANDIDATE_COLLECTIONS = ["nodes", "options"] as const;
 
@@ -1363,7 +1394,7 @@ function collectSourceBoundInterventionCandidates(
   return out;
 }
 
-function collectCandidates(graph: Record<string, unknown>): Candidate[] {
+function collectCandidates(graph: Record<string, unknown>, briefText: string): Candidate[] {
   const out: Candidate[] = [];
   const factorLabels = new Map<string, string>();
   if (Array.isArray(graph.nodes)) {
@@ -1408,6 +1439,98 @@ function collectCandidates(graph: Record<string, unknown>): Candidate[] {
     }
   }
   out.push(...collectLimitCandidates(graph));
+  out.push(...collectBriefNaturalEffectCandidates(graph, briefText));
+  return out;
+}
+
+/**
+ * The only edge-level value carrier the manifest may trust. The provenance
+ * gate is deliberately strict: an Olumi estimate or an interactively proposed
+ * effect must not make a number from the brief appear modelled before the
+ * existing approval/write rule has run.
+ */
+function collectBriefNaturalEffectCandidates(
+  graph: Record<string, unknown>,
+  briefText: string,
+): Candidate[] {
+  if (!Array.isArray(graph.edges)) return [];
+  const labels = new Map<string, string>();
+  if (Array.isArray(graph.nodes)) {
+    for (const raw of graph.nodes) {
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const node = raw as Record<string, unknown>;
+      if (typeof node.id === "string" && typeof node.label === "string") labels.set(node.id, node.label);
+    }
+  }
+  const out: Candidate[] = [];
+  for (const raw of graph.edges) {
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const edge = raw as Record<string, unknown>;
+    const provenance = edge.provenance;
+    if (provenance === null || typeof provenance !== "object" || Array.isArray(provenance)) continue;
+    const p = provenance as Record<string, unknown>;
+    if (p.source !== "brief_extraction" || p.magnitude !== "user_stated") continue;
+    const effect = p.natural_effect;
+    if (effect === null || typeof effect !== "object" || Array.isArray(effect)) continue;
+    const natural = effect as Record<string, unknown>;
+    const from = typeof edge.from === "string" ? edge.from : null;
+    const to = typeof edge.to === "string" ? edge.to : null;
+    if (from === null || to === null) continue;
+    const sourceLabel = labels.get(from);
+    const targetLabel = labels.get(to);
+    if (sourceLabel === undefined || targetLabel === undefined) continue;
+    const quote = p.quote;
+    if (typeof quote !== "string" || quote.length === 0 || !briefText.includes(quote)) continue;
+
+    const amount = natural.amount;
+    const amountUnit = natural.amount_unit;
+    const perSourceChange = natural.per_source_change;
+    const perSourceChangeUnit = natural.per_source_change_unit;
+    if (
+      typeof amount !== "number" ||
+      typeof amountUnit !== "string" ||
+      typeof perSourceChange !== "number" ||
+      typeof perSourceChangeUnit !== "string" ||
+      !statedEffectQuoteMatches(quote, {
+        amount,
+        amount_unit: amountUnit,
+        per_source_change: perSourceChange,
+        per_source_change_unit: perSourceChangeUnit,
+      })
+    ) continue;
+    const effectDirection = edge.effect_direction;
+    const signedEffect = Math.sign(amount) * Math.sign(perSourceChange);
+    if (
+      (effectDirection === "positive" && signedEffect < 0) ||
+      (effectDirection === "negative" && signedEffect >= 0)
+    ) continue;
+    if (typeof amount === "number" && Number.isFinite(amount) && typeof amountUnit === "string" && amountUnit.trim().length > 0) {
+      const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(amountUnit);
+      out.push({
+        nodeId: to,
+        label: targetLabel,
+        value: amount * multiplier,
+        unitKind: kind,
+        currencyCode: currencyCode ?? null,
+        declaredUnit: amountUnit,
+      });
+    }
+
+    if (
+      typeof perSourceChange === "number" && Number.isFinite(perSourceChange) &&
+      typeof perSourceChangeUnit === "string" && perSourceChangeUnit.trim().length > 0
+    ) {
+      const { kind, currencyCode, multiplier } = readCurrencyUnitWithQualifiers(perSourceChangeUnit);
+      out.push({
+        nodeId: from,
+        label: sourceLabel,
+        value: perSourceChange * multiplier,
+        unitKind: kind,
+        currencyCode: currencyCode ?? null,
+        declaredUnit: perSourceChangeUnit,
+      });
+    }
+  }
   return out;
 }
 
@@ -1490,7 +1613,7 @@ interface Surfaces {
  * The transform is idempotent (see `canonicaliseMonths`), so canonical strings
  * stored here read identically to the per-call form they replace.
  */
-function splitSurfaces(graph: Record<string, unknown>): Surfaces {
+function splitSurfaces(graph: Record<string, unknown>, briefText: string): Surfaces {
   const modelStrings: string[] = [];
   const proseStrings: string[] = [];
 
@@ -1505,8 +1628,18 @@ function splitSurfaces(graph: Record<string, unknown>): Surfaces {
       return;
     }
     if (typeof node === "object") {
-      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      const object = node as Record<string, unknown>;
+      const naturalEffectProvenance = object.source === "brief_extraction"
+        && object.magnitude === "user_stated"
+        && object.natural_effect !== null
+        && typeof object.natural_effect === "object";
+      for (const [k, v] of Object.entries(object)) {
         if (k === "widening_log") continue;
+        // A natural-effect quote is evidence for the signed, unit-validated
+        // candidate route below, never an unanchored label match. Otherwise a
+        // wrong-sign or wrong-unit stored effect would still make its literal
+        // appear `in_model` merely because the provenance repeated the brief.
+        if (naturalEffectProvenance && k === "quote") continue;
         walkText(v, inProse || PROSE_KEYS.has(k));
       }
     }
@@ -1520,7 +1653,7 @@ function splitSurfaces(graph: Record<string, unknown>): Surfaces {
     else if (cls === "prose") walkText(v, true);
   }
 
-  return { candidates: collectCandidates(graph), modelStrings, proseStrings };
+  return { candidates: collectCandidates(graph, briefText), modelStrings, proseStrings };
 }
 
 // ── matching ────────────────────────────────────────────────────────────────
@@ -1811,7 +1944,7 @@ export function deriveNotModelledManifest(
     return UNAVAILABLE("no_graph");
   }
 
-  const surfaces = splitSurfaces(graph as Record<string, unknown>);
+  const surfaces = splitSurfaces(graph as Record<string, unknown>, briefText);
   const quantities = extractStatedQuantities(briefText);
   const spans = constraintSpans(graph as Record<string, unknown>, briefText);
 
