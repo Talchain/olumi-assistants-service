@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RUN_ANALYSIS_PROJECTION_KEY, ANALYSIS_PROJECTION_VERSION } from '../../context/graph-identity.js';
 import type { SessionStore } from '../../session/store.js';
 import { isRunExplanationChip, RUN_EXPLANATION_MESSAGE, RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
 
@@ -14,14 +15,21 @@ let graph: unknown = GRAPH;
 let briefText = 'The strategic brief';
 let fact: typeof FACT | null = null;
 let readFails = false;
+let scenarioOwner: string | null = null;
+let restored: string | null = null;
+let editFacts: unknown[] = [];
 const rows: Record<string, unknown>[] = [];
 const store = {
   ensureScenarioExists: vi.fn(async () => ({ user_id: null })),
   readCommittedTurn: vi.fn(async (_scenario: string, id: string) => rows.find((r) => r.turn_id === id) ?? null),
   append: vi.fn(async (row: Record<string, unknown>) => { rows.push({ ...row, id: row.turn_id }); return { id: String(row.turn_id) }; }),
   readRecent: vi.fn(async () => [{ id: 'run-row', turn_class: 'decide', created_at: '2026-10-01T12:00:00.000Z' }, ...rows].reverse()),
-  readFactsFor: vi.fn(async () => fact === null ? [] : [fact]),
-  readAnalysisInvalidatedAt: vi.fn(async () => null),
+  readFactsFor: vi.fn(async () => fact === null ? [] : [...editFacts, fact]),
+  readFactsWithTurnFor: vi.fn(async () => fact === null ? [] : [
+    ...editFacts.map((edit, i) => ({ fact: edit, fact_row_id: `edit-${i}`, turn_id: `edit-turn-${i}`, fact_created_at: '2026-10-01T12:00:02.000Z' })),
+    { fact, fact_row_id: 'selected-run', turn_id: 'run-row', fact_created_at: '2026-10-01T12:00:00.000Z' },
+  ]),
+  readAnalysisInvalidatedAt: vi.fn(async () => restored),
   readRunCurrentness: undefined as SessionStore['readRunCurrentness'],
 };
 vi.mock('../../session/index.js', () => ({ getSessionStore: () => store }));
@@ -71,6 +79,7 @@ describe('two-request Run through the real handler and canonical analysis reader
     app.post('/assist/v1/scenarios/:id/graph', async (_req, reply) => {
       graphReads += 1;
       if (readFails) return reply.code(500).send({ error: 'unavailable' });
+      if (scenarioOwner !== null) return reply.code(403).send({ error: 'forbidden' });
       const read = await readScenarioAnalysis({ scenarioId: SCENARIO, graph, requestId: 'test' });
       return { graph, brief_text: briefText, graph_hash: hashOf(graph), ...read };
     });
@@ -81,7 +90,7 @@ describe('two-request Run through the real handler and canonical analysis reader
     await app.close(); vi.unstubAllGlobals();
     delete process.env.AGENT_LANE_ENABLED; delete process.env.AGENT_LANE_PREVIEW;
   });
-  beforeEach(() => { graph = GRAPH; briefText = 'The strategic brief'; fact = null; readFails = false; rows.length = 0; runs = 0; graphReads = 0;
+  beforeEach(() => { graph = GRAPH; briefText = 'The strategic brief'; fact = null; readFails = false; rows.length = 0; runs = 0; graphReads = 0; scenarioOwner = null; restored = null; editFacts = [];
     modelBodies = []; providerMode = 'ok'; mutateDuringExplanation = undefined; store.readRunCurrentness = undefined; });
   const run = () => app.inject({ method: 'POST', url: '/agent/v1/turn', payload: {
     turn_id: randomUUID(), scenario_id: SCENARIO, message: 'Run the analysis', source: 'chip_click', chip: { action_type: 'run_analysis' },
@@ -104,14 +113,14 @@ describe('two-request Run through the real handler and canonical analysis reader
     expect(modelBodies).toHaveLength(0);
   });
 
-  it('an unchanged explanation reads one graph plus one bounded currentness query', async () => {
+  it('an unchanged explanation canonically rereads chronology even when the fast port exists', async () => {
     const first = (await run()).json();
     store.readRunCurrentness = vi.fn(async () => fact === null ? null : ({ userId: null, graph, briefText, analysisInvalidatedAt: null, fact }));
     const before = graphReads;
     const second = await explanation(first);
     expect(second.json().narration.status).toBe('ready');
-    expect(graphReads - before).toBe(1);
-    expect(store.readRunCurrentness).toHaveBeenCalledExactlyOnceWith(SCENARIO);
+    expect(graphReads - before).toBe(2);
+    expect(store.readRunCurrentness).not.toHaveBeenCalled();
     expect(runs).toBe(1);
   });
 
@@ -133,19 +142,18 @@ describe('two-request Run through the real handler and canonical analysis reader
   }
 
   for (const change of ['new-run', 'graph', 'restore', 'owner', 'unavailable'] as const) {
-    it(`bounded currentness withholds narration after concurrent ${change}`, async () => {
+    it(`canonical reread withholds narration after concurrent ${change}`, async () => {
       const first = (await run()).json();
-      let owner: string | null = null;
-      let restored: string | null = null;
+
       store.readRunCurrentness = vi.fn(async () => {
         if (readFails) throw new Error('read unavailable');
-        return fact === null ? null : { userId: owner, graph, briefText, analysisInvalidatedAt: restored, fact };
+        return fact === null ? null : { userId: scenarioOwner, graph, briefText, analysisInvalidatedAt: restored, fact };
       });
       mutateDuringExplanation = () => {
         if (change === 'new-run') fact = { ...fact, result: { ...fact.result, computed_at: '2026-10-01T12:00:01.000Z' } };
         if (change === 'graph') graph = { ...GRAPH, nodes: [...GRAPH.nodes, { id: 'f2', kind: 'factor', label: 'Churn' }] };
         if (change === 'restore') restored = '2026-10-01T12:00:01.000Z';
-        if (change === 'owner') owner = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        if (change === 'owner') scenarioOwner = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
         if (change === 'unavailable') readFails = true;
       };
       const before = graphReads;
@@ -154,10 +162,37 @@ describe('two-request Run through the real handler and canonical analysis reader
       expect(second.json().narration.status).toBe('stale');
       expect(second.json().assistant_text).toContain(RUN_EXPLANATION_UNAVAILABLE_TEXT);
       expect(rows.at(-1)?.assistantMessage).not.toContain('depends on the assumptions');
-      expect(store.readRunCurrentness).toHaveBeenCalledExactlyOnceWith(SCENARIO);
+      expect(store.readRunCurrentness).not.toHaveBeenCalled();
       expect(runs).toBe(1);
     });
   }
+
+  it.each(['legacy', 'stamped'])('%s: add/clear during narration cannot reuse a FRESH response with identical graph bytes', async kind => {
+    const first = (await run()).json();
+    if (kind === 'stamped') fact.result.enrichment = { ...fact.result.enrichment, [RUN_ANALYSIS_PROJECTION_KEY]: ANALYSIS_PROJECTION_VERSION };
+    const identity = { graph_hash_at_run: fact.result.graph_hash_at_run, computed_at: fact.result.computed_at };
+    // This fast port would report the same Run and same clean graph after clearance.
+    store.readRunCurrentness = vi.fn(async () => ({ userId: null, graph, briefText, analysisInvalidatedAt: null, fact }));
+    mutateDuringExplanation = () => {
+      const before = JSON.stringify(graph);
+      graph = { ...GRAPH, nodes: [...GRAPH.nodes, { id: 'option-race', kind: 'option', label: 'Race', unresolved_targets: ['unmapped effect'] }] };
+      graph = GRAPH;
+      expect(JSON.stringify(graph)).toBe(before);
+      editFacts = [{ fact_type: 'edit_graph', fact_version: 1, noop: false, result: {
+        edit_kind: 'option_configuration', status: 'applied', operations_count: 1, affected_entities: [],
+        graph_hash_before: identity.graph_hash_at_run, graph_hash_after: identity.graph_hash_at_run,
+        safe_summary: 'Added and cleared an option gap.', impact: 'moderate', rerun_recommended: true,
+      } }];
+    };
+    const second = await explanation(first);
+    expect(fact.result).toMatchObject(identity);
+    expect(second.json().narration.status).toBe('stale');
+    expect(second.json().analysis_state.run_state.kind).toBe('complete_stale');
+    expect(second.json().assistant_text).toContain(RUN_EXPLANATION_UNAVAILABLE_TEXT);
+    expect(rows.at(-1)?.assistantMessage).not.toContain('depends on the assumptions');
+    expect(store.readRunCurrentness).not.toHaveBeenCalled();
+    expect(runs).toBe(1);
+  });
 
   it('returns the saved current result with zero narration calls; the follow-up only explains that Run', async () => {
     const response = await run();

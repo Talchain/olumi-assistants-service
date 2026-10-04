@@ -290,7 +290,7 @@ describe('buildTurnContext — scenario analysis fact authority', () => {
         reason:
           error.code === 'analysis_fact_corrupt'
             ? 'durable_contract_invalid'
-            : 'durable_unavailable',
+            : 'durable_read_failed',
       });
       expect(context.newest_analysis_fact).toBeNull();
       expect(context.newest_analysis_fact_read_ok).toBe(false);

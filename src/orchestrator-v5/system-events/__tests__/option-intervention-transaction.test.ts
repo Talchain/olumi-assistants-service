@@ -1,3 +1,6 @@
+import { legacyRun } from '../../context/__tests__/legacy-gap-projection.fixture.js';
+import { deriveAnalysisFreshness } from '../../context/freshness.js';
+import { stampRunAnalysisProjection } from '../../context/analysis-projection-policy.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { _resetConfigCache } from '../../../config/index.js';
@@ -5,6 +8,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { computeExpectedGraphCasHashes } from '../../context/graph-cas-conflict.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import type {
@@ -12,6 +16,7 @@ import type {
 } from '../../session/store.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import { applyOptionInterventionEdit, executeOptionInterventionBatch, executeOptionInterventionEdit } from '../option-intervention-edit.js';
+import { parseUnmodelledMechanisms, parseOptionGapsOfLevelOps, optionGapsHeld, optionGapOperands, optionGapPostimageIsScoped } from '../../agent-lane/unmodelled-mechanisms.js';
 import { runWithApprovedLevelAdoption } from '../../agent-lane/approved-adoption-context.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -102,6 +107,8 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
       if (loads === options.failLoadAt) throw new Error('canonical read unavailable');
       return JSON.parse(graphJson);
     },
+    // Today only restore sets this marker; append never does.
+    readAnalysisInvalidatedAt: async () => null,
     readMostRecentPendingActions: async () => {
       if (options.failPendingRead) throw new Error('pending authority unavailable');
       return clone(options.pendings ?? []) as PendingAction[];
@@ -123,7 +130,10 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
       const stored = clone(write);
       const id = `persisted-row-${rows.size + 1}`;
       rows.set(key, { id, json: JSON.stringify(stored) });
-      if (stored.graph !== undefined) graphJson = JSON.stringify(stored.graph);
+      if (stored.graph !== undefined) {
+        graphJson = JSON.stringify(stored.graph);
+
+      }
       const receipt = options.receiptFor?.(stored);
       if (receipt !== undefined) return { id, modelVersionReceipt: receipt };
       // Guest/no-version outcome: ordinary graph+turn+fact persistence succeeds.
@@ -1040,4 +1050,294 @@ describe('L4: an approved link set sizes a placeholder (real door, real writer, 
     expect(r).toMatchObject({ kind: 'refused', reason: 'link_adopted_estimate_not_a_set' });
     expect(p.attempts).toHaveLength(0);
   });
+});
+
+// Rows2–3: extend the existing serialized store and canonical commit controls;
+// no PostgreSQL/auth/HTTP/provider or independent approval-authority claim.
+describe('approved option gaps use the existing atomic level door', () => {
+  const GAP = 'a stated effect without a supported mapping';
+  function withStoredGap(where: 'both' | 'node' | 'mirror' = 'both') {
+    const graph = clone(canonicalGraph()) as ReturnType<typeof canonicalGraph> & { options?: Record<string, unknown>[] };
+    const node = graph.nodes.find(n => n.id === 'option')! as Record<string, unknown>;
+    const mirror = graph.options!.find(o => o.id === 'option')!;
+    for (const row of [ ...(where !== 'mirror' ? [node] : []), ...(where !== 'node' ? [mirror] : []) ]) {
+      row.unresolved_targets = [GAP]; row.user_questions = ['What would resolve the stated missing effect?'];
+    }
+    return graph;
+  }
+  function request(graph: ReturnType<typeof canonicalGraph>, optionGaps?: unknown) {
+    const { optionId, factorId, modelValue: _value, ...rest } = inputFor(graph);
+    return { ...rest, targets: [{ optionId, factorId, modelValue: 0.2 }],
+      ...(optionGaps !== undefined ? { optionGaps } : {}) } as Parameters<typeof executeOptionInterventionBatch>[0];
+  }
+  const clear = [{ optionId: 'option', mechanisms: [] }];
+
+  it.each(['addition', 'replacement', 'clearance'] as const)('exact carrier identities hold through %s, one commit and cold read', async action => {
+    const before = action === 'addition' ? canonicalGraph() : withStoredGap();
+    const declarations = [{ optionId: 'option', mechanisms: action === 'clearance' ? [] : ['new effect'] }];
+    const persistence = jsonStore(before);
+    expect((await executeOptionInterventionBatch(request(before, declarations), persistence.fresh())).kind).toBe('committed');
+    expect(persistence.attempts).toHaveLength(1);
+    const cold = await persistence.fresh().loadGraph(SCENARIO_ID) as ReturnType<typeof canonicalGraph>;
+    expect(optionGapsHeld(cold, declarations)).toBe(true);
+    expect(optionGapPostimageIsScoped(before, cold, declarations)).toBe(true);
+    expect(cold.options!.map(row => row.id)).toEqual(before.options!.map(row => row.id));
+    for (const carrier of ['nodes', 'options'] as const) {
+      expect(cold[carrier]!.find(row => row.id === 'other_option')).toStrictEqual(before[carrier]!.find(row => row.id === 'other_option'));
+    }
+  });
+
+  it.each(['addition', 'replacement', 'clearance'] as const)('refuses canonical carrier aliases before %s through the real transaction', async action => {
+    {
+      const before = action === 'addition' ? canonicalGraph() : withStoredGap();
+      const exact = before.options!.find(row => row.id === 'option')!;
+      const alias = { ...clone(exact), id: ' option ', unresolved_targets: ['alias effect'], user_questions: ['Alias question'] };
+      before.options!.push(alias);
+      expect(projectGraphForPersistence(before)).toStrictEqual(before);
+      const declarations = [{ optionId: 'option', mechanisms: action === 'clearance' ? [] : ['new effect'] }];
+      const persistence = jsonStore(before);
+      const result = await executeOptionInterventionBatch(request(before, declarations), persistence.fresh());
+      expect(result).toMatchObject({ kind: 'refused', reason: 'ambiguous_option_gap_target' });
+      expect(optionGapOperands(before, 'option')).toBeNull();
+      expect(optionGapsHeld(before, declarations)).toBe(false);
+      expect(optionGapPostimageIsScoped(before, before, declarations)).toBe(false);
+      expect(persistence.attempts).toHaveLength(0);
+      expect(persistence.durableGraph()).toStrictEqual(before);
+      expect(persistence.durableGraph().options!.map(row => row.id)).toEqual(before.options!.map(row => row.id));
+    }
+  });
+
+  it.each([
+    { name: '81 characters', value: ['x'.repeat(81)] },
+    { name: 'six entries', value: ['a', 'b', 'c', 'd', 'e', 'f'] },
+    { name: 'non-string member', value: [42] },
+    { name: 'blank member', value: ['   '] },
+    { name: 'non-array', value: 'missing effect' },
+    { name: 'mixed valid and invalid', value: ['valid effect', null] },
+    { name: 'null', value: null },
+  ])('refuses $name before any append, preserving both carriers', async row => {
+    const before = withStoredGap('mirror');
+    expect(projectGraphForPersistence(before)).toStrictEqual(before); // Valid on the predecessor: refusal cannot hide a bad fixture.
+    const persistence = jsonStore(before);
+    const result = await executeOptionInterventionBatch(request(before, [{ optionId: 'option', mechanisms: row.value }]), persistence.fresh());
+    expect(result.kind).toBe('refused'); expect(persistence.attempts).toHaveLength(0);
+    expect(persistence.durableGraph()).toStrictEqual(before);
+  });
+
+  it('distinguishes absence from literal clear and rejects present undefined', () => {
+    expect(parseUnmodelledMechanisms(undefined, false)).toEqual({ kind: 'absent' });
+    expect(parseUnmodelledMechanisms([], true)).toEqual({ kind: 'valid', mechanisms: [] });
+    expect(parseUnmodelledMechanisms(undefined, true).kind).toBe('invalid');
+    expect(parseUnmodelledMechanisms(['  missing   effect ', 'missing effect'], true))
+      .toEqual({ kind: 'valid', mechanisms: ['missing effect'] });
+  });
+
+
+  it('refuses conflicting approved declarations rather than taking the first level', () => {
+    const op = (mechanisms: unknown) => ({ op: 'set_option_intervention', path: 'option::factor', value: { unmodelled_mechanisms: mechanisms } });
+    expect(parseOptionGapsOfLevelOps([op([]), op(['a missing effect'])]).kind).toBe('invalid');
+    expect(parseOptionGapsOfLevelOps([op(['valid']), op(['valid', null])]).kind).toBe('invalid');
+    expect(parseOptionGapsOfLevelOps([op([]), op([])])).toEqual({ kind: 'valid', declarations: [{ optionId: 'option', mechanisms: [] }] });
+  });
+
+  it.each(['both', 'mirror'] as const)('same numerical level clears %s gaps in ONE append/fact and cold read', async where => {
+    const before = withStoredGap(where); const persistence = jsonStore(before);
+    const result = await executeOptionInterventionBatch(request(before, clear), persistence.fresh());
+    expect(result.kind).toBe('committed'); expect(persistence.attempts).toHaveLength(1);
+    expect(persistence.durableRows()).toHaveLength(1); expect(persistence.durableRows()[0]!.handler_facts).toHaveLength(1);
+    expect(persistence.attempts[0]).toMatchObject(computeExpectedGraphCasHashes(before));
+    const changedQuestion = clone(before);
+    (changedQuestion.options!.find(o => o.id === 'option')! as Record<string, unknown>).user_questions = ['Concurrent question'];
+    const originalCas = computeExpectedGraphCasHashes(before);
+    const changedCas = computeExpectedGraphCasHashes(changedQuestion);
+    expect(changedCas.expectedGraphAnalysisHash).toBe(originalCas.expectedGraphAnalysisHash);
+    expect(changedCas.expectedGraphIdentityHash).not.toBe(originalCas.expectedGraphIdentityHash);
+    const cold = await persistence.fresh().loadGraph(SCENARIO_ID);
+    expect(optionGapsHeld(cold, clear)).toBe(true);
+    const expected = clone(before);
+    for (const row of [...expected.nodes, ...expected.options!]) if (row.id === 'option') {
+      delete (row as Record<string, unknown>).unresolved_targets; delete (row as Record<string, unknown>).user_questions;
+    }
+    expect(cold).toStrictEqual(expected); // Includes numeric levels, authorship, other options and all unrelated metadata.
+    const ready = buildCanonicalAnalysisReadyFromGraph(cold)! as unknown as { options: { option_id: string; status: string }[] };
+    const option = ready.options.find(o => o.option_id === 'option')!;
+    expect(option.status).toBe('ready');
+  });
+
+  it('keeps options[] absent when the approved clear has only a node carrier', async () => {
+    const before = withStoredGap('node'); delete (before as { options?: unknown }).options;
+    const persistence = jsonStore(before);
+    expect((await executeOptionInterventionBatch(request(before, clear), persistence.fresh())).kind).toBe('committed');
+    expect(Object.hasOwn(persistence.durableGraph(), 'options')).toBe(false);
+    expect(optionGapsHeld(persistence.durableGraph(), clear)).toBe(true);
+  });
+
+  it('omitting the declaration preserves both gap carriers during a real level change', async () => {
+    const before = withStoredGap(); const persistence = jsonStore(before);
+    const input = { ...request(before), targets: request(before).targets.map(t => ({ ...t, modelValue: 0.3 })) };
+    expect((await executeOptionInterventionBatch(input, persistence.fresh())).kind).toBe('committed');
+    for (const carrier of ['nodes', 'options'] as const) {
+      const old = before[carrier]!.find(n => n.id === 'option')! as Record<string, unknown>;
+      const now = persistence.durableGraph()[carrier]!.find(n => n.id === 'option')! as Record<string, unknown>;
+      expect(now.unresolved_targets).toEqual(old.unresolved_targets); expect(now.user_questions).toEqual(old.user_questions);
+    }
+  });
+
+  it('a still-unencoded value stays needs_encoding after gap clearance', async () => {
+    const before = withStoredGap(); const node = before.nodes.find(n => n.id === 'option')!;
+    delete node.interventions!.other_factor;
+    const mirror = before.options!.find(o => o.id === 'option')!;
+    delete (mirror.interventions as Record<string, unknown>).other_factor;
+    mirror.raw_interventions = { other_factor: 'not encoded' }; mirror.status = 'needs_encoding';
+    const persistence = jsonStore(before);
+    expect((await executeOptionInterventionBatch(request(before, clear), persistence.fresh())).kind).toBe('committed');
+    const cold = persistence.durableGraph();
+    const ready = buildCanonicalAnalysisReadyFromGraph(cold)! as unknown as { options: { option_id: string; status: string }[] };
+    expect(ready.options.find(o => o.option_id === 'option')!.status).toBe('needs_encoding');
+  });
+
+  it('a node-only clear with a stale mirror readback is unverified', async () => {
+    const before = withStoredGap(); const persistence = jsonStore(before); const facade = persistence.fresh();
+    const load = facade.loadGraph.bind(facade); let reads = 0;
+    facade.loadGraph = async scenario => {
+      const graph = await load(scenario) as ReturnType<typeof withStoredGap>; reads += 1;
+      if (reads > 1) graph.options!.find(o => o.id === 'option')!.unresolved_targets = [GAP];
+      return graph;
+    };
+    expect(await executeOptionInterventionBatch(request(before, clear), facade))
+      .toMatchObject({ kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true });
+  });
+
+  it('stale approval refuses before append', async () => {
+    const before = withStoredGap(); const persistence = jsonStore(before);
+    expect((await executeOptionInterventionBatch({ ...request(before, clear), expectedGraphHash: '0000000000000000' }, persistence.fresh())).kind).toBe('refused');
+    expect(persistence.attempts).toHaveLength(0); expect(persistence.durableGraph()).toStrictEqual(before);
+  });
+
+  it('unknown freshness uses the existing mutation permission refusal', async () => {
+    const before = withStoredGap(); const persistence = jsonStore(before);
+    expect((await executeOptionInterventionBatch({ ...request(before, clear), freshness: 'unknown' }, persistence.fresh())).kind).toBe('refused');
+    expect(persistence.attempts).toHaveLength(0); expect(persistence.durableGraph()).toStrictEqual(before);
+  });
+
+  it.each(['node', 'mirror', 'both'] as const)(
+    'unstamped pre-B3 Run stays STALE after last-gap %s clearance outside the hot window, including goal-only snapshots', async where => {
+    const before = withStoredGap(where); const persistence = jsonStore(before);
+    const expectedClear = clone(before);
+    for (const row of [...expectedClear.nodes, ...expectedClear.options!]) {
+      delete (row as Record<string, unknown>).unresolved_targets; delete (row as Record<string, unknown>).user_questions;
+    }
+    const cleanHash = computeAnalysisAffectingGraphHash(expectedClear)!;
+    const old = legacyRun('node', false, true);
+    delete old.result.input_snapshot; old.result.graph_hash_at_run = cleanHash;
+    expect(deriveAnalysisFreshness([old], computeAnalysisAffectingGraphHash(before), undefined,
+      { currentGraph: before }).freshness).toBe('stale');
+    // The hot window lost the Run; the approved writer must still emit the signal.
+    const input = { ...request(before, clear), hasExistingAnalysis: false };
+    expect((await executeOptionInterventionBatch(input, persistence.fresh())).kind).toBe('committed');
+    expect(persistence.attempts).toHaveLength(1);
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(cold).toEqual(expectedClear); expect(computeAnalysisAffectingGraphHash(cold)).toBe(cleanHash);
+    const marker = await persistence.fresh().readAnalysisInvalidatedAt!(SCENARIO_ID);
+    expect(marker).toBeNull();
+    const edit = persistence.durableRows()[0]!.handler_facts[0]!;
+    expect(edit).toMatchObject({ fact_type: 'edit_graph', noop: false,
+      result: { status: 'applied', rerun_recommended: true } });
+    expect(deriveAnalysisFreshness([edit, old], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: marker })).toMatchObject({ freshness: 'stale', reason: 'model_edited_after_analysis' });
+    const visibleEdit = { fact: edit, turn_id: TURN_ID, fact_created_at: '2026-10-04T01:00:00.000Z' };
+    expect(deriveAnalysisFreshness([old], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: marker, priorFactsWithTurn: [visibleEdit] }))
+      .toMatchObject({ freshness: 'stale', reason: 'model_edited_after_analysis' });
+    for (const control of [
+      { ...edit, noop: true },
+      { ...edit, result: { ...edit.result, status: 'rejected' } },
+      { ...edit, result: { ...edit.result, rerun_recommended: false } },
+    ]) {
+      expect(deriveAnalysisFreshness([old], cleanHash, undefined,
+        { currentGraph: cold, priorFactsWithTurn: [{ ...visibleEdit, fact: control } as typeof visibleEdit] }).freshness).toBe('fresh');
+    }
+    // The durable reader returns the applied edit after this Run even when the hot window is empty.
+    const legacyEditFacts = { since: old.result.computed_at!, readOk: true, total_count: 1,
+      facts: [{ fact: edit, fact_row_id: 'clearance-fact', fact_created_at: visibleEdit.fact_created_at }] };
+    for (const input_snapshot of [undefined, { goal: null }]) {
+      const saved = { ...old, result: { ...old.result, input_snapshot } } as typeof old;
+      expect(deriveAnalysisFreshness([saved], cleanHash, undefined,
+        { currentGraph: cold, analysisInvalidatedAt: marker, priorFactsWithTurn: [], legacyEditFacts }))
+        .toMatchObject({ freshness: 'stale', reason: 'model_edited_after_analysis' });
+      expect(deriveAnalysisFreshness([saved], cleanHash, undefined,
+        { currentGraph: cold, legacyEditFacts: { ...legacyEditFacts, facts: [], readOk: false } }).freshness).toBe('stale');
+    }
+    const rerun = clone(old); rerun.result.computed_at = '2026-10-04T02:00:00.000Z';
+    rerun.result.enrichment = stampRunAnalysisProjection(rerun.result.enrichment!);
+    expect(deriveAnalysisFreshness([rerun, edit, old], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: marker }).freshness).toBe('fresh');
+    // A newer Run supersedes a persisted edit even if input array order differs.
+    expect(deriveAnalysisFreshness([edit, rerun, old], cleanHash, undefined,
+      { currentGraph: cold, priorFactsWithTurn: [visibleEdit] }).freshness).toBe('fresh');
+    // Current-turn facts have no DB chronology yet; their handler ordering
+    // must not turn the just-computed Run stale on its own response.
+    expect(deriveAnalysisFreshness([edit, rerun, old], cleanHash, undefined,
+      { currentGraph: cold, priorFactsWithTurn: [] }).freshness).toBe('fresh');
+    const refused = jsonStore(before, { rejectAppend: true });
+    expect((await executeOptionInterventionBatch(input, refused.fresh())).kind).toBe('unverified');
+    expect(await refused.fresh().readAnalysisInvalidatedAt!(SCENARIO_ID)).toBeNull();
+    expect(refused.durableGraph()).toEqual(before);
+  });
+
+  it.each(['node', 'mirror', 'both'] as const)(
+    'STAMPED Run at the gapped %s admission stays STALE after approved clearance and cold reload with no marker or edit fact', async where => {
+    const before = withStoredGap(where);
+    const persistence = jsonStore(before);
+    const saved = legacyRun('node', false, true);
+    delete saved.result.input_snapshot;
+    saved.result.graph_hash_at_run = computeAnalysisAffectingGraphHash(before)!;
+    saved.result.enrichment = stampRunAnalysisProjection(saved.result.enrichment!);
+    expect(deriveAnalysisFreshness([saved], saved.result.graph_hash_at_run, undefined,
+      { currentGraph: before, analysisInvalidatedAt: null }).freshness).toBe('fresh');
+    expect((await executeOptionInterventionBatch(request(before, clear), persistence.fresh())).kind).toBe('committed');
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(await persistence.fresh().readAnalysisInvalidatedAt!(SCENARIO_ID)).toBeNull();
+    const cleanHash = computeAnalysisAffectingGraphHash(cold)!;
+    expect(cleanHash).not.toBe(saved.result.graph_hash_at_run);
+    expect(deriveAnalysisFreshness([saved], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: null })).toMatchObject({ freshness: 'stale', reason: 'graph_hash_diverged' });
+    const rerun = clone(saved); rerun.result.graph_hash_at_run = cleanHash;
+    expect(deriveAnalysisFreshness([rerun], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: null }).freshness).toBe('fresh');
+  });
+
+
+  // Restoring the stamped Run's complete input identity and admission permits reuse of that result.
+  it('ACCEPTED: stamped gap-free Run is FRESH after add-then-clear restores its complete analysis identity and admission', async () => {
+    const before = canonicalGraph(); const persistence = jsonStore(before);
+    const cleanHash = computeAnalysisAffectingGraphHash(before)!;
+    const saved = legacyRun('node', false, true);
+    saved.result.graph_hash_at_run = cleanHash;
+    saved.result.enrichment = stampRunAnalysisProjection(saved.result.enrichment!);
+    saved.result.scenario_id = SCENARIO_ID;
+    saved.result.leading_option_id = 'option';
+    // Populated, gap-free admission snapshot: the counterexample does not
+    // depend on omitting the snapshot that today's producer always records.
+    saved.result.input_snapshot!.options = [
+      { option_id: 'option', settings: [{ factor_id: 'factor', encoded: 0.2 }, { factor_id: 'other_factor', encoded: 0.55 }] },
+      { option_id: 'other_option', settings: [{ factor_id: 'factor', encoded: 0.7 }, { factor_id: 'other_factor', encoded: 0.65 }] },
+    ];
+    expect(deriveAnalysisFreshness([saved], cleanHash, undefined, { currentGraph: before }).freshness).toBe('fresh');
+    expect((await executeOptionInterventionBatch(request(before, [{ optionId: 'option', mechanisms: [GAP] }]), persistence.fresh())).kind).toBe('committed');
+    const gapped = persistence.durableGraph();
+    expect(deriveAnalysisFreshness([saved], computeAnalysisAffectingGraphHash(gapped), undefined,
+      { currentGraph: gapped }).freshness).toBe('stale');
+    expect((await executeOptionInterventionBatch({ ...request(gapped, clear),
+      turnId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }, persistence.fresh())).kind).toBe('committed');
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    expect(cold).toEqual(before); expect(computeAnalysisAffectingGraphHash(cold)).toBe(cleanHash);
+    expect(await persistence.fresh().readAnalysisInvalidatedAt!(SCENARIO_ID)).toBeNull();
+    const edits = persistence.durableRows().flatMap(row => row.handler_facts).reverse();
+    expect(deriveAnalysisFreshness([...edits, saved], cleanHash, undefined,
+      { currentGraph: cold }).freshness).toBe('stale');
+    expect(deriveAnalysisFreshness([saved], cleanHash, undefined,
+      { currentGraph: cold, analysisInvalidatedAt: null })).toMatchObject({ freshness: 'fresh', reason: 'graph_hash_match' });
+  });
+
 });

@@ -236,6 +236,9 @@ function optionEntryFromNode(node: Dict): Dict {
     status: hasNumericIntervention(interventions) ? 'ready' : 'needs_encoding',
     interventions,
   };
+  for (const key of ['unresolved_targets', 'user_questions']) {
+    if (Object.hasOwn(node, key)) entry[key] = structuredClone(node[key]);
+  }
   if (node.is_baseline === true) entry.is_baseline = true;
   return entry;
 }

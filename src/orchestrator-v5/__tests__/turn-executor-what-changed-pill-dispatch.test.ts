@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../context/analysis-projection-policy.js';
 /**
  * F2 CHANGE B — dispatch-level proof that a TYPED `what_changed` chip_click
  * reaches the run-comparison mechanism through the turn executor.
@@ -153,6 +154,7 @@ function makeRunFact(opts: {
       graph_hash_at_run: opts.graphHashAtRun ?? hashOf(READY_GRAPH),
       computed_at: opts.computedAt,
       enrichment: {
+        ...stampRunAnalysisProjection({}), // Current producer: gap-free input identity is attested.
         // ⚠ ADDED. This fixture expressed robustness only through
         // `robustness_synthesis`, which the advice gate reads for its own band —
         // and which appears in **0 of 41** real September captures. The separation

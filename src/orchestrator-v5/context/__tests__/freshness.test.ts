@@ -1,3 +1,4 @@
+import { stampRunAnalysisProjection } from '../analysis-projection-policy.js';
 /**
  * Unit tests for deriveAnalysisFreshness — V5 state-trust freshness
  * derivation. Exercises the full decision tree against curated
@@ -27,7 +28,7 @@ interface FactOpts {
 }
 
 function mkRunAnalysisFact(opts: FactOpts = {}): RunAnalysisHandlerFact {
-  const enrichment: Record<string, unknown> = {};
+  const enrichment: Record<string, unknown> = stampRunAnalysisProjection({});
   if (opts.status !== undefined && opts.status !== null) {
     enrichment.analysis_status = opts.status;
   }
@@ -679,12 +680,12 @@ describe('deriveAnalysisFreshness — option-identity guard', () => {
     optionIds?: readonly string[];
     computedAt?: string | null;
   }): RunAnalysisHandlerFact {
-    const enrichment: Record<string, unknown> = {
+    const enrichment: Record<string, unknown> = stampRunAnalysisProjection({
       option_comparison: (opts.optionIds ?? []).map((id) => ({
         option_id: id,
         win_probability: 0.5,
       })),
-    };
+    });
     const result: Record<string, unknown> = {
       scenario_id: SCENARIO_ID,
       leading_option_id: opts.leader ?? null,

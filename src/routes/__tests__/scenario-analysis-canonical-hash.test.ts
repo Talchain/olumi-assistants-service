@@ -1,3 +1,8 @@
+import { stampRunAnalysisProjection } from '../../orchestrator-v5/context/analysis-projection-policy.js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseSessionStore } from '../../orchestrator-v5/session/supabase-store.js';
+import { SessionLRUCache } from '../../orchestrator-v5/session/cache.js';
+import { legacyRun } from '../../orchestrator-v5/context/__tests__/legacy-gap-projection.fixture.js';
 /**
  * CS-AN-2: THE RELOAD MUST JUDGE FRESHNESS WITH THE HASH THE RUN STAMPED.
  *
@@ -434,4 +439,93 @@ describe('CS-AN-2 — the reload judges freshness with the hash the run stamped'
     expect(body.graph, 'the reload still serves the graph').not.toBeNull();
     expect(body.graph_hash).toBe(runHash);
   });
+});
+
+// The Run compared only B/C. Clearing A's final gap admits A/B/C without changing legacy numeric bytes.
+describe('legacy clearance outside the hot window survives a real durable reader and cold reload', () => {
+  it.each(['complete', 'failed', 'capped', 'run failed'] as const)('withholds the exact B/C Run after A is admitted (%s edit read)', async state => {
+    const graph = makeBase();
+    const excludedId = 'opt_excluded';
+    (graph.nodes as Dict[]).push({ id: excludedId, kind: 'option', label: 'Hybrid',
+      interventions: { fac_annual_cost: { value: 0.3, source: 'user_specified' } } });
+    (graph.edges as Dict[]).push(...(graph.edges as Dict[]).filter(edge => edge.from === 'opt_hybrid' || edge.to === 'opt_hybrid')
+      .map(edge => ({ ...structuredClone(edge), from: edge.from === 'opt_hybrid' ? excludedId : edge.from, to: edge.to === 'opt_hybrid' ? excludedId : edge.to })));
+    const hash = await runStampFor(graph);
+    const before = structuredClone(graph);
+    (before.nodes as Dict[]).find(node => node.id === excludedId)!.unresolved_targets = ['unmapped demand'];
+    expect(computeAnalysisAffectingGraphHash(before as never, 'legacy')).toBe(hash);
+    const fact = runFact(hash);
+    fact.result.run_id = 'legacy-only-b-c';
+    expect(Object.keys(fact.result.win_probabilities!)).toEqual(['opt_hybrid', 'opt_status_quo']);
+    expect(fact.result).not.toHaveProperty('input_snapshot');
+    const edit = { fact_type: 'edit_graph', fact_version: 1, result: {
+      edit_kind: 'option_configuration', status: 'applied', operations_count: 1,
+      affected_entities: [{ kind: 'option', label: 'Hybrid' }], graph_hash_before: hash,
+      graph_hash_after: hash, safe_summary: 'Cleared the excluded option gap', impact: 'moderate', rerun_recommended: true,
+    } };
+    const runRow = { id: RUN_ROW, scenario_id: SCENARIO, v5_conversation_turn_id: RUN_TURN,
+      created_at: RUN_AT, handler_id: 'run_analysis', action_type: 'run_analysis', noop: false,
+      payload: { fact_type: fact.fact_type, fact_version: fact.fact_version, result: fact.result } };
+    const editRow = { ...runRow, id: 'fact-clear-excluded-a', created_at: '2026-09-25T18:00:00.000Z',
+      handler_id: 'edit_graph', action_type: 'edit_graph', payload: edit };
+    const queries: Dict[] = [];
+    const client = { from: () => {
+      const filters: Dict = {}; queries.push(filters);
+      const chain = {
+        select: () => chain,
+        eq: (key: string, value: unknown) => { filters[key] = value; return chain; },
+        gt: (key: string, value: unknown) => { filters['after_' + key] = value; return chain; },
+        order: () => chain,
+        limit: async () => filters.handler_id === 'run_analysis'
+          ? { data: [runRow], count: 1, error: state === 'run failed' ? { message: 'durable Run read failed' } : null }
+          : { data: state === 'complete' ? [editRow] : [], count: state === 'capped' ? 22 : state === 'complete' ? 1 : 0,
+            error: state === 'failed' ? { message: 'durable edit read failed' } : null },
+      }; return chain;
+    } } as unknown as SupabaseClient;
+    const store = new SupabaseSessionStore(client, new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }), { defaultReadLimit: 20 });
+    loadGraphAndBriefText.mockResolvedValue({ graph, briefText: null });
+    readRecent.mockResolvedValue(state === 'run failed' ? [{ id: RUN_TURN }] : []); readFactsFor.mockResolvedValue([]);
+    readFactsWithTurnFor.mockResolvedValue(state === 'run failed' ? [{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT, turn_id: RUN_TURN }] : []);
+    readScenarioRunAnalysisFactsFor.mockImplementation((id, limit) => store.readScenarioRunAnalysisFactsFor(id, limit));
+    const body = await reload();
+    expect(runStateOf(body)).toMatchObject({ kind: 'complete_stale', computed_at: RUN_AT });
+    expect(queries).toHaveLength(state === 'run failed' ? 1 : 2);
+    if (state !== 'run failed') expect(queries[1]).toMatchObject({ scenario_id: SCENARIO, handler_id: 'edit_graph', after_created_at: RUN_AT });
+    expect(body.analysis_result).toBeNull();
+    expect(body.graph_hash).toBe(hash);
+    // Equal labels cannot substitute the newly admitted A for either of the saved B/C identities.
+    expect((body.graph as Dict).nodes).toEqual(graph.nodes);
+  });
+
+  it('an explicit excluded-option admission snapshot also binds the exclusion by id', async () => {
+    const graph = makeBase();
+    (graph.nodes as Dict[]).push({ id: 'opt_excluded', kind: 'option', label: 'Hybrid', interventions: { fac_annual_cost: { value: 0.3 } } });
+    (graph.edges as Dict[]).push(...(graph.edges as Dict[]).filter(edge => edge.from === 'opt_hybrid' || edge.to === 'opt_hybrid')
+      .map(edge => ({ ...structuredClone(edge), from: edge.from === 'opt_hybrid' ? 'opt_excluded' : edge.from, to: edge.to === 'opt_hybrid' ? 'opt_excluded' : edge.to })));
+    const hash = await runStampFor(graph); const fact = runFact(hash);
+    const input = legacyRun('node').result.input_snapshot!;
+    fact.result.input_snapshot = { ...input, options: [
+      { option_id: 'opt_hybrid', settings: [{ factor_id: 'fac_annual_cost', encoded: 0.8 }] },
+      { option_id: 'opt_status_quo', settings: [{ factor_id: 'fac_annual_cost', encoded: 0.6 }] },
+    ], options_not_sent: [{ option_id: 'opt_excluded', reason: 'not_analysable' }] };
+    seed(graph, hash); readRecent.mockResolvedValue([]); readFactsWithTurnFor.mockResolvedValue([]);
+    readScenarioRunAnalysisFactsFor.mockResolvedValue({ facts: [{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT }], total_count: 1 });
+    const body = await reload();
+    expect(runStateOf(body)).toMatchObject({ kind: 'complete_stale', computed_at: RUN_AT });
+    expect(body.analysis_result).toBeNull();
+  });
+});
+
+
+it('healthy gap-free Run wire bytes stay identical when the private projection stamp is present', async () => {
+  const graph = makeBase(); const hash = await runStampFor(graph);
+  seed(graph, hash); const legacyBody = await reload(); delete legacyBody.request_id;
+  const fact = runFact(hash); fact.result.enrichment = stampRunAnalysisProjection(fact.result.enrichment!);
+  readFactsWithTurnFor.mockResolvedValue([{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT, turn_id: RUN_TURN }]);
+  readScenarioRunAnalysisFactsFor.mockResolvedValue({ total_count: 1,
+    facts: [{ fact, fact_row_id: RUN_ROW, fact_created_at: RUN_AT }],
+    legacy_edit_facts: { since: null, facts: [], readOk: false, total_count: null },
+  });
+  const stampedBody = await reload(); delete stampedBody.request_id;
+  expect(JSON.stringify(stampedBody)).toBe(JSON.stringify(legacyBody));
 });

@@ -55,6 +55,7 @@ import type { BoundaryError } from '@talchain/schemas/boundary';
 import { SelectedElementRefSchema } from '@talchain/schemas/boundary';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
+import { NodeV3 } from '../../schemas/cee-v3.js';
 import { assertIngressGraphNumericBounds } from '../../validators/numeric-bounds.js';
 
 export const REQUEST_EXTENSIONS_VALIDATOR_NAME = 'V5RequestExtensions';
@@ -95,7 +96,23 @@ export const GraphStateIngressSchema = z
     goal_node_id: z.string().optional(),
     goal_constraints: z.array(z.unknown()).optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((graph, ctx) => {
+    // Validate the existing NodeV3 carrier contract on both placements before
+    // any registration append, including first writes and newly added options.
+    for (const carrier of ['nodes', 'options'] as const) {
+      for (const [index, row] of (graph[carrier] ?? []).entries()) {
+        if (row === null || typeof row !== 'object' || Array.isArray(row)) continue;
+        for (const key of ['unresolved_targets', 'user_questions'] as const) {
+          if (!Object.hasOwn(row, key)) continue;
+          const value = (row as Record<string, unknown>)[key];
+          if (value === undefined || !NodeV3.shape[key].safeParse(value).success) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: [carrier, index, key], message: 'Expected an array of strings' });
+          }
+        }
+      }
+    }
+  });
 
 /**
  * Permissive analysis schema. Per plan correction #1: analysis arrives in
