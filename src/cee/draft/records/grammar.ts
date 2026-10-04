@@ -1,6 +1,11 @@
 /**
  * THE DRAFT RECORDS GRAMMAR — what the draft model emits, INSTEAD of a graph.
  *
+ * S1 offline compile spike (4 Oct 2026): typed evidence extensions below exceed
+ * the legacy Anthropic budget proxies. They are verified with the new OpenAI
+ * strict bridge only. Do not promote this candidate until those budget failures
+ * and the published effect-range carrier gap are resolved.
+ *
  * ── THE THREE SHAPES, NAMED APART (trap 21) ────────────────────────────────
  * There are three distinct shapes in this mechanism and they must never share a
  * name:
@@ -457,13 +462,67 @@ export type DraftRecordEffect = (typeof DRAFT_RECORD_EFFECTS)[number];
 // ── The wire shapes (TS mirrors of the JSON Schema below) ───────────────────
 
 /** What the user said. `id` is absent BY DESIGN — see design note 1. */
+/** UTF-16 offsets within the owning verbatim source_quote. */
+export interface DraftQuoteSpan { start: number; end: number }
+/** A range belongs to this exact value, never to another number in its quote. */
+export interface DraftValueRange {
+  low: number;
+  high: number;
+  unit: string;
+  meaning?: "min_max" | "likely_range";
+  low_span: DraftQuoteSpan;
+  high_span: DraftQuoteSpan;
+}
+/** Signed relationship transcription, owned by a stated cause, independent of a proposed link. */
+export interface DraftStatedRelationship {
+  from_quantity: number;
+  to_quantity: number;
+  amount: number;
+  amount_unit: string;
+  per_source_change: number;
+  per_source_change_unit: string;
+  amount_span: DraftQuoteSpan;
+  source_span: DraftQuoteSpan;
+}
+
+const QUOTE_SPAN_SCHEMA = {
+  type: "object", properties: { start: { type: "integer" }, end: { type: "integer" } },
+  required: ["start", "end"], additionalProperties: false,
+};
+const VALUE_RANGE_SCHEMA = {
+  type: "object", properties: {
+    low: { type: "number" }, high: { type: "number" }, unit: { type: "string" }, meaning: { type: "string", enum: ["min_max", "likely_range"] },
+    low_span: QUOTE_SPAN_SCHEMA, high_span: QUOTE_SPAN_SCHEMA,
+  }, required: ["low", "high", "unit", "low_span", "high_span"], additionalProperties: false,
+};
+const STATED_RELATIONSHIP_SCHEMA = {
+  type: "object", properties: {
+    from_quantity: { type: "integer" }, to_quantity: { type: "integer" },
+    amount: { type: "number" }, amount_unit: { type: "string" },
+    per_source_change: { type: "number" }, per_source_change_unit: { type: "string" },
+    amount_span: QUOTE_SPAN_SCHEMA, source_span: QUOTE_SPAN_SCHEMA,
+  }, required: ["from_quantity", "to_quantity", "amount", "amount_unit", "per_source_change", "per_source_change_unit", "amount_span", "source_span"],
+  additionalProperties: false,
+};
+
 export interface DraftStatedItem {
   kind: DraftRecordStatedKind;
   /** REQUIRED, verbatim. Verified by substring location against the brief. */
   source_quote: string;
   value?: number;
+  value_span?: DraftQuoteSpan;
+  unit_span?: DraftQuoteSpan;
   /** Explicit current level when the same quoted span also names a baseline. */
   baseline?: number;
+  /** Identity is a stated_items index; absence supplies no metric identity. */
+  quantity?: number;
+  /** Goal only: quoted baseline item for the SAME quantity. */
+  baseline_ref?: number;
+  range?: DraftValueRange;
+  relationship?: DraftStatedRelationship;
+  horizon_months?: number;
+  horizon_ref?: number;
+  direction_span?: DraftQuoteSpan;
   unit?: string;
   role?: DraftRecordRole;
   /**
@@ -545,6 +604,9 @@ export interface DraftInferenceClaim {
   from_claim?: number;
   to_stated?: number;
   to_claim?: number;
+  quantity?: number;
+  /** Range on an option link belongs to sets_to. */
+  range?: DraftValueRange;
   effect?: DraftRecordEffect;
   /** A user-quoted natural effect. All four fields are required when present. */
   effect_detail?: {
@@ -552,6 +614,7 @@ export interface DraftInferenceClaim {
     amount_unit: string;
     per_source_change: number;
     per_source_change_unit: string;
+    range?: DraftValueRange;
   };
   strength?: number;
   category?: DraftRecordCategory;
@@ -654,7 +717,11 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
             kind: { type: "string", enum: [...DRAFT_RECORD_STATED_KINDS] },
             source_quote: { type: "string" },
             value: { type: "number" },
+            value_span: QUOTE_SPAN_SCHEMA, unit_span: QUOTE_SPAN_SCHEMA,
             baseline: { type: "number" },
+            quantity: { type: "integer" }, baseline_ref: { type: "integer" },
+            range: VALUE_RANGE_SCHEMA, relationship: STATED_RELATIONSHIP_SCHEMA,
+            horizon_months: { type: "number" }, horizon_ref: { type: "integer" }, direction_span: QUOTE_SPAN_SCHEMA,
             unit: { type: "string" },
             role: { type: "string", enum: [...DRAFT_RECORD_ROLES] },
             // What convention `value` is written in. See the interface note:
@@ -733,6 +800,8 @@ export function buildDraftClaimItemSchema(): Record<string, unknown> {
       [DRAFT_RECORD_REF_FIELDS.fromClaim]: { type: "integer" },
       [DRAFT_RECORD_REF_FIELDS.toStated]: { type: "integer" },
       [DRAFT_RECORD_REF_FIELDS.toClaim]: { type: "integer" },
+      quantity: { type: "integer" },
+      range: VALUE_RANGE_SCHEMA,
       effect: { type: "string", enum: [...DRAFT_RECORD_EFFECTS] },
       effect_detail: {
         type: "object",
@@ -741,6 +810,7 @@ export function buildDraftClaimItemSchema(): Record<string, unknown> {
           amount_unit: { type: "string" },
           per_source_change: { type: "number" },
           per_source_change_unit: { type: "string" },
+          range: VALUE_RANGE_SCHEMA,
         },
         required: ["amount", "amount_unit", "per_source_change", "per_source_change_unit"],
         additionalProperties: false,

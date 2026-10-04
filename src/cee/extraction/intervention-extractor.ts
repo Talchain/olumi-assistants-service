@@ -71,6 +71,7 @@ export interface EdgeHint {
 
 /** Existing intervention fields carried from the deterministic records projector. */
 export interface V4InterventionBinding {
+  range?: InterventionV3T["range"];
   raw_value: number;
   unit?: string;
   source: "brief_extraction" | "cee_hypothesis";
@@ -1089,6 +1090,7 @@ function buildInterventionsFromV4Data(
         raw_value: binding.raw_value,
         ...(binding.unit !== undefined ? { unit: binding.unit } : {}),
         source: "brief_extraction",
+        ...(binding.range !== undefined ? { range: binding.range } : {}),
         target_match: {
           node_id: factorId,
           match_type: "exact_id",
