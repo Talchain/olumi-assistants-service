@@ -31,6 +31,7 @@ import { createHash } from 'node:crypto';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import { isDirectedEdge } from '../../schemas/graph.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
@@ -117,11 +118,16 @@ export function linkEffectEdgeToken(graph: unknown, from: string, to: string): s
  * `target_ambiguous` rule, `edge-strength-edit.ts`). A parallel copy of the endpoint pair, or two nodes under one end's
  * id, is never resolved by array order: the card names neither copy, so a write to "the first" is a guess. The token,
  * every dry run and every write read through this; a missing pair stays `edge_not_found`.
+ * ⛔ ONLY A CAUSAL LINK IS SIZED: a bidirected edge is an unmeasured-confounder annotation the analysis never simulates
+ * (`schemas/graph.ts` `isDirectedEdge`), so a user's "X moves Y by N" is never written onto it (adversarial review of
+ * #2561, pre-existing). A pair holding only a confounder has no link to size; a directed link beside one is THE link.
  */
 export function linkEffectTargetOf(graph: unknown, from: string, to: string):
   | { readonly kind: 'one'; readonly edge: Rec }
   | { readonly kind: 'refused'; readonly reason: 'edge_not_found' | 'target_ambiguous' } {
-  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter((e): e is Rec => isRec(e) && e.from === from && e.to === to) : [];
+  const edges = isRec(graph) && Array.isArray(graph.edges)
+    ? graph.edges.filter((e): e is Rec => isRec(e) && e.from === from && e.to === to && isDirectedEdge(e as Parameters<typeof isDirectedEdge>[0]))
+    : [];
   const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
   const sources = nodes.filter((n) => n.id === from).length;
   const targets = nodes.filter((n) => n.id === to).length;

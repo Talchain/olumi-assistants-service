@@ -375,3 +375,18 @@ describe('a parallel link prepares nothing and an approval over one writes nothi
     expect(w.graph.edges.filter((e: Json) => e.provenance?.magnitude === 'user_stated')).toEqual([]);
   });
 });
+
+describe('a confounder (bidirected) edge is never the link a figure is recorded on', () => {
+  it.each([false, true])('RED: a pair holding only a confounder prepares nothing and writes nothing (grouped=%s)', async (grouped) => {
+    const w = world();
+    const edge = w.graph.edges.find((e: Json) => e.from === COPY && e.to === TARGET);
+    edge.edge_type = 'bidirected';
+    const before = structuredClone(edge);
+    const args = { ...ARGS, from_label: COPY };
+    const result = await w.caps.proposeLinkEffect!(ctx(), grouped ? { links: [args] } : args) as Json;
+    expect(result).toEqual(expect.objectContaining({ ok: false, mutated: false, refusal: 'no_such_link' }));
+    expect(w.store.size()).toBe(0);
+    expect(w.sent).toEqual([]);
+    expect(w.graph.edges.find((e: Json) => e.from === COPY && e.to === TARGET)).toEqual(before);
+  });
+});

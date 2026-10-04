@@ -154,6 +154,23 @@ describe('a % source answered in points, through the real door: recorded, said a
     expect(JSON.stringify(persisted)).toBe(stored);
   });
 
+  it.each([false, true])('RED: a directed link beside a confounder on the same pair → applied: true, the confounder byte-equal (confounder first=%s)', async (first) => {
+    const g = persisted as { edges: Record<string, any>[] };
+    const directed = g.edges.find((e) => e.from === 'monthly_churn' && e.to === 'pro_plan_paying_subscribers')!;
+    const confounder = { ...structuredClone(directed), edge_type: 'bidirected', provenance: { source: 'cee_hypothesis' } };
+    g.edges = first ? [confounder, ...g.edges] : [...g.edges, confounder];
+    const before = structuredClone(confounder);
+    const a = agent(`Honestly: ${CHURN_PERCENT_QUOTE}.`);
+    const p = await a.caps.proposeLinkEffect!(a.ctx, { ...CHURN, per_source_change_unit: 'percent per month', quote: CHURN_PERCENT_QUOTE }) as Record<string, any>;
+    expect(p.ok, JSON.stringify(p)).toBe(true);
+    const out = await a.caps.authoriseChange(pressing(a, p), { proposal_id: String(p.proposal_id) }) as Record<string, any>;
+    expect(out, JSON.stringify(out)).toEqual(expect.objectContaining({ ok: true, mutated: true, applied: true }));
+    expect(rows.size, 'ONE commit').toBe(1);
+    const stored = (persisted as { edges: Record<string, any>[] }).edges.filter((e) => e.from === 'monthly_churn' && e.to === 'pro_plan_paying_subscribers');
+    expect(stored.find((e) => e.edge_type === 'bidirected')).toEqual(before);
+    expect(stored.find((e) => e.edge_type !== 'bidirected')?.provenance).toEqual(expect.objectContaining({ source: 'user_specified', magnitude: 'user_stated' }));
+  });
+
   it('control: a door that commits but stores ANOTHER figure is still not_verified (the read-back is not loosened)', async () => {
     const a = agent(`Honestly: ${CHURN_QUOTE}.`);
     const p = await a.caps.proposeLinkEffect!(a.ctx, CHURN) as Record<string, any>;
