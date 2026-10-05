@@ -16,7 +16,7 @@ function boundMatches(quote: string, span: DraftQuoteSpan, value: number, unit?:
 
 /** A typed range is checked, never inferred from wording or borrowed from a neighbour. */
 export function admittedValueRange(range: DraftValueRange | undefined, quote: string, value: number, unit: string | undefined): DraftValueRange | undefined {
-  if (range === undefined || unit === undefined || !sameUnit(range.unit, unit)
+  if (range === undefined || range.low_span === undefined || range.high_span === undefined || unit === undefined || !sameUnit(range.unit, unit)
     || ![range.low, range.high, value].every(Number.isFinite)
     || range.low > value || value > range.high || range.low >= range.high
     || range.low_span.end > range.high_span.start

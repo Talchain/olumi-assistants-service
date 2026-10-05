@@ -114,7 +114,7 @@ export function statedEffectQuoteMatches(
   detail: StatedEffectDetail,
   authority?: DraftStatedRelationship,
 ): boolean {
-  if (authority === undefined || !statedEffectFiguresMatch(quote, detail)) return false;
+  if (authority === undefined || authority.amount_span === undefined || authority.source_span === undefined || !statedEffectFiguresMatch(quote, detail)) return false;
   if (authority.amount !== detail.amount || authority.per_source_change !== detail.per_source_change
     || !sameUnit(authority.amount_unit, detail.amount_unit)
     || !sameUnit(authority.per_source_change_unit, detail.per_source_change_unit)) return false;

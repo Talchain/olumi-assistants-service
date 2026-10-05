@@ -1,6 +1,6 @@
 /** Offline construction spike. Deliberately has no live-route consumer or flag. */
-import { buildDraftRecordsSchema, type DraftRecordSet } from '../../../cee/draft/records/grammar.js';
-import { DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction.js';
+import { buildVNextDraftRecordsSchema, type DraftRecordSet } from '../../../cee/draft/records/grammar.js';
+import { V_NEXT_DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction-vnext.js';
 import { reconcileStatedDispositions } from '../../../cee/draft/records/stated-dispositions.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
 import { projectGraphAndOptionsToV3 } from '../../../cee/transforms/schema-v3.js';
@@ -33,11 +33,11 @@ export function buildStrictDraftRecordsSchema(): JsonSchema {
     if (object(schema.items)) out.items = nullable(schema.items);
     return out;
   };
-  return strictForTheDrafter(nullable(buildDraftRecordsSchema()));
+  return strictForTheDrafter(nullable(buildVNextDraftRecordsSchema()));
 }
 
 /** Null means omitted only for a key that the records grammar actually marks optional. */
-export function omitOptionalRecordNulls(value: unknown, schema: JsonSchema = buildDraftRecordsSchema()): unknown {
+export function omitOptionalRecordNulls(value: unknown, schema: JsonSchema = buildVNextDraftRecordsSchema()): unknown {
   if (Array.isArray(value) && object(schema.items)) return value.map(item => omitOptionalRecordNulls(item, schema.items as JsonSchema));
   if (!object(value) || !object(schema.properties)) return value;
   const properties = schema.properties;
@@ -59,7 +59,7 @@ export async function buildModelFromRecords(
   let raw: unknown;
   try {
     const out = await callStructured({
-      model: budget.model, instructions: DRAFT_RECORDS_INSTRUCTION, input: brief,
+      model: budget.model, instructions: V_NEXT_DRAFT_RECORDS_INSTRUCTION, input: brief,
       max_output_tokens: budget.max_output_tokens, reasoning_effort: budget.reasoning_effort,
       schema: buildStrictDraftRecordsSchema(),
     });
