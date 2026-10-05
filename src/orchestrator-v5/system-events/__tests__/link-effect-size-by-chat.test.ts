@@ -424,6 +424,64 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(prepared.ask).toBeDefined();
   });
 
+  // Codex buddy r4 (5 Oct): each counterexample, verbatim. A run must be a COMPLETE phrase holding the exact head token.
+  it.each([
+    ['revenue tax', 'Marketing spend', 'Revenue', undefined, 'Each £1,000 of marketing spend brings in £3 of revenue tax for revenue', 'GBP'],
+    ['marginal ≠ margin', 'Operating margin', 'Gross margin', undefined, 'Each 5 percentage points of operating margin costs us 2 percentage points of gross marginal tax rates for gross margin', 'percentage points'],
+    ['count noun without its head', 'Marketing spend', 'Enterprise customers', 'enterprise customers', 'Each £1,000 of marketing spend brings in £3 of enterprise revenue for enterprise customers', 'GBP'],
+    ['"per" before a numbered period', 'Marketing spend', 'Revenue per month', undefined, 'Each £1,000 of marketing spend brings in £3 of revenue per 12 months', 'GBP'],
+  ] as const)('H4 the target is not adopted: %s', (_n, sourceLabel, targetLabel, countNoun, said, amountUnit) => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: sourceLabel, kind: 'factor', ref: 'F2' });
+    Object.assign(nodeOf(graph, TARGET), { label: targetLabel, ...(countNoun !== undefined ? { count_noun: countNoun } : {}) });
+    graph.ref_high_water.F = 2;
+    const perUnit = amountUnit === 'GBP' ? 'GBP' : 'percentage points';
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: amountUnit === 'GBP' ? 3 : -2, amount_unit: amountUnit, per_source_change: amountUnit === 'GBP' ? 1000 : 5, per_source_change_unit: perUnit }, said);
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+    expect(prepared.ask).toBeDefined();
+  });
+
+  it('H4 backward: a phrase completed on its LEFT by another word ("gross revenue rising by £3") never names Revenue', () => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2' });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Revenue' });
+    graph.ref_high_water.F = 2;
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: 3, amount_unit: 'GBP', per_source_change: 1000, per_source_change_unit: 'GBP' }, 'Each £1,000 of marketing spend sees gross revenue rising by £3');
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+  });
+
+  // Discriminating twins: COMPLETE phrases (ending at a full stop), so only the head rule can refuse them.
+  it('H4 head by exact token: a complete "… of gross marginal." never names Gross margin', () => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Operating margin' });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Gross margin' });
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET, EFFECT,
+      'Each 5 percentage points of operating margin costs us 2 percentage points of gross marginal.');
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+  });
+
+  it('H4 count noun needs its head token: a complete "… of enterprise." never names Enterprise customers', () => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2' });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Enterprise customers', count_noun: 'enterprise customers' });
+    graph.ref_high_water.F = 2;
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: 3, amount_unit: 'GBP', per_source_change: 1000, per_source_change_unit: 'GBP' }, 'Each £1,000 of marketing spend brings in £3 of enterprise.');
+    expect(prepared.unit_readings.some((r) => r.node_id === TARGET)).toBe(false);
+  });
+
+  it('H4 control: a complete phrase still names the end ("… £3 of revenue, every month")', () => {
+    const graph = unsizedGraph();
+    Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', kind: 'factor', ref: 'F2' });
+    Object.assign(nodeOf(graph, TARGET), { label: 'Revenue' });
+    graph.ref_high_water.F = 2;
+    const prepared = prepareLinkEffectUnitReadings(graph, SOURCE, TARGET,
+      { amount: 3, amount_unit: 'GBP', per_source_change: 1000, per_source_change_unit: 'GBP' }, 'Each £1,000 of marketing spend brings in £3 of revenue, every month');
+    expect(prepared.unit_readings.find((r) => r.node_id === TARGET)).toEqual({ node_id: TARGET, unit_reading: reading('GBP', '£3 of revenue') });
+  });
+
   it('R4 own-clause negative: a multiword count noun cannot be adopted from a different counted thing', () => {
     const graph = unsizedGraph();
     Object.assign(nodeOf(graph, SOURCE), { label: 'Marketing spend', scale_frame: 10000 });
