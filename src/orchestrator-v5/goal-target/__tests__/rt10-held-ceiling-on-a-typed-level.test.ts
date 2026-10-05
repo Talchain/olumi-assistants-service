@@ -108,7 +108,7 @@ type Today = { readonly raw: number; readonly cap: number; readonly unit: string
  */
 function goalGraph(goal: {
   readonly id: string; readonly label: string; readonly held?: string; readonly raw?: number; readonly unit: string;
-  readonly cap: number; readonly frame?: string; readonly today?: Today;
+  readonly cap: number; readonly frame?: string; readonly today?: Today; readonly rows?: readonly Rec[];
 }): Graph {
   const node: Rec = {
     id: goal.id, kind: 'goal', label: goal.label,
@@ -134,6 +134,7 @@ function goalGraph(goal: {
       { id: 'fac_lever', kind: 'factor', label: 'Lever', observed_state: { value: 0.5, source: 'brief_extraction' } },
     ],
     edges: [{ from: 'fac_lever', to: goal.id, strength: { mean: 0.6, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' }],
+    ...(goal.rows !== undefined ? { goal_constraints: goal.rows } : {}),
   }) as unknown as Graph;
 }
 
@@ -280,5 +281,38 @@ describe('ceilingTheUserWroteFor: a ceiling is the USER\'S only where the brief 
     ['MC: a qualitative limit, no figure', 'Returns and packing capacity could limit how much of the extra output actually sells.', 1, 'units', false],
   ] as const)('%s → %s', (_n, text, value, unit, expected) => {
     expect(ceilingTheUserWroteFor(value, unit, text)).toBe(expected);
+  });
+});
+
+describe('RT-10 B′ (Science Q1; DL): a held ceiling BESIDE ITS OWN LIMIT ROW on the goal minimises — the approved card\'s pair, no figure needed', () => {
+  const row = (extra: Rec = {}): Rec => ({ constraint_id: 'gc-1', node_id: CHURN.id, operator: '<=', value: 2, unit: '%', label: 'Monthly churn', provenance: 'explicit', ...extra });
+
+  it('⭐ RED: "monthly churn", NO target figure, held `<=` + its `<=` row → minimise, through the REAL wire', async () => {
+    const graph = goalGraph({ ...CHURN, held: '<=', rows: [row()] });
+    expect(resolveGoalDirection(graph, CHURN.id)).toEqual({ direction: 'minimise', provenance: 'stated_comparator' });
+    const req = await plotRequestFor(graph);
+    expect(req.goal_direction).toBe('minimise');
+    expect(directionLogs()).toEqual([expect.objectContaining({ goal_node_id: CHURN.id, provenance: 'stated_comparator' })]);
+  });
+
+  it('a strict `<` held beside its row (`<=` + operator_as_stated `<`) → minimise', () => {
+    expect(resolveGoalDirection(goalGraph({ ...CHURN, held: '<', rows: [row({ operator_as_stated: '<' })] }), CHURN.id)?.direction).toBe('minimise');
+  });
+
+  // Each CONTRAST is the positive pair with ONE thing changed (rows built by `row()`, so every row parses).
+  it.each([
+    ['the row states another comparator (held `<`, row plain `<=`)', '<', [row()]],
+    ['the row is a CHANGE (value_frame change_rel)', '<=', [row({ value: -0.1, value_frame: 'change_rel' })]],
+    ['the row is on ANOTHER node', '<=', [row({ node_id: 'fac_lever', label: 'Lever' })]],
+    ['no row at all (a held ceiling with no figure and no row)', '<=', undefined],
+    ['a held FLOOR beside a ceiling row', '>=', [row()]],
+  ] as const)('CONTRAST: %s → nothing sent', (_n, held, rows) => {
+    const graph = goalGraph({ ...CHURN, held, ...(rows !== undefined ? { rows } : {}) });
+    if (rows !== undefined) expect((graph.goal_constraints ?? []).length, 'PRECONDITION: the row survived the parse').toBe(1);
+    expect(resolveGoalDirection(graph, CHURN.id)).toBeUndefined();
+  });
+
+  it('"cost savings" with no direction stays unattested (the label reads nothing) — B′ says the assumption instead (DL row)', () => {
+    expect(resolveGoalDirection(goalGraph({ id: 'cost_savings', label: 'Cost savings', unit: 'GBP', cap: 100000 }), 'cost_savings')).toBeUndefined();
   });
 });

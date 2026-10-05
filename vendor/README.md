@@ -7,7 +7,24 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.76.0.tgz` ← **THE CURRENT PIN** (SCI-DEEP v1, “Test without this link”)
+### `talchain-schemas-0.77.0.tgz` ← **THE CURRENT PIN** (SPINE X8, a relationship the user stated is the user's)
+
+The published `@talchain/schemas@0.77.0` registry artefact (olumi-schemas #88 → main `b0378e7f` = tag `v0.77.0`),
+byte-identical to the copies DGAI #2506 and PLoT #435 vendor:
+
+```
+sha256 ed6ca2a58beee5166d81abe92d5d7a2359bc7a24820b7f9bd6b70efafd1659ad
+sha1   57f6764c02225a80cd4a8d992acb872724ea1a9f   (= the registry shasum)
+sha512 UntaRpeyLzQhz3NO9slhaUaLpjc5GLzb1Ggc7RPcSLrtCZ6u/BL+T3r5libE9pt4cvJn8NzBsd5rq/3MKW8zwg==   (= the registry integrity)
+```
+
+0.77.0 adds ONE closed `ModelBuildingNoticeKindSchema` member, `stated_relationship_not_used`: a relationship the USER
+stated that the model could not use as written. Before it, such a row could only be counted under `relationship_not_used`,
+which every consumer words as Olumi's ("Connections Olumi proposed…"). In `dist/`, only `boundary/olumi-response.js`, the
+generated constants and the fixtures differ from 0.76.0. Order (DL, SPINE X8): DGAI served 0.77.0 first (13:28Z 5 Oct),
+PLoT second, CEE last. 0.76.0 is no longer vendored.
+
+### `talchain-schemas-0.76.0.tgz` (historical — no longer vendored as of 0.77.0) (SCI-DEEP v1, “Test without this link”)
 
 <!-- talchain-schemas-0.76.0.tgz was built from olumi-schemas PR #86 @71da209c (independently approved) and is not yet on schemas main. -->
 

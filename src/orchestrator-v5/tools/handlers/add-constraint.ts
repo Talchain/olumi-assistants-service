@@ -1045,12 +1045,24 @@ export function createAddConstraintHandler(): HandlerFn {
       const cardGoalDirection = ownsGoalThresholdChannel && invocation.holdsGoalDirection === true
         ? (operatorAsStated ?? operator) : undefined;
       // ⛔ An approved CEILING on the goal (CODEX CEE BUDDY 5918898090; DL 5918915292; AIQ 5919045720) contradicts any
-      // floor held before, so that direction goes (C3: the latest statement replaces). It is not held as `<=`: the
-      // goal's threshold channel carries floors only ("at most stamps nothing"), and a ceiling stamped there is sent no
-      // direction unless proven, so PLoT would score P(goal ≥ ceiling) under "at most" (measured, MG SUCCESSOR 30 Sep).
-      const cardClearsGoalDirection = targetNode.kind === 'goal' && invocation.holdsGoalDirection === true
-        && operator === '<=';
+      // floor held before, so that floor goes (C3: the latest statement replaces). The goal's threshold channel still
+      // carries floors only ("at most stamps nothing": a ceiling stamped there was scored P(goal ≥ ceiling), MG SUCCESSOR
+      // 30 Sep).
+      // ⭐ RT-10 B′ (Science 5 Oct Q1; DL ruling): the approved ceiling IS the user's sense of the goal, so the goal HOLDS
+      // it (`<` when stated strict, else `<=`) instead of losing its direction. `resolveGoalDirection` reads a held ceiling
+      // beside its own approved row on the goal and sends `minimise`, so the run is never left on the maximiser and the
+      // ceiling is never scored as a floor. The assumption line's correction ("set the goal’s target to ‘at most’ and
+      // re-run", `analysis-result-headline.ts`) is this door, so it re-orders.
+      // ⛔ Only where the goal holds NO target figure, or this very figure: the threshold channel is untouched, and a held
+      // ceiling beside a DIFFERENT figure (a floor's £1.2m under an approved "at most £1.4m") would be minimised against
+      // the stale figure. There the direction still goes, exactly as before (the assumption line then says so).
+      const heldFigure = (targetNode as { goal_threshold_raw?: unknown }).goal_threshold_raw;
+      const ceilingMatchesHeldFigure = heldFigure === undefined || heldFigure === null || heldFigure === params.value;
+      const cardIsAGoalCeiling = targetNode.kind === 'goal' && invocation.holdsGoalDirection === true && operator === '<=';
+      const cardGoalCeiling = cardIsAGoalCeiling && ceilingMatchesHeldFigure ? (operatorAsStated ?? operator) : undefined;
+      const cardClearsGoalDirection = cardIsAGoalCeiling && !ceilingMatchesHeldFigure;
       const directionDisagrees = (cardGoalDirection !== undefined && targetNode.goal_direction !== cardGoalDirection)
+        || (cardGoalCeiling !== undefined && targetNode.goal_direction !== cardGoalCeiling)
         || (cardClearsGoalDirection && targetNode.goal_direction !== undefined && targetNode.goal_direction !== null);
       const rowValueUnchanged =
         !directionDisagrees &&
@@ -1384,9 +1396,10 @@ export function createAddConstraintHandler(): HandlerFn {
               ? list
               : [...list, constraintParse.data];
         clone.goal_constraints = next;
-        if (cardClearsGoalDirection) {
+        if (cardGoalCeiling !== undefined || cardClearsGoalDirection) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
-          if (goalNode !== undefined) delete (goalNode as { goal_direction?: unknown }).goal_direction;
+          if (goalNode !== undefined && cardGoalCeiling !== undefined) (goalNode as { goal_direction?: unknown }).goal_direction = cardGoalCeiling;
+          else if (goalNode !== undefined) delete (goalNode as { goal_direction?: unknown }).goal_direction;
         }
         // ⭐ D1 B: the frame the goal was read on before this write moved its level (see the stamp below), else undefined.
         let levelFrameMovedFrom: number | undefined;

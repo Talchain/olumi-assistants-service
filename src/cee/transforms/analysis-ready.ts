@@ -675,27 +675,32 @@ function buildInterventionDetail(
   // The native option quantity survives in raw_interventions even when a zero
   // baseline cannot identify a divisor (19 Sep capture: £10000 beside .05).
   // Consume that option-owned carrier before trying to invert a calculation.
-  // Percent raw carriers still include both record conventions (.18 and 18);
-  // no per-intervention declaration reaches this boundary. Preserve their
-  // existing scale-based display route instead of treating every raw as 18%.
-  const carriedNativeValue = !usesPercentageDisplay && typeof carriedRawValue === "number" &&
-    Number.isFinite(carriedRawValue) ? carriedRawValue : null;
+  const scale = resolveMagnitudeScale(os);
+  const storedFrame = factorNode?.scale_frame;
+  const hasStoredFrame = typeof storedFrame === "number" && Number.isFinite(storedFrame) && storedFrame > 1;
+  const frame = hasStoredFrame
+    ? resolveScaleFrame({ storedFrame, value: os?.value, raw_value: os?.raw_value }) : undefined;
+  // Conflicting conversion evidence still cannot license a native amount.
+  const displayScale = hasStoredFrame
+    ? frame !== undefined && (scale.kind !== "cap" || scale.cap === frame)
+      ? { kind: "frame" as const, frame } : { kind: "unknown" as const }
+    : scale;
+  // A percent cap > 1 can verify an option-owned carrier's convention, but
+  // cannot replace the shared inverse when deriving an uncarried amount.
+  const carrierScale = usesPercentageDisplay && displayScale.kind === "cap" && displayScale.cap > 1
+    ? { kind: "frame" as const, frame: displayScale.cap } : displayScale;
+  // Percent carriers include both .18 and 18. Only a carrier coherent with
+  // this factor's frame is already in display-percent units.
+  const carriedNativeValue = typeof carriedRawValue === "number" && Number.isFinite(carriedRawValue) &&
+    (!usesPercentageDisplay || (sameUnit && carrierScale.kind === "frame" &&
+      resolveScaleFrame({ storedFrame: carrierScale.frame, value: normalisedValue, raw_value: carriedRawValue }) === carrierScale.frame))
+    ? carriedRawValue : null;
   let ownRawValue = carriedNativeValue;
   if (ownRawValue === null && sameUnit) {
     if (sitsAtObservedState && typeof os?.raw_value === "number" && Number.isFinite(os.raw_value)) {
       ownRawValue = os.raw_value;
     } else {
-      const scale = resolveMagnitudeScale(os);
-      const storedFrame = factorNode?.scale_frame;
-      if (typeof storedFrame === "number" && Number.isFinite(storedFrame) && storedFrame > 1) {
-        const frame = resolveScaleFrame({ storedFrame, value: os?.value, raw_value: os?.raw_value });
-        // Conflicting conversion evidence cannot license a native amount.
-        if (frame !== undefined && (scale.kind !== "cap" || scale.cap === frame)) {
-          ownRawValue = magnitudeUnderScale(normalisedValue, unit, { kind: "frame", frame });
-        }
-      } else {
-        ownRawValue = magnitudeUnderScale(normalisedValue, unit, scale);
-      }
+      ownRawValue = magnitudeUnderScale(normalisedValue, unit, displayScale);
     }
   }
 
