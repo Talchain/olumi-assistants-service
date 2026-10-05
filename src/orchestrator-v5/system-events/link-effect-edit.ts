@@ -23,6 +23,7 @@
  * receipt is the existing `adjust_edge_strength` fact.
  */
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import { classifyUnitScaleClass } from '../../cee/draft/records/unit-scale-class.js';
 import { AdjustEdgeStrengthHandlerFactSchema } from '@talchain/schemas/orchestrator';
 
 import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
@@ -143,7 +144,10 @@ export interface LinkEndUnits {
 function hasAdoptedPercentUnit(node: Rec | undefined, magnitude: MagnitudeNode): boolean {
   const candidate = node?.unit_reading;
   const reading = isRec(candidate) ? candidate : undefined;
-  return reading?.source === 'user_stated' && reading.unit === '%' && unitOf(magnitude) === '%';
+  // The shared percent classifier, never an inline equality (unit-scale-class KNOWN-UNMIGRATED guard). An adopted reading
+  // exists only on an end with no own unit (U1), and the reader writes "%" for points, so this is the bare-% case.
+  return reading?.source === 'user_stated' && typeof reading.unit === 'string'
+    && classifyUnitScaleClass(reading.unit) === 'percent' && classifyUnitScaleClass(unitOf(magnitude)) === 'percent';
 }
 
 /** U2's adopted points unit is a % level: one point is one raw unit on 100, even when no scale was stored. */
