@@ -397,6 +397,12 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
       expect(prepared.unit_readings.some(item => item.node_id === SOURCE)).toBe(false);
       const r = await propose(w);
       expect(r, JSON.stringify(r)).toMatchObject({ ok: false, refusal: 'unit_mismatch' });
+      // Never a dead end: an end step 2 may not adopt keeps step 1's Science-checked canvas route, verbatim.
+      expect(String(r.detail)).toBe('Nothing was prepared. Tell the user exactly this: "'
+        + `\u201c${FOOTFALL}\u201d and \u201c${MARGIN}\u201d have no unit or scale in this model yet, so I can\u2019t record your figure from chat, `
+        + `and nothing was recorded. You can set how strong this link is now: on the canvas, click the link from \u201c${FOOTFALL}\u201d `
+        + `to \u201c${MARGIN}\u201d, and under \u201cHow strong is this effect?\u201d choose Slight, Moderate, Strong or Very strong. `
+        + 'That records how strong you judge the link, not your figure."');
       expect(w.attempts).toEqual([]);
       expect(w.graph()).toEqual(before);
     });
@@ -446,8 +452,7 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(unitOf(magnitudeNodes(withOwn.nodes, new Set()).get(SOURCE)!)).toBe('customers');
     expect(nodeUnitOf(withOwn.nodes)(SOURCE)).toBe('customers');
     nodeOf(withOwn, SOURCE).unit = 'GBP';
-    expect(nodeUnitOf(withOwn.nodes)(SOURCE)).toBe('GBP');
-    expect(magnitudeNodes(withOwn.nodes, new Set()).get(SOURCE)!.unit).toBe('GBP');
+    expect(nodeUnitOf(withOwn.nodes)(SOURCE)).toBe('GBP'); // P5 already read a top-level unit first; unchanged.
   });
 
   it('M1 target-% twin asks about its own bare %; pp on source cannot license the other end', async () => {
@@ -456,7 +461,7 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     const effect = { ...EFFECT, amount_unit: '%' };
     const prepared = prepareLinkEffectUnitReadings(w.graph(), SOURCE, TARGET, effect, said);
     expect(prepared.unit_readings).toEqual([{ node_id: SOURCE, unit_reading: reading('%', SOURCE_CLAUSE) }]);
-    expect(prepared.ask).toContain(`"${MARGIN}"`);
+    expect(prepared.ask).toContain(`\u201c${MARGIN}\u201d`);
     const out = await propose(w, said, effect);
     expect(out).toMatchObject({ ok: false, refusal: 'unit_mismatch' });
     expect(w.attempts).toEqual([]);

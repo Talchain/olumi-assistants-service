@@ -133,7 +133,9 @@ describe('RT-6 writer: a unitless end adopts only the unit already held on its o
     const { caps, store } = world(graph);
     const r = await caps.proposeLinkEffect!(ctxSaying(SAID_READ), { ...LINK, quote: SAID_READ }) as Json;
     expectRefused(r, 'unit_mismatch', undefined, store, graph, before);
-    expect(String(r.detail)).toContain(`\u201c${FOOTFALL}\u201d has no unit or scale`);
+    // Step 2: the unitless SOURCE is the one asked about (never the % goal).
+    expect(String(r.detail)).toContain(`in \u201c${FOOTFALL}\u201d (say 10% → 15%)`);
+    expect(String(r.detail)).not.toContain(`in \u201c${MARGIN}\u201d (say`);
     expect(String(r.detail), 'the % goal is never called unitless').not.toContain(`\u201c${MARGIN}\u201d has no unit`);
     // RT-6 step 1: never a dead end — the route that works, by THIS link's two ends and the link panel's own words.
     // The ONE sentence the Agent is told to say verbatim (Science wording check), by THIS link's two ends.
