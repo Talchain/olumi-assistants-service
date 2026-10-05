@@ -27,7 +27,7 @@ type Json = Record<string, any>;
 type Selection = 'link' | 'nodes' | 'source_only' | 'wrong_link';
 interface CorpusRow {
   id: string;
-  fixture: 'f0eb03ac' | 'b8143909';
+  fixture: 'f0eb03ac' | 'b8143909' | '96ea7439' | 'd39c05ba' | 'lift';
   from: string;
   to: string;
   quote: string;
@@ -38,7 +38,11 @@ interface CorpusRow {
   /** An honest limit (the model's range, not the user's figure, stops it): said plainly, never a question about the figure. */
   limit?: string;
 }
-const SCENARIOS = { f0eb03ac: 'f0eb03ac-f6c6-4e68-9631-fa41d29d693f', b8143909: 'b8143909-9267-479e-ae3d-da8e19188427' } as const;
+const SCENARIOS = { f0eb03ac: 'f0eb03ac-f6c6-4e68-9631-fa41d29d693f', b8143909: 'b8143909-9267-479e-ae3d-da8e19188427',
+  // Acceptance's served reads on b644ddb (5 Oct): 96ea7439 (graph ba4fea4e) and d39c05ba (graph 3fe4a430).
+  '96ea7439': '96ea7439-40a4-40d5-a89a-0508e50ec998', d39c05ba: 'd39c05ba-0000-4000-8000-000000000000',
+  // Codex step-4 buddy r1's counterexample graph: café "Revenue" (GBP/month) beside a separate "Lift revenue".
+  lift: '11f7c0de-0000-4000-8000-000000000001' } as const;
 const TAIL = ' Approve, or correct.';
 const wasteHead = 'Record: +1 percentage point on "Production waste rate" → −0.5 percentage points in "gross margin": raising "Production waste rate" by 1 percentage point lowers "gross margin" by 0.5 percentage points.';
 const effect = (amount: number, amount_unit: string, per_source_change: number, per_source_change_unit: string): LinkEffectStatement => ({ amount, amount_unit, per_source_change, per_source_change_unit });
@@ -480,5 +484,33 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
     expect(edgeOf(reload, row).provenance).not.toHaveProperty('reasoning');
     expect(edgeOf(reload, row).provenance).not.toHaveProperty('clamped_from');
     expect(edgeOf(reload, row).provenance, 'Codex r1 P2: never a definition at the user\'s size').not.toHaveProperty('definitional');
+  });
+});
+
+// ⛔ Codex step-4 buddy r1 (5 Oct ~20:1xZ): two shapes #2605's other-quantity guard let through as WRONG-reading cards.
+describe('RT-6 step 3: a possessive or a modifier names ANOTHER quantity, never the end', () => {
+  const headcount = { fixture: 'd39c05ba', from: 'developer_headcount', to: 'onboarding_drag' } as const;
+  const resort = { fixture: 'lift', from: 'customers', to: 'revenue' } as const;
+  it.each([
+    ['a possessive continuation ("onboarding drag\'s share of total delivery risk")', { ...headcount, id: 'P-poss',
+      quote: "Every 2 extra developers add about 1 percentage point of onboarding drag's share of total delivery risk.",
+      effect: effect(1, 'percentage points', 2, 'developers') }, 'Is 1 percentage point of onboarding drag\'s share of total delivery risk a change in “Onboarding drag”?'],
+    ['a modifier after the verb ("increase LIFT revenue", Revenue already in GBP/month)', { ...resort, id: 'P-lift',
+      quote: 'Every 2 additional customers increase lift revenue by £100 per month.', effect: effect(100, 'GBP/month', 2, 'customers') }, 'Is £100 of lift revenue a change in “Revenue”?'],
+  ] as const)('%s → ONE typed question, no card, nothing stored', async (_n, row, question) => {
+    const w = world(row as CorpusRow); const before = w.graph(); const result = await propose(w, row as CorpusRow);
+    oneQuestion(result, question); expect(cardsFor(w, result)).toEqual([]); noWrite(w, row as CorpusRow, before);
+  });
+  it.each([
+    ['the end itself ("…of onboarding drag")', { ...headcount, id: 'C-poss', quote: 'Every 2 extra developers add about 1 percentage point of onboarding drag.',
+      effect: effect(1, 'percentage points', 2, 'developers') }],
+    ['no modifier ("increase revenue by £100")', { ...resort, id: 'C-lift', quote: 'Every 2 additional customers increase revenue by £100 per month.',
+      effect: effect(100, 'GBP/month', 2, 'customers') }],
+    ['a particle is not a modifier ("push up revenue by £100")', { ...resort, id: 'C-up', quote: 'Every 2 additional customers push up revenue by £100 per month.',
+      effect: effect(100, 'GBP/month', 2, 'customers') }],
+  ] as const)('CONTROL: %s still cards', async (_n, row) => {
+    const w = world(row as CorpusRow); const result = await propose(w, row as CorpusRow);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)[0]?.detail).toContain(`From your words: "${row.quote}"`);
   });
 });

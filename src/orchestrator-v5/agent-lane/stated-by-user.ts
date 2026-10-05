@@ -1172,10 +1172,20 @@ function targetFigureOfAnotherQuantity(q: string, figure: StatedAmount, target: 
     const head = wordsOf(target.split(/\s+(?:from|of|in|for|to|on|per|with|after|by)\s+/i)[0] ?? target).at(-1);
     const last = words[words.length - 1]; const modifier = words[words.length - 2];
     if (head === undefined || last === undefined || modifier === undefined || !sameWord(head, last.toLowerCase())) return undefined;
-    if (label.some(t => sameWord(t, modifier.toLowerCase())) || /^(?:our|the|their|its|your|my|a|an)$/i.test(modifier) || CHANGE_STATED.test(modifier)) return undefined;
+    // A change word is the VERB only when no change word stands before it: in "increase LIFT revenue" the verb is
+    // "increase" and "lift" names the other quantity (Codex step-4 buddy r1 HIGH). A particle or a comparative ("push UP
+    // revenue", "add MORE revenue") qualifies the change, never the quantity.
+    const beforeModifier = words[words.length - 3];
+    const modifierIsTheChange = CHANGE_STATED.test(modifier) && (/^(?:up|down|off|more|less|fewer|extra|additional)$/i.test(modifier)
+      || beforeModifier === undefined || !CHANGE_STATED.test(beforeModifier));
+    if (label.some(t => sameWord(t, modifier.toLowerCase())) || /^(?:our|the|their|its|your|my|a|an)$/i.test(modifier) || modifierIsTheChange) return undefined;
     return `${modifier} ${last}`;
   }
   const run = m[1]!.trim();
+  // "1 point of onboarding drag'S SHARE of total delivery risk": a possessive makes the end's name the OWNER of another
+  // quantity, never that quantity (Codex step-4 buddy r1 HIGH).
+  const owned = /^(['’])s((?:\s+(?!(?:while|and|but|which|that|when|if|as|so|for|than|to)\b)[\p{L}-]+){1,6})/iu.exec(after.slice(m[0].length));
+  if (owned !== null) return `${run}${owned[1]}s${owned[2]}`;
   const content = [...run.matchAll(/[\p{L}]+/gu)].map(w => w[0].toLowerCase()).filter(w => !/^(?:our|the|their|its|your|my|a|an)$/.test(w));
   if (content.length === 0 || content.every(w => wordsOf(target).some(t => sameWord(t, w)))) return undefined;
   return run;

@@ -1,0 +1,449 @@
+{
+ "edges": [
+  {
+   "to": "hire_a_tech_lead",
+   "from": "whether_to_hire_a_tech_lead_or_two_developers_to_boost_productivity_and_meet_our_next_feature_launch",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "hire_two_developers",
+   "from": "whether_to_hire_a_tech_lead_or_two_developers_to_boost_productivity_and_meet_our_next_feature_launch",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "carry_on_as_now",
+   "from": "whether_to_hire_a_tech_lead_or_two_developers_to_boost_productivity_and_meet_our_next_feature_launch",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "hire_one_developer",
+   "from": "whether_to_hire_a_tech_lead_or_two_developers_to_boost_productivity_and_meet_our_next_feature_launch",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "tech_leads",
+   "from": "hire_a_tech_lead",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "developers",
+   "from": "hire_two_developers",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "developers",
+   "from": "hire_one_developer",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "tech_leads",
+   "from": "carry_on_as_now",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "developers",
+   "from": "carry_on_as_now",
+   "origin": "repair",
+   "strength": {
+    "std": 0.01,
+    "mean": 1
+   },
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "to": "delivery_productivity",
+   "from": "tech_leads",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "team_coordination_overhead",
+   "from": "tech_leads",
+   "strength": {
+    "std": 0.18749999999999997,
+    "mean": -0.37499999999999994
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": -3.75,
+     "amount_unit": "percentage points",
+     "strength_mean": -0.37499999999999994,
+     "per_source_change": 1,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "tech leads"
+    },
+    "reviewed_by_user": {
+     "at": "2026-10-05T00:04:57.159Z",
+     "intent": "confirm"
+    }
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "delivery_productivity",
+   "from": "developers",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "team_coordination_overhead",
+   "from": "developers",
+   "strength": {
+    "std": 0.25,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis",
+    "magnitude": "olumi_estimate",
+    "natural_effect": {
+     "amount": 3.33333,
+     "amount_unit": "percentage points",
+     "strength_mean": 0.5,
+     "per_source_change": 2,
+     "strength_mean_frame": "edge_strength",
+     "per_source_change_unit": "developers"
+    },
+    "reviewed_by_user": {
+     "at": "2026-10-04T23:56:43.204Z",
+     "intent": "confirm"
+    }
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "delivery_productivity",
+   "from": "team_coordination_overhead",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "meet_our_next_feature_launch_deadline",
+   "from": "delivery_productivity",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "feature_launch_delay_risk",
+   "from": "team_coordination_overhead",
+   "strength": {
+    "std": 0.125,
+    "mean": 0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "meet_our_next_feature_launch_deadline",
+   "from": "feature_launch_delay_risk",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "to": "meet_our_next_feature_launch_deadline",
+   "from": "risk_lack_of_ai_experience",
+   "strength": {
+    "std": 0.125,
+    "mean": -0.5
+   },
+   "defaulted": true,
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  }
+ ],
+ "nodes": [
+  {
+   "id": "whether_to_hire_a_tech_lead_or_two_developers_to_boost_productivity_and_meet_our_next_feature_launch",
+   "ref": "D1",
+   "kind": "decision",
+   "label": "Whether to hire a Tech lead or two developers to boost productivity and meet…",
+   "provenance": "from_brief",
+   "description": "Whether to hire a Tech lead or two developers to boost productivity and meet our next feature-launch deadline."
+  },
+  {
+   "id": "meet_our_next_feature_launch_deadline",
+   "ref": "G1",
+   "kind": "goal",
+   "label": "meet our next feature-launch deadline",
+   "provenance": "from_brief",
+   "goal_threshold_unit": "%",
+   "goal_threshold_frame": "level"
+  },
+  {
+   "id": "hire_a_tech_lead",
+   "ref": "O1",
+   "kind": "option",
+   "label": "Hire a Tech Lead",
+   "provenance": "user_set",
+   "interventions": {
+    "tech_leads": {
+     "unit": "tech leads",
+     "value": 0.2,
+     "source": "cee_hypothesis",
+     "raw_value": 2,
+     "target_match": {
+      "node_id": "tech_leads",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "hire_two_developers",
+   "ref": "O2",
+   "kind": "option",
+   "label": "Hire Two Developers",
+   "provenance": "from_brief",
+   "interventions": {
+    "developers": {
+     "unit": "developers",
+     "value": 0.2,
+     "source": "cee_hypothesis",
+     "raw_value": 6,
+     "target_match": {
+      "node_id": "developers",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "carry_on_as_now",
+   "ref": "O3",
+   "kind": "option",
+   "label": "Carry On as Now",
+   "provenance": "user_set",
+   "is_baseline": true
+  },
+  {
+   "id": "hire_one_developer",
+   "ref": "O4",
+   "kind": "option",
+   "label": "Hire One Developer",
+   "provenance": "user_set",
+   "proposed_by": "olumi",
+   "interventions": {
+    "developers": {
+     "unit": "developers",
+     "value": 0.16666666666666666,
+     "source": "cee_hypothesis",
+     "raw_value": 5,
+     "target_match": {
+      "node_id": "developers",
+      "confidence": "high",
+      "match_type": "exact_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "tech_leads",
+   "ref": "F1",
+   "kind": "factor",
+   "label": "Tech leads",
+   "category": "controllable",
+   "provenance": "ai_inferred",
+   "scale_frame": 10,
+   "observed_state": {
+    "unit": "tech leads",
+    "value": 0.1,
+    "source": "cee_inference",
+    "raw_value": 1,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "developers",
+   "ref": "F2",
+   "kind": "factor",
+   "label": "Developers",
+   "category": "controllable",
+   "provenance": "user_set",
+   "scale_frame": 30,
+   "display_value": "4 developers",
+   "observed_state": {
+    "unit": "developers",
+    "value": 0.13333333333333333,
+    "source": "user_override",
+    "raw_value": 4
+   }
+  },
+  {
+   "id": "delivery_productivity",
+   "ref": "F3",
+   "kind": "factor",
+   "label": "Delivery productivity",
+   "category": "observable",
+   "provenance": "ai_inferred",
+   "scale_frame": 200,
+   "observed_state": {
+    "unit": "feature points per week",
+    "value": 0.1,
+    "source": "cee_inference",
+    "raw_value": 20,
+    "extractionType": "inferred"
+   }
+  },
+  {
+   "id": "team_coordination_overhead",
+   "ref": "F4",
+   "kind": "factor",
+   "label": "Team coordination overhead",
+   "category": "observable",
+   "provenance": "user_set",
+   "scale_frame": 100,
+   "display_value": "20%",
+   "observed_state": {
+    "unit": "%",
+    "value": 0.2,
+    "source": "user_override",
+    "raw_value": 20
+   }
+  },
+  {
+   "id": "feature_launch_delay_risk",
+   "ref": "R1",
+   "kind": "risk",
+   "label": "Feature-launch delay risk",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "risk_lack_of_ai_experience",
+   "ref": "R2",
+   "kind": "risk",
+   "label": "Lack of AI experience"
+  }
+ ],
+ "ref_high_water": {
+  "D": 1,
+  "F": 4,
+  "G": 1,
+  "O": 4,
+  "R": 2
+ }
+}
