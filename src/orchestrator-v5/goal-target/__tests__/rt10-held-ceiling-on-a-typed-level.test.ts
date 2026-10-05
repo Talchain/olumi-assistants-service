@@ -217,8 +217,22 @@ describe('ceilingTheUserWroteFor: a ceiling is the USER\'S only where the brief 
   it('⭐ SCOPE (Codex P1-a round 2): "Churn target 2%; tax below 2%" never lends tax\'s ceiling to churn; the churn clause still can', () => {
     const scope = { target: ['Monthly churn'], others: ['Tax rate', 'Monthly support tickets'] };
     expect(ceilingTheUserWroteFor(2, '%', 'Churn target 2%; tax below 2%.', scope)).toBe(false);
-    expect(ceilingTheUserWroteFor(2, '%', 'Churn target 2%; tax below 2%.'), 'unscoped, the borrow is what scope exists to stop').toBe(true);
-    expect(ceilingTheUserWroteFor(2, '%', 'Keep churn below 2%; tax is 2%.', scope)).toBe(true);
+    expect(ceilingTheUserWroteFor(2, '%', 'Keep churn below 2%; tax is 3%.', scope)).toBe(true);
+  });
+
+  it('⭐ SCOPE alone (one writing): "Keep the GCP unit-cost saving below 4%" is that saving\'s ceiling, never downtime\'s', () => {
+    const scope = { target: ['Downtime'], others: ['GCP unit-cost saving', 'Migration waves'] };
+    expect(ceilingTheUserWroteFor(4, '%', 'Keep the GCP unit-cost saving below 4%.', scope)).toBe(false);
+    expect(ceilingTheUserWroteFor(4, '%', 'Keep the GCP unit-cost saving below 4%.'), 'unscoped, the words alone would lend it').toBe(true);
+  });
+
+  it('⭐ ROUND 4 (Codex on a351e007): a figure written TWICE is a ceiling only when both writings are ("tax" is not in the model)', () => {
+    expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend target £36k; tax below £36k.')).toBe(false);
+    expect(ceilingTheUserWroteFor(2, '%', 'Keep churn below 2%; tax is 2%.'), 'the second writing is not a ceiling: under-claim, by design').toBe(false);
+    expect(ceilingTheUserWroteFor(2, '%', 'Keep churn below 2%, and I mean below 2%.'), 'CONTROL: both writings are ceilings').toBe(true);
+    // Today's level is the same figure, written plainly once: that writing is today's, the other is the ceiling.
+    expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend is £36k; keep it to at most £36k.', undefined, true)).toBe(true);
+    expect(ceilingTheUserWroteFor(36000, 'GBP/month', 'Monthly spend is £36k; keep it to at most £36k.'), 'not today\'s: unaccounted').toBe(false);
   });
 
   it('⭐ the SERVED B2 brief, scoped with the SERVED graph\'s own labels → the 2% ceiling is churn\'s', () => {

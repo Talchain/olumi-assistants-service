@@ -73,10 +73,10 @@ export function timesTheUserWrote(value: number, unit: unknown, userText: string
  *     stop / without): often a FLOOR ("must not go below 2%", "cannot fall below £36k");
  *   - the phrase is "no less / lower / fewer than": a FLOOR.
  * With `scope`, the clause's left side must not name ANOTHER quantity of the model instead of the goal
- * (`leftNamesAnotherQuantity`): "Churn target 2%; tax below 2%" never lends tax's ceiling to churn. KNOWN LIMIT: a
- * quantity the model does not hold names nothing ("…; tax below £36k" with no tax node), so it is caught only where the
- * drafter ALSO typed a ceiling for the goal (the hold needs both). Every miss under-claims: no comparator is held and the
- * goal reads as base.
+ * (`leftNamesAnotherQuantity`): "Keep the GCP unit-cost saving below 4%" never lends that saving's ceiling to downtime.
+ * And a figure written more than once is a ceiling only when EVERY writing reads as one ("Monthly spend target £36k; tax
+ * below £36k": tax is not in the model, so scope cannot see it, but the target's own writing carries no ceiling).
+ * Every miss under-claims: no comparator is held and the goal reads as base.
  */
 const CEILING_BEFORE_FIGURE = /(?<!\bno\s+)\b(?:(?:below|under|less\s+than)\s+or\s+equal\s+to|below|under|beneath|less\s+than|lower\s+than|fewer\s+than|at\s+most|no\s+more\s+than|no\s+higher\s+than|up\s+to|(?:a\s+)?maximum\s+of|max(?:imum)?|down\s+to|capped\s+at)\s+(?:(?:the|about|around|roughly|approximately|just)\s+)?$/i;
 const CEILING_AFTER_FIGURE = /^[^\S\n]*(?:or\s+(?:less|lower|below|under|fewer)|at\s+most|max(?:imum)?)\b/i;
@@ -103,11 +103,22 @@ function leftNamesAnotherQuantity(clauseBefore: string, scope: EntityScope): boo
   return names(decisiveOther) && !names(decisiveTarget);
 }
 
-export function ceilingTheUserWroteFor(value: number, unit: unknown, userText: string | null | undefined, scope?: EntityScope): boolean {
+export function ceilingTheUserWroteFor(
+  value: number,
+  unit: unknown,
+  userText: string | null | undefined,
+  scope?: EntityScope,
+  /** The goal's current level is this same figure (the drafter's `baseline_value`): ONE plain writing of it is today's. */
+  todayIsTheSameFigure = false,
+): boolean {
   if (typeof value !== 'number' || !Number.isFinite(value) || typeof userText !== 'string') return false;
   const family = unitPhraseFamily(unit);
-  return findStatedAmounts(userText).some((a) => {
-    if (!amountIs(a, value, unit, family, userText)) return false;
+  const writings = findStatedAmounts(userText).filter((a) => amountIs(a, value, unit, family, userText));
+  // ⛔ Round 4 (Codex buddy on a351e007): EVERY writing of the figure must be accounted for — as the ceiling, or (once)
+  // as today's level when the goal's current level is that same figure ("Monthly spend is £36k; keep it to at most
+  // £36k"). "Monthly spend target £36k; tax below £36k" writes the target once with no ceiling and once as an
+  // unmodelled quantity's: which writing is the goal's is unknown, so nothing is held.
+  const ceilings = writings.filter((a) => {
     const before = userText.slice(0, a.index);
     const clauseStart = Math.max(...['.', '!', '?', ';', ',', ':', '\n', '\u2013', '\u2014'].map((c) => before.lastIndexOf(c))) + 1;
     const clauseBefore = before.slice(clauseStart);
@@ -116,6 +127,7 @@ export function ceilingTheUserWroteFor(value: number, unit: unknown, userText: s
     const ceiling = CEILING_BEFORE_FIGURE.test(clauseBefore) || CEILING_AFTER_FIGURE.test(userText.slice(end, end + 24));
     return ceiling && (scope === undefined || !leftNamesAnotherQuantity(clauseBefore, scope));
   });
+  return ceilings.length > 0 && writings.length - ceilings.length <= (todayIsTheSameFigure ? 1 : 0);
 }
 
 /**
@@ -345,7 +357,7 @@ export interface HeldGoalAttributes {
  */
 export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   nodes: readonly N[],
-  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown } | null | undefined,
+  goal: { readonly operator?: unknown; readonly horizon_months?: unknown; readonly provenance?: unknown; readonly unit?: unknown; readonly baseline_value?: unknown } | null | undefined,
   brief: string,
 ): { nodes: N[]; held: HeldGoalAttributes; horizon: HorizonAttestation } {
   const none: HeldGoalAttributes = { target: false, direction: false, horizon: false };
@@ -379,8 +391,10 @@ export function holdStatedGoalAttributes<N extends { readonly kind?: unknown }>(
   // (`ceilingTheUserWroteFor`): the drafter must type some comparator, and one it chose is not the user's. A change
   // target keeps its verb's sign as before; a floor is held exactly as before.
   const ceilingOnALevel = !isChange && (typed === '<' || typed === '<=');
-  const operator = ceilingOnALevel && !ceilingTheUserWroteFor(Math.round((written.figure as number) * 1e9) / 1e9, written.unit, brief,
-    quantityScope(nodes, (node as { readonly label?: unknown }).label))
+  const figure = Math.round((written.figure as number) * 1e9) / 1e9;
+  const operator = ceilingOnALevel && !ceilingTheUserWroteFor(figure, written.unit, brief,
+    quantityScope(nodes, (node as { readonly label?: unknown }).label),
+    typeof goal.baseline_value === 'number' && same(goal.baseline_value, figure))
     ? undefined
     : typed;
   const direction = operator !== undefined;
