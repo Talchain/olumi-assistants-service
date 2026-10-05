@@ -66,11 +66,10 @@ function graph(): Rec {
 
 let runKind: 'complete_current' | 'complete_stale' = 'complete_current';
 /**
- * 'g2' = the gate-2 case (withheld leader); 'b5' = the served b5 a6ed1bff graph + PLoT response with a licensed leader
- * (its one flip row is Pro plan price, a LEVER); 'b5flip' = a later Run on the same graph whose flip row is a factor no
- * option sets.
+ * 'g2' = the gate-2 case (withheld leader); 'b5' = the served b5 a6ed1bff graph + PLoT response with a licensed leader;
+ * 'b5held' = a later Run on the same graph whose leader is withheld (so SCI-CHANGE would not answer).
  */
-let fixture: 'g2' | 'b5' | 'b5flip' = 'g2';
+let fixture: 'g2' | 'b5' | 'b5held' = 'g2';
 /** A competing writer: every graph read after this many sees the Run gone stale. */
 let staleAfterReads = Number.POSITIVE_INFINITY;
 let graphReads = 0;
@@ -78,8 +77,6 @@ const B5 = '../../../../tests/fixtures/cross-service/b5-per-limit/';
 const B5_STORED = JSON.parse(readFileSync(new URL(`${B5}a6ed1bff.graph.json`, import.meta.url), 'utf8')) as { graph: Rec; graph_hash: string };
 const B5_PLOT = JSON.parse(readFileSync(new URL(`${B5}a6ed1bff.plot-response.json`, import.meta.url), 'utf8')) as Rec;
 const B5_BLOCK = { type: 'analysis_result', computed_against_hash: B5_STORED.graph_hash, enrichment: B5_PLOT };
-const B5_FLIP_BLOCK = { ...B5_BLOCK, enrichment: { ...B5_PLOT, flip_thresholds: [{ ...(B5_PLOT.flip_thresholds as Rec[])[0],
-  factor_id: 'other_mrr_growth', factor_label: 'Other MRR growth' }] } };
 type Row = Record<string, unknown>;
 const rows: Row[] = [];
 const store = {
@@ -122,8 +119,8 @@ async function freshApp(): Promise<FastifyInstance> {
       : { graph: B5_STORED.graph, graph_hash: B5_STORED.graph_hash, analysis_ready: READY,
         // The served state's shape (0948Z: `usable_for_chips`/`usable_for_prose`), with a licensed leader.
         analysis_state: { ...SERVED.analysis_state, run_state: { kind: 'complete_current', computed_at: fixture === 'b5' ? '2026-10-05T03:48:55.163Z' : '2026-10-05T09:12:00.000Z' },
-          leader_claim: { permitted: true, separation: 'separated' } },
-        analysis_result: fixture === 'b5' ? B5_BLOCK : B5_FLIP_BLOCK };
+          leader_claim: fixture === 'b5' ? { permitted: true, separation: 'separated' } : { permitted: false, withheld_reason: 'separation_unavailable' } },
+        analysis_result: B5_BLOCK };
   });
   await app.register(agentV1TurnRoute);
   await app.ready();
@@ -181,23 +178,29 @@ describe('the "Review this decision" press on the live route', () => {
   });
 
   it('RED: each item\'s next step is offered as the existing press — the link test for its link, What would change', async () => {
-    fixture = 'b5flip';
+    fixture = 'b5';
     const body = (await press(randomUUID())).json() as Body;
     expect(body.assistant_text).toContain('The link from ‘Pro plan price’ to ‘MRR’ is one of the links this result is most sensitive to.');
     expect(chips(body)).toEqual([TEST_LINK, WHAT_WOULD_CHANGE]);
     expect(modelCalls).not.toHaveBeenCalled();
   });
 
-  it('RED (Science: never a lever): the served flip row is a factor the options set → no What would change', async () => {
-    fixture = 'b5';
+  it('RED (Science (c)): a Run whose leader is withheld → no What would change (SCI-CHANGE would not answer it)', async () => {
+    fixture = 'b5held';
     expect(chips((await press(randomUUID())).json() as Body)).toEqual([TEST_LINK]);
+  });
+
+  it.each(['', 'explain_results'])('RED (Codex r2 P2): the review is the id-only press — a chip with its id and action_type %j is not one', async (actionType) => {
+    const body = (await app.inject({ method: 'POST', url: '/agent/v1/turn', payload: { scenario_id: SCENARIO, turn_id: randomUUID(),
+      message: 'Review this decision', source: 'chip_click', chip: { id: DECISION_REVIEW_PRESS_ID, action_type: actionType } } })).json() as Body;
+    expect(body.assistant_text.startsWith(DECISION_REVIEW_OPENING)).toBe(false);
   });
 
   it.each(['g2', 'b5'] as const)('RED (Codex P2): a review offers its own presses only — no general next steps, no other method (%s)', async (f) => {
     fixture = f;
     const body = (await press(randomUUID())).json() as Body;
     expect(body.assistant_text.startsWith(DECISION_REVIEW_OPENING)).toBe(true);
-    expect(chips(body)).toEqual(f === 'g2' ? [] : [TEST_LINK]);
+    expect(chips(body)).toEqual(f === 'g2' ? [] : [TEST_LINK, WHAT_WOULD_CHANGE]);
     expect(body.guidance?.slot1).toBeUndefined();
     expect(body.guidance?.slot2).toBeUndefined();
   });
@@ -210,15 +213,13 @@ describe('the "Review this decision" press on the live route', () => {
   });
 
   it('RED (Codex P2): a replay after the Run is replaced offers today\'s presses only, also after a restart', async () => {
-    fixture = 'b5flip';
+    fixture = 'b5';
     const turnId = randomUUID();
     expect(chips((await press(turnId)).json() as Body)).toEqual([TEST_LINK, WHAT_WOULD_CHANGE]);
-    fixture = 'b5';
+    fixture = 'b5held';
     for (const restart of [false, true]) {
       if (restart) { await app.close(); app = await freshApp(); }
-      const replay = (await press(turnId)).json() as Body;
-      expect(replay.assistant_text, `restart=${restart}`).not.toContain('Other MRR growth');
-      expect(chips(replay), `restart=${restart}`).toEqual([TEST_LINK]);
+      expect(chips((await press(turnId)).json() as Body), `restart=${restart}`).toEqual([TEST_LINK]);
     }
   });
 

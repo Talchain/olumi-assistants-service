@@ -1905,7 +1905,9 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       const boundControl: OfferedAction[] = [];
       const whatChangesReplay = approvedProposal === undefined && (explanationId === TIPPING_POINT_PRESS_ID
         || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, WHAT_CHANGES_CHIP_OPERATION)));
-      const decisionReviewReplay = approvedProposal === undefined && (explanationId === DECISION_REVIEW_PRESS_ID
+      // The review is ONE operation, live and replayed: the id-only press (Codex #2581 r2 P2). Any other chip carrying its
+      // id (an action_type) is not the review, so a retry of it never recomposes one.
+      const decisionReviewReplay = approvedProposal === undefined && (chipOperationOf(body) === DECISION_REVIEW_CHIP_OPERATION
         || (chiplessRetry && prior.request_hash === withChipOperation(requestHash, DECISION_REVIEW_CHIP_OPERATION)));
       if (decisionReviewReplay) {
         // Deterministic on the readback: today's bound Run gives the same review; a Run that moved gives today's (or the
@@ -2701,7 +2703,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
         hops: 0, stopped_reason: 'answered',
         timing: { total_ms: 0, provider_ms: 0, tool_ms: 0, overhead_ms: 0, tool_provider_ms: 0, provider_calls: 0, tool_calls: 0, hops: 0 } };
     }
-    if (result === undefined && approvedProposal === undefined && pressedChipId === DECISION_REVIEW_PRESS_ID) {
+    if (result === undefined && approvedProposal === undefined && chipOperationOf(body) === DECISION_REVIEW_CHIP_OPERATION) {
       // Composed at assembly from the final, scope-composed read below (the one the response is built from).
       decisionReviewRequested = true;
       fastPath = 'method';

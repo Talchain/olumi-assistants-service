@@ -12,11 +12,9 @@ import {
   DECISION_REVIEW_OPENING,
 } from '../decision-review-press.js';
 import { RUN_EXPLANATION_UNAVAILABLE_TEXT } from '../run-explanation.js';
-import { tippingPointOf } from '../decision-sensitivity.js';
-import { goalChanceWithheldForAgent } from '../goal-chance-withheld.js';
-import { provisionalFiguresCaveatFor } from '../../compose/leading-option-wire-enforcement.js';
+import { goalChanceWithheldForAgent, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../goal-chance-withheld.js';
 import { dropRankingSentences } from '../withheld-leader-fail-closed.js';
-import { TREATED_AS_ZERO_UNNAMED_ONE } from '../root-line.js';
+import { TREATED_AS_ZERO_UNNAMED_ONE, treatedAsZeroUnnamedMany } from '../root-line.js';
 
 type Rec = Record<string, unknown>;
 const json = (p: string): Rec => JSON.parse(readFileSync(new URL(p, import.meta.url), 'utf8')) as Rec;
@@ -41,40 +39,39 @@ function readOf(opts: { claim?: Rec; ready?: Rec; enrichment?: Rec; graph?: Rec;
   };
 }
 const ZERO_FACTOR = '‘Existing customers grandfathered’ has no figure yet, so these figures treat it as 0 until you give it.';
-const FRAGILE_SENTENCE = 'The link from ‘Pro plan price’ to ‘MRR’ is one of the links this result is most sensitive to.';
-const FRAGILE = `${FRAGILE_SENTENCE} You can test the result without it.`;
+const FRAGILE = 'The link from ‘Pro plan price’ to ‘MRR’ is one of the links this result is most sensitive to.';
+const PROMISE = 'You can test the result without it.';
 const EXPLORATORY = { status: 'ready', analysis_admission: { structurally_analysable: true, permitted_analysis_mode: 'exploratory' } };
 /** The served flip row, re-pointed at a factor no option sets (the served one, Pro plan price, is a LEVER: options set it). */
 const NON_LEVER_FLIP = { ...(PLOT.flip_thresholds as Rec[])[0], factor_id: 'other_mrr_growth', factor_label: 'Other MRR growth' };
 const WITH_NON_LEVER_FLIP = { ...PLOT, flip_thresholds: [NON_LEVER_FLIP] };
-const TIPPING = (tippingPointOf(WITH_NON_LEVER_FLIP) as { say: string }).say;
+const TEST_LINK = { kind: 'test_without_link', from_id: 'pro_plan_price', to_id: 'mrr' } as const;
+const WHAT_WOULD_CHANGE = { kind: 'what_would_change' } as const;
+/** goal-chance-withheld.ts's own opening: the withhold said without its reason (its fail-closed reading). */
+const WITHHELD_OPENING = 'This run doesn’t show how often each option reaches the goal’s target.';
 
 describe('decisionReviewFor — one typed fact per item, on the bound Run', () => {
-  it('a licensed Run: the default-0 factor (F2), the most sensitive link (F5) and a non-lever tipping point (F6), with their presses', () => {
-    const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: WITH_NON_LEVER_FLIP }));
+  it('a licensed Run: the default-0 factor (F2) and the most sensitive link (F5), with the link test and What would change', () => {
+    const turn = decisionReviewFor(SCENARIO, readOf());
     expect(turn.bound).toBe(true);
     expect(turn.reply.split('\n')[0]).toBe(DECISION_REVIEW_OPENING);
-    expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${ZERO_FACTOR}`, `- ${FRAGILE}`, `- ${TIPPING}`]);
-    expect(turn.steps).toEqual([{ kind: 'test_without_link', from_id: 'pro_plan_price', to_id: 'mrr' }, { kind: 'what_would_change' }]);
-  });
-
-  it('CONTROL (F6, Science: never a lever): the served flip row is Pro plan price, which the options set → no tipping item', () => {
-    const turn = decisionReviewFor(SCENARIO, readOf());
     expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${ZERO_FACTOR}`, `- ${FRAGILE}`]);
-    expect(turn.steps).toEqual([{ kind: 'test_without_link', from_id: 'pro_plan_price', to_id: 'mrr' }]);
+    expect(turn.steps).toEqual([TEST_LINK, WHAT_WOULD_CHANGE]);
   });
 
-  it('CONTROL (F6): the same Run with the leader withheld says no tipping point and offers no What would change', () => {
-    const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: WITH_NON_LEVER_FLIP, claim: { permitted: false, withheld_reason: 'separation_unavailable' } }));
-    expect(turn.reply).not.toContain(TIPPING);
-    expect(turn.steps.some((s) => s.kind === 'what_would_change')).toBe(false);
+  it('RED (Codex r2 P2): no tipping item of its own, even beside a non-lever flip row — the press says what would change it', () => {
+    const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: WITH_NON_LEVER_FLIP }));
+    expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${ZERO_FACTOR}`, `- ${FRAGILE}`]);
+    expect(turn.reply).not.toContain('Other MRR growth');
+    expect(turn.steps).toEqual([TEST_LINK, WHAT_WOULD_CHANGE]);
   });
 
-  it('F6 under a provisional licence carries its caveat, once', () => {
-    const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: WITH_NON_LEVER_FLIP, ready: PROVISIONAL }));
-    const caveat = provisionalFiguresCaveatFor(PROVISIONAL);
-    expect(turn.lines).toContain(`- ${TIPPING} ${caveat}`);
-    expect(turn.reply.split(caveat)).toHaveLength(2);
+  it.each([
+    ['a provisional licence (permitted_with_caveat)', { ready: PROVISIONAL }, true],
+    ['the leader withheld', { claim: { permitted: false, withheld_reason: 'separation_unavailable' } }, false],
+  ])('What would change is offered exactly where SCI-CHANGE answers (licence not withheld) — %s', (_n, opts, offered) => {
+    const turn = decisionReviewFor(SCENARIO, readOf(opts as { ready?: Rec; claim?: Rec }));
+    expect(turn.steps.some((x) => x.kind === 'what_would_change')).toBe(offered);
   });
 
   it('CONTROL (F2): the warning gone → no zero-factor item', () => {
@@ -106,6 +103,27 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
     const turn = decisionReviewFor(SCENARIO, readOf({ graph: G2_GRAPH, enrichment: { inference_warnings: [gap] } }));
     expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${ROOT_SENTENCE}`]);
     expect(turn.reply.split('Demand shortfall')).toHaveLength(2);
+  });
+
+  it('RED (Codex r2 P2): an unnamed risk root (F1) and an unnamed default-0 factor (F2) are counted as two, in one sentence', () => {
+    const graph = { ...G2_GRAPH, nodes: (G2_GRAPH.nodes as Rec[]).map((n) => (n.id === 'demand_shortfall' ? { ...n, label: 'prop_abcdef12 shortfall' }
+      : n.id === 'productivity' ? { ...n, label: 'prop_abcdef13 output' } : n)) };
+    const gap = { code: 'GOAL_ANCESTOR_DATA_GAP', message: "Root ancestor(s) 'demand_shortfall', 'productivity' carry no observed value and defaulted to 0.0." };
+    const turn = decisionReviewFor(SCENARIO, readOf({ graph, enrichment: { inference_warnings: [gap] } }));
+    expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${treatedAsZeroUnnamedMany(2)}`]);
+  });
+
+  it('RED (Codex r2 P2): a goal-figure reason the editors would rewrite says the withhold in the reader\'s own opening', () => {
+    const warning = { code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, node_ids: ['mrr'], message: 'Not shown. ‘prop_abcdef12 cost’ is not evaluated yet.' };
+    const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: { inference_warnings: [warning] } }));
+    expect(turn.lines).toContain(`- ${WITHHELD_OPENING}`);
+    expect(turn.reply).not.toContain('prop_abcdef12');
+  });
+
+  it('CONTROL (F4): a goal-figure reason that reaches the user whole keeps its own words', () => {
+    const warning = { code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, node_ids: ['mrr'], message: 'Not shown. ‘Monthly cost’ is not evaluated yet.' };
+    const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: { inference_warnings: [warning] } }));
+    expect(turn.lines).toContain(`- ${WITHHELD_OPENING} ‘Monthly cost’ is not evaluated yet.`);
   });
 
   it('CONTROL (F5): a fragile link between two real nodes that is not a link of the stored graph is not said, and offers no test', () => {
@@ -140,9 +158,9 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
     expect(turn.lines).toHaveLength(2); // the opening + the goal-figure reason
   });
 
-  it('nothing to flag on a bound Run → Science’s empty sentence, no opening', () => {
+  it('nothing to flag on a bound Run → Science’s empty sentence, no opening (What would change still offered: it answers)', () => {
     const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: { inference_warnings: [] } }));
-    expect(turn).toEqual({ bound: true, reply: DECISION_REVIEW_NOTHING_TO_FLAG, lines: [DECISION_REVIEW_NOTHING_TO_FLAG], steps: [] });
+    expect(turn).toEqual({ bound: true, reply: DECISION_REVIEW_NOTHING_TO_FLAG, lines: [DECISION_REVIEW_NOTHING_TO_FLAG], steps: [WHAT_WOULD_CHANGE] });
   });
 
   it.each([
@@ -168,29 +186,47 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
 
   it('RED (Codex P2): a sensitive link whose label the editors would rewrite is said without names, with its test', () => {
     const turn = decisionReviewFor(SCENARIO, readOf({ graph: relabel('pro_plan_price', 'Increase price to £59 leads. Price') }));
-    expect(turn.lines).toContain('- One link in your model is one of the links this result is most sensitive to. You can test the result without it.');
-    expect(turn.steps).toContainEqual({ kind: 'test_without_link', from_id: 'pro_plan_price', to_id: 'mrr' });
+    expect(turn.lines).toContain('- One link in your model is one of the links this result is most sensitive to.');
+    expect(turn.steps).toContainEqual(TEST_LINK);
+  });
+
+  it('RED (Codex r2 P2): the test is never promised in words — SCI-DEEP decides at the press, on its own evidence', () => {
+    expect(decisionReviewFor(SCENARIO, readOf()).reply).not.toContain(PROMISE);
+  });
+
+  it.each([
+    ['blank', '   '],
+    ['absent', undefined],
+  ])('RED (Codex r2 P2): a default-0 factor with a %s label is still said, unnamed — never "nothing to flag"', (_n, label) => {
+    const graph = { ...STORED.graph, nodes: (STORED.graph.nodes as Rec[]).map((n) => (n.id === 'fac_existing_customers_grandfathered' ? { ...n, label } : n)) };
+    const turn = decisionReviewFor(SCENARIO, readOf({ graph, enrichment: { inference_warnings: PLOT.inference_warnings } }));
+    expect(turn.lines).toEqual([DECISION_REVIEW_OPENING, `- ${TREATED_AS_ZERO_UNNAMED_ONE}`]);
+  });
+
+  it('RED (Codex r2 P2): a default-0 factor whose id the slug grammar misses (fac-existing:customers__2) is found by its own id', () => {
+    const OLD = 'fac_existing_customers_grandfathered';
+    const NEW = 'fac-existing:customers__2';
+    const rename = (v: unknown): unknown => (v === OLD ? NEW : v);
+    const graph = { ...STORED.graph,
+      nodes: (STORED.graph.nodes as Rec[]).map((n) => ({ ...n, id: rename(n.id) })),
+      edges: (STORED.graph.edges as Rec[]).map((e) => ({ ...e, from: rename(e.from), to: rename(e.to) })) };
+    const inference_warnings = (PLOT.inference_warnings as Rec[]).map((w) => (w.code === 'GOAL_ANCESTOR_DATA_GAP'
+      ? { ...w, message: String(w.message).replaceAll(`'${OLD}'`, `'${NEW}'`) } : w));
+    expect(JSON.stringify(inference_warnings)).toContain(`'${NEW}'`);
+    const turn = decisionReviewFor(SCENARIO, readOf({ graph, enrichment: { inference_warnings } }));
+    expect(turn.lines).toContain(`- ${ZERO_FACTOR}`);
   });
 
   it.each([
     ['the link\'s removal would leave its target a root (target_becomes_root)', { fragile: { from_id: 'pro_plan_price', to_id: 'price_sensitivity' }, ready: COMPARATIVE },
       'The link from ‘Pro plan price’ to ‘Price sensitivity’ is one of the links this result is most sensitive to.'],
     ['the Run is below quantified_provisional (SCI-DEEP refuses exploratory work)', { fragile: { from_id: 'pro_plan_price', to_id: 'mrr' }, ready: EXPLORATORY },
-      FRAGILE_SENTENCE],
-  ])('RED (Codex P2): no test is promised or offered where SCI-DEEP would refuse — %s', (_n, c, sentence) => {
+      FRAGILE],
+  ])('RED (Codex P2): no test is offered where SCI-DEEP would refuse first — %s', (_n, c, sentence) => {
     const robustness = { ...(PLOT.robustness as Rec), fragile_edges: [c.fragile] };
     const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: { ...PLOT, robustness }, ready: c.ready as Rec }));
     expect(turn.lines).toContain(`- ${sentence}`);
-    expect(turn.reply).not.toContain('You can test the result without it.');
-    expect(turn.steps.some((s) => s.kind === 'test_without_link')).toBe(false);
-  });
-
-  it('RED (Codex P2): a tipping factor whose label the editors would rewrite is said without its name, with its press', () => {
-    const enrichment = { ...PLOT, flip_thresholds: [{ ...NON_LEVER_FLIP, factor_label: 'Other prop_abcdef12 growth' }] };
-    const turn = decisionReviewFor(SCENARIO, readOf({ enrichment }));
-    expect(turn.lines).toContain('- A factor in this model could change the comparison.');
-    expect(turn.reply).not.toContain('prop_abcdef12');
-    expect(turn.steps).toContainEqual({ kind: 'what_would_change' });
+    expect(turn.steps.some((x) => x.kind === 'test_without_link')).toBe(false);
   });
 
   it('every item survives the withheld-leader ranking drop unchanged', () => {
