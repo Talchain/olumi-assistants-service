@@ -27,6 +27,7 @@
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { statedFirstCalls } from './stated-first.js';
 
 const argv = process.argv.slice(2);
 const arg = (name: string): string | undefined => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; };
@@ -39,6 +40,9 @@ if ((mode !== 'live' && mode !== 'replay' && mode !== 'fixture') || !briefPath |
   console.error('usage: --mode live|replay|fixture --brief <file> --bank <dir> --draw <n> --out <file>');
   process.exit(2);
 }
+// DL 5 Oct: offline CEILING experiment only; this switch is never read by served code.
+const statedFirst = process.env.MC_STATED_FIRST === '1';
+if (statedFirst && mode === 'live') throw new Error('stated-first is an offline CEILING experiment only');
 if (mode === 'live' && !(process.env.OPENAI_API_KEY ?? '').startsWith('sk-')) { console.error('live: OPENAI_API_KEY missing or without the sk- prefix'); process.exit(3); }
 if (mode !== 'live') process.env.OPENAI_API_KEY = 'sk-harness-offline-never-sent';
 const brief = readFileSync(briefPath, 'utf8').trim();
@@ -173,9 +177,12 @@ const dispatch = async (path: string, body: unknown): Promise<{ status: number; 
 // As the route: one deadline per turn, from the turn's start; every attempt gets only what remains of it.
 const startedAt = Date.now();
 const deadlineAt = constructionDeadline(startedAt);
+const harnessCalls = statedFirstCalls(statedFirst, brief,
+  (reqBody) => constructionCallStructured(reqBody, deadlineAt),
+  (reqBody) => constructionCallStructured(reqBody, deadlineAt));
 const result = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () =>
-  buildModelFromRecords(SCENARIO, brief, dispatch as never, (reqBody) => constructionCallStructured(reqBody, deadlineAt),
-    undefined, undefined, (reqBody) => constructionCallStructured(reqBody, deadlineAt)));
+  buildModelFromRecords(SCENARIO, brief, dispatch as never, harnessCalls.main,
+    undefined, undefined, harnessCalls.sentencePass));
 const constructionMs = Date.now() - startedAt;
 
 let stored: unknown = null;
@@ -222,6 +229,8 @@ writeFileSync(out, JSON.stringify({
     timed_out: calls.length > 0 && JSON.stringify(result).includes(CONSTRUCTION_TIMEOUT_REASON),
     goal_scope_filled: goalScopeFill(),
     receipt_rows_sent: receiptRows, receipt_rows_bound: boundRows?.length ?? 0,
+    ...(statedFirst ? { ceiling_stated_first: harnessCalls.receipt() ?? { mode: 'stated-first', status: 'pass_absent' },
+      goal_scope_metric_source: 'original_main_transport' } : {}),
   },
   build_result: result,
   registered_stated_dispositions: registered?.stated_dispositions ?? null,
