@@ -1,4 +1,3 @@
-import { writeFileSync } from 'node:fs';
 import { Ajv } from 'ajv';
 import { describe, expect, it } from 'vitest';
 import { buildModelFromRecords, buildStrictDraftRecordsSchema, omitOptionalRecordNulls } from '../../../../../orchestrator-v5/agent-lane/runtime/build-model-from-records.js';
@@ -12,7 +11,6 @@ import { targetTestabilityOf } from '../../../../../orchestrator-v5/admission/ta
 import { resolveAnalysisAdmission } from '../../../../../orchestrator-v5/admission/analysis-admission.js';
 import { GraphV3, type GraphV3T } from '../../../../../schemas/cee-v3.js';
 import { GraphStateIngressSchema } from '../../../../../orchestrator-v5/boundary/request-extensions.js';
-import { deriveNotModelledManifest } from '../../../../context-integrity/not-modelled-manifest.js';
 // The strict attach site now accepts v-next literals; legacy draws have their own replay rows.
 import { BRIEF, sealedRecordsVNext as sealedRecords } from './sealed-fixture-vnext.js';
 
@@ -118,14 +116,10 @@ describe('Sealed M1/M2 compile', () => {
     const starter = graph.nodes.find(node => node.kind === 'option' && node.source_quote === 'launch a starter tier at £49 a month')!;
     const subscriberFactor = graph.nodes.find(node => node.id === graph.edges.find(edge => edge.provenance?.source_quote === sealedRecords().stated_items[12]!.source_quote)!.from)!;
     expect(starter.interventions![subscriberFactor.id]).toMatchObject({ range: { low: 80, high: 250, meaning: 'min_max', source: 'brief_extraction', source_quote: sealedRecords().stated_items[11]!.source_quote } });
-    writeFileSync('/private/tmp/mc-spike-sealed-graph.json', JSON.stringify({ graph, brief_text: BRIEF }, null, 2));
-    writeFileSync('/private/tmp/mc-spike-sealed-with-manifest.json', JSON.stringify({ graph, brief_text: BRIEF, not_modelled: deriveNotModelledManifest(BRIEF, graph) }, null, 2));
     expect(GraphStateIngressSchema.safeParse(graph).success).toBe(true);
     const testability = targetTestabilityOf(graph);
     const admission = resolveAnalysisAdmission(graph);
     const figures = Object.fromEntries(graph.nodes.filter(node => node.kind === 'option').map(option => [option.source_quote, oracle(graph, option.id)]));
-    const verdicts = { testability, admission, oracle: figures, determinism: JSON.stringify(first.registered) === JSON.stringify(second.registered) };
-    writeFileSync('/private/tmp/mc-spike-sealed-verdicts.json', JSON.stringify(verdicts, null, 2));
     expect(testability).toMatchObject({ kind: 'testable' });
     expect(JSON.stringify(admission)).not.toContain('TARGET_NOT_TESTABLE');
     expect(figures).toEqual({ 'raise prices by 10%': 126000, 'launch a starter tier at £49 a month': 127350, 'keep pricing as it is': 120000 });

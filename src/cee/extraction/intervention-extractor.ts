@@ -1159,8 +1159,22 @@ function buildInterventionsFromV4Data(
           ? resolveStatedDenominationForRawMagnitude(carriedRaw as number, briefText, unit)
           : null;
 
+      // ⭐ Codex R1 F4: a records-path DELTA option (`change_by`, P2-A1) is validated by its OWN carrier. Its
+      // `raw_value` is the compile-time absolute (baseline + delta), which the user never wrote, so asking the brief
+      // about it disowned a delta the user did state. The delta itself is bound to the option's own quoted literal.
+      const changeQuote = binding?.change_by !== undefined
+        ? binding.reasoning.match(/^Stated option change bound to stated_items\[\d+\]: (.+)$/s)?.[1]
+        : undefined;
+      const deltaEarnsBriefClaim =
+        binding?.change_by !== undefined &&
+        binding.source === "brief_extraction" &&
+        carriedRaw === binding.raw_value &&
+        bindingEarnsBriefClaim(
+          bindStatedItemToBrief({ quote: changeQuote, value: binding.change_by, unit: binding.unit, brief: briefText }),
+        );
+
       const earnsBriefClaim =
-        !bindingWithholdsBriefRoutes && (statedInBrief || statedDenomination !== null);
+        !bindingWithholdsBriefRoutes && (statedInBrief || statedDenomination !== null || deltaEarnsBriefClaim);
 
       interventions[factorId] = {
         value,
@@ -1178,7 +1192,7 @@ function buildInterventionsFromV4Data(
           // A value that EARNS the brief claim must not carry the receipt's
           // "not itself a stated figure" sentence — that would be a false
           // statement about a number the user demonstrably wrote.
-          (earnsBriefClaim ? undefined : binding?.reasoning) ??
+          (earnsBriefClaim && !deltaEarnsBriefClaim ? undefined : binding?.reasoning) ??
           (verdict === "stated"
             ? "Direct from V4 prompt data.interventions; the amount is stated in the brief"
             : statedDenomination !== null

@@ -37,7 +37,7 @@ import { labelMatchesBaseline } from '../../cee/transforms/analysis-ready.js';
 import { readIsBaseline } from '../../cee/baseline-identity.js';
 import { REPAIR_AUTHORED_ORIGIN } from '../../graph/repair-authored-edge.js';
 import { isPercentScaledUnit } from '../../cee/draft/records/unit-scale-class.js';
-import { defaultFrameFor, statedRangeFrame } from './frame-rule.js';
+import { defaultFrameFor, framedFields, statedRangeFrame } from './frame-rule.js';
 import { factorUnitOf, unitPhraseFamily } from './unit-conflict.js';
 import { CONNECTIVITY_REPAIR_WIRING_REASON } from '../../cee/unified-pipeline/stages/repair/status-quo-fix.js';
 import { admitCandidateLinks, definitionalLink, type CandidateLink, type AdmittedEdge } from './admit-candidate.js';
@@ -754,10 +754,9 @@ export function framedObservedState(f: {
   // only genuinely unusable cases are a missing/non-finite cap, a cap that is not
   // strictly above 1, a NEGATIVE baseline (which a 0..cap frame cannot express),
   // and a baseline above the cap.
-  if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 1 || raw < 0 || raw > cap) {
-    return { value: raw, ...base };
-  }
-  return { value: raw / cap, raw_value: raw, cap, declared_scale: 'unit_interval', ...base };
+  // The frame fields come from the ONE shared rule the records compile also writes through (`frame-rule.ts`).
+  const framed = framedFields(raw, cap);
+  return framed === undefined ? { value: raw, ...base } : { ...framed, ...base };
 }
 
 /**

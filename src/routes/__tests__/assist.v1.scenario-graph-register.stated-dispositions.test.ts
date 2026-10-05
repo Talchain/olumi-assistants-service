@@ -14,10 +14,11 @@
  * `loadGraphAndBriefText` does.
  *
  * The NO-FIELD CONTROL compares against a capture taken by running the SAME row on the base commit
- * (`__fixtures__/stated-dispositions.no-field-control.base.json`, written with `CAPTURE_BASE=1` at 9e0750dd).
+ * (`__fixtures__/stated-dispositions.no-field-control.base.json`, written at 9e0750dd by this row's former
+ * `CAPTURE_BASE=1` branch, since removed: a test never writes files, F8 on #2573).
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -437,10 +438,6 @@ describe("NO-FIELD CONTROL — a register without the key stores and serves exac
       register_response: registerWithoutRequestId,
       read_response_bytes: JSON.stringify(readWithoutRequestId),
     };
-    if (process.env.CAPTURE_BASE === "1") {
-      writeFileSync(FIXTURE, `${JSON.stringify(capture, null, 2)}\n`);
-      return;
-    }
     expect(existsSync(FIXTURE)).toBe(true);
     const base = JSON.parse(readFileSync(FIXTURE, "utf8")) as typeof capture;
     expect(capture.stored_graph_bytes).toBe(base.stored_graph_bytes);
