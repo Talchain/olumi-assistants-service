@@ -66,6 +66,8 @@ function outcomeLevelLine(who: string, q: StructuralChallengeQuantityClaimV1, re
   }
   // A not-comparable claim asserts no direction: its own reason (definitions, frame, unit…) says why (Codex #2582 P1).
   if (q.verdict === 'not_comparable') return `${who}'s expected result can't be compared between the two versions.${tail}`;
+  // Construction-invariant: any difference between the two values is sampling, not this link (Codex #2582 r2 P2).
+  if (q.invariant_by_construction) return `${who}'s expected result can't be affected by this link.${tail}`;
   const direction = a === b ? 'is the same without the link' : a > b ? 'is higher without the link' : 'is lower without the link';
   const t = q.target;
   if (t === null) return `${who}'s expected result ${direction}.${tail}`;

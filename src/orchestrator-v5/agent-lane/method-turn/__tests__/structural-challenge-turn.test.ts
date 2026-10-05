@@ -436,6 +436,16 @@ describe('review closure: final presentation is bound to its baseline execution 
     expect(reply).not.toMatch(/expected result is -?\d/);
     if (verdict === 'not_comparable') expect(reply).not.toMatch(/expected result is (higher|lower|the same)/);
   });
+
+  it('Codex #2582 r2: a construction-invariant outcome never narrates sampling noise as movement', () => {
+    // Codex's exact contract-valid claim: 100 → 101 across a target of 100.5, within noise, unaffected by construction.
+    const claim = { ...changed.claims.find((c) => c.kind === 'outcome_level')!, baseline: 100, alternative: 101, target: 100.5,
+      noise_verdict: 'within_noise', verdict: 'holds', basis: 'unaffected_by_construction', invariant_by_construction: true };
+    const result = StructuralChallengeResultV1Schema.parse({ ...changed, claims: [changed.claims[0]!, claim] });
+    const reply = composeStructuralChallengeReply({ result, labels: LABELS });
+    expect(reply).toContain('Raise Pro price to £59\'s expected result can\'t be affected by this link.');
+    expect(reply).not.toMatch(/expected result is (higher|lower|the same)|moves from|stays (above|below)/);
+  });
   it.each(['leader', 'goal_probability', 'outcome_level', 'constraint_probability'] as const)(
     'P1-4 / prior #4: %s change names its observed claim and discloses unpaired sampling without dependency prose', async (kind) => {
       const quantities = changed.claims.filter((c) => c.kind !== 'leader');
