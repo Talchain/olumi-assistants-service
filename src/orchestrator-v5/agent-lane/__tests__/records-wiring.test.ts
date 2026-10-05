@@ -111,7 +111,12 @@ describe('records ToolResult adapter', () => {
     const result = await buildModelFromRecords(SID, BRIEF, held.dispatch,
       async () => ({ text: JSON.stringify(strictRecordsWire(records)) }), trace);
     expect(result.ok).toBe(true);
-    expect(result.open_questions).toEqual(compiled.ask.items.map(item => item.detail));
+    // DL WIRING PORTS 3, port 1: the brief's deadline ("within 9 months") is asked FIRST, as on the legacy path; the
+    // compiler's own questions follow unchanged and in its order. (This row pinned the pre-port list, deadline absent.)
+    expect(result.open_questions).toEqual([
+      'Does "Monthly recurring revenue" get there within 9 months? The model holds the deadline; no result answers that yet.',
+      ...compiled.ask.items.map(item => item.detail),
+    ]);
     expect(result.not_represented).toEqual(compiled.projection.dropped);
     expect(trace.mock.calls).toEqual([[{ retried: false }]]);
   });
