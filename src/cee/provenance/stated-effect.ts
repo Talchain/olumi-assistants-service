@@ -105,7 +105,7 @@ export function statedEffectFiguresMatch(
 function atSpan(amount: LocatedAmount, span: DraftQuoteSpan, quote: string): boolean {
   return Number.isInteger(span.start) && Number.isInteger(span.end)
     && span.start >= 0 && span.end <= quote.length && span.start < span.end
-    && amount.index === span.start && amount.index + amount.matchedText.length === span.end;
+    && amount.index >= span.start && amount.index + amount.matchedText.length <= span.end;
 }
 
 /** Figures alone cannot attest a signed relationship. The stated cause owns it. */

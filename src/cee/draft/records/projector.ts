@@ -108,7 +108,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import { LIMIT_OPERATOR_WORDS } from "../../../orchestrator-v5/agent-lane/limit-operator-words.js";
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
 import { admitGoalBaseline } from "../../factor-extraction/goal-baseline-admissibility.js";
-import { admittedValueRange, statedValueIsBound } from "./quantity-evidence.js";
+import { admittedValueRange, statedValueIsBound, locateRecordEvidence } from "./quantity-evidence.js";
 import { statedEffectQuoteMatches } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
 import { sizeLink, resolveMagnitudeFrame, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
@@ -484,6 +484,7 @@ export interface DroppedRecordRef {
   /** The unit the user stated, alongside `value`. Same conditions, same source. */
   readonly unit?: string;
   readonly reason:
+    | import("./quantity-evidence.js").LiteralRefusal
     | "unparseable_ref"
     | "ref_out_of_range"
     | "ref_target_not_a_node"
@@ -5253,7 +5254,8 @@ export function projectRecordsToGraph(
   completionBoundary?: number,
 ): RecordProjection {
   const originalRecords = records;
-  records = unifyGoalQuantityReferences(records);
+  const located = locateRecordEvidence(records);
+  records = unifyGoalQuantityReferences(located.records);
   const claimCount = (records.claims ?? []).length;
   const demoted = new Map<number, DemoteDecision>();
   let projection = projectOnce(records, demoted, brief, completionBoundary);
@@ -5265,6 +5267,10 @@ export function projectRecordsToGraph(
     projection = projectOnce(records, demoted, brief, completionBoundary);
     repairStatedOptionTargets(projection);
   }
+  projection = { ...projection, dropped: [
+    ...located.refusals.map(r => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: records.stated_items[r.stated_index]!.source_quote,
+      stated_index: r.stated_index, reason: r.reason, source_quote: records.stated_items[r.stated_index]!.source_quote })), ...projection.dropped,
+  ] };
   // The internal binding is not part of the contract: consumers get the same
   // graph/provenance/disclosures and the explicitly declared constraint carriers.
   return boundEveryNodeLabel(
