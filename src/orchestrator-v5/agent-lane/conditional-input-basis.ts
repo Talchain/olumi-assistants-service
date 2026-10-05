@@ -28,6 +28,21 @@ export function analysedOptionIds(result: unknown): readonly string[] {
 }
 
 export function conditionalInputBasis(input: ConditionalInputBasis): string | null {
+  const basis = factorStartingValueBasis(input);
+  const graph = rec(input.graph);
+  // No path reader here: count causal links between non-option, non-decision nodes.
+  const causalNodeIds = new Set((Array.isArray(graph?.nodes) ? graph.nodes : []).map(rec)
+    .filter((n): n is Rec => n !== undefined && typeof n.id === 'string' && n.kind !== 'option' && n.kind !== 'decision')
+    .map((n) => n.id));
+  const count = (Array.isArray(graph?.edges) ? graph.edges : []).map(rec)
+    .filter((e) => e !== undefined && causalNodeIds.has(e.from) && causalNodeIds.has(e.to)
+      && rec(e.provenance)?.magnitude === 'example_figure').length;
+  if (count === 0) return basis;
+  const example = `This comparison uses the example's figures for ${count} ${count === 1 ? 'link' : 'links'}.`;
+  return basis === null ? example : `${example} ${basis}`;
+}
+
+function factorStartingValueBasis(input: ConditionalInputBasis): string | null {
   const raw = rec(rec(input.admission)?.semantic_signals)?.material_parameters_awaiting_user_node_ids;
   if (!Array.isArray(raw) || raw.some((id) => typeof id !== 'string' || id.trim() === '')) return UNAVAILABLE;
   if (raw.length === 0) return null;

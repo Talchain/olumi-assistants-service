@@ -661,7 +661,7 @@ export const EdgeProvenanceV3 = z.object({
   /** Optional reasoning */
   reasoning: z.string().optional(),
   /** Who sized the link (magnitude contract D9); `source: 'user_specified'` wins at read time. A malformed value is dropped. */
-  magnitude: z.enum(["user_stated", "olumi_estimate", "olumi_placeholder"]).optional().catch(undefined),
+  magnitude: z.enum(["user_stated", "olumi_estimate", "olumi_placeholder", "example_figure"]).optional().catch(undefined),
   /**
    * The size the link carries in natural units (magnitude contract; #70 5845713522). `strength_mean` is the β it was
    * written for: a reader says it only while the edge's mean equals it (R&C 5845818897). A malformed value is dropped.
