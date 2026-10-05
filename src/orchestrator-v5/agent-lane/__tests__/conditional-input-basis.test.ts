@@ -56,6 +56,22 @@ describe('RT-12: example figures are disclosed from edges only', () => {
     expect(say(withX(false))).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
   });
 
+  it('Codex #2591 r2 P2: a second goal kept out of the calculation is not "used"; the selected goal always is', () => {
+    const twoGoals = (excluded: boolean) => {
+      const g = { ...exampleGraph(0), goal_node_id: 'goal' };
+      g.nodes.push({ id: 'goal_2', kind: 'goal', label: 'Other goal', ...(excluded ? { analysis_participation: 'retained_excluded' } : {}) } as never);
+      g.edges.push(edge('subscribers', 'goal_2', 'example_figure'));
+      return g;
+    };
+    expect(say(twoGoals(true))).toBe(before);
+    expect(say(twoGoals(false))).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
+    // The selected goal is never dropped, even if marked.
+    const selected = { ...exampleGraph(0), goal_node_id: 'goal' };
+    selected.nodes = selected.nodes.map((n) => (n.id === 'goal' ? { ...n, analysis_participation: 'retained_excluded' } : n)) as never;
+    selected.edges = selected.edges.map((e) => (e.to === 'goal' ? edge(e.from, e.to, 'example_figure') : e));
+    expect(say(selected)).toBe(`This comparison uses the example's figures for 1 link. ${before}`);
+  });
+
   it('Codex #2591 r1 P2: duplicate stored copies of one example link count once', () => {
     const g = exampleGraph(1);
     g.edges.push(edge('subscribers', 'revenue', 'example_figure'));
