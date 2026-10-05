@@ -14,7 +14,7 @@ import { deriveAnswerTextFromShape, type AnswerShape } from '../../routing/answe
 import { NOT_ROBUST_SENTENCE, robustnessHonestySentence } from '../../coaching/analysis-result-headline.js';
 import { collectFactorIdsSetByEveryOption } from '../../context/intervention-controlled-drivers.js';
 import { analysedOptionIds } from '../conditional-input-basis.js';
-import { textAtRest } from '../decision-input-ask.js';
+import { decisionInputAsk, textAtRest } from '../decision-input-ask.js';
 import { RUN_EXPLANATION_MESSAGE } from '../run-explanation.js';
 
 const FX = JSON.parse(readFileSync(new URL('../../compose/__tests__/fixtures/leader-gate-real-replies.json', import.meta.url), 'utf8')) as {
@@ -396,6 +396,73 @@ describe('Explain: a licensed raw-fragile Run carries one server-owned caveat', 
     expect(countSentenceCopies(questionsTail, sentence)).toBe(0);
     for (const question of questions) expect(questionsTail).toContain(question);
   });
+  it('W18: a shapeable narrator with a questions tail keeps the caveat on the face', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    const question = 'What baseline should we use?';
+    narrator = `${bulletedNarrator(2)}\n\nQuestions this model does not answer yet: ${question}`;
+    const b = await press(await run());
+    expect(b._answer_shape).toBeDefined();
+    expect(b._answer_shape!.bullets[0]).toBe(sentence);
+    expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
+    expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
+    expect(b.assistant_text).toContain(question);
+  });
+  it('W19: display the exact double-space ID-bearing ask before adjacent caveat removal', async () => {
+    const sentence = NOT_ROBUST_SENTENCE.trim();
+    const graph = structuredClone(FX.state.draft_graph) as { nodes: Record<string, unknown>[] };
+    const goal = graph.nodes.find(node => node.kind === 'goal')!;
+    goal.label = 'Quarterly  revenue prop_deadbeefdeadbeefdeadbeefdeadbeef';
+    goal.provenance = 'ai_inferred';
+    readbackGraph = graph;
+    // The inferred-objective builder used by rawDecisionInputAsk and the existing D1 route rows.
+    const rawAsk = `I used "${goal.label}" as a provisional objective. What should this model help you explore?`;
+    const displayAsk = decisionInputAsk(graph, {
+      restingText: '', questionsToggle: false, awaitingApproval: false, builtOrRan: true,
+    });
+    expect(displayAsk).toBe('I used "Quarterly  revenue this proposal" as a provisional objective. What should this model help you explore?');
+    // Dedupe intentionally folds horizontal whitespace on the caveat-bearing line, AFTER display.
+    const displayedAtRest = displayAsk!.replace(/[^\S\n]+/g, ' ');
+    narrator = `${rawAsk} ${sentence}\nCompare with prop_abcdefabcdefabcdefabcdefabcdefab.`;
+    const b = await press(await run());
+    expect(count(b.assistant_text, displayedAtRest)).toBe(1);
+    expect(b.assistant_text).not.toMatch(/prop_[0-9a-f]{6,}/);
+    expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
+  });
+  // One class row: seven narrator variants crossed with both host-obligation states.
+  it.each(['plain', 'bulleted', 'questions tail', 'exact copy', 'spaced copy', 'caveat bullet', 'two copies']
+    .flatMap(variant => [false, true].map(basisUnavailable => ({ variant, basisUnavailable }))))(
+    'W20: $variant / basis-unavailable=$basisUnavailable preserves the caveat and narrator class',
+    async ({ variant, basisUnavailable }) => {
+      const sentence = NOT_ROBUST_SENTENCE.trim();
+      const questionTail = 'Questions this model does not answer yet: What baseline should we use?';
+      const cleanNarrator = variant === 'plain' ? NARRATOR
+        : variant === 'questions tail' || variant === 'two copies' ? `${bulletedNarrator(2)}\n\n${questionTail}` : bulletedNarrator(2);
+      if (basisUnavailable) readbackReady = structuredClone(FX.state.analysis_ready);
+      // Route control, independently authored without copies; no production stripper supplies the oracle.
+      narrator = cleanNarrator;
+      readbackResult.enrichment.robustness = { level: 'high', is_robust: true };
+      const control = await press(await run());
+      expect(countSentenceCopies(control.assistant_text, sentence)).toBe(0);
+      providerCalls = 0;
+      readbackResult.enrichment.robustness = { level: 'low', is_robust: false };
+      narrator = variant === 'exact copy' ? `${sentence} ${cleanNarrator}`
+        : variant === 'spaced copy' ? `${sentence.replace('robust —', 'robust  —')} ${cleanNarrator}`
+          : variant === 'caveat bullet' ? `${NARRATOR}\n- ${sentence}\n${cleanNarrator.slice(NARRATOR.length + 1)}`
+            : variant === 'two copies' ? `${sentence} ${cleanNarrator}\n${sentence}` : cleanNarrator;
+      const b = await press(await run());
+      expect(countSentenceCopies(b.assistant_text, sentence)).toBe(1);
+      expect(countSentenceCopies(textAtRest(b.assistant_text), sentence)).toBe(1);
+      if (!basisUnavailable) expect(b._answer_shape !== undefined).toBe(control._answer_shape !== undefined);
+      else {
+        expect(b._answer_shape).toBeUndefined();
+        expect(textAtRest(b.assistant_text)).toContain(BASIS_UNAVAILABLE);
+      }
+      // Shape rendering changes bullet glyphs; every non-caveat line's words still survive once.
+      for (const line of cleanNarrator.split('\n').filter(line => line.trim() !== '')) {
+        expect(count(b.assistant_text, line.replace(/^\s*[-*•]\s+/, '').trim())).toBe(1);
+      }
+    },
+  );
   it('unavailable narration of a licensed fragile Run carries no caveat', async () => {
     emptyNarration = true;
     const b = await press(await run());

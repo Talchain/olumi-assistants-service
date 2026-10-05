@@ -830,6 +830,11 @@ export function withAnalysisAnswerShape<T extends { assistant_text?: unknown; bl
   return { ...body, assistant_text: deriveAnswerTextFromShape(shape), _answer_shape: shape };
 }
 
+/** Whole-text assembly and its shape-eligibility mirror must place the same sole caveat at rest. */
+function placeExplainCaveat(text: string, caveat: string): string {
+  return withB3LinesAtRest([withoutSentenceCopies(text, caveat).trimEnd(), caveat].filter(Boolean).join(' '), [caveat]);
+}
+
 /** Prefer the identity-bound Run's own deterministic copy; only older summaries need a structural fallback. */
 function explainRobustnessSentence(analysisResult: unknown, graph: unknown): string {
   const block = analysisResult as { summary?: unknown; enrichment?: Record<string, unknown> };
@@ -3351,9 +3356,11 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
       explainRobustnessCaveat = explainRobustnessSentence(analysisResult, composedRead.graph);
     }
     // Whole-text exits keep the caveat after the narrator's at-rest prose, before any folded questions.
-    // Equivalent order: withDecisionInputAskDisplay only replaces the raw ask with its id-free form; it cannot contain/create the caveat or add/move Questions this model does not answer yet:.
+    // Display first, while the raw ask is intact. With no IDs the replacement is identical;
+    // otherwise the id-free form cannot recreate the raw ask. The caveat cannot contain it,
+    // so the scanner-pinned second display call is a no-op after dedupe and placement.
     const scopedNarration = explainRobustnessCaveat === null ? scopedNarrationRaw
-      : withB3LinesAtRest([withoutSentenceCopies(scopedNarrationRaw, explainRobustnessCaveat).trimEnd(), explainRobustnessCaveat].filter(Boolean).join(' '), [explainRobustnessCaveat]);
+      : placeExplainCaveat(withDecisionInputAskDisplay(scopedNarrationRaw, readbackGraph), explainRobustnessCaveat);
     const narrationText = withDecisionInputAskDisplay(scopedNarration, readbackGraph);
     const basis = fastPath !== 'method'
       && runExplanationChip(scenarioId, { graphHash, analysisState, analysisResult }) !== null
@@ -3540,7 +3547,7 @@ export async function agentV1TurnRoute(app: FastifyInstance): Promise<void> {
     const finalText = typeof wireBody.assistant_text === 'string' ? wireBody.assistant_text : '';
     const narratorWithCaveat = narratorWords === null ? null
       : explainRobustnessCaveat === null ? narratorWords
-        : [withoutSentenceCopies(narratorWords, explainRobustnessCaveat).trimEnd(), explainRobustnessCaveat].filter(Boolean).join(' ');
+        : placeExplainCaveat(narratorWords, explainRobustnessCaveat);
     if (fastPath !== 'method') wireBody = withAnalysisAnswerShape(wireBody, {
       proposalAwaitingApproval: approvals.length > 0 || carriedApproval.length > 0 || leavesProposalAwaitingApproval(approvalCalls),
       leaderGateEditedText,
