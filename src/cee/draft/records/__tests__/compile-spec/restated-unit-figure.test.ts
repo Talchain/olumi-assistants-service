@@ -76,11 +76,16 @@ describe('CLASS: a non-goal figure in a unit that is not its quantity\'s is neve
     const out = await compile();
     expect(carriers(out.projection.graph, 10, /£/)).toEqual([]);
     expect(carriers(out.graph, 10, /£/)).toEqual([]);
+    expect(carriers(out.projection.dropped, 10, /£/)).toEqual([]);
   });
   it('CONTRAST: the same-unit referencing figure keeps 41,000 in £/month', async () => {
     const out = await compile();
-    expect(carriers(out.projection.graph, 41000, /£/).length).toBeGreaterThan(0);
+    // With no causal claims this context node is pruned; its stated magnitude must survive in the disclosure.
+    expect(out.projection.dropped).toContainEqual(expect.objectContaining({
+      reason: 'unconnected_to_goal', label: records().stated_items[SAME_UNIT]!.source_quote, value: 41000, unit: '£/month',
+    }));
     const row = out.projection.stated_dispositions?.find((d) => d.stated_index === SAME_UNIT) as Json | undefined;
     expect(row?.reason).not.toBe('unit_not_evidenced');
+    expect(row?.stated_item).toMatchObject({ value: 41000, unit: '£/month' });
   });
 });

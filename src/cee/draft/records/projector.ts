@@ -1624,6 +1624,39 @@ export function changeWordedGoalTargets(records: DraftRecordSet): ReadonlySet<nu
   return out;
 }
 
+/**
+ * ⛔ THE SAME CLASS ON EVERY OTHER STATED ITEM (DL class question, 5 Oct 2026). `canonicalQuantityUnits` overwrites the
+ * unit of ANY stated item that references another quantity with that quantity's unit, after pushing
+ * `unit_restated_conflict` (which the receipt does not treat as failed evidence). So a figure "Costs rose 10% last year"
+ * on a £/month quantity was stored as 10 £/month: the user's figure misstated. A NON-goal stated item with a number,
+ * whose own `unit` is not `sameUnit` with its quantity's declaring item's unit, is REFUSED (`unit_not_evidenced`: the
+ * quantity's unit is not what its own words state) and projected without its number, so nothing stores it in the
+ * other unit. A constraint keeps its stated direction, so the existing "no usable threshold" ask still names it. Read on
+ * the AUTHORED records, before the relabel. (The goal has its own ask: `changeWordedGoalTargets`.)
+ */
+export function restatedUnitStatedItems(records: DraftRecordSet): ReadonlySet<number> {
+  const out = new Set<number>();
+  records.stated_items.forEach((item, index) => {
+    if (item.kind === "goal" || typeof item.value !== "number") return;
+    if (item.quantity === undefined || item.quantity === index) return;
+    const declared = records.stated_items[item.quantity]?.unit;
+    if (item.unit === undefined || declared === undefined) return;
+    if (!sameUnit(declared, item.unit)) out.add(index);
+  });
+  return out;
+}
+
+/** A refused item's number and its unit evidence, removed; a constraint's stated direction is kept (its own ask). */
+function withoutRestatedFigures(records: DraftRecordSet, refused: ReadonlySet<number>): DraftRecordSet {
+  if (refused.size === 0) return records;
+  return { ...records, stated_items: records.stated_items.map((item, index) => {
+    if (!refused.has(index)) return item;
+    const { value: _v, value_literal: _vl, value_span: _vs, value_scale: _sc, range: _r, unit: _u, unit_literals: _ul,
+      unit_span: _us, baseline: _b, ...kept } = item;
+    return kept;
+  }) };
+}
+
 /** The goal items in `asked` without the figure's target, unit, comparator and range: nothing below can write them. */
 function withoutChangeWordedTargets(records: DraftRecordSet, asked: ReadonlySet<number>): DraftRecordSet {
   if (asked.size === 0) return records;
@@ -5588,6 +5621,12 @@ export function projectRecordsToGraph(
     label: records.stated_items[stated_index]!.source_quote, stated_index, reason: "goal_target_frame_unresolved" as const,
     source_quote: records.stated_items[stated_index]!.source_quote }));
   records = withoutChangeWordedTargets(records, changeWorded);
+  // ⛔ The same class on every other stated item: refused, and its number never projected in the other unit.
+  const restated = restatedUnitStatedItems(records);
+  const restatedRefusals: DroppedRecordRef[] = [...restated].map((stated_index) => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND,
+    label: records.stated_items[stated_index]!.source_quote, stated_index, reason: "unit_not_evidenced" as const,
+    source_quote: records.stated_items[stated_index]!.source_quote }));
+  records = withoutRestatedFigures(records, restated);
   const located = locateRecordEvidence(records);
   const units = canonicalQuantityUnits(located.records);
   records = unifyGoalQuantityReferences(units.records);
@@ -5605,6 +5644,7 @@ export function projectRecordsToGraph(
   projection = { ...projection, dropped: [
     ...unresolvedLinks,
     ...frameAsks,
+    ...restatedRefusals,
     ...[...located.refusals, ...units.refusals].filter(r => records.stated_items[r.stated_index] !== undefined).map(r => ({ claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND, label: records.stated_items[r.stated_index]!.source_quote,
       stated_index: r.stated_index, reason: r.reason, source_quote: records.stated_items[r.stated_index]!.source_quote })), ...projection.dropped,
   ] };

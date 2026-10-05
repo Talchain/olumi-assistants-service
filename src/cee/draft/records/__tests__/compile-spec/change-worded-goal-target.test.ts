@@ -73,7 +73,8 @@ describe('CHANGE-WORDED TARGET (a): a % target on a £ quantity is asked about, 
     expect(out.projection.dropped).toContainEqual(expect.objectContaining({ stated_index: 1, reason: 'goal_target_frame_unresolved', label: quote }));
     expect(out.projection.stated_dispositions?.find(d => d.stated_index === 1))
       .toMatchObject({ disposition: 'asked', reason: 'goal_target_frame_unresolved', stated_item: { value: 10, unit: '%', direction: 'ceiling' } });
-    const questions = out.ask.items.map(i => i.detail).filter(d => d.includes(`"${quote}"`));
+    const questions = out.ask.items.filter(i => i.kind === 'stated_link_unresolved')
+      .map(i => i.detail).filter(d => d.includes(`"${quote}"`));
     expect(questions).toHaveLength(1);
     expect(questions[0]).toContain(FRAME_ASK);
   });
@@ -93,7 +94,7 @@ describe('CHANGE-WORDED TARGET (b) CONTRAST: the sealed "reach at least £150,00
     expect(goal).toMatchObject({ goal_threshold_raw: 150000, goal_threshold_unit: '£/month', goal_threshold_frame: 'level', goal_direction: '>=' });
     expect((result.not_represented as Json[]).some(d => d.reason === 'goal_target_frame_unresolved')).toBe(false);
     // Byte-identical to the head before this rule (1647abd8): pinned at GO, and the rule-off mutant must keep it.
-    expect(createHash('sha256').update(JSON.stringify(body!.graph)).digest('hex')).toBe('SEALED_GRAPH_SHA_PIN_AT_GO');
+    expect(createHash('sha256').update(JSON.stringify(body!.graph)).digest('hex')).toBe('093cc9ecbe48a7b3783fe7ad5205c7df4d3f8f46f526947021a455f4f74c49b6');
   });
 });
 
