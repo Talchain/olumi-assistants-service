@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v17",
+  "fixture": "04-scaffolded-options",
+  "arm": "2",
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 17246,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1382,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": "12.6",
+  "text": "{\n  \"narrative_summary\": \"This result rests on the link from Automation Coverage to Response Time. If that coverage slips toward a lower level, more runs could support a different option. In this model, 64% of runs supported Automate Tier One Triage.\",\n  \"story_headlines\": {\n    \"opt_automate\": \"Automate Tier One Triage gains from stronger automation coverage lowering response time directly.\",\n    \"opt_hire\": \"Hire Two Support Engineers would need ticket volume pressure to weigh more heavily on response time.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 73% of variations, based on current estimates given the moderate confidence behind it.\",\n    \"primary_risk\": \"The link from Automation Coverage to Response Time is the main point of fragility in this result.\",\n    \"stability_factors\": [\n      \"Ticket Volume shows a comparatively well evidenced connection to Response Time.\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Automation Coverage to Response Time could flip the comparison if coverage assumptions shift.\"\n    ]\n  },\n  \"readiness_rationale\": \"The comparison is settled enough to act on, though Automation Coverage is not yet evidence-backed and its intervention values remain placeholders to confirm.\",\n  \"evidence_enhancements\": {\n    \"fac_automation_rate\": {\n      \"specific_action\": \"Pilot the triage automation on a sample of tickets and measure actual coverage achieved before committing fully.\",\n      \"rationale\": \"This factor's connection to response time is the main thing the result depends on.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate the coverage level you expect before reviewing the pilot data.\"\n    }\n  },\n  \"scenario_contexts\": {\n    \"edge_automation_response\": {\n      \"trigger_description\": \"If Automation Coverage falls short of what is currently assumed for Response Time...\",\n      \"consequence\": \"...then the most runs would support Hire Two Support Engineers rather than Automate Tier One Triage.\"\n    }\n  },\n  \"flip_thresholds\": [\n    {\n      \"factor_id\": \"fac_automation_rate\",\n      \"factor_label\": \"Automation Coverage\",\n      \"current_display\": \"58%\",\n      \"flip_display\": \"31%\",\n      \"narrative\": \"If Automation Coverage moves from 58% to 31%, more runs would support a different option.\"\n    }\n  ],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Automation Coverage to Response Time assumes the modelled relationship continues to hold as coverage scales.\",\n    \"Automate Tier One Triage uses placeholder intervention values that have not yet been set to real figures.\",\n    \"The link from Ticket Volume to Response Time assumes current demand patterns persist.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"What would make you switch to Hire Two Support Engineers?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"Automate Tier One Triage holds a clear share of runs in its favour, so it is worth naming what would overturn it.\"\n    },\n    {\n      \"question\": \"This failed because Automation Coverage did not reach the assumed level, what warning signs would show up first?\",\n      \"principle\": \"Pre-mortem (Klein)\",\n      \"applies_because\": \"The result is settled enough to act on but still rests on one fragile link worth stress testing.\"\n    }\n  ],\n  \"pre_mortem\": {\n    \"failure_scenario\": \"Automate Tier One Triage failed because Automation Coverage never reached the level assumed, leaving Response Time barely improved.\",\n    \"warning_signs\": [\n      \"Pilot automation coverage tracking well below the assumed level.\",\n      \"Response Time showing little movement after automation rollout begins.\"\n    ],\n    \"mitigation\": \"Set a coverage checkpoint early in the rollout before committing further resources.\",\n    \"grounded_in\": [\"edge_automation_response\", \"fac_automation_rate\"],\n    \"review_trigger\": \"Reconvene if pilot coverage falls short of the assumed level before full rollout.\"\n  }\n}"
+}

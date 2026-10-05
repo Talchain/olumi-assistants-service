@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v17",
+  "fixture": "06-duplicate-headlines",
+  "arm": "3",
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 17281,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1150,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": "10.5",
+  "text": "{\n  \"narrative_summary\": \"This result rests on the link from Customer Acquisition Cost to New Revenue. If that cost moves enough, more runs could support a different option. In this model, 41% of runs supported Self Serve Funnel.\",\n  \"story_headlines\": {\n    \"opt_selfserve\": \"Self Serve Funnel holds up because its outcome stays strong even as acquisition cost varies across runs.\",\n    \"opt_paid\": \"Paid Acquisition would need acquisition cost to fall further for more runs to support it.\",\n    \"opt_partner\": \"Partner Channel would need a materially stronger modelled outcome relative to acquisition cost to gain runs.\",\n    \"opt_outbound\": \"Outbound Sales would need its modelled outcome range to narrow and shift upward to gain runs.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 64% of variations, a medium level of stability based on current estimates.\",\n    \"primary_risk\": \"The link from Customer Acquisition Cost to New Revenue is the single biggest threat to this result.\",\n    \"stability_factors\": [\n      \"Self Serve Funnel's modelled outcome range stays comparatively strong across variations\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Customer Acquisition Cost to New Revenue could shift which option more runs support\"\n    ]\n  },\n  \"readiness_rationale\": \"The comparison is settled enough to act on, though Customer Acquisition Cost is the one gap worth closing before committing fully.\",\n  \"evidence_enhancements\": {\n    \"fac_cac\": {\n      \"specific_action\": \"Pull the last two quarters of actual acquisition cost by channel from internal reporting to firm up the current estimate.\",\n      \"rationale\": \"This cost is the single factor this comparison is most sensitive to.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate the current acquisition cost yourself before checking the actual figure.\"\n    }\n  },\n  \"scenario_contexts\": {},\n  \"flip_thresholds\": [\n    {\n      \"factor_id\": \"fac_cac\",\n      \"factor_label\": \"Customer Acquisition Cost\",\n      \"current_display\": \"420 GBP\",\n      \"flip_display\": \"610 GBP\",\n      \"narrative\": \"If Customer Acquisition Cost moves from 420 GBP to 610 GBP, more runs would support a different option.\"\n    }\n  ],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Customer Acquisition Cost to New Revenue assumes current market conditions hold next quarter.\",\n    \"The brief frames this as a single-quarter allocation across four bets, assuming channel performance will not shift materially within that period.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"This failed because... what specifically went wrong with Self Serve Funnel six months from now?\",\n      \"principle\": \"Pre-mortem (Klein)\",\n      \"applies_because\": \"The comparison is settled enough to act on, so imagining a concrete failure now surfaces risks before budget commits.\"\n    },\n    {\n      \"question\": \"Choosing Self Serve Funnel, what does giving up Paid Acquisition cost?\",\n      \"principle\": \"Opportunity Cost\",\n      \"applies_because\": \"Four options are being compared for the same budget, so the cost of forgoing each alternative is worth naming explicitly.\"\n    }\n  ]\n}"
+}

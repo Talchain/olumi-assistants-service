@@ -1,0 +1,22 @@
+v17__01-clear-winner__arm1.json M1=1 M2=1(may_state=1) M3=1 M4=1(220) M5=1
+v17__01-clear-winner__arm2.json M1=1 M2=1(may_state=1) M3=1 M4=1(229) M5=1
+v17__01-clear-winner__arm3.json M1=1 M2=1(may_state=1) M3=1 M4=1(229) M5=1
+v17__02-close-call__arm1.json M1=1 M2=1(may_state=1) M3=1 M4=1(228) M5=1
+v17__02-close-call__arm2.json M1=1 M2=1(may_state=1) M3=1 M4=1(239) M5=1
+v17__02-close-call__arm3.json M1=1 M2=1(may_state=1) M3=1 M4=1(239) M5=1
+v17__03-needs-evidence__arm1.json M1=1 M2=1(may_state=1) M3=1 M4=1(213) M5=1
+v17__03-needs-evidence__arm2.json M1=1 M2=1(may_state=1) M3=1 M4=1(244) M5=1
+v17__03-needs-evidence__arm3.json M1=1 M2=1(may_state=1) M3=1 M4=1(247) M5=1
+v17__04-scaffolded-options__arm1.json M1=1 M2=1(may_state=1) M3=1 M4=1(227) M5=1
+v17__04-scaffolded-options__arm2.json M1=1 M2=1(may_state=1) M3=0 ['favour'] M4=1(224) M5=1
+v17__04-scaffolded-options__arm3.json M1=1 M2=1(may_state=1) M3=0 ['favours'] M4=1(224) M5=1
+v17__05-constraint-infeasible__arm1.json M1=1 M2=1(may_state=0) M3=1 M4=1(227) M5=1
+v17__05-constraint-infeasible__arm2.json M1=1 M2=1(may_state=0) M3=1 M4=0(308) M5=1
+v17__05-constraint-infeasible__arm3.json M1=1 M2=1(may_state=0) M3=1 M4=1(253) M5=1
+v17__06-duplicate-headlines__arm1.json M1=1 M2=1(may_state=1) M3=1 M4=1(203) M5=1
+v17__06-duplicate-headlines__arm2.json M1=1 M2=1(may_state=1) M3=1 M4=1(203) M5=1
+v17__06-duplicate-headlines__arm3.json M1=1 M2=1(may_state=1) M3=1 M4=1(203) M5=1
+v17__07-single-option__arm1.json M1=1 M2=1(may_state=1) M3=1 M4=1(196) M5=1
+v17__07-single-option__arm2.json M1=1 M2=1(may_state=1) M3=1 M4=1(205) M5=1
+v17__07-single-option__arm3.json M1=1 M2=1(may_state=1) M3=1 M4=1(193) M5=1
+n 21 M1 21/21 M2 21/21 M3 19/21 M4 20/21 M5 21/21

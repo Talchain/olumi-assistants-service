@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v17",
+  "fixture": "07-single-option",
+  "arm": "1",
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 16659,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 734,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": "7.7",
+  "text": "{\n  \"narrative_summary\": \"This result rests on how Query Load Growth affects Platform Cost. If load grows faster than expected, this comparison could look different. In this model, 77% of runs supported Renew for One Year.\",\n  \"story_headlines\": {\n    \"opt_renew\": \"Renew for One Year holds up because projected query load keeps platform cost within a manageable range.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 88% of variations, a settled result based on current estimates.\",\n    \"primary_risk\": \"Query Load Growth and its effect on Platform Cost is the main thing that could change this result.\",\n    \"stability_factors\": [\"The relationship between Query Load Growth and Platform Cost is well understood in this model\"],\n    \"fragility_factors\": []\n  },\n  \"readiness_rationale\": \"This comparison is settled enough to act on: the single open point is how Query Load Growth will evolve, which has not yet been firmed up with fresh evidence.\",\n  \"evidence_enhancements\": {\n    \"fac_query_load\": {\n      \"specific_action\": \"Pull the last two quarters of query volume logs and project forward against current warehouse capacity tiers.\",\n      \"rationale\": \"Query Load Growth is the main factor this decision is sensitive to, so firming up its trend reduces the open question here.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate the likely growth rate before looking at the logs, then compare.\"\n    }\n  },\n  \"scenario_contexts\": {},\n  \"flip_thresholds\": [],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Query Load Growth to Platform Cost assumes current pricing tiers and usage patterns continue\",\n    \"The brief frames this as a renewal decision, taking as given that a one year term is the right horizon to evaluate\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"What would make you switch away from Renew for One Year?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"Renew for One Year has strong support in this model, so it is worth actively seeking out what evidence would change that.\"\n    }\n  ]\n}"
+}

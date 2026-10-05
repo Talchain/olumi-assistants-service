@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v17",
+  "fixture": "01-clear-winner",
+  "arm": "2",
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 17384,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1398,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": "13.1",
+  "text": "{\n  \"narrative_summary\": \"This result rests on the link from Competitive Intensity to Revenue Growth. If competition intensifies beyond current levels, more runs could support a different option. In this model, 72% of runs supported Enter European Market.\",\n  \"story_headlines\": {\n    \"opt_expand\": \"Enter European Market converts entry into revenue growth while competitive intensity stays within modelled bounds.\",\n    \"opt_wait\": \"Delay to Next Year would need competitive intensity to rise well beyond current levels to gain more support.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 91% of variations, based on current estimates.\",\n    \"primary_risk\": \"The link from Competitive Intensity to Revenue Growth is the main source of fragility here.\",\n    \"stability_factors\": [\n      \"Europe Market Entry shows a well evidenced connection to Revenue Growth\",\n      \"Pricing Power supports Revenue Growth with firm confidence\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Competitive Intensity to Revenue Growth could shift the comparison if intensity rises\"\n    ]\n  },\n  \"readiness_rationale\": \"The comparison is settled on your numbers: entry and pricing effects are well evidenced, and only competitive intensity remains a modest open question.\",\n  \"evidence_enhancements\": {\n    \"fac_competition\": {\n      \"specific_action\": \"Commission a focused competitor scan of European pro-tier providers to pin down current intensity levels.\",\n      \"rationale\": \"This factor is the main lever that could shift which option more runs support.\",\n      \"evidence_type\": \"market_research\",\n      \"decision_hygiene\": \"Estimate the current competitive intensity yourself before reviewing the scan.\"\n    }\n  },\n  \"scenario_contexts\": {\n    \"edge_competition_revenue\": {\n      \"trigger_description\": \"If Competitive Intensity rises materially above current levels in the link to Revenue Growth...\",\n      \"consequence\": \"...then the most runs would support Delay to Next Year rather than Enter European Market.\"\n    }\n  },\n  \"flip_thresholds\": [\n    {\n      \"factor_id\": \"fac_competition\",\n      \"factor_label\": \"Competitive Intensity\",\n      \"current_display\": \"35%\",\n      \"flip_display\": \"62%\",\n      \"narrative\": \"If Competitive Intensity moves from 35% to 62%, more runs would support a different option.\"\n    }\n  ],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Europe Market Entry to Revenue Growth assumes current market entry conditions hold as modelled.\",\n    \"The link from Pricing Power to Revenue Growth assumes pricing power remains stable through expansion.\",\n    \"The goal of reaching eight hundred pro customers is not itself scored by this comparison.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"What would make you switch to Delay to Next Year?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"Enter European Market has strong support in this model, so it is worth naming what would overturn that before acting on it.\"\n    },\n    {\n      \"question\": \"This failed because competitive intensity in Europe rose faster than expected, what warning signs would you watch for?\",\n      \"principle\": \"Pre-mortem (Klein)\",\n      \"applies_because\": \"The comparison is settled enough to act on, so stress-testing the main fragility now is more useful than after committing.\"\n    }\n  ],\n  \"pre_mortem\": {\n    \"failure_scenario\": \"Expansion failed because Competitive Intensity rose sharply, eroding the link from Europe Market Entry to Revenue Growth faster than pricing power could offset it.\",\n    \"warning_signs\": [\n      \"New well-funded entrants appearing in target European segments\",\n      \"Early pricing pressure from local competitors in pilot regions\"\n    ],\n    \"mitigation\": \"Commission a competitor scan before committing full launch budget.\",\n    \"grounded_in\": [\"edge_competition_revenue\", \"fac_competition\"],\n    \"review_trigger\": \"Reconvene if early competitive signals in target markets look materially worse than assumed before full launch.\"\n  }\n}"
+}

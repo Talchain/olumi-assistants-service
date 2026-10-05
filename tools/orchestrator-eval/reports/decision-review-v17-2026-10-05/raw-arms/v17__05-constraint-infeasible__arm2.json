@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v17",
+  "fixture": "05-constraint-infeasible",
+  "arm": "2",
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 17024,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 904,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": "8.8",
+  "text": "{\n  \"narrative_summary\": \"This result rests on the link from Audit Completion to Annual Recurring Revenue. If the audit timeline shifts, more runs could support a different option. Launch in March breaches the stated constraint that launch cannot precede audit closure and is not available; Launch in June is the feasible alternative.\",\n  \"story_headlines\": {\n    \"opt_march\": \"Launch in March is not available: it breaches the constraint that launch cannot precede audit closure.\",\n    \"opt_june\": \"Launch in June becomes the feasible option once audit closure is respected as a hard constraint.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 68% of variations, a medium level of stability given the constraint on timing.\",\n    \"primary_risk\": \"The link from Audit Completion to Annual Recurring Revenue is the main source of fragility here.\",\n    \"stability_factors\": [\n      \"Early Demand shows a reasonably well evidenced link to Annual Recurring Revenue.\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Audit Completion to Annual Recurring Revenue is sensitive to your assumptions, worth checking before acting.\"\n    ]\n  },\n  \"readiness_rationale\": \"A structural issue sits ahead of the numbers: the option the most runs supported, Launch in March, breaches the audit closure constraint, so this cannot be settled enough to act on until timing is reframed around Launch in June.\",\n  \"evidence_enhancements\": {},\n  \"scenario_contexts\": {},\n  \"flip_thresholds\": [],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The constraint that launch cannot precede audit closure is treated as fixed rather than negotiable.\",\n    \"The link from Early Demand to Annual Recurring Revenue assumes current market conditions hold.\",\n    \"The link from Audit Completion to Annual Recurring Revenue assumes no change to the audit's scope or pace.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"If audit closure slipped later still, how would that change the case for Launch in June?\",\n      \"principle\": \"Pre-mortem (Klein)\",\n      \"applies_because\": \"A hard constraint has already ruled out the option most runs supported, so stress-testing the remaining option's timing assumptions matters before committing.\"\n    },\n    {\n      \"question\": \"What would need to be true about Early Demand for Launch in June to feel like a strong outcome rather than a fallback?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"With the feasible option decided by constraint rather than by comparison, it is worth checking the reasoning holds on its own terms.\"\n    }\n  ]\n}"
+}

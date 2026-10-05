@@ -39,17 +39,17 @@ LEADER / RUNNER-UP (pre-computed. Trust these, do not recalculate):
   "winner" and "runner_up" are INPUT KEY NAMES ONLY. They name a position in
   a field, and a position is never a thing you write about. In output text you
   write about an OPTION, by its LABEL, and you report THAT OPTION'S OWN figure:
-  "[winner.label] produced the best outcome in X% of runs of this model", where
-  X is that option's own win_probability as a percentage. Do the same for
+  "In this model, X% of runs supported [winner.label]", where X is that
+  option's own win_probability as a percentage. Do the same for
   runner_up with ITS own win_probability. Neither option is ever placed
   relative to the other. (See TERMINOLOGY for the full rule and its ban list.)
   If runner_up is null: report the single option's own share the same way, and
   make no comparison at all.
   winner.constraint_infeasible / winner.recommendation_suppressed (booleans,
-  may be absent): when EITHER is true, the option the model points to is
+  may be absent): when EITHER is true, the option the most runs supported is
   barred by a stated constraint. You MUST say so in narrative_summary, in
-  plain words, in the same sentence that reports its share: name the
-  constraint it breaches
+  plain words, INSTEAD of reporting its share: name the constraint it
+  breaches
   and say the option is not available, then name the feasible alternative.
   Presenting a barred option as a clean result is the most damaging failure
   this review can make, and it is silent: nothing downstream re-checks it.
@@ -122,16 +122,19 @@ author clean; a discarded block is wasted work.
 
 PREFERRED:
 - EVERY SENTENCE ABOUT AN OPTION NAMES THAT OPTION BY ITS LABEL and reports
-  THAT OPTION'S OWN figure. Write: [label] produced the best outcome in 72% of
-  runs of this model. Each option gets its own sentence and its own number,
+  THAT OPTION'S OWN figure. Write: In this model, 72% of runs supported
+  [label]. Each option gets its own sentence and its own number,
   and no option is ever positioned relative to another.
-- Referring to the option the model points to, when you need a phrase rather
-  than the label: say the option this model points to, or the option this
-  model favours on your numbers. Prefer the bare label wherever it fits.
-- Win probability: produced the best outcome in 72% of runs of this model.
+- Referring to that option when you need a phrase rather than the label: say
+  the option the most runs supported. Prefer the bare label wherever it fits.
+- Runs SUPPORT an option. Use that verb for what runs do, never favour,
+  prefer, pick or choose. In EVERY field, never write that the model, the
+  analysis or the comparison favours, prefers, picks or points to an option:
+  say which option the most runs supported.
+- Win probability: In this model, 72% of runs supported [label].
   Percentage form only. Read what this number is before you write it: it is
-  the SHARE OF SIMULATED RUNS in which that option's own modelled outcome came
-  out best of those compared. It is NOT the chance of hitting the user's goal,
+  the SHARE OF SIMULATED RUNS in which that option's own modelled outcome
+  scored highest against the goal of those compared. It is NOT the chance of hitting the user's goal,
   NOT a score out of 100, and NOT a measure of how much better that option is
   (see TRUTH_DISCIPLINE rule 4). Never attach it to a claim about the target.
 - Stability: plain bands. Stable: "holds under most plausible variations".
@@ -151,7 +154,8 @@ BANNED in every output string, no exceptions:
   "front of the pack", "the one to beat", "first place", "second place",
   "second best", "overtakes", "overtake", "overtaken", "outperforms",
   "outperformed", "beats", "edges out", "pulls away", "trails", "trailing",
-  "points ahead", "points clear", "percentage points ahead". The bare words
+  "points ahead", "points clear", "percentage points ahead",
+  "produced the best outcome", "came out best". The bare words
   lead, leads, leading, ahead, behind and margin are banned in this sense too,
   in every grammatical form: they are not quoted here only because they can
   occur inside a factor label you must copy verbatim. A label is the ONE place
@@ -233,7 +237,7 @@ cannot say. They override any older habit of narrating drivers or verdicts.
    lead to any single factor's influence in prose ("driven by X", "due to
    the impact of X"): attribute it to the comparison itself and to its
    stability or fragility. Grounded alternatives you MAY state: a flip
-   threshold ("if X moves from A to B, this model points to a different
+   threshold ("if X moves from A to B, more runs would support a different
    option"), a
    fragile relationship (from fragile_edges), an evidence gap worth closing
    (from evidence_gaps).
@@ -252,8 +256,8 @@ cannot say. They override any older habit of narrating drivers or verdicts.
    model reflects everything the user asked for; never claim a change was
    applied, and never claim no change was made.
 4. A SHARE OF RUNS IS NOT GOAL FIT. win_probability is the SHARE OF SIMULATED
-   RUNS in which that option's own modelled outcome was the best of those
-   compared. That is all it is. It is never evidence that a target, threshold
+   RUNS in which that option's own modelled outcome scored highest against
+   the goal of those compared. That is all it is. It is never evidence that a target, threshold
    or goal is met, and it is not a rating of the option. Never claim an option "meets the goal",
    "achieves the target" or "satisfies the constraint" from win_probability
    or outcome_mean. If the brief names a numeric target, you may note that
@@ -395,57 +399,58 @@ is incoherent and fails.
 Character caps are MAXIMUMS, not targets: stop when the substance is stated.
 Bodies clip near 300 characters downstream; never depend on text beyond a cap.
 
-narrative_summary (string, 1-2 sentences, max 280 chars):
-  BUDGET FIRST, because this field is the one that overruns. 280 characters
-  is roughly 45 words TOTAL across both sentences. The own-share phrasing
-  below is long, so you are buying it with words from everywhere else.
-  Drop, in this order, until you fit: the second option's share, then any
-  adjective, then every word of sentence 2 EXCEPT the risk it names. One
-  sentence inside the cap beats two that are clipped mid-word in front of
-  the user. THREE THINGS ARE NEVER DROPPED TO SAVE ROOM: the option's own
-  share, the constraint disclosure where it applies, and the PRIMARY RISK.
-  Sentence 2 exists to carry that risk. Shorten it to a clause if you must,
-  but never cut it: COHERENCE requires the relationship or factor you name
-  in robustness_explanation.primary_risk to appear here too, and a narrative
-  that leaves it out fails.
-  Sentence 1: name the option this model points to BY ITS LABEL, and give
-  THAT OPTION'S OWN share, in this shape: "[winner.label] produced the best
-  outcome in X% of runs of this model", where X is winner.win_probability as
-  a percentage. This shape holds whether or not runner_up is present: the
-  statistic is the option's own and does not change.
-  Do NOT report the distance to any other option, in any unit or any wording.
-  When headline_type is close_call, say the options are close IN WORDS and
-  still give the same own-share figure, for example: "[label] produced the
-  best outcome in 38% of runs of this model, and the other options are close
-  on these numbers". Note that a phrase like "close behind" still places one
-  option against another, so do not reach for it. Attach no number to the
-  closeness itself.
-  Then ground it in the PRIMARY RISK: name here, in your own words, the same
-  relationship or factor you name in robustness_explanation.primary_risk. A
-  stability statement from robustness or an evidence-backed uncertainty may
-  be ADDED alongside it, but never SUBSTITUTED for it: COHERENCE is scored on
-  the primary risk and on nothing else. Never a crowned driver.
-  THE 280-CHARACTER CAP IS HARD AND THIS FIELD IS THE ONE THAT BREACHES IT.
-  The own-share phrasing is longer than what it replaces, so the budget is
-  tighter than it looks: two sentences, and cut every word that is not
-  carrying a fact. Reporting a SECOND option's share is optional and is the
-  first thing to drop. Where a constraint must also be disclosed, that
-  disclosure outranks everything except the option's own share and the
-  primary risk: keep those three and shorten the rest. Count before you
-  emit; a narrative over the cap is clipped mid-sentence in front of the
+narrative_summary (string, 2-3 short sentences, max 280 chars, AIM FOR 230):
+  BUDGET FIRST, because this field is the one that overruns. Aim for 230
+  characters, roughly 38 words TOTAL, so that labels longer than you expect
+  still fit under 280. The shape, with nothing else added:
+    This result rests on [the link or factor]. If [that changes in a stated
+    way], more runs could support a different option. In this model, X% of
+    runs supported [winner.label].
+  Open with WHY the result is what it is, never
+  with an option's standing: the user reads this first, and its job is to
+  show what their result rests on and what would change it.
+  Sentence 1, WHAT THE RESULT TURNS ON: name, in your own words, the
+  relationship or factor this result depends on most in this model. It is
+  the PRIMARY RISK, the same relationship or factor you name in
+  robustness_explanation.primary_risk: COHERENCE is scored on it, so it is
+  never dropped. Never a crowned driver: say the result rests on it or is
+  sensitive to it, never that it drives or causes the result. Add NOTHING
+  after the link or factor: no qualifying clause, no "which is sensitive to
+  your assumptions". That qualification belongs in robustness_explanation.
+  Sentence 2, WHAT WOULD CHANGE IT: say what change to that relationship or
+  factor would change how the options compare in this model, in about 12
+  words. Use a flip
+  threshold or fragile relationship from the input when one is present, and
+  plain words when not. If you name an option here, use its exact label. When
+  the run is not ready, carry that caveat here,
+  in plain words and never by naming the input field.
+  Sentence 3, THE OPTION'S OWN STANDING, ONLY WHEN IT MAY BE STATED: when
+  neither winner.recommendation_suppressed nor winner.constraint_infeasible
+  is true, give that option's OWN share in this shape: "In this model, X% of
+  runs supported [winner.label]", where X is winner.win_probability as a
+  percentage. When headline_type is close_call, end that sentence with the
+  four words and the options are close, with no number attached to the
+  closeness. When EITHER flag is true, write exactly TWO sentences: sentence
+  1 as above, then one sentence saying [winner.label] breaches the named
+  constraint and is not available, and naming the feasible alternative by
+  its label. Write NO share sentence and NO sentence 2 in that case.
+  Do NOT report the distance to any other option, in any unit or any
+  wording, and never place one option against another.
+  DROP ORDER when over the cap: the close-call words, then any adjective,
+  then sentence 2's detail beyond the change itself. NEVER DROPPED: the
+  primary risk in sentence 1, the constraint disclosure where it applies,
+  and the option's own share in sentence 3 where it applies. Count before
+  you emit; a narrative over the cap is clipped mid-sentence in front of the
   user.
-  Sentence 2: the primary fragility or stability; when the run is not ready,
-  carry that caveat here, in plain words and never by naming the input field.
 
 story_headlines (Record<option_id, string>, max 12 words each):
   One entry per option (keys per GROUNDING_RULES). EVERY entry is about ITS
   OWN option and mentions no other option. OPEN EACH ENTRY WITH THAT OPTION'S
   OWN LABEL, exactly as provided: the label is the subject of the sentence,
   as FORM 4 and PREFERRED both require, and it counts toward the 12 words.
-  For the option this model points to: what in the model produces its result,
+  For the option the most runs supported: what in the model produces its result,
   naming a specific mechanism or trade-off. For every other option: what
-  would have to change in the model for it to produce the best outcome
-  instead.
+  would have to change in the model for more runs to support it instead.
   EVERY ENTRY MUST BE DISTINCTIVE TO ITS OWN OPTION. This is the rule that
   gets broken, and it gets broken in one specific way: the options that the
   model does not point to all share the same limiting factor, so answering
@@ -509,7 +514,7 @@ scenario_contexts (Record<edge_id, object>, max 2):
       from_label/to_label]...". Numerals only if they appear in the brief.
     consequence (max 160 chars): MUST contain both the resolved alternative
       label AND winner.label, exactly as provided, and must NOT place one
-      against the other: write "...then this model points to [alternative
+      against the other: write "...then the most runs would support [alternative
       label] rather than [winner.label]".
 
 flip_thresholds (array, max 2; always present, may be []):
@@ -530,7 +535,7 @@ flip_thresholds (array, max 2; always present, may be []):
       the whole card discarded. There is no third case: never invent a unit
       the input did not carry.
     narrative (1-2 sentences, max 220 chars): "If [factor_label] moves from
-      [current_display] to [flip_display], this model points to a different
+      [current_display] to [flip_display], more runs would support a different
       option."
       Restate the two values in the SAME display form you put in those
       fields, never the raw input value. Language matches the headline_type
@@ -592,6 +597,9 @@ decision_quality_prompts (array, max 2):
   applies_because: why this technique fits THIS run, qualitatively. The
   selection thresholds above are internal: never quote one ("below 0.5" and
   the like are banned raw decimals), and never name the field you read.
+  applies_because names THIS decision's situation in plain words. The
+  internal word readiness never appears in it, and neither does any other
+  internal-vocabulary term: say what is settled or missing instead.
   Each: { question, principle, applies_because, and, when a SCIENCE_CLAIMS
   section is present and the technique matches a listed claim: dsk_claim_id,
   evidence_strength, dsk_protocol_id copied exactly from it }.
