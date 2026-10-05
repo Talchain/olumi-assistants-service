@@ -1,29 +1,24 @@
 /**
- * Model Construction RECORDS replay harness (spike S2; evaluation tooling, not product code). A copy of replay.ts that
- * drives the spike's `buildModelFromRecords` (records grammar → deterministic compile) in place of the served drafter.
- * Extra mode `fixture`: a DraftRecordSet JSON file (MC_FIXTURE) as the response — zero provider calls (harness smoke).
+ * Model Construction RECORDS harness (evaluation tooling, not product code). It drives the SERVED construction path:
+ * `buildModelFromRecords` (what the served `build_model_from_brief` capability calls) with the route's OWN construction
+ * transport, `constructionCallStructured` from `routes/agent-v1-turn.ts` (same request bytes, `whole_candidate` strict
+ * schema, transport retry, provider policy and usage ledger), under the route's own `constructionDeadline` and
+ * `OPENAI_ONLY('agent_v1_turn')` policy. Never a side client (DL, 5 Oct live 3×3).
  *
- * Runs the REAL `buildModelFromBrief` with the provider cut at the transport, then takes the registered graph through
- * the register route's own pure steps (node-kind normalisation → ingress parse → persistence projection → entity refs)
- * and the GET route's own on-read derivations (not-modelled manifest, target testability, analysis admission). The
- * output is shaped like a GET /graph body, so the independent scorer reads it exactly as it reads a served wire capture.
+ * The registered graph then takes the register route's own store composition (projection → entity refs → the receipt
+ * stamping `withRegisteredStatedDispositions`) and the cold read's own derivations (not-modelled manifest WITH the bound
+ * stated-disposition rows, target testability, analysis admission). The output is shaped like a GET /graph body, so the
+ * independent scorer reads it exactly as it reads a served wire capture.
  *
- *   live:   one real agent.construct call per construction call; each raw response is banked.
- *   replay: the banked raw responses are replayed in order: zero provider calls, admission re-run on real model output.
+ *   live:    real Responses API calls through the served transport; each raw HTTP response is banked. A 429 aborts the
+ *            process at once (exit 42) before any retry. A machine-wide counter caps the calls.
+ *   replay:  `fetch` answers from the bank, in call order, so the served transport parses the banked bytes again.
+ *   fixture: `fetch` answers with MC_FIXTURE (a DraftRecordSet JSON) as the model text. Zero provider calls (smoke).
  *
- * tsx tools/mc-replay/replay.ts --mode live|replay --brief <file> --bank <dir> --draw <n> --out <file>
+ * tsx tools/mc-replay/replay-records.ts --mode live|replay|fixture --brief <file> --bank <dir> --draw <n> --out <file>
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import type { CallStructuredModel } from '../../src/orchestrator-v5/agent-lane/runtime/build-model.js';
-import { buildModelFromRecords } from '../../src/orchestrator-v5/agent-lane/runtime/build-model-from-records.js';
-import { normaliseGraphNodeKindField } from '../../src/orchestrator-v5/graph-registration/normalise-node-kind.js';
-import { GraphStateIngressSchema } from '../../src/orchestrator-v5/boundary/request-extensions.js';
-import { projectGraphForPersistence } from '../../src/orchestrator-v5/persisted-graph-projection.js';
-import { assignEntityRefs } from '../../src/orchestrator-v5/graph/entity-refs.js';
-import { deriveNotModelledManifest } from '../../src/cee/context-integrity/not-modelled-manifest.js';
-import { targetTestabilityOf } from '../../src/orchestrator-v5/admission/target-testability.js';
-import { resolveAnalysisAdmission } from '../../src/orchestrator-v5/admission/analysis-admission.js';
 
 const argv = process.argv.slice(2);
 const arg = (name: string): string | undefined => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : undefined; };
@@ -36,64 +31,75 @@ if ((mode !== 'live' && mode !== 'replay' && mode !== 'fixture') || !briefPath |
   console.error('usage: --mode live|replay|fixture --brief <file> --bank <dir> --draw <n> --out <file>');
   process.exit(2);
 }
+if (mode === 'live' && !(process.env.OPENAI_API_KEY ?? '').startsWith('sk-')) { console.error('live: OPENAI_API_KEY missing or without the sk- prefix'); process.exit(3); }
+if (mode !== 'live') process.env.OPENAI_API_KEY = 'sk-harness-offline-never-sent';
 const brief = readFileSync(briefPath, 'utf8').trim();
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex');
 const briefId = sha(brief).slice(0, 12);
 mkdirSync(bank, { recursive: true });
 const bankFile = (call: number): string => `${bank}/${briefId}-d${draw}-c${call}.json`;
 
+// ── The transport seam: `fetch`, beneath the served transport. ─────────────────────────────────────────────────────
+const realFetch = globalThis.fetch;
+const RESPONSES = 'https://api.openai.com/v1/responses';
 let callIndex = 0;
-const callStructured: CallStructuredModel = async (req) => {
+const calls: { call: number; request_sha256: string; schema_name: unknown; latency_ms: number; http_status: number; status: unknown; raw_text_chars: number }[] = [];
+const rawTexts: string[] = [];
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(input);
+  if (url !== RESPONSES) throw new Error(`harness: unexpected fetch ${url}`);
   callIndex += 1;
-  const identity = {
-    model: req.model, max_output_tokens: req.max_output_tokens, reasoning_effort: req.reasoning_effort ?? null,
-    instructions_sha256: sha(req.instructions), input_sha256: sha(req.input), schema_sha256: sha(JSON.stringify(req.schema)),
-  };
-  if (mode === 'fixture') return { text: readFileSync(process.env.MC_FIXTURE ?? '', 'utf8') };
-  if (mode === 'replay') {
+  const body = String(init?.body ?? '');
+  const sent = JSON.parse(body) as { text?: { format?: { name?: unknown } } };
+  const started = Date.now();
+  let status = 200, rawBody: string;
+  if (mode === 'live') {
+    const capFile = process.env.MC_CALL_COUNTER ?? '';
+    const cap = Number(process.env.MC_CALL_CAP ?? '0');
+    if (capFile === '' || !(cap > 0)) throw new Error('live: MC_CALL_COUNTER and MC_CALL_CAP are required');
+    const spent = existsSync(capFile) ? Number(readFileSync(capFile, 'utf8').trim() || '0') : 0;
+    if (spent >= cap) throw new Error(`live: call budget exhausted (${spent}/${cap})`);
+    writeFileSync(capFile, String(spent + 1));
+    const r = await realFetch(input, init);
+    status = r.status; rawBody = await r.text();
+    if (status === 429) { console.error('ABORT: 429 from provider'); process.exit(42); }
+    writeFileSync(bankFile(callIndex), JSON.stringify({ at: new Date().toISOString(), latency_ms: Date.now() - started, brief_sha256: sha(brief), request_sha256: sha(body), http_status: status, raw_body: rawBody }, null, 2));
+  } else if (mode === 'replay') {
     const f = bankFile(callIndex);
     if (!existsSync(f)) throw new Error(`replay: no banked response ${f}`);
-    const banked = JSON.parse(readFileSync(f, 'utf8')) as { request: typeof identity; response: { text: string; usage?: Record<string, unknown>; status?: string; incomplete_reason?: string } };
-    const drift = (Object.keys(identity) as (keyof typeof identity)[]).filter((k) => banked.request[k] !== identity[k]);
-    if (drift.length > 0) replayDrift.push({ call: callIndex, fields: drift });
-    return banked.response;
+    const banked = JSON.parse(readFileSync(f, 'utf8')) as { request_sha256: string; http_status: number; raw_body: string };
+    if (banked.request_sha256 !== sha(body)) replayDrift.push({ call: callIndex, banked: banked.request_sha256.slice(0, 12), now: sha(body).slice(0, 12) });
+    status = banked.http_status; rawBody = banked.raw_body;
+  } else {
+    rawBody = JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: readFileSync(process.env.MC_FIXTURE ?? '', 'utf8') }] }] });
   }
-  const key = process.env.OPENAI_API_KEY ?? '';
-  if (!key.startsWith('sk-')) throw new Error('live: OPENAI_API_KEY missing or without the sk- prefix');
-  // Hard, machine-wide call budget for this measurement: a shared counter file; refuse once the cap is reached.
-  const capFile = process.env.MC_CALL_COUNTER ?? '';
-  const cap = Number(process.env.MC_CALL_CAP ?? '0');
-  if (capFile === '' || !(cap > 0)) throw new Error('live: MC_CALL_COUNTER and MC_CALL_CAP are required');
-  const spent = existsSync(capFile) ? Number(readFileSync(capFile, 'utf8').trim() || '0') : 0;
-  if (spent >= cap) throw new Error(`live: call budget exhausted (${spent}/${cap})`);
-  writeFileSync(capFile, String(spent + 1));
-  const started = Date.now();
-  const r = await fetch('https://api.openai.com/v1/responses', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: req.model, instructions: req.instructions, input: req.input, max_output_tokens: req.max_output_tokens,
-      ...(req.reasoning_effort !== undefined ? { reasoning: { effort: req.reasoning_effort } } : {}),
-      text: { format: { type: 'json_schema', name: 'draft_records', strict: true, schema: req.schema } },
-    }),
-    signal: AbortSignal.timeout(110_000),
-  });
-  if (r.status === 429) { console.error('ABORT: 429 from provider'); process.exit(42); }
-  if (!r.ok) throw new Error(`openai_${r.status}: ${(await r.text()).slice(0, 300)}`);
-  const j = await r.json() as { output?: { type?: string; content?: { type?: string; text?: string }[] }[]; usage?: Record<string, unknown>; status?: unknown; incomplete_details?: { reason?: unknown } | null };
-  let text = '';
-  for (const item of j.output ?? []) {
-    if (item.type !== 'message') continue;
-    for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
-  }
-  const response = {
-    text, usage: j.usage,
-    ...(j.status === 'incomplete' ? { status: 'incomplete', incomplete_reason: typeof j.incomplete_details?.reason === 'string' ? j.incomplete_details.reason : undefined } : {}),
-  };
-  writeFileSync(bankFile(callIndex), JSON.stringify({ at: new Date().toISOString(), latency_ms: Date.now() - started, brief_sha256: sha(brief), request: identity, response }, null, 2));
-  return response;
-};
-const replayDrift: { call: number; fields: string[] }[] = [];
+  let parsedStatus: unknown = null, text = '';
+  try {
+    const j = JSON.parse(rawBody) as { status?: unknown; output?: { type?: string; content?: { type?: string; text?: string }[] }[] };
+    parsedStatus = j.status ?? null;
+    for (const item of j.output ?? []) if (item.type === 'message') for (const c of item.content ?? []) if (c.type === 'output_text') text += c.text ?? '';
+  } catch { /* the transport reports it */ }
+  rawTexts.push(text);
+  calls.push({ call: callIndex, request_sha256: sha(body).slice(0, 12), schema_name: sent.text?.format?.name ?? null, latency_ms: Date.now() - started, http_status: status, status: parsedStatus, raw_text_chars: text.length });
+  return new Response(rawBody, { status, headers: { 'content-type': 'application/json' } });
+}) as typeof fetch;
+const replayDrift: { call: number; banked: string; now: string }[] = [];
+
+// Imported AFTER the key is in the environment: the route's config reads it at load.
+const { constructionCallStructured, constructionDeadline, CONSTRUCTION_TIMEOUT_REASON } = await import('../../src/routes/agent-v1-turn.js');
+const { withRegisteredStatedDispositions } = await import('../../src/routes/assist.v1.scenario-graph-register.js');
+const { runWithProviderPolicy, OPENAI_ONLY } = await import('../../src/adapters/llm/provider-policy.js');
+const { buildModelFromRecords } = await import('../../src/orchestrator-v5/agent-lane/runtime/build-model-from-records.js');
+const { normaliseGraphNodeKindField } = await import('../../src/orchestrator-v5/graph-registration/normalise-node-kind.js');
+const { GraphStateIngressSchema } = await import('../../src/orchestrator-v5/boundary/request-extensions.js');
+const { projectGraphForPersistence } = await import('../../src/orchestrator-v5/persisted-graph-projection.js');
+const { assignEntityRefs } = await import('../../src/orchestrator-v5/graph/entity-refs.js');
+const { clearInheritedInterventionSourceQuotes } = await import('../../src/orchestrator/tools/encode-option-interventions.js');
+const { StatedDispositionsV3 } = await import('../../src/schemas/graph-stated-dispositions.js');
+const { currentStatedDispositionRows } = await import('../../src/orchestrator-v5/graph/stated-dispositions-binding.js');
+const { deriveNotModelledManifest } = await import('../../src/cee/context-integrity/not-modelled-manifest.js');
+const { targetTestabilityOf } = await import('../../src/orchestrator-v5/admission/target-testability.js');
+const { resolveAnalysisAdmission } = await import('../../src/orchestrator-v5/admission/analysis-admission.js');
 
 /** The verdict and its codes only; the full admission object restates the graph hash and signals. */
 function analysisAdmissionSummary(graph: unknown) {
@@ -117,31 +123,65 @@ const dispatch = async (path: string, body: unknown): Promise<{ status: number; 
   throw new Error(`harness: unexpected dispatch ${path}`);
 };
 
-const result = await buildModelFromRecords(SCENARIO, brief, dispatch as never, callStructured);
+// As the route: one deadline per turn, from the turn's start; every attempt gets only what remains of it.
+const startedAt = Date.now();
+const deadlineAt = constructionDeadline(startedAt);
+const result = await runWithProviderPolicy(OPENAI_ONLY('agent_v1_turn'), () =>
+  buildModelFromRecords(SCENARIO, brief, dispatch as never, (reqBody) => constructionCallStructured(reqBody, deadlineAt)));
+const constructionMs = Date.now() - startedAt;
 
 let stored: unknown = null;
 let ingress: unknown = null;
+let receiptRows = 0;
 if (registered !== undefined) {
   const normalised = normaliseGraphNodeKindField(registered.graph);
   if (!normalised.ok) ingress = { ok: false, reason: normalised.reason };
   else {
     const parsed = GraphStateIngressSchema.safeParse(normalised.graph);
     ingress = parsed.success ? { ok: true } : { ok: false, issues: parsed.error.issues.slice(0, 10) };
-    const projected = projectGraphForPersistence(normalised.graph, { scenarioId: SCENARIO, turnClass: 'direct_answer', source: 'graph_registration' });
-    stored = assignEntityRefs(projected, null).graph;
+    const receipt = registered.stated_dispositions == null ? undefined : StatedDispositionsV3.safeParse(registered.stated_dispositions);
+    if (receipt !== undefined && !receipt.success) ingress = { ok: false, reason: 'STATED_DISPOSITIONS_INVALID' };
+    const statedReceipt = receipt?.success ? receipt.data : undefined;
+    receiptRows = statedReceipt?.length ?? 0;
+    // The register route's store composition for a first draft (no base graph).
+    const opts = { scenarioId: SCENARIO, turnClass: 'direct_answer' as const, source: 'graph_registration' as const };
+    const projected = projectGraphForPersistence(normalised.graph, opts);
+    stored = withRegisteredStatedDispositions(
+      assignEntityRefs(projectGraphForPersistence(clearInheritedInterventionSourceQuotes(null, projected), opts), null).graph,
+      statedReceipt as never);
   }
+}
+const boundRows = stored === null ? undefined : currentStatedDispositionRows(stored);
+
+/** goal.scope fill (DL named metric): did the model's records declare the goal's part-or-whole scope? */
+function goalScopeFill(): boolean | null {
+  for (const text of rawTexts) {
+    try {
+      const records = JSON.parse(text) as { stated_items?: { kind?: string; scope?: unknown }[] };
+      const goals = (records.stated_items ?? []).filter((item) => item.kind === 'goal');
+      if (goals.length > 0) return goals.some((goal) => goal.scope != null);
+    } catch { /* not a record set */ }
+  }
+  return null;
 }
 
 writeFileSync(out, JSON.stringify({
-  harness: { kind: 'records', mode, draw: Number(draw), brief_id: briefId, provider_calls: mode === 'live' ? callIndex : 0, construction_calls: callIndex, replay_drift: replayDrift, ingress },
+  harness: {
+    kind: 'records-served-transport', mode, draw: Number(draw), brief_id: briefId,
+    provider_calls: mode === 'live' ? callIndex : 0, construction_calls: callIndex, calls, replay_drift: replayDrift, ingress,
+    construction_ms: constructionMs, deadline_ms: deadlineAt - startedAt,
+    timed_out: calls.length > 0 && JSON.stringify(result).includes(CONSTRUCTION_TIMEOUT_REASON),
+    goal_scope_filled: goalScopeFill(),
+    receipt_rows_sent: receiptRows, receipt_rows_bound: boundRows?.length ?? 0,
+  },
   build_result: result,
-  // Not included in graph: the existing registration route does not persist this diagnostic.
   registered_stated_dispositions: registered?.stated_dispositions ?? null,
   graph: stored,
   brief_text: brief,
-  not_modelled: stored === null ? null : deriveNotModelledManifest(brief, stored),
+  not_modelled: stored === null ? null : deriveNotModelledManifest(brief, stored, { statedDispositionRows: boundRows }),
   target_testability: stored === null ? null : targetTestabilityOf(stored),
-  // M1 (pass 2) is "testable AND admission != none": the stored graph's analysis admission, beside testability.
+  // M1 is "testable AND admission != none": the stored graph's analysis admission, beside testability.
   analysis_admission: stored === null ? null : analysisAdmissionSummary(stored),
 }, null, 2));
-console.log(JSON.stringify({ out, ok: (result as { ok?: unknown }).ok, calls: callIndex, drift: replayDrift.length, stored: stored !== null }));
+console.log(JSON.stringify({ out, ok: (result as { ok?: unknown }).ok, calls: callIndex, drift: replayDrift.length, stored: stored !== null, ms: constructionMs, receipt: `${boundRows?.length ?? 0}/${receiptRows}` }));
+process.exit(0);
