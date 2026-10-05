@@ -3,11 +3,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import {
-  GOAL_FIGURES_PLACEHOLDER_PATH, OPTION_IDENTICAL_TO_BASELINE, readOptionResultSources, runWithheldGoalFigures,
+  GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_OPTIONS_IDENTICAL, readOptionResultSources, runWithheldGoalFigures,
 } from '../../../../orchestrator/context/option-result-source.js';
 import type { HandlerInvocation } from '../../registry.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
-import { buildIdenticalArmsDisclosure, IDENTICAL_ARMS_DISCLOSURE_RE_SRC } from '../../../coaching/scaffold-disclosure.js';
+import { buildIdenticalArmsDisclosure, IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS, IDENTICAL_ARMS_DISCLOSURE_RE_SRC } from '../../../coaching/scaffold-disclosure.js';
+import { goalChanceWithheldForAgent, GOAL_CHANCE_WITHHELD_NOTE, OPTIONS_IDENTICAL_NOTE, PLACEHOLDER_PATH_NOTE } from '../../../agent-lane/goal-chance-withheld.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH as PLACEHOLDER, GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED } from '../../../../orchestrator/context/option-result-source.js';
 import { TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS } from '../../../coaching/analysis-result-headline.js';
 import { detectIdenticalArms } from '../identical-arms.js';
 import { createRunAnalysisHandler } from '../run-analysis.js';
@@ -50,10 +52,11 @@ function body(rows: Array<[string, string, Rec, number]>): Rec {
 }
 const threeArm = (hireTwo: Rec = SAME): Rec => body([
   ['carry_on', 'Carry On', SAME, 0.3], ['hire_two', 'Hire Two', hireTwo, 0.3], ['tech_lead', 'Tech Lead', OTHER, 0.4]]);
-const nudged = (field: 'mean' | 'p05', rel: number): Rec => {
+/** Nudge ONE outcome statistic. The shared rule (`identical-arms-core.ts`) compares the outcome distribution and the
+ *  draw count; `downside` is not compared (the same draws give the same downside). */
+const nudged = (field: 'mean' | 'p90', rel: number): Rec => {
   const s = structuredClone(SAME) as { outcome: Rec; downside: Rec };
-  if (field === 'mean') s.outcome.mean = (s.outcome.mean as number) * (1 + rel);
-  else s.downside.p05 = (s.downside.p05 as number) * (1 + rel);
+  s.outcome[field] = (s.outcome[field] as number) * (1 + rel);
   return s;
 };
 
@@ -83,7 +86,7 @@ describe('gate 1 v2 — identical arms are detected on the Run\'s own result', (
 
   it.each([1e-6, 1e-9, 1e-11])('(c) DL contrast: arms that differ by relative %s on ONE statistic are not identical', (rel) => {
     expect(detectIdenticalArms(threeArm(nudged('mean', rel)), OPTIONS)).toEqual([]);
-    expect(detectIdenticalArms(threeArm(nudged('p05', rel)), OPTIONS)).toEqual([]);
+    expect(detectIdenticalArms(threeArm(nudged('p90', rel)), OPTIONS)).toEqual([]);
   });
 
   it('within tolerance (relative 1e-13) is identical', () => {
@@ -101,9 +104,22 @@ describe('gate 1 v2 — identical arms are detected on the Run\'s own result', (
     expect(buildIdenticalArmsDisclosure(groups)).toContain('Carry On, Hire Two and Tech Lead came out identical');
   });
 
-  it.each(['outcome', 'downside'] as const)('(f) a missing %s on either side is never identical', (key) => {
+  it('(f) a missing outcome on either side is never identical', () => {
     const b = threeArm();
-    delete (b.option_comparison as Rec[])[1]![key];
+    delete (b.option_comparison as Rec[])[1]!.outcome;
+    expect(detectIdenticalArms(b, OPTIONS)).toEqual([]);
+  });
+
+  it('a non-computed arm (status skipped) is never grouped, whatever its statistics (the shared usability gate)', () => {
+    const b = threeArm();
+    (b.option_comparison as Rec[])[1]!.status = 'skipped';
+    expect(detectIdenticalArms(b, OPTIONS)).toEqual([]);
+    expect(detectIdenticalArms(threeArm(), OPTIONS)).toHaveLength(1); // control
+  });
+
+  it('(f) a percentile present on one side only is never identical', () => {
+    const b = threeArm();
+    delete ((b.option_comparison as Rec[])[1]!.outcome as Rec).p90;
     expect(detectIdenticalArms(b, OPTIONS)).toEqual([]);
   });
 
@@ -132,6 +148,50 @@ describe('gate 1 v2 — identical arms are detected on the Run\'s own result', (
     expect(re.test(PAIR_LINE)).toBe(true);
     expect(re.test(BASELINE_LINE + PAIR_LINE)).toBe(true);
     expect(TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.some((g) => g.name === 'IDENTICAL_ARMS_DISCLOSURE_RE_SRC')).toBe(true);
+  });
+
+  it('Codex P2: past MAX_OPTIONS arms the disclosure is the ONE generic sentence, inside the grammar and the budget', () => {
+    const ids = Array.from({ length: 7 }, (_, i) => `plan_${i}`);
+    const labels = ids.map((_, i) => `Plan ${String.fromCharCode(65 + i)} ${'a'.repeat(193)}`);
+    const said = buildIdenticalArmsDisclosure([{ option_ids: ids, labels, baseline_option_id: null }]);
+    expect(said).toBe(" Some options came out identical: in this model they lead to the same outcome. The comparison is held back until they differ: edit one of their values, or remove one.");
+    expect(said.length).toBeLessThanOrEqual(IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS);
+    expect(new RegExp(`^(?:${IDENTICAL_ARMS_DISCLOSURE_RE_SRC})$`).test(said)).toBe(true);
+    // Contrast: three pairs at the 200-character bound (six arms) are still named, and still inside the budget.
+    const pairs = [0, 1, 2].map((k) => ({ option_ids: [`a${k}`, `b${k}`], labels: [`A${k} ${'x'.repeat(197)}`, `B${k} ${'y'.repeat(197)}`], baseline_option_id: null }));
+    const named = buildIdenticalArmsDisclosure(pairs);
+    expect(named).toContain(`A0 ${'x'.repeat(197)} and B0`);
+    expect(named.length).toBeLessThanOrEqual(IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS);
+    expect(new RegExp(`^(?:${IDENTICAL_ARMS_DISCLOSURE_RE_SRC})$`).test(named)).toBe(true);
+  });
+});
+
+describe('gate 1 v2 — the Agent reader (Codex #2574 P1)', () => {
+  const identical = { code: 'GOAL_FIGURES_OPTIONS_IDENTICAL', severity: 'warning', option_ids: ['carry_on', 'hire_two'],
+    message: `Not shown.${BASELINE_LINE}` };
+  const block = (...w: Rec[]) => ({ type: 'analysis_result', enrichment: { inference_warnings: w } });
+
+  it('identical arms alone: their own reason and note, scoped to the identical options (Tech Lead keeps its chance)', () => {
+    const r = goalChanceWithheldForAgent(block(identical));
+    expect(r).toEqual({ withheld: true, say: BASELINE_LINE.trim(), node_ids: [], note: OPTIONS_IDENTICAL_NOTE, option_ids: ['carry_on', 'hire_two'] });
+    expect(r?.say).not.toContain('each option reaches');
+  });
+
+  it('beside a placeholder path: the placeholder keeps its note and words; the identical reason is added; scopes unite', () => {
+    const placeholder = { code: PLACEHOLDER, severity: 'warning', option_ids: ['tech_lead'], node_ids: ['n1'], message: 'Not shown. Its link to revenue is a guess.' };
+    const r = goalChanceWithheldForAgent(block(placeholder, identical));
+    expect(r?.note).toBe(PLACEHOLDER_PATH_NOTE);
+    expect(r?.say).toBe(`Its link to revenue is a guess. ${BASELINE_LINE.trim()}`);
+    expect(r?.option_ids).toEqual(['tech_lead', 'carry_on', 'hire_two']);
+    expect(r?.node_ids).toEqual(['n1']);
+  });
+
+  it('beside an every-option withhold: that note and scope stand (every option), with the identical reason added', () => {
+    const everyOption = { code: GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED, severity: 'warning', node_ids: ['g'], message: 'Not shown. The goal is a product this run did not evaluate.' };
+    const r = goalChanceWithheldForAgent(block(everyOption, identical));
+    expect(r?.note).toBe(GOAL_CHANCE_WITHHELD_NOTE);
+    expect(r?.option_ids).toBeUndefined();
+    expect(r?.say).toContain(BASELINE_LINE.trim());
   });
 });
 
@@ -181,7 +241,7 @@ describe('gate 1 v2 — run_analysis path', () => {
     expect(rows.every((r) => (r.outcome as Rec | undefined)?.mean !== undefined)).toBe(true);
     expect(fact.result.leading_option_id).toBeNull();
     expect(runWithheldGoalFigures(enrichment)).toBe(true);
-    const warning = (enrichment.inference_warnings as Rec[]).find((w) => w.code === OPTION_IDENTICAL_TO_BASELINE);
+    const warning = (enrichment.inference_warnings as Rec[]).find((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL);
     expect(warning?.option_ids).toEqual(['carry_on', 'hire_two']);
     expect(outcome.assistant_text).toContain(BASELINE_LINE);
     expect(outcome.assistant_text).not.toMatch(/currently leads|scored highest/);
@@ -191,7 +251,7 @@ describe('gate 1 v2 — run_analysis path', () => {
     const { outcome, fact, enrichment } = await runHandler(graphOf(OPTIONS), OPTIONS, threeArm(nudged('mean', 1e-6)));
     const rows = readOptionResultSources(enrichment)[0]!;
     expect(rows.every((r) => typeof r.win_probability === 'number')).toBe(true);
-    expect((enrichment.inference_warnings as Rec[] | undefined ?? []).some((w) => w.code === OPTION_IDENTICAL_TO_BASELINE)).toBe(false);
+    expect((enrichment.inference_warnings as Rec[] | undefined ?? []).some((w) => w.code === GOAL_FIGURES_OPTIONS_IDENTICAL)).toBe(false);
     expect(fact.result.leading_option_id).toBe('tech_lead');
     expect(outcome.assistant_text).not.toContain('came out identical');
   });
@@ -202,14 +262,14 @@ describe('gate 1 v2 — run_analysis path', () => {
     const withPlaceholder = await runHandler(graphOf(options, placeholder), options, threeArm());
     const codes = (withPlaceholder.enrichment.inference_warnings as Rec[]).map((w) => w.code);
     expect(codes).toContain(GOAL_FIGURES_PLACEHOLDER_PATH);
-    expect(codes).toContain(OPTION_IDENTICAL_TO_BASELINE);
+    expect(codes).toContain(GOAL_FIGURES_OPTIONS_IDENTICAL);
     const hireTwo = readOptionResultSources(withPlaceholder.enrichment).flat().filter((r) => r.option_id === 'hire_two');
     expect(hireTwo.length).toBeGreaterThan(0);
     expect(hireTwo.every((r) => r.probability_of_goal === undefined)).toBe(true);
     // Contrast: the same identical arm over a USER-sized link carries only the identity reason.
     const sized = await runHandler(graphOf(options), options, threeArm());
     const sizedCodes = (sized.enrichment.inference_warnings as Rec[]).map((w) => w.code);
-    expect(sizedCodes).toContain(OPTION_IDENTICAL_TO_BASELINE);
+    expect(sizedCodes).toContain(GOAL_FIGURES_OPTIONS_IDENTICAL);
     expect(sizedCodes).not.toContain(GOAL_FIGURES_PLACEHOLDER_PATH);
   });
 });

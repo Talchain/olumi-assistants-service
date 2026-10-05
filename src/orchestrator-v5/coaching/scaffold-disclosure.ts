@@ -548,7 +548,11 @@ export function buildAnalysisSubmissionDisclosure(
 
 /** The arms ran: say which came out identical (DL wording, true whatever the cause) and what the user can do. */
 export function buildIdenticalArmsDisclosure(groups: readonly IdenticalArmGroup[]): string {
-  return groups.map((g) => {
+  // ⛔ BOUNDED HERE, not by an upstream option cap (Codex #2574 P2: nothing on the run path enforces MAX_OPTIONS). Past
+  // the grammar's bounds — more names than one list admits, more arms than MAX_OPTIONS, or more characters than the
+  // budget — the whole disclosure is the one generic sentence, which the grammar and the length budget always admit.
+  if (groups.reduce((n, g) => n + g.option_ids.length, 0) > MAX_OPTIONS) return IDENTICAL_GENERIC_SENTENCE;
+  const out = groups.map((g) => {
     const names = g.option_ids.map((id, i) => sanitiseLabel(g.labels[i] ?? id, id));
     const ok = names.every((n): n is string => n !== null && n.length <= 200);
     const baselineAt = g.baseline_option_id === null ? -1 : g.option_ids.indexOf(g.baseline_option_id);
@@ -561,16 +565,18 @@ export function buildIdenticalArmsDisclosure(groups: readonly IdenticalArmGroup[
       const list = `${ordered.slice(0, -1).join(', ')} and ${ordered[ordered.length - 1]}`;
       sentence = ` ${list} came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`;
     } else {
-      sentence = ` Some options came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`;
+      sentence = IDENTICAL_GENERIC_SENTENCE;
     }
     return passesAssistantTextContentDefences(sentence) && !/[\r\n]/.test(sentence)
-      ? sentence : ` Some options came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`;
+      ? sentence : IDENTICAL_GENERIC_SENTENCE;
   }).join('');
+  return out.length <= IDENTICAL_ARMS_DISCLOSURE_MAX_CHARS ? out : IDENTICAL_GENERIC_SENTENCE;
 }
 
-/** What the user can do; the comparison is withheld (OPTION_IDENTICAL_TO_BASELINE) until the arms differ. */
+/** What the user can do; the comparison is withheld (GOAL_FIGURES_OPTIONS_IDENTICAL) until the arms differ. */
 const IDENTICAL_HOLD_BACK_ONE = ' The comparison is held back until it differs: edit its value, or remove it.';
 const IDENTICAL_HOLD_BACK_MANY = ' The comparison is held back until they differ: edit one of their values, or remove one.';
+const IDENTICAL_GENERIC_SENTENCE = ` Some options came out identical: in this model they lead to the same outcome.${IDENTICAL_HOLD_BACK_MANY}`;
 
 /** One sentence per identical group; names bounded at 200 characters each. */
 export const IDENTICAL_ARMS_DISCLOSURE_RE_SRC =

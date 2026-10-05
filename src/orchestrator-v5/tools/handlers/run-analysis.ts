@@ -47,7 +47,7 @@ import { IDENTITY_NOT_EVALUATED_CODE, composeIdentityNotEvaluatedAsk } from '../
 import { RunAnalysisArgsSchema, RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import { recordGoalCertainty } from './run-goal-certainty.js';
 import { placeholderGoalPaths, placeholderGoalWarning } from '../../agent-lane/goal-certainty.js';
-import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, OPTION_IDENTICAL_TO_BASELINE, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
+import { GOAL_FIGURES_PLACEHOLDER_PATH, GOAL_FIGURES_PRODUCT_NOT_READ, GOAL_FIGURES_TARGET_NOT_TESTABLE, GOAL_FIGURES_OPTIONS_IDENTICAL, readOptionResultSources, runWithheldGoalFigures } from '../../../orchestrator/context/option-result-source.js';
 import { targetTestabilityOf, targetNotTestableWarning } from '../../admission/target-testability.js';
 import { unreadGoalProduct, unreadGoalProductWarning } from '../../agent-lane/unread-goal-product.js';
 import { withUntestedHorizonWarning } from '../../agent-lane/decision-input-ask.js';
@@ -2025,7 +2025,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     if (identicalArms.length > 0) {
       const said = buildIdenticalArmsDisclosure(identicalArms).trim();
       response = withholdOptionGoalFigures(response, new Set(identicalArms.flatMap((g) => g.option_ids)), {
-        code: OPTION_IDENTICAL_TO_BASELINE,
+        code: GOAL_FIGURES_OPTIONS_IDENTICAL,
         message: said.length > 0 && said.length <= 388 ? `Not shown. ${said}` : 'Not shown. Some options came out identical, so the comparison is held back until they differ.',
         severity: 'warning',
         option_ids: identicalArms.flatMap((g) => g.option_ids),

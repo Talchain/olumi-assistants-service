@@ -315,8 +315,10 @@ export function structuralChallengeTurnUnderLicence(
     return { ...turn, result, outcome: result.status, certainty: undefined,
       reply: composeStructuralChallengeReply({ result, labels: turn.labels }) };
   }
-  // Identical arms leave the candidate no leader to licence: only the baseline's canonical licence governs its name.
-  const candidateNarrows = turn.identicalArms !== true;
+  // Identical arms (all, or ANY group) leave the candidate no leader to licence: only the baseline's canonical licence
+  // governs its name. Gate 1 v2 withholds an identical group's figures inside the candidate Run, so its licence reads
+  // withheld exactly when the served pair reply needs the baseline name (#2574 interplay, row R0g).
+  const candidateNarrows = turn.identicalArms !== true && (turn.identicalGroups?.length ?? 0) === 0;
   let licence: LeaderLicence = !permission.permissions.leader_may_be_named
     || (candidateNarrows && (turn.candidateLeaderLicence === 'withheld' || turn.candidateLeaderLicence === undefined)) ? 'withheld'
     : permission.permissions.provisional === true || (candidateNarrows && turn.candidateLeaderLicence === 'permitted_with_caveat')
