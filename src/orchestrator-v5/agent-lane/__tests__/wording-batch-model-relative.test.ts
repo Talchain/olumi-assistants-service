@@ -6,6 +6,8 @@
  * sentence binds the exact words; the budget rows prove the worst-case render still fits the contract's max_chars;
  * the guard rows prove the new words stay inside every existing defence without widening any of them.
  */
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { POLICY } from '../guidance/policy.js';
@@ -149,5 +151,51 @@ describe('explain and flip fallbacks: the leader and runner-up are said in this 
     const text = composeWhatWouldFlipFallback(ANALYSIS, null, null, null);
     expect(text).toContain("In this model, 'Hire Senior Engineer' scored highest in 62% of runs.");
     expect(text).not.toMatch(/performs best|currently leads/);
+  });
+});
+
+describe('SERVED BYTES (DL Review Desk on #2588): the served rerun capture (CEE c74a432) through the real builder reaches the wire verbatim', () => {
+  type Json = Record<string, unknown>;
+  const FIXTURE = JSON.parse(
+    readFileSync(new URL('../../coaching/__tests__/fixtures/rerun-c74a432.analysis-result-block.trimmed.json', import.meta.url), 'utf8'),
+  ) as { blocks: Json[] };
+  const BLOCK = FIXTURE.blocks[0] as Json;
+  const ENRICHMENT = BLOCK['enrichment'] as Json;
+  const SERVED_SUMMARY = BLOCK['summary'] as string;
+  /** As served by CEE c74a432, in the RETIRED caution words. */
+  const SERVED_HEADLINE =
+    'Raise Price to £50 scored highest against your goal in 84% of runs of this model,' +
+    ' but treat this as provisional: the link between Price per seat and Monthly revenue is fragile.';
+  /** The scaffold sentence run-analysis.ts appended after the headline, byte for byte from the capture. */
+  const SCAFFOLD = SERVED_SUMMARY.slice(SERVED_HEADLINE.length);
+  const FALLBACK = 'Ran analysis on your current scenario.';
+  const template = HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template;
+  const forward = (text: string): string => {
+    if (typeof template !== 'function') throw new Error('expected function-form confirmation_template');
+    return template({ assistant_text: text });
+  };
+  const built = buildAnalysisResultHeadline({
+    enrichment: ENRICHMENT,
+    leading_option_id: BLOCK['leading_option_id'] as string,
+    status_kind: 'ok',
+  });
+
+  it('PRECONDITION: the capture is the served bytes, and its served summary carried the retired caution', () => {
+    expect(SERVED_SUMMARY.startsWith(SERVED_HEADLINE)).toBe(true);
+    expect(SCAFFOLD.length).toBeGreaterThan(0);
+  });
+
+  it("today's builder on the served envelope says the caution in the new words, and the served-shape summary is forwarded verbatim", () => {
+    expect(built).not.toBeNull();
+    expect(built).toContain('it rests heavily on how much Price per seat changes Monthly revenue');
+    expect(built).toContain('scored highest in 84% of runs of this model');
+    expect(built).not.toContain('is fragile');
+    const summary = `${built}${SCAFFOLD}`;
+    expect(forward(summary)).toBe(summary);
+    expect(forward(summary)).not.toBe(FALLBACK);
+  });
+
+  it('CONTROL: the served summary in the retired words is no longer in the grammar, so the probe sees the change', () => {
+    expect(forward(SERVED_SUMMARY)).toBe(FALLBACK);
   });
 });
