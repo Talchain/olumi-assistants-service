@@ -21,6 +21,7 @@ import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type 
 import { executeOptionInterventionBatch, linkStrengthsPostimageIsScoped, type ApprovedLinkEffect } from '../option-intervention-edit.js';
 import { prepareLinkEffectUnitReadings } from '../link-effect-unit-reading.js';
 import { findStatedAmounts } from '../../../cee/provenance/stated-amounts.js';
+import { targetTestabilityOf } from '../../admission/target-testability.js';
 
 type Json = Record<string, any>;
 const SCENARIO = '0c6dcb3d-de66-4b46-8860-4b7dce0bb107';
@@ -619,6 +620,27 @@ describe('RT-6 size-by-chat on an UNSIZED link', () => {
     expect(nodeUnitOf(withOwn.nodes)(SOURCE)).toBe('customers');
     nodeOf(withOwn, SOURCE).unit = 'GBP';
     expect(nodeUnitOf(withOwn.nodes)(SOURCE)).toBe('GBP'); // P5 already read a top-level unit first; unchanged.
+  });
+
+  // DL 5999243055: only the USER's stated reading governs a unit; an Olumi-written one never moves P5.
+  it('goal path: the user\'s stated reading on the GOAL end is the unit both readers use (it has no own unit)', () => {
+    const graph = unsizedGraph();
+    nodeOf(graph, TARGET).unit_reading = reading('%', TARGET_CLAUSE);
+    expect(nodeUnitOf(graph.nodes)(TARGET)).toBe('%');
+    expect(magnitudeNodes(graph.nodes, percentLevelIds(graph)).get(TARGET)!.unit).toBe('%');
+  });
+
+  it('contrast: an Olumi-written reading on the same goal end is read by NEITHER reader, and P5 is unchanged', () => {
+    const plain = unsizedGraph();
+    const olumi = unsizedGraph();
+    nodeOf(olumi, TARGET).unit_reading = { unit: '%', source: 'olumi_reading', source_quote: 'Olumi read gross margin as %' };
+    expect(nodeUnitOf(olumi.nodes)(TARGET)).toBeUndefined();
+    expect(magnitudeNodes(olumi.nodes, percentLevelIds(olumi)).get(TARGET)!.unit).toBeNull();
+    expect(targetTestabilityOf(olumi)).toEqual(targetTestabilityOf(plain));
+    // data.unit never reaches P5's reader either.
+    const withData = unsizedGraph();
+    nodeOf(withData, TARGET).data = { unit: '%' };
+    expect(nodeUnitOf(withData.nodes)(TARGET)).toBeUndefined();
   });
 
   it('M1 target-% twin asks about its own bare %; pp on source cannot license the other end', async () => {

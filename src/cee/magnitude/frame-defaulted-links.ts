@@ -85,7 +85,10 @@ export function magnitudeNodes(nodes: readonly Rec[], percentLevel: ReadonlySet<
     // Draft records carry claim units on `data.unit`; the old view only read
     // observed_state and consequently made outcome/goal-path sizing refuse even
     // when the model had stated the natural unit.
-    unit: [isRec(n.data) ? n.data.unit : undefined, isRec(n.unit_reading) ? n.unit_reading.unit : undefined]
+    // RT-6 step 2: after the node's own unit, ONLY the user's own stated reading (Science U1–U4). An Olumi-written
+    // reading never governs sizing or P5 (DL 5999243055: it would move the Run headline with no analysis-hash move).
+    unit: [isRec(n.data) ? n.data.unit : undefined,
+      isRec(n.unit_reading) && n.unit_reading.source === 'user_stated' ? n.unit_reading.unit : undefined]
       .find((u): u is string => typeof u === 'string' && u.trim() !== '') ?? null,
     option_levels: optionLevels.get(n.id as string) ?? [],
     ...(percentLevel.has(n.id as string) ? { percent_level: true } : {}),
