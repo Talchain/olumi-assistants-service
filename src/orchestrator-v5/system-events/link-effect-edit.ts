@@ -122,6 +122,8 @@ export function statedInOneOf(stated: unknown, own: readonly (string | undefined
 export interface LinkEndUnits {
   readonly own: readonly string[];
   readonly adopted?: string;
+  /** A % LEVEL target whose goal names no unit: its points fallback is stored as the user stated it. */
+  readonly storeAsStated?: boolean;
 }
 export function linkEffectEndUnits(graph: unknown, from: string, to: string): { readonly source: LinkEndUnits; readonly target: LinkEndUnits } | null {
   if (!isRec(graph) || !Array.isArray(graph.nodes)) return null;
@@ -152,7 +154,8 @@ export function linkEffectEndUnits(graph: unknown, from: string, to: string): { 
   const targetAdopted = targetOwn.length === 0 && targetNode.percent_level !== true ? storedUnit('amount_unit') : undefined;
   return {
     source: { own: sourceOwn, ...(sourceAdopted !== undefined ? { adopted: sourceAdopted } : {}) },
-    target: { own: targetOwn, ...(targetAdopted !== undefined ? { adopted: targetAdopted } : {}) },
+    target: { own: targetOwn, ...(targetAdopted !== undefined ? { adopted: targetAdopted } : {}),
+      ...(targetNode.percent_level === true && levelPoints.length === 0 ? { storeAsStated: true } : {}) },
   };
 }
 
@@ -288,7 +291,7 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const naturalEffect = {
     ...sizing.natural_effect,
     ...(endUnits.source.adopted !== undefined ? { per_source_change_unit: effect.per_source_change_unit } : {}),
-    ...(endUnits.target.adopted !== undefined ? { amount_unit: effect.amount_unit } : {}),
+    ...(endUnits.target.adopted !== undefined || endUnits.target.storeAsStated === true ? { amount_unit: effect.amount_unit } : {}),
   };
   edge.provenance = { ...keptProvenance, source: 'user_specified', magnitude: 'user_stated', natural_effect: naturalEffect };
   edge.provenance_display = 'user_set';

@@ -253,9 +253,15 @@ describe('RT-6 row 2 (Science): points size a % LEVEL goal, through the writer\'
     expect(r).toEqual(expect.objectContaining({ ok: false, refusal: 'unit_mismatch' }));
     expect(String(r.detail)).toContain('recorded in percentage points');
     expectRefused(r, 'unit_mismatch', undefined, refusedWorld.store, refusedWorld.graph, before);
+    // Control, through the REAL writer (Codex buddy @97ff622f: the proposal alone passed while the write stored ''):
     const control = world(marked());
     const ok = await control.caps.proposeLinkEffect!(ctxSaying(SAID_READ), { ...LINK, quote: SAID_READ }) as Json;
     expect(ok, JSON.stringify(ok)).toEqual(expect.objectContaining({ ok: true }));
+    const applied = await control.caps.authoriseChange(ctxPressing(String(ok.proposal_id), cardFor(control.store, ok).message),
+      { proposal_id: String(ok.proposal_id) }) as Json;
+    expect(applied, JSON.stringify(applied)).toEqual(expect.objectContaining({ ok: true, applied: true }));
+    expect(linkOf(control.graph).provenance).toMatchObject({ magnitude: 'user_stated',
+      natural_effect: { amount: -2, amount_unit: 'percentage points', per_source_change: 5, per_source_change_unit: '%' } });
   });
   it('(d) a COUNT goal is not a % level: points into it stay unsized', () => {
     const count = goalPath('percentage points', 'user_stated', { goal_threshold_unit: 'customers', goal_threshold_raw: 600, goal_threshold_cap: 1000 });
