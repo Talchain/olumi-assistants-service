@@ -262,6 +262,9 @@ const EDGE_ATTRIBUTION = {
   },
 } as const;
 
+/** The goal-quantity identity edge's attribution (option A): the projector's own, never user text (max 100). */
+export const GOAL_QUANTITY_IDENTITY_QUOTE = "Same-quantity identity minted by the projector";
+
 export interface RecordProvenance {
   readonly provenance_class: RecordProvenanceClass;
   /**
@@ -3519,6 +3522,10 @@ function projectOnce(
   });
 
   const leverByQuantity = new Map<number,ProjectedNode>();
+  // The goal quantity's OUTCOME carrier (option A, below the option pass): goal-quantity outcome id → the goal it reaches.
+  const goalQuantityOutcome = new Map<number,ProjectedNode>();
+  const goalOfQuantityOutcome = new Map<string,string>();
+  const goalQuantityIdentityEdgeIds = new Set<string>();
   const ownOptionSettings = new Map<string,{index:number;lever:ProjectedNode;binding:ProjectedInterventionBinding}>();
   const carrier = (q: number): { node?: ProjectedNode; reason?: DroppedRecordRef["reason"] } => {
     const claimIds=new Set(claimIdByIndex.values());
@@ -3527,6 +3534,8 @@ function projectOnce(
     if(own.length===1)return {node:own[0]};
     const lever=leverByQuantity.get(q);
     if(lever!==undefined)return {node:lever};
+    const outcome=goalQuantityOutcome.get(q);
+    if(outcome!==undefined)return {node:outcome};
     const goals=nodes.filter(n=>n.kind==="goal" && n.quantity_ref===q);
     return goals.length>1 ? {reason:"relationship_endpoint_ambiguous"} : goals.length===1 ? {node:goals[0]} : {reason:"relationship_endpoint_missing"};
   };
@@ -3891,6 +3900,42 @@ function projectOnce(
     }
   }
 
+  // ⭐ VANS OUTCOME CARRIER (option A; Science ruling 5 Oct, brief-vans-outcome). A cause the USER STATED against the
+  // GOAL'S OWN quantity ("Each extra route increases deliveries by 55 every month", goal "at least 900 deliveries every
+  // month") had no carrier but the goal, so it was drawn factor→goal — and the served sweep's factor_goal_split
+  // (`deterministic-sweep.ts`) then replaced it with a synthetic "<Factor> Impact" and a 0.5 placeholder before any refit
+  // read the user's size (P5 goal_path_unsized). The sealed brief never hits that: its outcome CLAIM carries the goal's
+  // quantity, its causes land there, and the goal is reached by the same-quantity identity pass 3e sizes
+  // (`writeDefinition`: β 1 per 1 in ONE unit, `definitional`). So this mints exactly that shape and nothing else: ONE
+  // outcome per goal quantity, plus the identity edge into the goal, which pass 3e's ONE writer sizes (never a second).
+  // Only where (all of): the cause is SIZED (amount or range, per-source change) and its quote is in the brief; its target
+  // quantity has no carrier of its own (no claim node, no lever: `carrier` falls back to the goal); the declaring item
+  // is not the goal; its unit IS the goal's unit and the goal holds a frame (so the identity is sizeable); and the
+  // source→outcome shape is legal. A no-effect clause, an unsized cause and an inferred link (no stated cause) never mint.
+  // The node is the user's quantity, minted as the option-lever pass mints one (`stated`, the declaring quote).
+  if(typeof brief==="string" && brief.trim()!==""){
+    statedItems.forEach((item)=>{
+      const r=item.relationship;
+      if(item.kind!=="cause" || r===undefined || r.no_effect_literal!==undefined || !brief.includes(item.source_quote))return;
+      if(r.amount===undefined && r.range===undefined || r.per_source_change===undefined)return;
+      const q=r.to_quantity;
+      if(goalQuantityOutcome.has(q))return;
+      const goal=carrier(q).node, source=carrier(r.from_quantity).node, declaration=statedItems[q];
+      if(goal?.kind!=="goal" || source===undefined || source.kind==="goal" || declaration===undefined || declaration.kind==="goal")return;
+      if(UNRESCUABLE_EDGE_SHAPES.has(`${PROJECTED_KIND_AFTER_NORMALISATION[source.kind] ?? source.kind}->outcome`))return;
+      if(goal.goal_threshold_cap===undefined || goal.goal_threshold_unit===undefined || declaration.unit===undefined
+        || !sameUnit(declaration.unit,goal.goal_threshold_unit))return;
+      const id=mintUnique(sha8("outcome","goal-quantity",String(q)),usedIds);
+      const prov:RecordProvenance={provenance_class:"stated",source_quote:declaration.source_quote};
+      const outcome:ProjectedNode={id,kind:"outcome",label:declaration.source_quote,quantity_ref:q,data:{unit:declaration.unit},provenance:prov};
+      nodes.push(outcome);provenance[id]=prov;goalQuantityOutcome.set(q,outcome);goalOfQuantityOutcome.set(id,goal.id);
+      const edgeId=mintUnique(sha8("edge","goal-quantity-identity",id,goal.id),usedIds);
+      const edgeProv=scaffoldingProvenance(GOAL_QUANTITY_IDENTITY_QUOTE);
+      edges.push({id:edgeId,from:id,to:goal.id,effect_direction:"positive",origin:"default",provenance_source:"structural",provenance:edgeProv});
+      provenance[edgeId]=edgeProv;goalQuantityIdentityEdgeIds.add(edgeId);
+    });
+  }
+
   // Relationship endpoints are resolved solely by quantity identity, before connectivity pruning.
   statedItems.forEach((item,stated_index)=>{
     const r=item.relationship;
@@ -3906,7 +3951,9 @@ function projectOnce(
       const fromKind=PROJECTED_KIND_AFTER_NORMALISATION[source.kind] ?? source.kind;
       const toKind=PROJECTED_KIND_AFTER_NORMALISATION[target.kind] ?? target.kind;
       if(source.id===target.id || UNRESCUABLE_EDGE_SHAPES.has(`${fromKind}->${toKind}`)){rangeRefuse("relationship_endpoint_illegal");return;}
-      for(let i=edges.length-1;i>=0;i--)if(edges[i]!.from===source.id && edges[i]!.to===target.id){delete provenance[edges[i]!.id];edges.splice(i,1);}
+      // The goal-quantity outcome and its goal measure ONE quantity: "no effect" on it withdraws a link to either.
+      const sameQuantityGoal=goalOfQuantityOutcome.get(target.id);
+      for(let i=edges.length-1;i>=0;i--)if(edges[i]!.from===source.id && (edges[i]!.to===target.id || edges[i]!.to===sameQuantityGoal)){delete provenance[edges[i]!.id];edges.splice(i,1);}
       rangeRefuse("user_stated_no_effect");return;
     }
     if(r.range!==undefined){
@@ -3943,19 +3990,29 @@ function projectOnce(
     if(!statedEffectUnitsMatch(item.source_quote,detail,r)){refuse("unit_literal_contradicts_unit");return;}
     if(!statedEffectQuoteMatches(item.source_quote,detail,r)) return;
     const direction=Math.sign(r.amount*r.per_source_change)<0 ? "negative" : "positive";
-    const matches=edges.filter(e=>e.from===source.id && e.to===target.id);
+    // A model link that drew THIS stated cause into the goal is the same cause on the goal-quantity outcome (moved below).
+    const sameQuantityGoal=goalOfQuantityOutcome.get(target.id);
+    const matches=edges.filter(e=>e.from===source.id && (e.to===target.id || e.to===sameQuantityGoal));
     for(const e of matches){
       const origin=claimOriginByEdgeId.get(e.id), claim=origin===undefined ? undefined : claims[origin.index];
       if(claim?.effect_detail!==undefined && claim.effect===undefined || claim?.effect!==undefined && claim.effect!==direction){refuse("relationship_sign_conflicts_with_link");return;}
       const d=claim?.effect_detail;
       if(d!==undefined && (d.amount!==r.amount || d.per_source_change!==r.per_source_change || !sameUnit(d.amount_unit,r.amount_unit) || !sameUnit(d.per_source_change_unit,r.per_source_change_unit))){refuse("effect_detail_conflicts_with_relationship");return;}
     }
-    if(matches.length>0)return;
+    if(matches.length>0){for(const e of matches)e.to=target.id;return;}
     const id=mintUnique(sha8("edge", "stated-relationship",source.id,target.id),usedIds);
     const prov:RecordProvenance={provenance_class:"ai_inferred",...EDGE_ATTRIBUTION.ai_inferred,basis:[statedIdByIndex.get(stated_index)!],unbased:false};
     provenance[id]=prov;
     edges.push({id,from:source.id,to:target.id,effect_direction:direction,origin:"ai",provenance_source:"inferred",provenance:prov});
   });
+  // A goal-quantity outcome no stated cause reached (every one refused) is withdrawn with its identity edge: the goal
+  // carries the quantity exactly as before, and nothing the user said is lost (each refusal is already disclosed).
+  for(const [q,outcome] of goalQuantityOutcome){
+    if(edges.some(e=>e.to===outcome.id))continue;
+    for(let i=edges.length-1;i>=0;i--)if(edges[i]!.from===outcome.id){goalQuantityIdentityEdgeIds.delete(edges[i]!.id);delete provenance[edges[i]!.id];edges.splice(i,1);}
+    nodes.splice(nodes.indexOf(outcome),1);delete provenance[outcome.id];
+    goalQuantityOutcome.delete(q);goalOfQuantityOutcome.delete(outcome.id);
+  }
 
   // ── Pass 3b: DISCLOSE what the model never connected; never force it in. ───
   //
@@ -4733,8 +4790,9 @@ function projectOnce(
         const source={...heldSource,scale_frame:sourceNode.scale_frame};
         if(!writeDefinition(edge,unit,link.effect==="negative" ? -1 : 1,source,target))refuse("change_of_not_definitional");
       }else{
+        // The goal-quantity identity (option A) is sized here by the SAME writer as a model-drawn one (sealed's).
         if(sourceNode?.quantity_ref===undefined || sourceNode.quantity_ref!==targetNode?.quantity_ref
-          || link?.effect!=="positive" || link.effect_detail!==undefined)continue;
+          || !goalQuantityIdentityEdgeIds.has(edge.id) && (link?.effect!=="positive" || link.effect_detail!==undefined))continue;
         const unit=statedItems[sourceNode.quantity_ref]?.unit,source=view.get(edge.from),target=view.get(edge.to);
         if(unit===undefined || source===undefined || target===undefined)continue;
         if(!sameUnit(unit,source.observed_state?.unit ?? source.unit) || !sameUnit(unit,target.observed_state?.unit ?? target.goal_threshold_unit ?? target.unit))continue;
