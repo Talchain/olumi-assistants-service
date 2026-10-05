@@ -47,6 +47,8 @@ describe('SIGN-1 / DROP-1 typed stated-record authority', () => {
   });
   it('option_effect is an option path edge; unsized cause blocks too',()=>{
     const r=rows(2,-300);delete r[1]!.stated_item.quantity;
+    // Remove the alternative relationship route: only this option_effect can reach quantity 2.
+    r[3]=carry(3,{kind:'figure',source_quote:'Independent figure'});
     r.push(carry(5,{kind:'option_effect',source_quote:'Raise loses customers',option_effect:{option:1,quantity:2,change_by:2,value_literal:'2'}}));
     r[4]={...r[4],disposition:'rejected',reason:'relationship_unsized'} as StatedDisposition;delete r[4]!.stated_item.relationship!.amount;
     expect(assess(r).block_leader).toBe(true);
