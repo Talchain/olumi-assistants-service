@@ -49,6 +49,27 @@ describe("PR-U2a: an edge figure is the user's when the USER sized it, whatever 
     expect(at(FIXTURE.brief_text, g, AT_1200, "£1,200")).toEqual({ verdict: "in_model", matched: MRR });
   });
 
+  // MC 5 Oct: the post-P0 Fi-promoted link carries `source_quote` — the exact brief sentence its C2 binding validated.
+  const FACTS = "Facts: each 1% price rise adds £1,200 a month to monthly recurring revenue before churn.";
+  const AT_1PCT = 290;
+  it("F5, the EXACT post-P0 shape (source_quote): the figure binds inside that sentence, and its 1% source is credited too", () => {
+    const g = fresh();
+    Object.assign(priceEdge(g).provenance, { source: "cee_hypothesis", magnitude: "user_stated", source_quote: FACTS });
+    expect(FIXTURE.brief_text.indexOf(FACTS)).toBeGreaterThan(0);
+    expect(at(FIXTURE.brief_text, g, AT_1200, "£1,200")).toEqual({ verdict: "in_model", matched: MRR });
+    expect(at(FIXTURE.brief_text, g, AT_1PCT, "1%")).toEqual({ verdict: "in_model", matched: "price_increase" });
+  });
+
+  it("CONTRAST: a source_quote NOT in the brief (a chat sentence) binds as quote-less: the target by one span, never its source", () => {
+    const g = fresh();
+    Object.assign(priceEdge(g).provenance, { source: "user_specified", magnitude: "user_stated", source_quote: "Each 1% rise adds £1,200 a month." });
+    expect(at(FIXTURE.brief_text, g, AT_1200, "£1,200")).toEqual({ verdict: "in_model", matched: MRR });
+    // Not credited as modelled (the chat sentence stored on the edge is commentary text, so the text route may say
+    // prose_only — never in_model, and never anchored to the source node).
+    expect(at(FIXTURE.brief_text, g, AT_1PCT, "1%")).toMatchObject({ matched: null });
+    expect(at(FIXTURE.brief_text, g, AT_1PCT, "1%").verdict).not.toBe("in_model");
+  });
+
   it("CONTRAST: the same inferred link sized by Olumi is not credited", () => {
     const g = fresh();
     Object.assign(priceEdge(g).provenance, { source: "cee_hypothesis", magnitude: "olumi_estimate" });

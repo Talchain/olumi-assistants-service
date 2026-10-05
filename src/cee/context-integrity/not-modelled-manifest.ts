@@ -1518,7 +1518,13 @@ function collectBriefNaturalEffectCandidates(
     // is written ONLY on the user's own size (`value-warrant-guard.ts:810`), and the figure binds to the one place the
     // brief states it (below). A quote that IS present must still be the user's words verbatim and must still match
     // the whole effect.
-    const quote = typeof p.quote === "string" && p.quote.length > 0 ? p.quote : null;
+    // The edge's quote: the records projector writes `quote`; MC P0's Fi door writes `source_quote` — the ONE brief
+    // sentence its C2 binding validated (MC 5 Oct). A `source_quote` that is not in the brief (a size said in CHAT) is
+    // not brief evidence, so that edge binds as a quote-less one (one-span C3; Science ruling on chat sizes).
+    const sourceQuote = typeof p.source_quote === "string" && p.source_quote.length > 0 && briefText.includes(p.source_quote)
+      ? p.source_quote
+      : null;
+    const quote = typeof p.quote === "string" && p.quote.length > 0 ? p.quote : sourceQuote;
     if (quote !== null && !briefText.includes(quote)) continue;
 
     const amount = natural.amount;
