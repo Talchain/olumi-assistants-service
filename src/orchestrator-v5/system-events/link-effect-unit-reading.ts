@@ -1,5 +1,6 @@
 import { percentLevelIds } from '../../cee/magnitude/frame-defaulted-links.js';
 /** Literal, per-end unit readings for an unsized link (RT-6 U1–U4). No graph writes. */
+import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
 import { sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
@@ -18,8 +19,42 @@ export interface LinkEffectUnitReading {
 }
 export interface PreparedLinkEffectUnitReadings {
   readonly unit_readings: readonly LinkEffectUnitReading[];
+  /** % level ends at a TYPED 0, where a bare % can only be points (Science F1): the stored reading says points. */
+  readonly points_at_zero?: readonly string[];
   /** One question, including every unresolved eligible end. Nothing is written until it is answered. */
   readonly ask?: string;
+}
+
+/**
+ * The end's level only when the USER stated it (Science F1, #87 5999199710; typed fields 17:3xZ): `raw_value ?? value`
+ * (an unframed level has no raw_value) under a source that earns authorship. An Olumi estimate, a default or a missing
+ * level is no level here: never a "today's level" in an example, never a zero that settles a reading.
+ */
+function usersLevelOf(node: Rec): number | undefined {
+  const os = isRec(node.observed_state) ? node.observed_state : undefined;
+  const level = os === undefined ? undefined : os.raw_value ?? os.value;
+  return os !== undefined && typeof level === 'number' && Number.isFinite(level)
+    && earnsAuthorshipCredit(classifyValueSource(os.source)) ? level : undefined;
+}
+
+const tidy = (n: number): number => Number(n.toFixed(2));
+/** U3: points or a share of today's level. The example uses the user's own level when it is theirs, else a generic one. */
+function pointsOrShareAsk(label: string, value: number, level: number | undefined, frame: number | undefined): string {
+  const by = Math.abs(value);
+  const move = `${by}-point ${value < 0 ? 'fall' : 'rise'} in \u201c${label}\u201d`;
+  const to = level === undefined ? undefined : tidy(level + value);
+  if (level !== undefined && to !== undefined && to >= 0 && to <= (frame ?? 100)) {
+    return `Is that a ${move} (${level}% → ${to}%), or ${by}% of today\u2019s ${level}%, i.e. ${tidy(level * (1 + value / 100))}%?`;
+  }
+  const example = value < 0 ? `${10 + by}% → 10%` : `10% → ${10 + value}%`;
+  return `Is that a ${move} (say ${example}), or ${by}% of today\u2019s level?`;
+}
+
+/** The reading the card shows and the writer stores: a typed-zero end's change is said in points (B3). */
+export function withPointsAtZero<E extends LinkEffectStatement>(effect: E, zero: readonly string[] | undefined, from: string, to: string): E {
+  if (zero === undefined || zero.length === 0) return effect;
+  return { ...effect, ...(zero.includes(from) ? { per_source_change_unit: 'percentage points' } : {}),
+    ...(zero.includes(to) ? { amount_unit: 'percentage points' } : {}) };
 }
 
 const unitOf = (n: Rec): string | undefined => text(n.unit)
@@ -34,7 +69,8 @@ const endpointUnit = (edge: Rec, id: string): string | undefined => {
   return natural === undefined ? undefined : text(natural[edge.from === id ? 'per_source_change_unit' : 'amount_unit']);
 };
 // A points change and a % level use the same raw unit; this comparator does not reinterpret a literal bare %.
-const levelUnitKey = (u: string): string | undefined => /^(?:percentage\s+points?|pp|points?)$/i.test(u.trim()) ? unitComparisonKey('%') : unitComparisonKey(u);
+// Bare "point(s)" is points of a % only on a quantity whose unit is % (Science F1); on a unitless end it is a count noun.
+const levelUnitKey = (u: string): string | undefined => /^(?:percentage\s+points?|pp)$/i.test(u.trim()) ? unitComparisonKey('%') : unitComparisonKey(u);
 
 /** The model can adopt only where no established unit or level would be reinterpreted (U1). */
 function eligible(node: Rec, edges: readonly Rec[], from: string, to: string, unit: string): boolean {
@@ -190,7 +226,8 @@ function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: strin
   const at = clause.indexOf(literal);
   if (at < 0) return {};
   const tail = clause.slice(at + literal.length);
-  if (/^\s*(?:percentage\s+points?\b|pp\b|points?\s+of\b)/i.test(tail)) return { unit: '%' };
+  // "5 points of X" never makes an end of unknown unit a % (Science F1: loyalty points); it is asked, not adopted.
+  if (/^\s*(?:percentage\s+points?\b|pp\b)/i.test(tail)) return { unit: '%' };
   const nounWords = tail.replace(/^\s*(?:(?:more|extra|additional)\s+)?/, '').match(/[\p{L}]+/gu) ?? [];
   const noun = nounWords[0];
   const statedCountNoun = typeof node.count_noun === 'string' ? wordsOf(node.count_noun) : undefined;
@@ -215,6 +252,7 @@ export function prepareLinkEffectUnitReadings(
   const amounts = findLinkEffectAmounts(quote);
   const percentLevels = percentLevelIds(graph);
   const unit_readings: LinkEffectUnitReading[] = [];
+  const points_at_zero: string[] = [];
   const asks: string[] = [];
   for (const [node, other, value, statedUnit] of [[source, target, effect.per_source_change, effect.per_source_change_unit],
     [target, source, effect.amount, effect.amount_unit]] as const) {
@@ -229,8 +267,11 @@ export function prepareLinkEffectUnitReadings(
     if (establishedUnit !== undefined && literalPercent !== undefined && !explicitSourceLevels) {
       if ((unitOf(node) !== undefined || percentLevels.has(String(node.id)))
         && (percentLevels.has(String(node.id)) || isPercentageLevelUnit(establishedUnit, frame))) {
-        const example = value < 0 ? `${10 + Math.abs(value)}% → 10%` : `10% → ${10 + value}%`;
-        asks.push(`Is that a ${Math.abs(value)}-point ${value < 0 ? 'fall' : 'rise'} in \u201c${label}\u201d (say ${example}), or ${Math.abs(value)}% of today\u2019s level?`);
+        const level = usersLevelOf(node);
+        // Science F1: 10% of 0 is 0, so at the user's own 0 the % can only be points: no question, and the card says
+        // points for approval. Only a TYPED 0 settles it; Olumi's estimated 0 is read through the question like any level.
+        if (level === 0) { points_at_zero.push(String(node.id)); continue; }
+        asks.push(pointsOrShareAsk(label, value, level, frame));
         continue;
       }
       if (readCurrencyUnitWithQualifiers(establishedUnit).kind === 'currency') {
@@ -250,8 +291,7 @@ export function prepareLinkEffectUnitReadings(
     const unit = one?.unit;
     if (!eligible(node, edges, from, to, unit ?? statedUnit)) continue;
     if (one?.barePercent === true) {
-      const example = value < 0 ? `${10 + Math.abs(value)}% → 10%` : `10% → ${10 + value}%`;
-      asks.push(`Is that a ${Math.abs(value)}-point ${value < 0 ? 'fall' : 'rise'} in \u201c${label}\u201d (say ${example}), or ${Math.abs(value)}% of today\u2019s level?`);
+      asks.push(pointsOrShareAsk(label, value, undefined, undefined));
     } else if (unit === undefined || unit.length > 40) {
       asks.push(`What unit is the ${Math.abs(value)} change in \u201c${label}\u201d stated in?`);
     } else {
@@ -259,5 +299,5 @@ export function prepareLinkEffectUnitReadings(
     }
   }
   // One question even when both ends need clarification.
-  return { unit_readings, ...(asks.length > 0 ? { ask: asks.map((ask, i) => { const lead = i === 0 ? ask : ask[0]!.toLowerCase() + ask.slice(1); return i < asks.length - 1 ? lead.replace(/\?$/, ';') : lead; }).join(' ') } : {}) };
+  return { unit_readings, ...(points_at_zero.length > 0 ? { points_at_zero } : {}), ...(asks.length > 0 ? { ask: asks.map((ask, i) => { const lead = i === 0 ? ask : ask[0]!.toLowerCase() + ask.slice(1); return i < asks.length - 1 ? lead.replace(/\?$/, ';') : lead; }).join(' ') } : {}) };
 }

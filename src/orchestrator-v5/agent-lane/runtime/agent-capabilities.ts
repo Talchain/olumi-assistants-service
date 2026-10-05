@@ -39,7 +39,7 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js'
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
-import { prepareLinkEffectUnitReadings, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
+import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
@@ -3349,8 +3349,8 @@ export function createAgentCapabilities(
           }
           const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
             .map((n) => String(n.label ?? '')).filter((l) => l !== '');
-          const effect = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
-          const miss = linkEffectQuoteContextMiss(entryQuote, text) ?? linkEffectTheUserStated(entryQuote, effect, { source: from.label, target: to.label },
+          const stated = { amount: entryAmount, amount_unit: entryAmountUnit, per_source_change: entryPer, per_source_change_unit: entryPerUnit };
+          const miss = linkEffectQuoteContextMiss(entryQuote, text) ?? linkEffectTheUserStated(entryQuote, stated, { source: from.label, target: to.label },
             { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id) });
           if (miss === 'figures_not_in_statement') {
             fail('not_the_users_figure', 'Nothing was prepared: this quoted statement does not write both figures. Ask the user how much the one moves the other, in numbers.');
@@ -3360,7 +3360,7 @@ export function createAgentCapabilities(
             fail('not_the_users_statement', linkEffectUnitAskWords(linkEffectStatementAsk(miss, from.label, to.label), from, to));
             continue;
           }
-          const said = statingSentenceOf(entryQuote, effect, { source: from.label, target: to.label },
+          const said = statingSentenceOf(entryQuote, stated, { source: from.label, target: to.label },
             { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: linkSelectedByRequest(ctx, from.id, to.id) }) ?? entryQuote;
           const endpoints = linkEffectTargetOf(working, from.id, to.id);
           if (endpoints.kind === 'refused' && endpoints.reason === 'target_ambiguous') {
@@ -3377,15 +3377,16 @@ export function createAgentCapabilities(
             fail('unreadable_model', 'Nothing was prepared: the model could not be read in the form needed to size this link. Read the state again and try once more.');
             continue;
           }
-          const consent = { ...linkEffectConsent(working, from.id, to.id, effect),
+          const consent = { ...linkEffectConsent(working, from.id, to.id, stated),
             ...(linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {}) };
-          const unitReading = prepareLinkEffectUnitReadings(working, from.id, to.id, effect, said, { link_selected: consent.link_selected });
+          const unitReading = prepareLinkEffectUnitReadings(working, from.id, to.id, stated, said, { link_selected: consent.link_selected });
           const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
             ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
           if (unitAsk !== undefined) {
             fail('unit_mismatch', linkEffectUnitAskWords(unitAsk, from, to));
             continue;
           }
+          const effect = withPointsAtZero(stated, unitReading.points_at_zero, from.id, to.id);
           const unitReadings = unitReading.unit_readings.length > 0 ? { unit_readings: unitReading.unit_readings } : {};
           const dry = applyLinkEffectEdit({ persistedGraph: working, from: from.id, to: to.id, effect,
             expected: { graph_hash: expectedHash, edge_token: edgeToken }, quote: said,
@@ -3479,15 +3480,17 @@ export function createAgentCapabilities(
         return { ok: false, mutated: false, refusal: 'no_such_link',
           detail: `The model has no link from "${from.label}" to "${to.label}", so there is no effect to record. Nothing was prepared.` };
       }
-      const effect = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
-      const consent = { ...linkEffectConsent(g.raw, from.id, to.id, effect),
+      const stated = { amount, amount_unit: amountUnit, per_source_change: per, per_source_change_unit: perUnit };
+      const consent = { ...linkEffectConsent(g.raw, from.id, to.id, stated),
         ...(linkSelectedByRequest(ctx, from.id, to.id) ? { link_selected: true as const } : {}) };
-      const unitReading = prepareLinkEffectUnitReadings(g.raw, from.id, to.id, effect, said, { link_selected: consent.link_selected });
+      const unitReading = prepareLinkEffectUnitReadings(g.raw, from.id, to.id, stated, said, { link_selected: consent.link_selected });
       const unitAsk = unitReading.ask ?? (unitReading.unit_readings.length > 0 && said.length > 400
         ? `Could you say how much \u201c${from.label}\u201d moves \u201c${to.label}\u201d in one shorter sentence, with each unit beside its figure?` : undefined);
       if (unitAsk !== undefined) {
         return { ok: false, mutated: false, refusal: 'unit_mismatch', question: unitAsk, detail: linkEffectUnitAskWords(unitAsk, from, to) };
       }
+      // Science F1: a % at the user's own 0 is points; the card shows, and the writer stores, that reading.
+      const effect = withPointsAtZero(stated, unitReading.points_at_zero, from.id, to.id);
       const unitReadings = unitReading.unit_readings.length > 0 ? { unit_readings: unitReading.unit_readings } : {};
       const dry = applyLinkEffectEdit({ persistedGraph: g.raw, from: from.id, to: to.id, effect,
         expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: said,

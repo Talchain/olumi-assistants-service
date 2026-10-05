@@ -312,7 +312,18 @@ describe('RT-6 request selection, conservative statement controls and mutants', 
   it('M-bare: a literal bare source % on a % of output level asks once, even when the Agent calls it points', async () => {
     const row = { ...NATURAL_SENTENCE_ROWS[0]!, quote: 'Each 1% rise in production waste rate cuts gross margin by about 0.5 percentage points.' };
     const w = world(row); const before = w.graph(); const result = await propose(w, row);
-    oneQuestion(result, 'Is that a 1-point rise in “Production waste rate” (say 10% → 11%), or 1% of today’s level?');
+    // Science F1: the example uses the user's own level (brief_extraction 12% of output), never a generic one.
+    oneQuestion(result, 'Is that a 1-point rise in “Production waste rate” (12% → 13%), or 1% of today’s 12%, i.e. 12.12%?');
+    expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
+  });
+  it('F1 on the served graph: when Bread price change\'s 0 is the USER\'s, only Footfall (Olumi\'s level) is asked', async () => {
+    const row = NATURAL_SENTENCE_ROWS.find(r => r.id === 'F1')!;
+    const initial = fixture(row);
+    // Served b8143909 holds Olumi's 0 (cee_inference): the F1 row above asks about both ends. The user's own 0 settles one.
+    expect(nodeOf(initial, 'bread_price_change').observed_state).toMatchObject({ raw_value: 0, source: 'cee_inference' });
+    nodeOf(initial, 'bread_price_change').observed_state.source = 'brief_extraction';
+    const w = world(row, initial); const before = w.graph(); const result = await propose(w, row);
+    oneQuestion(result, 'Is that a 3-point fall in “Footfall” (say 13% → 10%), or 3% of today’s level?');
     expect(cardsFor(w, result)).toEqual([]); noWrite(w, row, before);
   });
   it('M-number: a target figure the user never wrote cannot yield a card', async () => {

@@ -36,7 +36,7 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { prepareLinkEffectUnitReadings, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -290,7 +290,9 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   const unitReadings = params.unit_readings ?? [];
   const prepared = prepareLinkEffectUnitReadings(params.persistedGraph, from, to, effect, params.quote,
     { link_selected: params.link_selected === true });
-  if (prepared.ask !== undefined || stableStringify(prepared.unit_readings) !== stableStringify(unitReadings)) {
+  if (prepared.ask !== undefined || stableStringify(prepared.unit_readings) !== stableStringify(unitReadings)
+    // A % at the user's own 0 is stored in points, exactly as its card said (Science F1); never as a bare %.
+    || stableStringify(withPointsAtZero(effect, prepared.points_at_zero, from, to)) !== stableStringify(effect)) {
     return refuse('unit_mismatch');
   }
   if (unitReadings.length > 0) {
