@@ -349,22 +349,27 @@ export const NodeV3 = z.object({
    * drafter's TYPED `direction` on the goal stated item (records compile only, `applyStatedGoalEvidence`): `floor` →
    * `maximise`, `ceiling` → `minimise`. It is the user's comparator, typed, so it carries no words of Olumi's and no
    * staleness key of its own; `resolveGoalDirection` honours it after the held-ceiling branches and before the label
-   * classifier, and never against a comparator or goal limit the user has since stated. The first member is the
-   * `typed_change_sign` reading above, byte-for-byte.
+   * classifier, for a target proven a level of the goal (CR-1), and never against a comparator or goal limit the user
+   * has since stated. The `typed_change_sign` reading above parses exactly as before (same keys, same order).
    */
-  goal_sense_reading: z.union([
-    z.object({
-      sense: z.literal('minimise'),
-      basis: z.literal('typed_change_sign'),
-      threshold: z.number().finite(),
-      threshold_frame: z.enum(['change_rel', 'change_abs']),
-      words: z.string().min(1).max(300),
-    }),
-    z.object({
-      sense: z.enum(['maximise', 'minimise']),
-      basis: z.literal('typed_comparator'),
-    }),
-  ]).optional().catch(undefined),
+  // ⛔ ONE OBJECT, NOT A UNION: the value-warrant guard (`value-warrant-guard.ts` deriveValueSites) walks ZodObject
+  // shapes and never enters a union, so a union hid `goal_sense_reading.threshold` (its FIELD warrant
+  // `threshold_frame`) from it (measured: 47 → 46 sites on d0b39ca9). The two readings' exact shapes are enforced
+  // below instead: `typed_change_sign` is `minimise` with all three of threshold, threshold_frame and words, exactly as
+  // before; `typed_comparator` carries none of them. Anything else is absence (`.catch`), never a refused graph.
+  goal_sense_reading: z.object({
+    sense: z.enum(['minimise', 'maximise']),
+    basis: z.enum(['typed_change_sign', 'typed_comparator']),
+    threshold: z.number().finite().optional(),
+    threshold_frame: z.enum(['change_rel', 'change_abs']).optional(),
+    words: z.string().min(1).max(300).optional(),
+  }).superRefine((reading, ctx) => {
+    const carried = [reading.threshold, reading.threshold_frame, reading.words].filter((v) => v !== undefined).length;
+    const legal = reading.basis === 'typed_change_sign'
+      ? reading.sense === 'minimise' && carried === 3
+      : carried === 0;
+    if (!legal) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'goal_sense_reading: not a shape either reading writes' });
+  }).optional().catch(undefined),
   /**
    * ⛔ OLUMI'S READING OF THE BRIEF'S FIGURE AS A CHANGE GOAL'S TODAY LEVEL (goal nodes only; R3-B #72 5894575583, MG
    * 5894657102 / 5894719651, AIQ (b) 5894808343 (1)). Written ONLY by construction (`admitStatedGoalChange`, from
