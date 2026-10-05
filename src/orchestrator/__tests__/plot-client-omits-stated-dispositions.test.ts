@@ -34,7 +34,7 @@ describe('the PLoT client posts no stated_dispositions', () => {
   });
 
   it('⭐ RED: the decision-flip /v2/run receives the graph without the receipt', async () => {
-    await createPLoTClient()!.decisionFlip(payload({ ...GRAPH, stated_dispositions: RECEIPT }), 'r2').catch(() => undefined);
+    await createPLoTClient()!.decisionFlip!(payload({ ...GRAPH, stated_dispositions: RECEIPT }), 'r2').catch(() => undefined);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(sentBody().graph).toEqual(GRAPH);
   });
