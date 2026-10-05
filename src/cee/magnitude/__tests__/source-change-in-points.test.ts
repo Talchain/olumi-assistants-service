@@ -36,9 +36,9 @@ describe('a percentage-level source is said in points, like a percentage-level t
     expect(asked(2, churn)).toContain('raising "Monthly churn" by 2 points');
   });
 
-  it('CONTRAST: a money source keeps its own unit ("by 10 GBP/month")', () => {
+  it('CONTRAST: a money source keeps its own unit, said as money ("by £10 / month"; AIQ 5923220559)', () => {
     // +5000 per £10 is β 4 on these frames (not representable), so the statement is asked back.
-    expect(asked(10, price, 5000)).toContain('raising "Pro plan price" by 10 GBP/month');
+    expect(asked(10, price, 5000)).toContain('raising "Pro plan price" by £10 / month');
   });
 
   it('CONTRAST: a percent CHANGE (not a level) keeps its unit, never "points"', () => {

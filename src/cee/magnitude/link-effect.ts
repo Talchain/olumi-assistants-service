@@ -34,7 +34,7 @@ import { classifyUnitScaleClass, unitPinnedScaleFrame } from '../draft/records/u
 import { readCurrencyUnitWithQualifiers } from '../provenance/stated-amounts.js';
 import { recoverScaleFrame } from '../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 import { isPercentWithPeriod } from '../../orchestrator-v5/agent-lane/admit-constraint.js';
-import { sayFigure } from '../../orchestrator-v5/agent-lane/say-figure.js';
+import { sayFigure, sayFigureExactly } from '../../orchestrator-v5/agent-lane/say-figure.js';
 
 /** Who sized a link (D9). Declared once, on `EdgeProvenanceV3.magnitude`. */
 export type MagnitudeAuthor = NonNullable<EdgeProvenanceV3T['magnitude']>;
@@ -338,18 +338,28 @@ function unitAfterOne(unit: string): string {
   return `${pluraliseUnit(unit.slice(0, cut), 1)}${unit.slice(cut)}`;
 }
 
+/**
+ * Money is said as the user writes it: "£1,000,000", never "1000000 £" or "5000 GBP" (AIQ #75 5923220559; served paul-1 and
+ * paul-2 on `d23f5df1` read "by 20000 £" and "by 5000 GBP"). The estate's one figure formatter (`sayFigure`), and only where
+ * it says the figure exactly; any other unit, or a figure it would round, keeps the words it had.
+ */
+function moneyWords(n: number, unit: string | undefined): string | undefined {
+  if (unit === undefined || readCurrencyUnitWithQualifiers(unit).kind !== 'currency') return undefined;
+  return sayFigureExactly(n, unit) ?? undefined;
+}
+
 function amountWords(amount: number, target: MagnitudeNode, frame: number | undefined): string {
   const n = Math.abs(amount);
   if (isPercentLevel(target, frame)) return `${fmt(n)} point${n === 1 ? '' : 's'}`;
   const unit = unitOf(target);
-  return `${fmt(n)}${unit === undefined ? '' : ` ${n === 1 ? unitAfterOne(unit) : unit}`}`;
+  return moneyWords(n, unit) ?? `${fmt(n)}${unit === undefined ? '' : ` ${n === 1 ? unitAfterOne(unit) : unit}`}`;
 }
 
 function levelWords(level: number, target: MagnitudeNode, frame: number): string {
   const raw = level * frame;
   if (isPercentLevel(target, frame)) return `${fmt(raw)}%`;
   const unit = unitOf(target);
-  return `${fmt(raw)}${unit === undefined ? '' : ` ${unit}`}`;
+  return moneyWords(raw, unit) ?? `${fmt(raw)}${unit === undefined ? '' : ` ${unit}`}`;
 }
 
 function statementWords(

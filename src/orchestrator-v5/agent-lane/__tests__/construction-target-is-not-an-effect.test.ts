@@ -74,7 +74,7 @@ describe('an Olumi estimate sized FROM the user\'s target is set aside and asked
     const { graph, out } = await build(cut({ amount: -9000, per: 100 }));
     expect(magnitudeOf(goalEdge(graph))).toBe('olumi_placeholder');
     expect(asked(out)).toHaveLength(1);
-    expect(asked(out)).toEqual(['Olumi estimated that raising "GCP workload share" by 100 points lowers "Monthly spend" by 9000 GBP per month; at the '
+    expect(asked(out)).toEqual(['Olumi estimated that raising "GCP workload share" by 100 points lowers "Monthly spend" by £9,000 per month; at the '
       + 'largest change an option makes, that moves "Monthly spend" by exactly the gap to your target. A target is what you want, not evidence of '
       + 'what an option does, so it was not used: a placeholder sized to keep "Monthly spend" within its range stands in for it. How much does '
       + '"GCP workload share" change "Monthly spend"?']);
