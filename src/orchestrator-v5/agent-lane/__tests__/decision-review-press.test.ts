@@ -96,8 +96,9 @@ describe('decisionReviewFor — one typed fact per item, on the bound Run', () =
     expect(turn.reply.split('Demand shortfall')).toHaveLength(2);
   });
 
-  it('CONTROL (F5): a fragile link that is not in the stored graph is not said, and offers no test', () => {
-    const robustness = { ...(PLOT.robustness as Rec), fragile_edges: [{ from_id: 'pro_plan_price', to_id: 'no_such_node' }] };
+  it('CONTROL (F5): a fragile link between two real nodes that is not a link of the stored graph is not said, and offers no test', () => {
+    // Both nodes exist and have labels; only the link (reversed) is absent, so the in-graph check alone decides.
+    const robustness = { ...(PLOT.robustness as Rec), fragile_edges: [{ from_id: 'mrr', to_id: 'pro_plan_price' }] };
     const turn = decisionReviewFor(SCENARIO, readOf({ enrichment: { ...PLOT, robustness } }));
     expect(turn.reply).not.toContain('most sensitive to');
     expect(turn.steps.some((s) => s.kind === 'test_without_link')).toBe(false);
