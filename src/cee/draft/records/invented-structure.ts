@@ -15,12 +15,14 @@
  *        today?"), at most INVENTED_ROOT_ASK_CAP asks, ordered by how many option→goal paths it carried; repeated until
  *        no invented root lacks a level. A USER-stated root keeps the gate-2 rule untouched. An option left with no path
  *        is NOT patched here: gate 1 v2 says so.
+ * CR-E1: a node carrying ANY stated receipt (`statedCarrierIds`) is user evidence and is never removed by either pass.
  * Every removal carries `restore` (the node, its edges, the option settings on it): adding it back is one step.
  */
 import { assessCanonicalAnalysisReadiness } from "../../../orchestrator/tools/analysis-ready-helper.js";
 import { projectGraphAndOptionsToV3, transformGraphToV3 } from "../../transforms/schema-v3.js";
 import type { V1Graph } from "../../transforms/schema-v2.js";
 import type { DroppedRecordRef } from "./projector.js";
+import type { StatedDisposition } from "./stated-dispositions.js";
 
 type Rec = Record<string, unknown>;
 type Node = { readonly id: string; readonly kind?: unknown; readonly label?: unknown; readonly observed_state?: unknown; readonly data?: unknown; readonly provenance?: unknown };
@@ -35,9 +37,31 @@ const INTERVENTION_FIELDS = ["interventions", "intervention_details", "raw_inter
 const rec = (value: unknown): value is Rec => value !== null && typeof value === "object" && !Array.isArray(value);
 const finite = (value: unknown): boolean => typeof value === "number" && Number.isFinite(value);
 
+/**
+ * ⭐ CR-E1 (MC review, 5 Oct; Science (e2) is "ai_inferred roots with NO user evidence"): every node that CARRIES a
+ * stated receipt — the node a carried row names, both endpoints of a carried edge (a stated relationship's natural
+ * effect), and the factor an option's carried setting is keyed by — is user evidence, so neither (e1) nor (e2) may
+ * remove it. Read from the compile's own receipt rows (`deriveStatedDispositions`), by identity, never a label.
+ */
+export function statedCarrierIds(dispositions: readonly StatedDisposition[] | undefined): Set<string> {
+  const ids = new Set<string>();
+  for (const row of dispositions ?? []) {
+    if (row.disposition !== "carried") continue;
+    const location = row.location;
+    if (location.kind === "edge") { ids.add(location.from); ids.add(location.to); continue; }
+    ids.add(location.node_id);
+    const [head, field, keyed] = location.path;
+    if ((head === "data" && (field === "intervention_details" || field === "interventions" || field === "raw_interventions")) && typeof keyed === "string") ids.add(keyed);
+    if (head === "interventions" && typeof field === "string") ids.add(field);
+  }
+  return ids;
+}
+
 export function setAsideInventedStructure<G extends { readonly nodes: readonly unknown[]; readonly edges: readonly unknown[] }>(
   graph: G,
   brief?: string,
+  /** CR-E1: nodes carrying a stated receipt (`statedCarrierIds`); never removed by either pass. */
+  userEvidence: ReadonlySet<string> = new Set(),
 ): { graph: G; disclosures: DroppedRecordRef[]; asks: string[] } {
   let nodes = [...graph.nodes] as Node[];
   let edges = [...graph.edges] as Edge[];
@@ -83,7 +107,7 @@ export function setAsideInventedStructure<G extends { readonly nodes: readonly u
       if (!causal.some((e) => e.from === option.id && e.to !== goal && sizedToGoal.has(e.to))) continue;
       const reached = grow([option.id], (into) => { for (const e of causal) if (into.has(e.from) && e.from !== goal) into.add(e.to); });
       for (const node of nodes) {
-        if (node.id === goal || !reached.has(node.id) || !toGoal.has(node.id) || !invented(node)) continue;
+        if (node.id === goal || !reached.has(node.id) || !toGoal.has(node.id) || !invented(node) || userEvidence.has(node.id)) continue;
         if (["option", "goal", "decision"].includes(String(node.kind))) continue;
         const level = (rec(node.observed_state) && finite(node.observed_state.value)) || (rec(node.data) && finite(node.data.value));
         const evidenced = edges.some((e) => (e.from === node.id || e.to === node.id) && sized(e));
@@ -104,7 +128,7 @@ export function setAsideInventedStructure<G extends { readonly nodes: readonly u
     const ids = new Set(assessment.blockingIssues
       .filter((issue) => issue.code === "MISSING_FACTOR_LEVEL" && issue.option_id === undefined && typeof issue.factor_id === "string")
       .map((issue) => v1IdOf.get(issue.factor_id as string) ?? (issue.factor_id as string))
-      .filter((id) => invented(nodes.find((n) => n.id === id))));
+      .filter((id) => invented(nodes.find((n) => n.id === id)) && !userEvidence.has(id)));
     if (ids.size === 0) break;
     const kind = kindOf();
     const goal = nodes.find((n) => n.kind === "goal")?.id;

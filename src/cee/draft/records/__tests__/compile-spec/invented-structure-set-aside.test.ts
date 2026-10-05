@@ -18,6 +18,9 @@ const GOAL = 'reach at least £150,000 monthly recurring revenue within 9 months
 const LOSS = 'Each lost customer removes £300 a month of monthly recurring revenue.';
 const CHURN = 'Each 1% price rise loses about 2 customers, between 1 and 4.';
 const SUPPORT = 'Each starter subscriber costs about £6 a month in support.';
+const SUBSCRIPTION = 'Each starter subscriber adds £49 a month to monthly recurring revenue.';
+const GROSS = 'each 1% price rise adds £1,200 a month to monthly recurring revenue before churn';
+const STARTER_WIN = 'The starter tier would win about 150 new subscribers, between 80 and 250.';
 const INVENTED = 'Net MRR Change';
 
 /** The user's stated path, typed: price option (its own quantity) → customers → MRR (declared by the baseline figure). */
@@ -142,5 +145,80 @@ describe('rule (e2): an invented root factor with no level that reaches the goal
     expect(aside(result, 'invented_root_level_unknown')).toEqual([]);
     const gaps = assessCanonicalAnalysisReadiness(body.graph).blockingIssues.filter(i => i.code === 'MISSING_FACTOR_LEVEL');
     expect(gaps.map(i => i.factor_id)).toContain(stated!.id);
+  });
+});
+
+/**
+ * CR-E1 (MC review of d0bf0911): (e1)/(e2) removed nodes that CARRIED the user's own receipts on 3 of 20 live draws
+ * (heldout1-d1 [0], heldout2-d4 [11], sealed-d5 [9] → carrier_removed). Science's (e2) is "ai_inferred roots with NO
+ * user evidence". Each draw's SHAPE is distilled here onto the sealed brief's quotes only (no held-out text).
+ */
+function baseItems(): DraftRecordSet['stated_items'] {
+  const r = statedPath();
+  return [r.stated_items[0]!, { ...r.stated_items[1]! }, r.stated_items[2]!];
+}
+/** heldout1-d1 shape: the baseline figure is carried as an option's setting on an invented, unlevelled root. */
+function figureOnInventedRoot(): DraftRecordSet {
+  const items = baseItems();
+  delete items[1]!.baseline_ref;
+  items.push({ kind: 'option', source_quote: 'keep pricing as it is', is_baseline: true }, { kind: 'option', source_quote: 'launch a starter tier at £49 a month', is_baseline: false });
+  return { stated_items: items, claims: [
+    { claim_kind: 'factor', label: 'Revenue capacity', basis: [0], quantity: 0 },
+    { claim_kind: 'outcome', label: 'Monthly revenue achieved', basis: [0, 1], quantity: 0 },
+    { claim_kind: 'causal_link', label: 'Keeping pricing holds revenue capacity', basis: [0, 3], from_stated: 3, to_claim: 0, effect: 'positive', sets_to: 120000 },
+    { claim_kind: 'causal_link', label: 'Capacity delivers revenue', from_claim: 0, to_claim: 1, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Revenue achieved reaches the goal', from_claim: 1, to_stated: 1, effect: 'positive' },
+  ] };
+}
+/** heldout2-d4 shape: a sized stated cause whose FROM endpoint is an invented root on a context figure's quantity. */
+function causeFromContextQuantityRoot(): DraftRecordSet {
+  const items = baseItems();
+  items.push({ kind: 'option', source_quote: 'launch a starter tier at £49 a month', is_baseline: false },
+    { kind: 'figure', source_quote: STARTER_WIN, value: 150, value_literal: '150', unit_literals: ['subscribers'], quantity: 4, unit: 'subscribers', role: 'context', value_scale: 'raw_count' },
+    { kind: 'cause', source_quote: SUBSCRIPTION, relationship: { from_quantity: 4, to_quantity: 0, amount: 49, amount_literal: '£49', per_source_change: 1, per_source_literal: 'Each starter subscriber' } });
+  return { stated_items: items, claims: [
+    { claim_kind: 'factor', label: 'Starter subscribers', basis: [4], quantity: 4 },
+    { claim_kind: 'outcome', label: 'Monthly recurring revenue', quantity: 0 },
+    { claim_kind: 'causal_link', label: 'The starter tier wins subscribers', basis: [3, 4], from_stated: 3, to_claim: 0, effect: 'positive', sets_to: 150 },
+    { claim_kind: 'causal_link', label: 'Subscribers add revenue', basis: [5], from_claim: 0, to_claim: 1, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Same revenue quantity', from_claim: 1, to_stated: 1, effect: 'positive' },
+  ] };
+}
+/** sealed-d5 shape: a sized stated cause whose FROM endpoint is an invented root on the price option's own quantity. */
+function causeFromOptionQuantityRoot(): DraftRecordSet {
+  const items = baseItems();
+  items.push({ kind: 'option', source_quote: 'raise prices by 10%', quantity: 3, value: 0.1, value_literal: '10%', unit: '%', value_scale: 'unit_interval', is_baseline: false },
+    { kind: 'option', source_quote: 'keep pricing as it is', is_baseline: true },
+    { kind: 'cause', source_quote: GROSS, relationship: { from_quantity: 3, to_quantity: 0, amount: 1200, amount_literal: '£1,200', per_source_change: 0.01, per_source_literal: '1%' } });
+  return { stated_items: items, claims: [
+    { claim_kind: 'factor', label: 'Price Increase', basis: [3, 5], quantity: 3 },
+    { claim_kind: 'outcome', label: 'Monthly recurring revenue', quantity: 0 },
+    { claim_kind: 'causal_link', label: 'Raising prices sets the price increase', basis: [3], from_stated: 3, to_claim: 0, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Price increases raise revenue', basis: [5], from_claim: 0, to_claim: 1, effect: 'positive' },
+    { claim_kind: 'causal_link', label: 'Same revenue quantity', from_claim: 1, to_stated: 1, effect: 'positive' },
+  ] };
+}
+const CR_E1 = [
+  { shape: 'heldout1-d1: a figure carried as an option setting on the root', records: figureOnInventedRoot, index: 0, root: 'Revenue capacity' },
+  { shape: 'heldout2-d4: a stated cause drawn from the root (context-figure quantity)', records: causeFromContextQuantityRoot, index: 5, root: 'Starter subscribers' },
+  { shape: 'sealed-d5: a stated cause drawn from the root (option-declared quantity)', records: causeFromOptionQuantityRoot, index: 5, root: 'Price Increase' },
+];
+
+describe('CR-E1: a node carrying ANY stated receipt is user evidence; neither (e1) nor (e2) removes it', () => {
+  for (const { shape, records, index, root } of CR_E1) {
+    it(`${shape}: the stated item stays carried and its carrier stays on the graph`, async () => {
+      const { result, body } = await build(records());
+      const row = (body.stated_dispositions as Json[]).find(d => d.stated_index === index)!;
+      expect(row, JSON.stringify(row)).toMatchObject({ disposition: 'carried' });
+      expect(labelled(body, root)).toBeDefined();
+      expect([...aside(result, 'invented_root_level_unknown'), ...aside(result, 'superseded_by_stated_path')].map(d => d.label)).not.toContain(root);
+    });
+  }
+  it('CONTRAST an unlevelled invented root carrying NO stated receipt is still removed (and asked)', async () => {
+    const records = withInvention(statedPath());
+    records.stated_items.splice(7, 2);
+    const { result, body } = await build(records);
+    expect(labelled(body, INVENTED)).toBeUndefined();
+    expect(aside(result, 'invented_root_level_unknown').map(d => d.label)).toEqual([INVENTED]);
   });
 });

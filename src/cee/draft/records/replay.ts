@@ -60,7 +60,7 @@ import { PROJECTOR_STRUCTURAL_CLASS } from "./projector.js";
 import type { DraftRecordSet } from "./grammar.js";
 import type { RecordProjection } from "./projector.js";
 import { projectDraftRecords } from "./seam.js";
-import { setAsideInventedStructure } from "./invented-structure.js";
+import { setAsideInventedStructure, statedCarrierIds } from "./invented-structure.js";
 
 /** A node as it stands at the end of the replay. Structural, not the V3 wire shape. */
 interface ReplayNode {
@@ -227,7 +227,9 @@ export async function replayRecordSet(
   );
   // ── 2b. RULE (e) (Science GO, 5 Oct; `invented-structure.ts`): Olumi's own unsupported structure is set aside BEFORE
   // the shared repair stages, so the sweep never scaffolds around a node the compile withdraws. Disclosed in `dropped`.
-  const aside = setAsideInventedStructure(normalisedDraft as { nodes: unknown[]; edges: unknown[] }, brief);
+  // CR-E1: a node carrying any stated receipt (the compile's own rows) is user evidence and stays.
+  const aside = setAsideInventedStructure(normalisedDraft as { nodes: unknown[]; edges: unknown[] }, brief,
+    statedCarrierIds(seam.projection.stated_dispositions));
   const normalised = aside.graph;
   const projection = aside.disclosures.length === 0 ? seam.projection
     : { ...seam.projection, dropped: [...seam.projection.dropped, ...aside.disclosures] };
