@@ -63,6 +63,17 @@ describe("PR-U1 G4 row 4 (FA-R2): every spelling of a year is a year", () => {
       expect(verdictAt(brief, graph(), AT_75K)).toEqual({ verdict: "in_model", matched: SPENDING });
     });
   }
+  // The discriminating half (mutant M2: a tail reader that misses the spelling reads NO period, and under C3 a part only
+  // one side states is no conflict — so the GBP/year rows above would pass either way). Read as a YEAR, every spelling
+  // CONFLICTS with an edge declared GBP/month.
+  for (const spelling of ["/year", " annually", " per annum", " p.a.", " yearly", " a year"]) {
+    it(`"£75,000${spelling}" is a year, so it never binds a GBP/month edge`, () => {
+      const g = graph();
+      spendingEffect(g).amount_unit = "GBP/month";
+      const brief = FIXTURE.brief_text.replace("£75,000 a year", `£75,000${spelling}`);
+      expect(verdictAt(brief, g, AT_75K).verdict).toBe("absent");
+    });
+  }
   it("CONTRAST: \"£75,000 a month\" is not a year", () => {
     const brief = FIXTURE.brief_text.replace("£75,000 a year", "£75,000 a month");
     expect(verdictAt(brief, graph(), AT_75K).verdict).toBe("absent");
