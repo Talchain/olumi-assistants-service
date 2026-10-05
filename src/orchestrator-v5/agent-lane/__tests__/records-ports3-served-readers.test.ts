@@ -535,15 +535,21 @@ describe('Science row 4: the sealed brief is byte-identical under option A; re-p
       stated_item: { source_quote: 'Keeping pricing as it is adds nothing.', unresolved: ['quantity'] } });
   });
 
-  const A16 = [
-    { draw: 1, projection: '8ea5c39a16ac66aa94fd19d52e916a638136235a23b7c3746b05f6f0d80d2266', analysis: '8ec98fdc7a121d19c9832e16b288303f0ff2a21b78915b464213cc19abc39a51' },
+  // RE-PIN (rule (e)) — "Science ruling 2026-10-05 rule (e) moves": rule (e) sets Olumi's own unsupported structure aside
+  // before the sweep, so each draw's projection gains its disclosures and its registered graph loses those nodes. Per-draw
+  // old → new in the commit message. EVERY STATED ITEM stays byte-identical: `receipts` is each stated_index's registered
+  // receipt row digest, taken at the pre-(e) head ed5edac4 and asserted BY ID below.
+  const A16: { draw: number; projection: string; analysis: string; receipts: Record<number, string> }[] = [
+    { draw: 1, projection: 'f7035b16fb678624661d31811eb8305913e814aa54b86d421a1485972d0cd657', analysis: '58d49709e955718710518528d1d68ff07ae5d65c1b6e113a5c466d8fbef1ec93', receipts: { 0: '4792e10fde79aec6', 1: '5b58ad278731e115', 2: '99d0f0b7d40731e4', 3: '03efdc2465aa8624', 4: '252a1ac241a64a2e', 5: '8ee78aa27b4ac191', 6: 'e28825e72db425b4', 7: '37702e79df257c14', 8: '4509c6bf61bd3474', 9: 'c4d55044b2c748bc', 10: '53fdd02cd7bccdc7', 11: 'bc76c24517f232cb', 12: '509a2ca6f9bdd696', 13: '56196f4886358e29', 14: '5a93430e8abaad2b' } },
     // RE-PIN (projection ONLY) — "Science ruling 2026-10-05 S3: more accurate drop reason (relationship_endpoint_missing →
     // effect_detail_conflicts_with_relationship); graph and analysis hash unchanged". Fix (d) resolves stated_items[9]'s
     // endpoints, so the EXISTING claim-side check names the real conflict. Diffed against the vans tip 9787d21b: the ONLY
     // difference is dropped[3].reason. Old → new projection: 3bbd7edc…453439 → 5a98e623…5b7d2b. The analysis pin is untouched.
-    { draw: 2, projection: '5a98e623b9e5d1725efc0b1903e513936f91d4349e1a390dec8f0ddf7b5b7d2b', analysis: '9f077ed8fd9415d575591a00443c9279aeb697ded44e51fbcc1de7ce016fbb36' },
-    { draw: 3, projection: '3ee815599bfced0e57b388b2bac3339aad592c73382bc2f73d1aaa3b0d25e2eb', analysis: 'bdb571be2bfffdb14bbe4768c4fced66d0136e9ef95612f7731e623259d90231' },
+    { draw: 2, projection: 'a57d59fe1ebf96c41bbacba05a64c4d74804051b7c1ad5c8a5d3ce9281070d8a', analysis: 'e61dd0fa77f902f8a94ca7d8acb73c39b9742caff39390b57accaa3cd73869e0', receipts: { 0: '1ccea1b0cccb6dd3', 1: '57ab2325df7a65d6', 2: '94c51091b96abfd6', 3: '8bb3516d6bd01d8b', 4: '3b63bf11388347bc', 5: '8ee78aa27b4ac191', 6: 'b0692fe92a84dd28', 7: 'd5763e1a0a147cd1', 8: '314ccc79cf189ebb', 9: '26d95fffbcb98441', 10: '0d1e53fd0b0be993', 11: '76ca863b6693beb6', 12: 'b40fcdf0078dc204', 13: '1ab207d6aef12745', 14: '5a93430e8abaad2b' } },
+    { draw: 3, projection: '16f40bf9e6d5ea9e93fb85af4d5c0717e371cddabb53b63ea7fd4f54859784e1', analysis: '61ec8af150d35a94f2d28e94bf5c77c9b7055f1ea30869da98fd787616891fbc', receipts: { 0: '071a0b3241f30791', 1: '5b58ad278731e115', 2: 'd3b5b93996d60a0e', 3: '387c4eaec7a07650', 4: '096752852502024b', 5: '8ee78aa27b4ac191', 6: 'd9f77284f793e509', 7: 'd8a5b4532ce41c36', 8: '1a13ed0106cd70a1', 9: 'fb4fe8d79b03176c', 10: '2e568882da41fc1d', 11: '5f29ab34606fa73d', 12: '1e998ad96d87ea0c', 13: 'a4f1e2da8a5c762e', 14: '05d4d7ef13b72cd6', 15: '7a8913d2ed75c228', 16: '5e2a4f0eb1f2bab3', 17: '360456bd52c2b381', 18: '111286da2bac4c08' } },
   ];
+  const receiptDigest = (rows: readonly Rec[]): Record<number, string> =>
+    Object.fromEntries(rows.map((row) => [row.stated_index as number, fingerprint(row).slice(0, 16)]));
   for (const pin of A16) it(`banked sealed draw ${pin.draw}: projection and analysis-affecting hash`, async () => {
     const raw = JSON.parse(readFileSync(new URL(`../../../cee/draft/records/__tests__/compile-spec/fixtures/s2-sealed-d${pin.draw}.records.json`, import.meta.url), 'utf8')) as unknown;
     const replay = await replayRecordSet(omitOptionalRecordNulls(raw) as DraftRecordSet, { brief: BRIEF });
@@ -557,6 +563,7 @@ describe('Science row 4: the sealed brief is byte-identical under option A; re-p
     const result = await buildModelFromRecords(SCENARIO, BRIEF, dispatch, async () => ({ text: JSON.stringify(raw), status: 'completed' }));
     expect(result.ok).toBe(true);
     expect(computeAnalysisAffectingGraphHashSha256(registered!.graph as never)).toBe(pin.analysis);
+    expect(receiptDigest(registered!.stated_dispositions as Rec[])).toEqual(pin.receipts);
   });
 });
 

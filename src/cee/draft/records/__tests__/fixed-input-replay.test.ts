@@ -93,31 +93,39 @@ describe("INV-R1 — risks and outcomes reach the graph through the whole chain"
  * trivially if the mint is broken, and "scaffolding present" passes trivially if
  * the gate never fires. The pair is the evidence.
  */
+/**
+ * ⭐ RULE (e) SWAP (Science ruling, 5 Oct: "do NOT re-pin; keep the invariant and swap in a user-valued root fixture that
+ * still reaches the sweep"). The root used to be an unvalued model claim ("Engineering Throughput"); rule (e2) now
+ * removes an invented unlevelled root BEFORE the sweep, so the pair stopped exercising the gate and the mint. The root is
+ * now the USER's own valued figure ("We ship 12 features."), which (e) never removes, so both variants still reach the
+ * sweep. The invariants below are unchanged.
+ */
+const CHAIN_BRIEF = "grow ARR 15% next year. We ship 12 features.";
 function recordsWithChain(authorBridge: boolean): DraftRecordSet {
   const claims: DraftRecordSet["claims"] = [
-    { claim_kind: "factor", label: "Engineering Throughput", basis: [0] },
-    { claim_kind: "causal_link", label: "lead raises throughput", from_stated: 1, to_claim: 0, effect: "positive" },
-    { claim_kind: "causal_link", label: "devs raise throughput", from_stated: 2, to_claim: 0, effect: "positive" },
+    { claim_kind: "causal_link", label: "lead raises throughput", from_stated: 1, to_stated: 3, effect: "positive" },
+    { claim_kind: "causal_link", label: "devs raise throughput", from_stated: 2, to_stated: 3, effect: "positive" },
   ];
   if (authorBridge) {
-    claims.push({ claim_kind: "outcome", label: "Feature Delivery Rate", basis: [0] });
-    claims.push({ claim_kind: "causal_link", label: "throughput drives delivery", from_claim: 0, to_claim: 3, effect: "positive" });
-    claims.push({ claim_kind: "causal_link", label: "delivery reaches the goal", from_claim: 3, to_stated: 0, effect: "positive" });
+    claims.push({ claim_kind: "outcome", label: "Feature Delivery Rate", basis: [3] });
+    claims.push({ claim_kind: "causal_link", label: "throughput drives delivery", from_stated: 3, to_claim: 2, effect: "positive" });
+    claims.push({ claim_kind: "causal_link", label: "delivery reaches the goal", from_claim: 2, to_stated: 0, effect: "positive" });
     // ⭐ AND THE REDUNDANT SHORTCUT, DELIBERATELY. Without it this variant emits
     // no `factor → goal` edge at all, so `fixFactorGoalEdges` never runs and the
     // assertion below would hold for a reason that has nothing to do with the
     // gap gate — proven by a mutant: removing the gate left this test GREEN.
     // With the shortcut present the variant exercises the gate end to end.
-    claims.push({ claim_kind: "causal_link", label: "throughput also bears on the goal", from_claim: 0, to_stated: 0, effect: "positive" });
+    claims.push({ claim_kind: "causal_link", label: "throughput also bears on the goal", from_stated: 3, to_stated: 0, effect: "positive" });
   } else {
     // The shape the starved grammar forced: a factor pointed straight at the goal.
-    claims.push({ claim_kind: "causal_link", label: "throughput reaches the goal", from_claim: 0, to_stated: 0, effect: "positive" });
+    claims.push({ claim_kind: "causal_link", label: "throughput reaches the goal", from_stated: 3, to_stated: 0, effect: "positive" });
   }
   return {
     stated_items: [
       { kind: "goal", source_quote: "grow ARR 15% next year" },
       { kind: "option", source_quote: "hire a tech lead" },
       { kind: "option", source_quote: "hire two developers" },
+      { kind: "figure", source_quote: "We ship 12 features.", value: 12, value_literal: "12", unit: "features", unit_literals: ["features"], role: "baseline", quantity: 3 },
     ],
     claims,
   };
@@ -125,10 +133,12 @@ function recordsWithChain(authorBridge: boolean): DraftRecordSet {
 
 describe("INV-R2/R3 — the scaffolding mint fires on a gap and only on a gap", () => {
   it("INV-R2: an AUTHORED outcome layer suppresses the mint entirely", async () => {
-    const result = await replayRecordSet(recordsWithChain(true), { brief: "grow ARR 15% next year" });
+    // PRECONDITION of the swap: the user-valued root reaches the sweep (rule (e) set nothing aside).
+    const result = await replayRecordSet(recordsWithChain(true), { brief: CHAIN_BRIEF });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
+    expect(result.projection.dropped.filter((d) => d.reason === "superseded_by_stated_path" || d.reason === "invented_root_level_unknown")).toEqual([]);
     expect(result.semantics.outcomeLabels).toEqual(["Feature Delivery Rate"]);
     expect(result.semantics.scaffoldedOutcomeIds).toEqual([]);
     // The independent contrast reading agrees: no `out_<factor>_impact` id exists.
@@ -141,7 +151,7 @@ describe("INV-R2/R3 — the scaffolding mint fires on a gap and only on a gap", 
   });
 
   it("INV-R3: a GENUINELY GAPPED set still gets the safety net, and it is MARKED", async () => {
-    const result = await replayRecordSet(recordsWithChain(false), { brief: "grow ARR 15% next year" });
+    const result = await replayRecordSet(recordsWithChain(false), { brief: CHAIN_BRIEF });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -156,8 +166,8 @@ describe("INV-R2/R3 — the scaffolding mint fires on a gap and only on a gap", 
     // Pins the PRECONDITION of the pair above: if both variants ever produced
     // the same outcome layer, both tests would still pass while proving nothing
     // (trap 13b — a guard whose discrimination depends on something nothing pins).
-    const authored = await replayRecordSet(recordsWithChain(true), { brief: "grow ARR 15% next year" });
-    const gapped = await replayRecordSet(recordsWithChain(false), { brief: "grow ARR 15% next year" });
+    const authored = await replayRecordSet(recordsWithChain(true), { brief: CHAIN_BRIEF });
+    const gapped = await replayRecordSet(recordsWithChain(false), { brief: CHAIN_BRIEF });
     expect(authored.ok && gapped.ok).toBe(true);
     if (!authored.ok || !gapped.ok) return;
     expect(authored.semantics.outcomeLabels).not.toEqual(gapped.semantics.outcomeLabels);
