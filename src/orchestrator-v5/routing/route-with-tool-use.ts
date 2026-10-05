@@ -2006,7 +2006,7 @@ export const SIMULATION_SHARE_MEANING_INSTRUCTION = [
   // ⚠ SCOPED TO ONE KEY, NOT TO "each option's percentage". A display option can
   // carry TWO percentages — `win_probability` AND `target_fit` — and
   // `format-analysis-for-context.ts` is the authority that they are DIFFERENT
-  // quantities ("an option can win most often yet still be unlikely to meet the
+  // quantities ("an option can be supported by the most runs yet still be unlikely to meet the
   // target"; live case 89% win vs 29% target-fit). The first cut of this line
   // said "each option's percentage", which silently redefined `target_fit` as a
   // simulation share and contradicted that authority inside the same pack — two

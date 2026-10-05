@@ -945,15 +945,15 @@ const GOAL_FIT_BASIS_PHRASES: Readonly<Record<string, string>> = {
  * Lane 30 — the definition sentence rendered ONCE (never per option) when
  * per-option `target_fit` values are present. It binds the two percent
  * vocabularies apart so the LLM cannot conflate them: `win_probability`
- * = "wins most often" (beats the alternatives), `target_fit` = "meets your
+ * = "how often runs supported it" (over the alternatives), `target_fit` = "meets your
  * target" (the modelled probability of goal attainment). The live defect
  * (scenario 90385279) was exactly this conflation — an 89% win probability
  * narrated as target attainment when the scored target-fit was 29.3%.
  */
 export const TARGET_FIT_DEFINITION =
   'each option\'s target_fit is the modelled probability it meets your target; ' +
-  'win_probability only says how often the option beats the alternatives — ' +
-  'an option can win most often yet still be unlikely to meet the target';
+  'win_probability only says how often runs supported the option over the alternatives — ' +
+  'an option can be supported by the most runs yet still be unlikely to meet the target';
 
 /**
  * Lane 30 — the DISCLOSED-absence line. Rendered whenever an analysis is
