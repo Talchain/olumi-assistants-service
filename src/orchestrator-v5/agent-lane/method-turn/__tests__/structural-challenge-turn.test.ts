@@ -77,7 +77,9 @@ describe('SCI-DEEP reply', () => {
     const reply = composeStructuralChallengeReply({ result: changed, labels: LABELS, certainty: { baseline: [], alternative: [{ option_id: 'raise_pro_price_to_59', probability_of_goal: 1, earned: true }] } });
     expect(reply.split('\n')[0]).toBe('Without the link from Monthly churn to Paying subscribers, Raise Pro price to £59 still leads — but part of the result changes.');
     expect(reply).toContain('baseline: Reaches the target in about 53% of model runs. Without the link: Reaches the target in 100% of model runs.');
-    expect(reply).toContain('83,434 now and 90,306 without the link (your target is 85,000)');
+    // DL beat-4 audit: no unitless amount; the direction and the target crossing the claim's own side test proves.
+    expect(reply).toContain('Raise Pro price to £59\'s expected result is higher without the link, and moves from below your target to above it.');
+    expect(reply).not.toMatch(/83,434|90,306|85,000/);
     expect(reply).toContain('doesn\'t say which version of the model is right');
     expect(reply).toContain('This test isn\'t saved.');
     expect(reply).toContain('What evidence do you have for the link from Monthly churn to Paying subscribers?');
@@ -415,7 +417,20 @@ describe('review closure: final presentation is bound to its baseline execution 
     expect(output.result?.baseline.run_id).toBe(BASE.baseline.run_id);
     expect(output.reply).toContain('The figures are provisional estimates from these two model versions.');
     expect(output.reply).not.toContain('still leads');
-    expect(output.reply).toContain('83,434');
+    // The outcome line is present, as a direction (never a unitless amount).
+    expect(output.reply).toContain('expected result is higher without the link');
+  });
+
+  it.each([
+    ['the same', 85500, 85500, 85000, 'is the same without the link, and stays above your target.'],
+    ['stays above', 90000, 87000, 85000, 'is lower without the link, and stays above your target.'],
+    ['no target', 0.0213, -0.0031, null, 'is lower without the link.'],
+    ['unavailable without the link', 0.0213, null, null, 'is unavailable without the link.'],
+  ] as const)('DL beat-4 audit: an outcome level reads as a direction (%s), never a number', (_name, baseline, alternative, target, words) => {
+    const claim = { ...changed.claims.find((c) => c.kind === 'outcome_level')!, baseline, alternative, target };
+    const reply = composeStructuralChallengeReply({ result: { ...changed, claims: [changed.claims[0]!, claim] } as StructuralChallengeResultV1, labels: LABELS });
+    expect(reply).toContain(`Raise Pro price to £59's expected result ${words}`);
+    expect(reply).not.toMatch(/expected result is -?\d/);
   });
   it.each(['leader', 'goal_probability', 'outcome_level', 'constraint_probability'] as const)(
     'P1-4 / prior #4: %s change names its observed claim and discloses unpaired sampling without dependency prose', async (kind) => {

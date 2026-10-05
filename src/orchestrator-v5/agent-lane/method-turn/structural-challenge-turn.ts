@@ -50,12 +50,27 @@ function chance(p: number): string {
   return `about ${r}%`;
 }
 
-/** Model-scale amounts keep three significant figures below 100 (0.0213, never "0"); a zero is never signed ("-0"). */
-export const formatChallengeAmount = (x: number): string => {
-  if (x === 0) return '0';
-  return Math.abs(x) >= 100 ? Math.round(x).toLocaleString('en-GB') : x.toLocaleString('en-GB', { maximumSignificantDigits: 3 });
-};
-const amount = formatChallengeAmount;
+/**
+ * ⛔ NO UNITLESS AMOUNTS (DL beat-4 audit, 5 Oct). An outcome level is in the ENCODED model scale (0.0213), not the
+ * goal's authored unit, and the claim carries no unit to say it in. So the line says the DIRECTION (ordering survives
+ * the encoding) and the target relation the claim's own side test proves; it never prints the number.
+ */
+function outcomeLevelLine(who: string, q: StructuralChallengeQuantityClaimV1, reason: string): string {
+  const b = q.baseline, a = q.alternative;
+  // "The figures can be compared, but no supported conclusion boundary…" refers to figures this line no longer prints;
+  // the direction is all that can be said, so that basis adds nothing here. Every other basis keeps its sentence.
+  const tail = reason && q.basis !== 'no_licensed_boundary' ? ` ${reason}` : '';
+  if (b === null || a === null) {
+    const where = b === null && a === null ? 'in both versions' : b === null ? 'in the baseline' : 'without the link';
+    return `${who}'s expected result is unavailable ${where}.${tail}`;
+  }
+  const direction = a === b ? 'is the same without the link' : a > b ? 'is higher without the link' : 'is lower without the link';
+  const t = q.target;
+  if (t === null) return `${who}'s expected result ${direction}.${tail}`;
+  const side = (v: number) => (v > t ? 'above' : v < t ? 'below' : 'at');
+  const target = side(b) === side(a) ? `, and stays ${side(b)} your target` : `, and moves from ${side(b)} your target to ${side(a)} it`;
+  return `${who}'s expected result ${direction}${target}.${tail}`;
+}
 const TARGET_FREQUENCY_UNAVAILABLE = 'The target frequency was unavailable.';
 
 const UNSUPPORTED: Record<string, string> = {
@@ -113,13 +128,9 @@ function claimLine(c: StructuralChallengeClaimV1, label: (id: string) => string,
   if (q.kind === 'goal_probability') {
     return `${who} — baseline: ${goalSide(q.baseline, q.option_id, certainty?.baseline, q.basis === 'withheld_on_one_side')} Without the link: ${goalSide(q.alternative, q.option_id, certainty?.alternative, q.basis === 'withheld_on_one_side')}${reason ? ` ${reason}` : ''}`;
   }
-  const value = (v: number | null, probability: boolean) => v === null ? 'unavailable' : probability
-    ? v === 1 ? 'all sampled model runs' : v === 0 ? 'none of the sampled model runs' : `${chance(v)} of model runs` : amount(v);
-  if (q.kind === 'outcome_level') {
-    const side = q.target === null ? '' : ` (your target is ${amount(q.target)})`;
-    return `${who}'s expected result is ${value(q.baseline, false)} now and ${value(q.alternative, false)} without the link${side}.${reason ? ` ${reason}` : ''}`;
-  }
-  const limitSide = (v: number | null) => v === null ? 'The frequency within this limit was unavailable.' : `Within the limit in ${value(v, true)}.`;
+  const share = (v: number) => v === 1 ? 'all sampled model runs' : v === 0 ? 'none of the sampled model runs' : `${chance(v)} of model runs`;
+  if (q.kind === 'outcome_level') return outcomeLevelLine(who, q, reason);
+  const limitSide = (v: number | null) => v === null ? 'The frequency within this limit was unavailable.' : `Within the limit in ${share(v)}.`;
   return `${who} — limit ${label(q.constraint_id ?? '')}: baseline: ${limitSide(q.baseline)} Without the link: ${limitSide(q.alternative)}${reason ? ` ${reason}` : ''}`;
 }
 
