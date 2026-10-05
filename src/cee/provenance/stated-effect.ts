@@ -98,6 +98,50 @@ function unitAgrees(amount: LocatedAmount, expected: string, other: string): boo
   return otherCount===null || !amount.units.some(u=>sameNoun(u,otherCount.noun));
 }
 
+/** A counting determiner needs its source unit, not an unrelated calendar marker. */
+function implicitSourceAgrees(amount: LocatedAmount, unit: string): boolean {
+  if (!amount.implicitSource) return true;
+  const count = readCountRate(unit);
+  if (count !== null) return amount.units.some(candidate => {
+    const actual = readCountRate(candidate);
+    return actual !== null && actual.noun.join(' ') === count.noun.join(' ')
+      && (actual.period === null || actual.period === count.period);
+  });
+  const money = readMoney(unit, '');
+  if (money !== null) return amount.units.some(candidate => {
+    const actual = readMoney(candidate, '');
+    return actual !== null && actual.code === money.code
+      && (actual.period === null || actual.period === money.period)
+      && (actual.per ?? []).join(' ') === (money.per ?? []).join(' ');
+  });
+  return amount.units.some(candidate => sameUnit(unit, candidate));
+}
+
+/** Unit words only check the declared ends; they never supply an endpoint or a unit. */
+export function statedEffectUnitsMatch(quote: string, detail: StatedEffectDetail, authority: DraftStatedRelationship): boolean {
+  const amounts = locatedAmounts(quote);
+  const agrees = (span: DraftQuoteSpan | undefined, unit: string, other: string, source = false): boolean => {
+    if (span === undefined) return true; // Missing evidence is refused by the evidence guard, not guessed here.
+    const amount = amounts.find(a => atSpan(a, span, quote) && (source || !a.implicitSource));
+    return amount === undefined || unitAgrees(amount, unit, other) && (!source || implicitSourceAgrees(amount, unit));
+  };
+  return agrees(authority.amount_span, detail.amount_unit, detail.per_source_change_unit)
+    && agrees(authority.range?.low_span, detail.amount_unit, detail.per_source_change_unit)
+    && agrees(authority.range?.high_span, detail.amount_unit, detail.per_source_change_unit)
+    && agrees(authority.source_span, detail.per_source_change_unit, detail.amount_unit, true);
+}
+
+/** Numeric punctuation inside an owned literal is not a sentence boundary. */
+function spansShareClause(quote: string, spans: readonly DraftQuoteSpan[]): boolean {
+  const ordered = [...spans].sort((a, b) => a.start - b.start);
+  let end = ordered[0]?.end ?? 0;
+  for (const span of ordered.slice(1)) {
+    if (span.start > end && ['.', '!', '?', ';'].some(d => quote.slice(end, span.start).includes(d))) return false;
+    end = Math.max(end, span.end);
+  }
+  return true;
+}
+
 /**
  * Validate, rather than extract, a typed natural effect against its quoted span.
  * The quote supplies no endpoints, signs or target values to the model. It
@@ -136,7 +180,7 @@ export function statedEffectQuoteMatches(
     const amounts=locatedAmounts(quote);
     const target=amounts.find(a=>!a.implicitSource && atSpan(a,authority.amount_span!,quote));
     const source=amounts.find(a=>atSpan(a,authority.source_span!,quote) && (a.implicitSource ? Math.abs(detail.per_source_change)===1 : magnitudeMatches(Math.abs(detail.per_source_change),a)));
-    if(target===undefined || source===undefined || target.index===source.index || !unitAgrees(target,detail.amount_unit,detail.per_source_change_unit)
+    if(target===undefined || source===undefined || target.index===source.index || !statedEffectUnitsMatch(quote,detail,authority) || !unitAgrees(target,detail.amount_unit,detail.per_source_change_unit)
       || !unitAgrees(source,detail.per_source_change_unit,detail.amount_unit))return false;
     const left=Math.min(authority.amount_span.end,authority.source_span.end),right=Math.max(authority.amount_span.start,authority.source_span.start);
     return !['.','!','?',';'].some(d=>quote.slice(left,right).includes(d));
@@ -149,11 +193,10 @@ export function statedEffectQuoteMatches(
     if(r.low_literal===undefined || r.high_literal===undefined || boundLiteral(quote,r.low_literal,r.low).reason!==undefined
       || boundLiteral(quote,r.high_literal,r.high).reason!==undefined) return false;
     if(authority.amount_literal!==undefined && boundLiteral(quote,authority.amount_literal,detail.amount).reason!==undefined)return false;
-    const source=oneMatchingAmount(locatedAmounts(quote),detail.per_source_change,detail.per_source_change_unit,true);
-    if(source===undefined || !atSpan(source,authority.source_span,quote))return false;
+    const source=locatedAmounts(quote).find(a=>atSpan(a,authority.source_span!,quote) && (a.implicitSource ? Math.abs(detail.per_source_change)===1 : magnitudeMatches(Math.abs(detail.per_source_change),a)));
+    if(source===undefined || !statedEffectUnitsMatch(quote,detail,authority))return false;
     const spans=[authority.source_span,r.low_span,r.high_span,authority.amount_span].filter((s):s is DraftQuoteSpan=>s!==undefined);
-    const left=Math.min(...spans.map(s=>s.start)),right=Math.max(...spans.map(s=>s.end));
-    return !['.','!','?',';'].some(d=>quote.slice(left,right).includes(d));
+    return spansShareClause(quote,spans);
   }
   if (authority === undefined || authority.amount_span === undefined || authority.source_span === undefined || !statedEffectFiguresMatch(quote, detail)) return false;
   if (authority.amount !== detail.amount || authority.per_source_change !== detail.per_source_change

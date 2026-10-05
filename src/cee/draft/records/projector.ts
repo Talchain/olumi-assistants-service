@@ -110,7 +110,7 @@ import { holdsByDefinition, nodeUnitOf } from "../../../orchestrator/context/pla
 import { sameUnit } from "../../../orchestrator-v5/agent-lane/same-unit.js";
 import { admitGoalBaseline } from "../../factor-extraction/goal-baseline-admissibility.js";
 import { admittedValueRange, statedValueIsBound, locateRecordEvidence, canonicalQuantityUnits, literalConventionValue, locateLiteral } from "./quantity-evidence.js";
-import { statedEffectQuoteMatches } from "../../provenance/stated-effect.js";
+import { statedEffectQuoteMatches, statedEffectUnitsMatch } from "../../provenance/stated-effect.js";
 import { magnitudeNodes, percentLevelIds } from "../../magnitude/frame-defaulted-links.js";
 import { sizeLink, resolveMagnitudeFrame, type NaturalEffect, type MagnitudeAuthor, type StatedRangeEnd } from "../../magnitude/link-effect.js";
 import type { InterventionV3T } from "../../../schemas/cee-v3.js";
@@ -3876,8 +3876,10 @@ function projectOnce(
       const toId=c.to_claim===undefined ? statedIdByIndex.get(c.to_stated!) : claimIdByIndex.get(c.to_claim);
       if(nodes.find(n=>n.id===fromId)?.quantity_ref!==r.from_quantity || nodes.find(n=>n.id===toId)?.quantity_ref!==r.to_quantity){refuse("effect_detail_conflicts_with_relationship");return;}
     }
-    if(r.amount_unit===undefined || r.per_source_change_unit===undefined
-      || !statedEffectQuoteMatches(item.source_quote,{amount:r.amount,amount_unit:r.amount_unit,per_source_change:r.per_source_change,per_source_change_unit:r.per_source_change_unit},r)) return;
+    if(r.amount_unit===undefined || r.per_source_change_unit===undefined) return;
+    const detail={amount:r.amount,amount_unit:r.amount_unit,per_source_change:r.per_source_change,per_source_change_unit:r.per_source_change_unit};
+    if(!statedEffectUnitsMatch(item.source_quote,detail,r)){refuse("unit_literal_contradicts_unit");return;}
+    if(!statedEffectQuoteMatches(item.source_quote,detail,r)) return;
     const direction=Math.sign(r.amount*r.per_source_change)<0 ? "negative" : "positive";
     const matches=edges.filter(e=>e.from===source.id && e.to===target.id);
     for(const e of matches){
