@@ -450,7 +450,7 @@ export async function buildModelFromRecords(
     goal_constraints_carried: graph.goal_constraints?.length ?? 0,
     ...(limits.notCarried.length > 0 ? { goal_constraints_not_carried: limits.notCarried } : {}),
     open_questions: [...(goalScope.question !== undefined ? [goalScope.question] : []), ...(deadline !== undefined ? [deadline] : []),
-      ...compiled.ask.items.map(item => item.detail), ...compiled.inventedRootAsks],
+      ...compiled.ask.items.map(item => item.detail), ...compiled.inventedRootAsks, ...compiled.setAsideDisclosure],
     // Preserve the projector's typed identities and reasons; do not reconstruct them from labels (rule (e)'s included).
     not_represented: compiled.projection.dropped,
   };

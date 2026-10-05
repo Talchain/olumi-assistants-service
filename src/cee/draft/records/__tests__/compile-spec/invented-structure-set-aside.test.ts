@@ -11,6 +11,7 @@ import { BRIEF } from './sealed-fixture.js';
 import { buildModelFromRecords } from '../../../../../orchestrator-v5/agent-lane/runtime/build-model-from-records.js';
 import { targetTestabilityOf } from '../../../../../orchestrator-v5/admission/target-testability.js';
 import { assessCanonicalAnalysisReadiness } from '../../../../../orchestrator/tools/analysis-ready-helper.js';
+import { openQuestionsForReply } from '../../../../../orchestrator-v5/agent-lane/write-outcome.js';
 import type { DraftRecordSet } from '../../grammar.js';
 
 type Json = Record<string, any>;
@@ -262,5 +263,20 @@ describe('Science merge condition (item 3): an option WITH a stated path keeps i
     expect(aside(result, 'invented_root_level_unknown').map(d => d.label)).toEqual([INVENTED]);
     expect((body.graph.nodes as Json[]).some(n => n.id === OPTION)).toBe(true);
     expect(reaches(body, OPTION, GOAL_ID)).toBe(false);
+  });
+});
+
+describe('item 4: the disclosure NAMES every item set aside, where the user sees it (open_questions → reply/UI)', () => {
+  it('(e1): one line names each superseded claim by its label', async () => {
+    const { result } = await build(withInvention());
+    const line = openQuestionsForReply(result as never).find(q => q.startsWith('Olumi left out its own') && q.includes('your stated figures'));
+    expect(line).toBeDefined();
+    for (const label of aside(result, 'superseded_by_stated_path').map(d => d.label)) expect(line).toContain(`"${label}"`);
+  });
+  it('(e2): beyond the 3-ask cap, the 4th root is still named in the disclosure line', async () => {
+    const { result } = await build(inventedRoots());
+    const line = openQuestionsForReply(result as never).find(q => q.startsWith('Olumi left out its own') && q.includes('no current level'));
+    expect(line).toBeDefined();
+    for (const label of ['Pricing power', 'Market appetite', 'Brand pull', 'Sales capacity']) expect(line).toContain(`"${label}"`);
   });
 });

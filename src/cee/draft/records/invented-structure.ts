@@ -32,6 +32,26 @@ type Edge = { readonly from: string; readonly to: string; readonly provenance?: 
 export const inventedRootLevelAsk = (label: string): string => `What is ${label} today?`;
 /** Rule (e2): at most this many level asks per turn; the rest are in the disclosure only. */
 export const INVENTED_ROOT_ASK_CAP = 3;
+
+const quoted = (labels: readonly string[]): string => {
+  const q = labels.map((label) => `"${label}"`);
+  return q.length <= 1 ? q.join("") : `${q.slice(0, -1).join(", ")} and ${q[q.length - 1]}`;
+};
+/**
+ * ⭐ ITEM 4 (Science, 5 Oct): THE DISCLOSURE NAMES EVERY SET-ASIDE ITEM, where the user sees it. `not_represented` reaches
+ * only the Agent's model; `open_questions` is appended to every reply and listed whole in the UI's disclosure. So each
+ * reason's set-aside labels are said in ONE line there, by name, so the user can restate any of them in chat. (The
+ * one-step add-back from `restore` is a follow-up; nothing here claims it exists.)
+ */
+export function setAsideDisclosureLines(disclosures: readonly DroppedRecordRef[]): string[] {
+  const named = (reason: DroppedRecordRef["reason"]): string[] => [...new Set(disclosures.filter((d) => d.reason === reason).map((d) => d.label))];
+  const superseded = named("superseded_by_stated_path");
+  const unlevelled = named("invented_root_level_unknown");
+  return [
+    ...(superseded.length > 0 ? [`Olumi left out its own ${quoted(superseded)}: your stated figures already link those options to the goal. Name any of them to add it back.`] : []),
+    ...(unlevelled.length > 0 ? [`Olumi left out its own ${quoted(unlevelled)}: no current level was given. Name any of them, with its level today, to add it back.`] : []),
+  ];
+}
 const INTERVENTION_FIELDS = ["interventions", "intervention_details", "raw_interventions"] as const;
 
 const rec = (value: unknown): value is Rec => value !== null && typeof value === "object" && !Array.isArray(value);

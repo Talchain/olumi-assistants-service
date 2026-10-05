@@ -60,7 +60,7 @@ import { PROJECTOR_STRUCTURAL_CLASS } from "./projector.js";
 import type { DraftRecordSet } from "./grammar.js";
 import type { RecordProjection } from "./projector.js";
 import { projectDraftRecords } from "./seam.js";
-import { setAsideInventedStructure, statedCarrierIds } from "./invented-structure.js";
+import { setAsideDisclosureLines, setAsideInventedStructure, statedCarrierIds } from "./invented-structure.js";
 
 /** A node as it stands at the end of the replay. Structural, not the V3 wire shape. */
 interface ReplayNode {
@@ -181,6 +181,8 @@ export interface ReplaySuccess {
   readonly semantics: SemanticTable;
   /** Rule (e2): the level asks for the invented roots set aside (at most 3, ordered by option→goal paths). */
   readonly inventedRootAsks: readonly string[];
+  /** Item 4: one user-visible line per rule-(e) reason, NAMING every item set aside (`setAsideDisclosureLines`). */
+  readonly setAsideDisclosure: readonly string[];
 }
 
 export type ReplayResult = ReplaySuccess | ReplayFailure;
@@ -284,6 +286,7 @@ export async function replayRecordSet(
     },
     semantics: measureSemanticTable(graph),
     inventedRootAsks: aside.asks,
+    setAsideDisclosure: setAsideDisclosureLines(aside.disclosures),
   };
 }
 
