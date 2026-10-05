@@ -154,8 +154,13 @@ export function runWithheldGoalFigures(envelope: Record<string, unknown>): boole
 
 /** That warning (the first), or `undefined`. */
 export function goalFiguresWithheldWarning(envelope: Record<string, unknown>): Record<string, unknown> | undefined {
+  return goalFiguresWithheldWarnings(envelope)[0];
+}
+
+/** EVERY goal-figure withhold on the envelope, in carrier order (RT-10 B′: a reader that must not depend on order). */
+export function goalFiguresWithheldWarnings(envelope: Record<string, unknown>): Record<string, unknown>[] {
   const warnings = Array.isArray(envelope.inference_warnings) ? envelope.inference_warnings : [];
-  return filterObjectEntries(warnings).find((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
+  return filterObjectEntries(warnings).filter((w) => typeof w.code === 'string' && GOAL_FIGURES_WITHHELD_CODES.has(w.code));
 }
 
 /**
