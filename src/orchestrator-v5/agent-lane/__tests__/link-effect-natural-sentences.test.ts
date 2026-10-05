@@ -15,7 +15,7 @@ import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../../system-events/dispatch.js';
-import type { LinkEffectStatement } from '../../system-events/link-effect-edit.js';
+import { linkEffectEndUnits, statedInOneOf, type LinkEffectStatement } from '../../system-events/link-effect-edit.js';
 import { ProposalStore } from '../proposal.js';
 import { approvalChipsFor } from '../approval-chips.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
@@ -516,6 +516,14 @@ describe('RT-6 row 1 (red team #87 6004429045): a unit the sentence WROTE is nev
     const result = await propose(w, { ...rt1, effect: effect(1, unit, 10, 'cafés') });
     expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
     expect(cardsFor(w, result)).toHaveLength(2);
+  });
+  // TEETH: the ONE list widens points spellings only. A % LEVEL end (S1's gross margin) still never takes a bare "%" or
+  // basis points at the writer's own comparator; the reader's question usually fires first, so this pins the list itself.
+  it('CONTROL: a % LEVEL target takes every leaf points spelling, never a bare "%" or basis points', () => {
+    const s1 = NATURAL_SENTENCE_ROWS.find((r) => r.id === 'S1')!;
+    const ends = linkEffectEndUnits(fixture(s1), s1.from, s1.to)!;
+    for (const u of POINTS_SPELLINGS) expect(statedInOneOf(u, ends.target.own), u).toBe(true);
+    for (const u of ['%', 'percent', 'basis points', 'bps']) expect(statedInOneOf(u, ends.target.own), u).toBe(false);
   });
   // ...and the SOURCE arm reads the same list (S1: a % level source stated in points).
   it.each([...POINTS_SPELLINGS])('source stated in "%s": a card, never unit_mismatch', async (unit) => {
