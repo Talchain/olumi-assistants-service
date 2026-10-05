@@ -306,10 +306,43 @@ describe('the composer: the code line first, then the model\'s sentences that pa
     expect(composeRerunExplanation(moved, paired)).toMatchObject({ dropped: [], text: `${paired.codeLine}\n\n${moved}` });
   });
 
-  it('a C2 pair: a causal sentence is dropped (RX-NO-CAUSE-UNPAIRED); a C1 pair may state the cause', () => {
+  // ⚠ RE-PINNED (Science d5, #87 6005682972 (1)): this row read `plan(PAIRED)`, which carries TWO changes (AI, FIX), as
+  // "a C1 pair may state the cause". C1 proves the same draw, builds and sample count but allows several edits, and with two
+  // edits no single one can be credited without an ablation. The permissive half now uses ONE change; the two-change and
+  // goal-row cases are the RED rows below.
+  it('a C2 pair: a causal sentence is dropped (RX-NO-CAUSE-UNPAIRED); a C1 pair with ONE change may state the cause', () => {
     const causal = 'The shift happened because of your change.';
     expect(composeRerunExplanation(causal, plan({ ...PAIRED, attribution_case: 'C2_unpaired' })!).failed).toContain('RX-NO-CAUSE-UNPAIRED');
-    expect(composeRerunExplanation(causal, plan(PAIRED)!).dropped).toEqual([]);
+    const one = plan({ ...PAIRED, input_changes: [AI] })!;
+    expect(one.inputs.attribution_case).toBe('C1_attributable');
+    expect(one.instruction).toContain('You may say what moved in the comparison.');
+    expect(composeRerunExplanation(causal, one).dropped).toEqual([]);
+  });
+
+  it('RED (d5 6005682972 (1)): a C1 pair with TWO changes never credits one of them; checked as unpaired, told so', () => {
+    const causal = 'The shift happened because of your change.';
+    const two = plan(PAIRED)!;
+    expect(two.inputs.attribution_case).toBe('C2_unpaired');
+    expect(two.instruction).not.toContain('You may say what moved in the comparison.');
+    expect(two.instruction).toContain('More than one input changed between the two Runs, or the goal itself changed, so never say which change caused the difference.');
+    expect(composeRerunExplanation(causal, two).failed).toContain('RX-NO-CAUSE-UNPAIRED');
+    // The line is still the record: both changes named, the same-draw case line kept.
+    expect(two.codeLine).toBe(`${SAID_AI} ${SAID_FIX} ${RERUN_FALLBACK_LINES.C1}`);
+  });
+
+  it('RED (d5 6005682972 (1), (4)): a C1 pair whose ONE change is to the goal (direction) never credits it: the question changed', () => {
+    const flip = { entity_kind: 'goal', entity_id: 'quarterly_revenue', field: 'direction', label_before: 'Quarterly revenue',
+      label_after: 'Quarterly revenue', before: { raw: 'maximize' }, after: { raw: 'minimize' }, change: 'changed' };
+    const p = plan({ ...PAIRED, input_changes: [flip] })!;
+    expect(p.inputs.attribution_case).toBe('C2_unpaired');
+    expect(p.instruction).not.toContain('You may say what moved in the comparison.');
+    expect(composeRerunExplanation('The shift happened because of your change.', p).failed).toContain('RX-NO-CAUSE-UNPAIRED');
+  });
+
+  it('the UNWITHHELD line is not this gate: two Accepts on a C1 prior-withheld pair keep the investor-moment line and its check case', () => {
+    const p = plan(UNWITHHELD)!;
+    expect(p.inputs.attribution_case).toBe('C1_attributable');
+    expect(p.codeLine).toBe(LINE);
   });
 });
 

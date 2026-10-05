@@ -172,9 +172,16 @@ export function rerunExplanationPlan(
   const priorWithheld = d.win_probabilities_unavailable === 'prior_withheld';
   const noMatched = !priorWithheld && Array.isArray(d.win_probabilities) && d.win_probabilities.length === 0;
   const noise = text(rec(d.leader)?.noise_verdict);
+  // ⛔ SAYING WHAT CAUSED A MOVEMENT needs ONE change (Science d5, #87 6005682972 (1)): C1 proves the same draw, builds and
+  // sample count, but it allows several edits (build-run-delta.ts checks only seed/draws/n/builds/hash), and with two edits no
+  // single one can be credited without an ablation. A goal row (direction, operator, target, unit) changes the question
+  // itself, so it is never the credited change. Any other C1 pair is checked as C2_unpaired (no cause), as C3–C5 already are.
+  // The UNWITHHELD line is NOT gated here: the licence change is deterministic (d5 (d)), and its own C1 rule is below.
+  const movementAttributable = wireCase === 'C1_attributable' && rows.length === 1 && rows[0]!.entity_kind !== 'goal';
+  const checkedCase = !priorWithheld && wireCase === 'C1_attributable' && !movementAttributable ? 'C2_unpaired' : wireCase;
   const inputs: MethodInputs = {
     change_labels: changes,
-    attribution_case: checkCase(wireCase),
+    attribution_case: checkCase(checkedCase),
     leader_licensed: leaderLicensed,
     ...(noise !== undefined ? { noise_verdict: noise } : {}),
     prior_withheld: priorWithheld,
@@ -207,6 +214,8 @@ export function rerunExplanationPlan(
         ? 'No option has figures in both Runs, so never say anything rose, fell or moved; say only what this Run shows.'
         : inputs.attribution_case === 'C1_attributable'
           ? 'You may say what moved in the comparison.'
+          : wireCase === 'C1_attributable'
+            ? 'More than one input changed between the two Runs, or the goal itself changed, so never say which change caused the difference.'
           // Each premise is TRUE of its case (CODEX on 3d0891e2 P1): C0 + complete proves identity; C2 leaves the draw unshown.
           : wireCase === 'C0_identical'
             ? 'Nothing differed between the two Runs, so never say anything moved because of a change.'
@@ -217,6 +226,61 @@ export function rerunExplanationPlan(
                 : 'Other things also differed between the two Runs, so never say the change caused the difference.',
   ].join('\n');
   return { inputs, changes, codeLine, instruction, fallback: codeLine };
+}
+
+/**
+ * ⭐ S7 "EXPLAIN THE CHANGE" ON THE TYPED PATH (D4 lease #87 6005636960; DL decision YES; Science d5 6005682972).
+ *
+ * Served at 5d767fa3 (red team s7-d4): after a withheld Run → set link → permitted Run, the TYPED question "What changed since
+ * the last run, and why?" answered "Nothing changed since the latest saved run", which was false. The Explain chip said it right
+ * from this same plan. The typed Agent loop never saw it: `selectedRunDeltaForModel` gives the model a delta only for a pair
+ * PROVEN licensed at both ends.
+ *
+ * So, for every OTHER pair, the model gets Olumi's own record from the chip's plan: the code line, `prior_withheld` and the
+ * checked case. LEADER-FREE BY CONSTRUCTION: the line is built from `input_changes` rows and the case lines only. There is no
+ * leader, no option share and no win_probabilities (asserted per field in rerun-record.test.ts). Raw `input_changes` rows
+ * never reach the model (AIQ binding rule, schemas #76 5916401270: a row carries no author). The code line is CODE-OWNED
+ * (ruling 5940472067). A pair the model DOES see as licensed gets nothing here, so its context is byte-unchanged.
+ */
+export interface RerunRecordForModel {
+  readonly code_line: string;
+  readonly prior_withheld: boolean;
+  readonly attribution_case: 'C0_identical' | 'C1_attributable' | 'C2_unpaired';
+  readonly use: string;
+}
+
+export const TYPED_RERUN_RECORD_RULE =
+  'Olumi\u2019s own record of what changed between the Run before the latest one and the latest Run. '
+  + 'When the user asks what changed since the last run, or why the result is different, answer from it: '
+  + 'first say code_line exactly, as Olumi\u2019s record, then say what the latest Run shows. '
+  + '\u201cSince the last run\u201d means the latest Run against the one before it; say any edit made after the latest Run separately. '
+  + 'Never say nothing changed when code_line names a change. '
+  + 'If prior_withheld is true, never say anything rose, fell or moved. '
+  + 'Unless attribution_case is C1_attributable, never say which change caused the difference. '
+  + 'If the latest Run still holds its comparison back, name every link in unsized_goal_path_links as what the comparison still needs, ranking none.';
+
+type NodeLike = { readonly id?: unknown; readonly kind?: unknown; readonly label?: unknown };
+
+/** The record for the typed Agent loop, or `undefined` when there is no wire delta (a first Run). Never for a licensed model delta. */
+export function rerunRecordForModel(
+  wireDelta: unknown,
+  modelDeltaShown: boolean,
+  nodes: readonly NodeLike[],
+  optionDisplayLabels: readonly string[] = [],
+): RerunRecordForModel | undefined {
+  if (modelDeltaShown) return undefined;
+  const labelled = nodes.filter((n): n is NodeLike & { id: string; label: string } =>
+    typeof n.id === 'string' && typeof n.label === 'string' && n.label.trim() !== '');
+  const labelOf = (id: string): string | undefined => labelled.find((n) => n.id === id)?.label;
+  const optionLabels = [...new Set([...labelled.filter((n) => n.kind === 'option').map((n) => n.label), ...optionDisplayLabels])];
+  const plan = rerunExplanationPlan(wireDelta, labelOf, optionLabels, false, labelled.map((n) => n.label));
+  if (plan === null) return undefined;
+  return {
+    code_line: plan.codeLine,
+    prior_withheld: plan.inputs.prior_withheld === true,
+    attribution_case: plan.inputs.attribution_case ?? 'C2_unpaired',
+    use: TYPED_RERUN_RECORD_RULE,
+  };
 }
 
 const SENTENCE_BREAK = /(?<=[.!?])\s+/u;
