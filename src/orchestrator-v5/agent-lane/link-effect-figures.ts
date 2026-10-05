@@ -33,6 +33,18 @@ export function findLinkEffectAmounts(quote: string): readonly StatedAmount[] {
   });
 }
 
+/**
+ * The user's figure for a change as THEY wrote it, with its points word ("1 point", "a point"), for the card to quote back;
+ * `undefined` unless exactly one figure in the quote has that size.
+ */
+export function figureAsWritten(quote: string, magnitude: number): string | undefined {
+  const hits = findLinkEffectAmounts(quote).filter(a => a.magnitude === magnitude);
+  if (hits.length !== 1) return undefined;
+  const a = hits[0]!;
+  const points = /^\s+(?:percentage\s+)?points?\b/i.exec(quote.slice(a.index + a.matchedText.length))?.[0] ?? '';
+  return `${a.matchedText}${points}`.trim();
+}
+
 export interface LinkEffectSourceLevels {
   readonly from: number;
   readonly to: number;

@@ -371,7 +371,10 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       + 'or a money change. A literal currency period ("per month", "a month", "a week", "a year") can supply an '
       + 'eligible unitless end\u2019s unit. Show the exact card and ask the user to approve or correct; nothing is recorded '
       + 'without approval. For a strength said in words ("strong"), use propose_link_strength. When several links need '
-      + 'sizes, ask for them in ONE message; when the user supplies several sizes, call propose_link_effect ONCE with all of them.',
+      + 'sizes, ask for them in ONE message; when the user supplies several sizes, call propose_link_effect ONCE with all of them. '
+      + 'When the user\u2019s reply answers the unit question this tool returned ("What unit is the 1 change in \u2026 stated in?"), '
+      + 'call it with ONLY `unit_answer`: their unit exactly as they wrote it ("Percentage points"). The server holds the question '
+      + 'and their sentence; never restate the sentence, its figures or the unit yourself.',
     parameters: {
       ...obj({
       links: { type: 'array', minItems: 1, maxItems: 12, description: 'Several existing links to size in one approval; use instead of the single-link fields when the user gave several figures.', items: obj({
@@ -388,10 +391,12 @@ export const AGENT_TOOLS: readonly ToolDefinition[] = [
       per_source_change: { type: 'number', description: 'Your proposed signed reading of the user\u2019s source magnitude (non-zero), disclosed on the approval card.' },
       per_source_change_unit: { type: 'string', description: 'The source\u2019s unit.' },
       quote: { type: 'string', description: 'The user\u2019s complete statement from THIS message, copied exactly with its punctuation.' },
+      unit_answer: { type: 'string', description: 'ONLY when the user is answering the unit question this tool returned: their unit, copied exactly from THIS message.' },
       }, []),
       oneOf: [
         { required: ['links'] },
         { required: ['from_label', 'to_label', 'amount', 'amount_unit', 'per_source_change', 'per_source_change_unit', 'quote'] },
+        { required: ['unit_answer'] },
       ],
     },
   },
@@ -845,6 +850,8 @@ export interface AgentCapabilities {
     links?: readonly { from_label: string; to_label: string; amount: number; amount_unit: string; per_source_change: number; per_source_change_unit: string; quote: string }[];
     from_label?: string; to_label?: string; amount?: number; amount_unit?: string;
     per_source_change?: number; per_source_change_unit?: string; quote?: string;
+    /** RT-6 S4-A phase 2: the user's reply to Olumi's unit question, verbatim; completes the server-held question alone. */
+    unit_answer?: string;
   }): Promise<ToolResult>;
   /** Optional: a set of link strengths as ONE approval and ONE commit; a capability set without it refuses the tool plainly. */
   proposeLinkStrengths?(ctx: AgentToolContext, args: {

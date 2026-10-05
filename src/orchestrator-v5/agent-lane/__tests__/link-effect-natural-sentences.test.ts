@@ -15,12 +15,12 @@ import { targetTestabilityOf } from '../../admission/target-testability.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import type { SessionStore, SessionTurnWrite } from '../../session/store.js';
 import { commitOptionLevelsInProcess, type CommitOptionLevelsInput } from '../../system-events/dispatch.js';
-import type { LinkEffectStatement } from '../../system-events/link-effect-edit.js';
+import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectReadingToken, type LinkEffectStatement } from '../../system-events/link-effect-edit.js';
 import { prepareLinkEffectUnitReadings } from '../../system-events/link-effect-unit-reading.js';
 import { linkEffectQuestionCarrier, LINK_EFFECT_QUESTION_WALL_TTL_MS } from '../link-effect-question.js';
-import { parsePendingAction } from '../../session/pending-action.js';
+import { parsePendingAction, type PendingAction } from '../../session/pending-action.js';
 import { ProposalStore } from '../proposal.js';
-import { approvalChipsFor } from '../approval-chips.js';
+import { approvalChipsFor, linkEffectReadingOf } from '../approval-chips.js';
 import { findLinkEffectAmounts } from '../link-effect-figures.js';
 import { agentSelectionContext } from '../selection-context.js';
 import { createAgentCapabilities, type InternalDispatch } from '../runtime/agent-capabilities.js';
@@ -141,7 +141,7 @@ function fixture(row: CorpusRow): Json {
 }
 
 /** JSON bytes are the store boundary. Every /graph read reparses and projects the stored bytes. */
-function world(row: CorpusRow, initial = fixture(row), corruptReload?: 'reading' | 'direction' | 'strength') {
+function world(row: CorpusRow, initial = fixture(row), corruptReload?: 'reading' | 'direction' | 'strength', held?: () => readonly PendingAction[]) {
   let graphJson = JSON.stringify(initial);
   const proposals = new ProposalStore();
   const attempts: SessionTurnWrite[] = [];
@@ -185,6 +185,8 @@ function world(row: CorpusRow, initial = fixture(row), corruptReload?: 'reading'
       graph_identity_hash: computeGraphIdentityHash(reloaded as never) } };
   };
   return { caps: createAgentCapabilities(dispatch, proposals, undefined, 'full', undefined, {
+    // The server's latest answer row (phase 2): only rows that pass a held list read one.
+    ...(held !== undefined ? { readPendingActions: async () => held() } : {}),
     commitOptionLevels: async input => {
       commits.push(input);
       session.store = store;
@@ -772,5 +774,198 @@ describe('RT-6 S4-A phase 2 (B): the refused proposal carries the server-held qu
       question: `What unit is the 1 change in “${'D'.repeat(1001)}” stated in?` }],
   ] as const)('NO carrier: %s', (_n, patch) => {
     expect(linkEffectQuestionCarrier({ ...base, ...patch } as never)).toBeUndefined();
+  });
+});
+
+// ⭐ RT-6 S4-A PHASE 2 (D): Acceptance's C1 asked its unit; the user's NEXT reply is one or two words. Science d5 (5 Oct ~21:0xZ)
+// ruled the card names BOTH readings and quotes the answer; DL e8 ruled the question is the server's, by id, never history.
+describe('RT-6 S4-A phase 2 (D): a one-word unit answer completes the server-held question → card → Approve → reload', () => {
+  const C1 = 'Every 2 extra developers add about 1 point of onboarding drag.';
+  const row = { fixture: 'd39c05ba', from: 'developer_headcount', to: 'onboarding_drag', id: 'D-C1', quote: C1,
+    effect: effect(1, 'points', 2, 'developers') } as CorpusRow;
+  const QUESTION = 'What unit is the 1 change in “Onboarding drag” stated in?';
+  const POINTS_CARD = 'Record: +2 developers on "Developer headcount" → +1 percentage point in "Onboarding drag": raising "Developer headcount" by 2 developers raises "Onboarding drag" by 1 percentage point.'
+    + ' From your words: "Every 2 extra developers add about 1 point of onboarding drag."'
+    + ' I\'ve taken "Onboarding drag" to be a percentage, and your "1 point" to mean 1 percentage point, from your answer "Percentage points".' + TAIL;
+  /** Turn 1 asks; the carrier it returns is what the route persists (C). `patch` edits that held row. */
+  async function asked(initial = fixture(row), patch: (c: Json) => Json = c => c, r: CorpusRow = row) {
+    let held: PendingAction[] = [];
+    const w = world(r, initial, undefined, () => held);
+    const first = await propose(w, r);
+    oneQuestion(first, QUESTION);
+    held = [patch(JSON.parse(JSON.stringify(first.pending_action))) as PendingAction];
+    return { w, carrier: first.pending_action as Json, setHeld: (h: PendingAction[]) => { held = h; } };
+  }
+  const answer = (w: World, words: string, message = words) =>
+    w.caps.proposeLinkEffect!({ ...ctxFor(row, message), request_id: 'rt6-natural-D-answer' }, { unit_answer: words }) as Promise<Json>;
+  async function approve(w: World, result: Json): Promise<Json> {
+    const card = cardsFor(w, result)[0]!;
+    return await w.caps.authoriseChange({ ...ctxFor(row, card.message), typed_approval_of: String(result.proposal_id),
+      typed_approval_words: card.message }, { proposal_id: String(result.proposal_id) }) as Json;
+  }
+
+  it('"Percentage points." → the card names BOTH readings and quotes the answer → Approve → the strict reload holds the user\'s figure, unit from their answer', async () => {
+    const { w } = await asked();
+    const before = w.graph();
+    const result = await answer(w, 'Percentage points.');
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true, mutated: false });
+    expect(cardsFor(w, result)[0]!.message).toBe(`Yes — ${POINTS_CARD}`);
+    expect(w.graph(), 'nothing is written before approval').toEqual(before);
+    const approved = await approve(w, result);
+    expect(approved, JSON.stringify(approved)).toMatchObject({ ok: true, mutated: true, applied: true });
+    const reload = projectGraphForPersistence(GraphV3.parse(w.graph())) as Json;
+    expect(nodeOf(reload, 'onboarding_drag').unit_reading).toEqual({ unit: '%', source: 'user_stated', source_quote: 'Percentage points' });
+    expect(edgeOf(reload, row).provenance).toMatchObject({ source: 'user_specified', magnitude: 'user_stated',
+      reading: 'agent_proposed_user_confirmed', source_quote: C1 });
+  });
+
+  it('the answered write IS the write of the same sentence with its unit written (edge and end, byte for byte but the quotes)', async () => {
+    const { w } = await asked();
+    const viaAnswer = await answer(w, 'Percentage points');
+    expect(await approve(w, viaAnswer)).toMatchObject({ applied: true });
+    const written = { ...row, id: 'D-written', quote: 'Every 2 extra developers add about 1 percentage point of onboarding drag.',
+      effect: effect(1, 'percentage points', 2, 'developers') } as CorpusRow;
+    const w2 = world(written);
+    const direct = await propose(w2, written);
+    expect(direct, JSON.stringify(direct)).toMatchObject({ ok: true });
+    const card = cardsFor(w2, direct)[0]!;
+    expect(await w2.caps.authoriseChange({ ...ctxFor(written, card.message), typed_approval_of: String(direct.proposal_id),
+      typed_approval_words: card.message }, { proposal_id: String(direct.proposal_id) })).toMatchObject({ applied: true });
+    const a = projectGraphForPersistence(GraphV3.parse(w.graph())) as Json;
+    const b = projectGraphForPersistence(GraphV3.parse(w2.graph())) as Json;
+    const { source_quote: qa, ...edgeA } = edgeOf(a, row).provenance; const { source_quote: qb, ...edgeB } = edgeOf(b, row).provenance;
+    expect([qa, qb]).toEqual([C1, written.quote]);
+    expect(edgeA).toEqual(edgeB);
+    expect(edgeOf(a, row).strength).toEqual(edgeOf(b, row).strength);
+    expect(nodeOf(a, 'onboarding_drag').unit_reading.unit).toBe(nodeOf(b, 'onboarding_drag').unit_reading.unit);
+  });
+
+  it('Science: a bare "%" answer is two readings → the points-or-share question (U3), no card, no unit question held', async () => {
+    const { w } = await asked();
+    const before = w.graph();
+    const result = await answer(w, '%');
+    oneQuestion(result, 'Is that a 1-point rise in “Onboarding drag” (say 10% → 11%), or 1% of today’s level?');
+    expect(result).not.toHaveProperty('pending_action');
+    noWrite(w, row, before);
+  });
+
+  it.each([['hours'], ['points'], ['pounds']])('"%s" is not a unit this end is read in → the SAME question again, held again; nothing prepared', async (words) => {
+    const { w } = await asked();
+    const before = w.graph();
+    const result = await answer(w, words);
+    oneQuestion(result, QUESTION);
+    expect((result.pending_action as Json).action.question).toBe(QUESTION);
+    noWrite(w, row, before);
+  });
+
+  it('a currency answer ("£") reaches exactly what the sentence with "£1" written reaches (here: the sizer\'s honest limit)', async () => {
+    const { w } = await asked();
+    const viaAnswer = await answer(w, '£');
+    const written = { ...row, id: 'D-gbp', quote: 'Every 2 extra developers add about £1 of onboarding drag.', effect: effect(1, 'GBP', 2, 'developers') } as CorpusRow;
+    const viaWritten = await propose(world(written), written);
+    const pick = (r: Json) => ({ ok: r.ok, refusal: r.refusal, detail: r.detail });
+    expect(viaWritten.ok, 'the control is the sizer\'s limit, not a question').toBe(false);
+    expect(pick(viaAnswer)).toEqual(pick(viaWritten));
+  });
+
+  it('the card for a currency answer says the unit and quotes the answer', () => {
+    const value = { from: 'developer_headcount', to: 'onboarding_drag', effect: effect(1, 'GBP', 2, 'developers'), quote: C1, edge_token: 't',
+      unit_readings: [{ node_id: 'onboarding_drag', unit_reading: { unit: 'GBP', source: 'user_stated', source_quote: '£' }, answer: true }] };
+    const proposal = { operations: [{ op: 'set_link_effect', path: 'developer_headcount::onboarding_drag', value }] } as never;
+    expect(linkEffectReadingOf(proposal, { from: 'Developer headcount', to: 'Onboarding drag' }))
+      .toMatch(/ From your words: "Every 2 extra developers add about 1 point of onboarding drag\." I've taken "Onboarding drag" to be in GBP, from your answer "£"\. Approve, or correct\.$/);
+    const unflagged = { ...value, unit_readings: [{ ...value.unit_readings[0]!, answer: undefined }].map(({ answer: _a, ...r }) => r) };
+    expect(linkEffectReadingOf({ operations: [{ op: 'set_link_effect', path: 'x', value: unflagged }] } as never,
+      { from: 'Developer headcount', to: 'Onboarding drag' }), 'CONTROL: a sentence reading must quote the sentence').toBeUndefined();
+    const two = { ...value, unit_readings: [{ ...value.unit_readings[0]!, node_id: 'developer_headcount' }, value.unit_readings[0]!] };
+    expect(linkEffectReadingOf({ operations: [{ op: 'set_link_effect', path: 'x', value: two }] } as never,
+      { from: 'Developer headcount', to: 'Onboarding drag' }), 'two answers are never one card').toBeUndefined();
+  });
+
+  it.each([
+    ['the answer is not in THIS message', 'unit_answer_not_verbatim', (_c: Json) => _c, 'Percentage points', 'Could you size it for me instead?'],
+    ['no question is held', 'no_unit_question', null, 'Percentage points', 'Percentage points'],
+    ['the held question expired (10 minutes)', 'no_unit_question', (c: Json) => ({ ...c, expires_at_iso: '2026-10-05T00:00:00.000Z' }), 'Percentage points', 'Percentage points'],
+    ['the held question is another scenario\'s', 'no_unit_question', (c: Json) => ({ ...c, scenario_id: 'someone-elses-scenario' }), 'Percentage points', 'Percentage points'],
+    ['the model moved after it was asked', 'model_changed_since_question', (c: Json) => ({ ...c, preconditions: { graph_hash: 'moved' } }), 'Percentage points', 'Percentage points'],
+    ['the held figure is not one the user wrote (a corrupt row: 5, not 1)', 'not_the_users_statement',
+      (c: Json) => ({ ...c, action: { ...c.action, effect: { ...c.action.effect, amount: 5 } } }), 'Percentage points', 'Percentage points'],
+  ] as const)('REFUSED, nothing prepared: %s', async (_n, refusal, patch, words, message) => {
+    const { w, setHeld } = await asked(undefined, patch ?? (c => c));
+    if (patch === null) setHeld([]);
+    const before = w.graph();
+    const result = await answer(w, words, message);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: false, mutated: false, refusal });
+    expect(result).not.toHaveProperty('proposal_id');
+    noWrite(w, row, before);
+  });
+
+  // Science's third row ("typed-zero bare % → card, no question"): a held unit question cannot exist for an end holding the
+  // user's own level (U1 never asks a unit beside a level), so there is no answer to complete; the sentence itself decides.
+  it.each([
+    ['a typed 0 with no unit → the canvas route, no question held', { value: 0, source: 'user_override' }, false],
+    ['a typed 0% → the card at once (F1 points), no question', { value: 0, raw_value: 0, cap: 100, unit: '%', source: 'user_override' }, true],
+  ] as const)('Science typed zero: %s', async (_n, observed, cards) => {
+    const initial = fixture(row); nodeOf(initial, 'onboarding_drag').observed_state = observed;
+    const w = world(row, projectGraphForPersistence(GraphV3.parse(initial)) as Json);
+    const result = await propose(w, row);
+    expect(result.ok, JSON.stringify(result)).toBe(cards);
+    expect(result).not.toHaveProperty('pending_action');
+    expect(result).not.toHaveProperty('question');
+  });
+
+  it('an end another link already sizes in hours never becomes a % from the answer (U1): the question stands', async () => {
+    const initial = fixture(row);
+    initial.edges.push({ ...JSON.parse(JSON.stringify(edgeOf(initial, row))), from: 'team_size_other', to: 'onboarding_drag',
+      provenance: { source: 'user_specified', magnitude: 'user_stated', natural_effect: { amount: 3, amount_unit: 'hours', per_source_change: 1,
+        per_source_change_unit: 'developers', strength_mean: 0.5, strength_mean_frame: 'edge_strength' } } });
+    initial.nodes.push({ id: 'team_size_other', kind: 'factor', label: 'Contractor headcount' });
+    // The Agent's own (wrong) unit guess matches the other link, so the sentence alone still asks its unit.
+    const { w } = await asked(projectGraphForPersistence(GraphV3.parse(initial)) as Json, undefined, { ...row, effect: effect(1, 'hours', 2, 'developers') });
+    const before = w.graph();
+    const result = await answer(w, 'Percentage points');
+    oneQuestion(result, QUESTION);
+    noWrite(w, row, before);
+  });
+});
+
+describe('RT-6 S4-A phase 2 (D): the WRITER re-derives an answered unit; a forged one writes nothing', () => {
+  const C1 = 'Every 2 extra developers add about 1 point of onboarding drag.';
+  const g = () => fixture({ fixture: 'd39c05ba' } as CorpusRow);
+  const answered = (words: string, node_id = 'onboarding_drag') =>
+    ({ node_id, unit_reading: { unit: '%', source: 'user_stated' as const, source_quote: words }, answer: true as const });
+  const write = (quote: string, e: LinkEffectStatement, unit_readings: readonly Json[]) => {
+    const graph = g();
+    return applyLinkEffectEdit({ persistedGraph: graph, from: 'developer_headcount', to: 'onboarding_drag', effect: e, quote,
+      unit_readings: unit_readings as never, expected: { graph_hash: hashOf(graph), edge_token: linkEffectEdgeToken(graph, 'developer_headcount', 'onboarding_drag')! },
+      reading_token: linkEffectReadingToken({ from: 'developer_headcount', to: 'onboarding_drag', effect: e, quote, unit_readings: unit_readings as never }) });
+  };
+  const pp = effect(1, 'percentage points', 2, 'developers');
+  it('CONTROL: the honest answered reading writes', () => {
+    expect(write(C1, pp, [answered('Percentage points')]).kind).toBe('mutated');
+  });
+  it('a quote that asks a SECOND question too (the source\'s points-or-share) is never completed by one unit answer', () => {
+    const graph = g();
+    nodeOf(graph, 'developer_headcount').observed_state = { value: 0.3, raw_value: 30, cap: 100, unit: '%', source: 'brief_extraction' };
+    const quote = 'Every 2% rise in developer headcount adds about 1 point of onboarding drag.';
+    const e = effect(1, 'percentage points', 2, '%');
+    const base = prepareLinkEffectUnitReadings(graph, 'developer_headcount', 'onboarding_drag', e, quote);
+    expect(base.asked_unit, 'PRECONDITION: one UNIT question…').toEqual([{ end: 'target', node_id: 'onboarding_drag', value: 1 }]);
+    expect(base.ask, '…inside a joined ask that also asks points-or-share').toMatch(/^Is that a 2-point rise in “Developer headcount”.*; what unit is the 1 change in “Onboarding drag” stated in\?$/);
+    const readings = [answered('Percentage points')];
+    expect(applyLinkEffectEdit({ persistedGraph: graph, from: 'developer_headcount', to: 'onboarding_drag', effect: e, quote, unit_readings: readings as never,
+      expected: { graph_hash: hashOf(graph), edge_token: linkEffectEdgeToken(graph, 'developer_headcount', 'onboarding_drag')! },
+      reading_token: linkEffectReadingToken({ from: 'developer_headcount', to: 'onboarding_drag', effect: e, quote, unit_readings: readings as never }) }))
+      .toEqual({ kind: 'refused', reason: 'unit_mismatch' });
+  });
+  it.each([
+    ['the quote asks no unit (it is written), yet an answer is claimed', 'Every 2 extra developers add about 1 percentage point of onboarding drag.', pp, [answered('Percentage points')]],
+    ['the answer is a bare % (two readings)', C1, pp, [answered('%')]],
+    ['the answer is not a unit', C1, pp, [answered('hours')]],
+    ['two answers', C1, pp, [answered('Percentage points', 'developer_headcount'), answered('Percentage points')]],
+    ['the answer is claimed for the end that was NOT asked', C1, pp, [answered('Percentage points', 'developer_headcount')]],
+    ['the change is not said in the answered unit', C1, effect(1, 'points', 2, 'developers'), [answered('Percentage points')]],
+  ] as const)('REFUSED: %s', (_n, quote, e, readings) => {
+    expect(write(quote, e, readings)).toEqual({ kind: 'refused', reason: 'unit_mismatch' });
   });
 });

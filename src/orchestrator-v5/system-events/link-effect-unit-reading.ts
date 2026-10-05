@@ -2,7 +2,7 @@ import { magnitudeNodes, percentLevelIds } from '../../cee/magnitude/frame-defau
 /** Literal, per-end unit readings for an unsized link (RT-6 U1–U4). No graph writes. */
 import { classifyValueSource, earnsAuthorshipCredit } from '../../cee/graph-readiness/obligation-provenance.js';
 import { readCurrencyUnitWithQualifiers, type StatedAmount } from '../../cee/provenance/stated-amounts.js';
-import { POINTS_UNIT } from '../../utils/unit-alphabet.js';
+import { POINTS_UNIT, shareKind } from '../../utils/unit-alphabet.js';
 import { countedNoun } from '../agent-lane/counted-nouns.js';
 import { namesSourceOf, sameWord, wordsOf } from '../agent-lane/stated-by-user.js';
 import { findLinkEffectAmounts, linkEffectSourceLevels } from '../agent-lane/link-effect-figures.js';
@@ -17,7 +17,14 @@ const text = (v: unknown): string | undefined => typeof v === 'string' && v.trim
 export interface LinkEffectUnitReading {
   readonly node_id: string;
   readonly unit_reading: { readonly unit: string; readonly source: 'user_stated'; readonly source_quote: string };
+  /**
+   * RT-6 S4-A phase 2: the unit is the user's ANSWER to Olumi's one unit question ("Percentage points."), so
+   * `source_quote` is the answer's words, not a span of the sentence. Bound into the approval token; the writer re-derives it.
+   */
+  readonly answer?: true;
 }
+/** The longest unit answer read as one (a unit is a few words; anything longer is a sentence, never a one-word answer). */
+export const UNIT_ANSWER_MAX = 60;
 export interface PreparedLinkEffectUnitReadings {
   readonly unit_readings: readonly LinkEffectUnitReading[];
   /** % level ends at a TYPED 0, where a bare % can only be points (Science F1): the stored reading says points. */
@@ -29,6 +36,8 @@ export interface PreparedLinkEffectUnitReadings {
    * question a one-word answer can complete. A points-or-share or a currency-vs-% question is not a unit question.
    */
   readonly asked_unit?: readonly { readonly end: 'source' | 'target'; readonly node_id: string; readonly value: number }[];
+  /** The end the user's answer completed, and the unit its change is said in on the card and in the store. */
+  readonly answered_unit?: { readonly end: 'source' | 'target'; readonly node_id: string; readonly effect_unit: string };
 }
 
 /**
@@ -61,6 +70,33 @@ export function withPointsAtZero<E extends LinkEffectStatement>(effect: E, zero:
   if (zero === undefined || zero.length === 0) return effect;
   return { ...effect, ...(zero.includes(from) ? { per_source_change_unit: POINTS_UNIT } : {}),
     ...(zero.includes(to) ? { amount_unit: POINTS_UNIT } : {}) };
+}
+
+/** The reading the card shows and the writer stores, with the user's answered unit on its end (phase 2). */
+export function effectAsPrepared<E extends LinkEffectStatement>(effect: E, prepared: PreparedLinkEffectUnitReadings, from: string, to: string): E {
+  const zeroed = withPointsAtZero(effect, prepared.points_at_zero, from, to);
+  const answered = prepared.answered_unit;
+  if (answered === undefined) return zeroed;
+  return { ...zeroed, ...(answered.node_id === from ? { per_source_change_unit: answered.effect_unit } : {}),
+    ...(answered.node_id === to ? { amount_unit: answered.effect_unit } : {}) };
+}
+
+/**
+ * The ONE unit a short answer names, or nothing (asked again). Only the leaf's points and percent spellings and a currency
+ * are read: a bare "%" is two readings (U3), and "points" alone may count loyalty points (Science F1), so neither is points.
+ */
+export function unitAnswerOf(words: string): { readonly kind: 'points' } | { readonly kind: 'percent' } | { readonly kind: 'currency'; readonly unit: string } | undefined {
+  if (words.length > UNIT_ANSWER_MAX) return undefined;
+  const bare = words.trim().replace(/[.!]+$/, '').replace(/^in\s+/i, '').trim();
+  if (bare === '') return undefined;
+  const share = shareKind(bare);
+  if (share !== null) return { kind: share };
+  const currency = readCurrencyUnitWithQualifiers(bare.replace(/\s+(?:a|per)\s+(?:day|week|month|quarter|year)$/i, '')
+    .replace(/\s*\/\s*(?:day|week|month|quarter|year)$/i, ''));
+  // "£k" scales the figure: a unit answer never rescales the user's number, so it is asked again.
+  if (currency.kind !== 'currency' || currency.currencyCode === undefined || currency.multiplier !== 1) return undefined;
+  const period = periodOf(bare);
+  return period === null ? undefined : { kind: 'currency', unit: `${currency.currencyCode}${period === undefined ? '' : `/${period}`}` };
 }
 
 const unitOf = (n: Rec): string | undefined => text(n.unit)
@@ -265,7 +301,37 @@ function literalUnit(a: StatedAmount, clause: string, node: Rec): { unit?: strin
   return {};
 }
 
+/**
+ * ⭐ RT-6 S4-A PHASE 2 (DL e8; Science d5): `answered` completes the ONE unit question this very quote asks, and nothing
+ * else. The quote alone must ask exactly that end's "What unit is the N change in …" and no other question; the answer
+ * must read as one unit the end may take (U1 eligibility, as if written in the sentence). A bare "%" asks U3 instead
+ * (points or a share); anything unread leaves the question standing. The proposer and the writer call this alike.
+ */
 export function prepareLinkEffectUnitReadings(
+  graph: unknown, from: string, to: string, effect: LinkEffectStatement, quote: string,
+  options?: { readonly link_selected?: boolean; readonly answered?: { readonly node_id: string; readonly words: string } },
+): PreparedLinkEffectUnitReadings {
+  const base = prepareFromQuote(graph, from, to, effect, quote, options);
+  const answered = options?.answered;
+  if (answered === undefined) return base;
+  const asked = base.asked_unit?.length === 1 ? base.asked_unit[0]! : undefined;
+  const nodes = isRec(graph) && Array.isArray(graph.nodes) ? graph.nodes.filter(isRec) : [];
+  const node = nodes.find(n => n.id === answered.node_id);
+  if (asked === undefined || node === undefined || asked.node_id !== answered.node_id
+    || base.ask !== `What unit is the ${Math.abs(asked.value)} change in \u201c${String(node.label ?? node.id)}\u201d stated in?`) return base;
+  const read = unitAnswerOf(answered.words);
+  if (read === undefined) return base;
+  const { asked_unit: _asked, ask: _ask, ...rest } = base;
+  if (read.kind === 'percent') return { ...rest, ask: pointsOrShareAsk(String(node.label ?? node.id), asked.value, undefined, undefined) };
+  const unit = read.kind === 'points' ? '%' : read.unit;
+  const edges = isRec(graph) && Array.isArray(graph.edges) ? graph.edges.filter(isRec) : [];
+  if (!eligible(node, edges, from, to, unit)) return base;
+  const reading: LinkEffectUnitReading = { node_id: asked.node_id, unit_reading: { unit, source: 'user_stated', source_quote: answered.words }, answer: true };
+  return { ...rest, unit_readings: asked.end === 'source' ? [reading, ...base.unit_readings] : [...base.unit_readings, reading],
+    answered_unit: { end: asked.end, node_id: asked.node_id, effect_unit: read.kind === 'points' ? POINTS_UNIT : read.unit } };
+}
+
+function prepareFromQuote(
   graph: unknown, from: string, to: string, effect: LinkEffectStatement, quote: string,
   options?: { readonly link_selected?: boolean },
 ): PreparedLinkEffectUnitReadings {

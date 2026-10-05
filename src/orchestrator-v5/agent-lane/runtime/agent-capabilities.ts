@@ -41,7 +41,7 @@ import { TYPED_TRANSACTION_ENVELOPE_CAP } from '../../graph-management/types.js'
 import { resolveProposalRenderCopy } from '../../compose/proposed-change.js';
 import { definitionalLinkInUse, definitionalLinkRefusalText, type IdentityRunUse } from '../../compose/definitional-links.js';
 import { applyLinkEffectEdit, linkEffectEdgeToken, linkEffectEndUnits, linkEffectReadingToken, statedInOneOf, linkEffectTargetOf, type LinkEffectRefusal, type LinkEffectReversal } from '../../system-events/link-effect-edit.js';
-import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
+import { effectAsPrepared, prepareLinkEffectUnitReadings, UNIT_ANSWER_MAX, withPointsAtZero, type LinkEffectUnitReading } from '../../system-events/link-effect-unit-reading.js';
 import { applyIdentityConfirmEdit, identityConfirmReadingToken } from '../../system-events/identity-confirm-edit.js';
 import { identityConfirmBaseIsWritable } from '../../system-events/editable-graph.js';
 import { proposeProductIdentity, type IdentityProposal } from '../identity-proposal.js';
@@ -1534,11 +1534,15 @@ function isLinkEffectUnitReadings(value: unknown, from: string, to: string): val
   if (!Array.isArray(value) || value.length > 2) return false;
   const seen = new Set<string>();
   return value.every((entry) => {
-    if (!isPlainRecord(entry) || Object.keys(entry).length !== 2 || typeof entry.node_id !== 'string'
+    // RT-6 S4-A phase 2: a reading may be the user's unit ANSWER (`answer: true`), quoting only the answer's words; the card
+    // (`linkEffectReadingOf`, re-run at approval) admits at most one.
+    const answer = isPlainRecord(entry) && entry.answer === true;
+    if (!isPlainRecord(entry) || Object.keys(entry).length !== (answer ? 3 : 2) || typeof entry.node_id !== 'string'
       || (entry.node_id !== from && entry.node_id !== to) || seen.has(entry.node_id) || !isPlainRecord(entry.unit_reading)) return false;
     const reading = entry.unit_reading;
     if (Object.keys(reading).length !== 3 || typeof reading.unit !== 'string' || reading.unit.length < 1 || reading.unit.length > 40
-      || reading.source !== 'user_stated' || typeof reading.source_quote !== 'string' || reading.source_quote.length < 1 || reading.source_quote.length > 500) return false;
+      || reading.source !== 'user_stated' || typeof reading.source_quote !== 'string' || reading.source_quote.length < 1
+      || reading.source_quote.length > (answer ? UNIT_ANSWER_MAX : 500)) return false;
     seen.add(entry.node_id);
     return true;
   });
@@ -2648,6 +2652,99 @@ export function createAgentCapabilities(
    * user's band as theirs; Olumi's band as `olumi_estimate`, never the user's).
    */
   /**
+   * ⭐ RT-6 S4-A PHASE 2 — A ONE-WORD UNIT ANSWER COMPLETES THE SERVER'S QUESTION (DL e8; Science d5, 5 Oct). The question
+   * is read from the server's own latest row (`readPendingActions`), never from the conversation: ONE live
+   * `agent_link_effect_question` for this scenario, on the very model it was asked on. The answer must be the user's words
+   * in THIS message. The held statement goes through the same binder and unit reader as a sentence with its unit written,
+   * so the card, the dry run and the writer are the ones every RT-6 card passes.
+   */
+  const completeLinkEffectQuestion = async (ctx: AgentToolContext, unitAnswer: string, text: string): Promise<ToolResult> => {
+    const sayAgain = 'Ask the user to say how much the link moves in one sentence, with each figure\u2019s unit beside it.';
+    const words = unitAnswer.trim().replace(/[.!]+$/, '').trim();
+    if (words === '' || words.length > UNIT_ANSWER_MAX || quoteSpansIn(text, words).length === 0) {
+      return { ok: false, mutated: false, refusal: 'unit_answer_not_verbatim',
+        detail: 'Nothing was prepared: `unit_answer` must be the unit exactly as the user wrote it in THIS message. Copy their words and call again.' };
+    }
+    const live = (opts.readPendingActions === undefined ? [] : await opts.readPendingActions(ctx.scenario_id))
+      .filter((p) => p.scenario_id === ctx.scenario_id && p.action.kind === 'agent_link_effect_question' && !isPendingActionExpired(p, Date.now()));
+    const held = live.length === 1 ? live[0]! : undefined;
+    if (held === undefined || held.action.kind !== 'agent_link_effect_question') {
+      return { ok: false, mutated: false, refusal: 'no_unit_question',
+        detail: `Nothing was prepared: no unit question about a link is waiting for this answer (one is answered in the very next reply, within 10 minutes). ${sayAgain}` };
+    }
+    const q = held.action;
+    const g = await readGraph(ctx.scenario_id);
+    if (g === null) return { ok: false, mutated: false, refusal: 'not_found' };
+    const from = g.nodes.find((n) => n.id === q.from_node_id);
+    const to = g.nodes.find((n) => n.id === q.to_node_id);
+    if (g.graph_hash !== held.preconditions.graph_hash || from === undefined || to === undefined) {
+      return { ok: false, mutated: false, refusal: 'model_changed_since_question',
+        detail: `Nothing was prepared: the model changed after the unit question was asked, so this answer cannot complete it. ${sayAgain}` };
+    }
+    const ends = { id: from.id, label: String(from.label ?? from.id) };
+    const endsTo = { id: to.id, label: String(to.label ?? to.id) };
+    const labelsOf = (keep: (kind: unknown) => boolean): string[] => g.nodes.filter((n) => keep((n as { kind?: unknown }).kind))
+      .map((n) => String(n.label ?? '')).filter((l) => l !== '');
+    const selected = linkSelectedByRequest(ctx, from.id, to.id);
+    // The held statement is bound again on the model as it is now: the same binder, never a looser one.
+    if (linkEffectTheUserStated(q.quote, q.effect, { source: ends.label, target: endsTo.label },
+      { quantities: labelsOf((k) => k !== 'option' && k !== 'decision'), link_selected: selected }) !== null) {
+      return { ok: false, mutated: false, refusal: 'not_the_users_statement', detail: `Nothing was prepared: the held statement no longer reads as this link\u2019s size. ${sayAgain}` };
+    }
+    const edgeToken = linkEffectEdgeToken(g.raw, from.id, to.id);
+    if (edgeToken === null) {
+      return { ok: false, mutated: false, refusal: 'no_such_link',
+        detail: `The model has no link from "${ends.label}" to "${endsTo.label}", so there is no effect to record. Nothing was prepared.` };
+    }
+    const askedEnd = q.asked_ends.length === 1 ? (q.asked_ends[0] === 'source' ? from.id : to.id) : undefined;
+    if (askedEnd === undefined) return { ok: false, mutated: false, refusal: 'no_unit_question', detail: `Nothing was prepared. ${sayAgain}` };
+    const consent = { ...linkEffectConsent(g.raw, from.id, to.id, q.effect), ...(selected ? { link_selected: true as const } : {}) };
+    const prepared = prepareLinkEffectUnitReadings(g.raw, from.id, to.id, q.effect, q.quote,
+      { link_selected: consent.link_selected, answered: { node_id: askedEnd, words } });
+    if (prepared.ask !== undefined) {
+      // Not a unit this end can take ("hours", "points"), or a bare % (two readings, U3): ask, and hold a unit question again.
+      const carrier = linkEffectQuestionCarrier({ scenario_id: ctx.scenario_id, question: prepared.ask, from: ends, to: endsTo, quote: q.quote,
+        effect: q.effect, asked_unit: prepared.asked_unit, graph_hash: g.graph_hash, emitted_at_iso: new Date().toISOString() });
+      return { ok: false, mutated: false, refusal: 'unit_mismatch', question: prepared.ask, detail: linkEffectUnitAskWords(prepared.ask, ends, endsTo),
+        ...(carrier !== undefined ? { pending_action: carrier } : {}) };
+    }
+    if (prepared.answered_unit === undefined) {
+      return { ok: false, mutated: false, refusal: 'no_unit_question', detail: `Nothing was prepared: the statement no longer asks for this unit. ${sayAgain}` };
+    }
+    const effect = effectAsPrepared(q.effect, prepared, from.id, to.id);
+    const unitReadings = { unit_readings: prepared.unit_readings };
+    const dry = applyLinkEffectEdit({ persistedGraph: g.raw, from: from.id, to: to.id, effect,
+      expected: { graph_hash: g.graph_hash, edge_token: edgeToken }, quote: q.quote, ...unitReadings, ...consent,
+      reading_token: linkEffectReadingToken({ from: from.id, to: to.id, effect, quote: q.quote, ...unitReadings, ...consent }),
+      lastRunIdentityUse: g.identity_run_use ?? null });
+    if (dry.kind === 'refused') {
+      const definition = dry.reason === 'definitional_link' ? definitionalLinkInUse(g.raw, from.id, to.id, g.identity_run_use ?? null) : null;
+      return { ok: false, mutated: false, refusal: dry.reason,
+        detail: definition !== null ? `${definitionalLinkRefusalText(g.raw, definition)} Tell the user exactly this.` : linkEffectRefusalWords(dry.reason, g.raw, ends, endsTo, effect) };
+    }
+    const proposal = createProposal({
+      scenario_id: ctx.scenario_id,
+      user_id: ctx.authenticated_user_id,
+      base_graph_identity_hash: g.graph_hash,
+      operations: [{ op: 'set_link_effect', path: `${from.id}::${to.id}`,
+        value: { from: from.id, to: to.id, effect, quote: q.quote, edge_token: edgeToken, ...unitReadings, ...consent } }],
+      provenance: { authored_by: 'user_stated', basis: q.quote },
+      validation: { admitted: true, loss_count: 0, refusals: [] },
+      public_label: `Record your figure for how "${cardNameOf(g, from.id)}" moves "${cardNameOf(g, to.id)}": "${q.quote}"`,
+    });
+    proposals.put(proposal);
+    return {
+      ok: true, mutated: false,
+      proposal_id: proposal.proposal_id,
+      public_label: proposal.public_label,
+      base_revision: g.graph_hash,
+      link: { from: cardNameOf(g, from.id), to: cardNameOf(g, to.id), effect, your_words: q.quote },
+      note: 'Nothing has changed yet. This completes your unit question with the user\u2019s answer. Tell the user it will be recorded as '
+        + 'THEIR figure for this link, in their words, never the id, and call authorise_change with this proposal_id once they agree.',
+    };
+  };
+
+  /**
    * ⭐ THE USER'S STATED LINK EFFECT, WRITTEN (DL 5882763151; Canonical #2274's door, 5883082976). ONE effect per approval
    * through the level door's `link_effect`: the writer re-checks the revision AND the link's bytes (`edge_token`) and the
    * sign against the STORED link, then ONE append. "Recorded" is said only when a read-back shows the link as the user's.
@@ -3314,6 +3411,7 @@ export function createAgentCapabilities(
     async proposeLinkEffect(ctx, args): Promise<ToolResult> {
       if (readOnly) return refuseReadOnly();
       const text = typeof ctx.user_turn_text === 'string' ? ctx.user_turn_text : typeof ctx.user_text === 'string' ? ctx.user_text : '';
+      if (typeof args?.unit_answer === 'string') return completeLinkEffectQuestion(ctx, args.unit_answer, text);
       const grouped = Array.isArray(args?.links) && args.links.length > 0 ? args.links : undefined;
       if (grouped !== undefined) {
         const g = await readGraph(ctx.scenario_id);

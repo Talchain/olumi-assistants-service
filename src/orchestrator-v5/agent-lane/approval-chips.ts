@@ -24,8 +24,9 @@ import type { InfluenceBand } from '../format/influence-bands.js';
 import type { ToolResult } from './runtime/agent-tools.js';
 import { SCOPE_APPROVE_PREFIX } from './goal-scope.js';
 import { identityApproveMessage, identityReadingOf } from './identity-card.js';
-import { linkEffectSourceLevels } from './link-effect-figures.js';
+import { figureAsWritten, linkEffectSourceLevels } from './link-effect-figures.js';
 import { namesSourceOf } from './stated-by-user.js';
+import { UNIT_ANSWER_MAX } from '../system-events/link-effect-unit-reading.js';
 
 const APPROVE: Readonly<Record<string, { label: string; message: string }>> = {
   propose_starting_point: { label: 'Use as starting assumptions', message: 'Yes, use those.' },
@@ -365,17 +366,30 @@ export function linkEffectReadingOf(proposal: StructuredProposal, labels: { read
   if (op.unit_readings !== undefined && (!Array.isArray(op.unit_readings) || op.unit_readings.length > 2)) return undefined;
   const disclosures: string[] = [];
   const seen = new Set<string>();
+  let answers = 0;
   for (const raw of (op.unit_readings ?? []) as unknown[]) {
-    const item = raw as { node_id?: unknown; unit_reading?: { unit?: unknown; source?: unknown; source_quote?: unknown } } | null;
+    const item = raw as { node_id?: unknown; unit_reading?: { unit?: unknown; source?: unknown; source_quote?: unknown }; answer?: unknown } | null;
     const reading = item?.unit_reading;
-    if (item === null || typeof item !== 'object' || Object.keys(item).length !== 2 || typeof item.node_id !== 'string'
+    // RT-6 S4-A phase 2: a unit from the user's ANSWER quotes the answer (≤ UNIT_ANSWER_MAX), never a span of the sentence.
+    const answer = item !== null && typeof item === 'object' && item.answer === true;
+    if (item === null || typeof item !== 'object' || Object.keys(item).length !== (answer ? 3 : 2) || typeof item.node_id !== 'string'
       || (item.node_id !== op.from && item.node_id !== op.to) || seen.has(item.node_id)
       || reading === undefined || reading === null || typeof reading !== 'object' || Object.keys(reading).length !== 3
       || typeof reading.unit !== 'string' || reading.unit.length < 1 || reading.unit.length > 40 || reading.source !== 'user_stated'
-      || typeof reading.source_quote !== 'string' || reading.source_quote.length < 1 || reading.source_quote.length > 500
-      || !op.quote.includes(reading.source_quote)) return undefined;
+      || typeof reading.source_quote !== 'string' || reading.source_quote.length < 1 || reading.source_quote.length > (answer ? UNIT_ANSWER_MAX : 500)
+      || (!answer && !op.quote.includes(reading.source_quote)) || (answer && ++answers > 1)) return undefined;
     seen.add(item.node_id);
-    disclosures.push(`I've taken "${item.node_id === op.from ? labels.from : labels.to}" to be in ${reading.unit}, from your words.`);
+    const label = item.node_id === op.from ? labels.from : labels.to;
+    if (!answer) {
+      disclosures.push(`I've taken "${label}" to be in ${reading.unit}, from your words.`);
+    } else if (reading.unit === '%') {
+      // Science d5 (5 Oct): name BOTH readings — the quantity is a percentage, and the user's figure is points of it.
+      const by = Math.abs(item.node_id === op.from ? e.per_source_change : e.amount);
+      const written = figureAsWritten(op.quote, by) ?? String(by);
+      disclosures.push(`I've taken "${label}" to be a percentage, and your "${written}" to mean ${by} percentage point${by === 1 ? '' : 's'}, from your answer "${reading.source_quote}".`);
+    } else {
+      disclosures.push(`I've taken "${label}" to be in ${reading.unit}, from your answer "${reading.source_quote}".`);
+    }
   }
   // One clean quote (no doubled full stop); "as you confirmed" is said AFTER approval, in the receipt, never before it.
   return `${head} From your words: "${op.quote}"${/[.!?]$/.test(op.quote) ? '' : '.'}`

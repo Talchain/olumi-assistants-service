@@ -36,7 +36,7 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { isDirectedEdge } from '../../schemas/graph.js';
 import { definitionalLinkInUse, type IdentityRunUse } from '../compose/definitional-links.js';
 import { unitComparisonKey } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { prepareLinkEffectUnitReadings, withPointsAtZero, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
+import { effectAsPrepared, prepareLinkEffectUnitReadings, type LinkEffectUnitReading } from './link-effect-unit-reading.js';
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -288,11 +288,17 @@ export function applyLinkEffectEdit(params: ApplyLinkEffectEditParams): LinkEffe
   // Unit readings are identity content, outside the analysis hash: independently re-check eligibility against the
   // persisted node and its other sized links. A level or governing unit added since approval makes adoption stale.
   const unitReadings = params.unit_readings ?? [];
+  // RT-6 S4-A phase 2: a unit the user gave as an ANSWER is re-derived exactly like one written in the sentence — the
+  // quote must still ask that one end's unit and nothing else, and the answer must read as that unit.
+  // Any second answer, or one on the wrong end, cannot equal the re-derived readings below.
+  const answer = unitReadings.find(r => r.answer === true);
   const prepared = prepareLinkEffectUnitReadings(params.persistedGraph, from, to, effect, params.quote,
-    { link_selected: params.link_selected === true });
+    { link_selected: params.link_selected === true,
+      ...(answer !== undefined ? { answered: { node_id: answer.node_id, words: answer.unit_reading.source_quote } } : {}) });
   if (prepared.ask !== undefined || stableStringify(prepared.unit_readings) !== stableStringify(unitReadings)
-    // A % at the user's own 0 is stored in points, exactly as its card said (Science F1); never as a bare %.
-    || stableStringify(withPointsAtZero(effect, prepared.points_at_zero, from, to)) !== stableStringify(effect)) {
+    // A % at the user's own 0 is stored in points, exactly as its card said (Science F1); never as a bare %. An answered
+    // end's change is said in the answered unit ("Percentage points." → percentage points).
+    || stableStringify(effectAsPrepared(effect, prepared, from, to)) !== stableStringify(effect)) {
     return refuse('unit_mismatch');
   }
   if (unitReadings.length > 0) {
