@@ -60,6 +60,8 @@ import {
   SETTLE_MATCHES_DEFAULT,
   WATCH_INTERVAL_MS,
   WATCH_REVERT_TICKS,
+  WATCH_MIN_DECIDED_FRACTION,
+  watchOutcome,
 } from "../../../scripts/ci/staging-journey-smoke.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -2130,17 +2132,24 @@ describe("staging journey smoke — a late duplicate push event cannot pass unse
     }
     const settledAt = t;
     t += journeyMs;
+    // The baseline main() passes: the measured head (a head run), or the event sha under the OLD rule.
+    const baseline = target.sha as string;
     let state = { mismatches: 0 };
     const end = t + 720000;
-    let verdict: string = "held";
+    let verdict: string = "";
     let at = 0;
     let served: string | undefined;
+    let ticks = 0;
+    let decided = 0;
     while (t + WATCH_INTERVAL_MS <= end) {
       t += WATCH_INTERVAL_MS;
-      const step = watchStep(state, { served: servedAt(t), head: headAt(t) }, target.sha as string);
+      ticks += 1;
+      const step = watchStep(state, { served: servedAt(t), head: headAt(t) }, target.sha as string, baseline);
       state = step.state;
+      if (step.decided) decided += 1;
       if (step.verdict !== "continue") { verdict = step.verdict; at = t; served = step.served; break; }
     }
+    if (!verdict) verdict = watchOutcome({ ticks, decided }); // the loop's own end-of-window verdict
     return { target, settled, settledAt: new Date(settledAt).toISOString(), verdict, at: at ? new Date(at).toISOString() : null, served };
   };
 
@@ -2161,13 +2170,13 @@ describe("staging journey smoke — a late duplicate push event cannot pass unse
       expect(r.target).toEqual({ sha: full("b02a3cc1"), source: "head", stale: true });
       expect(r.settled).toBe(true);
       expect(r.settledAt).toBe("2026-10-05T17:33:54.000Z"); // b02a3cc1 live 17:33:19 → 3 matches at :24/:39/:54
-      expect(r.verdict).toBe("revert");
+      expect(r.verdict).toBe("revert"); // 3 consecutive decided ticks on 147c663, live from 17:35:25
       expect(r.served).toBe("147c663");
       expect(Date.parse(r.at as string)).toBeLessThan(Date.parse("2026-10-05T17:39:58Z")); // before the manual redeploy
     },
   );
 
-  it("PRE-FIX CONTROL: measuring the event's sha (the old rule) never reds — the revert went unseen", () => {
+  it("PRE-FIX CONTROL: measuring the event's sha (the old rule; same settle + watch) never reds — the revert went unseen", () => {
     const r = replayRun("2026-10-05T17:31:24Z", full("147c6630"), 90000, "event");
     expect(r.verdict).toBe("superseded");
   });
@@ -2187,6 +2196,7 @@ describe("staging journey smoke — a late duplicate push event cannot pass unse
   it("the revert red names the head, the stale build and the exact redeploy", () => {
     const m = revertMessage({ target: full("b02a3cc1"), served: "147c663", renderServiceId: "srv-d4slpaili9vc73eiq4og" });
     expect(m).toContain("LIVE ≠ HEAD");
+    expect(m).toContain("the commit this run measured");
     expect(m).toContain("b02a3cc1");
     expect(m).toContain("147c663");
     expect(m).toContain(`https://api.render.com/v1/services/srv-d4slpaili9vc73eiq4og/deploys -d '{"commitId":"${full("b02a3cc1")}"}'`);
@@ -2220,26 +2230,69 @@ describe("staging journey smoke — target, settle and watch decisions", () => {
     expect(SETTLE_MATCHES_DEFAULT).toBe(3);
   });
 
-  it("watchStep: superseded on a moved head; no decision without both readings; revert needs consecutive mismatches", () => {
-    expect(watchStep({ mismatches: 0 }, { served: "147c663", head: B }, A).verdict).toBe("superseded");
-    expect(watchStep({ mismatches: 1 }, { served: "147c663", head: null }, A)).toEqual({ state: { mismatches: 1 }, verdict: "continue", decided: false });
-    expect(watchStep({ mismatches: 1 }, { served: null, head: A }, A)).toEqual({ state: { mismatches: 1 }, verdict: "continue", decided: false });
-    const one = watchStep({ mismatches: 0 }, { served: "147c663", head: A }, A);
-    expect(one).toMatchObject({ verdict: "continue", decided: true, state: { mismatches: 1 } });
-    expect(watchStep(one.state, { served: "147c663", head: A }, A)).toMatchObject({ verdict: "revert", served: "147c663" });
-    // A match between two mismatches resets: one stray answer is not a revert.
-    const reset = watchStep(one.state, { served: "b02a3cc", head: A }, A);
-    expect(reset.state.mismatches).toBe(0);
-    expect(watchStep(reset.state, { served: "147c663", head: A }, A).verdict).toBe("continue");
-    expect(WATCH_REVERT_TICKS).toBe(2);
+  it("watchStep: superseded only when the head leaves the baseline; undecidable ticks break the streak; revert needs 3 consecutive", () => {
+    const tick = (served: string | null, head: string | null) => ({ served, head });
+    expect(watchStep({ mismatches: 0 }, tick("147c663", B), A, A).verdict).toBe("superseded");
+    expect(watchStep({ mismatches: 2 }, tick("147c663", null), A, A)).toEqual({ state: { mismatches: 0 }, verdict: "continue", decided: false });
+    expect(watchStep({ mismatches: 2 }, tick(null, A), A, A)).toEqual({ state: { mismatches: 0 }, verdict: "continue", decided: false });
+    expect(watchStep({ mismatches: 2 }, tick("147c663", A), A, null)).toEqual({ state: { mismatches: 0 }, verdict: "continue", decided: false });
+    let st = { mismatches: 0 };
+    const verdicts: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const step = watchStep(st, tick("147c663", A), A, A);
+      st = step.state;
+      verdicts.push(step.verdict);
+    }
+    expect(verdicts).toEqual(["continue", "continue", "revert"]);
+    expect(WATCH_REVERT_TICKS).toBe(3);
     expect(WATCH_INTERVAL_MS).toBe(30000);
+  });
+
+  it("Codex r1 P1-2: mismatch → unreadable → mismatch → mismatch is NOT a revert (the streak restarts)", () => {
+    let st = { mismatches: 0 };
+    const out: string[] = [];
+    for (const [served, head] of [["147c663", A], ["147c663", null], ["147c663", A], ["147c663", A]] as const) {
+      const step = watchStep(st, { served, head }, A, A);
+      st = step.state;
+      out.push(step.verdict);
+    }
+    expect(out).toEqual(["continue", "continue", "continue", "continue"]);
+  });
+
+  it("an old instance answering twice just after a rollover is not a revert; a match resets the streak", () => {
+    let st = { mismatches: 0 };
+    const out: string[] = [];
+    for (const served of ["147c663", "147c663", "b02a3cc", "147c663", "147c663"]) {
+      const step = watchStep(st, { served, head: A }, A, A);
+      st = step.state;
+      out.push(step.verdict);
+    }
+    expect(out).toEqual(["continue", "continue", "continue", "continue", "continue"]);
+  });
+
+  it("Codex r1 P1-3: an explicit NON-head target is watched against the run-start head, not ended at once", () => {
+    const X = "7b1d84140000000000000000000000000000beef"; // explicit target ≠ head A
+    expect(watchStep({ mismatches: 0 }, { served: "7b1d841", head: A }, X, A)).toMatchObject({ verdict: "continue", decided: true });
+    expect(watchStep({ mismatches: 0 }, { served: "7b1d841", head: B }, X, A).verdict).toBe("superseded");
+  });
+
+  it("Codex r1 P1-1: watchOutcome — one decided tick out of 24 is UNMEASURED, not held", () => {
+    expect(watchOutcome({ ticks: 24, decided: 1 })).toBe("unmeasured");
+    expect(watchOutcome({ ticks: 24, decided: 11 })).toBe("unmeasured");
+    expect(watchOutcome({ ticks: 24, decided: 12 })).toBe("held");
+    expect(watchOutcome({ ticks: 0, decided: 0 })).toBe("unmeasured");
+    expect(WATCH_MIN_DECIDED_FRACTION).toBe(0.5);
   });
 
   it("the loops use these decisions (wiring pin)", () => {
     const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
     expect(src).toContain("resolveTarget({ explicitSha, eventSha, headSha, headRequired })");
     expect(src).toContain("settleStep(streak, served, expectSha, settleMatches)");
-    expect(src).toContain("watchStep(state, { served: probe?.served ?? null, head }, target)");
-    expect(src).toContain("await watchLiveVsHead(base, expectSha, watchMs)");
+    expect(src).toContain("watchStep(state, { served: probe?.served ?? null, head }, target, baselineHead)");
+    expect(src).toContain("await watchLiveVsHead(base, expectSha, baselineHead, watchMs)");
+    expect(src).toContain("const verdict = watchOutcome({ ticks, decided });");
+    expect(src).toContain('const baselineHead = target.source === "head" ? expectSha : headSha;');
+    // CI cannot turn the watch off.
+    expect(src).toContain("if (headRequired && watchMs < 60000) {");
   });
 });

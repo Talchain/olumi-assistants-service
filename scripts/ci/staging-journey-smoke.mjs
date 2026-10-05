@@ -190,36 +190,54 @@ export function settleStep(streak, served, want, needed) {
  * head did (5 Oct) — after every per-run check had finished — so nothing told
  * anyone staging was serving the wrong build. For WATCH_WINDOW after the
  * journey, every WATCH_INTERVAL the run reads the served build and the branch
- * head. A newer push ends the watch (its own run takes over); the served build
- * differing from an UNCHANGED head on WATCH_REVERT_TICKS consecutive ticks is a
- * REVERT, and a red. A tick missing either reading decides nothing.
+ * head. The head is compared with a BASELINE (the head this run measured, or —
+ * for an explicit dispatch sha — the head read when the run started): a newer
+ * push ends the watch (its own run takes over). The served build differing from
+ * the target, with the head still the baseline, on WATCH_REVERT_TICKS
+ * CONSECUTIVE decided ticks is a REVERT, and a red. A tick missing either
+ * reading decides nothing AND breaks the streak. `held` needs at least
+ * WATCH_MIN_DECIDED_FRACTION of the ticks decided; less is UNMEASURED, a red.
+ *
+ * 3 ticks (90 s), not 2: an old instance still answering just after a rollover
+ * must not read as a revert. The stale build in both incidents stayed live until
+ * someone redeployed (5 Oct: 4.5 min), so 90 s costs nothing in detection.
  */
 export const WATCH_INTERVAL_MS = 30000;
-export const WATCH_REVERT_TICKS = 2;
+export const WATCH_REVERT_TICKS = 3;
+export const WATCH_MIN_DECIDED_FRACTION = 0.5;
 
 /**
  * One watch tick. Pure.
  * @param {{mismatches: number}} state
  * @param {{served: string|null, head: string|null}} tick
  * @param {string} target the commit the run measured
+ * @param {string|null} baselineHead the head the watch compares against (see above); null = cannot tell a push from a revert
  * @returns {{state: {mismatches: number}, verdict: "continue"|"superseded"|"revert", decided: boolean, served?: string, head?: string}}
  */
-export function watchStep(state, tick, target, revertTicks = WATCH_REVERT_TICKS) {
+export function watchStep(state, tick, target, baselineHead, revertTicks = WATCH_REVERT_TICKS) {
   const mismatches = state?.mismatches ?? 0;
   const head = typeof tick?.head === "string" && SHA40_RE.test(tick.head) ? tick.head.toLowerCase() : null;
   const served = typeof tick?.served === "string" && /^[0-9a-f]{7,40}$/i.test(tick.served) ? tick.served : null;
-  if (head && !sameBuild(head, target)) return { state: { mismatches: 0 }, verdict: "superseded", decided: true, head };
-  if (!head || !served) return { state: { mismatches }, verdict: "continue", decided: false };
+  const baseline = typeof baselineHead === "string" && SHA40_RE.test(baselineHead) ? baselineHead : null;
+  if (head && baseline && !sameBuild(head, baseline)) return { state: { mismatches: 0 }, verdict: "superseded", decided: true, head };
+  // Undecidable: the streak is broken, so a revert needs CONSECUTIVE decided mismatches.
+  if (!head || !baseline || !served) return { state: { mismatches: 0 }, verdict: "continue", decided: false };
   if (sameBuild(served, target)) return { state: { mismatches: 0 }, verdict: "continue", decided: true };
   const n = mismatches + 1;
   return { state: { mismatches: n }, verdict: n >= revertTicks ? "revert" : "continue", decided: true, served };
+}
+
+/** The watch's verdict when its window ends without a revert or a newer push. Pure. */
+export function watchOutcome({ ticks, decided }) {
+  return decided > 0 && decided >= Math.ceil(ticks * WATCH_MIN_DECIDED_FRACTION) ? "held" : "unmeasured";
 }
 
 /** The red a revert produces: what happened, and the exact redeploy. */
 export function revertMessage({ target, served, renderServiceId }) {
   const svc = renderServiceId || "<render-service-id>";
   return (
-    `LIVE ≠ HEAD: staging's head is ${target.slice(0, 8)} but build ${served} went live over it with no newer push — ` +
+    `LIVE ≠ HEAD: staging was serving ${target.slice(0, 8)} (the commit this run measured) but build ${served} went live ` +
+    `over it with no newer push — ` +
     `a late duplicate push event redeployed an older commit (seen 30 Sep 19:21Z, 5 Oct 17:35Z). Redeploy the head now: ` +
     `Render → cee-staging → Manual Deploy → "Deploy latest commit", or ` +
     `curl -X POST -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" ` +
@@ -1586,7 +1604,7 @@ async function waitForBuild(base, expectSha, timeoutMs, settleMatches = SETTLE_M
  * (a newer push — its own run watches), `revert`, or `unmeasured` (no tick had
  * both readings: could-not-measure, a red).
  */
-async function watchLiveVsHead(base, target, windowMs) {
+async function watchLiveVsHead(base, target, baselineHead, windowMs) {
   const deadline = Date.now() + windowMs;
   let state = { mismatches: 0 };
   let ticks = 0;
@@ -1596,7 +1614,7 @@ async function watchLiveVsHead(base, target, windowMs) {
     await new Promise((r) => setTimeout(r, Math.min(WATCH_INTERVAL_MS, Math.max(0, deadline - Date.now()))));
     ticks += 1;
     const [probe, head] = await Promise.all([probeServedBuild(base), readBranchHead()]);
-    const step = watchStep(state, { served: probe?.served ?? null, head }, target);
+    const step = watchStep(state, { served: probe?.served ?? null, head }, target, baselineHead);
     state = step.state;
     if (step.decided) decided += 1;
     if (step.verdict === "superseded") {
@@ -1606,8 +1624,9 @@ async function watchLiveVsHead(base, target, windowMs) {
     if (step.served) log(`  tick ${ticks}: ⚠ serving ${step.served}, head still ${target.slice(0, 8)} (${state.mismatches}/${WATCH_REVERT_TICKS})`);
     if (step.verdict === "revert") return { verdict: "revert", served: step.served, ticks, decided };
   }
-  log(`  ${ticks} ticks, ${decided} decided — ${decided > 0 ? "the head stayed live" : "NO tick could read both the served build and the head"}.`);
-  return { verdict: decided > 0 ? "held" : "unmeasured", ticks, decided };
+  const verdict = watchOutcome({ ticks, decided });
+  log(`  ${ticks} ticks, ${decided} decided — ${verdict === "held" ? "the head stayed live" : "too few ticks could read both the served build and the head"}.`);
+  return { verdict, ticks, decided };
 }
 
 /**
@@ -1788,8 +1807,13 @@ async function main() {
   // exclusive. The job's timeout-minutes is set above their sum regardless.
   const budgetMs = intFromEnv("SMOKE_JOURNEY_BUDGET_MS", 720000, 30000, 3600000);
   const settleMatches = intFromEnv("SMOKE_SETTLE_MATCHES", 3, 1, 10);
-  // Phase 3 window. 0 turns the watch off (local runs only; the workflow never sets it).
+  // Phase 3 window. 0 turns the watch off — local runs only: with a required head
+  // (CI) anything under a minute is refused, so the watch cannot be quietly disabled.
   const watchMs = intFromEnv("SMOKE_WATCH_MS", 720000, 0, 1800000);
+  if (headRequired && watchMs < 60000) {
+    log(`FATAL: SMOKE_WATCH_MS=${watchMs} with SMOKE_HEAD_REPO set — the live-vs-head watch cannot be turned off in CI.`);
+    process.exit(2);
+  }
 
   if (!base || !origin) {
     log("FATAL: SMOKE_BASE_URL and SMOKE_ORIGIN are required.");
@@ -1809,7 +1833,8 @@ async function main() {
   const samplingOptions = { floor, requested, minSamples };
 
   // ---- WHICH COMMIT: the branch head, not the event's SHA (see resolveTarget) ----
-  const headSha = headRequired && !explicitSha.trim() ? await readBranchHead() : null;
+  // Read even for an explicit sha: it is the watch's baseline (see watchStep).
+  const headSha = headRequired ? await readBranchHead() : null;
   const target = resolveTarget({ explicitSha, eventSha, headSha, headRequired });
   if (target.source === "head_unreadable") {
     failures.push(
@@ -1878,9 +1903,10 @@ async function main() {
     slowestSampleMs = Math.max(slowestSampleMs, Date.now() - started);
   }
 
-  // ---- PHASE 3: does the head STAY live? ----
-  if (expectSha && watchMs > 0) {
-    const watch = await watchLiveVsHead(base, expectSha, watchMs);
+  // ---- PHASE 3: does the head STAY live? (needs the head: CI only) ----
+  if (expectSha && watchMs > 0 && headRequired) {
+    const baselineHead = target.source === "head" ? expectSha : headSha;
+    const watch = await watchLiveVsHead(base, expectSha, baselineHead, watchMs);
     if (watch.verdict === "revert") {
       const msg = revertMessage({ target: expectSha, served: watch.served, renderServiceId: process.env.SMOKE_RENDER_SERVICE_ID });
       failures.push(msg);
@@ -1888,10 +1914,12 @@ async function main() {
       log(`::error title=STAGING LIVE ≠ HEAD::${msg}`);
     } else if (watch.verdict === "unmeasured") {
       failures.push(
-        `LIVE-VS-HEAD WATCH UNMEASURED: none of ${watch.ticks} ticks could read both the served build and the ` +
-          "branch head. Could-not-measure, never a pass.",
+        `LIVE-VS-HEAD WATCH UNMEASURED: only ${watch.decided} of ${watch.ticks} ticks could read both the served build ` +
+          "and the branch head. Could-not-measure, never a pass.",
       );
     }
+  } else if (expectSha && watchMs > 0) {
+    log(`\n## Phase 3 — SKIPPED (no SMOKE_HEAD_REPO: a local run cannot read the head)`);
   }
 
   report(failures, samples, samplingOptions);

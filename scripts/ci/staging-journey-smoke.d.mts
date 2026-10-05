@@ -47,21 +47,27 @@ export declare const SETTLE_MATCHES_DEFAULT: number;
 /** One Phase-1 probe folded into the consecutive-match count; any non-match restarts it. */
 export declare function settleStep(streak: number, served: string | null, want: string, needed: number): { streak: number; done: boolean };
 
-/** Phase 3 tick spacing (ms) and the consecutive mismatches that make a revert. */
+/** Phase 3 tick spacing (ms), the consecutive decided mismatches that make a revert, and the decided share `held` needs. */
 export declare const WATCH_INTERVAL_MS: number;
 export declare const WATCH_REVERT_TICKS: number;
+export declare const WATCH_MIN_DECIDED_FRACTION: number;
 
 /**
- * One live-vs-head watch tick: a moved head = `superseded`; a tick missing either
- * reading decides nothing; the served build differing from an unchanged head on
- * `revertTicks` consecutive ticks = `revert`.
+ * One live-vs-head watch tick: a head that moved off `baselineHead` = `superseded`;
+ * a tick missing either reading (or with no baseline) decides nothing and breaks
+ * the streak; the served build differing from the target on `revertTicks`
+ * consecutive decided ticks = `revert`.
  */
 export declare function watchStep(
   state: { mismatches: number },
   tick: { served: string | null; head: string | null },
   target: string,
+  baselineHead: string | null,
   revertTicks?: number,
 ): { state: { mismatches: number }; verdict: "continue" | "superseded" | "revert"; decided: boolean; served?: string; head?: string };
+
+/** The watch verdict at the end of its window: `held` only with enough decided ticks, else `unmeasured`. */
+export declare function watchOutcome(input: { ticks: number; decided: number }): "held" | "unmeasured";
 
 /** The revert red: what went live over the head, and the exact redeploy command. */
 export declare function revertMessage(input: { target: string; served: string; renderServiceId?: string }): string;
