@@ -231,19 +231,22 @@ describe("the actual records producer reaches the same quantity boundary", () =>
 
   it("preserves native money through records, calculation framing, V3 extraction and details", () => {
     const amounts = [140000, 40000, 10000, 0];
+    // Science ruling 2026-10-05 P2-FRAME accepted change: the undeclared £ factor frames at defaultFrameFor(140000) = 1,000,000, not the ladder's 200,000;
+    // every level below moves raw/200000 → raw/1000000 (raw values and display strings unchanged).
+    const FRAME = 1_000_000;
     const { projected, v3, factorId, payload } = fromRecords("£", amounts, true);
     expect(v3.graph.nodes.find((node) => node.id === factorId)).toMatchObject({
-      scale_frame: 200000, observed_state: { value: 0, raw_value: 0, unit: "£" },
+      scale_frame: FRAME, observed_state: { value: 0, raw_value: 0, unit: "£" },
     });
     expect(payload.options).toHaveLength(amounts.length);
     for (const [index, raw] of amounts.entries()) {
       const sourceOption = projected.graph.nodes.find((node) => node.kind === "option" && node.label === `Strategy ${index + 1}`);
       expect(sourceOption).toBeDefined();
       const canonical = v3.options.find((candidate) => candidate.id === sourceOption!.id)!;
-      expect(canonical.interventions[factorId]).toMatchObject({ value: raw / 200000, raw_value: raw });
+      expect(canonical.interventions[factorId]).toMatchObject({ value: raw / FRAME, raw_value: raw });
       const output = payload.options.find((candidate) => candidate.id === sourceOption!.id)!;
       expect(output.intervention_details?.[factorId]).toMatchObject({
-        raw_value: raw, normalised_value: raw / 200000, unit: "£",
+        raw_value: raw, normalised_value: raw / FRAME, unit: "£",
       });
       expect(output.intervention_details?.[factorId]?.display_value).toBe(["£140k", "£40k", "£10k", "£0"][index]);
     }

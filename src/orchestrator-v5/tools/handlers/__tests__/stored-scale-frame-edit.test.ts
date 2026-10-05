@@ -168,7 +168,13 @@ describe("writer 1 — set_factor_value on a factor the brief gave no value", ()
     // ⭐ THE ORACLE IS PROVED TO BITE, on the exact value #1103 would have
     // written. Without this the tolerance above is an unmeasured assumption.
     const NINETEEN_ELEVEN_THREE = USER_SETS / 1_000_000; // frame from the edit alone
-    expect(() => expectRatio(NINETEEN_ELEVEN_THREE / level, USER_SETS / IN_HOUSE_RAW)).toThrow();
+    // Science ruling 2026-10-05 P2-FRAME accepted change: the draft frame for [300k, 400k] is now defaultFrameFor = 1,000,000, the
+    // SAME frame #1103's edit-alone derivation gives £600,000, so on this fixture its value is no longer wrong
+    // (old: toThrow; new: equals the written level). The oracle is proved to bite on the frame the pre-ruling
+    // records ladder wrote (500,000) instead — a frame from the other builder, the mismatch the ruling removes.
+    expect(NINETEEN_ELEVEN_THREE).toBe(written.value);
+    const LADDER_FRAME_VALUE = USER_SETS / 500_000;
+    expect(() => expectRatio(LADDER_FRAME_VALUE / level, USER_SETS / IN_HOUSE_RAW)).toThrow();
     // And the direction the user would read off the screen: £600,000 is DEARER
     // than the £400,000 option, so its level must be HIGHER. #1103 shipped 0.6
     // against 0.8 here — the status quo scored cheaper than both alternatives.

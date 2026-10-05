@@ -60,9 +60,10 @@ describe("interventions are the model's stated magnitudes (scale-projected onto 
     const hours = idOf(graph, "rep hours saved");
 
     // Magnitudes arrive scale-projected by pass 3d, ONE frame per factor
-    // (hand-computed): cost {240000} → frame 500000 → 0.48; hours {12} →
-    // frame 20 → 0.6. The KEYING property this test pins is unchanged.
-    expect(interventionsOf(graph, newCrm)).toEqual({ [cost]: 0.48, [hours]: 0.6 });
+    // (hand-computed): cost {240000} → frame 1000000 → 0.24; hours {12} →
+    // frame 100 → 0.12. The KEYING property this test pins is unchanged.
+    // Science ruling 2026-10-05 P2-FRAME accepted change: ladder frames 500000/20 → 1000000/100; 0.48 → 0.24, 0.6 → 0.12.
+    expect(interventionsOf(graph, newCrm)).toEqual({ [cost]: 0.24, [hours]: 0.12 });
   });
 
   it("gives an option with no stated magnitude NO interventions key at all", () => {
@@ -79,10 +80,10 @@ describe("interventions are the model's stated magnitudes (scale-projected onto 
   it("invents no magnitude — every entry is a stated sets_to projected by its factor's one frame", () => {
     const { graph } = projectRecordsToGraph(RECORDS);
     // Hand-computed expectations, NOT derived from the implementation: the two
-    // stated magnitudes and their pass-3d frames are 240000/500000 = 0.48 and
-    // 12/20 = 0.6. Nothing else may appear: an extra entry would be an invented
-    // magnitude, a missing one a dropped record.
-    const expected = new Set([0.48, 0.6]);
+    // stated magnitudes and their pass-3d frames are 240000/1000000 = 0.24 and
+    // 12/100 = 0.12. Nothing else may appear: an extra entry would be an invented
+    // magnitude, a missing one a dropped record. (Science ruling 2026-10-05 P2-FRAME accepted change: was 0.48 and 0.6.)
+    const expected = new Set([0.24, 0.12]);
     const emitted = graph.nodes.flatMap((n) =>
       Object.values((n.data?.interventions ?? {}) as Record<string, number>),
     );
@@ -157,9 +158,9 @@ describe("interventions are the model's stated magnitudes (scale-projected onto 
     expect(Object.keys(built)).not.toContain(goalId);
     expect(Object.values(built)).not.toContain(555);
     // The legitimate magnitude on the same option survives (scale-projected:
-    // {12} → frame 20 → 0.6) — so this is not passing because interventions
-    // were dropped wholesale.
-    expect(built).toEqual({ [idOf(graph, "rep hours saved")]: 0.6 });
+    // {12} → frame 100 → 0.12; Science ruling 2026-10-05 P2-FRAME accepted change: was frame 20 → 0.6) — so this is not passing
+    // because interventions were dropped wholesale.
+    expect(built).toEqual({ [idOf(graph, "rep hours saved")]: 0.12 });
   });
 
   it("never names a factor the connectivity prune withdrew", () => {
@@ -189,10 +190,10 @@ describe("interventions are the model's stated magnitudes (scale-projected onto 
       }
     }
     // And the surviving magnitude is still there (scale-projected: {12} →
-    // frame 20 → 0.6) — so the assertion above is not passing merely because
-    // interventions were emptied wholesale.
+    // frame 100 → 0.12; Science ruling 2026-10-05 P2-FRAME accepted change: was frame 20 → 0.6) — so the assertion above is not
+    // passing merely because interventions were emptied wholesale.
     const newCrm = idOf(graph, "replace the CRM");
-    expect(interventionsOf(graph, newCrm)).toEqual({ [idOf(graph, "rep hours saved")]: 0.6 });
+    expect(interventionsOf(graph, newCrm)).toEqual({ [idOf(graph, "rep hours saved")]: 0.12 });
   });
 });
 

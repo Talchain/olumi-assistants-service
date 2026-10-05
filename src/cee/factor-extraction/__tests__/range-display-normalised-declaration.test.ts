@@ -154,6 +154,17 @@ const WITNESSED_PRIOR = {
   range_max: 0.78,
 } as const;
 
+/**
+ * The same 1.04 NRR drafted under the ruled frame (Science ruling 2026-10-05 P2-FRAME accepted change): level
+ * 1.04/10 = 0.104, and the repair's prior around it, MEASURED through `realChain` (not hand-derived): 0.004–0.204
+ * (level ± 0.1). Under the {1,2,5} ladder (frame 2, level 0.52) it was WITNESSED_PRIOR, 0.26–0.78.
+ */
+const RULED_FRAME_PRIOR = {
+  distribution: "uniform",
+  range_min: expect.closeTo(0.004, 12),
+  range_max: expect.closeTo(0.204, 12),
+};
+
 /** Normalisation evidence present — the witnessed NRR node's state. */
 const NORMALISED = true;
 /** No normalisation evidence — a genuine model-declared share. */
@@ -391,8 +402,10 @@ describe("a NORMALISED unit_interval prior is not rendered beside a user-scale u
       afterProjection.declared_scale,
       "W2 must have OVERWRITTEN the model's raw_count, or this is not the case under test",
     ).toBe("unit_interval");
-    expect(afterProjection.scale_frame, "the frame is the normalisation evidence").toBe(2);
-    expect(afterRepair.prior).toEqual(WITNESSED_PRIOR);
+    // Science ruling 2026-10-05 P2-FRAME accepted change: NRR 1.04 frames at defaultFrameFor = 10, not the ladder's 2, so the
+    // drafted level is 0.104 and its prior 0.004–0.204 (was 0.52 → the witnessed 0.26–0.78).
+    expect(afterProjection.scale_frame, "the frame is the normalisation evidence").toBe(10);
+    expect(afterRepair.prior, JSON.stringify(afterRepair.prior)).toEqual(RULED_FRAME_PRIOR);
     expect(wire.display_value).toBeUndefined();
   });
 
@@ -409,7 +422,7 @@ describe("a NORMALISED unit_interval prior is not rendered beside a user-scale u
     ).toBeUndefined();
     expect(afterRepair.declared_scale).toBe("unit_interval");
     expect(afterRepair.unit).toBe("ratio");
-    expect(afterRepair.prior).toEqual(WITNESSED_PRIOR);
+    expect(afterRepair.prior, JSON.stringify(afterRepair.prior)).toEqual(RULED_FRAME_PRIOR); // Science ruling 2026-10-05 P2-FRAME accepted change: WITNESSED_PRIOR → RULED_FRAME_PRIOR
     expect(wire.display_value).toBeUndefined();
   });
 
