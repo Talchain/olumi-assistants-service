@@ -96,7 +96,7 @@ describe("PR-U2a: an edge figure is the user's when the USER sized it, whatever 
     expect(at(FIXTURE.brief_text, g, AT_1200, "£1,200").verdict).toBe("absent");
   });
 
-  // Review Desk class check + Science ruling (chat-sized edge CREDITED by the same one-span C3 rule): the chat-edit writer
+  // Review Desk class check + Science ruling #87 6003878735 (chat-sized edge CREDITED by the same one-span C3 rule): the chat-edit writer
   // (`link-effect-edit.ts`, source `user_specified`) sizes a link with the figure the user repeats from their brief.
   describe("a size the user said in CHAT (`user_specified` + `user_stated`)", () => {
     const chatSized = (g: Graph) => {

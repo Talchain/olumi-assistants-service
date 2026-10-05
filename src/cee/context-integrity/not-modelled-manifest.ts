@@ -1497,7 +1497,7 @@ function collectBriefNaturalEffectCandidates(
     // ⭐ WHO SIZED IT, not where the link came from (MC P0 F5, PR-U2a): `magnitude: 'user_stated'` is the user's own size
     // — written by construction (`cee/magnitude/link-effect.ts`, userSizeEarned), the records projector (quoted) and a
     // size said back in CHAT (`link-effect-edit.ts`, source `user_specified`). Science ruled the chat size is credited by
-    // the SAME one-span C3 binding as every other user_stated edge (#87 Science DM 5 Oct, citing RT-6 B4 5998132756):
+    // the SAME one-span C3 binding as every other user_stated edge (Science ruling #87 6003878735, citing RT-6 B4 5998132756):
     // the user repeating their brief figure to size a link must not leave "What I was given" saying it is missing.
     // An Olumi estimate never counts.
     if (p.magnitude !== "user_stated") continue;
@@ -1528,7 +1528,7 @@ function collectBriefNaturalEffectCandidates(
     // the whole effect.
     // The edge's quote: the records projector writes `quote`; MC P0's Fi door writes `source_quote` — the ONE brief
     // sentence its C2 binding validated (MC 5 Oct). A `source_quote` that is not in the brief (a size said in CHAT) is
-    // not brief evidence, so that edge binds as a quote-less one (one-span C3; Science ruling on chat sizes).
+    // not brief evidence, so that edge binds as a quote-less one (one-span C3; Science ruling #87 6003878735).
     const sourceQuote = typeof p.source_quote === "string" && p.source_quote.length > 0 && briefText.includes(p.source_quote)
       ? p.source_quote
       : null;
