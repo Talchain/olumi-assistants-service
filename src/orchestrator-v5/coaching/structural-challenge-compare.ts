@@ -200,6 +200,8 @@ export interface CompareStructuralChallengeInput {
   readonly candidateFact: HandlerFact;
   /** The turn may name a leader (the same input `buildRunDelta` takes); per-Run verdicts narrow it further. */
   readonly turnMayNameLeader: boolean;
+  /** The candidate side's entitlement, when it is narrower than the baseline's (its own result-bound licence). */
+  readonly candidateMayNameLeader?: boolean;
   /** The removed link's target and everything it reaches (`structuralChallengeEligibility`). */
   readonly reachable: ReadonlySet<string>;
   readonly goalNodeId: string;
@@ -215,8 +217,44 @@ export type CompareStructuralChallengeOutput =
       readonly pair_provenance: NonNullable<StructuralChallengeResultV1['pair_provenance']>;
       readonly claims: readonly StructuralChallengeClaimV1[];
       readonly certainty: StructuralChallengeCertainty;
+      /** Every arm of the candidate RESULT is identical, and the baseline's arms are not: the difference between the
+       *  options rests entirely on the removed link. CEE-local rendering carrier; never on the published result. */
+      readonly identical_arms: boolean;
     }
   | { readonly ok: false; readonly reason: 'baseline_unreadable' | 'candidate_unparseable' };
+
+/** Two arms are identical when every outcome statistic agrees within this relative tolerance (gate 1 v2's rule). */
+export const IDENTICAL_ARMS_RELATIVE_TOLERANCE = 1e-12;
+const ARM_STATS = ['mean', 'std', 'p10', 'p50', 'p90'] as const;
+
+/**
+ * Every submitted arm of this Run carries the same outcome distribution: mean and std present, every percentile the
+ * rows carry equal, and the same positive valid-draw count. Read from the RESULT, never from graph structure: with no
+ * option reaching the goal, ISL evaluates every arm on the same draws, so the arms come out identical.
+ */
+export function runArmsIdentical(fact: HandlerFact): boolean {
+  const result = (fact as { result?: Rec }).result;
+  const enrichment = isRec(result?.enrichment) ? result.enrichment : null;
+  if (enrichment === null) return false;
+  const submitted = submittedIdentities(enrichment, fact);
+  if (submitted === null || submitted.options.size < 2) return false;
+  const nested = isRec(enrichment.results) ? enrichment.results : {};
+  const current = Array.isArray(enrichment.option_comparison) ? enrichment.option_comparison : nested.option_comparison;
+  const source = Array.isArray(current) ? current : readOptionResultSources(enrichment)[0] ?? [];
+  const outcomes = new Map<string, Rec>();
+  for (const o of source) if (isRec(o) && typeof o.option_id === 'string' && isRec(o.outcome)) outcomes.set(o.option_id, o.outcome);
+  const arms = [...submitted.options].map((id) => outcomes.get(id));
+  const first = arms[0];
+  const n = first === undefined ? null : num(first.n_valid_samples);
+  if (first === undefined || n === null || !Number.isSafeInteger(n) || n <= 0) return false;
+  const same = (x: unknown, y: unknown): boolean => {
+    const a = num(x); const b = num(y);
+    return a !== null && b !== null && Math.abs(a - b) <= IDENTICAL_ARMS_RELATIVE_TOLERANCE * Math.max(Math.abs(a), Math.abs(b));
+  };
+  return arms.every((arm) => arm !== undefined && num(arm.n_valid_samples) === n
+    && same(first.mean, arm.mean) && same(first.std, arm.std)
+    && ARM_STATS.every((k) => (first[k] === undefined && arm[k] === undefined) || same(first[k], arm[k])));
+}
 
 function deltaOnlyBasis(noise: RunDeltaNoiseVerdictLiteral): StructuralChallengeClaimV1['basis'] {
   return noise === 'within_noise' ? 'within_noise' : noise === 'not_noise_qualified' ? 'not_noise_qualified' : 'no_licensed_boundary';
@@ -258,7 +296,7 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   // ── Leader ─────────────────────────────────────────────────────────────────────────────────────────────────────
   {
     const entitledA = mayPresentComparedRunLeader(input.turnMayNameLeader, input.baselineFact);
-    const entitledB = mayPresentComparedRunLeader(input.turnMayNameLeader, input.candidateFact);
+    const entitledB = mayPresentComparedRunLeader(input.candidateMayNameLeader ?? input.turnMayNameLeader, input.candidateFact);
     const idA = entitledA ? leaderOf(input.baselineFact) : null;
     const idB = idA !== null && entitledB ? leaderOf(input.candidateFact) : null;
     const base = { kind: 'leader' as const, baseline_option_id: idA, alternative_option_id: idB };
@@ -391,5 +429,5 @@ export function compareStructuralChallenge(input: CompareStructuralChallengeInpu
   return { ok: true, pair_provenance, claims, certainty: {
     baseline: readStoredGoalCertainty((input.baselineFact as { result?: Rec }).result?.goal_certainty),
     alternative: readStoredGoalCertainty((input.candidateFact as { result?: Rec }).result?.goal_certainty),
-  } };
+  }, identical_arms: runArmsIdentical(input.candidateFact) && !runArmsIdentical(input.baselineFact) };
 }

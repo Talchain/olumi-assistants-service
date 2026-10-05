@@ -71,6 +71,7 @@ import { PLoTTimeoutError, type PLoTClient } from '../../orchestrator/plot-clien
 import { PERMITTED_ANALYSIS_MODES, modePermitsAtLeast } from '../admission/analysis-admission.js';
 import type { ClaimPermissions } from '../agent-lane/first-analysis.js';
 import { boundRunLeaderLicence } from '../model-management/version-result-binding.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { SelectedRunIdentity } from '../coaching/build-run-delta.js';
 import type { LeaderLicence } from '../compose/leader-licence.js';
 import type { GoalScopeClaimInput } from '../compose/goal-scope-claim-input.js';
@@ -96,7 +97,7 @@ export interface DispatchStructuralChallengeParams {
 
 export type StructuralChallengeDispatchResult =
   | { readonly kind: 'no_run' }
-  | { readonly kind: 'result'; readonly result: StructuralChallengeResultV1; readonly labels: ReadonlyMap<string, string>; readonly certainty?: StructuralChallengeCertainty; readonly finalRead?: StructuralChallengeFinalRead; readonly candidateLeaderLicence?: LeaderLicence; readonly baselineRunIdentity?: SelectedRunIdentity };
+  | { readonly kind: 'result'; readonly result: StructuralChallengeResultV1; readonly labels: ReadonlyMap<string, string>; readonly certainty?: StructuralChallengeCertainty; readonly finalRead?: StructuralChallengeFinalRead; readonly candidateLeaderLicence?: LeaderLicence; readonly baselineRunIdentity?: SelectedRunIdentity; readonly identicalArms?: boolean };
 
 function currentFacts(context: Awaited<ReturnType<typeof buildTurnContext>>): readonly HandlerFact[] {
   const history = seedHistoryFacts({ scenarioId: context.session_id, hotWindow: context.prior_facts, durable: context.scenario_analysis_fact_set }) ?? [];
@@ -402,14 +403,20 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   const finalPermission = structuralChallengePresentationPermission(baseline, finalFreshness.finalRead, baselineRunIdentity);
   if (!finalPermission.ok) return refuse(finalPermission.status, finalPermission.reason, labels);
   const candidateRun = runResult(candidate);
+  // The candidate is a hypothetical, never the user's model: its admission is the baseline's. Readiness recomputed on
+  // the edited graph would block any removal that leaves a factor without a route to the goal (NO_PATH_TO_GOAL), and
+  // that withhold used to erase the baseline's canonical leader too (SCI-DEEP beat 4, fa027cf5). Only the candidate's
+  // RESULT (separation, withholds, limits) narrows its own side.
   const candidateLeaderLicence = boundRunLeaderLicence({ fact: candidate, identity: {
     scenario_id: context.session_id, run_id: candidateRun.run_id as string,
     graph_hash_at_run: candidateRun.graph_hash_at_run as string, computed_at: candidateRun.computed_at as string,
-  } }, { scenario_id: context.session_id, graph: edited.graph });
+  } }, { scenario_id: context.session_id, graph: edited.graph }, { readiness: buildCanonicalAnalysisReadyFromGraph(snapshot.graph) });
+  const baselineMayNameLeader = params.turnMayNameLeader && finalPermission.permissions.leader_may_be_named;
   const compared = compareStructuralChallenge({
     baselineFact: selected,
     candidateFact: candidate,
-    turnMayNameLeader: params.turnMayNameLeader && finalPermission.permissions.leader_may_be_named && candidateLeaderLicence !== 'withheld',
+    turnMayNameLeader: baselineMayNameLeader,
+    candidateMayNameLeader: baselineMayNameLeader && candidateLeaderLicence !== 'withheld',
     reachable: eligibility.reachable,
     goalNodeId: snapshot.goal_node_id,
     goalLevelTarget: goalLevelTarget(snapshot.graph, snapshot.goal_node_id),
@@ -431,5 +438,5 @@ export async function dispatchStructuralChallenge(params: DispatchStructuralChal
   });
   if (!parsed.success) return refuse('failed', 'candidate_unparseable', labels);
   log.info({ event: 'structural_challenge.result', request_id: requestId, status: 'completed', claims: parsed.data.claims.length }, 'structural challenge');
-  return { kind: 'result', labels, result: parsed.data, certainty: compared.certainty, finalRead: finalFreshness.finalRead, candidateLeaderLicence, baselineRunIdentity };
+  return { kind: 'result', labels, result: parsed.data, certainty: compared.certainty, finalRead: finalFreshness.finalRead, candidateLeaderLicence, baselineRunIdentity, identicalArms: compared.identical_arms };
 }
