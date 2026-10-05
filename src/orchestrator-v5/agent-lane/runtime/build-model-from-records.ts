@@ -3,6 +3,7 @@ import { buildVNextDraftRecordsSchema, DRAFT_RECORD_REQUIRED_LINKS, DRAFT_RECORD
 import { V_NEXT_DRAFT_RECORDS_INSTRUCTION } from '../../../cee/draft/records/instruction-vnext.js';
 import { reconcileStatedDispositions } from '../../../cee/draft/records/stated-dispositions.js';
 import { replayRecordSet } from '../../../cee/draft/records/replay.js';
+import { buildSentencePassBaseSchema, strictSentencePassSchema } from '../../../cee/draft/records/sentence-pass.js';
 import type { RecordConstraintCandidate } from '../../../cee/draft/records/projector.js';
 import { runCompoundGoals } from '../../../cee/unified-pipeline/stages/repair/compound-goals.js';
 import { sameRecordConstraintEvidence, type RecordConstraintDisposition } from '../../../cee/compound-goal/record-constraint-carrier.js';
@@ -75,6 +76,14 @@ export function buildStrictDraftRecordsSchema(): JsonSchema {
     variant(DRAFT_RECORD_STATED_KINDS.filter((kind) => !owners.includes(kind)), []),
   ] };
   return strictForTheDrafter(strict);
+}
+
+/**
+ * The sentence pass's strict wire schema (design §2): its base shape made OpenAI-strict by the same explicit-null rule,
+ * then `strictForTheDrafter`, exactly as the records bridge sends its own.
+ */
+export function buildStrictSentencePassSchema(): JsonSchema {
+  return strictForTheDrafter(strictSentencePassSchema(buildSentencePassBaseSchema()));
 }
 
 /** Null means omitted only for a key that the records grammar actually marks optional. */

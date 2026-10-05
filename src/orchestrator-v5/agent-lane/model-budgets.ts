@@ -12,7 +12,7 @@
 
 export interface CallBudget {
   readonly model: string;
-  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation' | 'interpret';
+  readonly role: 'faithful' | 'widening' | 'whole' | 'conversation' | 'interpret' | 'sentence_links';
   readonly max_output_tokens: number;
   /** Omitted means "model default", which is what the banked sessions used. */
   readonly reasoning_effort?: 'low' | 'medium' | 'high';
@@ -97,6 +97,18 @@ export const BANKED_BUDGETS: readonly CallBudget[] = [
       'finish inside the 125 s browser proxy less 10 s response headroom, so a larger ceiling ' +
       'buys spend, not a model the user receives. The ceiling costs a call that finishes below ' +
       'it nothing; only a call that would otherwise have been cut off runs longer.',
+  },
+  {
+    model: 'gpt-5.6-terra',
+    role: 'sentence_links',
+    // PROVISIONAL (design DESIGN-SENTENCE-PASS.md §3/§5, PL stop rule 5 Oct): the sentence pass runs IN PARALLEL with the
+    // whole-candidate call under the same deadline, so its cap bounds its own latency (~53 s at the measured ~100 tok/s).
+    max_output_tokens: 4000,
+    reasoning_effort: 'low',
+    evidence:
+      'PROVISIONAL, NOT YET MEASURED (no live pass run banked). Design estimate: ~14 records x ~70 visible tokens plus ' +
+      '0.5-1.5k reasoning = 1.5-3k output tokens; 4,000 is the cap that keeps the parallel pass inside the main call ' +
+      '(53-92 s measured on the numeric briefs). Raise or lower only on a banked measurement.',
   },
   {
     model: 'gpt-5.6-terra',

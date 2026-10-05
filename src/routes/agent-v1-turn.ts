@@ -332,13 +332,13 @@ export const constructionCallStructured = async (
     text: {
       format: {
         type: 'json_schema',
-        name: 'whole_candidate',
+        name: reqBody.schema_name ?? 'whole_candidate',
         strict: true,
         schema: reqBody.schema,
       },
     },
   };
-  const identity = agentRequestIdentity('agent.construct', sentBody);
+  const identity = agentRequestIdentity(reqBody.prompt_alias ?? 'agent.construct', sentBody);
   const usageHandle = assertProviderAllowed('openai', 'agent-v1-turn.callStructured', {
     model: reqBody.model, purpose: 'construction', ...identity,
   });
@@ -370,8 +370,9 @@ export const constructionCallStructured = async (
         'content-type': 'application/json',
       },
       body: JSON.stringify(sentBody),
-      // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one.
-      signal: AbortSignal.timeout(budgetMs),
+      // The call's OWN bound (see `constructionDeadline`), below the global 110 s undici one; a caller's own abort
+      // (the abandoned sentence pass) ends it too, so an abandoned call stops spending.
+      signal: reqBody.signal === undefined ? AbortSignal.timeout(budgetMs) : AbortSignal.any([AbortSignal.timeout(budgetMs), reqBody.signal]),
     });
     if (!r.ok) {
       const text = await r.text();

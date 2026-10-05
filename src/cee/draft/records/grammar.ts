@@ -519,13 +519,13 @@ export interface DraftStatedRelationship {
   source_span?: DraftQuoteSpan;
 }
 
-const VALUE_RANGE_SCHEMA = {
+export const VALUE_RANGE_SCHEMA = {
   type: "object", properties: {
     low: { type: "number" }, high: { type: "number" }, low_literal: { type: "string" }, high_literal: { type: "string" },
     meaning: { type: "string", enum: ["min_max", "likely_range"] },
   }, required: ["low", "high", "low_literal", "high_literal"], additionalProperties: false,
 };
-const STATED_RELATIONSHIP_SCHEMA = {
+export const STATED_RELATIONSHIP_SCHEMA = {
   type: "object", properties: {
     from_quantity: { type: "integer" }, to_quantity: { type: "integer" },
     amount: { type: "number" }, amount_literal: { type: "string" }, range: VALUE_RANGE_SCHEMA,

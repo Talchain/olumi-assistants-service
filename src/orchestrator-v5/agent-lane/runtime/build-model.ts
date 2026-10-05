@@ -397,6 +397,12 @@ export type CallStructuredModel = (req: {
   model: string; instructions: string; input: string;
   max_output_tokens: number; schema: Record<string, unknown>;
   reasoning_effort?: 'low' | 'medium' | 'high';
+  /** The strict schema's name (`text.format.name`). Absent = `whole_candidate`, the construction call's own. */
+  schema_name?: string;
+  /** The ledger's prompt alias. Absent = `agent.construct`. */
+  prompt_alias?: string;
+  /** Aborts the call (the sentence pass is abandoned when the main call finishes first). */
+  signal?: AbortSignal;
 }) => Promise<{
   text: string; usage?: Record<string, unknown>;
   /**
